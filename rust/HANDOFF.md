@@ -56,20 +56,31 @@ denied, and passed `git diff --check` before commit.
     including exact peaks, histogram areas, and beam decisions.
 21. `257d819e` — bounded opaque `.omr` ZIP inventory and content-equivalent round trip,
     preserving unknown members and rejecting unsafe or duplicate paths.
+22. `79bbfc7d` — exact production Java/Rust gray-level watershed vector.
+23. `a03c4d80` — lossless read-only `book.xml` metadata view with exact source bytes.
+24. `21126e72` — four-page SCALE parity covering dual interlines, extrapolated beams,
+    and low-quorum beam acceptance at the configured distance boundary.
 
-At the twenty-first checkpoint the Rust workspace executes 83 tests:
+At the twenty-fourth checkpoint the Rust workspace executes 91 tests:
 
 - `audiveris-core`: 32
 - `audiveris-image`: 36
-- `audiveris-omr`: 7
+- `audiveris-omr`: 15
 - `audiveris-cli`: 4
 - `xtask`: 4
 
-The live Java/Rust oracle compares 25 canonical vectors at this checkpoint. Chula
-matches through the complete SCALE result: line `2,3,4`, interline `20,21,22`, measured
-beam `12`, and no secondary interline or beam. Commit `27dbfeb6` briefly encoded the
-wrong out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavior
-in both a focused test and the full-page vector.
+The live Java/Rust oracle compares 32 canonical vectors at this checkpoint. SCALE
+matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
+population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
+exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
+out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavior in
+both a focused test and the full-page vector.
+
+A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
+of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
+(898,147), and Schumann Op. 48 No. 2 (1,547,112). Each had four members and one sheet;
+tightened resource limits rejected all three. The disposable audit executable was not
+retained, so this is evidence, not yet a checked-in regression.
 
 ## Verify before editing
 
@@ -113,19 +124,19 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Add at least two more full-page SCALE vectors, including a dual-interline or
-   extrapolated-beam case, before treating the Chula match as broad parity.
-2. Add a Java/Rust watershed vector before relying on the current Rust watershed in
-   recognition. The Java class floods a distance table, so its input contract must be
-   made explicit rather than inferred from the sparse Java unit test.
+1. Begin `GRID` with neutral section/lag contracts and stop at the first differing
+   section statistic before attempting staff-line assembly.
+2. Extend `audiveris-omr` with narrow read-only views of `sheet#N/sheet#N.xml`; retain
+   every original XML byte and unknown node exactly as the book view does.
 3. Extract the growing fixture schema into `audiveris-testkit`, then add stage
    snapshots to `xtask vectors` without weakening its first-difference diagnostics.
 4. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
-5. Extend `audiveris-omr` with a lossless XML token/tree layer. Do not yet map all JAXB
-   types: preserve unknown nodes, attributes, IDs, IDREFs, and member bytes while adding
-   narrow typed views. The SIG has roughly 96 Inter and 67 Relation classes.
-6. Port `GRID`, then subsequent stages strictly in `OmrStep` order. Stop comparison at
+5. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
+   to work in a standalone Audiveris clone; today those vectors deliberately resolve
+   `../../data/synth/...` from this parent OMR checkout.
+6. Port the remaining `GRID` contracts, then subsequent stages strictly in `OmrStep`
+   order. Stop comparison at
    the first differing stage so later agreement cannot hide an upstream mismatch.
 
 ## Differential fixture plan
