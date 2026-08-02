@@ -44,6 +44,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | CLI parameter slice | implemented with parity tests |
 | Binary run-table primitives | implemented with parity tests |
 | Median filter and chamfer distance transform | implemented with parity tests |
+| Global threshold, alpha compositing, polygon masks | implemented with parity tests |
 | Remaining filters and image ingest | queued |
 | `.omr` persistence | queued |
 | Recognition stages | queued in pipeline order |
