@@ -15,9 +15,10 @@ cargo run -p xtask -- vectors
 ```
 
 `xtask vectors` compiles a probe against the frozen production Java classes and
-compares 12 canonical utility, geometry, assignment, run-table, and pipeline-order
-results with Rust. Geometry is canonicalized to a declared `1e-15` decimal boundary;
-integer, string, topology, and ordering fields remain exact.
+compares 16 canonical utility, geometry, assignment, image, run-table, and
+pipeline-order results with Rust. Geometry is canonicalized to a declared `1e-15`
+decimal boundary; integer, byte raster, topology, string, and ordering fields remain
+exact.
 
 Passing the Rust tests means only that the currently ported surface is compatible.
 It does **not** yet mean that the whole Audiveris application or its recognition

@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 12 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 16 canonical cross-runtime fixtures matching |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
@@ -47,6 +47,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Median filter and chamfer distance transform | implemented with parity tests |
 | Global threshold, alpha compositing, polygon masks | implemented with parity tests |
 | Gray-level watershed flooding | implemented with parity tests |
+| Threshold/median/chamfer/run differential fixtures | exact Java/Rust match |
 | Remaining filters and image ingest | queued |
 | `.omr` persistence | queued |
 | Recognition stages | queued in pipeline order |

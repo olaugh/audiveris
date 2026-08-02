@@ -4,6 +4,11 @@ package org.audiveris.omr.rustport;
 
 import java.util.Arrays;
 
+import ij.process.ByteProcessor;
+
+import org.audiveris.omr.image.ChamferDistance;
+import org.audiveris.omr.image.GlobalFilter;
+import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
@@ -11,9 +16,11 @@ import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
+import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.sig.GradeUtil;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
+import org.audiveris.omr.util.Table;
 import org.audiveris.omr.util.WrappedInteger;
 
 /** Emits stable vectors from the production Java classes for Rust parity checks. */
@@ -67,6 +74,37 @@ public final class RustParityProbe
         runs.addRun(1, new Run(4, 2));
         System.out.println("runs=" + runs.getTotalRunCount() + "/" + runs.getWeight() + "/" + runs.getRunAt(6, 0));
 
+        ByteProcessor raster = new ByteProcessor(5, 3);
+        int[] pixels = {0, 126, 127, 128, 255, 255, 0, 255, 0, 255, 10, 20, 200, 210, 220};
+        for (int index = 0; index < pixels.length; index++) {
+            raster.set(index % 5, index / 5, pixels[index]);
+        }
+        ByteProcessor binary = new GlobalFilter(raster, 127).filteredImage();
+        System.out.println("image.threshold=" + pixels(binary));
+        System.out.println("image.median=" + pixels(new MedianGrayFilter(1).filter(raster)));
+        Table distances = new ChamferDistance.Integer().computeToFore(binary);
+        System.out.println("image.chamfer=" + values(distances));
+        RunTable extracted = new RunTableFactory(Orientation.HORIZONTAL).createTable(binary);
+        System.out.println("image.runs=" + extracted.getTotalRunCount() + "/" + extracted.getWeight() + "/" + extracted.getRunAt(1, 0) + "/" + extracted.getRunAt(4, 2));
+
         System.out.println("pipeline=" + String.join(",", Arrays.stream(OmrStep.values()).map(Enum::name).toList()));
+    }
+
+    private static String pixels (ByteProcessor image)
+    {
+        int[] values = new int[image.getWidth() * image.getHeight()];
+        for (int index = 0; index < values.length; index++) {
+            values[index] = image.get(index % image.getWidth(), index / image.getWidth());
+        }
+        return Arrays.toString(values);
+    }
+
+    private static String values (Table table)
+    {
+        int[] values = new int[table.getWidth() * table.getHeight()];
+        for (int index = 0; index < values.length; index++) {
+            values[index] = table.getValue(index);
+        }
+        return Arrays.toString(values);
     }
 }

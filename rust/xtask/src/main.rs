@@ -4,7 +4,11 @@ use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver, natural_spec,
     rational::Rational, step::OmrStep,
 };
-use audiveris_image::run_table::{Orientation, Run, RunTable};
+use audiveris_image::{
+    chamfer::ChamferDistance,
+    global_filter, median,
+    run_table::{Orientation, Run, RunTable},
+};
 use std::{
     env,
     error::Error,
@@ -180,7 +184,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 12] = [
+const VECTOR_KEYS: [&str; 16] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -192,6 +196,10 @@ const VECTOR_KEYS: [&str; 12] = [
     "grade.contextual=",
     "injection=",
     "runs=",
+    "image.threshold=",
+    "image.median=",
+    "image.chamfer=",
+    "image.runs=",
     "pipeline=",
 ];
 
@@ -253,6 +261,36 @@ fn rust_vectors() -> Result<String, Box<dyn Error>> {
         runs.total_run_count(),
         runs.weight(),
         runs.run_at(6, 0).ok_or("fixture run not found")?
+    ));
+
+    let pixels = [
+        0, 126, 127, 128, 255, 255, 0, 255, 0, 255, 10, 20, 200, 210, 220,
+    ];
+    let binary = global_filter::global_filter(&pixels, 127);
+    lines.push(format!("image.threshold={binary:?}"));
+    lines.push(format!(
+        "image.median={:?}",
+        median::median_gray(5, 3, &pixels, 1)
+    ));
+    let distances = ChamferDistance::default().compute_to_fore(5, 3, &binary);
+    let mut distance_values = Vec::with_capacity(15);
+    for y in 0..3 {
+        for x in 0..5 {
+            distance_values.push(distances.get(x, y));
+        }
+    }
+    lines.push(format!("image.chamfer={distance_values:?}"));
+    let extracted = RunTable::from_pixels(Orientation::Horizontal, 5, 3, &binary)?;
+    lines.push(format!(
+        "image.runs={}/{}/{}/{}",
+        extracted.total_run_count(),
+        extracted.weight(),
+        extracted
+            .run_at(1, 0)
+            .ok_or("first extracted run missing")?,
+        extracted
+            .run_at(4, 2)
+            .map_or_else(|| "null".to_owned(), |run| run.to_string())
     ));
 
     lines.push(format!(
