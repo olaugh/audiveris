@@ -45,15 +45,31 @@ denied, and passed `git diff --check` before commit.
     Java/Rust mask comparisons.
 14. `428fb6d5` — exact vertical-run input parity and source-guided black/combo run
     histograms for the first `SCALE` boundary.
+15. `a264e8b1` — takeover record refreshed through the exact SCALE input boundary.
+16. `3804a957` — Java-compatible integer functions and range primitives.
+17. `9775d53c` — live `IntegerFunction` differential vector.
+18. `1abc585c` and `1efc7ead` — derivative hysteresis peak finder plus terminal-range
+    behavior.
+19. `0dc07283` and `92d6a1ec` — line/interline/beam SCALE decisions and locked crate
+    dependency.
+20. `87b6a4e3` — real production `ScaleBuilder` versus Rust full-page Chula parity,
+    including exact peaks, histogram areas, and beam decisions.
+21. `257d819e` — bounded opaque `.omr` ZIP inventory and content-equivalent round trip,
+    preserving unknown members and rejecting unsafe or duplicate paths.
 
-At the fourteenth checkpoint the Rust workspace executes 59 tests:
+At the twenty-first checkpoint the Rust workspace executes 83 tests:
 
-- `audiveris-core`: 25
-- `audiveris-image`: 26
+- `audiveris-core`: 32
+- `audiveris-image`: 36
+- `audiveris-omr`: 7
 - `audiveris-cli`: 4
 - `xtask`: 4
 
-The live Java/Rust oracle compares 22 canonical vectors at this checkpoint.
+The live Java/Rust oracle compares 25 canonical vectors at this checkpoint. Chula
+matches through the complete SCALE result: line `2,3,4`, interline `20,21,22`, measured
+beam `12`, and no secondary interline or beam. Commit `27dbfeb6` briefly encoded the
+wrong out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavior
+in both a focused test and the full-page vector.
 
 ## Verify before editing
 
@@ -97,9 +113,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Port `SCALE` in small contracts: vertical black/background run histograms, quorum
-   and peak selection, then staff interline and line-thickness estimates. Compare the
-   first differing neutral statistic before comparing the final scale object.
+1. Add at least two more full-page SCALE vectors, including a dual-interline or
+   extrapolated-beam case, before treating the Chula match as broad parity.
 2. Add a Java/Rust watershed vector before relying on the current Rust watershed in
    recognition. The Java class floods a distance table, so its input contract must be
    made explicit rather than inferred from the sparse Java unit test.
@@ -107,9 +122,9 @@ Commit each slice separately after the full verification block above.
    snapshots to `xtask vectors` without weakening its first-difference diagnostics.
 4. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
-5. Add a read-only `.omr` crate. The format is ZIP with `book.xml`, per-sheet
-   `sheet#N.xml`, and `BINARY.png`; 225 Java files use JAXB annotations and the SIG
-   has roughly 96 Inter and 67 Relation classes with ID/IDREF rehydration.
+5. Extend `audiveris-omr` with a lossless XML token/tree layer. Do not yet map all JAXB
+   types: preserve unknown nodes, attributes, IDs, IDREFs, and member bytes while adding
+   narrow typed views. The SIG has roughly 96 Inter and 67 Relation classes.
 6. Port `GRID`, then subsequent stages strictly in `OmrStep` order. Stop comparison at
    the first differing stage so later agreement cannot hide an upstream mismatch.
 
