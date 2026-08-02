@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[package]
+name = "audiveris-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Deterministic fixture and canonical-vector utilities for the Audiveris Rust port"
+
+[lints]
+workspace = true
+

@@ -39,6 +39,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Java oracle | frozen, executable verifier green |
 | Live Java/Rust vectors | 34 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
+| Differential testkit | deterministic sorted vectors, first-difference diagnostics, bounded fixture roots |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |

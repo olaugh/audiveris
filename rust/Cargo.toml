@@ -4,6 +4,7 @@ members = [
     "crates/audiveris-cli",
     "crates/audiveris-image",
     "crates/audiveris-omr",
+    "crates/audiveris-testkit",
     "xtask",
 ]
 resolver = "2"
