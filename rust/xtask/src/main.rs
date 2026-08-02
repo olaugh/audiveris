@@ -186,7 +186,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 21] = [
+const VECTOR_KEYS: [&str; 22] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -205,10 +205,33 @@ const VECTOR_KEYS: [&str; 21] = [
     "image.adaptive=",
     "load.chula=",
     "binary.chula=",
+    "scale.vertical-runs=",
     "load.dichterliebe=",
     "binary.dichterliebe=",
     "pipeline=",
 ];
+
+fn hash_u32(mut hash: u64, value: usize) -> u64 {
+    for byte in u32::try_from(value)
+        .expect("fixture coordinate fits u32")
+        .to_be_bytes()
+    {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn run_table_digest(table: &RunTable) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for sequence in 0..table.sequence_count() {
+        for run in table.sequence(sequence).unwrap_or_default() {
+            hash = hash_u32(hash, sequence);
+            hash = hash_u32(hash, run.start);
+            hash = hash_u32(hash, run.length);
+        }
+    }
+    hash
+}
 
 fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     let mut lines = Vec::with_capacity(VECTOR_KEYS.len());
@@ -317,6 +340,18 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         lines.push(format!(
             "binary.chula={:016x}",
             ingest::fnv1a64_bytes(&binary)
+        ));
+        let vertical = RunTable::from_pixels(
+            Orientation::Vertical,
+            loaded.width(),
+            loaded.height(),
+            &binary,
+        )?;
+        lines.push(format!(
+            "scale.vertical-runs={}/{}/{:016x}",
+            vertical.total_run_count(),
+            vertical.weight(),
+            run_table_digest(&vertical)
         ));
 
         let loaded = ingest::load_max_channel_gray(
@@ -478,7 +513,7 @@ mod tests {
     #[test]
     fn rust_vector_contract_is_stable() {
         let vectors = rust_vectors(None).unwrap();
-        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 4);
+        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 5);
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }

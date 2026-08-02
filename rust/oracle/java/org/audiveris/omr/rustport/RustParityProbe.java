@@ -109,6 +109,13 @@ public final class RustParityProbe
                     java.util.Locale.ROOT,
                     "binary.chula=%016x%n",
                     fnv1a64(adaptive));
+            RunTable vertical = new RunTableFactory(Orientation.VERTICAL).createTable(adaptive);
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "scale.vertical-runs=%d/%d/%016x%n",
+                    vertical.getTotalRunCount(),
+                    vertical.getWeight(),
+                    runTableDigest(vertical));
         } finally {
             loader.dispose();
         }
@@ -170,6 +177,29 @@ public final class RustParityProbe
             for (int x = 0; x < image.getWidth(); x++) {
                 hash = (hash ^ image.get(x, y)) * 0x100000001b3L;
             }
+        }
+        return hash;
+    }
+
+    private static long runTableDigest (RunTable table)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (int sequence = 0; sequence < table.getSize(); sequence++) {
+            for (java.util.Iterator<Run> it = table.iterator(sequence); it.hasNext();) {
+                Run run = it.next();
+                hash = hashInt(hash, sequence);
+                hash = hashInt(hash, run.getStart());
+                hash = hashInt(hash, run.getLength());
+            }
+        }
+        return hash;
+    }
+
+    private static long hashInt (long hash,
+                                 int value)
+    {
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            hash = (hash ^ ((value >>> shift) & 0xff)) * 0x100000001b3L;
         }
         return hash;
     }
