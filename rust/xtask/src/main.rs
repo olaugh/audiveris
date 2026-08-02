@@ -9,7 +9,7 @@ use audiveris_image::{
     adaptive,
     chamfer::ChamferDistance,
     filament::{FilamentError, StaffFilament},
-    filament_factory::{FilamentFactory, FilamentFactoryParams},
+    filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -194,7 +194,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 38] = [
+const VECTOR_KEYS: [&str; 39] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -210,6 +210,7 @@ const VECTOR_KEYS: [&str; 38] = [
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
     "grid.filament-factory.synthetic=",
+    "grid.filament-factory.overlap=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -614,6 +615,49 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         "grid.filament-factory.synthetic={}/{}",
         factory_filaments.len(),
         factory_shapes.join("|")
+    ));
+    let mut overlap_sections = Vec::new();
+    for (x, y, length) in [(0, 2, 40), (10, 3, 40), (5, 8, 40)] {
+        let mut overlap_runs = RunTable::new(Orientation::Horizontal, 55, 12)?;
+        overlap_runs.add_run(y, Run::new(x, length))?;
+        overlap_sections
+            .push(build_sections(&overlap_runs, JunctionPolicy::DEFAULT_RATIO).remove(0));
+    }
+    let overlap_factory = FilamentFactory::new(FilamentFactoryParams {
+        interline: 10,
+        min_core_section_length: 5,
+        min_section_aspect: 3.0,
+        max_coord_gap: 17.0,
+        max_pos_gap: 1.0,
+        max_pos_gap_for_slope: 1.0,
+        max_gap_slope: 0.5,
+        min_length_for_delta_slope: 100.0,
+        max_delta_slope: 0.01,
+    });
+    let overlap_filaments = overlap_factory.retrieve_core_filaments_with_overlap(
+        &overlap_sections,
+        OverlapParams {
+            probe_width: 5,
+            max_overlap_delta_pos: 2.0,
+            max_thickness: 2.0,
+            max_overlap_space: 2.0,
+            max_expansion_space: 0.0,
+            max_involving_length: 20.0,
+            max_consistent_ratio: 1.7,
+        },
+    )?;
+    let mut overlap_member_counts = overlap_filaments
+        .iter()
+        .map(|filament| filament.sections().len())
+        .collect::<Vec<_>>();
+    overlap_member_counts.sort_unstable();
+    lines.push(format!(
+        "grid.filament-factory.overlap={}/{:016x}/{}/{:?}/{:016x}",
+        overlap_sections.len(),
+        section_digest(&overlap_sections),
+        overlap_filaments.len(),
+        overlap_member_counts,
+        filament_digest(&overlap_filaments)?
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

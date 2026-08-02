@@ -272,6 +272,37 @@ public final class RustParityProbe
                 "grid.filament-factory.synthetic=" + factoryFilaments.size() + "/"
                         + String.join("|", factoryShapes));
 
+        List<Section> overlapSections = new ArrayList<>();
+        for (int[] spec : new int[][]{{0, 2, 40}, {10, 3, 40}, {5, 8, 40}}) {
+            RunTable overlapRuns = new RunTable(Orientation.HORIZONTAL, 55, 12);
+            overlapRuns.addRun(spec[1], new Run(spec[0], spec[2]));
+            overlapSections.add(new SectionFactory(
+                    Orientation.HORIZONTAL,
+                    JunctionRatioPolicy.DEFAULT).createSections(
+                            overlapRuns,
+                            null,
+                            false).get(0));
+        }
+        FilamentFactory<StaffFilament> overlapFactory = new FilamentFactory<>(
+                factoryScale,
+                new FilamentIndex(null),
+                Orientation.HORIZONTAL,
+                StaffFilament.class);
+        List<StaffFilament> overlapFilaments = overlapFactory.retrieveFilaments(overlapSections);
+        List<Integer> overlapMemberCounts = new ArrayList<>();
+        for (StaffFilament overlapFilament : overlapFilaments) {
+            overlapMemberCounts.add(overlapFilament.getMembers().size());
+        }
+        Collections.sort(overlapMemberCounts);
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.filament-factory.overlap=%d/%016x/%d/%s/%016x%n",
+                overlapSections.size(),
+                sectionDigest(overlapSections),
+                overlapFilaments.size(),
+                overlapMemberCounts,
+                filamentDigest(overlapFilaments));
+
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
                 new double[]{1, 6});
