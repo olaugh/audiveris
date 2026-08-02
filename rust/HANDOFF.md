@@ -70,17 +70,20 @@ denied, and passed `git diff --check` before commit.
     first-difference diagnostics, and bounded fixture-root resolution.
 29. `3ac3f75e` — the live oracle harness now uses the parity testkit and rejects
     malformed or duplicate vector lines.
+30. `61f94c4b` — source-guided natural line, quadratic, and cubic spline geometry.
+31. `fe18009c` — neutral GRID staff-filament metrics and probe/spline geometry, plus
+    exact live Java/Rust spline and filament vectors.
 
-At the twenty-ninth checkpoint the Rust workspace executes 113 tests:
+At the thirty-first checkpoint the Rust workspace executes 122 tests:
 
-- `audiveris-core`: 32
-- `audiveris-image`: 45
+- `audiveris-core`: 38
+- `audiveris-image`: 48
 - `audiveris-omr`: 21
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 34 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 36 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -88,6 +91,10 @@ out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavi
 both a focused test and the full-page vector. GRID now matches both a branch-heavy
 synthetic section fixture and the real Chula page through run dispatch, long-run
 purging, both lag policies, and every section's run content digest.
+The next GRID boundary also matches Java for compound bounds, weight, its historical
+true-length hole arithmetic, thickness, endpoint probes, five spline positions/slopes,
+and range checks. Floating spline output is explicitly canonicalized at `1e-14` because
+HotSpot and Rust differ by one ULP in one quadratic expression.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
