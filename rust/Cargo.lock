@@ -23,6 +23,7 @@ version = "0.1.0"
 name = "audiveris-image"
 version = "0.1.0"
 dependencies = [
+ "audiveris-core",
  "image",
 ]
 
