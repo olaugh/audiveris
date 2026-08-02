@@ -36,13 +36,20 @@ denied, and passed `git diff --check` before commit.
 8. `a54a559e` — gray-level watershed segmentation with basin and watershed-line tests.
 9. `9fd992f3` — live Java probe and exact canonical Rust comparison across 12 utility,
    geometry, assignment, run-table, and pipeline-order vectors.
+10. `8f65b5a5` — exact cross-runtime threshold, median, chamfer, and run-extraction
+    image vectors.
+11. `354e1d8d` — SHA-256 oracle manifest for the classifier, fonts, and image fixtures.
+12. `c0c39f9f` — PNG/JPEG raster loading with Audiveris max-channel grayscale semantics
+    and an exact full-page Java/Rust PNG digest.
+13. `2e7a95c2` — integral-image adaptive binarization with exact synthetic and full-page
+    Java/Rust mask comparisons.
 
-At the ninth checkpoint the Rust workspace executes 51 tests:
+At the thirteenth checkpoint the Rust workspace executes 57 tests:
 
 - `audiveris-core`: 25
-- `audiveris-image`: 19
+- `audiveris-image`: 24
 - `audiveris-cli`: 4
-- `xtask`: 3
+- `xtask`: 4
 
 ## Verify before editing
 
@@ -54,6 +61,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p xtask -- baseline
 cargo run -p xtask -- vectors
+cargo run -p xtask -- manifest
 ```
 
 To rerun Java rather than inspect its current XML reports:
@@ -85,15 +93,16 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Extend the neutral live probe from utilities into byte-level image fixtures:
-   thresholding, median filtering, chamfer distance, watershed labels, and exact
-   raster-to-run extraction. Avoid PDF ingest until canonical PNG fixtures work.
-2. Extract the growing fixture schema into `audiveris-testkit`, then add stage
+1. Port `SCALE` in small contracts: vertical black/background run histograms, quorum
+   and peak selection, then staff interline and line-thickness estimates. Compare the
+   first differing neutral statistic before comparing the final scale object.
+2. Add a Java/Rust watershed vector before relying on the current Rust watershed in
+   recognition. The Java class floods a distance table, so its input contract must be
+   made explicit rather than inferred from the sparse Java unit test.
+3. Extract the growing fixture schema into `audiveris-testkit`, then add stage
    snapshots to `xtask vectors` without weakening its first-difference diagnostics.
-3. Freeze hashes for the classifier model, music fonts, Tesseract data, JDK, and all
-   fixture inputs in an oracle manifest.
-4. Implement raster `LOAD`, `BINARY`, and `SCALE` contracts with exact mask/black-count,
-   run-table, and scale-value comparisons.
+4. Add Tesseract data to the oracle manifest when its resolved runtime location is
+   known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
 5. Add a read-only `.omr` crate. The format is ZIP with `book.xml`, per-sheet
    `sheet#N.xml`, and `BINARY.png`; 225 Java files use JAXB annotations and the SIG
    has roughly 96 Inter and 67 Relation classes with ID/IDREF rehydration.
