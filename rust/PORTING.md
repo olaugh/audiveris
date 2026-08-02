@@ -44,6 +44,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
+| Natural spline geometry | line/quadratic/natural-cubic interpolation and horizontal evaluation implemented |
 | CLI parameter slice | implemented with parity tests |
 | Binary run-table primitives | implemented with parity tests |
 | Median filter and chamfer distance transform | implemented with parity tests |
