@@ -9,5 +9,6 @@ pub mod ingest;
 pub mod mask;
 pub mod median;
 pub mod run_table;
+pub mod scale_estimate;
 pub mod scale_runs;
 pub mod watershed;
