@@ -43,7 +43,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Least-squares line geometry | implemented with parity tests |
 | CLI parameter slice | implemented with parity tests |
 | Binary run-table primitives | implemented with parity tests |
-| Filters and distance transforms | queued |
+| Median filter and chamfer distance transform | implemented with parity tests |
+| Remaining filters and image ingest | queued |
 | `.omr` persistence | queued |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
