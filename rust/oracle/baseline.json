@@ -1,0 +1,21 @@
+{
+  "schema": "org.audiveris.rust-port.java-baseline.v1",
+  "source_commit": "9e1e55cd2746037d059345881c53e6a6754bffbd",
+  "source_version": "5.11.0",
+  "captured_at": "2026-08-02",
+  "java": {
+    "minimum_version": 25,
+    "gradle_command": "./gradlew :app:test --no-daemon",
+    "suites": 39,
+    "tests": 212,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 1
+  },
+  "pipeline": [
+    "LOAD", "BINARY", "SCALE", "GRID", "HEADERS", "STEM_SEEDS", "BEAMS",
+    "LEDGERS", "HEADS", "STEMS", "REDUCTION", "CUE_BEAMS", "TEXTS",
+    "MEASURES", "CHORDS", "CURVES", "SYMBOLS", "LINKS", "RHYTHMS", "PAGE"
+  ],
+  "qualification": "The Java unit suite does not execute the recognition pipeline. Stage snapshots and semantic MusicXML comparisons are separate required gates."
+}

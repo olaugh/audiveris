@@ -36,7 +36,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 
 | Area | State |
 | --- | --- |
-| Java oracle | frozen and green |
+| Java oracle | frozen, executable verifier green |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
 | CLI parameter slice | implemented with parity tests |
@@ -45,4 +45,3 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
-
