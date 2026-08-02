@@ -15,4 +15,5 @@ cargo run -p xtask -- baseline --run-java
 
 Passing the Rust tests means only that the currently ported surface is compatible.
 It does **not** yet mean that the whole Audiveris application or its recognition
-accuracy has reached parity. See [PORTING.md](PORTING.md) for the gates and status.
+accuracy has reached parity. See [PORTING.md](PORTING.md) for the gates and status,
+and [HANDOFF.md](HANDOFF.md) for an exact continuation checklist.
