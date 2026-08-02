@@ -17,6 +17,9 @@ use quick_xml::events::{BytesStart, Event};
 
 const BOOK_ELEMENT: &[u8] = b"book";
 const SHEET_ELEMENT: &[u8] = b"sheet";
+const INPUT_ELEMENT: &[u8] = b"input";
+const PATH_ELEMENT: &[u8] = b"path";
+const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
 const STEPS_ELEMENT: &[u8] = b"steps";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
@@ -44,6 +47,8 @@ impl BookXml {
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut sheet_numbers = HashSet::new();
         let mut active_sheet = None;
+        let mut active_input: Option<(usize, SheetInputBuilder)> = None;
+        let mut active_input_scalar: Option<InputScalarCapture> = None;
         let mut active_steps: Option<(usize, String)> = None;
         let mut root_closed = false;
 
@@ -59,6 +64,12 @@ impl BookXml {
                             sheet_stubs[*sheet_index].number,
                         ));
                     }
+                    if let Some(capture) = active_input_scalar.as_ref() {
+                        return Err(BookXmlError::UnexpectedInputScalarContent {
+                            sheet_number: sheet_stubs[capture.sheet_index].number,
+                            field: capture.scalar.field(),
+                        });
+                    }
                     if depth == 0 {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
@@ -69,6 +80,22 @@ impl BookXml {
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                         active_sheet = Some(sheet_stubs.len() - 1);
+                    } else if depth == 2
+                        && element.local_name().as_ref() == INPUT_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        begin_input(&sheet_stubs, sheet_index)?;
+                        active_input = Some((sheet_index, SheetInputBuilder::default()));
+                    } else if depth == 3
+                        && let Some((sheet_index, builder)) = active_input.as_ref()
+                        && let Some(scalar) = input_scalar(element.local_name().as_ref())
+                    {
+                        begin_input_scalar(&sheet_stubs, *sheet_index, builder, scalar)?;
+                        active_input_scalar = Some(InputScalarCapture {
+                            sheet_index: *sheet_index,
+                            scalar,
+                            text: String::new(),
+                        });
                     } else if depth == 2
                         && element.local_name().as_ref() == STEPS_ELEMENT
                         && let Some(sheet_index) = active_sheet
@@ -86,6 +113,12 @@ impl BookXml {
                             sheet_stubs[*sheet_index].number,
                         ));
                     }
+                    if let Some(capture) = active_input_scalar.as_ref() {
+                        return Err(BookXmlError::UnexpectedInputScalarContent {
+                            sheet_number: sheet_stubs[capture.sheet_index].number,
+                            field: capture.scalar.field(),
+                        });
+                    }
                     if depth == 0 {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
@@ -97,6 +130,27 @@ impl BookXml {
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                     } else if depth == 2
+                        && element.local_name().as_ref() == INPUT_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        begin_input(&sheet_stubs, sheet_index)?;
+                        return Err(BookXmlError::MissingInputField {
+                            sheet_number: sheet_stubs[sheet_index].number,
+                            field: "sheet/input/path",
+                        });
+                    } else if depth == 3
+                        && let Some((sheet_index, builder)) = active_input.as_mut()
+                        && let Some(scalar) = input_scalar(element.local_name().as_ref())
+                    {
+                        begin_input_scalar(&sheet_stubs, *sheet_index, builder, scalar)?;
+                        finish_input_scalar(
+                            &sheet_stubs,
+                            *sheet_index,
+                            builder,
+                            scalar,
+                            String::new(),
+                        )?;
+                    } else if depth == 2
                         && element.local_name().as_ref() == STEPS_ELEMENT
                         && let Some(sheet_index) = active_sheet
                     {
@@ -105,12 +159,36 @@ impl BookXml {
                     }
                 }
                 Event::End(element) => {
+                    if depth == 4
+                        && let Some(capture) = active_input_scalar.take()
+                    {
+                        let (_, builder) = active_input.as_mut().ok_or_else(|| {
+                            BookXmlError::malformed(
+                                reader.buffer_position(),
+                                "input scalar closed outside input",
+                            )
+                        })?;
+                        finish_input_scalar(
+                            &sheet_stubs,
+                            capture.sheet_index,
+                            builder,
+                            capture.scalar,
+                            capture.text,
+                        )?;
+                    }
                     if element.local_name().as_ref() == STEPS_ELEMENT
                         && depth == 3
                         && let Some((sheet_index, text)) = active_steps.take()
                     {
                         sheet_stubs[sheet_index].done_steps =
                             Some(parse_steps(&text, sheet_stubs[sheet_index].number)?);
+                    }
+                    if element.local_name().as_ref() == INPUT_ELEMENT
+                        && depth == 3
+                        && let Some((sheet_index, builder)) = active_input.take()
+                    {
+                        sheet_stubs[sheet_index].input =
+                            Some(finish_input(&sheet_stubs, sheet_index, builder)?);
                     }
                     if depth == 2 && active_sheet.is_some() {
                         active_sheet = None;
@@ -136,6 +214,16 @@ impl BookXml {
                     })?;
                     active_steps.as_mut().unwrap().1.push_str(&decoded);
                 }
+                Event::Text(text) if active_input_scalar.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_input_scalar
+                        .as_mut()
+                        .unwrap()
+                        .text
+                        .push_str(&decoded);
+                }
                 Event::CData(text) if depth == 0 => {
                     let text = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -150,6 +238,16 @@ impl BookXml {
                     })?;
                     active_steps.as_mut().unwrap().1.push_str(&decoded);
                 }
+                Event::CData(text) if active_input_scalar.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_input_scalar
+                        .as_mut()
+                        .unwrap()
+                        .text
+                        .push_str(&decoded);
+                }
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
@@ -158,6 +256,13 @@ impl BookXml {
                     return Err(BookXmlError::UnexpectedStepsContent(
                         sheet_stubs[sheet_index].number,
                     ));
+                }
+                Event::GeneralRef(_) if active_input_scalar.is_some() => {
+                    let capture = active_input_scalar.as_ref().unwrap();
+                    return Err(BookXmlError::UnexpectedInputScalarContent {
+                        sheet_number: sheet_stubs[capture.sheet_index].number,
+                        field: capture.scalar.field(),
+                    });
                 }
                 Event::Eof => break,
                 _ => {}
@@ -211,6 +316,7 @@ impl BookXml {
 pub struct SheetStub {
     number: u32,
     archive_path: String,
+    input: Option<SheetInput>,
     done_steps: Option<Vec<OmrStep>>,
 }
 
@@ -225,6 +331,14 @@ impl SheetStub {
     #[must_use]
     pub fn archive_path(&self) -> &str {
         &self.archive_path
+    }
+
+    /// Explicit source-image provenance from the optional direct `input` child.
+    ///
+    /// When absent, Java falls back to the book input path and sheet number.
+    #[must_use]
+    pub const fn input(&self) -> Option<&SheetInput> {
+        self.input.as_ref()
     }
 
     /// Completed stages recorded by the optional direct `steps` XML list.
@@ -242,6 +356,55 @@ impl SheetStub {
             .as_deref()
             .and_then(|steps| steps.iter().copied().max())
     }
+}
+
+/// Explicit image source associated with one persisted sheet stub.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SheetInput {
+    path: String,
+    number: u32,
+}
+
+impl SheetInput {
+    /// Path spelling passed through Java's `Jaxb.PathAdapter`.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// One-based image rank within the input file.
+    #[must_use]
+    pub const fn number(&self) -> u32 {
+        self.number
+    }
+}
+
+#[derive(Debug, Default)]
+struct SheetInputBuilder {
+    path: Option<String>,
+    number: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InputScalar {
+    Path,
+    Number,
+}
+
+impl InputScalar {
+    const fn field(self) -> &'static str {
+        match self {
+            Self::Path => "sheet/input/path",
+            Self::Number => "sheet/input/number",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct InputScalarCapture {
+    sheet_index: usize,
+    scalar: InputScalar,
+    text: String,
 }
 
 /// Failure to construct the conservative `book.xml` metadata view.
@@ -268,6 +431,36 @@ pub enum BookXmlError {
     InvalidSheetNumber(String),
     /// Two direct child sheet stubs declare the same number.
     DuplicateSheetNumber(u32),
+    /// A direct sheet stub contains more than one `input` element.
+    DuplicateSheetInput(u32),
+    /// A required scalar is absent from a present `input` element.
+    MissingInputField {
+        /// Sheet number containing the incomplete input.
+        sheet_number: u32,
+        /// Stable typed field path.
+        field: &'static str,
+    },
+    /// A direct `input` scalar occurs more than once.
+    DuplicateInputField {
+        /// Sheet number containing the duplicate.
+        sheet_number: u32,
+        /// Stable typed field path.
+        field: &'static str,
+    },
+    /// The input image rank is not a positive Java `int`.
+    InvalidInputNumber {
+        /// Sheet number containing the value.
+        sheet_number: u32,
+        /// Exact scalar text after XML decoding.
+        value: String,
+    },
+    /// A typed `input` scalar contains nested markup or an entity reference.
+    UnexpectedInputScalarContent {
+        /// Sheet number containing the scalar.
+        sheet_number: u32,
+        /// Stable typed field path.
+        field: &'static str,
+    },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -321,6 +514,37 @@ impl fmt::Display for BookXmlError {
             Self::DuplicateSheetNumber(number) => {
                 write!(formatter, "duplicate sheet stub number {number}")
             }
+            Self::DuplicateSheetInput(number) => {
+                write!(
+                    formatter,
+                    "sheet stub {number} has duplicate input elements"
+                )
+            }
+            Self::MissingInputField {
+                sheet_number,
+                field,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} input is missing {field}"
+            ),
+            Self::DuplicateInputField {
+                sheet_number,
+                field,
+            } => write!(formatter, "sheet stub {sheet_number} input repeats {field}"),
+            Self::InvalidInputNumber {
+                sheet_number,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} has invalid input image number {value:?}"
+            ),
+            Self::UnexpectedInputScalarContent {
+                sheet_number,
+                field,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} input field {field} contains non-text content"
+            ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
                     formatter,
@@ -412,6 +636,7 @@ fn push_sheet_stub(
     sheet_stubs.push(SheetStub {
         number,
         archive_path: format!("sheet#{number}/sheet#{number}.xml"),
+        input: None,
         done_steps: None,
     });
     Ok(())
@@ -424,6 +649,84 @@ fn begin_steps(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), Book
         ));
     }
     Ok(())
+}
+
+fn begin_input(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), BookXmlError> {
+    if sheet_stubs[sheet_index].input.is_some() {
+        return Err(BookXmlError::DuplicateSheetInput(
+            sheet_stubs[sheet_index].number,
+        ));
+    }
+    Ok(())
+}
+
+fn input_scalar(local_name: &[u8]) -> Option<InputScalar> {
+    match local_name {
+        PATH_ELEMENT => Some(InputScalar::Path),
+        INPUT_NUMBER_ELEMENT => Some(InputScalar::Number),
+        _ => None,
+    }
+}
+
+fn begin_input_scalar(
+    sheet_stubs: &[SheetStub],
+    sheet_index: usize,
+    builder: &SheetInputBuilder,
+    scalar: InputScalar,
+) -> Result<(), BookXmlError> {
+    let populated = match scalar {
+        InputScalar::Path => builder.path.is_some(),
+        InputScalar::Number => builder.number.is_some(),
+    };
+    if populated {
+        return Err(BookXmlError::DuplicateInputField {
+            sheet_number: sheet_stubs[sheet_index].number,
+            field: scalar.field(),
+        });
+    }
+    Ok(())
+}
+
+fn finish_input_scalar(
+    sheet_stubs: &[SheetStub],
+    sheet_index: usize,
+    builder: &mut SheetInputBuilder,
+    scalar: InputScalar,
+    text: String,
+) -> Result<(), BookXmlError> {
+    match scalar {
+        InputScalar::Path => builder.path = Some(text),
+        InputScalar::Number => {
+            let number = text
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|number| *number > 0 && *number <= i32::MAX as u32)
+                .ok_or_else(|| BookXmlError::InvalidInputNumber {
+                    sheet_number: sheet_stubs[sheet_index].number,
+                    value: text.clone(),
+                })?;
+            builder.number = Some(number);
+        }
+    }
+    Ok(())
+}
+
+fn finish_input(
+    sheet_stubs: &[SheetStub],
+    sheet_index: usize,
+    builder: SheetInputBuilder,
+) -> Result<SheetInput, BookXmlError> {
+    let sheet_number = sheet_stubs[sheet_index].number;
+    let path = builder.path.ok_or(BookXmlError::MissingInputField {
+        sheet_number,
+        field: "sheet/input/path",
+    })?;
+    let number = builder.number.ok_or(BookXmlError::MissingInputField {
+        sheet_number,
+        field: "sheet/input/number",
+    })?;
+    Ok(SheetInput { path, number })
 }
 
 fn parse_steps(text: &str, sheet_number: u32) -> Result<Vec<OmrStep>, BookXmlError> {
@@ -491,7 +794,10 @@ mod tests {
 </book>"#;
         let book = BookXml::parse(xml).unwrap();
         let steps = book.sheet_stubs()[0].done_steps().unwrap();
+        let input = book.sheet_stubs()[0].input().unwrap();
 
+        assert_eq!(input.path(), "page-001.png");
+        assert_eq!(input.number(), 1);
         assert_eq!(
             steps,
             &[
@@ -579,6 +885,53 @@ mod tests {
     }
 
     #[test]
+    fn reads_real_input_provenance_and_preserves_path_text() {
+        let xml = br#"<?xml version="1.0" ?>
+<book software-version="5.11.0">
+  <sheet number="7">
+    <input future="keep">
+      <path>/Users/john/sources/jul10-charter/omr/data/synth/k545-movement1-exposition/page-001.png</path>
+      <number>  1  </number>
+      <future/>
+    </input>
+  </sheet>
+</book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let input = book.sheet_stubs()[0].input().unwrap();
+
+        assert_eq!(
+            input.path(),
+            "/Users/john/sources/jul10-charter/omr/data/synth/k545-movement1-exposition/page-001.png"
+        );
+        assert_eq!(input.number(), 1);
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn distinguishes_absent_input_and_accepts_explicit_empty_path() {
+        let book = BookXml::parse(
+            br#"<book><sheet number="1"/><sheet number="2"><input><path/><number>2</number></input></sheet></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.sheet_stubs()[0].input(), None);
+        assert_eq!(book.sheet_stubs()[1].input().unwrap().path(), "");
+        assert_eq!(book.sheet_stubs()[1].input().unwrap().number(), 2);
+    }
+
+    #[test]
+    fn ignores_input_names_outside_the_direct_jaxb_positions() {
+        let book = BookXml::parse(
+            br#"<book><input><path>book</path><number>9</number></input><sheet number="1"><future><input><path>nested</path><number>8</number></input></future><input><path>direct</path><number>3</number><future><path>ignored</path><number>99</number></future></input></sheet></book>"#,
+        )
+        .unwrap();
+
+        let input = book.sheet_stubs()[0].input().unwrap();
+        assert_eq!(input.path(), "direct");
+        assert_eq!(input.number(), 3);
+    }
+
+    #[test]
     fn ignores_unknown_attributes_nodes_and_nested_sheet_names() {
         let xml = br#"<book software-version="5&amp;11" future="yes">
             <future><sheet number="99"/></future>
@@ -632,6 +985,98 @@ mod tests {
             BookXmlError::DuplicateOmrStep {
                 sheet_number: 4,
                 step: OmrStep::Load,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_input_and_direct_scalar_fields() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><input><path>a</path><number>1</number></input><input><path>b</path><number>2</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateSheetInput(4)
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><input><path>a</path><path>b</path><number>1</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateInputField {
+                sheet_number: 4,
+                field: "sheet/input/path",
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><input><path>a</path><number>1</number><number>2</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateInputField {
+                sheet_number: 4,
+                field: "sheet/input/number",
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_partial_input_and_invalid_image_numbers() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="5"><input><number>1</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::MissingInputField {
+                sheet_number: 5,
+                field: "sheet/input/path",
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="5"><input><path>page.png</path></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::MissingInputField {
+                sheet_number: 5,
+                field: "sheet/input/number",
+            }
+        );
+
+        for invalid in ["", "0", "-1", "not-a-number", "2147483648"] {
+            let xml = format!(
+                "<book><sheet number=\"5\"><input><path>page.png</path><number>{invalid}</number></input></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidInputNumber {
+                    sheet_number: 5,
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_markup_and_entities_inside_input_scalars() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="6"><input><path>page<future/>.png</path><number>1</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::UnexpectedInputScalarContent {
+                sheet_number: 6,
+                field: "sheet/input/path",
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="6"><input><path>page.png</path><number>&#49;</number></input></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::UnexpectedInputScalarContent {
+                sheet_number: 6,
+                field: "sheet/input/number",
             }
         );
     }
