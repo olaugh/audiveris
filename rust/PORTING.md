@@ -57,7 +57,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE line, interline, and beam estimate | exact match on 4 pages and key branch cases |
 | GRID section construction | neutral horizontal/vertical sections, four junction policies, exact live Java topology/statistics |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | opaque round trip plus lossless typed `book.xml` metadata view |
+| `.omr` persistence | opaque round trip plus lossless typed `book.xml` and per-sheet metadata views |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |

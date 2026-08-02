@@ -19,6 +19,7 @@ use std::path::Path;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub mod sheet_xml;
 pub mod xml;
 
 /// The required root member written by Audiveris.
