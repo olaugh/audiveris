@@ -56,7 +56,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE derivative peak finder | implemented; exercised by full-page Java oracle |
 | SCALE line, interline, and beam estimate | exact Chula Java/Rust full-page match |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | queued |
+| `.omr` persistence | opaque archive inventory/round-trip boundary implemented; XML schema queued |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
