@@ -39,6 +39,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Java oracle | frozen, executable verifier green |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
+| Histogram, grades, injection solver | implemented with parity tests |
 | CLI parameter slice | implemented with parity tests |
 | Image/run-table primitives | queued |
 | `.omr` persistence | queued |
