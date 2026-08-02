@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use audiveris_core::{
-    basic_line::BasicLine, grade, histogram::Histogram, injection_solver, natural_spec,
-    rational::Rational, step::OmrStep,
+    basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
+    integer_function::IntegerFunction, natural_spec, rational::Rational, step::OmrStep,
 };
 use audiveris_image::{
     adaptive,
@@ -186,7 +186,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 22] = [
+const VECTOR_KEYS: [&str; 23] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -197,6 +197,7 @@ const VECTOR_KEYS: [&str; 22] = [
     "line.one-ten=",
     "grade.contextual=",
     "injection=",
+    "integer.function=",
     "runs=",
     "image.threshold=",
     "image.median=",
@@ -280,6 +281,27 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         .abs()
     })?;
     lines.push(format!("injection={mapping:?}/{cost}"));
+
+    let mut integer = IntegerFunction::new(2, 9);
+    for (x, value) in [
+        (2, 1),
+        (3, 4),
+        (4, 4),
+        (5, 2),
+        (6, 5),
+        (7, 1),
+        (8, 3),
+        (9, 3),
+    ] {
+        integer.set_value(x, value);
+    }
+    lines.push(format!(
+        "integer.function={}/{}/{:?}/{}",
+        integer.arg_max(2, 9),
+        integer.area(),
+        integer.local_maxima(0, 20),
+        integer.derivative(3)
+    ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
     runs.add_run(0, Run::new(1, 2))?;

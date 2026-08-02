@@ -17,6 +17,7 @@ import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
+import org.audiveris.omr.math.IntegerFunction;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
@@ -73,6 +74,13 @@ public final class RustParityProbe
         WrappedInteger bestCost = new WrappedInteger(null);
         int[] mapping = solver.solve(bestCost);
         System.out.println("injection=" + Arrays.toString(mapping) + "/" + bestCost.value);
+
+        IntegerFunction integer = new IntegerFunction(2, 9);
+        int[][] functionValues = {{2, 1}, {3, 4}, {4, 4}, {5, 2}, {6, 5}, {7, 1}, {8, 3}, {9, 3}};
+        for (int[] entry : functionValues) {
+            integer.setValue(entry[0], entry[1]);
+        }
+        System.out.println("integer.function=" + integer.argMax(2, 9) + "/" + integer.getArea() + "/" + integer.getLocalMaxima(0, 20) + "/" + integer.getDerivative(3));
 
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
