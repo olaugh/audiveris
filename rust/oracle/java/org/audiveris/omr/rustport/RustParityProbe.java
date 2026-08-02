@@ -13,6 +13,7 @@ import org.audiveris.omr.image.ChamferDistance;
 import org.audiveris.omr.image.GlobalFilter;
 import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
+import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
@@ -92,6 +93,7 @@ public final class RustParityProbe
         System.out.println("image.chamfer=" + values(distances));
         RunTable extracted = new RunTableFactory(Orientation.HORIZONTAL).createTable(binary);
         System.out.println("image.runs=" + extracted.getTotalRunCount() + "/" + extracted.getWeight() + "/" + extracted.getRunAt(1, 0) + "/" + extracted.getRunAt(4, 2));
+        System.out.println("image.adaptive=" + pixels(new VerticalFilter(raster, 0.7, 0.9).filteredImage()));
 
         ImageLoading.Loader loader = ImageLoading.getLoader(Path.of("data/examples/chula.png"));
         try {
@@ -102,6 +104,29 @@ public final class RustParityProbe
                     loaded.getWidth(),
                     loaded.getHeight(),
                     fnv1a64(loaded.getRaster()));
+            ByteProcessor adaptive = new VerticalFilter(new ByteProcessor(loaded), 0.7, 0.9).filteredImage();
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "binary.chula=%016x%n",
+                    fnv1a64(adaptive));
+        } finally {
+            loader.dispose();
+        }
+
+        loader = ImageLoading.getLoader(Path.of("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"));
+        try {
+            BufferedImage loaded = Picture.adjustImageFormat(loader.getImage(1));
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "load.dichterliebe=%dx%d/%016x%n",
+                    loaded.getWidth(),
+                    loaded.getHeight(),
+                    fnv1a64(loaded.getRaster()));
+            ByteProcessor adaptive = new VerticalFilter(new ByteProcessor(loaded), 0.7, 0.9).filteredImage();
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "binary.dichterliebe=%016x%n",
+                    fnv1a64(adaptive));
         } finally {
             loader.dispose();
         }
@@ -133,6 +158,17 @@ public final class RustParityProbe
         for (int y = 0; y < raster.getHeight(); y++) {
             for (int x = 0; x < raster.getWidth(); x++) {
                 hash = (hash ^ raster.getSample(x, y, 0)) * 0x100000001b3L;
+            }
+        }
+        return hash;
+    }
+
+    private static long fnv1a64 (ByteProcessor image)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                hash = (hash ^ image.get(x, y)) * 0x100000001b3L;
             }
         }
         return hash;

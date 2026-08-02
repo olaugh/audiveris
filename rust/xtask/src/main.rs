@@ -5,6 +5,7 @@ use audiveris_core::{
     rational::Rational, step::OmrStep,
 };
 use audiveris_image::{
+    adaptive,
     chamfer::ChamferDistance,
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
@@ -185,7 +186,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 17] = [
+const VECTOR_KEYS: [&str; 21] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -201,7 +202,11 @@ const VECTOR_KEYS: [&str; 17] = [
     "image.median=",
     "image.chamfer=",
     "image.runs=",
+    "image.adaptive=",
     "load.chula=",
+    "binary.chula=",
+    "load.dichterliebe=",
+    "binary.dichterliebe=",
     "pipeline=",
 ];
 
@@ -294,6 +299,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .run_at(4, 2)
             .map_or_else(|| "null".to_owned(), |run| run.to_string())
     ));
+    lines.push(format!(
+        "image.adaptive={:?}",
+        adaptive::default_adaptive_filter(5, 3, &pixels)
+    ));
 
     if let Some(root) = root {
         let loaded = ingest::load_max_channel_gray(root.join("data/examples/chula.png"))?;
@@ -302,6 +311,28 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             loaded.width(),
             loaded.height(),
             loaded.fnv1a64()
+        ));
+        let binary =
+            adaptive::default_adaptive_filter(loaded.width(), loaded.height(), loaded.pixels());
+        lines.push(format!(
+            "binary.chula={:016x}",
+            ingest::fnv1a64_bytes(&binary)
+        ));
+
+        let loaded = ingest::load_max_channel_gray(
+            root.join("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"),
+        )?;
+        lines.push(format!(
+            "load.dichterliebe={}x{}/{:016x}",
+            loaded.width(),
+            loaded.height(),
+            loaded.fnv1a64()
+        ));
+        let binary =
+            adaptive::default_adaptive_filter(loaded.width(), loaded.height(), loaded.pixels());
+        lines.push(format!(
+            "binary.dichterliebe={:016x}",
+            ingest::fnv1a64_bytes(&binary)
         ));
     }
 
@@ -447,7 +478,7 @@ mod tests {
     #[test]
     fn rust_vector_contract_is_stable() {
         let vectors = rust_vectors(None).unwrap();
-        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 1);
+        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 4);
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }

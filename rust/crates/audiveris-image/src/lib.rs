@@ -2,6 +2,7 @@
 
 //! Raster and run-length primitives for the headless recognition pipeline.
 
+pub mod adaptive;
 pub mod chamfer;
 pub mod global_filter;
 pub mod ingest;

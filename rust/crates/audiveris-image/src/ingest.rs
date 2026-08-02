@@ -48,12 +48,16 @@ impl GrayRaster {
     /// Stable non-cryptographic summary for cross-runtime fixture diagnostics.
     #[must_use]
     pub fn fnv1a64(&self) -> u64 {
-        self.pixels
-            .iter()
-            .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-                (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-            })
+        fnv1a64_bytes(&self.pixels)
     }
+}
+
+/// Stable non-cryptographic summary for cross-runtime fixture diagnostics.
+#[must_use]
+pub fn fnv1a64_bytes(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 #[derive(Debug)]
