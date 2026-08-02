@@ -179,6 +179,16 @@ public final class RustParityProbe
             loader.dispose();
         }
 
+        emitScale(
+                "k545",
+                Path.of("../../data/synth/k545-movement1-exposition/page-001.png"));
+        emitScale(
+                "essen",
+                Path.of("../../data/synth/essenfolksong-erk20/page-001.png"));
+        emitScale(
+                "josquin",
+                Path.of("../../data/synth/josquin-4vperilludaveprolatum/page-001.png"));
+
         loader = ImageLoading.getLoader(Path.of("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"));
         try {
             BufferedImage loaded = Picture.adjustImageFormat(loader.getImage(1));
@@ -199,6 +209,53 @@ public final class RustParityProbe
 
         System.out.println("pipeline=" + String.join(",", Arrays.stream(OmrStep.values()).map(Enum::name).toList()));
 
+    }
+
+    private static void emitScale (String slug,
+                                   Path path)
+        throws Exception
+    {
+        ImageLoading.Loader loader = ImageLoading.getLoader(path);
+        try {
+            BufferedImage loaded = Picture.adjustImageFormat(loader.getImage(1));
+            ByteProcessor adaptive = new VerticalFilter(new ByteProcessor(loaded), 0.7, 0.9).filteredImage();
+            RunTable vertical = new RunTableFactory(Orientation.VERTICAL).createTable(adaptive);
+
+            Book book = new Book(path);
+            SheetStub stub = new SheetStub(book, 1);
+            book.addStub(stub);
+            Sheet sheet = new Sheet(stub, vertical);
+            ScaleBuilder scaleBuilder = new ScaleBuilder(sheet);
+            Scale scale = scaleBuilder.retrieveScale();
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "scale.%s=%s/%s/%s/%s/%s%n",
+                    slug,
+                    value(scale.getFore()),
+                    value(scale.getInterline()),
+                    value(scale.getSmallInterline()),
+                    value(scale.getBeamThickness()),
+                    value(scale.getSmallBeamScale() != null
+                            ? scale.getSmallBeamScale().getMain() : null));
+
+            Object histoKeeper = field(scaleBuilder, "histoKeeper");
+            IntegerFunction blackFunction = (IntegerFunction) field(histoKeeper, "blackFunction");
+            IntegerFunction comboFunction = (IntegerFunction) field(histoKeeper, "comboFunction");
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "scale.%s.detail=black:%s;combo:%s;combo2:%s;beam:%s;beam2:%s;guess:%s;areas:%d,%d%n",
+                    slug,
+                    range((Range) field(scaleBuilder, "blackPeak")),
+                    range((Range) field(scaleBuilder, "comboPeak")),
+                    range((Range) field(scaleBuilder, "comboPeak2")),
+                    value((Integer) field(scaleBuilder, "beamKey")),
+                    value((Integer) field(scaleBuilder, "beamKey2")),
+                    value((Integer) field(scaleBuilder, "beamGuess")),
+                    blackFunction.getArea(),
+                    comboFunction.getArea());
+        } finally {
+            loader.dispose();
+        }
     }
 
     private static String pixels (ByteProcessor image)

@@ -10,7 +10,7 @@ use audiveris_image::{
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
-    scale_runs::vertical_run_histograms,
+    scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     watershed,
 };
 use std::{
@@ -189,7 +189,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 26] = [
+const VECTOR_KEYS: [&str; 32] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -213,10 +213,19 @@ const VECTOR_KEYS: [&str; 26] = [
     "scale.vertical-runs=",
     "scale.chula=",
     "scale.chula.detail=",
+    "scale.k545=",
+    "scale.k545.detail=",
+    "scale.essen=",
+    "scale.essen.detail=",
+    "scale.josquin=",
+    "scale.josquin.detail=",
     "load.dichterliebe=",
     "binary.dichterliebe=",
     "pipeline=",
 ];
+
+#[cfg(test)]
+const ROOT_VECTOR_COUNT: usize = 13;
 
 fn hash_u32(mut hash: u64, value: usize) -> u64 {
     for byte in u32::try_from(value)
@@ -238,6 +247,74 @@ fn run_table_digest(table: &RunTable) -> u64 {
         }
     }
     hash
+}
+
+fn optional_i32(value: Option<i32>) -> String {
+    value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+}
+
+fn range_text(value: audiveris_core::range::Range) -> String {
+    format!("{},{},{}", value.min, value.main, value.max)
+}
+
+fn append_scale_vectors(
+    lines: &mut Vec<String>,
+    slug: &str,
+    histograms: &VerticalRunHistograms,
+    image_size: (usize, usize),
+) -> Result<(), Box<dyn Error>> {
+    let scale = estimate_scale(
+        histograms,
+        ScaleOptions {
+            image_size: Some(image_size),
+            ..ScaleOptions::default()
+        },
+    )?;
+    lines.push(format!(
+        "scale.{slug}={}/{}/{}/{}/{}",
+        scale.line.main,
+        scale.interline.main,
+        optional_i32(scale.small_interline.map(|value| value.main)),
+        scale.beam.main,
+        optional_i32(scale.small_beam.map(|value| value.main))
+    ));
+    lines.push(format!(
+        "scale.{slug}.detail=black:{};combo:{};combo2:{};beam:{};beam2:{};guess:{};areas:{},{}",
+        range_text(audiveris_core::range::Range::new(
+            scale.line.min,
+            scale.line.main,
+            scale.line.max
+        )),
+        range_text(scale.primary_combo_peak),
+        scale
+            .secondary_combo_peak
+            .map_or_else(|| "null".to_owned(), range_text),
+        optional_i32(scale.beam_key),
+        optional_i32(scale.beam_key2),
+        optional_i32(scale.beam_guess),
+        histograms.black.iter().sum::<usize>(),
+        histograms.combo.iter().sum::<usize>()
+    ));
+    Ok(())
+}
+
+fn append_page_scale_vectors(
+    lines: &mut Vec<String>,
+    root: &Path,
+    slug: &str,
+    relative_path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let loaded = ingest::load_max_channel_gray(root.join(relative_path))?;
+    let binary =
+        adaptive::default_adaptive_filter(loaded.width(), loaded.height(), loaded.pixels());
+    let vertical = RunTable::from_pixels(
+        Orientation::Vertical,
+        loaded.width(),
+        loaded.height(),
+        &binary,
+    )?;
+    let histograms = vertical_run_histograms(&vertical);
+    append_scale_vectors(lines, slug, &histograms, (loaded.width(), loaded.height()))
 }
 
 fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
@@ -393,43 +470,31 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             run_table_digest(&vertical)
         ));
         let histograms = vertical_run_histograms(&vertical);
-        let scale = estimate_scale(
+        append_scale_vectors(
+            &mut lines,
+            "chula",
             &histograms,
-            ScaleOptions {
-                image_size: Some((loaded.width(), loaded.height())),
-                ..ScaleOptions::default()
-            },
+            (loaded.width(), loaded.height()),
         )?;
-        let optional_value =
-            |value: Option<i32>| value.map_or_else(|| "null".to_owned(), |value| value.to_string());
-        let range = |value: audiveris_core::range::Range| {
-            format!("{},{},{}", value.min, value.main, value.max)
-        };
-        lines.push(format!(
-            "scale.chula={}/{}/{}/{}/{}",
-            scale.line.main,
-            scale.interline.main,
-            optional_value(scale.small_interline.map(|value| value.main)),
-            scale.beam.main,
-            optional_value(scale.small_beam.map(|value| value.main))
-        ));
-        lines.push(format!(
-            "scale.chula.detail=black:{};combo:{};combo2:{};beam:{};beam2:{};guess:{};areas:{},{}",
-            range(audiveris_core::range::Range::new(
-                scale.line.min,
-                scale.line.main,
-                scale.line.max
-            )),
-            range(scale.primary_combo_peak),
-            scale
-                .secondary_combo_peak
-                .map_or_else(|| "null".to_owned(), range),
-            optional_value(scale.beam_key),
-            optional_value(scale.beam_key2),
-            optional_value(scale.beam_guess),
-            histograms.black.iter().sum::<usize>(),
-            histograms.combo.iter().sum::<usize>()
-        ));
+
+        append_page_scale_vectors(
+            &mut lines,
+            root,
+            "k545",
+            "../../data/synth/k545-movement1-exposition/page-001.png",
+        )?;
+        append_page_scale_vectors(
+            &mut lines,
+            root,
+            "essen",
+            "../../data/synth/essenfolksong-erk20/page-001.png",
+        )?;
+        append_page_scale_vectors(
+            &mut lines,
+            root,
+            "josquin",
+            "../../data/synth/josquin-4vperilludaveprolatum/page-001.png",
+        )?;
 
         let loaded = ingest::load_max_channel_gray(
             root.join("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"),
@@ -590,7 +655,10 @@ mod tests {
     #[test]
     fn rust_vector_contract_is_stable() {
         let vectors = rust_vectors(None).unwrap();
-        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 7);
+        assert_eq!(
+            vectors.lines().count(),
+            VECTOR_KEYS.len() - ROOT_VECTOR_COUNT
+        );
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }
