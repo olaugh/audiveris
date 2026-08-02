@@ -43,13 +43,17 @@ denied, and passed `git diff --check` before commit.
     and an exact full-page Java/Rust PNG digest.
 13. `2e7a95c2` — integral-image adaptive binarization with exact synthetic and full-page
     Java/Rust mask comparisons.
+14. `428fb6d5` — exact vertical-run input parity and source-guided black/combo run
+    histograms for the first `SCALE` boundary.
 
-At the thirteenth checkpoint the Rust workspace executes 57 tests:
+At the fourteenth checkpoint the Rust workspace executes 59 tests:
 
 - `audiveris-core`: 25
-- `audiveris-image`: 24
+- `audiveris-image`: 26
 - `audiveris-cli`: 4
 - `xtask`: 4
+
+The live Java/Rust oracle compares 22 canonical vectors at this checkpoint.
 
 ## Verify before editing
 
