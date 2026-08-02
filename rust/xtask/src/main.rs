@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use audiveris_core::{
+    basic_line::BasicLine, grade, histogram::Histogram, injection_solver, natural_spec,
+    rational::Rational, step::OmrStep,
+};
+use audiveris_image::run_table::{Orientation, Run, RunTable};
 use std::{
     env,
     error::Error,
@@ -81,27 +86,20 @@ fn expected() -> TestCounts {
 }
 
 fn java_root(args: &[String]) -> Result<PathBuf, Box<dyn Error>> {
-    if let Some(index) = args.iter().position(|arg| arg == "--java-root") {
-        return Ok(args
-            .get(index + 1)
+    let root = if let Some(index) = args.iter().position(|arg| arg == "--java-root") {
+        args.get(index + 1)
             .ok_or("--java-root needs a path")?
-            .into());
-    }
-    if let Some(root) = env::var_os("AUDIVERIS_JAVA_ROOT") {
-        return Ok(root.into());
-    }
-    Ok(PathBuf::from(".."))
+            .into()
+    } else if let Some(root) = env::var_os("AUDIVERIS_JAVA_ROOT") {
+        root.into()
+    } else {
+        PathBuf::from("..")
+    };
+    Ok(fs::canonicalize(root)?)
 }
 
 fn run_java(root: &Path) -> Result<(), Box<dyn Error>> {
-    let java_home = env::var_os("JAVA_HOME").map_or_else(
-        || {
-            root.parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("jdk25/Contents/Home")
-        },
-        PathBuf::from,
-    );
+    let java_home = java_home(root);
     let status = Command::new(root.join("gradlew"))
         .args(["--no-daemon", ":app:test"])
         .current_dir(root)
@@ -111,6 +109,54 @@ fn run_java(root: &Path) -> Result<(), Box<dyn Error>> {
         return Err(format!("Java baseline failed with {status}").into());
     }
     Ok(())
+}
+
+fn java_home(root: &Path) -> PathBuf {
+    env::var_os("JAVA_HOME").map_or_else(
+        || {
+            root.parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("jdk25/Contents/Home")
+        },
+        PathBuf::from,
+    )
+}
+
+fn java_vector_output(root: &Path) -> Result<String, Box<dyn Error>> {
+    let output = Command::new(root.join("gradlew"))
+        .args([
+            "--no-daemon",
+            "-q",
+            "-I",
+            "rust/oracle/parity.init.gradle",
+            ":app:rustParityProbe",
+        ])
+        .current_dir(root)
+        .env("JAVA_HOME", java_home(root))
+        .output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "Java parity probe failed with {}:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into());
+    }
+    let stdout = String::from_utf8(output.stdout)?;
+    let canonical = stdout
+        .lines()
+        .filter(|line| VECTOR_KEYS.iter().any(|key| line.starts_with(key)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if canonical.lines().count() != VECTOR_KEYS.len() {
+        return Err(format!(
+            "Java parity probe emitted {} canonical lines, expected {}. Full stdout:\n{stdout}",
+            canonical.lines().count(),
+            VECTOR_KEYS.len()
+        )
+        .into());
+    }
+    Ok(format!("{canonical}\n"))
 }
 
 fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
@@ -134,9 +180,124 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+const VECTOR_KEYS: [&str; 12] = [
+    "natural.decode=",
+    "natural.encode=",
+    "rational.sum=",
+    "rational.gcd=",
+    "histogram.data=",
+    "histogram.summary=",
+    "line.origin=",
+    "line.one-ten=",
+    "grade.contextual=",
+    "injection=",
+    "runs=",
+    "pipeline=",
+];
+
+fn rust_vectors() -> Result<String, Box<dyn Error>> {
+    let mut lines = Vec::with_capacity(VECTOR_KEYS.len());
+    lines.push(format!(
+        "natural.decode={:?}",
+        natural_spec::decode(Some("1 - 3 , 6"), true, None)?
+    ));
+    lines.push(format!(
+        "natural.encode={}",
+        natural_spec::encode(&[5, 2, 4, 6, 7, 8, 10, 12])
+    ));
+
+    let two_thirds = Rational::new(2, 3)?;
+    let one_half = Rational::new(1, 2)?;
+    lines.push(format!("rational.sum={}", two_thirds.plus(one_half)?));
+    lines.push(format!(
+        "rational.gcd={}",
+        Rational::gcd_pair(two_thirds, Rational::new(5, 4)?)?
+    ));
+
+    let mut histogram = Histogram::default();
+    for (bucket, count) in [(3, 2), (4, 10), (5, 12), (8, 3), (10, 6), (11, 0)] {
+        histogram.increase_count(bucket, count);
+    }
+    lines.push(format!("histogram.data={}", histogram.data_string()));
+    lines.push(format!(
+        "histogram.summary={}/{}/{}",
+        histogram.total_count(),
+        histogram.max_bucket().ok_or("histogram has no maximum")?,
+        histogram.max_count().ok_or("histogram has no count")?
+    ));
+
+    let line = BasicLine::from_coordinates(&[1., 2., 3., 4., 5.], &[4., 9., 14., 19., 24.])?;
+    // Java and Rust hypot implementations can differ by one ULP. Geometry is
+    // canonicalized at the explicitly declared 1e-15 comparison boundary.
+    lines.push(format!("line.origin={:.15}", line.distance_of(0., 0.)?));
+    lines.push(format!("line.one-ten={:.15}", line.distance_of(1., 10.)?));
+
+    let contextual = grade::contextual_from_partners(0.2, &[0.5, 0.8], &[5.0, 2.0])
+        .map_err(|error| error.to_owned())?;
+    lines.push(format!("grade.contextual={contextual:.17}"));
+
+    let (mapping, cost) = injection_solver::solve(3, 3, |domain, range| {
+        (i32::try_from(domain + 1).expect("small fixture")
+            - i32::try_from(range).expect("small fixture"))
+        .abs()
+    })?;
+    lines.push(format!("injection={mapping:?}/{cost}"));
+
+    let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
+    runs.add_run(0, Run::new(1, 2))?;
+    runs.add_run(0, Run::new(5, 3))?;
+    runs.add_run(1, Run::new(0, 1))?;
+    runs.add_run(1, Run::new(4, 2))?;
+    lines.push(format!(
+        "runs={}/{}/{}",
+        runs.total_run_count(),
+        runs.weight(),
+        runs.run_at(6, 0).ok_or("fixture run not found")?
+    ));
+
+    lines.push(format!(
+        "pipeline={}",
+        OmrStep::ALL
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    Ok(format!("{}\n", lines.join("\n")))
+}
+
+fn vectors(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let rust = rust_vectors()?;
+    if args.iter().any(|arg| arg == "--rust-only") {
+        print!("{rust}");
+        return Ok(());
+    }
+
+    let root = java_root(args)?;
+    let java = java_vector_output(&root)?;
+    if java != rust {
+        let mut detail = String::new();
+        for (index, (java_line, rust_line)) in java.lines().zip(rust.lines()).enumerate() {
+            if java_line != rust_line {
+                detail.push_str(&format!(
+                    "\nline {}:\n  Java: {java_line}\n  Rust: {rust_line}",
+                    index + 1
+                ));
+            }
+        }
+        return Err(format!("Java/Rust parity vector mismatch:{detail}").into());
+    }
+    print!("{rust}");
+    println!(
+        "Java/Rust parity: {} canonical vectors match",
+        VECTOR_KEYS.len()
+    );
+    Ok(())
+}
+
 fn usage() {
     println!(
-        "cargo xtask equivalent:\n  cargo run -p xtask -- baseline [--run-java] [--java-root PATH]"
+        "cargo xtask equivalent:\n  cargo run -p xtask -- baseline [--run-java] [--java-root PATH]\n  cargo run -p xtask -- vectors [--rust-only] [--java-root PATH]"
     );
 }
 
@@ -144,6 +305,7 @@ fn execute() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("baseline") => baseline(&args[1..]),
+        Some("vectors") => vectors(&args[1..]),
         Some("help" | "--help" | "-h") | None => {
             usage();
             Ok(())
@@ -184,5 +346,13 @@ mod tests {
     #[test]
     fn rejects_incomplete_suite_tag() {
         assert!(suite_counts("<testsuite tests=\"1\">").is_err());
+    }
+
+    #[test]
+    fn rust_vector_contract_is_stable() {
+        let vectors = rust_vectors().unwrap();
+        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len());
+        assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
+        assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }
 }

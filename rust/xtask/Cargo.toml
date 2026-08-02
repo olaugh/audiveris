@@ -7,6 +7,9 @@ rust-version.workspace = true
 authors.workspace = true
 publish = false
 
+[dependencies]
+audiveris-core = { path = "../crates/audiveris-core" }
+audiveris-image = { path = "../crates/audiveris-image" }
+
 [lints]
 workspace = true
-

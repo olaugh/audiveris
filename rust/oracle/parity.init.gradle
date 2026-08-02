@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) {
+        return
+    }
+    def outputDir = app.layout.buildDirectory.dir('rust-parity/classes')
+
+    app.tasks.register('compileRustParityProbe', JavaCompile) {
+        source = app.fileTree("${gradle.rootProject.projectDir}/rust/oracle/java") {
+            include '**/*.java'
+        }
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+
+    app.tasks.register('rustParityProbe', JavaExec) {
+        dependsOn 'compileRustParityProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.RustParityProbe'
+    }
+}

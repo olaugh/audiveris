@@ -37,6 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
+| Live Java/Rust vectors | 12 canonical cross-runtime fixtures matching |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
