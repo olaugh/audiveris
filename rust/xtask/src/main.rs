@@ -6,7 +6,7 @@ use audiveris_core::{
 };
 use audiveris_image::{
     chamfer::ChamferDistance,
-    global_filter, median,
+    global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
 };
 use std::{
@@ -185,7 +185,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 16] = [
+const VECTOR_KEYS: [&str; 17] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -201,10 +201,11 @@ const VECTOR_KEYS: [&str; 16] = [
     "image.median=",
     "image.chamfer=",
     "image.runs=",
+    "load.chula=",
     "pipeline=",
 ];
 
-fn rust_vectors() -> Result<String, Box<dyn Error>> {
+fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     let mut lines = Vec::with_capacity(VECTOR_KEYS.len());
     lines.push(format!(
         "natural.decode={:?}",
@@ -294,6 +295,16 @@ fn rust_vectors() -> Result<String, Box<dyn Error>> {
             .map_or_else(|| "null".to_owned(), |run| run.to_string())
     ));
 
+    if let Some(root) = root {
+        let loaded = ingest::load_max_channel_gray(root.join("data/examples/chula.png"))?;
+        lines.push(format!(
+            "load.chula={}x{}/{:016x}",
+            loaded.width(),
+            loaded.height(),
+            loaded.fnv1a64()
+        ));
+    }
+
     lines.push(format!(
         "pipeline={}",
         OmrStep::ALL
@@ -306,13 +317,13 @@ fn rust_vectors() -> Result<String, Box<dyn Error>> {
 }
 
 fn vectors(args: &[String]) -> Result<(), Box<dyn Error>> {
-    let rust = rust_vectors()?;
+    let root = java_root(args)?;
+    let rust = rust_vectors(Some(&root))?;
     if args.iter().any(|arg| arg == "--rust-only") {
         print!("{rust}");
         return Ok(());
     }
 
-    let root = java_root(args)?;
     let java = java_vector_output(&root)?;
     if java != rust {
         let mut detail = String::new();
@@ -435,8 +446,8 @@ mod tests {
 
     #[test]
     fn rust_vector_contract_is_stable() {
-        let vectors = rust_vectors().unwrap();
-        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len());
+        let vectors = rust_vectors(None).unwrap();
+        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 1);
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }

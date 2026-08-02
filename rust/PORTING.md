@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 16 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 17 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
@@ -49,7 +49,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Global threshold, alpha compositing, polygon masks | implemented with parity tests |
 | Gray-level watershed flooding | implemented with parity tests |
 | Threshold/median/chamfer/run differential fixtures | exact Java/Rust match |
-| Remaining filters and image ingest | queued |
+| PNG/JPEG raster load and max-channel grayscale | implemented; canonical PNG exact |
+| Remaining filters and PDF ingest | queued |
 | `.omr` persistence | queued |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |

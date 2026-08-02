@@ -4,6 +4,7 @@
 
 pub mod chamfer;
 pub mod global_filter;
+pub mod ingest;
 pub mod mask;
 pub mod median;
 pub mod run_table;

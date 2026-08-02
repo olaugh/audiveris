@@ -2,12 +2,16 @@
 
 package org.audiveris.omr.rustport;
 
+import java.awt.image.BufferedImage;
+import java.awt.image.Raster;
+import java.nio.file.Path;
 import java.util.Arrays;
 
 import ij.process.ByteProcessor;
 
 import org.audiveris.omr.image.ChamferDistance;
 import org.audiveris.omr.image.GlobalFilter;
+import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
@@ -18,6 +22,7 @@ import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.sig.GradeUtil;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -31,6 +36,7 @@ public final class RustParityProbe
     }
 
     public static void main (String[] args)
+        throws Exception
     {
         System.out.println("natural.decode=" + NaturalSpec.decode("1 - 3 , 6", true));
         System.out.println("natural.encode=" + NaturalSpec.encode(Arrays.asList(5, 2, 4, 6, 7, 8, 10, 12)));
@@ -87,6 +93,19 @@ public final class RustParityProbe
         RunTable extracted = new RunTableFactory(Orientation.HORIZONTAL).createTable(binary);
         System.out.println("image.runs=" + extracted.getTotalRunCount() + "/" + extracted.getWeight() + "/" + extracted.getRunAt(1, 0) + "/" + extracted.getRunAt(4, 2));
 
+        ImageLoading.Loader loader = ImageLoading.getLoader(Path.of("data/examples/chula.png"));
+        try {
+            BufferedImage loaded = Picture.adjustImageFormat(loader.getImage(1));
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "load.chula=%dx%d/%016x%n",
+                    loaded.getWidth(),
+                    loaded.getHeight(),
+                    fnv1a64(loaded.getRaster()));
+        } finally {
+            loader.dispose();
+        }
+
         System.out.println("pipeline=" + String.join(",", Arrays.stream(OmrStep.values()).map(Enum::name).toList()));
     }
 
@@ -106,5 +125,16 @@ public final class RustParityProbe
             values[index] = table.getValue(index);
         }
         return Arrays.toString(values);
+    }
+
+    private static long fnv1a64 (Raster raster)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (int y = 0; y < raster.getHeight(); y++) {
+            for (int x = 0; x < raster.getWidth(); x++) {
+                hash = (hash ^ raster.getSample(x, y, 0)) * 0x100000001b3L;
+            }
+        }
+        return hash;
     }
 }

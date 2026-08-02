@@ -20,5 +20,6 @@ gradle.projectsEvaluated {
         dependsOn 'compileRustParityProbe'
         classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
         mainClass = 'org.audiveris.omr.rustport.RustParityProbe'
+        workingDir = gradle.rootProject.projectDir
     }
 }
