@@ -194,7 +194,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 37] = [
+const VECTOR_KEYS: [&str; 38] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -223,6 +223,7 @@ const VECTOR_KEYS: [&str; 37] = [
     "scale.chula=",
     "scale.chula.detail=",
     "grid.chula=",
+    "grid.filament-factory.chula=",
     "scale.k545=",
     "scale.k545.detail=",
     "scale.essen=",
@@ -235,7 +236,7 @@ const VECTOR_KEYS: [&str; 37] = [
 ];
 
 #[cfg(test)]
-const ROOT_VECTOR_COUNT: usize = 14;
+const ROOT_VECTOR_COUNT: usize = 15;
 
 fn hash_u32(mut hash: u64, value: usize) -> u64 {
     for byte in u32::try_from(value)
@@ -285,16 +286,39 @@ fn section_shape(section: &Section) -> String {
 fn section_digest(sections: &[Section]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325;
     for section in sections {
-        hash = hash_u32(hash, section.first_pos());
-        hash = hash_u32(hash, section.run_count());
-        hash = hash_u32(hash, section.weight());
-        hash = hash_u32(hash, section.max_run_length());
-        for run in section.runs() {
-            hash = hash_u32(hash, run.start);
-            hash = hash_u32(hash, run.length);
-        }
+        hash = hash_section(hash, section);
     }
     hash
+}
+
+fn hash_section(mut hash: u64, section: &Section) -> u64 {
+    hash = hash_u32(hash, section.first_pos());
+    hash = hash_u32(hash, section.run_count());
+    hash = hash_u32(hash, section.weight());
+    hash = hash_u32(hash, section.max_run_length());
+    for run in section.runs() {
+        hash = hash_u32(hash, run.start);
+        hash = hash_u32(hash, run.length);
+    }
+    hash
+}
+
+fn filament_digest(filaments: &[StaffFilament]) -> Result<u64, FilamentError> {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for filament in filaments {
+        let bounds = filament.bounds()?;
+        hash = hash_u32(hash, filament.sections().len());
+        hash = hash_u32(hash, bounds.x);
+        hash = hash_u32(hash, bounds.y);
+        hash = hash_u32(hash, bounds.width);
+        hash = hash_u32(hash, bounds.height);
+        hash = hash_u32(hash, filament.weight());
+        hash = hash_u32(hash, filament.true_length()?);
+        for section in filament.sections() {
+            hash = hash_section(hash, section);
+        }
+    }
+    Ok(hash)
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -743,6 +767,53 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             long_vertical.total_run_count(),
             long_vertical.weight(),
             section_digest(&vertical_sections)
+        ));
+
+        // Bounded live-page coverage for the scoped factory. Expanded coordinate
+        // intervals are disjoint, isolating core filtering and the real-gap branch;
+        // overlap behavior has its own synthetic fixture and expansion remains queued.
+        let page_min_core = (f64::from(scale.interline.main) * 0.5).round_ties_even() as usize;
+        let page_max_length = 4 * usize::try_from(scale.interline.main)?;
+        let page_max_coord_gap = (f64::from(scale.interline.main) * 1.7).round_ties_even() as usize;
+        let mut page_factory_sections = Vec::new();
+        for section in &horizontal_sections {
+            let bounds = section.bounds();
+            if bounds.width < page_min_core
+                || bounds.width > page_max_length
+                || section.mean_thickness(Orientation::Horizontal) > 1.0
+            {
+                continue;
+            }
+            let separated = page_factory_sections.iter().all(|accepted: &Section| {
+                let other = accepted.bounds();
+                bounds.x > other.x + other.width - 1 + page_max_coord_gap
+                    || other.x > bounds.x + bounds.width - 1 + page_max_coord_gap
+            });
+            if separated {
+                page_factory_sections.push(section.clone());
+                if page_factory_sections.len() == 8 {
+                    break;
+                }
+            }
+        }
+        let page_factory = FilamentFactory::new(FilamentFactoryParams {
+            interline: usize::try_from(scale.interline.main)?,
+            min_core_section_length: page_min_core,
+            min_section_aspect: 3.0,
+            max_coord_gap: page_max_coord_gap as f64,
+            max_pos_gap: (f64::from(scale.line.main) * 0.75).round_ties_even(),
+            max_pos_gap_for_slope: (f64::from(scale.interline.main) * 0.1).round_ties_even(),
+            max_gap_slope: 0.5,
+            min_length_for_delta_slope: f64::from(scale.interline.main) * 10.0,
+            max_delta_slope: 0.01,
+        });
+        let page_filaments = page_factory.retrieve_core_filaments(&page_factory_sections)?;
+        lines.push(format!(
+            "grid.filament-factory.chula={}/{:016x}/{}/{:016x}",
+            page_factory_sections.len(),
+            section_digest(&page_factory_sections),
+            page_filaments.len(),
+            filament_digest(&page_filaments)?
         ));
 
         append_page_scale_vectors(

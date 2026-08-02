@@ -395,6 +395,53 @@ public final class RustParityProbe
                     verticalLag.getRunTable().getTotalRunCount(),
                     verticalLag.getRunTable().getWeight(),
                     sectionDigest(verticalLag.getEntities()));
+
+            // Exercise the dependency-light factory slice on a bounded sample of real page
+            // sections. Keep thin cores whose expanded coordinate intervals are disjoint, so
+            // this vector isolates core filtering and the real-gap branch. Overlap behavior has
+            // its own synthetic boundary vector; leftover expansion remains outside this one.
+            int pageMinCore = (int) Math.rint(scale.getInterline() * 0.5);
+            int pageMaxLength = 4 * scale.getInterline();
+            int pageMaxCoordGap = (int) Math.rint(scale.getInterline() * 1.7);
+            List<Section> pageFactorySections = new ArrayList<>();
+            for (Section section : horizontalLag.getEntities()) {
+                java.awt.Rectangle bounds = section.getBounds();
+                if ((bounds.width < pageMinCore)
+                        || (bounds.width > pageMaxLength)
+                        || (section.getMeanThickness(Orientation.HORIZONTAL) > 1.0)) {
+                    continue;
+                }
+
+                boolean separated = true;
+                for (Section accepted : pageFactorySections) {
+                    java.awt.Rectangle other = accepted.getBounds();
+                    if ((bounds.x <= (other.x + other.width - 1 + pageMaxCoordGap))
+                            && (other.x <= (bounds.x + bounds.width - 1 + pageMaxCoordGap))) {
+                        separated = false;
+                        break;
+                    }
+                }
+                if (separated) {
+                    pageFactorySections.add(section);
+                    if (pageFactorySections.size() == 8) {
+                        break;
+                    }
+                }
+            }
+            FilamentFactory<StaffFilament> pageFilamentFactory = new FilamentFactory<>(
+                    scale,
+                    new FilamentIndex(null),
+                    Orientation.HORIZONTAL,
+                    StaffFilament.class);
+            List<StaffFilament> pageFilaments = pageFilamentFactory.retrieveFilaments(
+                    pageFactorySections);
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "grid.filament-factory.chula=%d/%016x/%d/%016x%n",
+                    pageFactorySections.size(),
+                    sectionDigest(pageFactorySections),
+                    pageFilaments.size(),
+                    filamentDigest(pageFilaments));
         } finally {
             loader.dispose();
         }
@@ -555,14 +602,40 @@ public final class RustParityProbe
     {
         long hash = 0xcbf29ce484222325L;
         for (Section section : sections) {
-            hash = hashInt(hash, section.getFirstPos());
-            hash = hashInt(hash, section.getRunCount());
-            hash = hashInt(hash, section.getWeight());
-            hash = hashInt(hash, section.getMaxRunLength());
-            for (Run run : section.getRuns()) {
-                hash = hashInt(hash, run.getStart());
-                hash = hashInt(hash, run.getLength());
+            hash = hashSection(hash, section);
+        }
+        return hash;
+    }
+
+    private static long filamentDigest (Iterable<StaffFilament> filaments)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (StaffFilament filament : filaments) {
+            java.awt.Rectangle bounds = filament.getBounds();
+            hash = hashInt(hash, filament.getMembers().size());
+            hash = hashInt(hash, bounds.x);
+            hash = hashInt(hash, bounds.y);
+            hash = hashInt(hash, bounds.width);
+            hash = hashInt(hash, bounds.height);
+            hash = hashInt(hash, filament.getWeight());
+            hash = hashInt(hash, filament.getTrueLength());
+            for (Section section : filament.getMembers()) {
+                hash = hashSection(hash, section);
             }
+        }
+        return hash;
+    }
+
+    private static long hashSection (long hash,
+                                     Section section)
+    {
+        hash = hashInt(hash, section.getFirstPos());
+        hash = hashInt(hash, section.getRunCount());
+        hash = hashInt(hash, section.getWeight());
+        hash = hashInt(hash, section.getMaxRunLength());
+        for (Run run : section.getRuns()) {
+            hash = hashInt(hash, run.getStart());
+            hash = hashInt(hash, run.getLength());
         }
         return hash;
     }
