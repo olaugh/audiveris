@@ -11,6 +11,7 @@ use audiveris_image::{
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
+    section::{JunctionPolicy, Section, build_sections},
     watershed,
 };
 use std::{
@@ -189,7 +190,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 32] = [
+const VECTOR_KEYS: [&str; 33] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -202,6 +203,7 @@ const VECTOR_KEYS: [&str; 32] = [
     "injection=",
     "integer.function=",
     "runs=",
+    "grid.sections.synthetic=",
     "image.threshold=",
     "image.median=",
     "image.chamfer=",
@@ -247,6 +249,29 @@ fn run_table_digest(table: &RunTable) -> u64 {
         }
     }
     hash
+}
+
+fn section_shape(section: &Section) -> String {
+    let bounds = section.bounds();
+    let runs = section
+        .runs()
+        .iter()
+        .map(|run| format!("{}+{}", run.start, run.length))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{}-{}/{}/{}/{}/{},{},{},{}/{}",
+        section.first_pos(),
+        section.last_pos(),
+        section.run_count(),
+        section.weight(),
+        section.max_run_length(),
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        runs
+    )
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -396,6 +421,33 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         runs.total_run_count(),
         runs.weight(),
         runs.run_at(6, 0).ok_or("fixture run not found")?
+    ));
+
+    let mut section_runs = RunTable::new(Orientation::Horizontal, 9, 6)?;
+    for (position, run) in [
+        (0, Run::new(1, 3)),
+        (0, Run::new(6, 2)),
+        (1, Run::new(1, 3)),
+        (1, Run::new(6, 2)),
+        (2, Run::new(1, 7)),
+        (3, Run::new(2, 5)),
+        (4, Run::new(2, 2)),
+        (4, Run::new(5, 2)),
+        (5, Run::new(2, 2)),
+        (5, Run::new(5, 2)),
+    ] {
+        section_runs.add_run(position, run)?;
+    }
+    let sections = build_sections(&section_runs, JunctionPolicy::DEFAULT_RATIO);
+    let mut section_shapes = sections.iter().map(section_shape).collect::<Vec<_>>();
+    section_shapes.sort_unstable();
+    lines.push(format!(
+        "grid.sections.synthetic={}/{}/{}/{}/{}",
+        sections.len(),
+        sections.len(),
+        section_runs.total_run_count(),
+        section_runs.weight(),
+        section_shapes.join("|")
     ));
 
     let pixels = [

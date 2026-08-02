@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 32 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 33 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
@@ -55,6 +55,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE integer functions and range primitives | implemented with Java edge semantics |
 | SCALE derivative peak finder | implemented; exercised by full-page Java oracle |
 | SCALE line, interline, and beam estimate | exact match on 4 pages and key branch cases |
+| GRID section construction | neutral horizontal/vertical sections, four junction policies, exact live Java topology/statistics |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus lossless typed `book.xml` metadata view |
 | Recognition stages | queued in pipeline order |

@@ -6,7 +6,10 @@ import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import ij.process.ByteProcessor;
 
@@ -16,6 +19,11 @@ import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.image.WatershedGrayLevel;
+import org.audiveris.omr.lag.BasicLag;
+import org.audiveris.omr.lag.JunctionRatioPolicy;
+import org.audiveris.omr.lag.Lag;
+import org.audiveris.omr.lag.Section;
+import org.audiveris.omr.lag.SectionFactory;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
@@ -96,6 +104,53 @@ public final class RustParityProbe
         runs.addRun(1, new Run(0, 1));
         runs.addRun(1, new Run(4, 2));
         System.out.println("runs=" + runs.getTotalRunCount() + "/" + runs.getWeight() + "/" + runs.getRunAt(6, 0));
+
+        RunTable sectionRuns = new RunTable(Orientation.HORIZONTAL, 9, 6);
+        sectionRuns.addRun(0, new Run(1, 3));
+        sectionRuns.addRun(0, new Run(6, 2));
+        sectionRuns.addRun(1, new Run(1, 3));
+        sectionRuns.addRun(1, new Run(6, 2));
+        sectionRuns.addRun(2, new Run(1, 7));
+        sectionRuns.addRun(3, new Run(2, 5));
+        sectionRuns.addRun(4, new Run(2, 2));
+        sectionRuns.addRun(4, new Run(5, 2));
+        sectionRuns.addRun(5, new Run(2, 2));
+        sectionRuns.addRun(5, new Run(5, 2));
+        Lag sectionLag = new BasicLag("rust-synthetic", Orientation.HORIZONTAL);
+        List<Section> sections = new SectionFactory(
+                sectionLag,
+                JunctionRatioPolicy.DEFAULT).createSections(sectionRuns, null, true);
+        List<String> sectionShapes = new ArrayList<>();
+        for (Section section : sections) {
+            StringBuilder runShape = new StringBuilder();
+            for (Run run : section.getRuns()) {
+                if (!runShape.isEmpty()) {
+                    runShape.append(',');
+                }
+                runShape.append(run.getStart()).append('+').append(run.getLength());
+            }
+            java.awt.Rectangle bounds = section.getBounds();
+            sectionShapes.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%d-%d/%d/%d/%d/%d,%d,%d,%d/%s",
+                    section.getFirstPos(),
+                    section.getLastPos(),
+                    section.getRunCount(),
+                    section.getWeight(),
+                    section.getMaxRunLength(),
+                    bounds.x,
+                    bounds.y,
+                    bounds.width,
+                    bounds.height,
+                    runShape));
+        }
+        Collections.sort(sectionShapes);
+        System.out.println(
+                "grid.sections.synthetic=" + sections.size() + "/"
+                        + sectionLag.getEntities().size() + "/"
+                        + sectionLag.getRunTable().getTotalRunCount() + "/"
+                        + sectionLag.getRunTable().getWeight() + "/"
+                        + String.join("|", sectionShapes));
 
         ByteProcessor raster = new ByteProcessor(5, 3);
         int[] pixels = {0, 126, 127, 128, 255, 255, 0, 255, 0, 255, 10, 20, 200, 210, 220};
