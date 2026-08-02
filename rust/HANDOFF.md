@@ -33,13 +33,16 @@ denied, and passed `git diff --check` before commit.
 6. `6ad10fba` — chamfer distance transforms and Audiveris median-gray filtering.
 7. `941fc15a` — inclusive global thresholding, alpha-over-white compositing, and
    polygon-mask enumeration.
+8. `a54a559e` — gray-level watershed segmentation with basin and watershed-line tests.
+9. `9fd992f3` — live Java probe and exact canonical Rust comparison across 12 utility,
+   geometry, assignment, run-table, and pipeline-order vectors.
 
-At the seventh checkpoint the Rust workspace executes 47 tests:
+At the ninth checkpoint the Rust workspace executes 51 tests:
 
 - `audiveris-core`: 25
-- `audiveris-image`: 16
+- `audiveris-image`: 19
 - `audiveris-cli`: 4
-- `xtask`: 2
+- `xtask`: 3
 
 ## Verify before editing
 
@@ -50,6 +53,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p xtask -- baseline
+cargo run -p xtask -- vectors
 ```
 
 To rerun Java rather than inspect its current XML reports:
@@ -58,7 +62,9 @@ To rerun Java rather than inspect its current XML reports:
 cargo run -p xtask -- baseline --run-java
 ```
 
-The latter resolves the sibling JDK automatically when `JAVA_HOME` is absent.
+Both Java-running commands resolve the sibling JDK automatically when `JAVA_HOME`
+is absent. `vectors` compiles its probe against the real frozen Audiveris classes;
+it does not duplicate production Java implementations in the harness.
 
 ## Design decisions to preserve
 
@@ -79,11 +85,11 @@ The latter resolves the sibling JDK automatically when `JAVA_HOME` is absent.
 
 Commit each slice separately after the full verification block above.
 
-1. Port remaining pure image tests: masks, gray filters, watershed, chamfer matching,
-   then exact raster-to-run extraction. Avoid PDF ingest until canonical PNG fixtures
-   are working.
-2. Implement `audiveris-testkit` and make `xtask parity` run neutral fixtures through
-   both Java and Rust. Start with utilities/runs/images, then add stage snapshots.
+1. Extend the neutral live probe from utilities into byte-level image fixtures:
+   thresholding, median filtering, chamfer distance, watershed labels, and exact
+   raster-to-run extraction. Avoid PDF ingest until canonical PNG fixtures work.
+2. Extract the growing fixture schema into `audiveris-testkit`, then add stage
+   snapshots to `xtask vectors` without weakening its first-difference diagnostics.
 3. Freeze hashes for the classifier model, music fonts, Tesseract data, JDK, and all
    fixture inputs in an oracle manifest.
 4. Implement raster `LOAD`, `BINARY`, and `SCALE` contracts with exact mask/black-count,
