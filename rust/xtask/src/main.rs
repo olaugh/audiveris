@@ -11,6 +11,7 @@ use audiveris_image::{
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::vertical_run_histograms,
+    watershed,
 };
 use std::{
     env,
@@ -188,7 +189,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 25] = [
+const VECTOR_KEYS: [&str; 26] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -204,6 +205,7 @@ const VECTOR_KEYS: [&str; 25] = [
     "image.threshold=",
     "image.median=",
     "image.chamfer=",
+    "watershed.synthetic=",
     "image.runs=",
     "image.adaptive=",
     "load.chula=",
@@ -336,6 +338,17 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         }
     }
     lines.push(format!("image.chamfer={distance_values:?}"));
+    let watershed_profile = [3, 2, 1, 2, 3];
+    let watershed = watershed::watershed_gray_level(5, 1, &watershed_profile, true, 1);
+    let watershed_bits: String = watershed
+        .lines
+        .iter()
+        .map(|&line| if line { '1' } else { '0' })
+        .collect();
+    lines.push(format!(
+        "watershed.synthetic={}/{watershed_bits}",
+        watershed.region_count
+    ));
     let extracted = RunTable::from_pixels(Orientation::Horizontal, 5, 3, &binary)?;
     lines.push(format!(
         "image.runs={}/{}/{}/{}",

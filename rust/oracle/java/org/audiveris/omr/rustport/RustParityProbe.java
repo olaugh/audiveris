@@ -15,6 +15,7 @@ import org.audiveris.omr.image.GlobalFilter;
 import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.image.VerticalFilter;
+import org.audiveris.omr.image.WatershedGrayLevel;
 import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
@@ -106,6 +107,18 @@ public final class RustParityProbe
         System.out.println("image.median=" + pixels(new MedianGrayFilter(1).filter(raster)));
         Table distances = new ChamferDistance.Integer().computeToFore(binary);
         System.out.println("image.chamfer=" + values(distances));
+        Table watershedDistances = new Table.Short(5, 1);
+        int[] watershedProfile = {3, 2, 1, 2, 3};
+        for (int x = 0; x < watershedProfile.length; x++) {
+            watershedDistances.setValue(x, 0, watershedProfile[x]);
+        }
+        WatershedGrayLevel watershed = new WatershedGrayLevel(watershedDistances, true);
+        boolean[][] watershedMap = watershed.process(1);
+        StringBuilder watershedBits = new StringBuilder(watershedProfile.length);
+        for (int x = 0; x < watershedProfile.length; x++) {
+            watershedBits.append(watershedMap[x][0] ? '1' : '0');
+        }
+        System.out.println("watershed.synthetic=" + watershed.getRegionCount() + "/" + watershedBits);
         RunTable extracted = new RunTableFactory(Orientation.HORIZONTAL).createTable(binary);
         System.out.println("image.runs=" + extracted.getTotalRunCount() + "/" + extracted.getWeight() + "/" + extracted.getRunAt(1, 0) + "/" + extracted.getRunAt(4, 2));
         System.out.println("image.adaptive=" + pixels(new VerticalFilter(raster, 0.7, 0.9).filteredImage()));
