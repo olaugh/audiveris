@@ -3,10 +3,11 @@
 //! A conservative persistence boundary for Audiveris `.omr` files.
 //!
 //! Audiveris books are ZIP archives whose root contains `book.xml`. This crate
-//! deliberately does not interpret or mutate the XML yet. It validates every
-//! member name, retains every member's uncompressed bytes (including unknown
-//! members), and can emit a content-equivalent archive. It never extracts an
-//! archive to the filesystem.
+//! keeps XML opaque unless a caller explicitly requests a narrow read-only view.
+//! It validates every member name, retains every member's uncompressed bytes
+//! (including unknown members), and can emit a content-equivalent archive. Typed
+//! views never replace the retained bytes. The crate never extracts an archive
+//! to the filesystem.
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -17,6 +18,8 @@ use std::path::Path;
 
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+pub mod xml;
 
 /// The required root member written by Audiveris.
 pub const BOOK_XML_PATH: &str = "book.xml";
