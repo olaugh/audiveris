@@ -77,17 +77,26 @@ denied, and passed `git diff --check` before commit.
     undeclared, missing, present, and malformed-member states.
 33. `6a76eb9a` — scoped `FilamentFactory` core filtering and stable non-overlap
     grouping, plus an exact live Java/Rust merge/rejection vector.
+34. `638b2989` — section pixel ROI moments and Java-compatible horizontal/vertical
+    contact semantics needed by filament probes and expansion.
+35. `113a7da3` — source-compatible `StaffPattern` scoring for idealized GRID lines.
+36. `b5fb5227` — exact horizontal overlap sampling, thickness, consistency, space,
+    slope, and expansion-contact compatibility for filament grouping.
+37. `4affaca2` — lossless typed reading of persisted sheet-step completion lists,
+    sharing the recognition pipeline's single `OmrStep` type.
+38. `1fa21844` — bounded real-page Chula filament-factory digest with exact live
+    Java/Rust parity.
 
-At the thirty-third checkpoint the Rust workspace executes 130 tests:
+At the thirty-eighth checkpoint the Rust workspace executes 145 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 52
-- `audiveris-omr`: 25
+- `audiveris-image`: 61
+- `audiveris-omr`: 31
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 37 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 38 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -99,10 +108,15 @@ The next GRID boundary also matches Java for compound bounds, weight, its histor
 true-length hole arithmetic, thickness, endpoint probes, five spline positions/slopes,
 and range checks. Floating spline output is explicitly canonicalized at `1e-14` because
 HotSpot and Rust differ by one ULP in one quadratic expression.
-The first factory slice now also matches Java's core-section filtering, stable
-reverse-length traversal, and successful/rejected real-gap merges. Overlapping
-filaments still fail explicitly pending the source thickness probe; short-section
-expansion, glyph ownership, and index integration remain outside this slice.
+The factory slice now also matches Java's core-section filtering, stable reverse-length
+traversal, successful/rejected real-gap merges, and every horizontal overlap gate:
+sample placement, ordinate delta, combined/individual probe thickness, consistency,
+internal space, slope, and expansion contact. A bounded digest covers real Chula page
+sections without turning the oracle into an unbounded production run. Short-section
+expansion orchestration, glyph ownership, and index integration remain outside this slice.
+The lossless `book.xml` view now exposes absent-versus-empty persisted step lists and
+the latest completed stage while preserving all original bytes and rejecting unknown
+or duplicate step tokens.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
@@ -152,9 +166,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` by adding the exact overlapping-filament thickness probe, then
-   leftover short-section expansion; keep glyph ownership and UI/SIG integration out
-   until the neutral grouping behavior has full-page live vectors.
+1. Continue `GRID` with leftover short-section expansion, then source-guided staff-line
+   grouping around the now-ported pattern and filament primitives; keep glyph ownership
+   and UI/SIG integration out until the neutral behavior has stronger live vectors.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
