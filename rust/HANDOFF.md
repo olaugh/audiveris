@@ -31,11 +31,13 @@ denied, and passed `git diff --check` before commit.
 5. `fc4c9197` — oriented binary run tables, RLE conversion, union, purge, trim,
    raster conversion, and query behavior.
 6. `6ad10fba` — chamfer distance transforms and Audiveris median-gray filtering.
+7. `941fc15a` — inclusive global thresholding, alpha-over-white compositing, and
+   polygon-mask enumeration.
 
-At the sixth checkpoint the Rust workspace executes 43 tests:
+At the seventh checkpoint the Rust workspace executes 47 tests:
 
 - `audiveris-core`: 25
-- `audiveris-image`: 12
+- `audiveris-image`: 16
 - `audiveris-cli`: 4
 - `xtask`: 2
 
