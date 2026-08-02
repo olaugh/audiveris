@@ -14,5 +14,9 @@ name = "audiveris-core"
 version = "0.1.0"
 
 [[package]]
+name = "audiveris-image"
+version = "0.1.0"
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
