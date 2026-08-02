@@ -44,12 +44,11 @@ pub fn vertical_run_histograms(table: &RunTable) -> VerticalRunHistograms {
                 if white <= max_white && last_black != 0 {
                     let previous_combo = last_black + white;
                     let next_combo = white + run.length;
-                    if previous_combo < combo.len() {
-                        combo[previous_combo] += 1;
-                    }
-                    if next_combo < combo.len() {
-                        combo[next_combo] += 1;
-                    }
+                    // Production Java indexes the fixed IntegerFunction directly.
+                    // Preserve its out-of-domain failure instead of silently dropping
+                    // an oversized adjacent run.
+                    combo[previous_combo] += 1;
+                    combo[next_combo] += 1;
                 }
             }
             last_black = run.length;
@@ -95,5 +94,15 @@ mod tests {
         table.add_run(0, Run::new(10, 2)).unwrap();
         let histograms = vertical_run_histograms(&table);
         assert_eq!(histograms.combo.iter().sum::<usize>(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn preserves_java_failure_for_oversized_current_combo_run() {
+        let mut table = RunTable::new(Orientation::Vertical, 1, 100).unwrap();
+        table.add_run(0, Run::new(0, 2)).unwrap();
+        table.add_run(0, Run::new(5, 50)).unwrap();
+
+        let _ = vertical_run_histograms(&table);
     }
 }
