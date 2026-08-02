@@ -217,6 +217,107 @@ impl Section {
     pub fn mean_thickness(&self, orientation: Orientation) -> f64 {
         self.weight as f64 / self.length(orientation) as f64
     }
+
+    /// Number of section pixels inside an absolute, half-open pixel box.
+    #[must_use]
+    pub fn pixel_count_in(&self, roi: Bounds) -> usize {
+        self.pixel_moments_in(roi).0
+    }
+
+    /// Centroid of section pixels inside an absolute, half-open pixel box.
+    #[must_use]
+    pub fn pixel_centroid_in(&self, roi: Bounds) -> Option<(f64, f64)> {
+        let (count, sum_x, sum_y) = self.pixel_moments_in(roi);
+        (count != 0).then(|| (sum_x / count as f64, sum_y / count as f64))
+    }
+
+    /// Whether this section intersects or shares a horizontal/vertical edge
+    /// with another section. Corner-only diagonal contact is rejected, matching
+    /// Java `BasicSection.touches` and `GeoUtil.touch`.
+    #[must_use]
+    pub fn touches(&self, other: &Self) -> bool {
+        self.absolute_run_boxes().any(|one| {
+            other
+                .absolute_run_boxes()
+                .any(|two| run_boxes_touch(one, two))
+        })
+    }
+
+    fn pixel_moments_in(&self, roi: Bounds) -> (usize, f64, f64) {
+        if roi.width == 0 || roi.height == 0 {
+            return (0, 0.0, 0.0);
+        }
+        let roi_stop_x = roi.x + roi.width - 1;
+        let roi_stop_y = roi.y + roi.height - 1;
+        let mut count = 0;
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+
+        for (offset, run) in self.runs.iter().enumerate() {
+            let position = self.first_pos + offset;
+            let (fixed, roi_fixed_min, roi_fixed_max, roi_coord_min, roi_coord_max) =
+                match self.orientation {
+                    Orientation::Horizontal => (position, roi.y, roi_stop_y, roi.x, roi_stop_x),
+                    Orientation::Vertical => (position, roi.x, roi_stop_x, roi.y, roi_stop_y),
+                };
+            if fixed < roi_fixed_min || fixed > roi_fixed_max {
+                continue;
+            }
+            let start = run.start.max(roi_coord_min);
+            let stop = run.stop().min(roi_coord_max);
+            if start > stop {
+                continue;
+            }
+            for coordinate in start..=stop {
+                let (x, y) = match self.orientation {
+                    Orientation::Horizontal => (coordinate, fixed),
+                    Orientation::Vertical => (fixed, coordinate),
+                };
+                count += 1;
+                sum_x += x as f64;
+                sum_y += y as f64;
+            }
+        }
+
+        (count, sum_x, sum_y)
+    }
+
+    fn absolute_run_boxes(&self) -> impl Iterator<Item = Bounds> + '_ {
+        self.runs.iter().enumerate().map(|(offset, run)| {
+            let position = self.first_pos + offset;
+            match self.orientation {
+                Orientation::Horizontal => Bounds {
+                    x: run.start,
+                    y: position,
+                    width: run.length,
+                    height: 1,
+                },
+                Orientation::Vertical => Bounds {
+                    x: position,
+                    y: run.start,
+                    width: 1,
+                    height: run.length,
+                },
+            }
+        })
+    }
+}
+
+fn run_boxes_touch(one: Bounds, two: Bounds) -> bool {
+    let x_overlap = one
+        .x
+        .saturating_add(one.width)
+        .min(two.x.saturating_add(two.width)) as isize
+        - one.x.max(two.x) as isize;
+    if x_overlap < 0 {
+        return false;
+    }
+    let y_overlap = one
+        .y
+        .saturating_add(one.height)
+        .min(two.y.saturating_add(two.height)) as isize
+        - one.y.max(two.y) as isize;
+    y_overlap >= 0 && (x_overlap > 0 || y_overlap > 0)
 }
 
 /// Build sections in the same deterministic creation order as Java `SectionFactory`.
@@ -357,6 +458,71 @@ mod tests {
         assert_eq!(section.length(Orientation::Horizontal), 7);
         assert_eq!(section.thickness(Orientation::Horizontal), 3);
         assert_eq!(section.mean_thickness(Orientation::Horizontal), 12.0 / 7.0);
+    }
+
+    #[test]
+    fn pixel_roi_moments_match_horizontal_and_vertical_coordinates() {
+        let horizontal = build_sections(
+            &table(
+                Orientation::Horizontal,
+                8,
+                4,
+                &[(1, Run::new(1, 4)), (2, Run::new(2, 4))],
+            ),
+            JunctionPolicy::All,
+        )
+        .remove(0);
+        let roi = Bounds {
+            x: 3,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(horizontal.pixel_count_in(roi), 4);
+        assert_eq!(horizontal.pixel_centroid_in(roi), Some((3.5, 1.5)));
+
+        let vertical = build_sections(
+            &table(
+                Orientation::Vertical,
+                4,
+                8,
+                &[(1, Run::new(1, 4)), (2, Run::new(2, 4))],
+            ),
+            JunctionPolicy::All,
+        )
+        .remove(0);
+        let vertical_roi = Bounds {
+            x: 1,
+            y: 3,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(vertical.pixel_count_in(vertical_roi), 4);
+        assert_eq!(vertical.pixel_centroid_in(vertical_roi), Some((1.5, 3.5)));
+        assert_eq!(horizontal.pixel_count_in(Bounds { width: 0, ..roi }), 0);
+    }
+
+    #[test]
+    fn touches_accepts_edge_contact_but_rejects_diagonal_contact() {
+        let horizontal = build_sections(
+            &table(Orientation::Horizontal, 8, 4, &[(1, Run::new(1, 3))]),
+            JunctionPolicy::All,
+        )
+        .remove(0);
+        let edge = build_sections(
+            &table(Orientation::Vertical, 8, 4, &[(4, Run::new(1, 2))]),
+            JunctionPolicy::All,
+        )
+        .remove(0);
+        let diagonal = build_sections(
+            &table(Orientation::Vertical, 8, 4, &[(4, Run::new(2, 2))]),
+            JunctionPolicy::All,
+        )
+        .remove(0);
+
+        assert!(horizontal.touches(&edge));
+        assert!(!horizontal.touches(&diagonal));
+        assert_eq!(horizontal.touches(&edge), edge.touches(&horizontal));
     }
 
     #[test]
