@@ -73,17 +73,21 @@ denied, and passed `git diff --check` before commit.
 30. `61f94c4b` — source-guided natural line, quadratic, and cubic spline geometry.
 31. `fe18009c` — neutral GRID staff-filament metrics and probe/spline geometry, plus
     exact live Java/Rust spline and filament vectors.
+32. `cf68ee56` — archive-level typed `book.xml`/per-sheet access with explicit
+    undeclared, missing, present, and malformed-member states.
+33. `6a76eb9a` — scoped `FilamentFactory` core filtering and stable non-overlap
+    grouping, plus an exact live Java/Rust merge/rejection vector.
 
-At the thirty-first checkpoint the Rust workspace executes 122 tests:
+At the thirty-third checkpoint the Rust workspace executes 130 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 48
-- `audiveris-omr`: 21
+- `audiveris-image`: 52
+- `audiveris-omr`: 25
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 36 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 37 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -95,6 +99,10 @@ The next GRID boundary also matches Java for compound bounds, weight, its histor
 true-length hole arithmetic, thickness, endpoint probes, five spline positions/slopes,
 and range checks. Floating spline output is explicitly canonicalized at `1e-14` because
 HotSpot and Rust differ by one ULP in one quadratic expression.
+The first factory slice now also matches Java's core-section filtering, stable
+reverse-length traversal, and successful/rejected real-gap merges. Overlapping
+filaments still fail explicitly pending the source thickness probe; short-section
+expansion, glyph ownership, and index integration remain outside this slice.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
@@ -144,11 +152,11 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` from exact sections into neutral filament/staff-line geometry;
-   keep FilamentFactory grouping and UI/SIG dependencies deferred until the primitive
-   metrics and spline behavior have live Java vectors.
-2. Add archive-level convenience access to the narrow `sheet#N/sheet#N.xml` view only
-   if it can preserve the current opaque-byte boundary and explicit missing-member state.
+1. Continue `GRID` by adding the exact overlapping-filament thickness probe, then
+   leftover short-section expansion; keep glyph ownership and UI/SIG integration out
+   until the neutral grouping behavior has full-page live vectors.
+2. Extend `.omr` typing only through bounded read-only views that preserve every
+   unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
    current vector ordering stable while its key-aware diagnostics catch schema drift.
 4. Add Tesseract data to the oracle manifest when its resolved runtime location is

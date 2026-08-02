@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 36 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 37 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Rust workspace | building |
@@ -59,6 +59,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE line, interline, and beam estimate | exact match on 4 pages and key branch cases |
 | GRID section construction | neutral horizontal/vertical sections, four junction policies, exact synthetic and full-page Chula lag topology/statistics |
 | GRID staff-filament geometry | section compounds, probe centroids, true length, thickness, endpoints, positions, slopes; exact live synthetic vector |
+| GRID initial filament grouping | long/slim core filtering, stable reverse-length traversal, and exact non-overlap compatibility/merge behavior; exact live synthetic vector; overlap probes and leftover expansion still queued |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus fresh lossless typed `book.xml`/per-sheet views and explicit stub/member resolution states |
 | Recognition stages | queued in pipeline order |
