@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 audiveris-core = { path = "../crates/audiveris-core" }
 audiveris-image = { path = "../crates/audiveris-image" }
+audiveris-testkit = { path = "../crates/audiveris-testkit" }
 
 [lints]
 workspace = true

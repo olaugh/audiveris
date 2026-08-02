@@ -14,6 +14,7 @@ use audiveris_image::{
     section::{JunctionPolicy, Section, build_sections},
     watershed,
 };
+use audiveris_testkit::CanonicalVectors;
 use std::{
     env,
     error::Error,
@@ -653,17 +654,10 @@ fn vectors(args: &[String]) -> Result<(), Box<dyn Error>> {
     }
 
     let java = java_vector_output(&root)?;
-    if java != rust {
-        let mut detail = String::new();
-        for (index, (java_line, rust_line)) in java.lines().zip(rust.lines()).enumerate() {
-            if java_line != rust_line {
-                detail.push_str(&format!(
-                    "\nline {}:\n  Java: {java_line}\n  Rust: {rust_line}",
-                    index + 1
-                ));
-            }
-        }
-        return Err(format!("Java/Rust parity vector mismatch:{detail}").into());
+    let java_vectors = parse_canonical_vectors(&java)?;
+    let rust_vectors = parse_canonical_vectors(&rust)?;
+    if let Some(difference) = java_vectors.first_difference(&rust_vectors) {
+        return Err(format!("Java/Rust parity vector mismatch: {difference}").into());
     }
     print!("{rust}");
     println!(
@@ -671,6 +665,17 @@ fn vectors(args: &[String]) -> Result<(), Box<dyn Error>> {
         VECTOR_KEYS.len()
     );
     Ok(())
+}
+
+fn parse_canonical_vectors(text: &str) -> Result<CanonicalVectors, Box<dyn Error>> {
+    let mut vectors = CanonicalVectors::new();
+    for (index, line) in text.lines().enumerate() {
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("canonical vector line {} has no '='", index + 1))?;
+        vectors.insert(key, value)?;
+    }
+    Ok(vectors)
 }
 
 fn manifest_count(contents: &str) -> Result<usize, Box<dyn Error>> {
@@ -794,5 +799,13 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn canonical_vector_parser_rejects_malformed_and_duplicate_lines() {
+        assert!(parse_canonical_vectors("missing-delimiter\n").is_err());
+        assert!(parse_canonical_vectors("a=1\na=2\n").is_err());
+        let parsed = parse_canonical_vectors("b=2\na=1\n").unwrap();
+        assert_eq!(parsed.render(), "a=1\nb=2\n");
     }
 }
