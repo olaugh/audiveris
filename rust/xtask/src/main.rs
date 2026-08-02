@@ -9,6 +9,7 @@ use audiveris_image::{
     adaptive,
     chamfer::ChamferDistance,
     filament::{FilamentError, StaffFilament},
+    filament_factory::{FilamentFactory, FilamentFactoryParams},
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -193,7 +194,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 36] = [
+const VECTOR_KEYS: [&str; 37] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -208,6 +209,7 @@ const VECTOR_KEYS: [&str; 36] = [
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
+    "grid.filament-factory.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -520,6 +522,74 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         filament.thickness()?,
         samples,
         within
+    ));
+    let mut factory_runs = RunTable::new(Orientation::Horizontal, 85, 14)?;
+    for row in [2, 3] {
+        factory_runs.add_run(row, Run::new(0, 40))?;
+        factory_runs.add_run(row, Run::new(45, 40))?;
+    }
+    for row in [10, 11] {
+        factory_runs.add_run(row, Run::new(0, 40))?;
+    }
+    let factory_sections = build_sections(&factory_runs, JunctionPolicy::DEFAULT_RATIO);
+    let factory = FilamentFactory::new(FilamentFactoryParams {
+        interline: 10,
+        min_core_section_length: 16,
+        min_section_aspect: 3.0,
+        max_coord_gap: 5.0,
+        max_pos_gap: 2.0,
+        max_pos_gap_for_slope: 1.0,
+        max_gap_slope: 0.1,
+        min_length_for_delta_slope: 20.0,
+        max_delta_slope: 0.01,
+    });
+    let factory_filaments = factory.retrieve_core_filaments(&factory_sections)?;
+    let mut factory_shapes = factory_filaments
+        .iter()
+        .map(|factory_filament| -> Result<String, FilamentError> {
+            let mut member_shapes = factory_filament
+                .sections()
+                .iter()
+                .map(|member| {
+                    let member_bounds = member.bounds();
+                    format!(
+                        "{},{},{},{},{}",
+                        member_bounds.x,
+                        member_bounds.y,
+                        member_bounds.width,
+                        member_bounds.height,
+                        member.weight()
+                    )
+                })
+                .collect::<Vec<_>>();
+            member_shapes.sort();
+            let factory_bounds = factory_filament.bounds()?;
+            let factory_geometry = factory_filament.geometry()?;
+            let factory_start = factory_geometry.start();
+            let factory_stop = factory_geometry.stop();
+            Ok(format!(
+                "{}/{},{},{},{}/{}/{}/{}/{:.12},{:.12}/{:.12},{:.12}/{:.12}",
+                factory_filament.sections().len(),
+                factory_bounds.x,
+                factory_bounds.y,
+                factory_bounds.width,
+                factory_bounds.height,
+                factory_filament.weight(),
+                factory_filament.true_length()?,
+                member_shapes.join(";"),
+                factory_start.0,
+                factory_start.1,
+                factory_stop.0,
+                factory_stop.1,
+                factory_filament.thickness()?
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    factory_shapes.sort();
+    lines.push(format!(
+        "grid.filament-factory.synthetic={}/{}",
+        factory_filaments.len(),
+        factory_shapes.join("|")
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

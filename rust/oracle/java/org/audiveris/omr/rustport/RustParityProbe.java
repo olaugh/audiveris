@@ -19,6 +19,8 @@ import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.image.WatershedGrayLevel;
+import org.audiveris.omr.glyph.dynamic.FilamentFactory;
+import org.audiveris.omr.glyph.dynamic.FilamentIndex;
 import org.audiveris.omr.lag.BasicLag;
 import org.audiveris.omr.lag.JunctionRatioPolicy;
 import org.audiveris.omr.lag.Lag;
@@ -206,6 +208,69 @@ public final class RustParityProbe
                 filament.getThickness(),
                 filamentSamples,
                 within);
+
+        RunTable factoryRuns = new RunTable(Orientation.HORIZONTAL, 85, 14);
+        for (int row : new int[]{2, 3}) {
+            factoryRuns.addRun(row, new Run(0, 40));
+            factoryRuns.addRun(row, new Run(45, 40));
+        }
+        for (int row : new int[]{10, 11}) {
+            factoryRuns.addRun(row, new Run(0, 40));
+        }
+        List<Section> factorySections = new SectionFactory(
+                Orientation.HORIZONTAL,
+                JunctionRatioPolicy.DEFAULT).createSections(factoryRuns, null, false);
+        Scale factoryScale = new Scale(
+                new Scale.InterlineScale(10, 10, 10),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null);
+        FilamentFactory<StaffFilament> filamentFactory = new FilamentFactory<>(
+                factoryScale,
+                new FilamentIndex(null),
+                Orientation.HORIZONTAL,
+                StaffFilament.class);
+        List<StaffFilament> factoryFilaments = filamentFactory.retrieveFilaments(factorySections);
+        List<String> factoryShapes = new ArrayList<>();
+        for (StaffFilament factoryFilament : factoryFilaments) {
+            List<String> memberShapes = new ArrayList<>();
+            for (Section member : factoryFilament.getMembers()) {
+                java.awt.Rectangle memberBounds = member.getBounds();
+                memberShapes.add(String.format(
+                        java.util.Locale.ROOT,
+                        "%d,%d,%d,%d,%d",
+                        memberBounds.x,
+                        memberBounds.y,
+                        memberBounds.width,
+                        memberBounds.height,
+                        member.getWeight()));
+            }
+            Collections.sort(memberShapes);
+            java.awt.Rectangle factoryBounds = factoryFilament.getBounds();
+            java.awt.geom.Point2D factoryStart = factoryFilament.getStartPoint();
+            java.awt.geom.Point2D factoryStop = factoryFilament.getStopPoint();
+            factoryShapes.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%d/%d,%d,%d,%d/%d/%d/%s/%.12f,%.12f/%.12f,%.12f/%.12f",
+                    factoryFilament.getMembers().size(),
+                    factoryBounds.x,
+                    factoryBounds.y,
+                    factoryBounds.width,
+                    factoryBounds.height,
+                    factoryFilament.getWeight(),
+                    factoryFilament.getTrueLength(),
+                    String.join(";", memberShapes),
+                    factoryStart.getX(),
+                    factoryStart.getY(),
+                    factoryStop.getX(),
+                    factoryStop.getY(),
+                    factoryFilament.getThickness()));
+        }
+        Collections.sort(factoryShapes);
+        System.out.println(
+                "grid.filament-factory.synthetic=" + factoryFilaments.size() + "/"
+                        + String.join("|", factoryShapes));
 
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
