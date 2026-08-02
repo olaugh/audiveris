@@ -333,7 +333,7 @@ impl<'a> HiLoPeakFinder<'a> {
 mod tests {
     use super::*;
 
-    fn function(values: &[i32]) -> IntegerFunction {
+    fn build_function(values: &[i32]) -> IntegerFunction {
         let mut function = IntegerFunction::new(0, i32::try_from(values.len() - 1).unwrap());
         for (x, value) in values.iter().copied().enumerate() {
             function.set_value(i32::try_from(x).unwrap(), value);
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn derivative_hysteresis_finishes_restarts_and_closes_on_new_high() {
-        let function = function(&[0, 5, 6, 10, 6, 6, 11, 6, 11, 6, 6]);
+        let function = build_function(&[0, 5, 6, 10, 6, 6, 11, 6, 11, 6, 6]);
         let mut finder = HiLoPeakFinder::new("hysteresis", &function);
 
         finder.find_peaks(1, 4, 1.0);
@@ -356,11 +356,17 @@ mod tests {
                 Range::new(8, 8, 9)
             ]
         );
+
+        // Java does not flush a pending Hi/Lo at the end of the domain.
+        let terminal_function = build_function(&[0, 5, 0]);
+        let mut terminal_finder = HiLoPeakFinder::new("terminal", &terminal_function);
+        assert!(terminal_finder.find_peaks(1, 4, 1.0).is_empty());
+        assert!(terminal_finder.hilos().is_empty());
     }
 
     #[test]
     fn widening_tie_goes_toward_larger_abscissa() {
-        let function = function(&[0, 0, 5, 10, 5, 0]);
+        let function = build_function(&[0, 0, 5, 10, 5, 0]);
         let mut finder = HiLoPeakFinder::new("tie", &function);
         finder.min_gain_ratio = 0.3;
 
@@ -369,7 +375,7 @@ mod tests {
 
     #[test]
     fn quorum_truncates_at_first_peak_below_threshold() {
-        let function = function(&[0, 10, 0, 0, 8, 0, 0, 3, 0, 0]);
+        let function = build_function(&[0, 10, 0, 0, 8, 0, 0, 3, 0, 0]);
         let mut finder = HiLoPeakFinder::new("quorum", &function);
         finder.set_quorum(Quorum::new(4));
 
@@ -384,7 +390,7 @@ mod tests {
 
     #[test]
     fn peaks_are_value_ordered_and_ties_remain_abscissa_ordered() {
-        let function = function(&[0, 3, 0, 0, 10, 0, 0, 10, 0, 0]);
+        let function = build_function(&[0, 3, 0, 0, 10, 0, 0, 10, 0, 0]);
         let mut finder = HiLoPeakFinder::new("ordering", &function);
 
         assert_eq!(
