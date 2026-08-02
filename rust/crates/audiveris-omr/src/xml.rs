@@ -11,11 +11,13 @@ use std::error::Error;
 use std::fmt;
 use std::io::Cursor;
 
+use audiveris_core::step::OmrStep;
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
 const BOOK_ELEMENT: &[u8] = b"book";
 const SHEET_ELEMENT: &[u8] = b"sheet";
+const STEPS_ELEMENT: &[u8] = b"steps";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 
@@ -39,8 +41,10 @@ impl BookXml {
         let mut depth = 0_usize;
         let mut root_element = None;
         let mut software_version = None;
-        let mut sheet_stubs = Vec::new();
+        let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut sheet_numbers = HashSet::new();
+        let mut active_sheet = None;
+        let mut active_steps: Option<(usize, String)> = None;
         let mut root_closed = false;
 
         loop {
@@ -50,6 +54,11 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if let Some((sheet_index, _)) = active_steps.as_ref() {
+                        return Err(BookXmlError::UnexpectedStepsContent(
+                            sheet_stubs[*sheet_index].number,
+                        ));
+                    }
                     if depth == 0 {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
@@ -59,12 +68,24 @@ impl BookXml {
                         software_version = version;
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
+                        active_sheet = Some(sheet_stubs.len() - 1);
+                    } else if depth == 2
+                        && element.local_name().as_ref() == STEPS_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        begin_steps(&sheet_stubs, sheet_index)?;
+                        active_steps = Some((sheet_index, String::new()));
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
                     })?;
                 }
                 Event::Empty(element) => {
+                    if let Some((sheet_index, _)) = active_steps.as_ref() {
+                        return Err(BookXmlError::UnexpectedStepsContent(
+                            sheet_stubs[*sheet_index].number,
+                        ));
+                    }
                     if depth == 0 {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
@@ -75,9 +96,25 @@ impl BookXml {
                         root_closed = true;
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
+                    } else if depth == 2
+                        && element.local_name().as_ref() == STEPS_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        begin_steps(&sheet_stubs, sheet_index)?;
+                        sheet_stubs[sheet_index].done_steps = Some(Vec::new());
                     }
                 }
-                Event::End(_) => {
+                Event::End(element) => {
+                    if element.local_name().as_ref() == STEPS_ELEMENT
+                        && depth == 3
+                        && let Some((sheet_index, text)) = active_steps.take()
+                    {
+                        sheet_stubs[sheet_index].done_steps =
+                            Some(parse_steps(&text, sheet_stubs[sheet_index].number)?);
+                    }
+                    if depth == 2 && active_sheet.is_some() {
+                        active_sheet = None;
+                    }
                     depth = depth.checked_sub(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "unexpected closing tag")
                     })?;
@@ -93,6 +130,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_steps.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_steps.as_mut().unwrap().1.push_str(&decoded);
+                }
                 Event::CData(text) if depth == 0 => {
                     let text = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -101,8 +144,20 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_steps.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_steps.as_mut().unwrap().1.push_str(&decoded);
+                }
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
+                }
+                Event::GeneralRef(_) if active_steps.is_some() => {
+                    let sheet_index = active_steps.as_ref().unwrap().0;
+                    return Err(BookXmlError::UnexpectedStepsContent(
+                        sheet_stubs[sheet_index].number,
+                    ));
                 }
                 Event::Eof => break,
                 _ => {}
@@ -156,6 +211,7 @@ impl BookXml {
 pub struct SheetStub {
     number: u32,
     archive_path: String,
+    done_steps: Option<Vec<OmrStep>>,
 }
 
 impl SheetStub {
@@ -169,6 +225,22 @@ impl SheetStub {
     #[must_use]
     pub fn archive_path(&self) -> &str {
         &self.archive_path
+    }
+
+    /// Completed stages recorded by the optional direct `steps` XML list.
+    ///
+    /// `None` distinguishes an absent element from an explicitly empty list.
+    #[must_use]
+    pub fn done_steps(&self) -> Option<&[OmrStep]> {
+        self.done_steps.as_deref()
+    }
+
+    /// Latest completed stage by Java enum declaration order.
+    #[must_use]
+    pub fn latest_done_step(&self) -> Option<OmrStep> {
+        self.done_steps
+            .as_deref()
+            .and_then(|steps| steps.iter().copied().max())
     }
 }
 
@@ -196,6 +268,24 @@ pub enum BookXmlError {
     InvalidSheetNumber(String),
     /// Two direct child sheet stubs declare the same number.
     DuplicateSheetNumber(u32),
+    /// A direct sheet stub contains more than one `steps` element.
+    DuplicateSheetSteps(u32),
+    /// A `steps` XML list contains an element or entity rather than plain text.
+    UnexpectedStepsContent(u32),
+    /// A `steps` XML list names a token absent from the current Java enum.
+    UnknownOmrStep {
+        /// Sheet number containing the token.
+        sheet_number: u32,
+        /// Exact unrecognized token.
+        token: String,
+    },
+    /// One step token occurs more than once in a sheet's XML list.
+    DuplicateOmrStep {
+        /// Sheet number containing the duplicate.
+        sheet_number: u32,
+        /// Repeated stage.
+        step: OmrStep,
+    },
 }
 
 impl BookXmlError {
@@ -231,6 +321,30 @@ impl fmt::Display for BookXmlError {
             Self::DuplicateSheetNumber(number) => {
                 write!(formatter, "duplicate sheet stub number {number}")
             }
+            Self::DuplicateSheetSteps(number) => {
+                write!(
+                    formatter,
+                    "sheet stub {number} has duplicate steps elements"
+                )
+            }
+            Self::UnexpectedStepsContent(number) => {
+                write!(
+                    formatter,
+                    "sheet stub {number} steps contain non-text content"
+                )
+            }
+            Self::UnknownOmrStep {
+                sheet_number,
+                token,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} has unknown OMR step {token:?}"
+            ),
+            Self::DuplicateOmrStep { sheet_number, step } => write!(
+                formatter,
+                "sheet stub {sheet_number} repeats OMR step {}",
+                step.as_str()
+            ),
         }
     }
 }
@@ -298,8 +412,39 @@ fn push_sheet_stub(
     sheet_stubs.push(SheetStub {
         number,
         archive_path: format!("sheet#{number}/sheet#{number}.xml"),
+        done_steps: None,
     });
     Ok(())
+}
+
+fn begin_steps(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), BookXmlError> {
+    if sheet_stubs[sheet_index].done_steps.is_some() {
+        return Err(BookXmlError::DuplicateSheetSteps(
+            sheet_stubs[sheet_index].number,
+        ));
+    }
+    Ok(())
+}
+
+fn parse_steps(text: &str, sheet_number: u32) -> Result<Vec<OmrStep>, BookXmlError> {
+    let mut steps = Vec::new();
+    for token in text.split_whitespace() {
+        let step = OmrStep::ALL
+            .into_iter()
+            .find(|step| step.as_str() == token)
+            .ok_or_else(|| BookXmlError::UnknownOmrStep {
+                sheet_number,
+                token: token.to_owned(),
+            })?;
+        if steps.contains(&step) {
+            return Err(BookXmlError::DuplicateOmrStep { sheet_number, step });
+        }
+        steps.push(step);
+    }
+    // JAXB stores this XML list in an EnumSet, whose iteration order is the
+    // Java enum's declaration order rather than the source token order.
+    steps.sort_unstable();
+    Ok(steps)
 }
 
 fn decode_name(name: &[u8], position: u64) -> Result<String, BookXmlError> {
@@ -329,6 +474,108 @@ mod tests {
         assert_eq!(book.sheet_stubs()[0].archive_path(), "sheet#1/sheet#1.xml");
         assert_eq!(book.sheet_stubs()[1].number(), 7);
         assert_eq!(book.sheet_stubs()[1].archive_path(), "sheet#7/sheet#7.xml");
+        assert_eq!(book.sheet_stubs()[0].done_steps(), None);
+        assert_eq!(book.sheet_stubs()[0].latest_done_step(), None);
+    }
+
+    #[test]
+    fn reads_all_steps_from_real_baseline_spelling() {
+        // Exact JAXB list spelling from the frozen 5.11.0 K.545 baseline.
+        let xml = br#"<?xml version="1.0" ?>
+<book software-version="5.11.0" future="keep">
+  <sheet number="1">
+    <input><path>page-001.png</path><number>1</number></input>
+    <steps>LOAD BINARY SCALE GRID HEADERS STEM_SEEDS BEAMS LEDGERS HEADS STEMS REDUCTION CUE_BEAMS TEXTS MEASURES CHORDS CURVES SYMBOLS LINKS RHYTHMS PAGE</steps>
+    <page id="1"><future/></page>
+  </sheet>
+</book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let steps = book.sheet_stubs()[0].done_steps().unwrap();
+
+        assert_eq!(
+            steps,
+            &[
+                OmrStep::Load,
+                OmrStep::Binary,
+                OmrStep::Scale,
+                OmrStep::Grid,
+                OmrStep::Headers,
+                OmrStep::StemSeeds,
+                OmrStep::Beams,
+                OmrStep::Ledgers,
+                OmrStep::Heads,
+                OmrStep::Stems,
+                OmrStep::Reduction,
+                OmrStep::CueBeams,
+                OmrStep::Texts,
+                OmrStep::Measures,
+                OmrStep::Chords,
+                OmrStep::Curves,
+                OmrStep::Symbols,
+                OmrStep::Links,
+                OmrStep::Rhythms,
+                OmrStep::Page,
+            ]
+        );
+        assert_eq!(
+            book.sheet_stubs()[0].latest_done_step(),
+            Some(OmrStep::Page)
+        );
+        assert_eq!(book.original_bytes(), xml);
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            "LOAD BINARY SCALE GRID HEADERS STEM_SEEDS BEAMS LEDGERS HEADS STEMS REDUCTION CUE_BEAMS TEXTS MEASURES CHORDS CURVES SYMBOLS LINKS RHYTHMS PAGE"
+        );
+    }
+
+    #[test]
+    fn distinguishes_absent_and_explicitly_empty_steps() {
+        let book = BookXml::parse(
+            br#"<book><sheet number="1"/><sheet number="2"><steps/></sheet><sheet number="3"><steps>  </steps></sheet></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.sheet_stubs()[0].done_steps(), None);
+        assert_eq!(book.sheet_stubs()[1].done_steps(), Some(&[][..]));
+        assert_eq!(book.sheet_stubs()[2].done_steps(), Some(&[][..]));
+    }
+
+    #[test]
+    fn canonicalizes_steps_to_java_enum_set_order() {
+        let book = BookXml::parse(
+            br#"<book><sheet number="1"><steps>PAGE GRID LOAD</steps></sheet></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            book.sheet_stubs()[0].done_steps(),
+            Some(&[OmrStep::Load, OmrStep::Grid, OmrStep::Page][..])
+        );
+        assert_eq!(
+            book.sheet_stubs()[0].latest_done_step(),
+            Some(OmrStep::Page)
+        );
+    }
+
+    #[test]
+    fn ignores_steps_outside_a_direct_sheet_stub() {
+        let book = BookXml::parse(
+            br#"<book><steps>PAGE</steps><sheet number="1"><future><steps>PAGE</steps></future><steps>LOAD GRID</steps></sheet></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            book.sheet_stubs()[0].done_steps(),
+            Some(&[OmrStep::Load, OmrStep::Grid][..])
+        );
+        assert_eq!(
+            book.sheet_stubs()[0].latest_done_step(),
+            Some(OmrStep::Grid)
+        );
     }
 
     #[test]
@@ -366,6 +613,48 @@ mod tests {
         let error =
             BookXml::parse(b"<book><sheet number=\"4\"/><sheet number=\"4\"/></book>").unwrap_err();
         assert_eq!(error, BookXmlError::DuplicateSheetNumber(4));
+    }
+
+    #[test]
+    fn rejects_duplicate_steps_elements_and_tokens() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><steps>LOAD</steps><steps>GRID</steps></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateSheetSteps(4)
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><steps>LOAD GRID LOAD</steps></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateOmrStep {
+                sheet_number: 4,
+                step: OmrStep::Load,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_steps_and_non_text_list_content() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="8"><steps>LOAD FUTURE_STEP</steps></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::UnknownOmrStep {
+                sheet_number: 8,
+                token: "FUTURE_STEP".to_owned(),
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="8"><steps>LOAD<future/>GRID</steps></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::UnexpectedStepsContent(8)
+        );
     }
 
     #[test]
