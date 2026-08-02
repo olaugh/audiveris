@@ -60,21 +60,34 @@ denied, and passed `git diff --check` before commit.
 23. `a03c4d80` — lossless read-only `book.xml` metadata view with exact source bytes.
 24. `21126e72` — four-page SCALE parity covering dual interlines, extrapolated beams,
     and low-quorum beam acceptance at the configured distance boundary.
+25. `2ace02ba` — neutral GRID section construction with all four junction policies and
+    an exact synthetic Java/Rust topology vector.
+26. `e0809435` — lossless read-only per-sheet XML metadata view while retaining every
+    original byte and leaving SIG content opaque.
+27. `66ebf2ef` — exact full-page Chula GRID run-dispatch and horizontal/vertical lag
+    section parity.
+28. `504fed58` — dependency-free parity testkit with deterministic vectors,
+    first-difference diagnostics, and bounded fixture-root resolution.
+29. `3ac3f75e` — the live oracle harness now uses the parity testkit and rejects
+    malformed or duplicate vector lines.
 
-At the twenty-fourth checkpoint the Rust workspace executes 91 tests:
+At the twenty-ninth checkpoint the Rust workspace executes 113 tests:
 
 - `audiveris-core`: 32
-- `audiveris-image`: 36
-- `audiveris-omr`: 15
+- `audiveris-image`: 45
+- `audiveris-omr`: 21
+- `audiveris-testkit`: 6
 - `audiveris-cli`: 4
-- `xtask`: 4
+- `xtask`: 5
 
-The live Java/Rust oracle compares 32 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 34 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
 out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavior in
-both a focused test and the full-page vector.
+both a focused test and the full-page vector. GRID now matches both a branch-heavy
+synthetic section fixture and the real Chula page through run dispatch, long-run
+purging, both lag policies, and every section's run content digest.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
@@ -124,12 +137,13 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Begin `GRID` with neutral section/lag contracts and stop at the first differing
-   section statistic before attempting staff-line assembly.
-2. Extend `audiveris-omr` with narrow read-only views of `sheet#N/sheet#N.xml`; retain
-   every original XML byte and unknown node exactly as the book view does.
-3. Extract the growing fixture schema into `audiveris-testkit`, then add stage
-   snapshots to `xtask vectors` without weakening its first-difference diagnostics.
+1. Continue `GRID` from exact sections into neutral filament/staff-line geometry;
+   keep FilamentFactory grouping and UI/SIG dependencies deferred until the primitive
+   metrics and spline behavior have live Java vectors.
+2. Add archive-level convenience access to the narrow `sheet#N/sheet#N.xml` view only
+   if it can preserve the current opaque-byte boundary and explicit missing-member state.
+3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
+   current vector ordering stable while its key-aware diagnostics catch schema drift.
 4. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
 5. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
