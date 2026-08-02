@@ -7,3 +7,4 @@ pub mod global_filter;
 pub mod mask;
 pub mod median;
 pub mod run_table;
+pub mod watershed;
