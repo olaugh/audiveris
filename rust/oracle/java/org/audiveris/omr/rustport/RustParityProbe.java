@@ -22,6 +22,7 @@ import org.audiveris.omr.image.WatershedGrayLevel;
 import org.audiveris.omr.lag.BasicLag;
 import org.audiveris.omr.lag.JunctionRatioPolicy;
 import org.audiveris.omr.lag.Lag;
+import org.audiveris.omr.lag.Lags;
 import org.audiveris.omr.lag.Section;
 import org.audiveris.omr.lag.SectionFactory;
 import org.audiveris.omr.math.BasicLine;
@@ -41,6 +42,7 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.ScaleBuilder;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
+import org.audiveris.omr.sheet.grid.GridBuilder;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -206,6 +208,7 @@ public final class RustParityProbe
             Sheet sheet = new Sheet(stub, vertical);
             ScaleBuilder scaleBuilder = new ScaleBuilder(sheet);
             Scale scale = scaleBuilder.retrieveScale();
+            sheet.setScale(scale);
             System.out.printf(
                     java.util.Locale.ROOT,
                     "scale.chula=%s/%s/%s/%s/%s%n",
@@ -230,6 +233,22 @@ public final class RustParityProbe
                     value((Integer) field(scaleBuilder, "beamGuess")),
                     blackFunction.getArea(),
                     comboFunction.getArea());
+
+            GridBuilder gridBuilder = new GridBuilder(sheet);
+            gridBuilder.linesRetriever.createBothLags();
+            Lag horizontalLag = sheet.getLagManager().getLag(Lags.HLAG);
+            Lag verticalLag = sheet.getLagManager().getLag(Lags.VLAG);
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "grid.chula=%d/%d/%d/%016x/%d/%d/%d/%016x%n",
+                    horizontalLag.getEntities().size(),
+                    horizontalLag.getRunTable().getTotalRunCount(),
+                    horizontalLag.getRunTable().getWeight(),
+                    sectionDigest(horizontalLag.getEntities()),
+                    verticalLag.getEntities().size(),
+                    verticalLag.getRunTable().getTotalRunCount(),
+                    verticalLag.getRunTable().getWeight(),
+                    sectionDigest(verticalLag.getEntities()));
         } finally {
             loader.dispose();
         }
@@ -379,6 +398,22 @@ public final class RustParityProbe
             for (java.util.Iterator<Run> it = table.iterator(sequence); it.hasNext();) {
                 Run run = it.next();
                 hash = hashInt(hash, sequence);
+                hash = hashInt(hash, run.getStart());
+                hash = hashInt(hash, run.getLength());
+            }
+        }
+        return hash;
+    }
+
+    private static long sectionDigest (Iterable<Section> sections)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (Section section : sections) {
+            hash = hashInt(hash, section.getFirstPos());
+            hash = hashInt(hash, section.getRunCount());
+            hash = hashInt(hash, section.getWeight());
+            hash = hashInt(hash, section.getMaxRunLength());
+            for (Run run : section.getRuns()) {
                 hash = hashInt(hash, run.getStart());
                 hash = hashInt(hash, run.getLength());
             }

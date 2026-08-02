@@ -190,7 +190,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 33] = [
+const VECTOR_KEYS: [&str; 34] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -215,6 +215,7 @@ const VECTOR_KEYS: [&str; 33] = [
     "scale.vertical-runs=",
     "scale.chula=",
     "scale.chula.detail=",
+    "grid.chula=",
     "scale.k545=",
     "scale.k545.detail=",
     "scale.essen=",
@@ -227,7 +228,7 @@ const VECTOR_KEYS: [&str; 33] = [
 ];
 
 #[cfg(test)]
-const ROOT_VECTOR_COUNT: usize = 13;
+const ROOT_VECTOR_COUNT: usize = 14;
 
 fn hash_u32(mut hash: u64, value: usize) -> u64 {
     for byte in u32::try_from(value)
@@ -272,6 +273,21 @@ fn section_shape(section: &Section) -> String {
         bounds.height,
         runs
     )
+}
+
+fn section_digest(sections: &[Section]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for section in sections {
+        hash = hash_u32(hash, section.first_pos());
+        hash = hash_u32(hash, section.run_count());
+        hash = hash_u32(hash, section.weight());
+        hash = hash_u32(hash, section.max_run_length());
+        for run in section.runs() {
+            hash = hash_u32(hash, run.start);
+            hash = hash_u32(hash, run.length);
+        }
+    }
+    hash
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -528,6 +544,58 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             &histograms,
             (loaded.width(), loaded.height()),
         )?;
+        let scale = estimate_scale(
+            &histograms,
+            ScaleOptions {
+                image_size: Some((loaded.width(), loaded.height())),
+                ..ScaleOptions::default()
+            },
+        )?;
+        let mut short_vertical = vertical.clone();
+        let mut long_vertical =
+            RunTable::new(Orientation::Vertical, loaded.width(), loaded.height())?;
+        let min_vertical_run_length =
+            1 + (f64::from(scale.line.max) * 1.2).round_ties_even().max(0.0) as usize;
+        short_vertical.purge(
+            |run| run.length >= min_vertical_run_length,
+            Some(&mut long_vertical),
+        )?;
+        let mut long_horizontal = RunTable::from_pixels(
+            Orientation::Horizontal,
+            loaded.width(),
+            loaded.height(),
+            &short_vertical.to_pixels(),
+        )?;
+        let mut short_horizontal =
+            RunTable::new(Orientation::Horizontal, loaded.width(), loaded.height())?;
+        let min_horizontal_run_length = (f64::from(scale.interline.main) * 0.25)
+            .round_ties_even()
+            .max(0.0) as usize;
+        long_horizontal.purge(
+            |run| run.length < min_horizontal_run_length,
+            Some(&mut short_horizontal),
+        )?;
+        let horizontal_sections = build_sections(&long_horizontal, JunctionPolicy::DEFAULT_RATIO);
+        let max_vertical_shift = (f64::from(scale.interline.main) * 0.05)
+            .round_ties_even()
+            .max(0.0) as usize;
+        let vertical_sections = build_sections(
+            &long_vertical,
+            JunctionPolicy::Shift {
+                max_shift: max_vertical_shift,
+            },
+        );
+        lines.push(format!(
+            "grid.chula={}/{}/{}/{:016x}/{}/{}/{}/{:016x}",
+            horizontal_sections.len(),
+            long_horizontal.total_run_count(),
+            long_horizontal.weight(),
+            section_digest(&horizontal_sections),
+            vertical_sections.len(),
+            long_vertical.total_run_count(),
+            long_vertical.weight(),
+            section_digest(&vertical_sections)
+        ));
 
         append_page_scale_vectors(
             &mut lines,
