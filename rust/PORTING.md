@@ -60,7 +60,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID section construction | neutral horizontal/vertical sections, four junction policies, exact synthetic and full-page Chula lag topology/statistics |
 | GRID staff-filament geometry | section compounds, probe centroids, true length, thickness, endpoints, positions, slopes; exact live synthetic vector |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | opaque round trip plus lossless typed `book.xml` and per-sheet metadata views |
+| `.omr` persistence | opaque round trip plus fresh lossless typed `book.xml`/per-sheet views and explicit stub/member resolution states |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |

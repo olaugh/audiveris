@@ -22,6 +22,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 pub mod sheet_xml;
 pub mod xml;
 
+use sheet_xml::{SheetXml, SheetXmlError};
+use xml::{BookXml, BookXmlError};
+
 /// The required root member written by Audiveris.
 pub const BOOK_XML_PATH: &str = "book.xml";
 
@@ -99,6 +102,63 @@ struct OmrEntry {
 pub struct OmrArchive {
     entries: Vec<OmrEntry>,
     book_xml_index: usize,
+}
+
+/// Result of resolving a requested sheet through a direct `book.xml` stub.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SheetXmlMember {
+    /// No direct book sheet stub declares the requested one-based number.
+    Undeclared,
+    /// The stub exists, but its exact conventional archive member is absent.
+    Missing {
+        /// Conventional `sheet#N/sheet#N.xml` member path from the stub.
+        archive_path: String,
+    },
+    /// The conventional member exists and produced a fresh lossless typed view.
+    Present {
+        /// Exact member path used for the lookup.
+        archive_path: String,
+        /// Narrow typed view retaining the member's original bytes.
+        xml: SheetXml,
+    },
+}
+
+/// Failure to parse a fresh archive-level typed XML view.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArchiveXmlError {
+    /// The required root `book.xml` member is malformed or semantically invalid.
+    Book(BookXmlError),
+    /// A resolved per-sheet member is malformed or semantically invalid.
+    Sheet {
+        /// Exact conventional member path that was parsed.
+        archive_path: String,
+        /// Per-sheet parser failure.
+        source: SheetXmlError,
+    },
+}
+
+impl fmt::Display for ArchiveXmlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Book(error) => write!(formatter, "invalid archive book XML: {error}"),
+            Self::Sheet {
+                archive_path,
+                source,
+            } => write!(
+                formatter,
+                "invalid sheet XML member {archive_path:?}: {source}"
+            ),
+        }
+    }
+}
+
+impl Error for ArchiveXmlError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Book(error) => Some(error),
+            Self::Sheet { source, .. } => Some(source),
+        }
+    }
 }
 
 impl OmrArchive {
@@ -219,6 +279,40 @@ impl OmrArchive {
     #[must_use]
     pub fn book_xml(&self) -> &[u8] {
         &self.entries[self.book_xml_index].bytes
+    }
+
+    /// Parse a fresh narrow view of `book.xml` while retaining its exact bytes.
+    ///
+    /// The view is not cached and never replaces or reserializes the opaque
+    /// archive member.
+    pub fn typed_book_xml(&self) -> Result<BookXml, ArchiveXmlError> {
+        BookXml::parse(self.book_xml()).map_err(ArchiveXmlError::Book)
+    }
+
+    /// Resolve and parse one sheet declared by a direct `book.xml` sheet stub.
+    ///
+    /// Only the stub's exact conventional `sheet#N/sheet#N.xml` path is
+    /// consulted. A similarly named member is unrelated. The returned typed
+    /// view is created on demand and retains the member bytes exactly.
+    pub fn typed_sheet_xml(&self, number: u32) -> Result<SheetXmlMember, ArchiveXmlError> {
+        let book = self.typed_book_xml()?;
+        let Some(stub) = book
+            .sheet_stubs()
+            .iter()
+            .find(|stub| stub.number() == number)
+        else {
+            return Ok(SheetXmlMember::Undeclared);
+        };
+
+        let archive_path = stub.archive_path().to_owned();
+        let Some(bytes) = self.member(&archive_path) else {
+            return Ok(SheetXmlMember::Missing { archive_path });
+        };
+        let xml = SheetXml::parse(bytes).map_err(|source| ArchiveXmlError::Sheet {
+            archive_path: archive_path.clone(),
+            source,
+        })?;
+        Ok(SheetXmlMember::Present { archive_path, xml })
     }
 
     /// Raw, uninterpreted bytes of a validated member, or `None` for a directory.
@@ -510,6 +604,96 @@ mod tests {
                 ("vendor/private.bin", false),
             ]
         );
+    }
+
+    #[test]
+    fn resolves_declared_sheet_without_interpreting_unrelated_members() {
+        let sheet = br#"<sheet last-persistent-id="8"><picture width="20" height="30"/><page id="1"/><sig><future/></sig></sheet>"#;
+        let unrelated = b"opaque\0vendor\xff";
+        let source = make_zip(&[
+            (
+                BOOK_XML_PATH,
+                b"<book><sheet number=\"1\"/><sheet number=\"2\"/></book>",
+                false,
+            ),
+            ("sheet#1/sheet#1.xml", sheet, true),
+            ("sheet#2/sheet#2.xml", b"<not-even-sheet>", false),
+            ("vendor/private.bin", unrelated, false),
+        ]);
+        let archive = OmrArchive::from_bytes(&source).unwrap();
+
+        let book = archive.typed_book_xml().unwrap();
+        assert_eq!(book.original_bytes(), archive.book_xml());
+        assert_eq!(book.sheet_stubs().len(), 2);
+
+        let resolved = archive.typed_sheet_xml(1).unwrap();
+        let SheetXmlMember::Present { archive_path, xml } = resolved else {
+            panic!("declared sheet member should be present");
+        };
+        assert_eq!(archive_path, "sheet#1/sheet#1.xml");
+        assert_eq!(xml.original_bytes(), sheet);
+        assert_eq!(xml.last_persistent_id(), Some(8));
+        assert_eq!(xml.picture().unwrap().width(), 20);
+        assert_eq!(xml.page_ids(), &[1]);
+        assert_eq!(archive.member("vendor/private.bin"), Some(&unrelated[..]));
+    }
+
+    #[test]
+    fn distinguishes_missing_conventional_member_and_undeclared_sheet() {
+        let source = make_zip(&[
+            (BOOK_XML_PATH, b"<book><sheet number=\"4\"/></book>", false),
+            ("sheet#4/sheet.xml", b"<sheet/>", false),
+            ("unrelated/sheet#4.xml", b"<sheet/>", false),
+        ]);
+        let archive = OmrArchive::from_bytes(&source).unwrap();
+
+        assert_eq!(
+            archive.typed_sheet_xml(4).unwrap(),
+            SheetXmlMember::Missing {
+                archive_path: "sheet#4/sheet#4.xml".to_owned(),
+            }
+        );
+        assert_eq!(
+            archive.typed_sheet_xml(99).unwrap(),
+            SheetXmlMember::Undeclared
+        );
+        assert_eq!(archive.member("sheet#4/sheet.xml"), Some(&b"<sheet/>"[..]));
+    }
+
+    #[test]
+    fn reports_malformed_resolved_sheet_with_exact_member_path() {
+        let source = make_zip(&[
+            (BOOK_XML_PATH, b"<book><sheet number=\"7\"/></book>", false),
+            (
+                "sheet#7/sheet#7.xml",
+                b"<sheet><page id=\"1\"></sheet>",
+                false,
+            ),
+        ]);
+        let archive = OmrArchive::from_bytes(&source).unwrap();
+
+        let error = archive.typed_sheet_xml(7).unwrap_err();
+        assert!(matches!(
+            error,
+            ArchiveXmlError::Sheet {
+                ref archive_path,
+                source: SheetXmlError::Malformed { .. },
+            } if archive_path == "sheet#7/sheet#7.xml"
+        ));
+    }
+
+    #[test]
+    fn reports_malformed_book_before_resolving_any_sheet_member() {
+        let source = make_zip(&[
+            (BOOK_XML_PATH, b"<book><sheet number=\"1\"></book>", false),
+            ("sheet#1/sheet#1.xml", b"<sheet/>", false),
+        ]);
+        let archive = OmrArchive::from_bytes(&source).unwrap();
+
+        assert!(matches!(
+            archive.typed_sheet_xml(1),
+            Err(ArchiveXmlError::Book(BookXmlError::Malformed { .. }))
+        ));
     }
 
     #[test]
