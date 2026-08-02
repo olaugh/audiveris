@@ -29,6 +29,7 @@ import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
+import org.audiveris.omr.math.NaturalSpline;
 import org.audiveris.omr.math.Range;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.run.Orientation;
@@ -43,6 +44,7 @@ import org.audiveris.omr.sheet.ScaleBuilder;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.grid.GridBuilder;
+import org.audiveris.omr.sheet.grid.StaffFilament;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -153,6 +155,85 @@ public final class RustParityProbe
                         + sectionLag.getRunTable().getTotalRunCount() + "/"
                         + sectionLag.getRunTable().getWeight() + "/"
                         + String.join("|", sectionShapes));
+
+        RunTable filamentRuns = new RunTable(Orientation.HORIZONTAL, 165, 15);
+        int[][] filamentStrips = {{2, 0}, {5, 40}, {8, 80}, {11, 120}};
+        for (int[] strip : filamentStrips) {
+            filamentRuns.addRun(strip[0], new Run(strip[1], 45));
+            filamentRuns.addRun(strip[0] + 1, new Run(strip[1], 45));
+        }
+        List<Section> filamentSections = new SectionFactory(
+                Orientation.HORIZONTAL,
+                JunctionRatioPolicy.DEFAULT).createSections(filamentRuns, null, false);
+        StaffFilament filament = new StaffFilament(10);
+        for (Section section : filamentSections) {
+            filament.addSection(section);
+        }
+        java.awt.Rectangle filamentBounds = filament.getBounds();
+        java.awt.geom.Point2D filamentStart = filament.getStartPoint();
+        java.awt.geom.Point2D filamentStop = filament.getStopPoint();
+        StringBuilder filamentSamples = new StringBuilder();
+        int[] sampleCoords = {0, 40, 80, 120, 164};
+        for (int coord : sampleCoords) {
+            if (!filamentSamples.isEmpty()) {
+                filamentSamples.append(',');
+            }
+            filamentSamples.append(String.format(
+                    java.util.Locale.ROOT,
+                    "%d:%.12f:%.12f",
+                    coord,
+                    filament.getPositionAt(coord, Orientation.HORIZONTAL),
+                    filament.getSlopeAt(coord, Orientation.HORIZONTAL)));
+        }
+        StringBuilder within = new StringBuilder(4);
+        for (int coord : new int[]{-1, 0, 164, 165}) {
+            within.append(filament.isWithinRange(coord) ? '1' : '0');
+        }
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.filament.synthetic=%d/%d,%d,%d,%d/%d/%d/%.12f,%.12f/%.12f,%.12f/%.12f/%s/%s%n",
+                filament.getMembers().size(),
+                filamentBounds.x,
+                filamentBounds.y,
+                filamentBounds.width,
+                filamentBounds.height,
+                filament.getWeight(),
+                filament.getTrueLength(),
+                filamentStart.getX(),
+                filamentStart.getY(),
+                filamentStop.getX(),
+                filamentStop.getY(),
+                filament.getThickness(),
+                filamentSamples,
+                within);
+
+        NaturalSpline lineSpline = NaturalSpline.interpolate(
+                new double[]{0, 10},
+                new double[]{1, 6});
+        NaturalSpline quadraticSpline = NaturalSpline.interpolate(
+                new double[]{0, 20, 30},
+                new double[]{0, 10, 10});
+        NaturalSpline cubicSpline = NaturalSpline.interpolate(
+                new double[]{0, 12, 19, 30},
+                new double[]{0, 1, 2, 3});
+        String upperException;
+        try {
+            lineSpline.yAtX(10.000001);
+            upperException = "none";
+        } catch (RuntimeException ex) {
+            upperException = ex.getClass().getSimpleName();
+        }
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "spline.synthetic=line:%.14f,%.14f;quadratic:%.14f,%.14f;cubic:%.14f,%.14f;lower:%.14f;upper:%s%n",
+                lineSpline.yAtX(4.0),
+                lineSpline.yDerivativeAtX(4.0),
+                quadraticSpline.yAtX(20.0),
+                quadraticSpline.yDerivativeAtX(20.0),
+                cubicSpline.yAtX(24.5),
+                cubicSpline.yDerivativeAtX(12.0),
+                lineSpline.yAtX(-2.0),
+                upperException);
 
         ByteProcessor raster = new ByteProcessor(5, 3);
         int[] pixels = {0, 126, 127, 128, 255, 255, 0, 255, 0, 255, 10, 20, 200, 210, 220};

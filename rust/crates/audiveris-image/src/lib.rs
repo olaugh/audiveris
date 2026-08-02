@@ -4,6 +4,7 @@
 
 pub mod adaptive;
 pub mod chamfer;
+pub mod filament;
 pub mod global_filter;
 pub mod ingest;
 pub mod mask;

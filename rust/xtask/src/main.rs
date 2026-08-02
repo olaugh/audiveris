@@ -2,11 +2,13 @@
 
 use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
-    integer_function::IntegerFunction, natural_spec, rational::Rational, step::OmrStep,
+    integer_function::IntegerFunction, natural_spec, natural_spline::NaturalSpline,
+    rational::Rational, step::OmrStep,
 };
 use audiveris_image::{
     adaptive,
     chamfer::ChamferDistance,
+    filament::{FilamentError, StaffFilament},
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -191,7 +193,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 34] = [
+const VECTOR_KEYS: [&str; 36] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -205,6 +207,8 @@ const VECTOR_KEYS: [&str; 34] = [
     "integer.function=",
     "runs=",
     "grid.sections.synthetic=",
+    "grid.filament.synthetic=",
+    "spline.synthetic=",
     "image.threshold=",
     "image.median=",
     "image.chamfer=",
@@ -465,6 +469,79 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         section_runs.total_run_count(),
         section_runs.weight(),
         section_shapes.join("|")
+    ));
+    let mut filament_runs = RunTable::new(Orientation::Horizontal, 165, 15)?;
+    for (row, start) in [(2, 0), (5, 40), (8, 80), (11, 120)] {
+        filament_runs.add_run(row, Run::new(start, 45))?;
+        filament_runs.add_run(row + 1, Run::new(start, 45))?;
+    }
+    let mut filament = StaffFilament::new(10)?;
+    for section in build_sections(&filament_runs, JunctionPolicy::DEFAULT_RATIO) {
+        filament.add_section(section)?;
+    }
+    let bounds = filament.bounds()?;
+    let geometry = filament.geometry()?;
+    let start = geometry.start();
+    let stop = geometry.stop();
+    let samples = [0.0, 40.0, 80.0, 120.0, 164.0]
+        .into_iter()
+        .map(|x| {
+            Ok(format!(
+                "{x:.0}:{:.12}:{:.12}",
+                geometry.position_at(x)?,
+                geometry.slope_at(x)?
+            ))
+        })
+        .collect::<Result<Vec<_>, FilamentError>>()?
+        .join(",");
+    let within = [-1.0, 0.0, 164.0, 165.0]
+        .into_iter()
+        .map(|x| {
+            if geometry.is_within_range(x) {
+                '1'
+            } else {
+                '0'
+            }
+        })
+        .collect::<String>();
+    lines.push(format!(
+        "grid.filament.synthetic={}/{},{},{},{}/{}/{}/{:.12},{:.12}/{:.12},{:.12}/{:.12}/{}/{}",
+        filament.sections().len(),
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        filament.weight(),
+        filament.true_length()?,
+        start.0,
+        start.1,
+        stop.0,
+        stop.1,
+        filament.thickness()?,
+        samples,
+        within
+    ));
+    let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
+    let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;
+    let cubic_spline =
+        NaturalSpline::interpolate(&[(0.0, 0.0), (12.0, 1.0), (19.0, 2.0), (30.0, 3.0)])?;
+    let upper_exception = if line_spline.y_at_x(10.000_001).is_err() {
+        "RuntimeException"
+    } else {
+        "none"
+    };
+    // HotSpot and Rust can differ by one ULP in the quadratic expression;
+    // spline geometry is canonicalized at this explicit 1e-14 boundary.
+    lines.push(format!(
+        "spline.synthetic=line:{:.14},{:.14};quadratic:{:.14},{:.14};cubic:{:.14},{:.14};lower:{:.14};upper:{}",
+        line_spline.y_at_x(4.0)?,
+        line_spline.y_derivative_at_x(4.0)?,
+        quadratic_spline.y_at_x(20.0)?,
+        quadratic_spline.y_derivative_at_x(20.0)?,
+        cubic_spline.y_at_x(24.5)?,
+        cubic_spline.y_derivative_at_x(12.0)?,
+        line_spline.y_at_x(-2.0)?,
+        upper_exception
     ));
 
     let pixels = [

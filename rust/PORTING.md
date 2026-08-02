@@ -37,14 +37,14 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 34 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 36 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Rust workspace | building |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
-| Natural spline geometry | line/quadratic/natural-cubic interpolation and horizontal evaluation implemented |
+| Natural spline geometry | line/quadratic/natural-cubic interpolation and horizontal evaluation; exact live vector at declared 1e-14 boundary |
 | CLI parameter slice | implemented with parity tests |
 | Binary run-table primitives | implemented with parity tests |
 | Median filter and chamfer distance transform | implemented with parity tests |
@@ -58,6 +58,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE derivative peak finder | implemented; exercised by full-page Java oracle |
 | SCALE line, interline, and beam estimate | exact match on 4 pages and key branch cases |
 | GRID section construction | neutral horizontal/vertical sections, four junction policies, exact synthetic and full-page Chula lag topology/statistics |
+| GRID staff-filament geometry | section compounds, probe centroids, true length, thickness, endpoints, positions, slopes; exact live synthetic vector |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus lossless typed `book.xml` and per-sheet metadata views |
 | Recognition stages | queued in pipeline order |
