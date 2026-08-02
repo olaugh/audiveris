@@ -14,5 +14,6 @@ pub mod run_table;
 pub mod scale_estimate;
 pub mod scale_runs;
 pub mod section;
+pub mod section_tally;
 pub mod staff_pattern;
 pub mod watershed;
