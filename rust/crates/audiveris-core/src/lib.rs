@@ -3,6 +3,7 @@
 //! Dependency-light contracts shared by the Audiveris recognition pipeline.
 
 pub mod arrangements;
+pub mod basic_line;
 pub mod grade;
 pub mod histogram;
 pub mod injection_solver;
