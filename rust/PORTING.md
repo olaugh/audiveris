@@ -52,6 +52,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | PNG/JPEG raster load and max-channel grayscale | implemented; canonical PNG exact |
 | Adaptive local thresholding | implemented; exact synthetic and two full-page masks |
 | SCALE vertical runs and black/combo histograms | inputs exact; peak interpretation queued |
+| SCALE integer functions and range primitives | implemented with Java edge semantics |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | queued |
 | Recognition stages | queued in pipeline order |
