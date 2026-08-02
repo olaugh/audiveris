@@ -4,6 +4,7 @@ package org.audiveris.omr.rustport;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.Arrays;
 
@@ -18,13 +19,19 @@ import org.audiveris.omr.math.BasicLine;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
+import org.audiveris.omr.math.Range;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.sig.GradeUtil;
+import org.audiveris.omr.sheet.Book;
 import org.audiveris.omr.sheet.Picture;
+import org.audiveris.omr.sheet.Scale;
+import org.audiveris.omr.sheet.ScaleBuilder;
+import org.audiveris.omr.sheet.Sheet;
+import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -124,6 +131,37 @@ public final class RustParityProbe
                     vertical.getTotalRunCount(),
                     vertical.getWeight(),
                     runTableDigest(vertical));
+
+            Book book = new Book(Path.of("data/examples/chula.png"));
+            SheetStub stub = new SheetStub(book, 1);
+            book.addStub(stub);
+            Sheet sheet = new Sheet(stub, vertical);
+            ScaleBuilder scaleBuilder = new ScaleBuilder(sheet);
+            Scale scale = scaleBuilder.retrieveScale();
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "scale.chula=%s/%s/%s/%s/%s%n",
+                    value(scale.getFore()),
+                    value(scale.getInterline()),
+                    value(scale.getSmallInterline()),
+                    value(scale.getBeamThickness()),
+                    value(scale.getSmallBeamScale() != null
+                            ? scale.getSmallBeamScale().getMain() : null));
+
+            Object histoKeeper = field(scaleBuilder, "histoKeeper");
+            IntegerFunction blackFunction = (IntegerFunction) field(histoKeeper, "blackFunction");
+            IntegerFunction comboFunction = (IntegerFunction) field(histoKeeper, "comboFunction");
+            System.out.printf(
+                    java.util.Locale.ROOT,
+                    "scale.chula.detail=black:%s;combo:%s;combo2:%s;beam:%s;beam2:%s;guess:%s;areas:%d,%d%n",
+                    range((Range) field(scaleBuilder, "blackPeak")),
+                    range((Range) field(scaleBuilder, "comboPeak")),
+                    range((Range) field(scaleBuilder, "comboPeak2")),
+                    value((Integer) field(scaleBuilder, "beamKey")),
+                    value((Integer) field(scaleBuilder, "beamKey2")),
+                    value((Integer) field(scaleBuilder, "beamGuess")),
+                    blackFunction.getArea(),
+                    comboFunction.getArea());
         } finally {
             loader.dispose();
         }
@@ -147,6 +185,7 @@ public final class RustParityProbe
         }
 
         System.out.println("pipeline=" + String.join(",", Arrays.stream(OmrStep.values()).map(Enum::name).toList()));
+
     }
 
     private static String pixels (ByteProcessor image)
@@ -156,6 +195,25 @@ public final class RustParityProbe
             values[index] = image.get(index % image.getWidth(), index / image.getWidth());
         }
         return Arrays.toString(values);
+    }
+
+    private static Object field (Object instance,
+                                 String name)
+        throws ReflectiveOperationException
+    {
+        Field field = instance.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(instance);
+    }
+
+    private static String range (Range range)
+    {
+        return range != null ? range.min + "," + range.main + "," + range.max : "null";
+    }
+
+    private static String value (Integer value)
+    {
+        return value != null ? value.toString() : "null";
     }
 
     private static String values (Table table)

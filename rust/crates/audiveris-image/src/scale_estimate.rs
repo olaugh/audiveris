@@ -126,6 +126,9 @@ pub struct ScaleEstimate {
     pub primary_combo_peak: Range,
     pub secondary_combo_peak: Option<Range>,
     pub significant_beam_key: Option<i32>,
+    pub beam_key: Option<i32>,
+    pub beam_key2: Option<i32>,
+    pub beam_guess: Option<i32>,
     pub beam_quorum: i32,
 }
 
@@ -235,6 +238,9 @@ pub fn estimate_scale(
         primary_combo_peak: combo_peak,
         secondary_combo_peak: combo_peak2,
         significant_beam_key,
+        beam_key: beams.key,
+        beam_key2: beams.key2,
+        beam_guess: beams.guess,
         beam_quorum,
     })
 }
@@ -359,6 +365,9 @@ fn select_line_peak(
 struct BeamScales {
     normal: BeamScale,
     small: Option<BeamScale>,
+    key: Option<i32>,
+    key2: Option<i32>,
+    guess: Option<i32>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -379,6 +388,9 @@ fn compute_beams(
                 extrapolated: false,
             },
             small: None,
+            key: Some(main),
+            key2: None,
+            guess: None,
         };
     }
 
@@ -389,6 +401,9 @@ fn compute_beams(
                 extrapolated: false,
             },
             small: None,
+            key: Some(main),
+            key2: None,
+            guess: None,
         };
     }
 
@@ -433,6 +448,9 @@ fn compute_beams(
                 main: first.min(second),
                 extrapolated: false,
             }),
+            key: Some(first),
+            key2: Some(second),
+            guess: Some(guess),
         },
         (Some(main), None) => BeamScales {
             normal: BeamScale {
@@ -440,6 +458,9 @@ fn compute_beams(
                 extrapolated: false,
             },
             small: None,
+            key: Some(main),
+            key2: None,
+            guess: Some(guess),
         },
         (None, _) => BeamScales {
             normal: BeamScale {
@@ -447,6 +468,9 @@ fn compute_beams(
                 extrapolated: true,
             },
             small: None,
+            key: None,
+            key2: None,
+            guess: Some(guess),
         },
     }
 }

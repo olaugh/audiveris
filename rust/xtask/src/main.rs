@@ -9,6 +9,8 @@ use audiveris_image::{
     chamfer::ChamferDistance,
     global_filter, ingest, median,
     run_table::{Orientation, Run, RunTable},
+    scale_estimate::{ScaleOptions, estimate_scale},
+    scale_runs::vertical_run_histograms,
 };
 use std::{
     env,
@@ -186,7 +188,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 23] = [
+const VECTOR_KEYS: [&str; 25] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -207,6 +209,8 @@ const VECTOR_KEYS: [&str; 23] = [
     "load.chula=",
     "binary.chula=",
     "scale.vertical-runs=",
+    "scale.chula=",
+    "scale.chula.detail=",
     "load.dichterliebe=",
     "binary.dichterliebe=",
     "pipeline=",
@@ -375,6 +379,44 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             vertical.weight(),
             run_table_digest(&vertical)
         ));
+        let histograms = vertical_run_histograms(&vertical);
+        let scale = estimate_scale(
+            &histograms,
+            ScaleOptions {
+                image_size: Some((loaded.width(), loaded.height())),
+                ..ScaleOptions::default()
+            },
+        )?;
+        let optional_value =
+            |value: Option<i32>| value.map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let range = |value: audiveris_core::range::Range| {
+            format!("{},{},{}", value.min, value.main, value.max)
+        };
+        lines.push(format!(
+            "scale.chula={}/{}/{}/{}/{}",
+            scale.line.main,
+            scale.interline.main,
+            optional_value(scale.small_interline.map(|value| value.main)),
+            scale.beam.main,
+            optional_value(scale.small_beam.map(|value| value.main))
+        ));
+        lines.push(format!(
+            "scale.chula.detail=black:{};combo:{};combo2:{};beam:{};beam2:{};guess:{};areas:{},{}",
+            range(audiveris_core::range::Range::new(
+                scale.line.min,
+                scale.line.main,
+                scale.line.max
+            )),
+            range(scale.primary_combo_peak),
+            scale
+                .secondary_combo_peak
+                .map_or_else(|| "null".to_owned(), range),
+            optional_value(scale.beam_key),
+            optional_value(scale.beam_key2),
+            optional_value(scale.beam_guess),
+            histograms.black.iter().sum::<usize>(),
+            histograms.combo.iter().sum::<usize>()
+        ));
 
         let loaded = ingest::load_max_channel_gray(
             root.join("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"),
@@ -535,7 +577,7 @@ mod tests {
     #[test]
     fn rust_vector_contract_is_stable() {
         let vectors = rust_vectors(None).unwrap();
-        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 5);
+        assert_eq!(vectors.lines().count(), VECTOR_KEYS.len() - 7);
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
     }
