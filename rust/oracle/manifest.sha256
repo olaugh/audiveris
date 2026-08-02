@@ -1,0 +1,19 @@
+# Audiveris source baseline: 9e1e55cd2746037d059345881c53e6a6754bffbd
+# JDK: Temurin 25.0.3+9 LTS
+# Gradle: 9.4.1, distribution SHA-256 2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
+# Rust verifier baseline: rustc 1.96.0, cargo 1.96.0
+327194c47116a8ebf5771d04cea08a4e563ec93d2955e1efd990a54a9245f29e  app/res/basic-classifier.zip
+dca2d90c88437a701b1c2e71fa54e76f9fa41d7deee935d74dc871ea66ecfdd2  app/res/Bravura.otf
+cacca69cb750d851023d52a8e41d3373904aa82afc7247085f37d4ee6823506c  app/res/Leland.otf
+a8ea0408ef7628ca38ae29eaa1b4357d2b0bf11747f6eee3c5f9ed5cca358e08  app/res/FinaleJazz.otf
+b3421c9171d41a5c7e24c772848c87af695f012cdfab2f849d86829435a8baff  app/res/FinaleJazzText.otf
+25f73922f6462d50a250e98cbb3b69909a7546eae8167e99592c3d641b80facd  app/res/Primus.ttf
+07fb37d9fd2c6ccceb1124d0e9e7aa8a4ffe03ae2f0a3bff5e620b241b59d5cc  app/res/MusicalSymbols.ttf
+a5dce91498d98a54a50e9624c12c2d90891d1c77d8b5934038df42d5d62eb00f  data/examples/chula.png
+9ab9a9a8ebf609d60a7d0cddcccd5ffc91d433812fd86153244595371d282805  data/examples/BachInvention5.jpg
+f6c613b3a60423dadde60d5e61ee7c1a641eef71c9fc6b6e8bdf5fab4c3c3e94  data/examples/zizi.png
+a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065  data/examples/allegretto.png
+249330d6558d410f64f550180d3a659dd3c9c340dcdcb5ae08e809c273fe2e44  data/examples/carmen.png
+483bf10cc8c41ca9708c6dd33120a56bec5811722a27c51e8ea3985d1625312f  app/src/test/resources/org/audiveris/omr/image/SchbAvMaSample_rotated-1.png
+e863d36fcd5de7036219339a3dca32273f9eaac1e08a6944db7cf2aa095360e8  app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png
+bc092bc577d481943a00f5cef696c4dadfda28a8b7eb221c998aaa5ce23f9a12  app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-2.png

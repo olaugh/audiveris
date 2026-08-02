@@ -14,6 +14,7 @@ use std::{
     error::Error,
     ffi::OsStr,
     fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
@@ -333,9 +334,54 @@ fn vectors(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn manifest_count(contents: &str) -> Result<usize, Box<dyn Error>> {
+    let mut count = 0;
+    for (index, line) in contents.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (hash, path) = line
+            .split_once("  ")
+            .ok_or_else(|| format!("invalid manifest line {}", index + 1))?;
+        if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(format!("invalid SHA-256 on manifest line {}", index + 1).into());
+        }
+        if path.is_empty() || Path::new(path).is_absolute() {
+            return Err(format!("invalid path on manifest line {}", index + 1).into());
+        }
+        count += 1;
+    }
+    Ok(count)
+}
+
+fn manifest(args: &[String]) -> Result<(), Box<dyn Error>> {
+    let root = java_root(args)?;
+    let relative = Path::new("rust/oracle/manifest.sha256");
+    let count = manifest_count(&fs::read_to_string(root.join(relative))?)?;
+    let mut command = Command::new("shasum");
+    command
+        .args(["-a", "256", "-c"])
+        .arg(relative)
+        .current_dir(&root);
+    let status = match command.status() {
+        Ok(status) => status,
+        Err(error) if error.kind() == ErrorKind::NotFound => Command::new("sha256sum")
+            .arg("-c")
+            .arg(relative)
+            .current_dir(&root)
+            .status()?,
+        Err(error) => return Err(error.into()),
+    };
+    if !status.success() {
+        return Err(format!("oracle manifest verification failed with {status}").into());
+    }
+    println!("Oracle manifest: {count} files match their frozen SHA-256 digests");
+    Ok(())
+}
+
 fn usage() {
     println!(
-        "cargo xtask equivalent:\n  cargo run -p xtask -- baseline [--run-java] [--java-root PATH]\n  cargo run -p xtask -- vectors [--rust-only] [--java-root PATH]"
+        "cargo xtask equivalent:\n  cargo run -p xtask -- baseline [--run-java] [--java-root PATH]\n  cargo run -p xtask -- vectors [--rust-only] [--java-root PATH]\n  cargo run -p xtask -- manifest [--java-root PATH]"
     );
 }
 
@@ -344,6 +390,7 @@ fn execute() -> Result<(), Box<dyn Error>> {
     match args.first().map(String::as_str) {
         Some("baseline") => baseline(&args[1..]),
         Some("vectors") => vectors(&args[1..]),
+        Some("manifest") => manifest(&args[1..]),
         Some("help" | "--help" | "-h") | None => {
             usage();
             Ok(())
@@ -392,5 +439,18 @@ mod tests {
         assert_eq!(vectors.lines().count(), VECTOR_KEYS.len());
         assert!(vectors.starts_with("natural.decode=[1, 2, 3, 6]\n"));
         assert!(vectors.ends_with("LINKS,RHYTHMS,PAGE\n"));
+    }
+
+    #[test]
+    fn validates_sha256_manifest_shape() {
+        let manifest = "# metadata\n0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  fixture.png\n";
+        assert_eq!(manifest_count(manifest).unwrap(), 1);
+        assert!(manifest_count("abc  fixture.png\n").is_err());
+        assert!(
+            manifest_count(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /absolute\n"
+            )
+            .is_err()
+        );
     }
 }
