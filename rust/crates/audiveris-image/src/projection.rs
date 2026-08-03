@@ -89,6 +89,76 @@ pub struct PeakSide {
     pub chunk_grade: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakSearchBounds {
+    pub x_min: i32,
+    pub x_max: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakConstructionParams {
+    refinement: PeakRefinementParams,
+    maximum_bar_width: i32,
+}
+
+impl PeakConstructionParams {
+    pub fn new(
+        refinement: PeakRefinementParams,
+        maximum_bar_width: i32,
+    ) -> Result<Self, ProjectionError> {
+        if maximum_bar_width <= 0 {
+            return Err(ProjectionError::InvalidMaximumBarWidth(maximum_bar_width));
+        }
+        Ok(Self {
+            refinement,
+            maximum_bar_width,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakConstructionRequest {
+    pub raw_start: i32,
+    pub raw_stop: i32,
+    pub half_mode: bool,
+    pub minimum_derivative_up: i32,
+    pub minimum_derivative_down: i32,
+    pub added_chunk: i32,
+}
+
+impl PeakConstructionRequest {
+    #[must_use]
+    pub const fn new(
+        raw_start: i32,
+        raw_stop: i32,
+        half_mode: bool,
+        minimum_derivative_up: i32,
+        minimum_derivative_down: i32,
+        added_chunk: i32,
+    ) -> Self {
+        Self {
+            raw_start,
+            raw_stop,
+            half_mode,
+            minimum_derivative_up,
+            minimum_derivative_down,
+            added_chunk,
+        }
+    }
+}
+
+/// Numeric front half of Java `StaffProjector.createPeak`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectionPeakCandidate {
+    pub raw_start: i32,
+    pub raw_stop: i32,
+    pub start: i32,
+    pub stop: i32,
+    pub maximum_value: i32,
+    pub left: PeakSide,
+    pub right: PeakSide,
+}
+
 impl ProjectionBlank {
     #[must_use]
     pub const fn start(self) -> i32 {
@@ -274,6 +344,33 @@ impl ShortProjection {
         blanks
     }
 
+    /// Java `findPeaks` window after `selectEndingBlanks`.
+    #[must_use]
+    pub fn peak_search_bounds(
+        &self,
+        blanks: &[ProjectionBlank],
+        staff_left: i32,
+        staff_right: i32,
+        minimum_wide_blank_width: i32,
+    ) -> PeakSearchBounds {
+        let left = select_blank(
+            blanks,
+            HorizontalSide::Left,
+            staff_left,
+            minimum_wide_blank_width,
+        );
+        let right = select_blank(
+            blanks,
+            HorizontalSide::Right,
+            staff_right,
+            minimum_wide_blank_width,
+        );
+        PeakSearchBounds {
+            x_min: left.map_or(self.start, ProjectionBlank::stop),
+            x_max: right.map_or(self.stop, ProjectionBlank::start),
+        }
+    }
+
     /// Pure numeric kernel from Java `StaffProjector.refinePeakSide`.
     pub fn refine_peak_side(
         &self,
@@ -368,6 +465,58 @@ impl ShortProjection {
         Ok(None)
     }
 
+    /// Numeric front half of Java `StaffProjector.createPeak`.
+    ///
+    /// Staff-line ordinates, vertical-core pixels, gap/white ratios, composite
+    /// impacts, and final grade acceptance intentionally remain outside.
+    pub fn construct_peak_candidate(
+        &self,
+        request: PeakConstructionRequest,
+        params: PeakConstructionParams,
+    ) -> Result<Option<ProjectionPeakCandidate>, ProjectionError> {
+        let left_request = PeakRefinementRequest::new(
+            request.raw_start,
+            request.raw_stop,
+            -1,
+            request.half_mode,
+            request.minimum_derivative_up,
+            request.added_chunk,
+        );
+        let Some(left) = self.refine_peak_side(left_request, params.refinement)? else {
+            return Ok(None);
+        };
+        let right_request = PeakRefinementRequest::new(
+            request.raw_start,
+            request.raw_stop,
+            1,
+            request.half_mode,
+            request.minimum_derivative_down,
+            request.added_chunk,
+        );
+        let Some(right) = self.refine_peak_side(right_request, params.refinement)? else {
+            return Ok(None);
+        };
+
+        let width = right.abscissa.wrapping_sub(left.abscissa).wrapping_add(1);
+        if width > params.maximum_bar_width {
+            return Ok(None);
+        }
+
+        let mut maximum_value = 0;
+        for position in left.abscissa..=right.abscissa {
+            maximum_value = maximum_value.max(self.value(position));
+        }
+        Ok(Some(ProjectionPeakCandidate {
+            raw_start: request.raw_start,
+            raw_stop: request.raw_stop,
+            start: left.abscissa,
+            stop: right.abscissa,
+            maximum_value,
+            left,
+            right,
+        }))
+    }
+
     /// Java `StaffProjector.getChunk`: minimum projection immediately outside
     /// a refined peak side, or zero when the full probe leaves the image.
     fn chunk_minimum(&self, x0: i32, direction: i32, chunk_width: i32) -> i32 {
@@ -444,6 +593,7 @@ pub enum ProjectionError {
     InvalidDirection(i32),
     InvalidPeakRange { x_start: i32, x_stop: i32 },
     InvalidRefinementParameters,
+    InvalidMaximumBarWidth(i32),
 }
 
 impl fmt::Display for ProjectionError {
@@ -473,6 +623,9 @@ impl fmt::Display for ProjectionError {
             }
             Self::InvalidRefinementParameters => {
                 formatter.write_str("peak refinement dx and chunk width are invalid")
+            }
+            Self::InvalidMaximumBarWidth(width) => {
+                write!(formatter, "maximum bar width must be positive, got {width}")
             }
         }
     }
@@ -699,6 +852,36 @@ mod tests {
     }
 
     #[test]
+    fn peak_search_bounds_compose_selected_wide_blanks() {
+        let mut projection = ShortProjection::new(0, 20).unwrap();
+        for position in [3, 4, 9, 10, 11, 16, 17, 18] {
+            projection.increment_one(position);
+        }
+        let blanks = projection.blank_regions(0);
+        assert_eq!(
+            blanks
+                .iter()
+                .map(|blank| (blank.start(), blank.stop()))
+                .collect::<Vec<_>>(),
+            [(0, 2), (5, 8), (12, 15), (19, 20)]
+        );
+        assert_eq!(
+            projection.peak_search_bounds(&blanks, 9, 10, 3),
+            PeakSearchBounds {
+                x_min: 8,
+                x_max: 12
+            }
+        );
+        assert_eq!(
+            projection.peak_search_bounds(&blanks, 9, 10, 5),
+            PeakSearchBounds {
+                x_min: 0,
+                x_max: 20
+            }
+        );
+    }
+
+    #[test]
     fn peak_side_refinement_finds_directional_extrema_and_grades_chunks() {
         let mut projection = ShortProjection::new(0, 12).unwrap();
         for (position, value) in [(3, 2), (4, 8), (5, 10), (6, 10), (7, 10), (8, 5), (9, 3)] {
@@ -806,6 +989,68 @@ mod tests {
         assert_eq!(
             PeakRefinementParams::new(10, 2, 5, 1, 0),
             Err(ProjectionError::InvalidRefinementParameters)
+        );
+    }
+
+    #[test]
+    fn peak_construction_composes_refined_sides_width_and_maximum() {
+        let mut projection = ShortProjection::new(0, 12).unwrap();
+        for (position, value) in [(3, 2), (4, 8), (5, 10), (6, 10), (7, 10), (8, 5), (9, 3)] {
+            projection.increment(position, value);
+        }
+        let refinement = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let request = PeakConstructionRequest::new(4, 7, false, 4, 4, 0);
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        let candidate = projection
+            .construct_peak_candidate(request, params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(candidate.raw_start, 4);
+        assert_eq!(candidate.raw_stop, 7);
+        assert_eq!(candidate.start, 4);
+        assert_eq!(candidate.stop, 7);
+        assert_eq!(candidate.maximum_value, 10);
+        assert_eq!(candidate.left.abscissa, 4);
+        assert_eq!(candidate.right.abscissa, 7);
+
+        assert_eq!(
+            projection
+                .construct_peak_candidate(
+                    request,
+                    PeakConstructionParams::new(refinement, 3).unwrap(),
+                )
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn peak_construction_abstains_on_missing_side_and_validates_width() {
+        let projection = ShortProjection::new(0, 9).unwrap();
+        let refinement = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        assert_eq!(
+            projection
+                .construct_peak_candidate(
+                    PeakConstructionRequest::new(2, 3, false, 3, 3, 0),
+                    params,
+                )
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            projection.construct_peak_candidate(
+                PeakConstructionRequest::new(-1, 3, false, 3, 3, 0),
+                params,
+            ),
+            Err(ProjectionError::InvalidPeakRange {
+                x_start: -1,
+                x_stop: 3,
+            })
+        );
+        assert_eq!(
+            PeakConstructionParams::new(refinement, 0),
+            Err(ProjectionError::InvalidMaximumBarWidth(0))
         );
     }
 
