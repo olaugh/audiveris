@@ -9,8 +9,11 @@ use audiveris_image::{
     adaptive,
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
     chamfer::ChamferDistance,
+    cluster_coordinator::{RecursiveCombSnapshot, include_from_combs},
+    cluster_ownership::{ClusterOwnership, CombId},
     comb_builder::{CombFilament, popular_comb_size, retrieve_combs},
     filament::{FilamentError, StaffFilament},
+    filament_comb::FilamentComb,
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
     global_filter, ingest,
     line_cluster::{FilamentId, LineCluster},
@@ -31,7 +34,7 @@ use audiveris_image::{
 };
 use audiveris_testkit::CanonicalVectors;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env,
     error::Error,
     ffi::OsStr,
@@ -207,7 +210,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 54] = [
+const VECTOR_KEYS: [&str; 55] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -235,6 +238,7 @@ const VECTOR_KEYS: [&str; 54] = [
     "grid.line-cluster.synthetic=",
     "grid.line-cluster-index.synthetic=",
     "grid.line-cluster-lifecycle.synthetic=",
+    "grid.line-cluster-recursive.synthetic=",
     "grid.bar-column.synthetic=",
     "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
@@ -1151,6 +1155,139 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         .join(",");
     lines.push(format!(
         "grid.line-cluster-lifecycle.synthetic=merge:{merged_lifecycle_lines};renumber:{renumbered_positions};trimRemoved:{trimmed_ids};trimKept:{kept_trim_lines}"
+    ));
+
+    let coordinator_filaments = |count: u64| -> Result<
+        (ClusterOwnership, BTreeMap<FilamentId, StaffFilament>),
+        Box<dyn Error>,
+    > {
+        let count = usize::try_from(count)?;
+        let mut table = RunTable::new(Orientation::Horizontal, 160, (count * 3) + 2)?;
+        for index in 0..count {
+            table.add_run((index * 3) + 1, Run::new(index * 20, 18))?;
+        }
+        let mut ownership = ClusterOwnership::new();
+        let mut filaments = BTreeMap::new();
+        for (index, section) in build_sections(&table, JunctionPolicy::All)
+            .into_iter()
+            .enumerate()
+        {
+            let mut filament = StaffFilament::new(10)?;
+            filament.add_section(section)?;
+            let filament_id = FilamentId::new(u64::try_from(index + 1)?);
+            ownership.register_filament(filament_id, &filament)?;
+            filaments.insert(filament_id, filament);
+        }
+        Ok((ownership, filaments))
+    };
+    let add_coordinator_comb = |ownership: &mut ClusterOwnership,
+                                snapshots: &mut BTreeMap<CombId, RecursiveCombSnapshot>,
+                                id: u64,
+                                column: i32,
+                                members: &[u64]|
+     -> Result<(), Box<dyn Error>> {
+        let mut comb = FilamentComb::new(column);
+        for (index, member) in members.iter().copied().enumerate() {
+            comb.append_root(usize::try_from(member)?, (index * 10) as f64)?;
+        }
+        let comb_id = CombId::new(id);
+        ownership.register_comb(comb_id, &comb)?;
+        snapshots.insert(comb_id, RecursiveCombSnapshot::from_comb(&comb));
+        Ok(())
+    };
+
+    let (mut cycle_ownership, cycle_filaments) = coordinator_filaments(3)?;
+    let mut cycle_combs = BTreeMap::new();
+    add_coordinator_comb(&mut cycle_ownership, &mut cycle_combs, 1, 1, &[1, 2])?;
+    add_coordinator_comb(&mut cycle_ownership, &mut cycle_combs, 2, 2, &[2, 3])?;
+    add_coordinator_comb(&mut cycle_ownership, &mut cycle_combs, 3, 3, &[3, 1])?;
+    let cycle_seed = FilamentId::new(1);
+    let cycle_cluster_id = cycle_ownership.register_cluster(cycle_seed)?;
+    let mut cycle_clusters = BTreeMap::from([(
+        cycle_cluster_id,
+        LineCluster::new(10, cycle_seed, cycle_filaments[&cycle_seed].clone())?,
+    )]);
+    include_from_combs(
+        &mut cycle_ownership,
+        &mut cycle_clusters,
+        &cycle_filaments,
+        &mut cycle_combs,
+        cycle_cluster_id,
+        cycle_seed,
+        0,
+    )?;
+    let cycle_processed = cycle_combs
+        .values()
+        .map(|comb| comb.is_processed().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let cycle_lines = cycle_clusters[&cycle_cluster_id]
+        .lines()
+        .map(|(position, line)| format!("{position}-{}", line.primary_id().value()))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let (mut collision_ownership, collision_filaments) = coordinator_filaments(4)?;
+    let one = FilamentId::new(1);
+    let two = FilamentId::new(2);
+    let three = FilamentId::new(3);
+    let four = FilamentId::new(4);
+    let collision_destination = collision_ownership.register_cluster(one)?;
+    collision_ownership.assign_filament(four, collision_destination, 1)?;
+    let mut collision_destination_value =
+        LineCluster::new(10, one, collision_filaments[&one].clone())?;
+    collision_destination_value.include_line(1, four, collision_filaments[&four].clone())?;
+    let collision_swallowed = collision_ownership.register_cluster(two)?;
+    collision_ownership.assign_filament(three, collision_swallowed, 1)?;
+    let mut collision_swallowed_value =
+        LineCluster::new(10, two, collision_filaments[&two].clone())?;
+    collision_swallowed_value.include_line(1, three, collision_filaments[&three].clone())?;
+    let mut collision_clusters = BTreeMap::from([
+        (collision_destination, collision_destination_value),
+        (collision_swallowed, collision_swallowed_value),
+    ]);
+    let mut collision_combs = BTreeMap::new();
+    add_coordinator_comb(
+        &mut collision_ownership,
+        &mut collision_combs,
+        1,
+        1,
+        &[1, 2],
+    )?;
+    add_coordinator_comb(
+        &mut collision_ownership,
+        &mut collision_combs,
+        2,
+        1,
+        &[2, 3],
+    )?;
+    include_from_combs(
+        &mut collision_ownership,
+        &mut collision_clusters,
+        &collision_filaments,
+        &mut collision_combs,
+        collision_destination,
+        one,
+        0,
+    )?;
+    let collision_lines = collision_clusters[&collision_destination]
+        .lines()
+        .map(|(position, line)| format!("{position}-{}", line.primary_id().value()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let collision_processed = collision_combs
+        .values()
+        .map(|comb| comb.is_processed().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let cluster_merged =
+        collision_ownership.cluster_parent(collision_swallowed)? == Some(collision_destination);
+    let filament_parent = collision_ownership
+        .filament_parent(two)?
+        .ok_or("collision filament was not absorbed")?
+        .value();
+    lines.push(format!(
+        "grid.line-cluster-recursive.synthetic=cycleProcessed:{cycle_processed};cycleLines:{cycle_lines};clusterMerged:{cluster_merged};filamentParent:{filament_parent};collisionLines:{collision_lines};collisionProcessed:{collision_processed}"
     ));
     let staff_ids = [4, 5, 6].map(StaffId::new);
     let top_peak = BarPeak::new(PeakId::new(1), staff_ids[0], 2.0, 10.5, false, true)?;

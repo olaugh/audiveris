@@ -767,6 +767,80 @@ public final class RustParityProbe
                         + ";trimRemoved:" + String.join(",", trimmedIds)
                         + ";trimKept:" + String.join(",", keptTrimLines));
 
+        List<StaffFilament> cycleFilaments = List.of(
+                staffFilament(0, 1, 18, 10),
+                staffFilament(20, 4, 18, 10),
+                staffFilament(40, 7, 18, 10));
+        FilamentComb cycleComb1 = new FilamentComb(1);
+        cycleComb1.append(cycleFilaments.get(0), 0.0);
+        cycleComb1.append(cycleFilaments.get(1), 10.0);
+        FilamentComb cycleComb2 = new FilamentComb(2);
+        cycleComb2.append(cycleFilaments.get(1), 0.0);
+        cycleComb2.append(cycleFilaments.get(2), 10.0);
+        FilamentComb cycleComb3 = new FilamentComb(3);
+        cycleComb3.append(cycleFilaments.get(2), 0.0);
+        cycleComb3.append(cycleFilaments.get(0), 10.0);
+        LineCluster cycleCluster = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                cycleFilaments.get(0));
+        List<String> cycleLines = new ArrayList<>();
+        for (StaffFilament cycleLine : cycleCluster.getLines()) {
+            cycleLines.add(cycleLine.getClusterPos() + "-"
+                    + (cycleFilaments.indexOf(cycleLine) + 1));
+        }
+
+        List<StaffFilament> collisionFilaments = List.of(
+                staffFilament(0, 1, 18, 10),
+                staffFilament(20, 4, 18, 10),
+                staffFilament(40, 7, 18, 10),
+                staffFilament(60, 10, 18, 10));
+        LineCluster collisionDestination = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                collisionFilaments.get(0));
+        collisionDestination.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                collisionFilaments.get(3)), 1);
+        LineCluster collisionSwallowed = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                collisionFilaments.get(1));
+        collisionSwallowed.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                collisionFilaments.get(2)), 1);
+        FilamentComb collisionComb1 = new FilamentComb(1);
+        collisionComb1.append(collisionFilaments.get(0), 0.0);
+        collisionComb1.append(collisionFilaments.get(1), 10.0);
+        FilamentComb collisionComb2 = new FilamentComb(1);
+        collisionComb2.append(collisionFilaments.get(1), 0.0);
+        collisionComb2.append(collisionFilaments.get(2), 10.0);
+        Method includeCluster = LineCluster.class.getDeclaredMethod(
+                "include",
+                StaffFilament.class,
+                int.class);
+        includeCluster.setAccessible(true);
+        includeCluster.invoke(collisionDestination, collisionFilaments.get(0), 0);
+        List<String> collisionLines = new ArrayList<>();
+        for (StaffFilament collisionLine : collisionDestination.getLines()) {
+            collisionLines.add(collisionLine.getClusterPos() + "-"
+                    + (collisionFilaments.indexOf(collisionLine) + 1));
+        }
+        System.out.println(
+                "grid.line-cluster-recursive.synthetic=cycleProcessed:"
+                        + cycleComb1.isProcessed() + "," + cycleComb2.isProcessed() + ","
+                        + cycleComb3.isProcessed()
+                        + ";cycleLines:" + String.join(",", cycleLines)
+                        + ";clusterMerged:"
+                        + (collisionSwallowed.getAncestor() == collisionDestination)
+                        + ";filamentParent:"
+                        + (collisionFilaments.indexOf(collisionFilaments.get(1).getAncestor()) + 1)
+                        + ";collisionLines:" + String.join(",", collisionLines)
+                        + ";collisionProcessed:" + collisionComb1.isProcessed() + ","
+                        + collisionComb2.isProcessed());
+
         Book columnBook = new Book(Path.of("bar-column.synthetic"));
         SheetStub columnStub = new SheetStub(columnBook, 1);
         columnBook.addStub(columnStub);
