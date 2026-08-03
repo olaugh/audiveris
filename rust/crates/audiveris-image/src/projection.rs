@@ -11,7 +11,9 @@ use std::{error::Error, fmt};
 
 use crate::bar_column::StaffId;
 use crate::run_table::FOREGROUND;
-use crate::staff_peak::{HorizontalSide, StaffPeak, StaffPeakError, StaffVerticalImpacts};
+use crate::staff_peak::{
+    HorizontalSide, StaffPeak, StaffPeakError, StaffPeakKey, StaffVerticalImpacts,
+};
 
 const MINIMUM_STAFF_PEAK_GRADE: f64 = 0.08;
 
@@ -164,6 +166,13 @@ pub struct NeutralStaffProjectorResult {
 pub struct LinesRootTransition {
     pub staff_left: i32,
     pub clear_staff_left_end_at: Option<usize>,
+}
+
+/// Mutation-free decision produced by Java `StaffProjector.refineRightEnd`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RightEndTransition {
+    pub staff_right: i32,
+    pub set_staff_right_end_at: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1590,6 +1599,60 @@ impl StaffProjectionAccumulation {
     }
 }
 
+impl NeutralStaffProjectorResult {
+    /// Java `StaffProjector.getStartPeakIndex`.
+    #[must_use]
+    pub fn start_peak_index(&self) -> Option<usize> {
+        self.peaks
+            .iter()
+            .position(|peak| peak.is_staff_end(HorizontalSide::Left))
+    }
+
+    /// Java `StaffProjector.getLastPeak`.
+    #[must_use]
+    pub fn last_peak(&self) -> Option<&StaffPeak> {
+        self.peaks.last()
+    }
+
+    /// Vector-only portion of Java `StaffProjector.insertPeak`.
+    ///
+    /// `StaffPeakKey` is Java `StaffPeak.equals` identity. Graph insertion is
+    /// intentionally left to the caller.
+    pub fn insert_peak_before(
+        &mut self,
+        to_insert: StaffPeak,
+        before: StaffPeakKey,
+    ) -> Result<(), ProjectionError> {
+        let Some(index) = self.peaks.iter().position(|peak| peak.key() == before) else {
+            return Err(ProjectionError::MissingPeakAnchor(before));
+        };
+        self.peaks.insert(index, to_insert);
+        Ok(())
+    }
+
+    /// Vector-only portion of Java `StaffProjector.removePeak`.
+    ///
+    /// Java removes the first equal peak and silently ignores a missing one.
+    pub fn remove_peak(&mut self, key: StaffPeakKey) -> Option<StaffPeak> {
+        self.peaks
+            .iter()
+            .position(|peak| peak.key() == key)
+            .map(|index| self.peaks.remove(index))
+    }
+
+    /// Java `StaffProjector.removePeaks`, preserving collection order.
+    pub fn remove_peaks(&mut self, keys: &[StaffPeakKey]) -> Vec<StaffPeak> {
+        keys.iter()
+            .filter_map(|key| self.remove_peak(*key))
+            .collect()
+    }
+
+    /// Neutral portion of Java `StaffProjector.setBracePeak`.
+    pub fn set_brace_candidate(&mut self, candidate: Option<ProjectionBraceCandidate>) {
+        self.brace_candidate = candidate;
+    }
+}
+
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
 #[must_use]
 pub fn select_blank(
@@ -1662,6 +1725,63 @@ pub fn check_lines_root_transition(
     }
 }
 
+/// Exact decision kernel of Java `StaffProjector.refineRightEnd`.
+///
+/// The caller writes `staff_right` to its `Staff` and, when requested, marks
+/// the indexed graph-owned peak as `STAFF_RIGHT_END`.
+#[must_use]
+pub fn refine_right_end_transition(
+    peaks: &[StaffPeak],
+    blanks: &[ProjectionBlank],
+    lines_right: i32,
+    sheet_right: i32,
+    minimum_small_blank_width: i32,
+    maximum_right_extremum: i32,
+) -> RightEndTransition {
+    let mut staff_end = lines_right;
+    let mut end_peak = None;
+    if let Some((index, peak)) = peaks
+        .len()
+        .checked_sub(1)
+        .map(|index| (index, &peaks[index]))
+    {
+        let peak_midpoint = peak.start().wrapping_add(peak.stop()) / 2;
+        if peak_midpoint.wrapping_sub(lines_right) >= 0 {
+            staff_end = peak.stop();
+            end_peak = Some((index, peak));
+        }
+    }
+
+    let x_max = select_blank(
+        blanks,
+        HorizontalSide::Right,
+        staff_end,
+        minimum_small_blank_width,
+    )
+    .map_or(sheet_right, |blank| blank.start().wrapping_sub(1));
+
+    if let Some((index, peak)) = end_peak {
+        if x_max.wrapping_sub(peak.stop()) > maximum_right_extremum {
+            RightEndTransition {
+                staff_right: x_max,
+                set_staff_right_end_at: None,
+            }
+        } else {
+            // Java deliberately uses unsigned `>>> 1` in this branch.
+            let midpoint = (peak.start().wrapping_add(peak.stop()) as u32 >> 1) as i32;
+            RightEndTransition {
+                staff_right: midpoint,
+                set_staff_right_end_at: Some(index),
+            }
+        }
+    } else {
+        RightEndTransition {
+            staff_right: x_max,
+            set_staff_right_end_at: None,
+        }
+    }
+}
+
 /// Java `StaffProjector.hasStandardBlank`.
 #[must_use]
 pub fn has_blank_between(
@@ -1725,6 +1845,7 @@ pub enum ProjectionError {
         raw_stop: i32,
         maximum_right: i32,
     },
+    MissingPeakAnchor(StaffPeakKey),
 }
 
 impl fmt::Display for ProjectionError {
@@ -1795,6 +1916,13 @@ impl fmt::Display for ProjectionError {
             } => write!(
                 formatter,
                 "invalid brace refinement start:{start} stop:{raw_stop} right:{maximum_right}",
+            ),
+            Self::MissingPeakAnchor(key) => write!(
+                formatter,
+                "peak insertion anchor staff:{} start:{} stop:{} is absent",
+                key.staff_id().value(),
+                key.start(),
+                key.stop(),
             ),
         }
     }
@@ -2120,6 +2248,119 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn neutral_result_peak_operations_preserve_java_key_and_list_order() {
+        let mut first = StaffPeak::new(StaffId::new(1), 0, 4, 10, 11).unwrap();
+        let mut last = StaffPeak::new(StaffId::new(1), 0, 4, 20, 21).unwrap();
+        last.set_staff_end(HorizontalSide::Left);
+        first.set_staff_end(HorizontalSide::Right);
+        let first_key = first.key();
+        let last_key = last.key();
+        let mut result = NeutralStaffProjectorResult {
+            projection: ShortProjection::new(0, 30).unwrap(),
+            derivative_threshold: 2,
+            all_blanks: Vec::new(),
+            peak_search_bounds: PeakSearchBounds {
+                x_min: 0,
+                x_max: 30,
+            },
+            peaks: vec![first, last],
+            brace_candidate: None,
+        };
+
+        assert_eq!(result.start_peak_index(), Some(1));
+        assert_eq!(result.last_peak().map(StaffPeak::key), Some(last_key));
+
+        let inserted = StaffPeak::new(StaffId::new(1), 0, 4, 15, 16).unwrap();
+        let inserted_key = inserted.key();
+        // A different value with the same Java equality key locates the anchor.
+        let equal_anchor = StaffPeak::new(StaffId::new(1), 9, 12, 20, 21).unwrap();
+        result
+            .insert_peak_before(inserted, equal_anchor.key())
+            .unwrap();
+        assert_eq!(
+            result
+                .peaks
+                .iter()
+                .map(StaffPeak::start)
+                .collect::<Vec<_>>(),
+            [10, 15, 20]
+        );
+        assert_eq!(result.start_peak_index(), Some(2));
+
+        let missing = StaffPeak::new(StaffId::new(1), 0, 4, 29, 30).unwrap();
+        let missing_key = missing.key();
+        assert_eq!(
+            result.insert_peak_before(missing, missing_key),
+            Err(ProjectionError::MissingPeakAnchor(missing_key))
+        );
+        assert_eq!(result.remove_peak(missing_key), None);
+        assert_eq!(
+            result
+                .remove_peaks(&[inserted_key, first_key])
+                .iter()
+                .map(StaffPeak::start)
+                .collect::<Vec<_>>(),
+            [15, 10]
+        );
+        assert_eq!(
+            result.peaks.iter().map(StaffPeak::key).collect::<Vec<_>>(),
+            [last_key]
+        );
+
+        let brace = ProjectionBraceCandidate {
+            raw_start: 2,
+            raw_stop: 3,
+            start: 1,
+            stop: 4,
+            search_right: 5,
+        };
+        result.set_brace_candidate(Some(brace));
+        assert_eq!(result.brace_candidate, Some(brace));
+    }
+
+    #[test]
+    fn right_end_transition_preserves_peak_blank_and_unsigned_midpoint_rules() {
+        let peak = StaffPeak::new(StaffId::new(1), 0, 4, 30, 32).unwrap();
+        let peaks = [peak];
+        let blanks = [ProjectionBlank {
+            start: 40,
+            stop: 50,
+        }];
+        assert_eq!(
+            refine_right_end_transition(&peaks, &blanks, 25, 99, 3, 6),
+            RightEndTransition {
+                staff_right: 39,
+                set_staff_right_end_at: None,
+            }
+        );
+        // The extremum comparison is strict, so an exact limit retains the
+        // peak and marks it as the right staff end.
+        assert_eq!(
+            refine_right_end_transition(&peaks, &blanks, 25, 99, 3, 7),
+            RightEndTransition {
+                staff_right: 31,
+                set_staff_right_end_at: Some(0),
+            }
+        );
+        assert_eq!(
+            refine_right_end_transition(&peaks, &blanks, 35, 99, 3, 7),
+            RightEndTransition {
+                staff_right: 39,
+                set_staff_right_end_at: None,
+            }
+        );
+
+        let negative = StaffPeak::new(StaffId::new(1), 0, 4, -4, -2).unwrap();
+        assert_eq!(
+            refine_right_end_transition(&[negative], &[], -4, 0, 1, 5),
+            RightEndTransition {
+                staff_right: 2_147_483_645,
+                set_staff_right_end_at: Some(0),
+            }
+        );
     }
 
     #[test]
