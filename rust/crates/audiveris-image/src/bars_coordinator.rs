@@ -207,6 +207,11 @@ impl BarsCoordinatorParameters {
             c_clef,
         })
     }
+
+    #[must_use]
+    pub const fn interline(self) -> i32 {
+        self.interline
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -52,6 +52,11 @@ pub trait PreparedStaffHandoffSource {
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff>;
 }
 
+pub trait PreparedStaffStage {
+    fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff>;
+    fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff>;
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProductionRetrieveLinesError<DownstreamError> {
     MissingHorizontalLag,
@@ -121,11 +126,22 @@ impl<Downstream> ProductionRetrieveLines<Downstream> {
     }
 }
 
-impl<Downstream, Vip> PreparedStaffHandoffSource
-    for HeadlessRasterGridBuilder<ProductionRetrieveLines<Downstream>, Vip>
+impl<Stages, Vip> PreparedStaffHandoffSource for HeadlessRasterGridBuilder<Stages, Vip>
+where
+    Stages: PreparedStaffStage,
 {
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
-        self.stages_mut().take_handoff()
+        self.stages_mut().take_prepared_staff_handoff()
+    }
+}
+
+impl<Downstream> PreparedStaffStage for ProductionRetrieveLines<Downstream> {
+    fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff> {
+        self.handoff.as_ref()
+    }
+
+    fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
+        self.take_handoff()
     }
 }
 

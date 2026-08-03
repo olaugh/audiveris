@@ -23,6 +23,7 @@ use audiveris_image::{
     line_short_sections::NoopVipSectionHook,
     lines_coordinator::StaffCandidateKind,
     peak_graph::{PeakEdgeId, PeakGraph},
+    prepared_bars::{PreparedBarsHandoff, PreparedBarsHandoffSource},
     prepared_lines::{PreparedStaffHandoff, PreparedStaffHandoffSource},
     raster_grid_builder::{RasterGridHandoff, RasterGridHandoffSource},
     run_table::{RunTable, RunTableError},
@@ -109,6 +110,33 @@ pub struct HeadlessGridSigState {
     /// Plans in the exact global `peakGraph.edgeSet()` iteration order.
     pub connections: Vec<HeadlessConnectionPlan>,
     pub connection_warnings: Vec<HeadlessConnectionWarning>,
+}
+
+impl HeadlessGridSigState {
+    pub fn install_prepared_bars_handoff(&mut self, handoff: PreparedBarsHandoff) {
+        self.systems = handoff
+            .systems
+            .into_iter()
+            .map(|system| HeadlessSystemSigState {
+                system_id: system.system_id,
+                sig: GridSig::default(),
+                vertical_plans: system.vertical_plans,
+                staff_peaks: system.staff_peaks,
+                maximum_group_gap: system.maximum_group_gap,
+                interline: system.interline,
+            })
+            .collect();
+        self.peak_graph = handoff.peak_graph;
+        self.connections = handoff
+            .connections
+            .into_iter()
+            .map(|connection| HeadlessConnectionPlan {
+                system_id: connection.system_id,
+                plan: connection.plan,
+            })
+            .collect();
+        self.connection_warnings.clear();
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -272,6 +300,7 @@ where
     pub build_outcome: Option<GridBuildOutcome<HeadlessBuildOtherError<Builder::OtherError>>>,
     raster_handoff: Option<fn(&mut Builder) -> Option<RasterGridHandoff>>,
     staff_handoff: Option<fn(&mut Builder) -> Option<PreparedStaffHandoff>>,
+    bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
     pub cleaner_finished: bool,
     pub step_finished: bool,
 }
@@ -289,6 +318,7 @@ where
             build_outcome: None,
             raster_handoff: None,
             staff_handoff: None,
+            bars_handoff: None,
             cleaner_finished: false,
             step_finished: false,
         }
@@ -313,6 +343,17 @@ where
         Builder: PreparedStaffHandoffSource,
     {
         self.staff_handoff = Some(Builder::take_prepared_staff_handoff);
+        self
+    }
+
+    /// Install production bar-system results before the existing SIG
+    /// promotion pass runs.
+    #[must_use]
+    pub fn with_prepared_bars_handoff(mut self) -> Self
+    where
+        Builder: PreparedBarsHandoffSource,
+    {
+        self.bars_handoff = Some(Builder::take_prepared_bars_handoff);
         self
     }
 
@@ -365,6 +406,7 @@ where
                         builder: &mut self.builder,
                         sig: &mut self.sheet.sig,
                         promotion_failure: &mut self.sheet.promotion_failure,
+                        bars_handoff: self.bars_handoff,
                     };
                     build_grid_info(&mut builder)
                 };
@@ -400,6 +442,7 @@ struct SigPromotingBuilder<'a, Builder> {
     builder: &'a mut Builder,
     sig: &'a mut HeadlessGridSigState,
     promotion_failure: &'a mut Option<HeadlessGridPromotionError>,
+    bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
 }
 
 impl<Builder> GridBuildExecutor for SigPromotingBuilder<'_, Builder>
@@ -416,7 +459,8 @@ where
         (),
         audiveris_image::grid_lifecycle::GridStageFailure<Self::StepError, Self::OtherError>,
     > {
-        self.builder
+        let result = self
+            .builder
             .run_stage(stage)
             .map_err(|failure| match failure {
                 audiveris_image::grid_lifecycle::GridStageFailure::Step(error) => {
@@ -427,13 +471,21 @@ where
                         HeadlessBuildOtherError::Builder(error),
                     )
                 }
-            })?;
+            });
         if stage == audiveris_image::grid_lifecycle::GridBuildStage::ProcessBars {
+            if let Some(extract) = self.bars_handoff
+                && let Some(handoff) = extract(self.builder)
+            {
+                self.sig.install_prepared_bars_handoff(handoff);
+            }
+            result?;
             promote_grid_sigs(self.sig).map_err(|error| {
                 audiveris_image::grid_lifecycle::GridStageFailure::Other(
                     HeadlessBuildOtherError::Promotion(error),
                 )
             })?;
+        } else {
+            result?;
         }
         Ok(())
     }
