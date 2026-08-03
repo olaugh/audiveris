@@ -24,6 +24,7 @@ pub mod grid_lifecycle;
 pub mod ingest;
 pub mod line_cluster;
 pub mod line_sections;
+pub mod line_short_sections;
 pub mod lines_coordinator;
 pub mod mask;
 pub mod median;
