@@ -15,7 +15,7 @@ use crate::{
         BarsLogicError, ConnectionInterPlan, VerticalInterPlan, extended_connection_peak_keys,
     },
     peak_graph::{PeakEdgeId, PeakGraph},
-    staff_peak::StaffPeakKey,
+    staff_peak::{StaffPeak, StaffPeakKey},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,6 +55,7 @@ pub enum GridSigNode {
 pub enum GridSigRelation {
     NoExclusion,
     BarConnectionSupport { grade: f64 },
+    BarGroup { gap_fraction: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,6 +69,11 @@ pub struct GridSigEdge {
 pub enum ConnectionPromotionFailure {
     MissingTopInter,
     MissingBottomInter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarGroupPromotionError {
+    MissingInter(StaffPeakKey),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +203,50 @@ impl GridSig {
         }
         Ok(warnings)
     }
+
+    /// Reproduce `BarsRetriever.groupBarlines` in staff/projector order.
+    ///
+    /// Braces and brackets are skipped without clearing the preceding ordinary
+    /// peak. Java has no per-staff catch here, so a missing promoted inter stops
+    /// immediately while previously inserted relations remain.
+    pub fn group_barlines(
+        &mut self,
+        staff_peaks: &[Vec<StaffPeak>],
+        maximum_gap: i32,
+        mut pixels_to_fraction: impl FnMut(i32) -> f64,
+    ) -> Result<(), BarGroupPromotionError> {
+        for peaks in staff_peaks {
+            let mut previous: Option<&StaffPeak> = None;
+            for peak in peaks {
+                if peak.is_brace() || peak.is_bracket() {
+                    continue;
+                }
+                if let Some(previous_peak) = previous {
+                    let gap = peak
+                        .start()
+                        .wrapping_sub(previous_peak.stop())
+                        .wrapping_sub(1);
+                    if gap <= maximum_gap {
+                        let source = self
+                            .inter_of(previous_peak.key())
+                            .ok_or(BarGroupPromotionError::MissingInter(previous_peak.key()))?;
+                        let target = self
+                            .inter_of(peak.key())
+                            .ok_or(BarGroupPromotionError::MissingInter(peak.key()))?;
+                        self.edges.push(GridSigEdge {
+                            source,
+                            target,
+                            relation: GridSigRelation::BarGroup {
+                                gap_fraction: pixels_to_fraction(gap),
+                            },
+                        });
+                    }
+                }
+                previous = Some(peak);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +369,54 @@ mod tests {
         );
         assert_eq!(sig.edges().len(), 1);
         assert_eq!(sig.nodes_in_order().count(), 2);
+    }
+
+    #[test]
+    fn bar_groups_skip_structural_peaks_without_reset_and_use_inclusive_gap() {
+        let first = peak(1, 10);
+        let mut bracket = peak(1, 12);
+        bracket.set(crate::staff_peak::StaffPeakAttribute::BracketMiddle);
+        let at_limit = peak(1, 14);
+        let beyond = peak(1, 19);
+        let mut sig = GridSig::default();
+        sig.promote_vertical_inters(&[
+            vertical_plan(&first),
+            vertical_plan(&bracket),
+            vertical_plan(&at_limit),
+            vertical_plan(&beyond),
+        ]);
+        sig.group_barlines(&[vec![first, bracket, at_limit, beyond]], 3, |gap| {
+            f64::from(gap) / 10.0
+        })
+        .unwrap();
+        let groups = sig
+            .edges()
+            .iter()
+            .filter_map(|edge| match edge.relation {
+                GridSigRelation::BarGroup { gap_fraction } => Some(gap_fraction),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(groups, [0.3]);
+    }
+
+    #[test]
+    fn missing_group_inter_stops_after_retaining_prior_group_edges() {
+        let first = peak(1, 10);
+        let second = peak(1, 12);
+        let missing = peak(1, 14);
+        let mut sig = GridSig::default();
+        sig.promote_vertical_inters(&[vertical_plan(&first), vertical_plan(&second)]);
+        assert_eq!(
+            sig.group_barlines(&[vec![first, second, missing.clone()]], 3, f64::from),
+            Err(BarGroupPromotionError::MissingInter(missing.key()))
+        );
+        assert_eq!(
+            sig.edges()
+                .iter()
+                .filter(|edge| matches!(edge.relation, GridSigRelation::BarGroup { .. }))
+                .count(),
+            1
+        );
     }
 }
