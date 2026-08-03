@@ -315,6 +315,53 @@ pub struct StaffProjectorScaleParameters {
     pub gap_threshold: i32,
 }
 
+/// Remaining configurable Java constants used by neutral
+/// `StaffProjector.process` orchestration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffProjectorProcessTuning {
+    pub top_derivative_count: usize,
+    pub minimum_derivative_ratio: f64,
+    pub blank_threshold_ratio: f64,
+    pub chunk_threshold_ratio: f64,
+    pub minimum_white_ratio_beyond_serif: f64,
+}
+
+impl StaffProjectorProcessTuning {
+    /// Values declared by Java `StaffProjector.Constants`.
+    #[must_use]
+    pub const fn java_defaults() -> Self {
+        Self {
+            top_derivative_count: 5,
+            minimum_derivative_ratio: 0.3,
+            blank_threshold_ratio: 0.5,
+            chunk_threshold_ratio: 1.2,
+            minimum_white_ratio_beyond_serif: 0.3,
+        }
+    }
+}
+
+/// Complete neutral facts needed to run Java `StaffProjector.process`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffProjectorProcessRequest<'a> {
+    pub staff_id: StaffId,
+    pub staff_left: i32,
+    pub staff_right: i32,
+    pub line_thicknesses: &'a [f64],
+    pub staff_line_count: i32,
+    pub foreground_thickness: i32,
+    pub scale: StaffProjectorScaleRequest,
+    pub tuning: StaffProjectorProcessTuning,
+}
+
+/// Neutral process result with the exact resolved parameters retained for
+/// downstream diagnostics and orchestration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StaffProjectorProcessOutput {
+    pub result: NeutralStaffProjectorResult,
+    pub scale_parameters: StaffProjectorScaleParameters,
+    pub line_thresholds: StaffLineThresholds,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1948,6 +1995,99 @@ pub fn staff_projector_scale_parameters(
     }
 }
 
+/// Mutation-free orchestration of Java `StaffProjector.process`.
+///
+/// The two ordinate callbacks model the lines selected by
+/// `computeProjection`; `core_geometry_at` resolves the source-owned first,
+/// middle, and last staff lines for candidate validation. The returned peaks
+/// have grades and geometry but no graph membership, semantic attributes, or
+/// deskewed centers.
+pub fn process_staff_projection<First, Last, Geometry>(
+    raster_width: usize,
+    raster_height: usize,
+    pixels: &[u8],
+    request: StaffProjectorProcessRequest<'_>,
+    first_ordinate_at: First,
+    last_ordinate_at: Last,
+    core_geometry_at: Geometry,
+) -> Result<StaffProjectorProcessOutput, ProjectionError>
+where
+    First: FnMut(i32) -> i32,
+    Last: FnMut(i32) -> i32,
+    Geometry: FnMut(i32) -> PeakCoreGeometry,
+{
+    let scale_parameters = staff_projector_scale_parameters(request.scale);
+    let line_thresholds = staff_line_thresholds(StaffLineThresholdRequest {
+        line_thicknesses: request.line_thicknesses,
+        staff_line_count: request.staff_line_count,
+        foreground_thickness: request.foreground_thickness,
+        specific_interline: request.scale.staff_specific_interline,
+        blank_threshold_ratio: request.tuning.blank_threshold_ratio,
+        chunk_threshold_ratio: request.tuning.chunk_threshold_ratio,
+    });
+    let accumulation = ShortProjection::from_staff_raster(
+        raster_width,
+        raster_height,
+        pixels,
+        StaffProjectionRequest::new(
+            request.staff_left,
+            request.staff_right,
+            scale_parameters.staff_abscissa_margin,
+        ),
+        first_ordinate_at,
+        last_ordinate_at,
+    )?;
+    let refinement = PeakRefinementParams::new(
+        scale_parameters.bar_threshold,
+        line_thresholds.lines_threshold,
+        line_thresholds.chunk_threshold,
+        scale_parameters.bar_refine_dx,
+        scale_parameters.chunk_width,
+    )?;
+    let construction = PeakConstructionParams::new(refinement, scale_parameters.maximum_bar_width)?;
+    let core = PeakCoreParams::new(
+        scale_parameters.gap_threshold,
+        request.tuning.minimum_white_ratio_beyond_serif,
+    )?;
+    let staff_height_interlines = if request.scale.is_one_line_staff {
+        4
+    } else {
+        request.staff_line_count.wrapping_sub(1)
+    };
+    let total_height = request
+        .scale
+        .staff_specific_interline
+        .wrapping_mul(staff_height_interlines);
+    let result = accumulation.finish_neutral(
+        raster_width,
+        raster_height,
+        pixels,
+        NeutralStaffProjectorRequest {
+            staff_id: request.staff_id,
+            staff_left: request.staff_left,
+            staff_right: request.staff_right,
+            blank_threshold: line_thresholds.blank_threshold,
+            minimum_wide_blank_width: scale_parameters.minimum_wide_blank_width,
+            top_derivative_count: request.tuning.top_derivative_count,
+            minimum_derivative_ratio: request.tuning.minimum_derivative_ratio,
+            use_one_line_half_mode: scale_parameters.use_one_line_half_mode,
+            is_one_line_staff: request.scale.is_one_line_staff,
+            bar_threshold: scale_parameters.bar_threshold,
+            total_height,
+            peak_construction: construction,
+            peak_core: core,
+            brace_search: None,
+        },
+        core_geometry_at,
+    )?;
+
+    Ok(StaffProjectorProcessOutput {
+        result,
+        scale_parameters,
+        line_thresholds,
+    })
+}
+
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
 #[must_use]
 pub fn select_blank(
@@ -2823,6 +2963,87 @@ mod tests {
             }
         });
         assert_eq!(fallback_one_line.bar_threshold, 0);
+    }
+
+    #[test]
+    fn process_orchestration_runs_raster_through_neutral_graded_peaks() {
+        let width = 20;
+        let height = 5;
+        let mut pixels = vec![255; width * height];
+        for x in 0..width {
+            pixels[x] = FOREGROUND;
+            pixels[(height - 1) * width + x] = FOREGROUND;
+        }
+        for x in 5..=6 {
+            for y in 0..height {
+                pixels[y * width + x] = FOREGROUND;
+            }
+        }
+        let ratios = StaffProjectorScaleRatios {
+            staff_abscissa_margin: 20.0,
+            bar_refine_dx: 2.0,
+            bar_threshold: 4.0,
+            brace_threshold: 4.0,
+            gap_threshold: 1.0,
+            minimum_wide_blank_width: 2.0,
+            maximum_bar_width: 4.0,
+            chunk_width: 1.0,
+            ..StaffProjectorScaleRatios::java_defaults()
+        };
+        let output = process_staff_projection(
+            width,
+            height,
+            &pixels,
+            StaffProjectorProcessRequest {
+                staff_id: StaffId::new(1),
+                staff_left: 5,
+                staff_right: 6,
+                line_thicknesses: &[1.0, 1.0],
+                staff_line_count: 6,
+                foreground_thickness: 2,
+                scale: StaffProjectorScaleRequest {
+                    large_interline: 1,
+                    staff_specific_interline: 1,
+                    is_one_line_staff: false,
+                    barline_height: BarlineHeightSpec::Four,
+                    ratios,
+                },
+                tuning: StaffProjectorProcessTuning {
+                    top_derivative_count: 2,
+                    minimum_derivative_ratio: 1.0,
+                    blank_threshold_ratio: 1.21,
+                    chunk_threshold_ratio: 2.0,
+                    minimum_white_ratio_beyond_serif: 0.3,
+                },
+            },
+            |_| 0,
+            |_| 5,
+            |x| {
+                assert_eq!(x, 5);
+                PeakCoreGeometry::new(0, 4, 2)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(output.scale_parameters.bar_threshold, 4);
+        assert_eq!(output.line_thresholds.blank_threshold, 2);
+        assert_eq!(output.line_thresholds.lines_threshold, 2);
+        assert_eq!(output.line_thresholds.chunk_threshold, 4);
+        assert_eq!(output.result.derivative_threshold, 3);
+        assert_eq!(
+            output.result.peak_search_bounds,
+            PeakSearchBounds { x_min: 4, x_max: 7 }
+        );
+        assert_eq!(output.result.peaks.len(), 1);
+        assert_eq!(
+            (
+                output.result.peaks[0].start(),
+                output.result.peaks[0].stop(),
+                output.result.peaks[0].top(),
+                output.result.peaks[0].bottom(),
+            ),
+            (5, 6, 0, 4)
+        );
     }
 
     #[test]
