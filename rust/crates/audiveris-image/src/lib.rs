@@ -41,6 +41,7 @@ pub mod section_tally;
 pub mod staff_line_cleaner;
 pub mod staff_pattern;
 pub mod staff_peak;
+pub mod staff_simplify;
 pub mod target_layout;
 pub mod target_line;
 pub mod watershed;
