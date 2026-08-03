@@ -85,6 +85,11 @@ impl ClusterRetrievalParameters {
             one_line_vertical_margin,
         })
     }
+
+    #[must_use]
+    pub const fn interline(&self) -> usize {
+        self.interline
+    }
 }
 
 /// Stable observable partitions produced by the complete neutral pipeline.

@@ -21,6 +21,7 @@ pub mod global_filter;
 pub mod ingest;
 pub mod line_cluster;
 pub mod line_sections;
+pub mod lines_coordinator;
 pub mod mask;
 pub mod median;
 pub mod part_group;
