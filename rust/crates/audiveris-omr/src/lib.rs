@@ -23,6 +23,7 @@ pub mod grid_executor;
 pub mod raw_projector_adapter;
 pub mod score_update;
 pub mod sheet_xml;
+pub mod system_grouping;
 pub mod xml;
 
 use sheet_xml::{SheetXml, SheetXmlError};

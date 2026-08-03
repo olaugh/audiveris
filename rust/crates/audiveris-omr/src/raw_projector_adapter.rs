@@ -50,6 +50,10 @@ use audiveris_image::{
 };
 
 use crate::grid_executor::HeadlessSkew;
+use crate::system_grouping::{
+    SystemGroupingError, SystemGroupingParameters, SystemGroupingReport, SystemGroupingStaff,
+    group_systems_and_build_columns,
+};
 
 /// Borrowed live sheet raster. Zero is foreground, as in Audiveris run tables.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +138,12 @@ pub enum RawSystemGroupingBoundary {
         retained_edge_count: usize,
         connection_count: usize,
     },
+    /// Java system ownership, cross-system purge, and initial bar columns are
+    /// complete for every retained staff.
+    CompleteSystems {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
 }
 
 /// Ordered peak graph plus the system-grouping boundary reached from it.
@@ -198,7 +208,21 @@ pub struct RawSplitBridgeParameters {
 #[derive(Clone, Debug)]
 pub struct RawSplitGraphBridge {
     pub connections: RawConnectionGraphBridge,
+    /// Exact projector order after any merged-peak replacements.
+    pub staffs: Vec<AlignmentStaff>,
     pub splits: SplitBuildReport,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawSystemGroupingParameters {
+    pub splits: RawSplitBridgeParameters,
+    pub maximum_first_connection_x_offset: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawSystemGraphBridge {
+    pub split: RawSplitGraphBridge,
+    pub systems: SystemGroupingReport,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -231,6 +255,7 @@ pub enum RawProjectorAdapterError {
     Alignments(AlignmentBuildError),
     Connections(ConnectionBuildError),
     Splits(SplitBuildError),
+    Systems(SystemGroupingError),
     BarColumns(BarsLogicError),
 }
 
@@ -297,6 +322,7 @@ impl fmt::Display for RawProjectorAdapterError {
                 write!(formatter, "bar-connection discovery failed: {source}")
             }
             Self::Splits(source) => write!(formatter, "merged bar-peak splitting failed: {source}"),
+            Self::Systems(source) => write!(formatter, "system grouping failed: {source}"),
             Self::BarColumns(source) => {
                 write!(formatter, "bar-column construction failed: {source}")
             }
@@ -314,6 +340,7 @@ impl Error for RawProjectorAdapterError {
             Self::Alignments(source) => Some(source),
             Self::Connections(source) => Some(source),
             Self::Splits(source) => Some(source),
+            Self::Systems(source) => Some(source),
             Self::BarColumns(source) => Some(source),
             _ => None,
         }
@@ -619,8 +646,72 @@ pub fn bridge_raw_projectors_through_splits(
     }
     Ok(RawSplitGraphBridge {
         connections,
+        staffs,
         splits,
     })
+}
+
+/// Continue through Java system-top inference, `createSystems`, cross-system
+/// alignment purge, and the immediately following initial column build.
+#[allow(clippy::too_many_arguments)]
+pub fn bridge_raw_projectors_through_systems(
+    handoff: &PreparedStaffHandoff,
+    preparation: &RawProjectorPreparation,
+    raster: RawProjectorRaster<'_>,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    skew: &HeadlessSkew,
+    parameters: RawSystemGroupingParameters,
+) -> Result<RawSystemGraphBridge, RawProjectorAdapterError> {
+    let mut split = bridge_raw_projectors_through_splits(
+        handoff,
+        preparation,
+        raster,
+        vertical_sections,
+        horizontal_sections,
+        skew,
+        parameters.splits,
+    )?;
+    let staffs = split
+        .staffs
+        .iter()
+        .map(|geometry| {
+            let source = handoff
+                .staffs
+                .iter()
+                .find(|staff| staff.id == geometry.staff_id.value())
+                .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                    geometry.staff_id.value(),
+                ))?;
+            Ok(SystemGroupingStaff {
+                geometry: geometry.clone(),
+                kind: source.kind,
+            })
+        })
+        .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+    let mut systems = SystemGroupingReport::default();
+    group_systems_and_build_columns(
+        &mut split.connections.alignments.bars.projectors.graph,
+        &staffs,
+        SystemGroupingParameters {
+            maximum_first_connection_x_offset: parameters.maximum_first_connection_x_offset,
+            maximum_column_dx: parameters.splits.connections.alignments.maximum_column_dx,
+        },
+        &mut systems,
+    )
+    .map_err(RawProjectorAdapterError::Systems)?;
+    split.connections.alignments.bars.projectors.grouping =
+        RawSystemGroupingBoundary::CompleteSystems {
+            staff_ids: split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .retained_staff_ids
+                .clone(),
+            system_count: systems.systems.len(),
+        };
+    Ok(RawSystemGraphBridge { split, systems })
 }
 
 fn alignment_staffs(
@@ -1181,6 +1272,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsSystemGrouping { .. } => {
                 panic!("one retained staff does not require system grouping")
             }
+            RawSystemGroupingBoundary::CompleteSystems { .. } => {
+                panic!("one retained staff uses its earlier direct completion")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -1471,6 +1565,51 @@ mod tests {
                 ref staff_ids,
                 retained_edge_count: 1,
                 connection_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let systems = bridge_raw_projectors_through_systems(
+            &handoff,
+            &prepared,
+            raster,
+            &vertical_sections,
+            &[],
+            &skew,
+            RawSystemGroupingParameters {
+                splits: RawSplitBridgeParameters {
+                    connections: RawConnectionBridgeParameters {
+                        alignments: RawAlignmentBridgeParameters {
+                            sticks: BarStickParameters {
+                                vertical_extension: 0,
+                                minimum_core_section_length: 3,
+                                probe_width: 1,
+                                minimum_probe_weight: 1,
+                                segment_length: 3,
+                                minimum_mean_curvature: 0.0,
+                                first_filament_id: 1,
+                            },
+                            maximum_alignment_slope: 0.06,
+                            maximum_alignment_delta_width: 1,
+                            maximum_column_dx: 2,
+                        },
+                        maximum_connection_gap: 1,
+                        maximum_connection_white_ratio: 0.25,
+                    },
+                    maximum_close_gap: 2,
+                    maximum_width_ratio: 0.5,
+                },
+                maximum_first_connection_x_offset: 20,
+            },
+        )
+        .unwrap();
+        assert_eq!(systems.systems.systems.len(), 1);
+        assert_eq!(systems.systems.systems[0].staff_ids.len(), 2);
+        assert_eq!(systems.systems.systems[0].columns.len(), 1);
+        assert!(matches!(
+            systems.split.connections.alignments.bars.projectors.grouping,
+            RawSystemGroupingBoundary::CompleteSystems {
+                ref staff_ids,
+                system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
         ));
     }
