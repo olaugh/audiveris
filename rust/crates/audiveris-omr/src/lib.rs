@@ -30,6 +30,7 @@ pub mod cue_beams_step;
 pub mod curves_step;
 pub mod grid_executor;
 pub mod header_builder;
+pub mod header_time_builder;
 pub mod header_time_column;
 pub mod headers_step;
 pub mod heads_step;
