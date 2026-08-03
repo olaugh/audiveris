@@ -18,6 +18,8 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HeadlessHeaderStaff {
     pub id: usize,
+    /// Owning Java `Part`; equal IDs denote a multi-staff part.
+    pub part_id: usize,
     pub tablature: bool,
     pub one_line: bool,
     /// Staff-scale conversion of Java's 4.5-interline clef browse limit.
@@ -38,6 +40,7 @@ impl HeadlessHeaderStaff {
     pub fn new(id: usize) -> Self {
         Self {
             id,
+            part_id: id,
             tablature: false,
             one_line: false,
             maximum_clef_end: 0,

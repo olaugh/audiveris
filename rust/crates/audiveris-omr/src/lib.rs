@@ -27,6 +27,7 @@ pub mod clef_column;
 pub mod grid_executor;
 pub mod header_builder;
 pub mod headers_step;
+pub mod key_column;
 pub mod raw_projector_adapter;
 pub mod score_update;
 pub mod sheet_xml;
