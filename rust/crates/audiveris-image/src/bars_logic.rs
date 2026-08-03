@@ -68,6 +68,120 @@ pub fn peak_groups(peaks: &[StaffPeak], maximum_double_bar_gap: i32) -> Vec<Vec<
     groups
 }
 
+/// Width class assigned by Java `BarsRetriever.partitionWidths`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeakWidthClass {
+    Thin,
+    Thick,
+}
+
+/// Stable peak-key result of Java `groupBarPeaks` plus `partitionWidths`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakWidthAssignment {
+    pub peak: StaffPeakKey,
+    pub class: PeakWidthClass,
+}
+
+/// Dispatch structural peaks, isolated bars, and adjacent bar groups, then
+/// reproduce Java's within-group thin/thick width partition.
+///
+/// Each inner slice is one staff's already abscissa-ordered peak sequence.
+/// Braces and brackets terminate a group and are not classified. Isolated
+/// bars are always thin. A heterogeneous group splits at the midpoint, with
+/// exact midpoint ties classified thin, as in Java.
+#[must_use]
+pub fn classify_bar_peak_widths(
+    staff_peaks: &[Vec<StaffPeak>],
+    maximum_double_bar_gap: i32,
+    interline: i32,
+    minimum_normalized_width_delta: f64,
+) -> Vec<PeakWidthAssignment> {
+    let mut isolated = Vec::new();
+    let mut groups: Vec<Vec<&StaffPeak>> = Vec::new();
+
+    for peaks in staff_peaks {
+        let mut group_index = None;
+        let mut previous: Option<&StaffPeak> = None;
+
+        for peak in peaks {
+            if peak.is_brace() || peak.is_bracket() {
+                if group_index.is_none() {
+                    if let Some(previous) = previous {
+                        isolated.push(previous);
+                    }
+                }
+                group_index = None;
+                previous = None;
+                continue;
+            }
+
+            if let Some(previous_peak) = previous {
+                let gap = peak
+                    .start()
+                    .wrapping_sub(previous_peak.stop())
+                    .wrapping_sub(1);
+                if gap <= maximum_double_bar_gap {
+                    let index = *group_index.get_or_insert_with(|| {
+                        groups.push(vec![previous_peak]);
+                        groups.len() - 1
+                    });
+                    groups[index].push(peak);
+                } else if group_index.is_some() {
+                    group_index = None;
+                } else {
+                    isolated.push(previous_peak);
+                }
+            }
+            previous = Some(peak);
+        }
+
+        if group_index.is_none() {
+            if let Some(previous) = previous {
+                isolated.push(previous);
+            }
+        }
+    }
+
+    let mut assignments = isolated
+        .into_iter()
+        .map(|peak| PeakWidthAssignment {
+            peak: peak.key(),
+            class: PeakWidthClass::Thin,
+        })
+        .collect::<Vec<_>>();
+
+    for group in groups {
+        let min_width = group
+            .iter()
+            .map(|peak| peak.width())
+            .min()
+            .unwrap_or(i32::MAX);
+        let max_width = group
+            .iter()
+            .map(|peak| peak.width())
+            .max()
+            .unwrap_or(i32::MIN);
+        let delta = max_width.wrapping_sub(min_width);
+        let heterogeneous =
+            f64::from(delta) / f64::from(interline) >= minimum_normalized_width_delta;
+
+        assignments.extend(group.into_iter().map(|peak| {
+            let class = if heterogeneous
+                && peak.width().wrapping_sub(min_width) > max_width.wrapping_sub(peak.width())
+            {
+                PeakWidthClass::Thick
+            } else {
+                PeakWidthClass::Thin
+            };
+            PeakWidthAssignment {
+                peak: peak.key(),
+                class,
+            }
+        }));
+    }
+    assignments
+}
+
 /// Java `purgeLeftPeaks` selection, stopping at the first peak strictly to the
 /// right of the staff limit because callers provide abscissa-ordered peaks.
 #[must_use]
@@ -276,6 +390,79 @@ mod tests {
         let peaks = [peak(1, 0, i32::MIN), peak(1, i32::MAX, i32::MAX)];
         // MAX - MIN - 1 wraps to -2, so Java keeps the pair even at maxGap -1.
         assert_eq!(peak_groups(&peaks, -1).len(), 1);
+    }
+
+    #[test]
+    fn bar_width_partition_matches_group_boundaries_and_midpoint_ties() {
+        let isolated = peak(1, 0, 0);
+        let narrow = peak(1, 10, 11); // width 2
+        let midpoint = peak(1, 13, 16); // width 4, tied around [2, 6]
+        let wide = peak(1, 18, 23); // width 6
+        let after_group = peak(1, 40, 42);
+        let mut brace = peak(1, 45, 45);
+        brace.set(StaffPeakAttribute::Brace);
+        let after_brace = peak(1, 47, 51);
+        let staves = vec![vec![
+            isolated.clone(),
+            narrow.clone(),
+            midpoint.clone(),
+            wide.clone(),
+            after_group.clone(),
+            brace,
+            after_brace.clone(),
+        ]];
+
+        let result = classify_bar_peak_widths(&staves, 2, 10, 0.3);
+        assert_eq!(
+            result,
+            [
+                PeakWidthAssignment {
+                    peak: isolated.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: after_group.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: after_brace.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: narrow.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: midpoint.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: wide.key(),
+                    class: PeakWidthClass::Thick
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bar_width_partition_keeps_homogeneous_groups_thin() {
+        let first = peak(1, 0, 1);
+        let second = peak(1, 3, 5);
+        let staves = vec![vec![first.clone(), second.clone()]];
+        let result = classify_bar_peak_widths(&staves, 1, 10, 0.2);
+        assert_eq!(
+            result,
+            [
+                PeakWidthAssignment {
+                    peak: first.key(),
+                    class: PeakWidthClass::Thin
+                },
+                PeakWidthAssignment {
+                    peak: second.key(),
+                    class: PeakWidthClass::Thin
+                },
+            ]
+        );
     }
 
     #[test]
