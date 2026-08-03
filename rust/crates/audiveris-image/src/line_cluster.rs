@@ -195,6 +195,72 @@ impl LineCluster {
             .collect();
     }
 
+    /// Java `trim`: prune excess outer lines and reject a short sixth
+    /// tablature line before renumbering the survivors from zero.
+    ///
+    /// When the two outer lines have equal true lengths Java removes the
+    /// bottom one. Six-line clusters compare the shorter outer line with the
+    /// ties-even rounded mean-length ratio of the four interior lines.
+    pub fn trim(
+        &mut self,
+        allowed_comb_sizes: &std::collections::BTreeSet<usize>,
+        minimum_tablature_length_ratio: f64,
+    ) -> Result<Vec<ClusterLine>, LineClusterError> {
+        let Some(&maximum_count) = allowed_comb_sizes.last() else {
+            return Err(LineClusterError::EmptyCombSizes);
+        };
+        if maximum_count == 0 || !minimum_tablature_length_ratio.is_finite() {
+            return Err(LineClusterError::InvalidTrimParameters);
+        }
+
+        let mut removed = Vec::new();
+        while self.lines.len() > maximum_count {
+            let (&top_position, top) = self.lines.first_key_value().expect("nonempty cluster");
+            let (&bottom_position, bottom) = self.lines.last_key_value().expect("nonempty cluster");
+            let remove_position = if top.filament.true_length()? < bottom.filament.true_length()? {
+                top_position
+            } else {
+                bottom_position
+            };
+            removed.push(
+                self.lines
+                    .remove(&remove_position)
+                    .expect("selected outer line"),
+            );
+        }
+
+        if self.lines.len() == 6 {
+            let positions = self.lines.keys().copied().collect::<Vec<_>>();
+            if positions.windows(2).any(|pair| pair[1] != pair[0] + 1) {
+                return Err(LineClusterError::NonContiguousTablatureLines);
+            }
+            let interior_sum = positions[1..5].iter().try_fold(0_usize, |sum, position| {
+                Ok::<_, LineClusterError>(sum + self.lines[position].filament.true_length()?)
+            })?;
+            let minimum_length = (minimum_tablature_length_ratio * interior_sum as f64 / 4.0)
+                .round_ties_even() as usize;
+            let top_position = positions[0];
+            let bottom_position = positions[5];
+            let top_length = self.lines[&top_position].filament.true_length()?;
+            let bottom_length = self.lines[&bottom_position].filament.true_length()?;
+            let candidate = if top_length < bottom_length {
+                (top_position, top_length)
+            } else {
+                (bottom_position, bottom_length)
+            };
+            if candidate.1 < minimum_length {
+                removed.push(
+                    self.lines
+                        .remove(&candidate.0)
+                        .expect("selected tablature outer line"),
+                );
+            }
+        }
+
+        self.renumber_lines();
+        Ok(removed)
+    }
+
     fn contains_id(&self, id: FilamentId) -> bool {
         self.lines
             .values()
@@ -443,6 +509,9 @@ fn combined_thickness_at(
 pub enum LineClusterError {
     Filament(FilamentError),
     DuplicateFilamentId(FilamentId),
+    EmptyCombSizes,
+    InvalidTrimParameters,
+    NonContiguousTablatureLines,
 }
 
 impl From<FilamentError> for LineClusterError {
@@ -457,6 +526,13 @@ impl fmt::Display for LineClusterError {
             Self::Filament(error) => write!(formatter, "line-cluster filament error: {error}"),
             Self::DuplicateFilamentId(id) => {
                 write!(formatter, "duplicate filament id {}", id.value())
+            }
+            Self::EmptyCombSizes => formatter.write_str("line-cluster comb sizes are empty"),
+            Self::InvalidTrimParameters => {
+                formatter.write_str("line-cluster trim parameters are invalid")
+            }
+            Self::NonContiguousTablatureLines => {
+                formatter.write_str("six-line tablature positions are not contiguous")
             }
         }
     }
@@ -716,5 +792,78 @@ mod tests {
                 .collect::<Vec<_>>(),
             [0, 2, 5]
         );
+    }
+
+    #[test]
+    fn trim_discards_shorter_outer_lines_and_breaks_ties_at_bottom() {
+        let mut cluster = LineCluster::new(10, FilamentId::new(3), filament(0, 30, 30)).unwrap();
+        for (position, id, length) in [
+            (-2, 1, 10),
+            (-1, 2, 20),
+            (1, 4, 40),
+            (2, 5, 20),
+            (3, 6, 20),
+            (4, 7, 20),
+        ] {
+            cluster
+                .include_line(
+                    position,
+                    FilamentId::new(id),
+                    filament(0, id as usize * 10, length),
+                )
+                .unwrap();
+        }
+
+        let removed = cluster.trim(&[5].into_iter().collect(), 0.5).unwrap();
+
+        assert_eq!(
+            removed
+                .iter()
+                .map(|line| line.primary_id().value())
+                .collect::<Vec<_>>(),
+            [1, 7]
+        );
+        assert_eq!(
+            cluster
+                .lines()
+                .map(|(position, line)| (position, line.primary_id().value()))
+                .collect::<Vec<_>>(),
+            [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6)]
+        );
+    }
+
+    #[test]
+    fn trim_short_sixth_line_uses_ties_even_interior_threshold() {
+        let mut cluster = LineCluster::new(10, FilamentId::new(1), filament(0, 10, 3)).unwrap();
+        for (position, id, length) in [(1, 2, 6), (2, 3, 6), (3, 4, 6), (4, 5, 6), (5, 6, 10)] {
+            cluster
+                .include_line(
+                    position,
+                    FilamentId::new(id),
+                    filament(0, id as usize * 10, length),
+                )
+                .unwrap();
+        }
+
+        // Each interior true length is 5: 0.5 * 20 / 4 = 2.5, and
+        // Java Math.rint rounds that tie to 2, equal to the short top line.
+        assert!(
+            cluster
+                .trim(&[6].into_iter().collect(), 0.5)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(cluster.size(), 6);
+
+        let removed = cluster.trim(&[6].into_iter().collect(), 0.6).unwrap();
+        assert_eq!(
+            removed
+                .iter()
+                .map(|line| line.primary_id().value())
+                .collect::<Vec<_>>(),
+            [1]
+        );
+        assert_eq!(cluster.size(), 5);
+        assert_eq!(cluster.lines().next().unwrap().0, 0);
     }
 }
