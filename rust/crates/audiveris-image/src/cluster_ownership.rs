@@ -276,6 +276,34 @@ impl ClusterOwnership {
         Ok(true)
     }
 
+    /// Reproduce `LineCluster.destroy` for a current cluster root.
+    ///
+    /// Java clears each member filament's cluster backlink and reverse comb
+    /// map, but leaves the cluster and filament objects themselves alive. The
+    /// neutral registry therefore retains both parent forests and section
+    /// ownership while releasing active memberships and comb links.
+    pub fn destroy_cluster(
+        &mut self,
+        cluster: ClusterId,
+    ) -> Result<Vec<FilamentId>, ClusterOwnershipError> {
+        let cluster = self.cluster_ancestor(cluster)?;
+        let members = self
+            .memberships
+            .iter()
+            .filter_map(|(&filament, membership)| {
+                (membership.cluster == cluster).then_some(filament)
+            })
+            .collect::<Vec<_>>();
+        for filament in &members {
+            self.memberships.remove(filament);
+            self.reverse_combs
+                .get_mut(filament)
+                .expect("registered filament has a reverse-comb map")
+                .clear();
+        }
+        Ok(members)
+    }
+
     pub fn filament_ancestor(
         &self,
         filament: FilamentId,
@@ -529,6 +557,30 @@ mod tests {
             })
         );
         assert!(!ownership.merge_clusters(lower, upper, 99).unwrap());
+    }
+
+    #[test]
+    fn cluster_destroy_releases_memberships_and_combs_but_keeps_objects() {
+        let (mut ownership, ids) = register_three();
+        let mut comb = FilamentComb::new(4);
+        comb.append_root(1, 10.0).unwrap();
+        comb.append_root(2, 20.0).unwrap();
+        ownership.register_comb(CombId::new(10), &comb).unwrap();
+        let retained_section = ownership
+            .section_owners
+            .iter()
+            .find_map(|(&section, &owner)| (owner == ids[0]).then_some(section))
+            .unwrap();
+        let cluster = ownership.register_cluster(ids[0]).unwrap();
+        ownership.assign_filament(ids[1], cluster, 1).unwrap();
+
+        assert_eq!(ownership.destroy_cluster(cluster).unwrap(), &ids[..2]);
+        assert_eq!(ownership.membership_of(ids[0]).unwrap(), None);
+        assert_eq!(ownership.membership_of(ids[1]).unwrap(), None);
+        assert!(ownership.combs_of(ids[0]).unwrap().is_empty());
+        assert!(ownership.combs_of(ids[1]).unwrap().is_empty());
+        assert_eq!(ownership.cluster_ancestor(cluster).unwrap(), cluster);
+        assert_eq!(ownership.section_owner(retained_section), Some(ids[0]));
     }
 
     #[test]
