@@ -13,6 +13,7 @@ use std::{error::Error, fmt};
 use audiveris_image::{
     run_table::{Orientation, RunTable, RunTableError},
     section::{Bounds, JunctionPolicy, Section, build_sections_from_id},
+    stick_factory::{HorizontalStickFactory, HorizontalStickParameters, StraightStickError},
     system_population::PopulationSystemArea,
 };
 
@@ -254,9 +255,12 @@ fn bounds_intersect(one: Bounds, two: Bounds) -> bool {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawLedgerCandidate {
+    /// Sheet-global filament registration identity.
     pub id: usize,
-    pub glyph_id: usize,
-    pub inter_id: usize,
+    /// Populated only by the later glyph/SIG materializer.
+    pub glyph_id: Option<usize>,
+    /// Populated only by the later glyph/SIG materializer.
+    pub inter_id: Option<usize>,
     pub section_ids: Vec<usize>,
     pub bounds: LedgerFloatBounds,
     pub start: (f64, f64),
@@ -375,6 +379,131 @@ pub struct LedgerPreviousReference {
 pub enum RawLedgerCandidateError<FactoryError> {
     InvalidScale,
     Factory(FactoryError),
+}
+
+#[derive(Clone, Debug)]
+pub struct NativeLedgerCandidateOutcome {
+    pub candidates: Vec<RawLedgerCandidate>,
+    /// All StickFactory registrations, including sticks swallowed before a
+    /// later partial failure.
+    pub registered_filament_ids: Vec<u64>,
+    pub next_filament_id: u64,
+    pub error: Option<StraightStickError>,
+}
+
+/// Concrete horizontal StickFactory adapter. The returned candidates retain
+/// filament ownership but deliberately have no glyph or inter identity; that
+/// materializer is the next production seam.
+#[must_use]
+pub fn source_native_ledger_candidates(
+    no_staff: &RunTable,
+    system: &RawLedgerSystemZone,
+    sections: &[Section],
+    scale: RawLedgerScale,
+    parameters: RawLedgerCandidateParameters,
+    first_filament_id: u64,
+) -> NativeLedgerCandidateOutcome {
+    if scale.large_interline <= 0 || scale.mean_line_thickness <= 0.0 {
+        return NativeLedgerCandidateOutcome {
+            candidates: Vec::new(),
+            registered_filament_ids: Vec::new(),
+            next_filament_id: first_filament_id,
+            error: Some(StraightStickError::InvalidParameters),
+        };
+    }
+    let maximum_thickness = java_rint(
+        (scale.mean_line_thickness * parameters.maximum_thickness_line_fraction).min(
+            f64::from(scale.large_interline) * parameters.maximum_thickness_interline_fraction,
+        ),
+    );
+    let minimum_core_section_length =
+        java_rint(f64::from(scale.large_interline) * parameters.minimum_core_section_length);
+    let factory = HorizontalStickFactory::new(HorizontalStickParameters {
+        interline: usize::try_from(scale.large_interline).unwrap_or(0),
+        maximum_stick_thickness: usize::try_from(maximum_thickness).unwrap_or(0),
+        minimum_core_section_length: usize::try_from(minimum_core_section_length).unwrap_or(0),
+        minimum_side_ratio: parameters.minimum_side_ratio,
+    });
+    let outcome = factory.retrieve_sticks(sections, first_filament_id);
+    let maximum_length = f64::from(java_rint(
+        f64::from(scale.large_interline) * parameters.maximum_ledger_length,
+    ));
+    let mut candidates = Vec::new();
+    let mut conversion_error = None;
+    for stick in outcome.result.survivors() {
+        let geometry = match stick.straight_geometry() {
+            Ok(geometry) => geometry,
+            Err(error) => {
+                conversion_error = Some(error);
+                break;
+            }
+        };
+        let center = (
+            (geometry.start.0 + geometry.stop.0) / 2.0,
+            (geometry.start.1 + geometry.stop.1) / 2.0,
+        );
+        let overlaps_good_beam = system.good_full_beams.iter().any(|beam| {
+            beam.area.contains(center.0, center.1)
+                && point_in_bounds(center.0, center.1, beam.bounds)
+        });
+        let candidate = RawLedgerCandidate {
+            id: usize::try_from(stick.id()).unwrap_or(usize::MAX),
+            glyph_id: None,
+            inter_id: None,
+            section_ids: stick
+                .filament()
+                .sections()
+                .iter()
+                .map(Section::id)
+                .collect(),
+            bounds: LedgerFloatBounds {
+                x: geometry.bounds.x as f64,
+                y: geometry.bounds.y as f64,
+                width: geometry.bounds.width as f64,
+                height: geometry.bounds.height as f64,
+            },
+            start: geometry.start,
+            stop: geometry.stop,
+            mean_thickness: geometry.mean_thickness,
+            mean_distance: geometry.mean_distance,
+            convex_end_count: convex_end_count(no_staff, geometry.bounds),
+            overlaps_good_beam,
+        };
+        // Java performs beam purge first, then too-long purge, both without
+        // disturbing the order returned by StickFactory.
+        if !candidate.overlaps_good_beam && candidate.bounds.width <= maximum_length {
+            candidates.push(candidate);
+        }
+    }
+    NativeLedgerCandidateOutcome {
+        candidates,
+        registered_filament_ids: outcome.result.creation_ids().to_vec(),
+        next_filament_id: outcome.result.next_creation_id(),
+        error: outcome.error.or(conversion_error),
+    }
+}
+
+fn point_in_bounds(x: f64, y: f64, bounds: Bounds) -> bool {
+    x >= bounds.x as f64
+        && x < bounds.x.saturating_add(bounds.width) as f64
+        && y >= bounds.y as f64
+        && y < bounds.y.saturating_add(bounds.height) as f64
+}
+
+fn convex_end_count(no_staff: &RunTable, bounds: Bounds) -> i32 {
+    let pixels = no_staff.to_pixels();
+    let width = no_staff.width();
+    let height = no_staff.height();
+    let mut convexities = 0;
+    for x in [bounds.x, bounds.x + bounds.width - 1] {
+        let top_foreground = bounds.y > 0 && pixels[(bounds.y - 1) * width + x] == 0;
+        let below = bounds.y.saturating_add(bounds.height);
+        let bottom_foreground = below < height && pixels[below * width + x] == 0;
+        if !(top_foreground || bottom_foreground) {
+            convexities += 1;
+        }
+    }
+    convexities
 }
 
 impl<FactoryError: fmt::Display> fmt::Display for RawLedgerCandidateError<FactoryError> {
@@ -665,7 +794,8 @@ fn reduce_overlaps(mut candidates: Vec<LedgerLineCandidate>) -> Vec<LedgerLineCa
         let remove = if candidates[left].grade.grade < candidates[right].grade.grade {
             left
         } else if candidates[right].grade.grade < candidates[left].grade.grade
-            || candidates[left].candidate.inter_id < candidates[right].candidate.inter_id
+            || candidate_tie_id(&candidates[left].candidate)
+                < candidate_tie_id(&candidates[right].candidate)
         {
             right
         } else {
@@ -674,6 +804,10 @@ fn reduce_overlaps(mut candidates: Vec<LedgerLineCandidate>) -> Vec<LedgerLineCa
         candidates.remove(remove);
     }
     candidates
+}
+
+fn candidate_tie_id(candidate: &RawLedgerCandidate) -> usize {
+    candidate.inter_id.unwrap_or(candidate.id)
 }
 
 fn java_rint(value: f64) -> i32 {
@@ -827,8 +961,8 @@ mod tests {
     fn candidate(id: usize, inter_id: usize, x: f64, y: f64) -> RawLedgerCandidate {
         RawLedgerCandidate {
             id,
-            glyph_id: id + 100,
-            inter_id,
+            glyph_id: Some(id + 100),
+            inter_id: Some(inter_id),
             section_ids: vec![id],
             bounds: LedgerFloatBounds {
                 x,
@@ -1010,5 +1144,89 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn native_stick_factory_feeds_unmaterialized_grade_tail_in_registration_order() {
+        let mut raster = RunTable::new(Orientation::Horizontal, 50, 40).unwrap();
+        assert!(raster.add_run(10, Run::new(2, 20)).unwrap());
+        let sections = build_sections_from_id(&raster, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        let system = RawLedgerSystemZone {
+            id: 1,
+            left: 0,
+            right: 49,
+            area: area(1, 50, 40),
+            good_full_beams: Vec::new(),
+        };
+
+        let outcome = source_native_ledger_candidates(
+            &raster,
+            &system,
+            &sections,
+            RawLedgerScale {
+                large_interline: 10,
+                mean_line_thickness: 2.0,
+            },
+            RawLedgerCandidateParameters::default(),
+            50,
+        );
+
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.registered_filament_ids, vec![50]);
+        assert_eq!(outcome.next_filament_id, 51);
+        assert_eq!(outcome.candidates.len(), 1);
+        assert_eq!(outcome.candidates[0].id, 50);
+        assert_eq!(outcome.candidates[0].glyph_id, None);
+        assert_eq!(outcome.candidates[0].inter_id, None);
+        assert_eq!(outcome.candidates[0].section_ids, vec![1]);
+        assert_eq!(outcome.candidates[0].convex_end_count, 2);
+
+        let accepted = evaluate_ledger_line(
+            &staff(),
+            -1,
+            &outcome.candidates,
+            &[],
+            RawLedgerScale {
+                large_interline: 10,
+                mean_line_thickness: 2.0,
+            },
+            RawLedgerCandidateParameters::default(),
+        );
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].candidate.id, 50);
+        assert!(accepted[0].grade.grade >= 0.08);
+    }
+
+    #[test]
+    fn native_factory_failure_keeps_registered_and_converted_candidate_prefix() {
+        let mut raster = RunTable::new(Orientation::Horizontal, 50, 40).unwrap();
+        assert!(raster.add_run(10, Run::new(2, 20)).unwrap());
+        assert!(raster.add_run(10, Run::new(30, 12)).unwrap());
+        let sections = build_sections_from_id(&raster, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        let system = RawLedgerSystemZone {
+            id: 1,
+            left: 0,
+            right: 49,
+            area: area(1, 50, 40),
+            good_full_beams: Vec::new(),
+        };
+
+        let outcome = source_native_ledger_candidates(
+            &raster,
+            &system,
+            &sections,
+            RawLedgerScale {
+                large_interline: 10,
+                mean_line_thickness: 2.0,
+            },
+            RawLedgerCandidateParameters::default(),
+            u64::MAX - 1,
+        );
+
+        assert_eq!(outcome.error, Some(StraightStickError::IdentityOverflow));
+        assert_eq!(outcome.registered_filament_ids, vec![u64::MAX - 1]);
+        assert_eq!(outcome.next_filament_id, u64::MAX);
+        assert_eq!(outcome.candidates.len(), 1);
+        assert_eq!(outcome.candidates[0].id, usize::MAX - 1);
     }
 }

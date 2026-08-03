@@ -63,6 +63,7 @@ pub mod staff_pattern;
 pub mod staff_peak;
 pub mod staff_simplify;
 pub mod sticker_completion;
+pub mod stick_factory;
 pub mod system_population;
 pub mod target_layout;
 pub mod target_line;
