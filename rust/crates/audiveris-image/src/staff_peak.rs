@@ -41,6 +41,47 @@ pub enum HorizontalSide {
     Right,
 }
 
+/// Immutable key used by Java `StaffPeak.compareTo` and `equals`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StaffPeakKey {
+    staff_id: StaffId,
+    start: i32,
+    stop: i32,
+}
+
+impl PartialOrd for StaffPeakKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StaffPeakKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.staff_id
+            .value()
+            .cmp(&other.staff_id.value())
+            .then_with(|| self.start.cmp(&other.start))
+            .then_with(|| self.stop.cmp(&other.stop))
+    }
+}
+
+impl StaffPeakKey {
+    #[must_use]
+    pub const fn staff_id(self) -> StaffId {
+        self.staff_id
+    }
+
+    #[must_use]
+    pub const fn start(self) -> i32 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn stop(self) -> i32 {
+        self.stop
+    }
+}
+
 /// Declaration order matches Java `StaffPeak.Attribute` and therefore
 /// `EnumSet` iteration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -271,8 +312,13 @@ impl StaffPeak {
         });
     }
 
-    fn key(&self) -> (usize, i32, i32) {
-        (self.staff_id.value(), self.start, self.stop)
+    #[must_use]
+    pub const fn key(&self) -> StaffPeakKey {
+        StaffPeakKey {
+            staff_id: self.staff_id,
+            start: self.start,
+            stop: self.stop,
+        }
     }
 }
 
@@ -292,7 +338,11 @@ impl PartialOrd for StaffPeak {
 
 impl Ord for StaffPeak {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.key().cmp(&other.key())
+        self.staff_id
+            .value()
+            .cmp(&other.staff_id.value())
+            .then_with(|| self.start.cmp(&other.start))
+            .then_with(|| self.stop.cmp(&other.stop))
     }
 }
 
