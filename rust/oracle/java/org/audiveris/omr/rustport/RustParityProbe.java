@@ -48,6 +48,7 @@ import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.sig.GradeUtil;
 import org.audiveris.omr.sheet.Book;
+import org.audiveris.omr.sheet.OneLineStaff;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.ScaleBuilder;
@@ -59,6 +60,7 @@ import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.grid.BarAlignment;
 import org.audiveris.omr.sheet.grid.BarColumn;
 import org.audiveris.omr.sheet.grid.BarConnection;
+import org.audiveris.omr.sheet.grid.BarsRetriever;
 import org.audiveris.omr.sheet.grid.ClustersRetriever;
 import org.audiveris.omr.sheet.grid.FilamentComb;
 import org.audiveris.omr.sheet.grid.GridBuilder;
@@ -1125,6 +1127,90 @@ public final class RustParityProbe
                 braceReplacement.isBrace(),
                 barColumn.isFull());
 
+        Book barsBook = new Book(Path.of("bars-columns-start.synthetic"));
+        SheetStub barsStub = new SheetStub(barsBook, 1);
+        barsBook.addStub(barsStub);
+        Sheet barsSheet = new Sheet(
+                barsStub,
+                new RunTable(Orientation.VERTICAL, 100, 100));
+        barsSheet.setScale(indexedScale);
+        Skew barsSkew = new Skew(0.0, barsSheet);
+        List<Staff> barsStaves = List.of(
+                new OneLineStaff(10, 0.0, 99.0, 10, new ArrayList<>()),
+                new OneLineStaff(11, 0.0, 99.0, 10, new ArrayList<>()));
+        SystemInfo barsSystem = new SystemInfo(13, barsSheet, barsStaves);
+        barsSheet.getSystemManager().setSystems(List.of(barsSystem));
+        BarsRetriever barsRetriever = new BarsRetriever(barsSheet);
+        PeakGraph barsGraph = (PeakGraph) field(barsRetriever, "peakGraph");
+
+        StaffPeak c0Top = staffPeak(barsStaves.get(0), 2, 20, 10, 11, barsSkew);
+        StaffPeak c0Bottom = staffPeak(barsStaves.get(1), 30, 48, 10, 11, barsSkew);
+        StaffPeak c1Top = staffPeak(barsStaves.get(0), 2, 20, 30, 31, barsSkew);
+        StaffPeak c1Bottom = staffPeak(barsStaves.get(1), 30, 48, 30, 31, barsSkew);
+        StaffPeak c2Bottom = staffPeak(barsStaves.get(1), 30, 48, 35, 36, barsSkew);
+        StaffPeak c2Top = staffPeak(barsStaves.get(0), 2, 20, 36, 37, barsSkew);
+        StaffPeak c3Top = staffPeak(barsStaves.get(0), 2, 20, 50, 51, barsSkew);
+        StaffPeak c3Bottom = staffPeak(barsStaves.get(1), 30, 48, 50, 51, barsSkew);
+        for (StaffPeak peak : List.of(
+                c2Bottom,
+                c3Top,
+                c0Bottom,
+                c1Top,
+                c2Top,
+                c0Top,
+                c3Bottom,
+                c1Bottom)) {
+            barsGraph.addVertex(peak);
+        }
+        connectBars(barsSheet, barsGraph, c0Top, c0Bottom);
+        connectBars(barsSheet, barsGraph, c1Top, c1Bottom);
+        connectBars(barsSheet, barsGraph, c3Top, c3Bottom);
+
+        Method buildColumns = BarsRetriever.class.getDeclaredMethod("buildColumns");
+        buildColumns.setAccessible(true);
+        buildColumns.invoke(barsRetriever);
+        @SuppressWarnings("unchecked")
+        Map<SystemInfo, List<BarColumn>> barsColumnMap =
+                (Map<SystemInfo, List<BarColumn>>) field(barsRetriever, "columnMap");
+        List<BarColumn> barsColumns = barsColumnMap.get(barsSystem);
+        Method detectStartColumns = BarsRetriever.class.getDeclaredMethod("detectStartColumns");
+        detectStartColumns.setAccessible(true);
+        detectStartColumns.invoke(barsRetriever);
+        List<String> builtColumns = new ArrayList<>();
+        int startColumnIndex = -1;
+        for (int i = 0; i < barsColumns.size(); i++) {
+            BarColumn column = barsColumns.get(i);
+            List<String> slots = new ArrayList<>();
+            for (StaffPeak peak : column.getPeaks()) {
+                slots.add(peak != null
+                        ? String.format(
+                                java.util.Locale.ROOT,
+                                "%d@%.1f",
+                                peak.getStaff().getId(),
+                                peak.getDeskewedAbscissa())
+                        : "-");
+            }
+            if (column.isStart()) {
+                startColumnIndex = i;
+            }
+            builtColumns.add(String.format(
+                    java.util.Locale.ROOT,
+                    "[%s|%.1f|%s|%s]",
+                    String.join(",", slots),
+                    column.getXDsk(),
+                    column.isFull(),
+                    column.isFullyConnected()));
+        }
+        Object barsParams = field(barsRetriever, "params");
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.bars-columns-start.synthetic=max:%s,%s,%s;columns:%s;start:%d%n",
+                field(barsParams, "maxColumnDx"),
+                field(barsParams, "maxBraceBarGap"),
+                field(barsParams, "maxDoubleBarGap"),
+                String.join(",", builtColumns),
+                startColumnIndex);
+
         Book combBook = new Book(Path.of("comb-discovery.synthetic"));
         SheetStub combStub = new SheetStub(combBook, 1);
         combBook.addStub(combStub);
@@ -1897,6 +1983,20 @@ public final class RustParityProbe
         StaffPeak peak = new StaffPeak(staff, top, bottom, start, stop, null);
         peak.computeDeskewedCenter(skew);
         return peak;
+    }
+
+    private static void connectBars (Sheet sheet,
+                                     PeakGraph graph,
+                                     StaffPeak top,
+                                     StaffPeak bottom)
+    {
+        BarAlignment alignment = new BarAlignment(
+                top,
+                bottom,
+                0.0,
+                1.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        graph.addEdge(top, bottom, new BarConnection(sheet, alignment, 1.0, 1.0));
     }
 
     private static long hashSection (long hash,

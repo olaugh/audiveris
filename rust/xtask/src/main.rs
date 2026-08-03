@@ -8,6 +8,7 @@ use audiveris_core::{
 use audiveris_image::{
     adaptive,
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
+    bars_logic::{aggregate_bar_chains, start_column_candidate},
     chamfer::ChamferDistance,
     cluster_coordinator::{RecursiveCombSnapshot, include_from_combs},
     cluster_ownership::{ClusterOwnership, CombId},
@@ -212,7 +213,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 58] = [
+const VECTOR_KEYS: [&str; 59] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -245,6 +246,7 @@ const VECTOR_KEYS: [&str; 58] = [
     "grid.line-cluster-lifecycle.synthetic=",
     "grid.line-cluster-recursive.synthetic=",
     "grid.bar-column.synthetic=",
+    "grid.bars-columns-start.synthetic=",
     "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
     "spline.synthetic=",
@@ -1547,6 +1549,56 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         bar_column.is_start(),
         brace_replacement.is_brace(),
         bar_column.is_full()
+    ));
+    let bars_staff_ids = [StaffId::new(10), StaffId::new(11)];
+    let c0_top = BarPeak::new(PeakId::new(1), bars_staff_ids[0], 2.0, 10.5, false, false)?;
+    let c0_bottom = BarPeak::new(PeakId::new(2), bars_staff_ids[1], 2.0, 10.5, false, false)?;
+    let c1_top = BarPeak::new(PeakId::new(3), bars_staff_ids[0], 2.0, 30.5, false, false)?;
+    let c1_bottom = BarPeak::new(PeakId::new(4), bars_staff_ids[1], 2.0, 30.5, false, false)?;
+    let c2_bottom = BarPeak::new(PeakId::new(5), bars_staff_ids[1], 2.0, 35.5, false, false)?;
+    let c2_top = BarPeak::new(PeakId::new(6), bars_staff_ids[0], 2.0, 36.5, false, false)?;
+    let c3_top = BarPeak::new(PeakId::new(7), bars_staff_ids[0], 2.0, 50.5, false, false)?;
+    let c3_bottom = BarPeak::new(PeakId::new(8), bars_staff_ids[1], 2.0, 50.5, false, false)?;
+    let bars_chains = vec![
+        vec![c2_bottom],
+        vec![c3_top, c3_bottom],
+        vec![c0_top, c0_bottom],
+        vec![c2_top],
+        vec![c1_top, c1_bottom],
+    ];
+    let bars_relations = [
+        PeakRelation::connection(c0_top.id(), c0_bottom.id()),
+        PeakRelation::connection(c1_top.id(), c1_bottom.id()),
+        PeakRelation::connection(c3_top.id(), c3_bottom.id()),
+    ];
+    let mut bars_columns = aggregate_bar_chains(&bars_staff_ids, &bars_chains, 8)?;
+    let bars_start = start_column_candidate(&mut bars_columns, &bars_relations, 20, 8)
+        .map_or(-1, |index| index as i32);
+    let built_columns = bars_columns
+        .iter_mut()
+        .map(|column| {
+            let slots = column
+                .peaks()
+                .iter()
+                .map(|peak| {
+                    peak.map_or_else(
+                        || "-".to_owned(),
+                        |peak| format!("{}@{:.1}", peak.staff_id().value(), peak.deskewed_x()),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "[{slots}|{:.1}|{}|{}]",
+                column.deskewed_x(),
+                column.is_full(),
+                column.is_fully_connected(&bars_relations)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    lines.push(format!(
+        "grid.bars-columns-start.synthetic=max:8,20,8;columns:{built_columns};start:{bars_start}"
     ));
     let comb_filaments = [
         CombFilament::new(1, 1, staff_filament(0, 2, 110, 10)?.geometry()?)?,
