@@ -18,6 +18,7 @@ use quick_xml::events::{BytesStart, Event};
 const BOOK_ELEMENT: &[u8] = b"book";
 const SHEET_ELEMENT: &[u8] = b"sheet";
 const SCORE_ELEMENT: &[u8] = b"score";
+const LOGICAL_PART_ELEMENT: &[u8] = b"logical-part";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -38,6 +39,9 @@ const DELTA_MEASURE_ID_ATTRIBUTE: &[u8] = b"delta-measure-id";
 const NUM_ATTRIBUTE: &[u8] = b"num";
 const DEN_ATTRIBUTE: &[u8] = b"den";
 const NAME_ATTRIBUTE: &[u8] = b"name";
+const STAFF_COUNT_ATTRIBUTE: &[u8] = b"staff-count";
+const ABBREVIATION_ATTRIBUTE: &[u8] = b"abbreviation";
+const MIDI_PROGRAM_ATTRIBUTE: &[u8] = b"midi-program";
 const LOGICAL_ID_ATTRIBUTE: &[u8] = b"logical-id";
 const MANUAL_ATTRIBUTE: &[u8] = b"manual";
 const LINE_COUNT_ATTRIBUTE: &[u8] = b"line-count";
@@ -80,6 +84,8 @@ impl BookXml {
         let mut active_part = None;
         let mut active_staff_leaf: Option<StaffLeafCapture> = None;
         let mut active_score = None;
+        let mut active_logical_part = None;
+        let mut active_logical_staff_leaf: Option<LogicalStaffLeafCapture> = None;
         let mut active_score_page: Option<(u32, ScorePageRef)> = None;
         let mut root_closed = false;
 
@@ -96,6 +102,9 @@ impl BookXml {
                             sheet_number: page.sheet_number,
                             sheet_page_id: page.sheet_page_id,
                         });
+                    }
+                    if let Some(capture) = active_logical_staff_leaf.as_ref() {
+                        return Err(unexpected_logical_staff_config_content(capture));
                     }
                     if let Some(capture) = active_staff_leaf.as_ref() {
                         return Err(unexpected_staff_config_content(&sheet_stubs, capture));
@@ -131,6 +140,24 @@ impl BookXml {
                     } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
                         let score_index = push_score_ref(&reader, &element, &mut score_refs)?;
                         active_score = Some(score_index);
+                    } else if depth == 2
+                        && element.name().as_ref() == LOGICAL_PART_ELEMENT
+                        && let Some(score_index) = active_score
+                    {
+                        let logical_index =
+                            push_logical_part(&reader, &element, &mut score_refs[score_index])?;
+                        active_logical_part = Some((score_index, logical_index));
+                    } else if depth == 3
+                        && let Some((score_index, logical_index)) = active_logical_part
+                        && let Some(kind) = staff_leaf_kind(element.name().as_ref())
+                    {
+                        active_logical_staff_leaf = Some(begin_logical_staff_leaf(
+                            &reader,
+                            &element,
+                            &mut score_refs[score_index],
+                            logical_index,
+                            kind,
+                        )?);
                     } else if depth == 2
                         && element.local_name().as_ref() == INPUT_ELEMENT
                         && let Some(sheet_index) = active_sheet
@@ -227,6 +254,9 @@ impl BookXml {
                             sheet_page_id: page.sheet_page_id,
                         });
                     }
+                    if let Some(capture) = active_logical_staff_leaf.as_ref() {
+                        return Err(unexpected_logical_staff_config_content(capture));
+                    }
                     if let Some(capture) = active_staff_leaf.as_ref() {
                         return Err(unexpected_staff_config_content(&sheet_stubs, capture));
                     }
@@ -260,6 +290,22 @@ impl BookXml {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                     } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
                         push_score_ref(&reader, &element, &mut score_refs)?;
+                    } else if depth == 2
+                        && element.name().as_ref() == LOGICAL_PART_ELEMENT
+                        && let Some(score_index) = active_score
+                    {
+                        push_logical_part(&reader, &element, &mut score_refs[score_index])?;
+                    } else if depth == 3
+                        && let Some((score_index, logical_index)) = active_logical_part
+                        && let Some(kind) = staff_leaf_kind(element.name().as_ref())
+                    {
+                        finish_empty_logical_staff_leaf(
+                            &reader,
+                            &element,
+                            &mut score_refs[score_index],
+                            logical_index,
+                            kind,
+                        )?;
                     } else if depth == 2
                         && element.local_name().as_ref() == INPUT_ELEMENT
                         && let Some(sheet_index) = active_sheet
@@ -348,6 +394,11 @@ impl BookXml {
                     {
                         finish_staff_leaf(&mut sheet_stubs, capture)?;
                     }
+                    if depth == 4
+                        && let Some(capture) = active_logical_staff_leaf.take()
+                    {
+                        finish_logical_staff_leaf(&mut score_refs, capture)?;
+                    }
                     if element.name().as_ref() == LAST_TIME_RATIONAL_ELEMENT && depth == 4 {
                         active_time_rational = None;
                     }
@@ -388,6 +439,9 @@ impl BookXml {
                     if depth == 2 && active_score.is_some() {
                         active_score = None;
                     }
+                    if depth == 3 && active_logical_part.is_some() {
+                        active_logical_part = None;
+                    }
                     if depth == 3 && active_page.is_some() {
                         active_page = None;
                     }
@@ -424,6 +478,16 @@ impl BookXml {
                             sheet_page_id: page.sheet_page_id,
                         });
                     }
+                }
+                Event::Text(text) if active_logical_staff_leaf.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    let capture = active_logical_staff_leaf.as_mut().unwrap();
+                    if capture.kind == StaffLeafKind::Current && !decoded.trim().is_empty() {
+                        return Err(unexpected_logical_staff_config_content(capture));
+                    }
+                    capture.text.push_str(&decoded);
                 }
                 Event::Text(text) if active_staff_leaf.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
@@ -480,6 +544,11 @@ impl BookXml {
                         sheet_page_id: page.sheet_page_id,
                     });
                 }
+                Event::CData(_) if active_logical_staff_leaf.is_some() => {
+                    return Err(unexpected_logical_staff_config_content(
+                        active_logical_staff_leaf.as_ref().unwrap(),
+                    ));
+                }
                 Event::CData(_) if active_staff_leaf.is_some() => {
                     return Err(unexpected_staff_config_content(
                         &sheet_stubs,
@@ -521,6 +590,11 @@ impl BookXml {
                         sheet_page_id: page.sheet_page_id,
                     });
                 }
+                Event::GeneralRef(_) if active_logical_staff_leaf.is_some() => {
+                    return Err(unexpected_logical_staff_config_content(
+                        active_logical_staff_leaf.as_ref().unwrap(),
+                    ));
+                }
                 Event::GeneralRef(_) if active_staff_leaf.is_some() => {
                     return Err(unexpected_staff_config_content(
                         &sheet_stubs,
@@ -557,6 +631,13 @@ impl BookXml {
                         sheet_number: page.sheet_number,
                         sheet_page_id: page.sheet_page_id,
                     });
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_logical_staff_leaf.is_some() =>
+                {
+                    return Err(unexpected_logical_staff_config_content(
+                        active_logical_staff_leaf.as_ref().unwrap(),
+                    ));
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_staff_leaf.is_some() =>
@@ -635,6 +716,7 @@ impl BookXml {
 pub struct ScoreRef {
     index: u32,
     logicals_locked: Option<bool>,
+    logical_parts: Vec<LogicalPartRef>,
     pages: Vec<ScorePageRef>,
 }
 
@@ -657,10 +739,72 @@ impl ScoreRef {
         self.logicals_locked.unwrap_or(false)
     }
 
+    /// Direct logical parts in persisted document order.
+    #[must_use]
+    pub fn logical_parts(&self) -> &[LogicalPartRef] {
+        &self.logical_parts
+    }
+
     /// Soft page references in persisted document order.
     #[must_use]
     pub fn pages(&self) -> &[ScorePageRef] {
         &self.pages
+    }
+}
+
+/// Persisted scalar metadata for one score-level logical part.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LogicalPartRef {
+    index: u32,
+    id: u32,
+    staff_count: u32,
+    name: Option<String>,
+    abbreviation: Option<String>,
+    midi_program: Option<i32>,
+    staff_configs: Vec<PersistedStaffConfig>,
+}
+
+impl LogicalPartRef {
+    /// Zero-based position, matching Java `LogicalPart.getIndex(score)`.
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Positive logical-part ID persisted by Java.
+    #[must_use]
+    pub const fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// Deprecated but still persisted positive number of staves.
+    #[must_use]
+    pub const fn staff_count(&self) -> u32 {
+        self.staff_count
+    }
+
+    /// Optional decoded part name; explicit empty remains distinct from absent.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Optional decoded abbreviation; explicit empty remains distinct from absent.
+    #[must_use]
+    pub fn abbreviation(&self) -> Option<&str> {
+        self.abbreviation.as_deref()
+    }
+
+    /// Optional raw Java `int` MIDI program.
+    #[must_use]
+    pub const fn midi_program(&self) -> Option<i32> {
+        self.midi_program
+    }
+
+    /// Direct current and deprecated staff-config spellings in document order.
+    #[must_use]
+    pub fn staff_configs(&self) -> &[PersistedStaffConfig] {
+        &self.staff_configs
     }
 }
 
@@ -767,9 +911,7 @@ impl SheetStub {
     }
 }
 
-/// Lightweight attributes of one direct sheet-stub `page` reference.
-///
-/// Nested system parts, staves, and all deeper structures remain opaque.
+/// Lightweight metadata from one direct sheet-stub `page` reference.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PageRef {
     id: u32,
@@ -846,8 +988,7 @@ impl SystemRef {
 
 /// Persisted scalar metadata for one direct SystemRef `part` child.
 ///
-/// Staff configurations, deprecated line counts, and all descendants remain
-/// opaque. Java exposes only a derived zero-based list index, not a part ID.
+/// Java exposes only a derived zero-based list index, not a part ID.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PartRef {
     index: u32,
@@ -1018,6 +1159,15 @@ struct StaffLeafCapture {
     text: String,
 }
 
+#[derive(Debug)]
+struct LogicalStaffLeafCapture {
+    score_index: usize,
+    logical_index: usize,
+    logical_source_index: u32,
+    kind: StaffLeafKind,
+    text: String,
+}
+
 /// Failure to construct the conservative `book.xml` metadata view.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BookXmlError {
@@ -1049,6 +1199,48 @@ pub enum BookXmlError {
         score_index: u32,
         field: &'static str,
         value: String,
+    },
+    /// A score contains too many logical parts to expose a Java `int` index.
+    TooManyLogicalParts { score_index: u32 },
+    /// A direct logical part lacks one of its required scalar attributes.
+    MissingLogicalPartField {
+        score_index: u32,
+        logical_index: u32,
+        field: &'static str,
+    },
+    /// A logical-part integer is malformed or outside its supported Java range.
+    InvalidLogicalPartInteger {
+        score_index: u32,
+        logical_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// Two direct logical parts in one score declare the same stable ID.
+    DuplicateLogicalPartId { score_index: u32, id: u32 },
+    /// A current logical-part staff configuration lacks a required attribute.
+    MissingLogicalStaffConfigField {
+        score_index: u32,
+        logical_index: u32,
+        field: &'static str,
+    },
+    /// A logical-part staff integer is malformed or outside Java `int` range.
+    InvalidLogicalStaffConfigInteger {
+        score_index: u32,
+        logical_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A logical-part staff boolean has an invalid XML Schema spelling.
+    InvalidLogicalStaffConfigBoolean {
+        score_index: u32,
+        logical_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A typed logical-part staff configuration contains unsupported content.
+    UnexpectedLogicalStaffConfigContent {
+        score_index: u32,
+        logical_index: u32,
     },
     /// A score page link lacks one of its required coordinate attributes.
     MissingScorePageField {
@@ -1272,6 +1464,66 @@ impl fmt::Display for BookXmlError {
             } => write!(
                 formatter,
                 "score index {score_index} has invalid boolean {field}: {value:?}"
+            ),
+            Self::TooManyLogicalParts { score_index } => {
+                write!(
+                    formatter,
+                    "score index {score_index} has too many logical parts"
+                )
+            }
+            Self::MissingLogicalPartField {
+                score_index,
+                logical_index,
+                field,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} is missing {field}"
+            ),
+            Self::InvalidLogicalPartInteger {
+                score_index,
+                logical_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} has invalid integer {field}: {value:?}"
+            ),
+            Self::DuplicateLogicalPartId { score_index, id } => write!(
+                formatter,
+                "score index {score_index} has duplicate logical part ID {id}"
+            ),
+            Self::MissingLogicalStaffConfigField {
+                score_index,
+                logical_index,
+                field,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} staff config is missing {field}"
+            ),
+            Self::InvalidLogicalStaffConfigInteger {
+                score_index,
+                logical_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} has invalid staff integer {field}: {value:?}"
+            ),
+            Self::InvalidLogicalStaffConfigBoolean {
+                score_index,
+                logical_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} has invalid staff boolean {field}: {value:?}"
+            ),
+            Self::UnexpectedLogicalStaffConfigContent {
+                score_index,
+                logical_index,
+            } => write!(
+                formatter,
+                "score index {score_index} logical part index {logical_index} staff config contains content"
             ),
             Self::MissingScorePageField { score_index, field } => {
                 write!(
@@ -1555,9 +1807,250 @@ fn push_score_ref(
     score_refs.push(ScoreRef {
         index,
         logicals_locked,
+        logical_parts: Vec::new(),
         pages: Vec::new(),
     });
     Ok(score_refs.len() - 1)
+}
+
+fn push_logical_part(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_ref: &mut ScoreRef,
+) -> Result<usize, BookXmlError> {
+    let logical_index = u32::try_from(score_ref.logical_parts.len())
+        .ok()
+        .filter(|index| *index <= i32::MAX as u32)
+        .ok_or(BookXmlError::TooManyLogicalParts {
+            score_index: score_ref.index,
+        })?;
+    let mut id = None;
+    let mut staff_count = None;
+    let mut name = None;
+    let mut abbreviation = None;
+    let mut midi_program = None;
+
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == ID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            id = Some(parse_positive_logical_part_integer(
+                &value,
+                score_ref.index,
+                logical_index,
+                "book/score/logical-part/@id",
+            )?);
+        } else if key == STAFF_COUNT_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            staff_count = Some(parse_positive_logical_part_integer(
+                &value,
+                score_ref.index,
+                logical_index,
+                "book/score/logical-part/@staff-count",
+            )?);
+        } else if key == NAME_ATTRIBUTE {
+            name = Some(decode_attribute(reader, &attribute)?);
+        } else if key == ABBREVIATION_ATTRIBUTE {
+            abbreviation = Some(decode_attribute(reader, &attribute)?);
+        } else if key == MIDI_PROGRAM_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            midi_program = Some(value.trim().parse::<i32>().map_err(|_| {
+                BookXmlError::InvalidLogicalPartInteger {
+                    score_index: score_ref.index,
+                    logical_index,
+                    field: "book/score/logical-part/@midi-program",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+
+    let id = id.ok_or(BookXmlError::MissingLogicalPartField {
+        score_index: score_ref.index,
+        logical_index,
+        field: "book/score/logical-part/@id",
+    })?;
+    let staff_count = staff_count.ok_or(BookXmlError::MissingLogicalPartField {
+        score_index: score_ref.index,
+        logical_index,
+        field: "book/score/logical-part/@staff-count",
+    })?;
+    if score_ref.logical_parts.iter().any(|part| part.id == id) {
+        return Err(BookXmlError::DuplicateLogicalPartId {
+            score_index: score_ref.index,
+            id,
+        });
+    }
+    score_ref.logical_parts.push(LogicalPartRef {
+        index: logical_index,
+        id,
+        staff_count,
+        name,
+        abbreviation,
+        midi_program,
+        staff_configs: Vec::new(),
+    });
+    Ok(score_ref.logical_parts.len() - 1)
+}
+
+fn parse_positive_logical_part_integer(
+    value: &str,
+    score_index: u32,
+    logical_index: u32,
+    field: &'static str,
+) -> Result<u32, BookXmlError> {
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|number| *number > 0 && *number <= i32::MAX as u32)
+        .ok_or_else(|| BookXmlError::InvalidLogicalPartInteger {
+            score_index,
+            logical_index,
+            field,
+            value: value.to_owned(),
+        })
+}
+
+fn begin_logical_staff_leaf(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_ref: &mut ScoreRef,
+    logical_index: usize,
+    kind: StaffLeafKind,
+) -> Result<LogicalStaffLeafCapture, BookXmlError> {
+    if kind == StaffLeafKind::Current {
+        push_current_logical_staff_config(reader, element, score_ref, logical_index)?;
+    }
+    Ok(LogicalStaffLeafCapture {
+        score_index: score_ref.index as usize,
+        logical_index,
+        logical_source_index: score_ref.logical_parts[logical_index].index,
+        kind,
+        text: String::new(),
+    })
+}
+
+fn finish_empty_logical_staff_leaf(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_ref: &mut ScoreRef,
+    logical_index: usize,
+    kind: StaffLeafKind,
+) -> Result<(), BookXmlError> {
+    match kind {
+        StaffLeafKind::Current => {
+            push_current_logical_staff_config(reader, element, score_ref, logical_index)
+        }
+        StaffLeafKind::DeprecatedLineCount => {
+            push_deprecated_logical_line_count(score_ref, logical_index, "")
+        }
+    }
+}
+
+fn finish_logical_staff_leaf(
+    score_refs: &mut [ScoreRef],
+    capture: LogicalStaffLeafCapture,
+) -> Result<(), BookXmlError> {
+    if capture.kind == StaffLeafKind::DeprecatedLineCount {
+        push_deprecated_logical_line_count(
+            &mut score_refs[capture.score_index],
+            capture.logical_index,
+            &capture.text,
+        )?;
+    }
+    Ok(())
+}
+
+fn push_current_logical_staff_config(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_ref: &mut ScoreRef,
+    logical_index: usize,
+) -> Result<(), BookXmlError> {
+    let logical_source_index = score_ref.logical_parts[logical_index].index;
+    let mut line_count = None;
+    let mut small = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == LINE_COUNT_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            line_count = Some(parse_logical_staff_integer(
+                &value,
+                score_ref.index,
+                logical_source_index,
+                "book/score/logical-part/staff-configuration/@line-count",
+            )?);
+        } else if key == SMALL_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            small = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidLogicalStaffConfigBoolean {
+                    score_index: score_ref.index,
+                    logical_index: logical_source_index,
+                    field: "book/score/logical-part/staff-configuration/@small",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+    let line_count = line_count.ok_or(BookXmlError::MissingLogicalStaffConfigField {
+        score_index: score_ref.index,
+        logical_index: logical_source_index,
+        field: "book/score/logical-part/staff-configuration/@line-count",
+    })?;
+    score_ref.logical_parts[logical_index]
+        .staff_configs
+        .push(PersistedStaffConfig::Current(StaffConfig {
+            line_count,
+            small,
+        }));
+    Ok(())
+}
+
+fn push_deprecated_logical_line_count(
+    score_ref: &mut ScoreRef,
+    logical_index: usize,
+    text: &str,
+) -> Result<(), BookXmlError> {
+    let logical_source_index = score_ref.logical_parts[logical_index].index;
+    let count = parse_logical_staff_integer(
+        text,
+        score_ref.index,
+        logical_source_index,
+        "book/score/logical-part/line-count",
+    )?;
+    score_ref.logical_parts[logical_index]
+        .staff_configs
+        .push(PersistedStaffConfig::DeprecatedLineCount(count));
+    Ok(())
+}
+
+fn parse_logical_staff_integer(
+    value: &str,
+    score_index: u32,
+    logical_index: u32,
+    field: &'static str,
+) -> Result<i32, BookXmlError> {
+    value
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| BookXmlError::InvalidLogicalStaffConfigInteger {
+            score_index,
+            logical_index,
+            field,
+            value: value.to_owned(),
+        })
+}
+
+fn unexpected_logical_staff_config_content(capture: &LogicalStaffLeafCapture) -> BookXmlError {
+    BookXmlError::UnexpectedLogicalStaffConfigContent {
+        score_index: capture.score_index as u32,
+        logical_index: capture.logical_source_index,
+    }
 }
 
 fn push_score_page(
@@ -2434,7 +2927,10 @@ mod tests {
       <system><part logical-id="1"><staff-configuration line-count="5"/></part></system>
     </page>
   </sheet>
-  <score><page sheet-number="1" sheet-page-id="1"/></score>
+  <score>
+    <logical-part id="1" staff-count="2"><staff-configuration line-count="5"/><staff-configuration line-count="5"/></logical-part>
+    <page sheet-number="1" sheet-page-id="1"/>
+  </score>
 </book>"#;
         let book = BookXml::parse(xml).unwrap();
         let pages = book.sheet_stubs()[0].page_refs();
@@ -2472,6 +2968,19 @@ mod tests {
         assert_eq!(scores[0].index(), 0);
         assert_eq!(scores[0].logicals_locked_attribute(), None);
         assert!(!scores[0].logicals_locked());
+        assert_eq!(scores[0].logical_parts().len(), 1);
+        let logical = &scores[0].logical_parts()[0];
+        assert_eq!(logical.index(), 0);
+        assert_eq!(logical.id(), 1);
+        assert_eq!(logical.staff_count(), 2);
+        assert_eq!(logical.name(), None);
+        assert_eq!(logical.abbreviation(), None);
+        assert_eq!(logical.midi_program(), None);
+        assert_eq!(logical.staff_configs().len(), 2);
+        assert!(logical.staff_configs().iter().all(|config| matches!(
+            config,
+            PersistedStaffConfig::Current(staff) if staff.line_count() == 5
+        )));
         assert_eq!(scores[0].pages().len(), 1);
         assert_eq!(scores[0].pages()[0].sheet_number(), 1);
         assert_eq!(scores[0].pages()[0].sheet_page_id(), 1);
@@ -2480,7 +2989,7 @@ mod tests {
 
     #[test]
     fn reads_ordered_score_page_links_and_lock_states() {
-        let xml = br#"<book><score/><score logicals-locked="false"><logical-part id="1"/><page sheet-number="2" sheet-page-id="1"/><page sheet-number="1" sheet-page-id="2"> </page></score><score logicals-locked="1"><page sheet-number="3" sheet-page-id="1"/></score></book>"#;
+        let xml = br#"<book><score/><score logicals-locked="false"><logical-part id="1" staff-count="1"/><page sheet-number="2" sheet-page-id="1"/><page sheet-number="1" sheet-page-id="2"> </page></score><score logicals-locked="1"><page sheet-number="3" sheet-page-id="1"/></score></book>"#;
         let book = BookXml::parse(xml).unwrap();
         let scores = book.score_refs();
 
@@ -2503,6 +3012,206 @@ mod tests {
         assert_eq!(scores[2].logicals_locked_attribute(), Some(true));
         assert!(scores[2].logicals_locked());
         assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn reads_ordered_logical_part_scalars_and_preserves_optional_states() {
+        let xml = br#"<book><score><logical-part id="2" staff-count="1" name="P&amp;1" abbreviation="" midi-program=" -1 "/><logical-part id="1" staff-count="2"><line-count>1</line-count><staff-configuration line-count="5" small="true"/><line-count> 0 </line-count><staff-configuration line-count="-2" small="false"> </staff-configuration></logical-part></score><score/></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let parts = book.score_refs()[0].logical_parts();
+
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            (parts[0].index(), parts[0].id(), parts[0].staff_count()),
+            (0, 2, 1)
+        );
+        assert_eq!(parts[0].name(), Some("P&1"));
+        assert_eq!(parts[0].abbreviation(), Some(""));
+        assert_eq!(parts[0].midi_program(), Some(-1));
+        assert!(parts[0].staff_configs().is_empty());
+        assert_eq!(
+            (parts[1].index(), parts[1].id(), parts[1].staff_count()),
+            (1, 1, 2)
+        );
+        assert_eq!(parts[1].name(), None);
+        assert_eq!(parts[1].abbreviation(), None);
+        assert_eq!(parts[1].midi_program(), None);
+        assert_eq!(
+            parts[1].staff_configs()[0],
+            PersistedStaffConfig::DeprecatedLineCount(1)
+        );
+        assert!(matches!(
+            parts[1].staff_configs()[1],
+            PersistedStaffConfig::Current(staff)
+                if staff.line_count() == 5 && staff.small_attribute() == Some(true)
+        ));
+        assert_eq!(
+            parts[1].staff_configs()[2],
+            PersistedStaffConfig::DeprecatedLineCount(0)
+        );
+        assert!(matches!(
+            parts[1].staff_configs()[3],
+            PersistedStaffConfig::Current(staff)
+                if staff.line_count() == -2 && staff.small_attribute() == Some(false)
+        ));
+        assert!(book.score_refs()[1].logical_parts().is_empty());
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn ignores_nested_and_namespaced_logical_part_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><f:score><logical-part id="9" staff-count="9"/></f:score><score><future><logical-part id="8" staff-count="8"/></future><f:logical-part id="7" staff-count="7"/><logical-part f:id="6" id="1" staff-count="2"><f:staff-configuration line-count="8"/><future><staff-configuration line-count="7"/><line-count>6</line-count></future><staff-configuration f:line-count="5" line-count="3"/></logical-part></score></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.score_refs().len(), 1);
+        let parts = book.score_refs()[0].logical_parts();
+        assert_eq!(parts.len(), 1);
+        assert_eq!((parts[0].id(), parts[0].staff_count()), (1, 2));
+        assert_eq!(parts[0].staff_configs().len(), 1);
+        assert!(matches!(
+            parts[0].staff_configs()[0],
+            PersistedStaffConfig::Current(staff) if staff.line_count() == 3
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_invalid_and_duplicate_logical_part_scalars() {
+        for (xml, field) in [
+            (
+                br#"<book><score><logical-part staff-count="1"/></score></book>"#.as_slice(),
+                "book/score/logical-part/@id",
+            ),
+            (
+                br#"<book><score><logical-part id="1"/></score></book>"#.as_slice(),
+                "book/score/logical-part/@staff-count",
+            ),
+        ] {
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::MissingLogicalPartField {
+                    score_index: 0,
+                    logical_index: 0,
+                    field,
+                }
+            );
+        }
+
+        for (field, attrs, value) in [
+            (
+                "book/score/logical-part/@id",
+                "id=\"0\" staff-count=\"1\"",
+                "0",
+            ),
+            (
+                "book/score/logical-part/@staff-count",
+                "id=\"1\" staff-count=\"2147483648\"",
+                "2147483648",
+            ),
+            (
+                "book/score/logical-part/@midi-program",
+                "id=\"1\" staff-count=\"1\" midi-program=\"bad\"",
+                "bad",
+            ),
+        ] {
+            let xml = format!("<book><score><logical-part {attrs}/></score></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidLogicalPartInteger {
+                    score_index: 0,
+                    logical_index: 0,
+                    field,
+                    value: value.to_owned(),
+                }
+            );
+        }
+
+        assert_eq!(
+            BookXml::parse(br#"<book><score><logical-part id="1" staff-count="1"/><logical-part id="1" staff-count="2"/></score></book>"#).unwrap_err(),
+            BookXmlError::DuplicateLogicalPartId {
+                score_index: 0,
+                id: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_logical_part_staff_configs() {
+        assert_eq!(
+            BookXml::parse(br#"<book><score><logical-part id="1" staff-count="1"><staff-configuration/></logical-part></score></book>"#).unwrap_err(),
+            BookXmlError::MissingLogicalStaffConfigField {
+                score_index: 0,
+                logical_index: 0,
+                field: "book/score/logical-part/staff-configuration/@line-count",
+            }
+        );
+        for (field, child, value) in [
+            (
+                "book/score/logical-part/staff-configuration/@line-count",
+                "<staff-configuration line-count=\"bad\"/>",
+                "bad",
+            ),
+            (
+                "book/score/logical-part/line-count",
+                "<line-count>2147483648</line-count>",
+                "2147483648",
+            ),
+        ] {
+            let xml = format!(
+                "<book><score><logical-part id=\"1\" staff-count=\"1\">{child}</logical-part></score></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidLogicalStaffConfigInteger {
+                    score_index: 0,
+                    logical_index: 0,
+                    field,
+                    value: value.to_owned(),
+                }
+            );
+        }
+        assert_eq!(
+            BookXml::parse(br#"<book><score><logical-part id="1" staff-count="1"><staff-configuration line-count="5" small="yes"/></logical-part></score></book>"#).unwrap_err(),
+            BookXmlError::InvalidLogicalStaffConfigBoolean {
+                score_index: 0,
+                logical_index: 0,
+                field: "book/score/logical-part/staff-configuration/@small",
+                value: "yes".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_logical_part_staff_markup_and_duplicate_attributes() {
+        for child in [
+            "<staff-configuration line-count=\"5\">text</staff-configuration>",
+            "<staff-configuration line-count=\"5\"><future/></staff-configuration>",
+            "<line-count><![CDATA[5]]></line-count>",
+            "<line-count>&#53;</line-count>",
+            "<line-count><!--5--></line-count>",
+        ] {
+            let xml = format!(
+                "<book><score><logical-part id=\"1\" staff-count=\"1\">{child}</logical-part></score></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedLogicalStaffConfigContent {
+                    score_index: 0,
+                    logical_index: 0,
+                }
+            );
+        }
+
+        for xml in [
+            br#"<book><score><logical-part id="1" id="2" staff-count="1"/></score></book>"#.as_slice(),
+            br#"<book><score><logical-part id="1" staff-count="1"><staff-configuration line-count="5" line-count="4"/></logical-part></score></book>"#.as_slice(),
+        ] {
+            assert!(matches!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::Malformed { .. }
+            ));
+        }
     }
 
     #[test]
