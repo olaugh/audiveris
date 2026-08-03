@@ -20,6 +20,7 @@ use crate::{
         unaligned_peak_keys, validate_start_column,
     },
     peak_graph::{PeakGraph, PeakGraphError},
+    projection::{ProjectionBlank, check_lines_root_transition},
     staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
@@ -77,6 +78,10 @@ impl BarsStaffState {
         &self.peaks
     }
 
+    pub fn peaks_mut(&mut self) -> &mut [StaffPeak] {
+        &mut self.peaks
+    }
+
     /// Preserve Java `StaffProjector.getBracePeak()`, which is held outside
     /// the ordinary peak list and is not necessarily promoted into the SIG.
     pub fn with_brace_peak(mut self, brace_peak: StaffPeak) -> Result<Self, BarsCoordinatorError> {
@@ -97,6 +102,34 @@ impl BarsStaffState {
     pub const fn brace_peak(&self) -> Option<&StaffPeak> {
         self.brace_peak.as_ref()
     }
+
+    /// Reconcile an externally executed brace stage with this projector-owned
+    /// staff copy. Validation happens before either field is replaced.
+    pub fn replace_brace_stage(
+        &mut self,
+        peaks: Vec<StaffPeak>,
+        brace_peak: Option<StaffPeak>,
+    ) -> Result<(), BarsCoordinatorError> {
+        // Java `insertPeak(new, old)` owns replacement order explicitly; do
+        // not re-sort or reject that observable transient order here.
+        if peaks.iter().any(|peak| peak.staff_id() != self.staff_id) {
+            return Err(BarsCoordinatorError::InvalidStaffState(self.staff_id));
+        }
+        if let Some(brace) = &brace_peak {
+            if brace.staff_id() != self.staff_id {
+                return Err(BarsCoordinatorError::BracePeakOutsideStaff {
+                    staff: self.staff_id,
+                    peak: brace.key(),
+                });
+            }
+            if !brace.is_brace() {
+                return Err(BarsCoordinatorError::InvalidBracePeak(brace.key()));
+            }
+        }
+        self.peaks = peaks;
+        self.brace_peak = brace_peak;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +137,8 @@ pub struct BarsSystemState {
     system_id: usize,
     staffs: Vec<BarsStaffState>,
     graph: PeakGraph<BarAlignment>,
+    /// Stable Java entity identities assigned before any projector purge.
+    peak_ids: Vec<(PeakId, StaffPeakKey)>,
     columns: Vec<BarColumn>,
 }
 
@@ -141,10 +176,17 @@ impl BarsSystemState {
                 return Err(BarsCoordinatorError::GraphPeakMissingFromStaff(peak.key()));
             }
         }
+        let peak_ids = graph
+            .vertices()
+            .iter()
+            .enumerate()
+            .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
+            .collect();
         Ok(Self {
             system_id,
             staffs,
             graph,
+            peak_ids,
             columns: Vec::new(),
         })
     }
@@ -164,9 +206,41 @@ impl BarsSystemState {
         &self.graph
     }
 
+    pub fn graph_mut(&mut self) -> &mut PeakGraph<BarAlignment> {
+        &mut self.graph
+    }
+
+    #[must_use]
+    pub fn peak_ids(&self) -> &[(PeakId, StaffPeakKey)] {
+        &self.peak_ids
+    }
+
+    pub fn peak_ids_mut(&mut self) -> &mut Vec<(PeakId, StaffPeakKey)> {
+        &mut self.peak_ids
+    }
+
+    pub fn graph_and_peak_ids_mut(
+        &mut self,
+    ) -> (
+        &mut PeakGraph<BarAlignment>,
+        &mut Vec<(PeakId, StaffPeakKey)>,
+    ) {
+        (&mut self.graph, &mut self.peak_ids)
+    }
+
     #[must_use]
     pub fn columns(&self) -> &[BarColumn] {
         &self.columns
+    }
+
+    pub fn replace_columns(&mut self, columns: Vec<BarColumn>) {
+        self.columns = columns;
+    }
+
+    pub fn staff_mut(&mut self, staff_id: StaffId) -> Option<&mut BarsStaffState> {
+        self.staffs
+            .iter_mut()
+            .find(|staff| staff.staff_id == staff_id)
     }
 }
 
@@ -241,9 +315,44 @@ impl BarsCoordinatorParameters {
 pub enum PeakRemovalStage {
     PartialColumn,
     TooFarLeft,
+    LeftOfBrace,
     LeftOfStaff,
     Unaligned,
     CClef,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BarsRootEvidence {
+    pub staff_id: StaffId,
+    pub blanks: Vec<ProjectionBlank>,
+    pub minimum_small_blank_width: i32,
+    pub maximum_left_extremum: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinesRootUpdate {
+    pub staff_id: StaffId,
+    pub previous_left: i32,
+    pub staff_left: i32,
+    pub cleared_peak: Option<StaffPeakKey>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BarsPostBraceResult {
+    removed_peaks: Vec<RemovedPeak>,
+    lines_root_updates: Vec<LinesRootUpdate>,
+}
+
+impl BarsPostBraceResult {
+    #[must_use]
+    pub fn removed_peaks(&self) -> &[RemovedPeak] {
+        &self.removed_peaks
+    }
+
+    #[must_use]
+    pub fn lines_root_updates(&self) -> &[LinesRootUpdate] {
+        &self.lines_root_updates
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -315,13 +424,7 @@ pub fn process_bars_system(
     let mut next = state.clone();
     let prefix = process_prefix(&mut next, parameters)?;
 
-    let id_to_key = next
-        .graph
-        .vertices()
-        .iter()
-        .enumerate()
-        .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
-        .collect::<Vec<_>>();
+    let id_to_key = next.peak_ids.clone();
     let mut removed_peaks = prefix.removed_peaks;
     let start_column_index = prefix.start_column_index;
 
@@ -430,6 +533,99 @@ pub fn process_bars_through_too_far_left(
     Ok(result)
 }
 
+/// Continue Java `BarsRetriever.process` immediately after `buildBraces`:
+/// `purgeLeftOfBraces`, then `verifyLinesRoot`.
+///
+/// Mutations are deliberately not transactional. The source removes projector
+/// and graph peaks before deleting their related columns, and a later adapter
+/// evidence failure retains that completed prefix.
+pub fn process_bars_after_braces(
+    state: &mut BarsSystemState,
+    root_evidence: &[BarsRootEvidence],
+) -> Result<BarsPostBraceResult, BarsCoordinatorError> {
+    let id_to_key = state.peak_ids.clone();
+    let mut result = BarsPostBraceResult::default();
+
+    // purgeLeftOfBraces applies only to multi-staff systems.
+    if state.staffs.len() > 1 {
+        for staff_index in 0..state.staffs.len() {
+            let Some(brace_start) = state.staffs[staff_index]
+                .brace_peak
+                .as_ref()
+                .map(StaffPeak::start)
+            else {
+                continue;
+            };
+            let Some(start_index) = state.staffs[staff_index]
+                .peaks
+                .iter()
+                .position(|peak| peak.is_staff_end(HorizontalSide::Left))
+            else {
+                continue;
+            };
+            let keys = state.staffs[staff_index].peaks[..start_index]
+                .iter()
+                .rev()
+                .filter(|peak| peak.stop() < brace_start)
+                .map(StaffPeak::key)
+                .collect::<Vec<_>>();
+            remove_keys_and_related_columns_java_order(
+                state,
+                &keys,
+                &id_to_key,
+                PeakRemovalStage::LeftOfBrace,
+                &mut result.removed_peaks,
+            );
+        }
+    }
+
+    // verifyLinesRoot applies only to one-staff systems.
+    if state.staffs.len() == 1 {
+        let staff = &mut state.staffs[0];
+        let evidence = root_evidence
+            .iter()
+            .find(|evidence| evidence.staff_id == staff.staff_id)
+            .ok_or(BarsCoordinatorError::MissingRootEvidence(staff.staff_id))?;
+        if evidence.minimum_small_blank_width < 0 || evidence.maximum_left_extremum < 0 {
+            return Err(BarsCoordinatorError::InvalidRootEvidence(staff.staff_id));
+        }
+        let start_index = staff
+            .peaks
+            .iter()
+            .position(|peak| peak.is_staff_end(HorizontalSide::Left));
+        let previous_left = staff.left;
+        let transition = check_lines_root_transition(
+            &staff.peaks,
+            &evidence.blanks,
+            staff.brace_peak.is_some(),
+            start_index,
+            staff.left,
+            evidence.minimum_small_blank_width,
+            evidence.maximum_left_extremum,
+        );
+        let cleared_peak = transition
+            .clear_staff_left_end_at
+            .map(|index| staff.peaks[index].key());
+        if let Some(index) = transition.clear_staff_left_end_at {
+            staff.peaks[index].unset(StaffPeakAttribute::StaffLeftEnd);
+            state
+                .graph
+                .vertex_mut(staff.peaks[index].key())
+                .expect("projector start peak remains in its system graph")
+                .unset(StaffPeakAttribute::StaffLeftEnd);
+        }
+        staff.left = transition.staff_left;
+        result.lines_root_updates.push(LinesRootUpdate {
+            staff_id: staff.staff_id,
+            previous_left,
+            staff_left: transition.staff_left,
+            cleared_peak,
+        });
+    }
+
+    Ok(result)
+}
+
 fn process_prefix(
     next: &mut BarsSystemState,
     parameters: BarsCoordinatorParameters,
@@ -441,13 +637,7 @@ fn process_prefix(
         .collect::<Vec<_>>();
     next.columns =
         build_bar_columns_from_graph(&next.graph, &staff_ids, parameters.maximum_column_dx)?;
-    let id_to_key = next
-        .graph
-        .vertices()
-        .iter()
-        .enumerate()
-        .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
-        .collect::<Vec<_>>();
+    let id_to_key = next.peak_ids.clone();
     let relations = graph_relations(&next.graph, &id_to_key)?;
 
     let candidate = start_column_candidate(
@@ -682,6 +872,56 @@ fn remove_keys_without_columns(
     }
 }
 
+fn remove_keys_and_related_columns_java_order(
+    state: &mut BarsSystemState,
+    keys: &[StaffPeakKey],
+    id_to_key: &[(PeakId, StaffPeakKey)],
+    stage: PeakRemovalStage,
+    removed: &mut Vec<RemovedPeak>,
+) {
+    if keys.is_empty() {
+        return;
+    }
+    let mut column_indices = Vec::new();
+    for key in keys {
+        if let Some(index) = state.columns.iter().position(|column| {
+            column.peaks().iter().flatten().any(|peak| {
+                id_to_key
+                    .iter()
+                    .find_map(|(id, mapped)| (*id == peak.id()).then_some(mapped))
+                    == Some(key)
+            })
+        }) && !column_indices.contains(&index)
+        {
+            column_indices.push(index);
+        }
+    }
+
+    // projector.removePeaks(toRemove) precedes deleteRelatedColumns.
+    remove_keys_without_columns(state, keys, stage, removed);
+    let mut removed_column_indices = Vec::new();
+    for original_index in column_indices {
+        let shift = removed_column_indices
+            .iter()
+            .filter(|&&removed_index| removed_index < original_index)
+            .count();
+        let current_index = original_index - shift;
+        let related = state.columns[current_index]
+            .peaks()
+            .iter()
+            .flatten()
+            .filter_map(|peak| {
+                id_to_key
+                    .iter()
+                    .find_map(|(id, key)| (*id == peak.id()).then_some(*key))
+            })
+            .collect::<Vec<_>>();
+        remove_keys_without_columns(state, &related, stage, removed);
+        state.columns.remove(current_index);
+        removed_column_indices.push(original_index);
+    }
+}
+
 fn apply_width_assignments(state: &mut BarsSystemState, assignments: &[PeakWidthAssignment]) {
     for assignment in assignments {
         for staff in &mut state.staffs {
@@ -721,6 +961,8 @@ pub enum BarsCoordinatorError {
     MissingColumnPeak(PeakId),
     MissingGraphPeak(StaffPeakKey),
     MissingBlankEvidence(StaffPeakKey),
+    MissingRootEvidence(StaffId),
+    InvalidRootEvidence(StaffId),
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
     Graph(PeakGraphError),
@@ -773,6 +1015,20 @@ impl fmt::Display for BarsCoordinatorError {
                 "missing start-column blank evidence for {:?}",
                 key
             ),
+            Self::MissingRootEvidence(staff) => {
+                write!(
+                    formatter,
+                    "missing lines-root evidence for staff {}",
+                    staff.value()
+                )
+            }
+            Self::InvalidRootEvidence(staff) => {
+                write!(
+                    formatter,
+                    "invalid lines-root evidence for staff {}",
+                    staff.value()
+                )
+            }
             Self::InvalidColumnIndex(index) => {
                 write!(formatter, "invalid bar column index {index}")
             }
@@ -788,6 +1044,7 @@ impl Error for BarsCoordinatorError {}
 mod tests {
     use super::*;
     use crate::bar_alignment::{AlignmentPeak, BarImpacts};
+    use crate::{bar_column::BarPeak, projection::ShortProjection};
 
     fn peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
         let mut peak = StaffPeak::new(StaffId::new(staff), 10, 20, start, stop).unwrap();
@@ -922,6 +1179,123 @@ mod tests {
                 .map(BarsStaffState::left)
                 .collect::<Vec<_>>(),
             before_lefts
+        );
+    }
+
+    #[test]
+    fn post_brace_purge_removes_explicit_peak_then_its_column_peers() {
+        let top_left = peak(1, 0, 1);
+        let mut top_start = peak(1, 10, 11);
+        top_start.set_staff_end(HorizontalSide::Left);
+        let bottom_left = peak(2, 0, 1);
+        let mut bottom_start = peak(2, 10, 11);
+        bottom_start.set_staff_end(HorizontalSide::Left);
+        let mut graph = PeakGraph::new();
+        for value in [&top_left, &bottom_left, &top_start, &bottom_start] {
+            graph.add_vertex(value.clone());
+        }
+        let mut brace = peak(1, 5, 7);
+        brace.set(StaffPeakAttribute::BraceTop);
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![top_left.clone(), top_start],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_brace_peak(brace)
+        .unwrap();
+        let bottom = BarsStaffState::new(
+            StaffId::new(2),
+            0,
+            false,
+            vec![bottom_left.clone(), bottom_start],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let mut column = BarColumn::new(vec![StaffId::new(1), StaffId::new(2)]).unwrap();
+        column
+            .add_peak(
+                BarPeak::new(PeakId::new(1), StaffId::new(1), 2.0, 0.5, false, false).unwrap(),
+            )
+            .unwrap();
+        column
+            .add_peak(
+                BarPeak::new(PeakId::new(2), StaffId::new(2), 2.0, 0.5, false, false).unwrap(),
+            )
+            .unwrap();
+        state.columns.push(column);
+
+        let result = process_bars_after_braces(&mut state, &[]).unwrap();
+
+        assert_eq!(
+            result.removed_peaks(),
+            [
+                RemovedPeak {
+                    peak: top_left.key(),
+                    stage: PeakRemovalStage::LeftOfBrace,
+                },
+                RemovedPeak {
+                    peak: bottom_left.key(),
+                    stage: PeakRemovalStage::LeftOfBrace,
+                },
+            ]
+        );
+        assert!(state.columns().is_empty());
+        assert_eq!(state.graph().vertices().len(), 2);
+        assert_eq!(state.staffs()[0].peaks().len(), 1);
+        assert_eq!(state.staffs()[1].peaks().len(), 1);
+    }
+
+    #[test]
+    fn one_staff_lines_root_clears_projector_and_graph_start_peak() {
+        let first = peak(1, 20, 21);
+        let mut start = peak(1, 25, 26);
+        start.set_staff_end(HorizontalSide::Left);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(first.clone());
+        graph.add_vertex(start.clone());
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            3,
+            false,
+            vec![first, start.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut state = BarsSystemState::new(1, vec![staff], graph).unwrap();
+        let mut projection = ShortProjection::new(0, 10).unwrap();
+        for position in 2..=4 {
+            projection.increment_one(position);
+        }
+        let evidence = [BarsRootEvidence {
+            staff_id: StaffId::new(1),
+            blanks: projection.blank_regions(0),
+            minimum_small_blank_width: 4,
+            maximum_left_extremum: 8,
+        }];
+
+        let result = process_bars_after_braces(&mut state, &evidence).unwrap();
+
+        assert_eq!(
+            result.lines_root_updates(),
+            [LinesRootUpdate {
+                staff_id: StaffId::new(1),
+                previous_left: 3,
+                staff_left: 11,
+                cleared_peak: Some(start.key()),
+            }]
+        );
+        assert_eq!(state.staffs()[0].left(), 11);
+        assert!(!state.staffs()[0].peaks()[1].is_staff_end(HorizontalSide::Left));
+        assert!(
+            !state
+                .graph()
+                .vertex(start.key())
+                .unwrap()
+                .is_staff_end(HorizontalSide::Left)
         );
     }
 }

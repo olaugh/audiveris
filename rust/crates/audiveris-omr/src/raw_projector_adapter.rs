@@ -35,8 +35,9 @@ use audiveris_image::{
         BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks, build_sub_stick,
     },
     bars_coordinator::{
-        BarsCoordinatorError, BarsCoordinatorParameters, BarsPrefixResult, BarsStaffState,
-        BarsSystemState, process_bars_through_too_far_left,
+        BarsCoordinatorError, BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult,
+        BarsRootEvidence, BarsStaffState, BarsSystemState, process_bars_after_braces,
+        process_bars_through_too_far_left,
     },
     bars_logic::{BarsLogicError, build_bar_columns_from_graph},
     filament::{FilamentError, FilamentGeometry},
@@ -50,13 +51,24 @@ use audiveris_image::{
         barline_height, has_blank_between, process_staff_projection,
     },
     section::Section,
-    staff_peak::{StaffPeak, StaffPeakError, StaffPeakKey},
+    staff_peak::{PeakPoint, StaffPeak, StaffPeakError, StaffPeakKey},
 };
 
 use crate::grid_executor::HeadlessSkew;
 use crate::system_grouping::{
     SystemGroupingError, SystemGroupingParameters, SystemGroupingReport, SystemGroupingStaff,
     group_systems_and_build_columns,
+};
+use crate::{
+    brace_filament::{
+        BraceFilamentError, BraceFilamentParameters, BraceFilamentPortion, build_brace_filament,
+    },
+    brace_portions::{
+        BraceColumnSet, BracePortionError, BracePortionParameters, BracePortionReport,
+        BracePortionStaff, BracePortionSystem, BraceProbe, apply_brace_replacements_with_peak_ids,
+        detect_brace_portions,
+    },
+    brace_sig::{BracePromotion, BraceSigError, BraceSigStore, promote_brace_filament},
 };
 
 /// Borrowed live sheet raster. Zero is foreground, as in Audiveris run tables.
@@ -151,6 +163,12 @@ pub enum RawSystemGroupingBoundary {
     /// Start-column selection and the two following column/left purges are
     /// complete. Java next requires brace-portion section/glyph evidence.
     NeedsBracePortionDetection {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Brace detection, construction, left purge, and one-staff lines-root
+    /// verification are complete. Java next detects bracket ends.
+    NeedsBracketEndDetection {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -253,6 +271,26 @@ pub struct RawBarsPrefixBridge {
     pub bars: Vec<RawBarsPrefixSystem>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawBraceStageParameters {
+    pub portions: BracePortionParameters,
+    pub filament: BraceFilamentParameters,
+    pub maximum_alignment_dx: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawBraceSystemReport {
+    pub system_id: usize,
+    pub portions: BracePortionReport,
+    pub promotions: Vec<BracePromotion>,
+    pub post_brace: BarsPostBraceResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RawBraceStageReport {
+    pub systems: Vec<RawBraceSystemReport>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -286,6 +324,10 @@ pub enum RawProjectorAdapterError {
     Systems(SystemGroupingError),
     Bars(BarsCoordinatorError),
     BarColumns(BarsLogicError),
+    BracePortions(BracePortionError),
+    BraceFilament(BraceFilamentError),
+    BraceSig(BraceSigError),
+    BraceMembers(String),
 }
 
 impl fmt::Display for RawProjectorAdapterError {
@@ -356,6 +398,10 @@ impl fmt::Display for RawProjectorAdapterError {
             Self::BarColumns(source) => {
                 write!(formatter, "bar-column construction failed: {source}")
             }
+            Self::BracePortions(source) => write!(formatter, "brace portions failed: {source}"),
+            Self::BraceFilament(source) => write!(formatter, "brace filament failed: {source}"),
+            Self::BraceSig(source) => write!(formatter, "brace SIG promotion failed: {source}"),
+            Self::BraceMembers(source) => write!(formatter, "brace members failed: {source}"),
         }
     }
 }
@@ -373,6 +419,9 @@ impl Error for RawProjectorAdapterError {
             Self::Systems(source) => Some(source),
             Self::Bars(source) => Some(source),
             Self::BarColumns(source) => Some(source),
+            Self::BracePortions(source) => Some(source),
+            Self::BraceFilament(source) => Some(source),
+            Self::BraceSig(source) => Some(source),
             _ => None,
         }
     }
@@ -863,6 +912,289 @@ pub fn bridge_raw_projectors_through_bars_prefix(
     Ok(RawBarsPrefixBridge { systems, bars })
 }
 
+/// Continue an existing raw prefix through `detectBracePortions`, replacement,
+/// `buildBraces`, `purgeLeftOfBraces`, and `verifyLinesRoot`.
+///
+/// Probe construction and peak-to-filament member lookup remain explicit
+/// production seams because the former allocates a newly registered filament.
+/// The bridge and SIG store are caller-owned so any successful Java mutation
+/// prefix remains observable when a later system or callback fails.
+#[allow(clippy::too_many_arguments)]
+pub fn continue_raw_bars_through_lines_root(
+    bridge: &mut RawBarsPrefixBridge,
+    preparation: &RawProjectorPreparation,
+    all_brace_sections: &[Section],
+    skew: &HeadlessSkew,
+    parameters: RawBraceStageParameters,
+    sig_store: &mut BraceSigStore,
+    mut probe: impl FnMut(usize, StaffId, i32, i32) -> Result<Option<BraceProbe>, String>,
+    mut members_of: impl FnMut(StaffPeakKey) -> Result<Vec<Section>, String>,
+) -> Result<RawBraceStageReport, RawProjectorAdapterError> {
+    if !parameters.maximum_alignment_dx.is_finite() || parameters.maximum_alignment_dx < 0.0 {
+        return Err(RawProjectorAdapterError::BraceMembers(
+            "invalid brace-alignment distance".to_owned(),
+        ));
+    }
+    let mut report = RawBraceStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let mut systems = [brace_portion_snapshot(&raw_system.state)];
+        let mut portion_report = BracePortionReport::default();
+        let detection = detect_brace_portions(
+            &mut systems,
+            parameters.portions,
+            |staff_id, minimum, maximum| probe(system_id, staff_id, minimum, maximum),
+            &mut portion_report,
+        );
+        reconcile_brace_snapshot(&mut raw_system.state, &systems[0])?;
+        detection.map_err(RawProjectorAdapterError::BracePortions)?;
+
+        let mut columns = [BraceColumnSet {
+            system_id,
+            columns: raw_system.state.columns().to_vec(),
+        }];
+        let (graph, peak_ids) = raw_system.state.graph_and_peak_ids_mut();
+        let replacement = apply_brace_replacements_with_peak_ids(
+            graph,
+            peak_ids,
+            &mut systems,
+            &mut columns,
+            &portion_report.replacements,
+        );
+        raw_system
+            .state
+            .replace_columns(std::mem::take(&mut columns[0].columns));
+        reconcile_brace_snapshot(&mut raw_system.state, &systems[0])?;
+        replacement.map_err(RawProjectorAdapterError::BracePortions)?;
+
+        let promotions = build_and_promote_system_braces(
+            &mut raw_system.state,
+            all_brace_sections,
+            skew,
+            parameters,
+            sig_store,
+            &mut members_of,
+        )?;
+        let root_evidence = raw_system
+            .state
+            .staffs()
+            .iter()
+            .map(|staff| {
+                let projector = preparation
+                    .registry
+                    .projectors()
+                    .iter()
+                    .find(|projector| projector.staff_id == staff.staff_id())
+                    .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                        staff.staff_id().value(),
+                    ))?;
+                Ok(BarsRootEvidence {
+                    staff_id: staff.staff_id(),
+                    blanks: projector.result.all_blanks.clone(),
+                    minimum_small_blank_width: projector.scale_parameters.minimum_small_blank_width,
+                    maximum_left_extremum: projector.scale_parameters.maximum_left_extremum,
+                })
+            })
+            .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+        let post_brace = process_bars_after_braces(&mut raw_system.state, &root_evidence)
+            .map_err(RawProjectorAdapterError::Bars)?;
+        report.systems.push(RawBraceSystemReport {
+            system_id,
+            portions: portion_report,
+            promotions,
+            post_brace,
+        });
+    }
+
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsBracketEndDetection {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+fn brace_portion_snapshot(state: &BarsSystemState) -> BracePortionSystem {
+    BracePortionSystem {
+        system_id: state.system_id(),
+        staffs: state
+            .staffs()
+            .iter()
+            .map(|staff| BracePortionStaff {
+                staff_id: staff.staff_id(),
+                peaks: staff.peaks().iter().map(StaffPeak::key).collect(),
+                start_peak_index: staff.peaks().iter().position(|peak| {
+                    peak.is_staff_end(audiveris_image::staff_peak::HorizontalSide::Left)
+                }),
+                brace_peak: staff.brace_peak().cloned(),
+            })
+            .collect(),
+    }
+}
+
+fn reconcile_brace_snapshot(
+    state: &mut BarsSystemState,
+    snapshot: &BracePortionSystem,
+) -> Result<(), RawProjectorAdapterError> {
+    for staff in &snapshot.staffs {
+        let peaks = staff
+            .peaks
+            .iter()
+            .map(|&key| {
+                state
+                    .graph()
+                    .vertex(key)
+                    .cloned()
+                    .ok_or(RawProjectorAdapterError::MissingRegisteredPeak(key))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        state
+            .staff_mut(staff.staff_id)
+            .expect("brace snapshot comes from this system")
+            .replace_brace_stage(peaks, staff.brace_peak.clone())
+            .map_err(RawProjectorAdapterError::Bars)?;
+    }
+    Ok(())
+}
+
+fn build_and_promote_system_braces(
+    state: &mut BarsSystemState,
+    all_brace_sections: &[Section],
+    skew: &HeadlessSkew,
+    parameters: RawBraceStageParameters,
+    sig_store: &mut BraceSigStore,
+    members_of: &mut impl FnMut(StaffPeakKey) -> Result<Vec<Section>, String>,
+) -> Result<Vec<BracePromotion>, RawProjectorAdapterError> {
+    let mut promotions = Vec::new();
+    if state.staffs().len() <= 1 {
+        return Ok(promotions);
+    }
+    let mut staff_index = 0;
+    while staff_index < state.staffs().len() {
+        let Some(top) = state.staffs()[staff_index].brace_peak().cloned() else {
+            staff_index += 1;
+            continue;
+        };
+        if !top.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceTop) {
+            staff_index += 1;
+            continue;
+        }
+
+        let mut portions = vec![(state.staffs()[staff_index].staff_id(), top.clone())];
+        let mut current_top = top;
+        for lower_index in (staff_index + 1)..state.staffs().len() {
+            let mut lower = state.staffs()[lower_index].brace_peak().cloned();
+            if lower.is_none() {
+                let candidate = state.staffs()[lower_index]
+                    .peaks()
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| {
+                        RawProjectorAdapterError::BraceMembers(format!(
+                            "staff {} has no first peak for brace alignment",
+                            state.staffs()[lower_index].staff_id().value()
+                        ))
+                    })?;
+                if brace_peaks_align(
+                    &current_top,
+                    &candidate,
+                    parameters.maximum_alignment_dx,
+                    skew,
+                ) {
+                    let mut middle = candidate;
+                    middle.set(audiveris_image::staff_peak::StaffPeakAttribute::BraceMiddle);
+                    let key = middle.key();
+                    *state
+                        .graph_mut()
+                        .vertex_mut(key)
+                        .expect("fallback brace candidate remains in graph") = middle.clone();
+                    let staff = state
+                        .staff_mut(key.staff_id())
+                        .expect("fallback brace candidate belongs to lower staff");
+                    *staff
+                        .peaks_mut()
+                        .first_mut()
+                        .expect("fallback candidate is the first peak") = middle.clone();
+                    staff
+                        .replace_brace_stage(staff.peaks().to_vec(), Some(middle.clone()))
+                        .map_err(RawProjectorAdapterError::Bars)?;
+                    lower = Some(middle);
+                }
+            }
+            let Some(lower) = lower else {
+                break;
+            };
+            if !lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceMiddle)
+                && !lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceBottom)
+            {
+                break;
+            }
+            portions.push((state.staffs()[lower_index].staff_id(), lower.clone()));
+            if lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceBottom) {
+                break;
+            }
+            current_top = lower;
+        }
+
+        if portions.len() > 1 {
+            let filament_portions = portions
+                .iter()
+                .map(|(_, peak)| {
+                    Ok(BraceFilamentPortion {
+                        peak: peak.clone(),
+                        members: members_of(peak.key())
+                            .map_err(RawProjectorAdapterError::BraceMembers)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+            let filament =
+                build_brace_filament(&filament_portions, all_brace_sections, parameters.filament)
+                    .map_err(RawProjectorAdapterError::BraceFilament)?;
+            promotions.push(
+                promote_brace_filament(&filament, state.system_id(), portions[0].0, sig_store)
+                    .map_err(RawProjectorAdapterError::BraceSig)?,
+            );
+        }
+        staff_index = state
+            .staffs()
+            .iter()
+            .position(|staff| staff.staff_id() == portions.last().expect("top exists").0)
+            .expect("portion staff remains in system")
+            + 1;
+    }
+    Ok(promotions)
+}
+
+fn brace_peaks_align(
+    top: &StaffPeak,
+    bottom: &StaffPeak,
+    maximum_dx: f64,
+    skew: &HeadlessSkew,
+) -> bool {
+    let top_mid = top.start().wrapping_add(top.stop()) / 2;
+    let bottom_mid = bottom.start().wrapping_add(bottom.stop()) / 2;
+    let top = skew.deskewed(PeakPoint::new(f64::from(top_mid), f64::from(top.bottom())));
+    let bottom = skew.deskewed(PeakPoint::new(
+        f64::from(bottom_mid),
+        f64::from(bottom.top()),
+    ));
+    (bottom.x - top.x).abs() <= maximum_dx
+}
+
 fn induced_system_graph(
     source: &PeakGraph<BarAlignment>,
     staff_ids: &[StaffId],
@@ -1194,7 +1526,7 @@ mod tests {
         bar_alignment::BarAlignmentKind,
         prepared_lines::PreparedStaffLine,
         run_table::{Orientation, Run, RunTable},
-        section::{JunctionPolicy, build_sections},
+        section::{JunctionPolicy, build_sections, build_sections_from_id},
         staff_peak::{PeakPoint, StaffPeakAttribute},
     };
 
@@ -1450,6 +1782,9 @@ mod tests {
             }
             RawSystemGroupingBoundary::NeedsBracePortionDetection { .. } => {
                 panic!("one retained staff does not require brace-portion grouping")
+            }
+            RawSystemGroupingBoundary::NeedsBracketEndDetection { .. } => {
+                panic!("one retained staff does not require bracket-end grouping")
             }
         }
 
@@ -1789,7 +2124,7 @@ mod tests {
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
         ));
 
-        let prefix = bridge_raw_projectors_through_bars_prefix(
+        let mut prefix = bridge_raw_projectors_through_bars_prefix(
             &handoff,
             &prepared,
             raster,
@@ -1839,6 +2174,99 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsBracePortionDetection {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let make_brace_section = |id, y| {
+            let mut table = RunTable::new(Orientation::Vertical, 3, 12).unwrap();
+            table.add_run(1, Run::new(y, 6)).unwrap();
+            build_sections_from_id(&table, JunctionPolicy::All, id)
+                .into_iter()
+                .find(|section| section.id() == id)
+                .unwrap()
+        };
+        let top_member = make_brace_section(100, 0);
+        let bottom_member = make_brace_section(101, 6);
+        let all_brace_sections = vec![top_member.clone(), bottom_member.clone()];
+        let mut sig_store = BraceSigStore::new(0, 0, [1]);
+        let brace_report = continue_raw_bars_through_lines_root(
+            &mut prefix,
+            &prepared,
+            &all_brace_sections,
+            &skew,
+            RawBraceStageParameters {
+                portions: BracePortionParameters {
+                    neutral_gap: 1,
+                    maximum_peak_width: 2,
+                    maximum_bar_gap: 4,
+                    minimum_portion_height: 5.0,
+                    maximum_curvature: 10.0,
+                    lookup_extension: 2.0,
+                },
+                filament: BraceFilamentParameters {
+                    interline: 5,
+                    segment_length: 5,
+                    left_margin: 1,
+                },
+                maximum_alignment_dx: 4.0,
+            },
+            &mut sig_store,
+            |_, staff_id, _, _| {
+                let (top, bottom, extension_top, extension_bottom) = if staff_id == StaffId::new(1)
+                {
+                    (0, 5, 0.0, 3.0)
+                } else {
+                    (6, 11, 3.0, 0.0)
+                };
+                let mut peak = StaffPeak::new(staff_id, top, bottom, 1, 1).unwrap();
+                peak.set(StaffPeakAttribute::Brace);
+                Ok(Some(BraceProbe {
+                    peak,
+                    filament: Some(crate::brace_portions::BraceFilamentEvidence {
+                        vertical_length: 6.0,
+                        mean_curvature: 1.0,
+                        extension_top,
+                        extension_bottom,
+                    }),
+                }))
+            },
+            |key| {
+                Ok(if key.staff_id() == StaffId::new(1) {
+                    vec![top_member.clone()]
+                } else {
+                    vec![bottom_member.clone()]
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(brace_report.systems.len(), 1);
+        assert_eq!(brace_report.systems[0].promotions.len(), 1);
+        assert!(
+            prefix.bars[0].state.staffs()[0]
+                .brace_peak()
+                .unwrap()
+                .is_set(StaffPeakAttribute::BraceTop)
+        );
+        assert!(
+            prefix.bars[0].state.staffs()[1]
+                .brace_peak()
+                .unwrap()
+                .is_set(StaffPeakAttribute::BraceBottom)
+        );
+        assert_eq!(sig_store.originals().len(), 1);
+        assert_eq!(sig_store.system_nodes(1).unwrap().len(), 1);
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsBracketEndDetection {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]

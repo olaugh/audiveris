@@ -84,6 +84,8 @@ pub enum BracePortionError {
     Probe(String),
     MissingReplacementPeak(StaffPeakKey),
     MissingProjectorPeak(StaffPeakKey),
+    MissingPeakIdentity(StaffPeakKey),
+    PeakIdentityExhausted,
     Column(BarColumnError),
     Graph(PeakGraphError),
 }
@@ -106,6 +108,10 @@ impl fmt::Display for BracePortionError {
             Self::MissingProjectorPeak(peak) => {
                 write!(formatter, "brace projector peak is absent: {peak:?}")
             }
+            Self::MissingPeakIdentity(peak) => {
+                write!(formatter, "brace peak has no stable identity: {peak:?}")
+            }
+            Self::PeakIdentityExhausted => formatter.write_str("brace peak identity exhausted"),
             Self::Column(source) => write!(formatter, "brace column replacement failed: {source}"),
             Self::Graph(source) => write!(formatter, "brace graph replacement failed: {source}"),
         }
@@ -132,6 +138,24 @@ pub fn apply_brace_replacements(
     columns: &mut [BraceColumnSet],
     replacements: &[BraceReplacement],
 ) -> Result<(), BracePortionError> {
+    let mut peak_ids = graph
+        .vertices()
+        .iter()
+        .enumerate()
+        .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
+        .collect::<Vec<_>>();
+    apply_brace_replacements_with_peak_ids(graph, &mut peak_ids, systems, columns, replacements)
+}
+
+/// Stable-ID form used after earlier projector purges have made graph-vector
+/// positions diverge from Java entity identities.
+pub fn apply_brace_replacements_with_peak_ids(
+    graph: &mut PeakGraph<BarAlignment>,
+    peak_ids: &mut Vec<(PeakId, StaffPeakKey)>,
+    systems: &mut [BracePortionSystem],
+    columns: &mut [BraceColumnSet],
+    replacements: &[BraceReplacement],
+) -> Result<(), BracePortionError> {
     for replacement in replacements {
         let system = systems
             .iter_mut()
@@ -150,22 +174,34 @@ pub fn apply_brace_replacements(
             .ok_or(BracePortionError::MissingReplacementPeak(
                 replacement.new_peak,
             ))?;
-        let old_vertex_index = graph
-            .vertices()
-            .iter()
-            .position(|peak| peak.key() == replacement.old_peak)
-            .ok_or(BracePortionError::MissingProjectorPeak(
+        if graph.vertex(replacement.old_peak).is_none() {
+            return Err(BracePortionError::MissingProjectorPeak(
                 replacement.old_peak,
-            ))?;
-        let old_id = PeakId::new(old_vertex_index + 1);
-        let new_id = graph
-            .vertices()
+            ));
+        }
+        let old_id = peak_ids
             .iter()
-            .position(|peak| peak.key() == replacement.new_peak)
-            .map_or_else(
-                || PeakId::new(graph.vertices().len() + 1),
-                |index| PeakId::new(index + 1),
-            );
+            .find_map(|(id, key)| (*key == replacement.old_peak).then_some(*id))
+            .ok_or(BracePortionError::MissingPeakIdentity(replacement.old_peak))?;
+        let existing_new_id = peak_ids
+            .iter()
+            .find_map(|(id, key)| (*key == replacement.new_peak).then_some(*id));
+        if graph.vertex(replacement.new_peak).is_some() && existing_new_id.is_none() {
+            return Err(BracePortionError::MissingPeakIdentity(replacement.new_peak));
+        }
+        let new_id = existing_new_id.map_or_else(
+            || {
+                peak_ids
+                    .iter()
+                    .map(|(id, _)| id.value())
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .map(PeakId::new)
+                    .ok_or(BracePortionError::PeakIdentityExhausted)
+            },
+            Ok,
+        )?;
 
         if let Some(column_set) = columns
             .iter_mut()
@@ -204,7 +240,10 @@ pub fn apply_brace_replacements(
                 replacement.old_peak,
             ))?;
         staff.peaks.insert(projector_index, replacement.new_peak);
-        graph.add_vertex(new_peak);
+        let added = graph.add_vertex(new_peak);
+        if added && existing_new_id.is_none() {
+            peak_ids.push((new_id, replacement.new_peak));
+        }
 
         let incoming = graph
             .incoming_edges(replacement.old_peak)
@@ -685,5 +724,64 @@ mod tests {
             columns[0].columns[0].peaks()[1].unwrap().id(),
             PeakId::new(3)
         );
+    }
+
+    #[test]
+    fn stable_ids_survive_an_earlier_graph_vertex_purge() {
+        let old = graded_peak(2, 20, 21);
+        let bottom = graded_peak(3, 30, 31);
+        let mut replacement = graded_peak(2, 16, 18);
+        replacement.set(StaffPeakAttribute::Brace);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(old.clone());
+        graph.add_vertex(bottom.clone());
+        let removed = graded_peak(1, 10, 11);
+        let mut peak_ids = vec![
+            (PeakId::new(1), removed.key()),
+            (PeakId::new(2), old.key()),
+            (PeakId::new(3), bottom.key()),
+        ];
+        let mut column = BarColumn::new(vec![StaffId::new(2), StaffId::new(3)]).unwrap();
+        column
+            .add_peak(
+                BarPeak::new(PeakId::new(2), StaffId::new(2), 2.0, 20.5, false, false).unwrap(),
+            )
+            .unwrap();
+        let mut columns = [BraceColumnSet {
+            system_id: 1,
+            columns: vec![column],
+        }];
+        let mut systems = [BracePortionSystem {
+            system_id: 1,
+            staffs: vec![BracePortionStaff {
+                staff_id: StaffId::new(2),
+                peaks: vec![old.key()],
+                start_peak_index: Some(0),
+                brace_peak: Some(replacement.clone()),
+            }],
+        }];
+        let intent = BraceReplacement {
+            system_id: 1,
+            staff_id: StaffId::new(2),
+            old_peak: old.key(),
+            new_peak: replacement.key(),
+        };
+
+        apply_brace_replacements_with_peak_ids(
+            &mut graph,
+            &mut peak_ids,
+            &mut systems,
+            &mut columns,
+            &[intent],
+        )
+        .unwrap();
+
+        assert_eq!(
+            columns[0].columns[0].peaks()[0].unwrap().id(),
+            PeakId::new(4)
+        );
+        assert_eq!(peak_ids.last(), Some(&(PeakId::new(4), replacement.key())));
+        assert!(!graph.contains_vertex(old.key()));
+        assert!(graph.contains_vertex(replacement.key()));
     }
 }
