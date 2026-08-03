@@ -46,12 +46,18 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.ScaleBuilder;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
+import org.audiveris.omr.sheet.Skew;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
+import org.audiveris.omr.sheet.grid.BarAlignment;
+import org.audiveris.omr.sheet.grid.BarColumn;
+import org.audiveris.omr.sheet.grid.BarConnection;
 import org.audiveris.omr.sheet.grid.GridBuilder;
 import org.audiveris.omr.sheet.grid.LineCluster;
+import org.audiveris.omr.sheet.grid.PeakGraph;
 import org.audiveris.omr.sheet.grid.StaffFilament;
 import org.audiveris.omr.sheet.grid.StaffPattern;
+import org.audiveris.omr.sheet.grid.StaffPeak;
 import org.audiveris.omr.sheet.grid.TargetLine;
 import org.audiveris.omr.sheet.grid.TargetStaff;
 import org.audiveris.omr.sheet.grid.TargetSystem;
@@ -380,6 +386,90 @@ public final class RustParityProbe
                         + ";lines:" + String.join(",", indexedLines)
                         + ";starts:" + points(indexedCluster.getStarts())
                         + ";stops:" + points(indexedCluster.getStops()));
+
+        Book columnBook = new Book(Path.of("bar-column.synthetic"));
+        SheetStub columnStub = new SheetStub(columnBook, 1);
+        columnBook.addStub(columnStub);
+        Sheet columnSheet = new Sheet(
+                columnStub,
+                new RunTable(Orientation.VERTICAL, 100, 100));
+        columnSheet.setScale(indexedScale);
+        Skew columnSkew = new Skew(0.0, columnSheet);
+        List<Staff> columnStaves = List.of(
+                new Staff(4, 0.0, 99.0, 10, new ArrayList<>()),
+                new Staff(5, 0.0, 99.0, 10, new ArrayList<>()),
+                new Staff(6, 0.0, 99.0, 10, new ArrayList<>()));
+        SystemInfo columnSystem = new SystemInfo(12, columnSheet, columnStaves);
+        PeakGraph columnGraph = new PeakGraph(columnSheet, new ArrayList<>());
+        BarColumn barColumn = new BarColumn(columnSystem, columnGraph);
+        StaffPeak topPeak = staffPeak(columnStaves.get(0), 2, 20, 10, 11, columnSkew);
+        StaffPeak middlePeak = staffPeak(columnStaves.get(1), 30, 48, 12, 14, columnSkew);
+        StaffPeak bottomPeak = staffPeak(columnStaves.get(2), 58, 76, 14, 17, columnSkew);
+        topPeak.setStaffEnd(org.audiveris.omr.util.HorizontalSide.LEFT);
+        for (StaffPeak peak : List.of(topPeak, middlePeak, bottomPeak)) {
+            columnGraph.addVertex(peak);
+        }
+        BarAlignment topAlignment = new BarAlignment(
+                topPeak,
+                middlePeak,
+                0.0,
+                1.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        BarAlignment bottomAlignment = new BarAlignment(
+                middlePeak,
+                bottomPeak,
+                0.0,
+                1.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        columnGraph.addEdge(
+                topPeak,
+                middlePeak,
+                new BarConnection(columnSheet, topAlignment, 1.0, 1.0));
+        columnGraph.addEdge(
+                middlePeak,
+                bottomPeak,
+                new BarConnection(columnSheet, bottomAlignment, 1.0, 1.0));
+        // Deliberately add out of order: slots remain fixed in staff order.
+        barColumn.addPeak(bottomPeak);
+        barColumn.addPeak(topPeak);
+        barColumn.addPeak(middlePeak);
+        double initialWidth = barColumn.getWidth();
+        double initialX = barColumn.getXDsk();
+        boolean initialFull = barColumn.isFull();
+        boolean initialConnected = barColumn.isFullyConnected();
+        StaffPeak replacement = staffPeak(columnStaves.get(1), 30, 48, 20, 24, columnSkew);
+        columnGraph.addVertex(replacement);
+        barColumn.addPeak(replacement);
+        double replacementWidth = barColumn.getWidth();
+        double replacementX = barColumn.getXDsk();
+        boolean replacementFull = barColumn.isFull();
+        boolean replacementConnected = barColumn.isFullyConnected();
+        StaffPeak braceReplacement = staffPeak(columnStaves.get(1), 30, 48, 20, 24, columnSkew);
+        braceReplacement.set(StaffPeak.Attribute.BRACE);
+        barColumn.addPeak(braceReplacement);
+        List<String> columnSlots = new ArrayList<>();
+        for (StaffPeak peak : barColumn.getPeaks()) {
+            columnSlots.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%d@%.1f",
+                    peak.getStaff().getId(),
+                    peak.getDeskewedAbscissa()));
+        }
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.bar-column.synthetic=slots:%s;initial:%.12f,%.12f,%s,%s,%s;overwrite:%.12f,%.12f,%s,%s;brace:%s,%s%n",
+                String.join(",", columnSlots),
+                initialWidth,
+                initialX,
+                initialFull,
+                initialConnected,
+                barColumn.isStart(),
+                replacementWidth,
+                replacementX,
+                replacementFull,
+                replacementConnected,
+                braceReplacement.isBrace(),
+                barColumn.isFull());
 
         TargetSystem targetSystem = new TargetSystem(
                 new SystemInfo(7, null, new ArrayList<>()),
@@ -829,6 +919,18 @@ public final class RustParityProbe
     private static String point (Point2D point)
     {
         return String.format(java.util.Locale.ROOT, "%.12f,%.12f", point.getX(), point.getY());
+    }
+
+    private static StaffPeak staffPeak (Staff staff,
+                                        int top,
+                                        int bottom,
+                                        int start,
+                                        int stop,
+                                        Skew skew)
+    {
+        StaffPeak peak = new StaffPeak(staff, top, bottom, start, stop, null);
+        peak.computeDeskewedCenter(skew);
+        return peak;
     }
 
     private static long hashSection (long hash,

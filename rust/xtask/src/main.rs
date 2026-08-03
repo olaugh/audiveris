@@ -7,6 +7,7 @@ use audiveris_core::{
 };
 use audiveris_image::{
     adaptive,
+    bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
     chamfer::ChamferDistance,
     filament::{FilamentError, StaffFilament},
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
@@ -198,7 +199,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 43] = [
+const VECTOR_KEYS: [&str; 44] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -217,6 +218,7 @@ const VECTOR_KEYS: [&str; 43] = [
     "grid.filament-factory.overlap=",
     "grid.line-cluster.synthetic=",
     "grid.line-cluster-index.synthetic=",
+    "grid.bar-column.synthetic=",
     "grid.target-line.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
@@ -777,6 +779,45 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .map(|(x, y)| format!("{x:.6},{y:.6}"))
             .collect::<Vec<_>>()
             .join(";")
+    ));
+    let staff_ids = [4, 5, 6].map(StaffId::new);
+    let top_peak = BarPeak::new(PeakId::new(1), staff_ids[0], 2.0, 10.5, false, true)?;
+    let middle_peak = BarPeak::new(PeakId::new(2), staff_ids[1], 3.0, 13.0, false, false)?;
+    let bottom_peak = BarPeak::new(PeakId::new(3), staff_ids[2], 4.0, 15.5, false, false)?;
+    let relations = [
+        PeakRelation::connection(top_peak.id(), middle_peak.id()),
+        PeakRelation::connection(middle_peak.id(), bottom_peak.id()),
+    ];
+    let mut bar_column = BarColumn::new(staff_ids.to_vec())?;
+    bar_column.add_peak(bottom_peak)?;
+    bar_column.add_peak(top_peak)?;
+    bar_column.add_peak(middle_peak)?;
+    let initial_width = bar_column.mean_width();
+    let initial_x = bar_column.deskewed_x();
+    let initial_full = bar_column.is_full();
+    let initial_connected = bar_column.is_fully_connected(&relations);
+    let replacement = BarPeak::new(PeakId::new(4), staff_ids[1], 5.0, 22.0, false, false)?;
+    bar_column.add_peak(replacement)?;
+    let replacement_width = bar_column.mean_width();
+    let replacement_x = bar_column.deskewed_x();
+    let replacement_full = bar_column.is_full();
+    let replacement_connected = bar_column.is_fully_connected(&relations);
+    let brace_replacement = BarPeak::new(PeakId::new(4), staff_ids[1], 5.0, 22.0, true, false)?;
+    bar_column.add_peak(brace_replacement)?;
+    let column_slots = bar_column
+        .peaks()
+        .iter()
+        .map(|peak| {
+            let peak = peak.expect("full fixture column");
+            format!("{}@{:.1}", peak.staff_id().value(), peak.deskewed_x())
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    lines.push(format!(
+        "grid.bar-column.synthetic=slots:{column_slots};initial:{initial_width:.12},{initial_x:.12},{initial_full},{initial_connected},{};overwrite:{replacement_width:.12},{replacement_x:.12},{replacement_full},{replacement_connected};brace:{},{}",
+        bar_column.is_start(),
+        brace_replacement.is_brace(),
+        bar_column.is_full()
     ));
     let target_line = TargetLine::new(filament.geometry()?, 75.0, 100.0, 300.0)?;
     lines.push(format!(
