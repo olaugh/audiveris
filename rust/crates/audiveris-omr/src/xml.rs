@@ -119,6 +119,7 @@ impl BookXml {
         let mut active_book_parameters = false;
         let mut active_book_interline: Option<String> = None;
         let mut active_book_beam_thickness: Option<String> = None;
+        let mut active_book_ocr_languages: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -128,6 +129,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_book_ocr_languages.is_some() {
+                        return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
+                    }
                     if active_book_beam_thickness.is_some() {
                         return Err(BookXmlError::UnexpectedBookBeamThicknessContent);
                     }
@@ -220,6 +224,12 @@ impl BookXml {
                     {
                         begin_book_beam_thickness(&book_parameters)?;
                         active_book_beam_thickness = Some(String::new());
+                    } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                    {
+                        begin_book_ocr_languages(&book_parameters)?;
+                        active_book_ocr_languages = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -327,6 +337,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_book_ocr_languages.is_some() {
+                        return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
+                    }
                     if active_book_beam_thickness.is_some() {
                         return Err(BookXmlError::UnexpectedBookBeamThicknessContent);
                     }
@@ -418,6 +431,12 @@ impl BookXml {
                     {
                         begin_book_beam_thickness(&book_parameters)?;
                         set_book_beam_thickness(&mut book_parameters, "")?;
+                    } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                    {
+                        begin_book_ocr_languages(&book_parameters)?;
+                        set_book_ocr_languages(&mut book_parameters, String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -514,6 +533,12 @@ impl BookXml {
                     }
                 }
                 Event::End(element) => {
+                    if depth == 3
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                        && let Some(text) = active_book_ocr_languages.take()
+                    {
+                        set_book_ocr_languages(&mut book_parameters, text);
+                    }
                     if depth == 3
                         && element.name().as_ref() == BEAM_THICKNESS_ELEMENT
                         && let Some(text) = active_book_beam_thickness.take()
@@ -631,6 +656,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_book_ocr_languages.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_ocr_languages
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::Text(text) if active_book_beam_thickness.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -740,6 +774,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_book_ocr_languages.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_ocr_languages
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::CData(text) if active_book_beam_thickness.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -825,6 +868,9 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_book_ocr_languages.is_some() => {
+                    return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
+                }
                 Event::GeneralRef(_) if active_book_beam_thickness.is_some() => {
                     return Err(BookXmlError::UnexpectedBookBeamThicknessContent);
                 }
@@ -889,6 +935,11 @@ impl BookXml {
                         sheet_number: page.sheet_number,
                         sheet_page_id: page.sheet_page_id,
                     });
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_book_ocr_languages.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_book_beam_thickness.is_some() =>
@@ -1057,10 +1108,11 @@ impl BookXml {
 }
 
 /// Narrow modern Book parameter view without resolving inherited defaults.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BookParameterScalars {
     interline: Option<i32>,
     beam_thickness: Option<i32>,
+    ocr_languages: Option<String>,
 }
 
 impl BookParameterScalars {
@@ -1074,6 +1126,12 @@ impl BookParameterScalars {
     #[must_use]
     pub const fn beam_thickness_specific(&self) -> Option<i32> {
         self.beam_thickness
+    }
+
+    /// Explicit Book-scope OCR languages; absent means inherit globally.
+    #[must_use]
+    pub fn ocr_languages_specific(&self) -> Option<&str> {
+        self.ocr_languages.as_deref()
     }
 }
 
@@ -1592,6 +1650,10 @@ pub enum BookXmlError {
     InvalidBookBeamThickness(String),
     /// The typed Book beam-thickness scalar contains unsupported content.
     UnexpectedBookBeamThicknessContent,
+    /// The Book parameter container repeats its OCR-language override.
+    DuplicateBookOcrLanguages,
+    /// The typed Book OCR-language scalar contains unsupported content.
+    UnexpectedBookOcrLanguagesContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1913,6 +1975,15 @@ impl fmt::Display for BookXmlError {
                 write!(
                     formatter,
                     "book parameter beam-thickness contains non-text content"
+                )
+            }
+            Self::DuplicateBookOcrLanguages => {
+                write!(formatter, "book parameters repeat ocr-languages")
+            }
+            Self::UnexpectedBookOcrLanguagesContent => {
+                write!(
+                    formatter,
+                    "book parameter ocr-languages contains non-text content"
                 )
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
@@ -2296,6 +2367,21 @@ fn set_book_beam_thickness(
         .map_err(|_| BookXmlError::InvalidBookBeamThickness(text.to_owned()))?;
     parameters.as_mut().unwrap().beam_thickness = Some(value);
     Ok(())
+}
+
+fn begin_book_ocr_languages(current: &Option<BookParameterScalars>) -> Result<(), BookXmlError> {
+    if current
+        .as_ref()
+        .and_then(BookParameterScalars::ocr_languages_specific)
+        .is_some()
+    {
+        return Err(BookXmlError::DuplicateBookOcrLanguages);
+    }
+    Ok(())
+}
+
+fn set_book_ocr_languages(parameters: &mut Option<BookParameterScalars>, text: String) {
+    parameters.as_mut().unwrap().ocr_languages = Some(text);
 }
 
 fn parse_book_root(
@@ -4326,6 +4412,66 @@ mod tests {
             assert_eq!(
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::UnexpectedBookBeamThicknessContent
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_inherited_empty_and_specific_book_ocr_languages() {
+        let inherited =
+            BookXml::parse(br#"<book><parameters><interline>12</interline></parameters></book>"#)
+                .unwrap();
+        assert_eq!(
+            inherited
+                .book_parameters()
+                .unwrap()
+                .ocr_languages_specific(),
+            None
+        );
+
+        let empty_xml = br#"<book><parameters><ocr-languages/></parameters></book>"#;
+        let empty = BookXml::parse(empty_xml).unwrap();
+        assert_eq!(
+            empty.book_parameters().unwrap().ocr_languages_specific(),
+            Some("")
+        );
+        assert_eq!(empty.original_bytes(), empty_xml);
+
+        let xml = br#"<book><ocr-languages>legacy</ocr-languages><parameters><ocr-languages> eng+ita </ocr-languages><beam-thickness>7</beam-thickness><future/></parameters></book>"#;
+        let specific = BookXml::parse(xml).unwrap();
+        let parameters = specific.book_parameters().unwrap();
+        assert_eq!(parameters.ocr_languages_specific(), Some(" eng+ita "));
+        assert_eq!(parameters.beam_thickness_specific(), Some(7));
+        assert_eq!(specific.deprecated_ocr_languages(), Some("legacy"));
+        assert_eq!(specific.original_bytes(), xml);
+    }
+
+    #[test]
+    fn reads_cdata_and_ignores_non_direct_book_ocr_language_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><f:parameters><ocr-languages>ignored</ocr-languages></f:parameters><sheet number="1"><parameters><ocr-languages>ignored</ocr-languages></parameters></sheet><parameters><future><ocr-languages>ignored</ocr-languages></future><f:ocr-languages>ignored</f:ocr-languages><ocr-languages>eng+<![CDATA[ita]]></ocr-languages></parameters></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            book.book_parameters().unwrap().ocr_languages_specific(),
+            Some("eng+ita")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_or_non_text_book_ocr_languages() {
+        assert_eq!(
+            BookXml::parse(br#"<book><parameters><ocr-languages>eng</ocr-languages><ocr-languages>ita</ocr-languages></parameters></book>"#).unwrap_err(),
+            BookXmlError::DuplicateBookOcrLanguages
+        );
+        for content in ["<future/>", "&#101;ng", "<!--eng-->", "<?pick eng?>"] {
+            let xml = format!(
+                "<book><parameters><ocr-languages>{content}</ocr-languages></parameters></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedBookOcrLanguagesContent
             );
         }
     }
