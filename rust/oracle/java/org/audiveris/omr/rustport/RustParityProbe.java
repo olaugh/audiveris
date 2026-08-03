@@ -27,6 +27,7 @@ import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.image.WatershedGrayLevel;
 import org.audiveris.omr.glyph.Glyph;
+import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.glyph.dynamic.FilamentFactory;
 import org.audiveris.omr.glyph.dynamic.FilamentIndex;
 import org.audiveris.omr.glyph.dynamic.StraightFilament;
@@ -88,6 +89,8 @@ import org.audiveris.omr.sheet.grid.TargetStaff;
 import org.audiveris.omr.sheet.grid.TargetSystem;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.AbstractVerticalConnectorInter;
+import org.audiveris.omr.sig.inter.BarConnectorInter;
+import org.audiveris.omr.sig.inter.BarlineInter;
 import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.sig.relation.BarConnectionRelation;
 import org.audiveris.omr.sig.relation.BarGroupRelation;
@@ -1392,6 +1395,7 @@ public final class RustParityProbe
                         + ";field:" + (referenceSystem.getRef() == referenceSystemRef));
 
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
+        System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
@@ -2223,6 +2227,70 @@ public final class RustParityProbe
                 pages,
                 refs,
                 scoreTopology(book.getScores()));
+    }
+
+    private static String gridContextualize ()
+        throws Exception
+    {
+        Book book = new Book(Path.of("grid-contextualize.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, new RunTable(Orientation.VERTICAL, 80, 80));
+        SystemInfo system = new SystemInfo(1, sheet, List.of());
+        SIGraph sig = system.getSig();
+
+        BarlineInter a = new BarlineInter(null, Shape.THIN_BARLINE, 0.2, null, null);
+        BarlineInter b = new BarlineInter(null, Shape.THIN_BARLINE, 0.4, null, null);
+        BarlineInter c = new BarlineInter(null, Shape.THIN_BARLINE, 0.6, null, null);
+        BarlineInter groupLeft = new BarlineInter(null, Shape.THIN_BARLINE, 0.3, null, null);
+        BarlineInter groupRight = new BarlineInter(null, Shape.THIN_BARLINE, 0.5, null, null);
+        BarConnectorInter ab = new BarConnectorInter(Shape.THIN_BARLINE, 0.2, null, 1.0);
+        BarConnectorInter bc = new BarConnectorInter(Shape.THIN_BARLINE, 0.7, null, 1.0);
+        List<Inter> nodes = List.of(a, b, c, groupLeft, groupRight, ab, bc);
+        for (Inter node : nodes) {
+            sig.addVertex(node);
+        }
+
+        sig.addEdge(a, ab, new NoExclusion());
+        sig.addEdge(ab, b, new NoExclusion());
+        BarConnectionRelation abSupport = new BarConnectionRelation();
+        abSupport.setGrade(0.2);
+        sig.addEdge(a, b, abSupport);
+        sig.addEdge(b, bc, new NoExclusion());
+        sig.addEdge(bc, c, new NoExclusion());
+        BarConnectionRelation bcSupport = new BarConnectionRelation();
+        bcSupport.setGrade(0.7);
+        sig.addEdge(b, c, bcSupport);
+        sig.addEdge(groupLeft, groupRight, new BarGroupRelation(0.1));
+
+        a.freeze();
+        b.freeze();
+        c.freeze();
+        bc.freeze();
+        String frozenBefore = frozenBits(nodes);
+        int edgeCountBefore = sig.edgeSet().size();
+        sig.contextualize();
+
+        List<String> grades = new ArrayList<>();
+        for (Inter node : nodes) {
+            grades.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%.12f>%.12f",
+                    node.getGrade(),
+                    node.getContextualGrade()));
+        }
+        return "grades:" + String.join(",", grades)
+                + ";frozen:" + frozenBefore + ">" + frozenBits(nodes)
+                + ";edges:" + edgeCountBefore + ">" + sig.edgeSet().size();
+    }
+
+    private static String frozenBits (List<Inter> nodes)
+    {
+        StringBuilder bits = new StringBuilder();
+        for (Inter node : nodes) {
+            bits.append(node.isFrozen() ? '1' : '0');
+        }
+        return bits.toString();
     }
 
     private static Staff outputBoundaryStaff (int id,

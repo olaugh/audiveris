@@ -48,7 +48,7 @@ use audiveris_image::{
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
-    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute},
+    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffVerticalImpacts},
     target_line::TargetLine,
     watershed,
 };
@@ -266,7 +266,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 63] = [
+const VECTOR_KEYS: [&str; 64] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -306,6 +306,7 @@ const VECTOR_KEYS: [&str; 63] = [
     "grid.score-update.synthetic=",
     "grid.system-ref.synthetic=",
     "grid.output-boundary.synthetic=",
+    "grid.contextualize.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -845,6 +846,116 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
     Ok(format!(
         "build:swallowed@PROCESS_BARS/missing:s1.staff1.x14;staffs:{staff_glyphs}/{staff_digest:016x};glyphs:staff{staff_glyphs},bar{bar_glyphs},total{total_glyphs};sig:{sigs};pages:{pages};refs:{refs};scores:{};done:builder1,cleaner1,step1",
         format_score_topology(&executor.book.scores)
+    ))
+}
+
+fn grid_contextualize_vector() -> Result<String, Box<dyn Error>> {
+    fn peak(staff: usize, x: i32) -> Result<StaffPeak, Box<dyn Error>> {
+        Ok(StaffPeak::new(StaffId::new(staff), 10, 30, x, x)?)
+    }
+
+    fn vertical_plan(peak: &StaffPeak, impact: f64) -> VerticalInterPlan {
+        VerticalInterPlan {
+            peak: peak.key(),
+            median: VerticalMedian {
+                x: f64::from(peak.start()) + 0.5,
+                top: 9.5,
+                bottom: 31.5,
+            },
+            width: 1.0,
+            impacts: Some(StaffVerticalImpacts::new(
+                impact, impact, impact, impact, impact, impact,
+            )),
+            kind: VerticalInterKind::Barline {
+                width_class: PeakWidthClass::Thin,
+                left_staff_end: false,
+                right_staff_end: false,
+            },
+        }
+    }
+
+    fn connection(
+        top: &StaffPeak,
+        bottom: &StaffPeak,
+        first_id: usize,
+        impact: f64,
+    ) -> Result<BarAlignment, Box<dyn Error>> {
+        let alignment = BarAlignment::new(
+            AlignmentPeak::new(PeakId::new(first_id), top.staff_id(), top.start(), 1.0)?,
+            AlignmentPeak::new(
+                PeakId::new(first_id + 1),
+                bottom.staff_id(),
+                bottom.start(),
+                1.0,
+            )?,
+            0.0,
+            0.0,
+            BarImpacts::alignment(impact, impact)?,
+        )?;
+        Ok(BarAlignment::connection(&alignment, impact, impact)?)
+    }
+
+    let a = peak(1, 10)?;
+    let b = peak(2, 10)?;
+    let c = peak(3, 10)?;
+    let group_left = peak(4, 40)?;
+    let group_right = peak(4, 42)?;
+    let mut graph = PeakGraph::new();
+    for peak in [&a, &b, &c] {
+        graph.add_vertex(peak.clone());
+    }
+    graph.add_edge(a.key(), b.key(), connection(&a, &b, 1, 0.25)?)?;
+    graph.add_edge(b.key(), c.key(), connection(&b, &c, 2, 0.875)?)?;
+
+    let mut sig = GridSig::default();
+    sig.promote_vertical_inters(&[
+        vertical_plan(&a, 0.25),
+        vertical_plan(&b, 0.5),
+        vertical_plan(&c, 0.75),
+        vertical_plan(&group_left, 0.375),
+        vertical_plan(&group_right, 0.625),
+    ]);
+    let connection_plans = plan_connection_inters(&graph, |_| true);
+    sig.promote_connection_inters(&graph, &connection_plans)?;
+    sig.group_barlines(&[vec![group_left, group_right]], 3, |gap| {
+        f64::from(gap) / 10.0
+    })
+    .map_err(|error| format!("contextualization fixture grouping failed: {error:?}"))?;
+
+    let frozen_bits = |sig: &GridSig| {
+        sig.nodes_in_order()
+            .map(|(_, node)| {
+                if matches!(
+                    node,
+                    GridSigNode::Vertical { frozen: true, .. }
+                        | GridSigNode::Connector { frozen: true, .. }
+                ) {
+                    '1'
+                } else {
+                    '0'
+                }
+            })
+            .collect::<String>()
+    };
+    let frozen_before = frozen_bits(&sig);
+    let edge_count_before = sig.edges().len();
+    sig.contextualize();
+    let grades = sig
+        .nodes_in_order()
+        .map(|(_, node)| {
+            format!(
+                "{:.12}>{:.12}",
+                node.intrinsic_grade(),
+                node.contextual_grade()
+                    .expect("contextualization assigns every GRID node")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!(
+        "grades:{grades};frozen:{frozen_before}>{};edges:{edge_count_before}>{}",
+        frozen_bits(&sig),
+        sig.edges().len()
     ))
 }
 
@@ -2352,6 +2463,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.output-boundary.synthetic={}",
         output_boundary_vector()?
+    ));
+    lines.push(format!(
+        "grid.contextualize.synthetic={}",
+        grid_contextualize_vector()?
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;
