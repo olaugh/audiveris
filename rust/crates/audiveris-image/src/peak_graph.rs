@@ -163,6 +163,19 @@ impl<R> PeakGraph<R> {
         Ok(self.edges.iter().filter(move |edge| edge.source == source))
     }
 
+    /// Java/JGraphT `edgesOf`: all incoming and outgoing edges incident to the
+    /// vertex, in the graph's stable edge iteration order.
+    pub fn edges_of(
+        &self,
+        vertex: StaffPeakKey,
+    ) -> Result<impl Iterator<Item = &PeakGraphEdge<R>>, PeakGraphError> {
+        self.require_vertex(vertex)?;
+        Ok(self
+            .edges
+            .iter()
+            .filter(move |edge| edge.source == vertex || edge.target == vertex))
+    }
+
     pub fn in_degree(&self, target: StaffPeakKey) -> Result<usize, PeakGraphError> {
         Ok(self.incoming_edges(target)?.count())
     }
@@ -542,6 +555,57 @@ mod tests {
             graph.in_degree(peak(9, 0, 1).key()),
             Err(PeakGraphError::MissingVertex(peak(9, 0, 1).key()))
         );
+    }
+
+    #[test]
+    fn edges_of_combines_both_directions_in_global_order() {
+        let mut graph = PeakGraph::new();
+        let focus = peak(2, 10, 11);
+        let top = peak(1, 10, 11);
+        let bottom = peak(3, 10, 11);
+        let unrelated_left = peak(4, 10, 11);
+        let unrelated_right = peak(5, 10, 11);
+        let isolated = peak(6, 10, 11);
+        let keys = [
+            focus.key(),
+            top.key(),
+            bottom.key(),
+            unrelated_left.key(),
+            unrelated_right.key(),
+            isolated.key(),
+        ];
+        for vertex in [
+            focus,
+            top,
+            bottom,
+            unrelated_left,
+            unrelated_right,
+            isolated,
+        ] {
+            graph.add_vertex(vertex);
+        }
+
+        graph.add_edge(keys[0], keys[2], "focus-out-first").unwrap();
+        graph
+            .add_edge(keys[3], keys[4], "unrelated-middle")
+            .unwrap();
+        graph.add_edge(keys[1], keys[0], "focus-in-last").unwrap();
+
+        assert_eq!(
+            graph
+                .edges_of(keys[0])
+                .unwrap()
+                .map(|edge| *edge.relation())
+                .collect::<Vec<_>>(),
+            ["focus-out-first", "focus-in-last"]
+        );
+        assert_eq!(graph.edges_of(keys[5]).unwrap().count(), 0);
+
+        let missing = peak(7, 10, 11).key();
+        assert!(matches!(
+            graph.edges_of(missing),
+            Err(PeakGraphError::MissingVertex(key)) if key == missing
+        ));
     }
 
     #[test]
