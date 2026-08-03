@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/audiveris-core",
+    "crates/audiveris-classifier",
     "crates/audiveris-cli",
     "crates/audiveris-image",
     "crates/audiveris-omr",
