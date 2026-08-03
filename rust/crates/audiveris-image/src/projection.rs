@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
 
+use crate::run_table::FOREGROUND;
 use crate::staff_peak::HorizontalSide;
 
 /// Java `StaffProjector.Blank`: an inclusive region without staff lines.
@@ -157,6 +158,248 @@ pub struct ProjectionPeakCandidate {
     pub maximum_value: i32,
     pub left: PeakSide,
     pub right: PeakSide,
+}
+
+/// Resolved staff ordinates at the peak midpoint, supplied without transferring
+/// ownership of Java's `Staff` or line geometry into this numeric kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakCoreGeometry {
+    pub y_top: i32,
+    pub y_bottom: i32,
+    pub y_mid: i32,
+}
+
+impl PeakCoreGeometry {
+    #[must_use]
+    pub const fn new(y_top: i32, y_bottom: i32, y_mid: i32) -> Self {
+        Self {
+            y_top,
+            y_bottom,
+            y_mid,
+        }
+    }
+}
+
+/// Scale-resolved acceptance thresholds used after Java `createPeak` has
+/// refined the two horizontal sides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeakCoreParams {
+    gap_threshold: i32,
+    minimum_white_ratio_beyond_serif: f64,
+}
+
+impl PeakCoreParams {
+    pub fn new(
+        gap_threshold: i32,
+        minimum_white_ratio_beyond_serif: f64,
+    ) -> Result<Self, ProjectionError> {
+        if gap_threshold < 0
+            || !minimum_white_ratio_beyond_serif.is_finite()
+            || !(0.0..=1.0).contains(&minimum_white_ratio_beyond_serif)
+        {
+            return Err(ProjectionError::InvalidCoreParameters);
+        }
+        Ok(Self {
+            gap_threshold,
+            minimum_white_ratio_beyond_serif,
+        })
+    }
+}
+
+/// Java `AreaUtil.CoreData` for an axis-aligned vertical probe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalCoreData {
+    pub length: i32,
+    pub gap: i32,
+    pub white_ratio: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PeakCoreRejection {
+    GapTooLarge,
+    InsufficientWhiteBeyondSerif,
+}
+
+/// Pixel evidence and the bounded accept/reject decision immediately following
+/// peak construction in Java `StaffProjector.createPeak`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeakCoreValidation {
+    pub y_top: i32,
+    pub y_bottom: i32,
+    pub core: VerticalCoreData,
+    pub full_height_core: Option<VerticalCoreData>,
+    pub rejection: Option<PeakCoreRejection>,
+}
+
+impl PeakCoreValidation {
+    #[must_use]
+    pub const fn is_accepted(self) -> bool {
+        self.rejection.is_none()
+    }
+}
+
+impl ProjectionPeakCandidate {
+    /// Pixel/core validation from the middle of Java
+    /// `StaffProjector.createPeak`.
+    ///
+    /// `pixels` uses the same row-major zero-is-foreground convention as
+    /// [`crate::ingest::GrayRaster::pixels`] and [`crate::run_table::RunTable::to_pixels`].
+    /// The caller resolves the three staff-line ordinates at the candidate's
+    /// midpoint; no sheet, staff, graph, or score mutation crosses this boundary.
+    pub fn validate_core(
+        self,
+        raster_width: usize,
+        raster_height: usize,
+        pixels: &[u8],
+        geometry: PeakCoreGeometry,
+        added_chunk: i32,
+        params: PeakCoreParams,
+    ) -> Result<PeakCoreValidation, ProjectionError> {
+        let expected = raster_width.checked_mul(raster_height).ok_or(
+            ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            },
+        )?;
+        if raster_width == 0 || raster_height == 0 {
+            return Err(ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            });
+        }
+        if pixels.len() != expected {
+            return Err(ProjectionError::InvalidRasterPixels {
+                expected,
+                actual: pixels.len(),
+            });
+        }
+        if geometry.y_top > geometry.y_bottom
+            || (added_chunk != 0
+                && (geometry.y_mid < geometry.y_top || geometry.y_mid > geometry.y_bottom))
+        {
+            return Err(ProjectionError::InvalidCoreGeometry(geometry));
+        }
+
+        let width = self.stop.wrapping_sub(self.start).wrapping_add(1);
+        let dx = i32::from(width <= 2);
+        let x_min = self.start.wrapping_sub(dx);
+        let x_max = self.stop.wrapping_add(dx);
+
+        let full_height_core = if added_chunk != 0 {
+            Some(vertical_core_data(
+                raster_width,
+                raster_height,
+                pixels,
+                x_min,
+                x_max,
+                geometry.y_top,
+                geometry.y_bottom,
+            )?)
+        } else {
+            None
+        };
+
+        let (y_top, y_bottom) = if added_chunk != 0 {
+            (
+                geometry
+                    .y_top
+                    .wrapping_add(geometry.y_mid.wrapping_sub(geometry.y_top) / 2),
+                geometry
+                    .y_bottom
+                    .wrapping_sub(geometry.y_bottom.wrapping_sub(geometry.y_mid) / 2),
+            )
+        } else {
+            (geometry.y_top, geometry.y_bottom)
+        };
+        let core = vertical_core_data(
+            raster_width,
+            raster_height,
+            pixels,
+            x_min,
+            x_max,
+            y_top,
+            y_bottom,
+        )?;
+
+        let rejection = if core.gap > params.gap_threshold {
+            Some(PeakCoreRejection::GapTooLarge)
+        } else if full_height_core
+            .is_some_and(|data| data.white_ratio < params.minimum_white_ratio_beyond_serif)
+        {
+            Some(PeakCoreRejection::InsufficientWhiteBeyondSerif)
+        } else {
+            None
+        };
+
+        Ok(PeakCoreValidation {
+            y_top,
+            y_bottom,
+            core,
+            full_height_core,
+            rejection,
+        })
+    }
+}
+
+/// Axis-aligned specialization of Java `AreaUtil.verticalCore` used by
+/// `StaffProjector`: a row is black if any pixel in the inclusive x span is
+/// foreground. Leading and trailing white rows contribute to `white_ratio` but
+/// not to the largest enclosed gap, matching the source implementation.
+fn vertical_core_data(
+    raster_width: usize,
+    raster_height: usize,
+    pixels: &[u8],
+    x_min: i32,
+    x_max: i32,
+    y_min: i32,
+    y_max: i32,
+) -> Result<VerticalCoreData, ProjectionError> {
+    let in_bounds = |x: i32, y: i32| {
+        x >= 0
+            && y >= 0
+            && usize::try_from(x).is_ok_and(|x| x < raster_width)
+            && usize::try_from(y).is_ok_and(|y| y < raster_height)
+    };
+    if x_min > x_max || y_min > y_max || !in_bounds(x_min, y_min) || !in_bounds(x_max, y_max) {
+        return Err(ProjectionError::CoreProbeOutOfBounds {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        });
+    }
+
+    let mut largest_gap = 0;
+    let mut last_black_y = -1;
+    let mut last_white_y = -1;
+    let mut white_count = 0;
+
+    for y in y_min..=y_max {
+        let y_index = usize::try_from(y).expect("validated nonnegative y");
+        let row = y_index * raster_width;
+        let empty = (x_min..=x_max).all(|x| {
+            let x_index = usize::try_from(x).expect("validated nonnegative x");
+            pixels[row + x_index] != FOREGROUND
+        });
+        if empty {
+            white_count += 1;
+            last_white_y = y;
+            continue;
+        }
+
+        if last_white_y != -1 && last_black_y != -1 {
+            largest_gap = largest_gap.max(last_white_y - last_black_y);
+            last_white_y = -1;
+        }
+        last_black_y = y;
+    }
+
+    let length = y_max.wrapping_sub(y_min).wrapping_add(1);
+    Ok(VerticalCoreData {
+        length,
+        gap: largest_gap,
+        white_ratio: f64::from(white_count) / f64::from(length),
+    })
 }
 
 impl ProjectionBlank {
@@ -587,13 +830,41 @@ pub fn has_blank_between(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectionError {
-    InvalidDomain { start: i32, stop: i32 },
-    InvalidDerivativeRange { x_min: i32, x_max: i32 },
-    InsufficientDerivativeSamples { available: usize, required: usize },
+    InvalidDomain {
+        start: i32,
+        stop: i32,
+    },
+    InvalidDerivativeRange {
+        x_min: i32,
+        x_max: i32,
+    },
+    InsufficientDerivativeSamples {
+        available: usize,
+        required: usize,
+    },
     InvalidDirection(i32),
-    InvalidPeakRange { x_start: i32, x_stop: i32 },
+    InvalidPeakRange {
+        x_start: i32,
+        x_stop: i32,
+    },
     InvalidRefinementParameters,
     InvalidMaximumBarWidth(i32),
+    InvalidCoreParameters,
+    InvalidRasterDimensions {
+        width: usize,
+        height: usize,
+    },
+    InvalidRasterPixels {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidCoreGeometry(PeakCoreGeometry),
+    CoreProbeOutOfBounds {
+        x_min: i32,
+        x_max: i32,
+        y_min: i32,
+        y_max: i32,
+    },
 }
 
 impl fmt::Display for ProjectionError {
@@ -627,6 +898,29 @@ impl fmt::Display for ProjectionError {
             Self::InvalidMaximumBarWidth(width) => {
                 write!(formatter, "maximum bar width must be positive, got {width}")
             }
+            Self::InvalidCoreParameters => {
+                formatter.write_str("core gap threshold or minimum white ratio is invalid")
+            }
+            Self::InvalidRasterDimensions { width, height } => {
+                write!(formatter, "invalid raster dimensions {width}x{height}")
+            }
+            Self::InvalidRasterPixels { expected, actual } => {
+                write!(formatter, "raster has {actual} pixels, expected {expected}",)
+            }
+            Self::InvalidCoreGeometry(geometry) => write!(
+                formatter,
+                "invalid core geometry top:{} mid:{} bottom:{}",
+                geometry.y_top, geometry.y_mid, geometry.y_bottom,
+            ),
+            Self::CoreProbeOutOfBounds {
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+            } => write!(
+                formatter,
+                "core probe ({x_min}..={x_max}, {y_min}..={y_max}) is outside raster",
+            ),
         }
     }
 }
@@ -636,6 +930,26 @@ impl Error for ProjectionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn candidate(start: i32, stop: i32) -> ProjectionPeakCandidate {
+        ProjectionPeakCandidate {
+            raw_start: start,
+            raw_stop: stop,
+            start,
+            stop,
+            maximum_value: 10,
+            left: PeakSide {
+                abscissa: start,
+                derivative_grade: 1.0,
+                chunk_grade: 1.0,
+            },
+            right: PeakSide {
+                abscissa: stop,
+                derivative_grade: 1.0,
+                chunk_grade: 1.0,
+            },
+        }
+    }
 
     #[test]
     fn nonzero_domain_values_and_derivatives_match_java() {
@@ -1051,6 +1365,132 @@ mod tests {
         assert_eq!(
             PeakConstructionParams::new(refinement, 0),
             Err(ProjectionError::InvalidMaximumBarWidth(0))
+        );
+    }
+
+    #[test]
+    fn vertical_core_counts_only_enclosed_gaps_but_all_white_rows() {
+        let mut pixels = vec![255; 5 * 9];
+        for y in [2, 6] {
+            pixels[y * 5 + 2] = FOREGROUND;
+        }
+        let data = vertical_core_data(5, 9, &pixels, 2, 2, 0, 8).unwrap();
+        assert_eq!(data.length, 9);
+        // Rows 3..=5 are enclosed by black rows 2 and 6. Java records
+        // lastWhiteY-lastBlackY, which is 5-2 = 3.
+        assert_eq!(data.gap, 3);
+        assert!((data.white_ratio - (7.0 / 9.0)).abs() < 1.0e-14);
+
+        // Trailing white rows do not close another gap.
+        let data = vertical_core_data(5, 9, &pixels, 2, 2, 6, 8).unwrap();
+        assert_eq!(data.gap, 0);
+        assert!((data.white_ratio - (2.0 / 3.0)).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn peak_core_validation_thickens_thin_serif_and_limits_its_height() {
+        let mut pixels = vec![255; 8 * 9];
+        for y in 2..=6 {
+            // The candidate itself is x=3. Ink only at adjacent x=2 proves
+            // the Java one-pixel thickening is part of the lookup.
+            pixels[y * 8 + 2] = FOREGROUND;
+        }
+        let validation = candidate(3, 3)
+            .validate_core(
+                8,
+                9,
+                &pixels,
+                PeakCoreGeometry::new(0, 8, 4),
+                4,
+                PeakCoreParams::new(1, 0.3).unwrap(),
+            )
+            .unwrap();
+        assert!(validation.is_accepted());
+        assert_eq!((validation.y_top, validation.y_bottom), (2, 6));
+        assert_eq!(validation.core.gap, 0);
+        assert_eq!(validation.core.white_ratio, 0.0);
+        let full = validation.full_height_core.unwrap();
+        assert_eq!(full.gap, 0);
+        assert!((full.white_ratio - (4.0 / 9.0)).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn peak_core_validation_rejects_gap_then_tall_multiple_rest_serif() {
+        let mut pixels = vec![255; 8 * 9];
+        for y in [0, 4, 5, 6, 7, 8] {
+            pixels[y * 8 + 3] = FOREGROUND;
+        }
+        let gap = candidate(3, 3)
+            .validate_core(
+                8,
+                9,
+                &pixels,
+                PeakCoreGeometry::new(0, 8, 4),
+                0,
+                PeakCoreParams::new(2, 0.3).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(gap.core.gap, 3);
+        assert_eq!(gap.rejection, Some(PeakCoreRejection::GapTooLarge));
+
+        pixels.fill(255);
+        for y in 0..=8 {
+            pixels[y * 8 + 3] = FOREGROUND;
+        }
+        let serif = candidate(3, 3)
+            .validate_core(
+                8,
+                9,
+                &pixels,
+                PeakCoreGeometry::new(0, 8, 4),
+                4,
+                PeakCoreParams::new(2, 0.3).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(serif.core.gap, 0);
+        assert_eq!(serif.full_height_core.unwrap().white_ratio, 0.0);
+        assert_eq!(
+            serif.rejection,
+            Some(PeakCoreRejection::InsufficientWhiteBeyondSerif)
+        );
+    }
+
+    #[test]
+    fn peak_core_validation_fails_closed_for_invalid_inputs() {
+        assert_eq!(
+            PeakCoreParams::new(-1, 0.3),
+            Err(ProjectionError::InvalidCoreParameters)
+        );
+        assert_eq!(
+            PeakCoreParams::new(1, f64::NAN),
+            Err(ProjectionError::InvalidCoreParameters)
+        );
+
+        let pixels = vec![255; 8 * 9];
+        let params = PeakCoreParams::new(1, 0.3).unwrap();
+        assert_eq!(
+            candidate(0, 0)
+                .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params,),
+            Err(ProjectionError::CoreProbeOutOfBounds {
+                x_min: -1,
+                x_max: 1,
+                y_min: 0,
+                y_max: 8,
+            })
+        );
+        assert_eq!(
+            candidate(3, 3).validate_core(
+                8,
+                9,
+                &pixels[..10],
+                PeakCoreGeometry::new(0, 8, 4),
+                0,
+                params,
+            ),
+            Err(ProjectionError::InvalidRasterPixels {
+                expected: 72,
+                actual: 10,
+            })
         );
     }
 
