@@ -23,6 +23,8 @@ const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
 const STEPS_ELEMENT: &[u8] = b"steps";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
+const VERSION_ATTRIBUTE: &[u8] = b"version";
+const INVALID_ATTRIBUTE: &[u8] = b"invalid";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -316,6 +318,8 @@ impl BookXml {
 pub struct SheetStub {
     number: u32,
     archive_path: String,
+    version: Option<String>,
+    invalid: Option<bool>,
     input: Option<SheetInput>,
     done_steps: Option<Vec<OmrStep>>,
 }
@@ -331,6 +335,29 @@ impl SheetStub {
     #[must_use]
     pub fn archive_path(&self) -> &str {
         &self.archive_path
+    }
+
+    /// Sheet-specific Audiveris version override, when explicitly persisted.
+    ///
+    /// Java falls back to the book version when this attribute is absent.
+    #[must_use]
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    /// Explicit lexical state of the JAXB boolean-positive `invalid` attribute.
+    ///
+    /// The adapter normally omits false during marshalling, but accepts an
+    /// explicitly persisted false value while unmarshalling.
+    #[must_use]
+    pub const fn invalid_attribute(&self) -> Option<bool> {
+        self.invalid
+    }
+
+    /// Effective Java invalidity state; an absent attribute defaults to false.
+    #[must_use]
+    pub fn is_invalid(&self) -> bool {
+        self.invalid.unwrap_or(false)
     }
 
     /// Explicit source-image provenance from the optional direct `input` child.
@@ -461,6 +488,13 @@ pub enum BookXmlError {
         /// Stable typed field path.
         field: &'static str,
     },
+    /// The sheet `invalid` attribute is not an XML Schema boolean.
+    InvalidSheetBoolean {
+        /// Stable typed attribute path.
+        field: &'static str,
+        /// Exact decoded attribute value.
+        value: String,
+    },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -545,6 +579,9 @@ impl fmt::Display for BookXmlError {
                 formatter,
                 "sheet stub {sheet_number} input field {field} contains non-text content"
             ),
+            Self::InvalidSheetBoolean { field, value } => {
+                write!(formatter, "invalid sheet boolean {field}: {value:?}")
+            }
             Self::DuplicateSheetSteps(number) => {
                 write!(
                     formatter,
@@ -610,22 +647,31 @@ fn push_sheet_stub(
     sheet_stubs: &mut Vec<SheetStub>,
 ) -> Result<(), BookXmlError> {
     let mut number = None;
+    let mut version = None;
+    let mut invalid = None;
     for attribute in element.attributes() {
         let attribute = attribute
             .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
-        if attribute.key.as_ref() == NUMBER_ATTRIBUTE {
-            let value = attribute
-                .decode_and_unescape_value(reader.decoder())
-                .map_err(|error| {
-                    BookXmlError::malformed(reader.error_position(), error.to_string())
-                })?
-                .into_owned();
-            let parsed = value
-                .parse::<u32>()
-                .ok()
-                .filter(|candidate| *candidate > 0)
-                .ok_or_else(|| BookXmlError::InvalidSheetNumber(value.clone()))?;
-            number = Some(parsed);
+        let key = attribute.key.as_ref();
+        if key == NUMBER_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            number = Some(
+                value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|candidate| *candidate > 0)
+                    .ok_or_else(|| BookXmlError::InvalidSheetNumber(value.clone()))?,
+            );
+        } else if key == VERSION_ATTRIBUTE {
+            version = Some(decode_attribute(reader, &attribute)?);
+        } else if key == INVALID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            invalid = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidSheetBoolean {
+                    field: "sheet/@invalid",
+                    value: value.clone(),
+                }
+            })?);
         }
     }
 
@@ -636,10 +682,30 @@ fn push_sheet_stub(
     sheet_stubs.push(SheetStub {
         number,
         archive_path: format!("sheet#{number}/sheet#{number}.xml"),
+        version,
+        invalid,
         input: None,
         done_steps: None,
     });
     Ok(())
+}
+
+fn decode_attribute(
+    reader: &Reader<Cursor<&[u8]>>,
+    attribute: &quick_xml::events::attributes::Attribute<'_>,
+) -> Result<String, BookXmlError> {
+    attribute
+        .decode_and_unescape_value(reader.decoder())
+        .map(Into::into)
+        .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))
+}
+
+fn parse_jaxb_boolean(value: &str) -> Option<bool> {
+    match value.trim() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 fn begin_steps(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), BookXmlError> {
@@ -764,7 +830,7 @@ mod tests {
     fn reads_namespaced_book_and_direct_sheet_stubs() {
         let xml = br#"<?xml version="1.0"?>
             <av:book xmlns:av="urn:audiveris" software-version="5.11.0">
-              <av:sheet number="1"/>
+              <av:sheet number="1" version="5&amp;10" invalid="true"/>
               <av:sheet number="7"><unknown/></av:sheet>
             </av:book>"#;
 
@@ -775,8 +841,14 @@ mod tests {
         assert_eq!(book.sheet_stubs().len(), 2);
         assert_eq!(book.sheet_stubs()[0].number(), 1);
         assert_eq!(book.sheet_stubs()[0].archive_path(), "sheet#1/sheet#1.xml");
+        assert_eq!(book.sheet_stubs()[0].version(), Some("5&10"));
+        assert_eq!(book.sheet_stubs()[0].invalid_attribute(), Some(true));
+        assert!(book.sheet_stubs()[0].is_invalid());
         assert_eq!(book.sheet_stubs()[1].number(), 7);
         assert_eq!(book.sheet_stubs()[1].archive_path(), "sheet#7/sheet#7.xml");
+        assert_eq!(book.sheet_stubs()[1].version(), None);
+        assert_eq!(book.sheet_stubs()[1].invalid_attribute(), None);
+        assert!(!book.sheet_stubs()[1].is_invalid());
         assert_eq!(book.sheet_stubs()[0].done_steps(), None);
         assert_eq!(book.sheet_stubs()[0].latest_done_step(), None);
     }
@@ -920,6 +992,24 @@ mod tests {
     }
 
     #[test]
+    fn preserves_explicit_false_and_empty_version_attribute_states() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><sheet number="1"/><sheet number="2" version="" invalid="false"/><sheet number="3" invalid="0"/><sheet number="4" invalid=" 1 "/><sheet number="5" f:invalid="true"/></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.sheet_stubs()[0].version(), None);
+        assert_eq!(book.sheet_stubs()[0].invalid_attribute(), None);
+        assert_eq!(book.sheet_stubs()[1].version(), Some(""));
+        assert_eq!(book.sheet_stubs()[1].invalid_attribute(), Some(false));
+        assert!(!book.sheet_stubs()[1].is_invalid());
+        assert_eq!(book.sheet_stubs()[2].invalid_attribute(), Some(false));
+        assert_eq!(book.sheet_stubs()[3].invalid_attribute(), Some(true));
+        assert!(book.sheet_stubs()[3].is_invalid());
+        assert_eq!(book.sheet_stubs()[4].invalid_attribute(), None);
+    }
+
+    #[test]
     fn ignores_input_names_outside_the_direct_jaxb_positions() {
         let book = BookXml::parse(
             br#"<book><input><path>book</path><number>9</number></input><sheet number="1"><future><input><path>nested</path><number>8</number></input></future><input><path>direct</path><number>3</number><future><path>ignored</path><number>99</number></future></input></sheet></book>"#,
@@ -966,6 +1056,33 @@ mod tests {
         let error =
             BookXml::parse(b"<book><sheet number=\"4\"/><sheet number=\"4\"/></book>").unwrap_err();
         assert_eq!(error, BookXmlError::DuplicateSheetNumber(4));
+    }
+
+    #[test]
+    fn rejects_duplicate_typed_sheet_attributes_as_malformed_xml() {
+        for xml in [
+            br#"<book><sheet number="1" invalid="true" invalid="false"/></book>"#.as_slice(),
+            br#"<book><sheet number="1" version="5.10" version="5.11"/></book>"#.as_slice(),
+        ] {
+            assert!(matches!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::Malformed { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_non_jaxb_boolean_spellings() {
+        for invalid in ["", "TRUE", "False", "yes", "2"] {
+            let xml = format!("<book><sheet number=\"1\" invalid=\"{invalid}\"/></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidSheetBoolean {
+                    field: "sheet/@invalid",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
     }
 
     #[test]
