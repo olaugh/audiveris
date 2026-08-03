@@ -572,6 +572,8 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         discarded_filament_recomputations: Vec::new(),
         fill_hole_insertions: Vec::new(),
         section_inclusion_batches: Vec::new(),
+        curvature_removals: Vec::new(),
+        curvature_recomputations: Vec::new(),
         completed_stages: Vec::new(),
     };
     define_end_points(

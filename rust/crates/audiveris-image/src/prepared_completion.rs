@@ -9,6 +9,7 @@
 //! completion timer, while every later success or failure does.
 
 use crate::{
+    curvature_completion::{PreparedCurvatureRecomputation, PreparedCurvatureRemoval},
     discarded_completion::{
         PreparedCompletionSystem, PreparedDiscardedFilamentSteal, PreparedFilamentRecomputation,
     },
@@ -51,6 +52,8 @@ pub struct PreparedCompletionState {
     pub discarded_filament_steals: Vec<PreparedDiscardedFilamentSteal>,
     pub discarded_filament_recomputations: Vec<PreparedFilamentRecomputation>,
     pub section_inclusion_batches: Vec<PreparedSectionInclusionBatch>,
+    pub curvature_removals: Vec<PreparedCurvatureRemoval>,
+    pub curvature_recomputations: Vec<PreparedCurvatureRecomputation>,
     pub completed_stages: Vec<LineCompletionStage>,
 }
 
@@ -230,6 +233,8 @@ where
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),
+            curvature_removals: Vec::new(),
+            curvature_recomputations: Vec::new(),
             completed_stages: Vec::new(),
         });
         let mut executor = CompletionAdapter {

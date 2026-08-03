@@ -124,6 +124,18 @@ impl StaffFilament {
         Ok(())
     }
 
+    /// Java `SectionCompound.removeSection`, including unconditional cache
+    /// invalidation when no matching member is present.
+    pub fn remove_section_by_id(&mut self, section_id: usize) -> bool {
+        let before = self.sections.len();
+        self.sections.retain(|section| section.id() != section_id);
+        self.ending_points = None;
+        self.geometry_cache.get_mut().take();
+        self.pending_points = None;
+        self.expanded_bounds = None;
+        self.sections.len() != before
+    }
+
     #[must_use]
     pub const fn interline(&self) -> usize {
         self.interline

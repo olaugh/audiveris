@@ -202,74 +202,17 @@ pub fn polish_curvature<E>(
             recomputations += 1;
         }
 
-        let points = state.points.as_ref().expect("points recomputed above");
-        if points.len() < 2 {
-            return Err(CurvaturePolishError::InvalidPointCount {
-                count: points.len(),
-            });
-        }
-
-        let mut minimum = f64::from(i32::MAX);
-        let mut minimum_index = 0;
-        for index in 1..points.len() - 1 {
-            let radius = radius_at(points, index);
-            // Strict comparison preserves the first index on equal radii and
-            // ignores NaN exactly like Java's `minRadius > radius`.
-            if minimum > radius {
-                minimum = radius;
-                minimum_index = index;
-            }
-        }
-
-        if !matches!(
-            minimum.partial_cmp(&f64::from(minimum_radius)),
-            Some(std::cmp::Ordering::Less)
-        ) {
-            break;
-        }
-
-        let radius_index = minimum_index;
-        let probe_index = if minimum_index == 1 {
-            0
-        } else if minimum_index == points.len() - 2 {
-            points.len() - 1
-        } else {
-            minimum_index
-        };
-        let point = points[probe_index];
-        let oriented_point = orient_point(point, state.orientation);
-        // InterlineScale.toPixels(interline, Fraction(0.5)) uses Math.rint.
-        let probe_width = (f64::from(state.interline) * 0.5).round_ties_even();
-        let probe = OrientedSectionBounds {
-            x: oriented_point.x - probe_width / 2.0,
-            y: oriented_point.y - probe_width / 2.0,
-            width: probe_width,
-            height: probe_width,
-        };
-
-        let mut selected = None;
-        let mut selected_distance = f64::NAN;
-        for (index, section) in state.members.iter().enumerate() {
-            if !probe.intersects(section.oriented_bounds) {
-                continue;
-            }
-            let distance = point.distance(section.centroid);
-            if selected.is_none() || distance.total_cmp(&selected_distance).is_lt() {
-                selected = Some(index);
-                selected_distance = distance;
-            }
-        }
-
-        let Some(section_index) = selected else {
+        let Some(removal) = curvature_removal_candidate(state, minimum_radius)? else {
             break;
         };
+        let section_index = state
+            .members
+            .iter()
+            .position(|section| section.id == removal.section_id)
+            .expect("candidate belongs to the current member set");
         let section = state.members.remove(section_index);
-        removals.push(CurvatureRemoval {
-            section_id: section.id,
-            radius_point_index: radius_index,
-            probe_point_index: probe_index,
-            radius: minimum,
-        });
+        debug_assert_eq!(section.id, removal.section_id);
+        removals.push(removal);
         // removeSection invalidates points and spline; the next do/while pass
         // restores the original endpoints and recomputes from remaining ink.
         state.points = None;
@@ -279,6 +222,73 @@ pub fn polish_curvature<E>(
         removals,
         recomputations,
     })
+}
+
+/// Select Java's next strict-minimum curvature removal without mutating.
+pub fn curvature_removal_candidate<E>(
+    state: &CurvedFilamentPolishState,
+    minimum_radius: i32,
+) -> Result<Option<CurvatureRemoval>, CurvaturePolishError<E>> {
+    let points = state
+        .points
+        .as_ref()
+        .ok_or(CurvaturePolishError::InvalidPointCount { count: 0 })?;
+    if points.len() < 2 {
+        return Err(CurvaturePolishError::InvalidPointCount {
+            count: points.len(),
+        });
+    }
+
+    let mut minimum = f64::from(i32::MAX);
+    let mut minimum_index = 0;
+    for index in 1..points.len() - 1 {
+        let radius = radius_at(points, index);
+        if minimum > radius {
+            minimum = radius;
+            minimum_index = index;
+        }
+    }
+    if !matches!(
+        minimum.partial_cmp(&f64::from(minimum_radius)),
+        Some(std::cmp::Ordering::Less)
+    ) {
+        return Ok(None);
+    }
+
+    let probe_index = if minimum_index == 1 {
+        0
+    } else if minimum_index == points.len() - 2 {
+        points.len() - 1
+    } else {
+        minimum_index
+    };
+    let point = points[probe_index];
+    let oriented_point = orient_point(point, state.orientation);
+    let probe_width = (f64::from(state.interline) * 0.5).round_ties_even();
+    let probe = OrientedSectionBounds {
+        x: oriented_point.x - probe_width / 2.0,
+        y: oriented_point.y - probe_width / 2.0,
+        width: probe_width,
+        height: probe_width,
+    };
+    let mut selected = None;
+    let mut selected_distance = f64::NAN;
+    for section in &state.members {
+        if !probe.intersects(section.oriented_bounds) {
+            continue;
+        }
+        let distance = point.distance(section.centroid);
+        if selected.is_none() || distance.total_cmp(&selected_distance).is_lt() {
+            selected = Some(section.id);
+            selected_distance = distance;
+        }
+    }
+    Ok(selected.map(|section_id| CurvatureRemoval {
+        section_id,
+        radius_point_index: minimum_index,
+        probe_point_index: probe_index,
+        radius: minimum,
+    }))
 }
 
 fn orient_point(point: CurvaturePoint, orientation: Orientation) -> CurvaturePoint {
