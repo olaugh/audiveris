@@ -244,11 +244,13 @@ denied, and passed `git diff --check` before commit.
 160. `414d8106` — Java-order bar-connection component freeze traversal.
 161. `361656c3` — stable distance/weight selection of serif compounds.
 162. `2a170c3f` — transactional neutral BarsRetriever stage coordinator.
+163. `71823e49` — merged two-staff/eleven-line part classification.
+164. `5411d5e7` — transactional headless LinesRetriever/BarsRetriever GRID join.
 
-At the one-hundred-and-sixty-second checkpoint the Rust workspace executes 406 tests:
+At the one-hundred-and-sixty-fourth checkpoint the Rust workspace executes 409 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 262
+- `audiveris-image`: 265
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -323,6 +325,13 @@ conditional small-interline pass over ID-sorted primary discards, and Java's
 buildStaves purge/layout/right-indentation sequence. It returns typed standard,
 one-line, and tablature staff candidates with median sides and small/short flags while
 leaving sheet ownership and glyph/SIG mutation outside the boundary.
+
+The headless GRID coordinator now joins that staff-candidate output to the transactional
+BarsRetriever coordinator in production order. It validates sequential staff identity
+and kind, allows only Java's omitted one-line-staff case, processes systems in source
+order, and restores both line and bar state if any downstream system fails. The next
+boundary remains actual raster/section-to-filament ownership plus production sheet,
+glyph, and SIG mutation—not an assertion that GRID is fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel

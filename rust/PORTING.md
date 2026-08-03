@@ -40,7 +40,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 59 canonical fixtures, including composed StaffProjector, recursive clusters, result operations, and bar-column construction/start selection |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 406 tests green at checkpoint 162: core 38, image 262, OMR 91, testkit 6, CLI 4, xtask 5 |
+| Rust workspace | 409 tests green at checkpoint 164: core 38, image 265, OMR 91, testkit 6, CLI 4, xtask 5 |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -68,6 +68,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID StaffProjector | scale parameters, raster accumulation, adaptive thresholds, blanks, peak refinement, core validation, multi-rest serif rejection, six-impact grading, brace discovery, and composed neutral process; result, lines-root, and right-end decisions; ordered BarsRetriever registry; graph edges and sheet ownership queued |
 | GRID LinesRetriever | transactional main and optional small-interline cluster passes, Java-ordered secondary filament input, buildStaves rejection/layout/right-indent sequence, typed standard/one-line/tablature staff candidates, and small/short flags; sheet ownership queued |
 | GRID bars and columns | peak grouping/purges including C-clef false bars, width partition, section selection, group links, graph components and chain aggregation, column construction, partial/extension/unaligned purge, start-column selection and validation, bracket-end/middle/serif decisions, cached geometry, ordered within-part connection selection, group/part topology, bar-connection freeze traversal, neutral bar/bracket plus connector inter plans, and a transactional coordinator through these stages; exact column/start vector; glyph and production SIG integration queued |
+| GRID coordinator | transactional LinesRetriever-before-BarsRetriever join, sequential staff identity/kind validation, Java-compatible omitted one-line staffs, source-order system processing, and whole-grid rollback; raster/section-to-filament ownership and production sheet/SIG mutation queued |
 | GRID target geometry | source-guided target-line deskew mapping with exact live sloped-line parity plus immutable cycle-free page/system/staff containers |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline status, sheet input provenance, compatibility attributes, page references and links, order-derived systems, part/staff configuration, logical parts, score-root metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics parameters; absent, inherited, and explicit values remain distinct |
