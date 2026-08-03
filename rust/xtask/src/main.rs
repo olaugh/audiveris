@@ -22,7 +22,8 @@ use audiveris_image::{
         BraceSearchRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
         PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams, PeakCoreRejection,
         PeakRefinementParams, PeakRefinementRequest, PeakScanRequest, ProjectionPeakMode,
-        ShortProjection, StaffProjectionRequest, check_lines_root_transition, select_blank,
+        ShortProjection, StaffProjectionRequest, check_lines_root_transition,
+        refine_right_end_transition, select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -211,7 +212,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 57] = [
+const VECTOR_KEYS: [&str; 58] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -233,6 +234,7 @@ const VECTOR_KEYS: [&str; 57] = [
     "grid.staff-projector-brace.synthetic=",
     "grid.staff-projector-composed.synthetic=",
     "grid.staff-projector-lines-root.synthetic=",
+    "grid.staff-projector-result-ops.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -949,6 +951,80 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         boundary.clear_staff_left_end_at != Some(1),
         brace_noop.staff_left,
         brace_noop.clear_staff_left_end_at != Some(1)
+    ));
+
+    let mut result_first =
+        audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 0, 4, 10, 11)?;
+    let mut result_last =
+        audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 0, 4, 20, 21)?;
+    result_first.set_staff_end(HorizontalSide::Right);
+    result_last.set_staff_end(HorizontalSide::Left);
+    let first_key = result_first.key();
+    let mut result_operations = audiveris_image::projection::NeutralStaffProjectorResult {
+        projection: ShortProjection::new(0, 99)?,
+        derivative_threshold: 0,
+        all_blanks: Vec::new(),
+        peak_search_bounds: audiveris_image::projection::PeakSearchBounds {
+            x_min: 0,
+            x_max: 99,
+        },
+        peaks: vec![result_first, result_last],
+        brace_candidate: None,
+    };
+    let initial_start = result_operations
+        .start_peak_index()
+        .ok_or("missing start peak")?;
+    let initial_last = result_operations
+        .last_peak()
+        .ok_or("missing last peak")?
+        .start();
+    let inserted = audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 0, 4, 15, 16)?;
+    let inserted_key = inserted.key();
+    let equal_anchor = audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 9, 12, 20, 21)?;
+    result_operations.insert_peak_before(inserted, equal_anchor.key())?;
+    let inserted_order = result_operations
+        .peaks
+        .iter()
+        .map(|peak| peak.start().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let inserted_start = result_operations
+        .start_peak_index()
+        .ok_or("missing inserted start")?;
+    result_operations.remove_peaks(&[inserted_key, first_key]);
+    let remaining_order = result_operations
+        .peaks
+        .iter()
+        .map(|peak| peak.start().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let remaining_last = result_operations
+        .last_peak()
+        .ok_or("missing remaining peak")?
+        .start();
+
+    let mut right_projection = ShortProjection::new(0, 99)?;
+    for position in 0..=99 {
+        if !(40..=50).contains(&position) {
+            right_projection.increment_one(position);
+        }
+    }
+    let right_blanks = right_projection.blank_regions(0);
+    let right_peaks = [audiveris_image::staff_peak::StaffPeak::new(
+        StaffId::new(1),
+        0,
+        4,
+        30,
+        32,
+    )?];
+    let over = refine_right_end_transition(&right_peaks, &right_blanks, 25, 99, 3, 6);
+    let exact = refine_right_end_transition(&right_peaks, &right_blanks, 25, 99, 3, 7);
+    lines.push(format!(
+        "grid.staff-projector-result-ops.synthetic=initial:start{initial_start}:last{initial_last};insert:{inserted_order}:start{inserted_start};remove:{remaining_order}:last{remaining_last};rightBlank:40-50;over:right{}:marked{};boundary:right{}:marked{}",
+        over.staff_right,
+        over.set_staff_right_end_at == Some(0),
+        exact.staff_right,
+        exact.set_staff_right_end_at == Some(0)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

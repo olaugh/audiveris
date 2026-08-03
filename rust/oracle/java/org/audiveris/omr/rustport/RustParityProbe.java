@@ -528,6 +528,80 @@ public final class RustParityProbe
                         + ":start" + markedLaterPeak.isStaffEnd(
                                 org.audiveris.omr.util.HorizontalSide.LEFT));
 
+        int[] resultOperationCounts = new int[100];
+        Arrays.fill(resultOperationCounts, 1);
+        Arrays.fill(resultOperationCounts, 40, 51, 0);
+        StaffProjector resultOperationProjector = staffProjector(
+                projectorScale, resultOperationCounts, new int[]{0, 4});
+        Sheet resultOperationSheet = (Sheet) field(resultOperationProjector, "sheet");
+        PeakGraph resultOperationGraph = new PeakGraph(resultOperationSheet, new ArrayList<>());
+        Field resultOperationGraphField = StaffProjector.class.getDeclaredField("peakGraph");
+        resultOperationGraphField.setAccessible(true);
+        resultOperationGraphField.set(resultOperationProjector, resultOperationGraph);
+        Staff resultOperationStaff = (Staff) field(resultOperationProjector, "staff");
+        StaffPeak resultFirst = new StaffPeak(resultOperationStaff, 0, 4, 10, 11, null);
+        StaffPeak resultLast = new StaffPeak(resultOperationStaff, 0, 4, 20, 21, null);
+        resultFirst.setStaffEnd(org.audiveris.omr.util.HorizontalSide.RIGHT);
+        resultLast.setStaffEnd(org.audiveris.omr.util.HorizontalSide.LEFT);
+        @SuppressWarnings("unchecked")
+        List<StaffPeak> resultOperationPeaks =
+                (List<StaffPeak>) field(resultOperationProjector, "peaks");
+        resultOperationPeaks.add(resultFirst);
+        resultOperationPeaks.add(resultLast);
+        resultOperationGraph.addVertex(resultFirst);
+        resultOperationGraph.addVertex(resultLast);
+        int initialStartIndex = resultOperationProjector.getStartPeakIndex();
+        int initialLastStart = resultOperationProjector.getLastPeak().getStart();
+        StaffPeak resultInserted = new StaffPeak(resultOperationStaff, 0, 4, 15, 16, null);
+        StaffPeak equalAnchor = new StaffPeak(resultOperationStaff, 9, 12, 20, 21, null);
+        resultOperationProjector.insertPeak(resultInserted, equalAnchor);
+        List<String> insertedOrder = new ArrayList<>();
+        for (StaffPeak peak : resultOperationProjector.getPeaks()) {
+            insertedOrder.add(Integer.toString(peak.getStart()));
+        }
+        int insertedStartIndex = resultOperationProjector.getStartPeakIndex();
+        resultOperationProjector.removePeaks(List.of(resultInserted, resultFirst));
+        List<String> remainingOrder = new ArrayList<>();
+        for (StaffPeak peak : resultOperationProjector.getPeaks()) {
+            remainingOrder.add(Integer.toString(peak.getStart()));
+        }
+
+        StaffProjector rightEndProjector = staffProjector(
+                projectorScale, resultOperationCounts, new int[]{0, 4});
+        Object rightEndParams = field(rightEndProjector, "params");
+        setIntField(rightEndParams, "blankThreshold", 0);
+        setIntField(rightEndParams, "minSmallBlankWidth", 3);
+        setIntField(rightEndParams, "maxRightExtremum", 6);
+        findAllBlanks.invoke(rightEndProjector);
+        Staff rightEndStaff = (Staff) field(rightEndProjector, "staff");
+        rightEndStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.RIGHT, 25);
+        StaffPeak rightEndPeak = new StaffPeak(rightEndStaff, 0, 4, 30, 32, null);
+        @SuppressWarnings("unchecked")
+        List<StaffPeak> rightEndPeaks = (List<StaffPeak>) field(rightEndProjector, "peaks");
+        rightEndPeaks.add(rightEndPeak);
+        rightEndProjector.refineRightEnd();
+        int overLimitRight = rightEndStaff.getAbscissa(
+                org.audiveris.omr.util.HorizontalSide.RIGHT);
+        boolean overLimitMarked = rightEndPeak.isStaffEnd(
+                org.audiveris.omr.util.HorizontalSide.RIGHT);
+        rightEndStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.RIGHT, 25);
+        rightEndPeak.unset(StaffPeak.Attribute.STAFF_RIGHT_END);
+        setIntField(rightEndParams, "maxRightExtremum", 7);
+        rightEndProjector.refineRightEnd();
+        System.out.println(
+                "grid.staff-projector-result-ops.synthetic=initial:start"
+                        + initialStartIndex + ":last" + initialLastStart
+                        + ";insert:" + String.join(",", insertedOrder) + ":start"
+                        + insertedStartIndex
+                        + ";remove:" + String.join(",", remainingOrder) + ":last"
+                        + resultOperationProjector.getLastPeak().getStart()
+                        + ";rightBlank:40-50;over:right" + overLimitRight + ":marked"
+                        + overLimitMarked
+                        + ";boundary:right" + rightEndStaff.getAbscissa(
+                                org.audiveris.omr.util.HorizontalSide.RIGHT)
+                        + ":marked" + rightEndPeak.isStaffEnd(
+                                org.audiveris.omr.util.HorizontalSide.RIGHT));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
