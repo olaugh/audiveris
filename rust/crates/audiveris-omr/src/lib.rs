@@ -19,6 +19,7 @@ use std::path::Path;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub mod brace_filament;
 pub mod brace_portions;
 pub mod grid_executor;
 pub mod raw_projector_adapter;
