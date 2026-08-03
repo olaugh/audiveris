@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use audiveris_classifier::{BasicClassifier, INPUT_SIZE, mix_glyph_features};
+use audiveris_classifier::{
+    BasicClassifier, INPUT_SIZE, mix_glyph_features, mix_glyph_features_from_run_table,
+};
 use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
     integer_function::IntegerFunction, natural_spec, natural_spline::NaturalSpline,
@@ -285,7 +287,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 72] = [
+const VECTOR_KEYS: [&str; 73] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -297,6 +299,7 @@ const VECTOR_KEYS: [&str; 72] = [
     "grade.contextual=",
     "classifier.basic.synthetic=",
     "classifier.mix-glyph.asymmetric=",
+    "classifier.mix-glyph.runtable=",
     "injection=",
     "integer.function=",
     "projection.short.synthetic=",
@@ -1987,6 +1990,29 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "classifier.mix-glyph.asymmetric={}",
         glyph_features
+            .iter()
+            .map(|value| format!("{value:.12}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+
+    // Match Java Glyph.getPointsCollector: horizontal run sequences, runs in
+    // sequence order, and descending coordinates within a run, translated by
+    // the glyph's absolute origin. The vector contains the ordered points and
+    // resulting descriptor so it catches adapter ordering as well as feature
+    // extraction regressions.
+    let raster_pixels = [255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255, 0, 0, 255, 0, 255];
+    let raster = RunTable::from_pixels(Orientation::Horizontal, 4, 4, &raster_pixels)?;
+    let raster_points = raster.foreground_points((17, 23));
+    let raster_features = mix_glyph_features_from_run_table(&raster, (17, 23), 11)?;
+    lines.push(format!(
+        "classifier.mix-glyph.runtable={}/{}",
+        raster_points
+            .iter()
+            .map(|(x, y)| format!("{x}:{y}"))
+            .collect::<Vec<_>>()
+            .join(";"),
+        raster_features
             .iter()
             .map(|value| format!("{value:.12}"))
             .collect::<Vec<_>>()

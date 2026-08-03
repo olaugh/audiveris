@@ -29,6 +29,7 @@ import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.image.WatershedGrayLevel;
 import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Shape;
+import org.audiveris.omr.classifier.MixGlyphDescriptor;
 import org.audiveris.omr.glyph.dynamic.FilamentFactory;
 import org.audiveris.omr.glyph.dynamic.FilamentIndex;
 import org.audiveris.omr.glyph.dynamic.StraightFilament;
@@ -46,6 +47,7 @@ import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
 import org.audiveris.omr.math.LineUtil;
+import org.audiveris.omr.math.PointsCollector;
 import org.audiveris.omr.math.NeuralNetwork;
 import org.audiveris.omr.math.NaturalSpline;
 import org.audiveris.omr.math.Projection;
@@ -214,6 +216,36 @@ public final class RustParityProbe
             glyphVector.append(String.format(java.util.Locale.ROOT, "%.12f", glyphFeatures[index]));
         }
         System.out.println("classifier.mix-glyph.asymmetric=" + glyphVector);
+
+        // Exercise the exact Glyph -> RunTable.cumulate adapter boundary: sequence order,
+        // descending pixels within each run, and the absolute glyph offset. Keeping the
+        // collected coordinates alongside the descriptor catches an ordering regression even
+        // where a moment happens to be insensitive to it.
+        RunTable rasterGlyphTable = new RunTable(Orientation.HORIZONTAL, 4, 4);
+        rasterGlyphTable.setSequence(0, Arrays.asList(new Run(1, 2)));
+        rasterGlyphTable.setSequence(1, Arrays.asList(new Run(0, 1), new Run(2, 2)));
+        rasterGlyphTable.setSequence(2, Arrays.asList(new Run(1, 1), new Run(3, 1)));
+        rasterGlyphTable.setSequence(3, Arrays.asList(new Run(0, 1), new Run(2, 1)));
+        Glyph rasterGlyph = new Glyph(17, 23, rasterGlyphTable);
+        PointsCollector rasterCollector = rasterGlyph.getPointsCollector();
+        StringBuilder rasterPoints = new StringBuilder();
+        for (int index = 0; index < rasterCollector.getSize(); index++) {
+            if (index > 0) {
+                rasterPoints.append(';');
+            }
+            rasterPoints.append(rasterCollector.getXValues()[index])
+                    .append(':')
+                    .append(rasterCollector.getYValues()[index]);
+        }
+        double[] rasterFeatures = new MixGlyphDescriptor().getFeatures(rasterGlyph, 11);
+        StringBuilder rasterVector = new StringBuilder(rasterPoints).append('/');
+        for (int index = 0; index < rasterFeatures.length; index++) {
+            if (index > 0) {
+                rasterVector.append(',');
+            }
+            rasterVector.append(String.format(java.util.Locale.ROOT, "%.12f", rasterFeatures[index]));
+        }
+        System.out.println("classifier.mix-glyph.runtable=" + rasterVector);
 
         InjectionSolver solver = new InjectionSolver(
                 3,

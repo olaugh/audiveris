@@ -10,6 +10,7 @@ authors.workspace = true
 description = "Immutable inference for Audiveris' bundled basic glyph classifier"
 
 [dependencies]
+audiveris-image = { path = "../audiveris-image" }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 quick-xml = { version = "=0.39.4", default-features = false }
 zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }

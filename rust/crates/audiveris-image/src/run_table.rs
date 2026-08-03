@@ -305,6 +305,40 @@ impl RunTable {
         pixels
     }
 
+    /// Collect foreground coordinates in Audiveris `RunTable.cumulate` order.
+    ///
+    /// Each sequence is visited in ascending order, runs retain their stored
+    /// left-to-right/top-to-bottom order, and pixels *within* a run are emitted
+    /// in descending coordinate order. This slightly unusual last rule is the
+    /// production Java contract used by `Glyph.getPointsCollector()` and hence
+    /// by the classifier's moment extractors.
+    ///
+    /// `offset` is applied after collection, matching Java's final
+    /// `PointsCollector.translate`. Coordinates use wrapping addition to retain
+    /// Java `int` overflow semantics at the public boundary.
+    #[must_use]
+    pub fn foreground_points(&self, offset: (i32, i32)) -> Vec<(i32, i32)> {
+        let mut points = Vec::with_capacity(self.weight());
+        for (sequence, runs) in self.sequences.iter().enumerate() {
+            for run in runs {
+                for coordinate in (run.start..=run.stop()).rev() {
+                    let (x, y) = match self.orientation {
+                        Orientation::Horizontal => (coordinate, sequence),
+                        Orientation::Vertical => (sequence, coordinate),
+                    };
+                    // A Java RunTable is `int`-dimensioned. The Rust type is
+                    // deliberately wider, so mirror Java's narrowing/wrapping
+                    // only when exposing its point-collector boundary.
+                    points.push((
+                        (x as i32).wrapping_add(offset.0),
+                        (y as i32).wrapping_add(offset.1),
+                    ));
+                }
+            }
+        }
+        points
+    }
+
     #[must_use]
     pub fn total_run_count(&self) -> usize {
         self.sequences.iter().map(Vec::len).sum()
@@ -662,6 +696,41 @@ mod tests {
         assert_eq!([vertical.get(0, 1), vertical.get(1, 1)], [0, 255]);
         assert_eq!(horizontal.run_at(0, 0), None);
         assert_eq!(horizontal.run_at(6, 0), Some(Run::new(5, 3)));
+    }
+
+    #[test]
+    fn foreground_points_match_cumulate_order_for_both_orientations() {
+        let pixels = [
+            BACKGROUND, FOREGROUND, FOREGROUND, BACKGROUND, FOREGROUND, BACKGROUND, FOREGROUND,
+            FOREGROUND, BACKGROUND, FOREGROUND, BACKGROUND, FOREGROUND,
+        ];
+        let horizontal = RunTable::from_pixels(Orientation::Horizontal, 4, 3, &pixels).unwrap();
+        assert_eq!(
+            horizontal.foreground_points((17, 23)),
+            vec![
+                (19, 23),
+                (18, 23),
+                (17, 24),
+                (20, 24),
+                (19, 24),
+                (18, 25),
+                (20, 25)
+            ]
+        );
+
+        let vertical = RunTable::from_pixels(Orientation::Vertical, 4, 3, &pixels).unwrap();
+        assert_eq!(
+            vertical.foreground_points((17, 23)),
+            vec![
+                (17, 24),
+                (18, 23),
+                (18, 25),
+                (19, 24),
+                (19, 23),
+                (20, 25),
+                (20, 24)
+            ]
+        );
     }
 
     #[test]

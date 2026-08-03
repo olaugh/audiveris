@@ -10,6 +10,7 @@ use std::fmt;
 use std::io::{Cursor, Read};
 use std::sync::OnceLock;
 
+use audiveris_image::run_table::RunTable;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use zip::ZipArchive;
@@ -105,6 +106,22 @@ pub fn mix_glyph_features(
         .copy_from_slice(&geometric[..GEOMETRIC_FEATURE_COUNT]);
     features[INPUT_SIZE - 1] = height / width;
     Ok(features)
+}
+
+/// Extracts `MixGlyphDescriptor` features directly from a native `RunTable`.
+///
+/// `origin` is the glyph's absolute top-left coordinate. The underlying image
+/// adapter retains Java `RunTable.cumulate` traversal exactly (sequence order,
+/// run order, then descending coordinate within each run), before delegating to
+/// the point-list implementation. This is deliberately a classifier-to-image
+/// dependency: image primitives remain independent of classifier policy.
+pub fn mix_glyph_features_from_run_table(
+    table: &RunTable,
+    origin: (i32, i32),
+    interline: i32,
+) -> Result<[f64; INPUT_SIZE], FeatureExtractionError> {
+    let pixels = table.foreground_points(origin);
+    mix_glyph_features(&pixels, interline)
 }
 
 fn bounds(pixels: &[(i32, i32)]) -> (i32, i32, i32, i32) {
