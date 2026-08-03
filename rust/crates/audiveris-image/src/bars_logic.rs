@@ -5,7 +5,9 @@
 use crate::{
     bar_alignment::VerticalSide,
     bar_column::BarColumn,
-    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
+    run_table::Orientation,
+    section::Section,
+    staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
 /// Java `BracketKind`; `None` from [`bracket_kind`] remains distinct from
@@ -129,6 +131,52 @@ pub fn start_column_index(columns: &[BarColumn]) -> Option<usize> {
     columns.iter().position(BarColumn::is_start)
 }
 
+/// Java `BarFilamentBuilder.buildFilament` section preselection.
+///
+/// The caller supplies sections in nondecreasing x order. Intersection uses
+/// Java `Rectangle`'s positive-area rule; a section touching the peak's right
+/// edge triggers the same early break. Both horizontal and vertical sections
+/// are accepted when their horizontal length does not exceed the peak width.
+#[must_use]
+pub fn bar_filament_section_ids(
+    peak_bounds: PeakBounds,
+    vertical_extension: i32,
+    sections: &[Section],
+) -> Vec<usize> {
+    if peak_bounds.width <= 0 {
+        return Vec::new();
+    }
+    let left = i128::from(peak_bounds.x);
+    let right = left + i128::from(peak_bounds.width);
+    let top = i128::from(peak_bounds.y) - i128::from(vertical_extension);
+    let bottom =
+        i128::from(peak_bounds.y) + i128::from(peak_bounds.height) + i128::from(vertical_extension);
+    if right <= left || bottom <= top {
+        return Vec::new();
+    }
+
+    let mut selected = Vec::new();
+    for section in sections {
+        let bounds = section.bounds();
+        let section_left = bounds.x as i128;
+        let section_right = section_left + bounds.width as i128;
+        let section_top = bounds.y as i128;
+        let section_bottom = section_top + bounds.height as i128;
+        let intersects = section_left < right
+            && section_right > left
+            && section_top < bottom
+            && section_bottom > top;
+        if intersects {
+            if section.length(Orientation::Horizontal) <= peak_bounds.width as usize {
+                selected.push(section.id());
+            }
+        } else if section_left >= right {
+            break;
+        }
+    }
+    selected
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarsLogicError {
     InvalidStartIndex(usize),
@@ -138,6 +186,10 @@ pub enum BarsLogicError {
 mod tests {
     use super::*;
     use crate::bar_column::{BarPeak, PeakId, StaffId};
+    use crate::{
+        run_table::{Orientation, Run, RunTable},
+        section::{JunctionPolicy, build_sections},
+    };
 
     fn peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
         StaffPeak::new(StaffId::new(staff), 0, 40, start, stop).unwrap()
@@ -248,5 +300,48 @@ mod tests {
 
         assert_eq!(start_column_index(&[plain.clone(), start]), Some(1));
         assert_eq!(start_column_index(&[plain]), None);
+    }
+
+    #[test]
+    fn bar_section_selection_grows_vertically_filters_width_and_breaks_at_right_edge() {
+        let mut table = RunTable::new(Orientation::Horizontal, 30, 20).unwrap();
+        table.add_run(4, Run::new(9, 2)).unwrap(); // intersects after grow
+        table.add_run(6, Run::new(10, 4)).unwrap(); // too wide
+        table.add_run(10, Run::new(11, 2)).unwrap(); // intersects after grow
+        table.add_run(5, Run::new(13, 1)).unwrap(); // touches right edge
+        table.add_run(5, Run::new(15, 1)).unwrap(); // never visited after break
+        let mut sections = build_sections(&table, JunctionPolicy::All);
+        sections.sort_by_key(|section| section.bounds().x);
+
+        assert_eq!(
+            bar_filament_section_ids(
+                PeakBounds {
+                    x: 10,
+                    y: 5,
+                    width: 3,
+                    height: 5,
+                },
+                2,
+                &sections,
+            ),
+            sections
+                .iter()
+                .filter(|section| matches!(section.bounds().x, 9 | 11))
+                .map(Section::id)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            bar_filament_section_ids(
+                PeakBounds {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 1
+                },
+                0,
+                &sections
+            )
+            .is_empty()
+        );
     }
 }
