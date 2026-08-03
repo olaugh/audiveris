@@ -239,11 +239,16 @@ denied, and passed `git diff --check` before commit.
 155. `0f391920` — neutral vertical bar/bracket interpretation geometry and kinds.
 156. `78b32c79` — neutral bar/bracket connector plans and good-grade extension gate.
 157. `52559a4b` — stage-ordered cluster passes into typed staff candidates.
+158. `1ee7133e` — exact bar-extension pixel and overflow arithmetic regression.
+159. `34cbfd43` — bracket-serif lookup rectangle construction.
+160. `414d8106` — Java-order bar-connection component freeze traversal.
+161. `361656c3` — stable distance/weight selection of serif compounds.
+162. `2a170c3f` — transactional neutral BarsRetriever stage coordinator.
 
-At the one-hundred-and-fifty-seventh checkpoint the Rust workspace executes 400 tests:
+At the one-hundred-and-sixty-second checkpoint the Rust workspace executes 406 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 256
+- `audiveris-image`: 262
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -304,7 +309,10 @@ discovery and the line-cluster lifecycle have exact production-Java vectors. Bar
 columns have exact parity across fixed slots, cached means, overwrite invalidation,
 full/start/brace status, and concrete graph connectivity. BarsRetriever now also has
 neutral C-clef purging, bracket-end and bracket-middle decisions, group/part topology,
-and bar/bracket inter geometry/type plans. Neutral `StaffPeak`,
+serif geometry/selection, connection-component freezing, and bar/bracket inter
+geometry/type plans. A transactional coordinator now composes column construction,
+start validation, partial/left/unaligned/C-clef purges, related-column deletion, width
+classification, and interpretation planning with rollback on missing evidence. Neutral `StaffPeak`,
 `PartGroup`, and stable-ID `PeakGraph` types now cover graph storage, incident and
 connection queries, alignment purge, median connection geometry, and brace checks
 without recreating Java object cycles. Promotion into the production SIG and the full
