@@ -6,6 +6,8 @@
 //! areas, section containers, indentation flags, pages, and page references in
 //! order; an unchecked failure leaves every earlier mutation visible.
 
+use std::collections::BTreeMap;
+
 /// Stable identity used at the sheet/system boundary.
 pub type SystemId = usize;
 
@@ -582,6 +584,198 @@ fn global_boundary(
         });
     }
     StaffBoundary { segments }
+}
+
+/// Stable identity replacing Java's shared `SystemRef` object reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PopulationSystemRefId(u64);
+
+impl PopulationSystemRefId {
+    #[must_use]
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// Exact value returned by `Staff.getStaffConfig()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopulationStaffConfig {
+    pub line_count: usize,
+    pub is_small: bool,
+}
+
+/// Physical staff input to `PartRef.computeStaffConfigs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopulationReferenceStaff {
+    pub staff_id: usize,
+    pub config: PopulationStaffConfig,
+}
+
+/// Physical part input in `SystemInfo.getParts()` order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopulationReferencePart {
+    pub part_id: usize,
+    pub staves: Vec<PopulationReferenceStaff>,
+}
+
+/// Fresh `PartRef` produced by its two-argument Java constructor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopulationPartRef {
+    pub system_ref: PopulationSystemRefId,
+    pub staff_configs: Vec<PopulationStaffConfig>,
+    pub name: Option<String>,
+    pub logical_id: Option<i32>,
+    pub manual: bool,
+}
+
+/// Fresh `SystemRef` produced by `SystemInfo.buildRef`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopulationSystemRef {
+    pub page_ref_id: usize,
+    pub parts: Vec<PopulationPartRef>,
+}
+
+/// Physical system's transient `systemRef` field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PopulationSystemRefState {
+    pub system_ref: Option<PopulationSystemRefId>,
+}
+
+/// Headless ownership registry for shared Java soft-reference objects.
+#[derive(Clone, Debug, Default)]
+pub struct PopulationReferenceRegistry {
+    next_system_ref_id: u64,
+    system_refs: BTreeMap<PopulationSystemRefId, PopulationSystemRef>,
+}
+
+impl PopulationReferenceRegistry {
+    #[must_use]
+    pub fn get(&self, id: PopulationSystemRefId) -> Option<&PopulationSystemRef> {
+        self.system_refs.get(&id)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.system_refs.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.system_refs.is_empty()
+    }
+}
+
+/// Soft page ownership. Java stores the actual `SystemRef` objects; stable IDs
+/// retain the same shared identity without self-referential Rust values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PopulationReferencePage {
+    pub page_ref_id: usize,
+    pub systems: Vec<PopulationSystemRefId>,
+}
+
+/// Concrete Java `SystemInfo.buildRef` port.
+///
+/// A new object replaces the system's prior reference. Its page backlink is set
+/// before parts are visited. Parts and their staff configurations preserve
+/// physical list order; constructor defaults remain absent/false.
+pub fn build_population_system_ref(
+    state: &mut PopulationSystemRefState,
+    registry: &mut PopulationReferenceRegistry,
+    page_ref_id: usize,
+    parts: &[PopulationReferencePart],
+) -> PopulationSystemRefId {
+    registry.next_system_ref_id += 1;
+    let id = PopulationSystemRefId(registry.next_system_ref_id);
+    registry.system_refs.insert(
+        id,
+        PopulationSystemRef {
+            page_ref_id,
+            parts: Vec::new(),
+        },
+    );
+    state.system_ref = Some(id);
+
+    for part in parts {
+        let staff_configs = part.staves.iter().map(|staff| staff.config).collect();
+        registry
+            .system_refs
+            .get_mut(&id)
+            .expect("fresh system reference remains registered")
+            .parts
+            .push(PopulationPartRef {
+                system_ref: id,
+                staff_configs,
+                name: None,
+                logical_id: None,
+                manual: false,
+            });
+    }
+    id
+}
+
+/// Reproduce the separate `pageRef.addSystem(system.buildRef())` ownership step.
+pub fn append_population_system_ref(
+    page: &mut PopulationReferencePage,
+    registry: &PopulationReferenceRegistry,
+    system_ref: PopulationSystemRefId,
+) -> Result<(), PopulationReferenceError> {
+    let reference = registry
+        .get(system_ref)
+        .ok_or(PopulationReferenceError::UnknownSystemRef(system_ref))?;
+    if reference.page_ref_id != page.page_ref_id {
+        return Err(PopulationReferenceError::WrongPage {
+            system_ref,
+            expected: reference.page_ref_id,
+            actual: page.page_ref_id,
+        });
+    }
+    page.systems.push(system_ref);
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopulationReferenceError {
+    UnknownSystemRef(PopulationSystemRefId),
+    WrongPage {
+        system_ref: PopulationSystemRefId,
+        expected: usize,
+        actual: usize,
+    },
+}
+
+/// Fallible adapter preserving the precise partial-mutation boundary of Java
+/// `SystemInfo.buildRef` when an unchecked collaborator fails.
+pub trait SystemReferenceExecutor {
+    type Error;
+
+    fn install_empty_system_ref(&mut self) -> Result<(), Self::Error>;
+    fn bind_system_ref_to_page(&mut self) -> Result<(), Self::Error>;
+    fn part_ids(&self) -> Vec<usize>;
+    fn staff_ids(&self, part_id: usize) -> Vec<usize>;
+    fn staff_config(&mut self, staff_id: usize) -> Result<PopulationStaffConfig, Self::Error>;
+    fn append_part_ref(
+        &mut self,
+        part_id: usize,
+        configs: Vec<PopulationStaffConfig>,
+    ) -> Result<(), Self::Error>;
+}
+
+pub fn build_population_system_ref_with<Executor>(
+    executor: &mut Executor,
+) -> Result<(), Executor::Error>
+where
+    Executor: SystemReferenceExecutor,
+{
+    executor.install_empty_system_ref()?;
+    executor.bind_system_ref_to_page()?;
+    for part_id in executor.part_ids() {
+        let mut configs = Vec::new();
+        for staff_id in executor.staff_ids(part_id) {
+            configs.push(executor.staff_config(staff_id)?);
+        }
+        executor.append_part_ref(part_id, configs)?;
+    }
+    Ok(())
 }
 
 /// System state consumed and mutated by Java `allocatePages`.
@@ -1198,6 +1392,206 @@ mod tests {
                     start: (0.0, 70.0),
                     end: (0.0, 10.0),
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn build_ref_replaces_system_field_and_preserves_part_staff_order_and_defaults() {
+        let mut state = PopulationSystemRefState::default();
+        let mut registry = PopulationReferenceRegistry::default();
+        let parts = [
+            PopulationReferencePart {
+                part_id: 20,
+                staves: vec![
+                    PopulationReferenceStaff {
+                        staff_id: 4,
+                        config: PopulationStaffConfig {
+                            line_count: 5,
+                            is_small: false,
+                        },
+                    },
+                    PopulationReferenceStaff {
+                        staff_id: 5,
+                        config: PopulationStaffConfig {
+                            line_count: 1,
+                            is_small: true,
+                        },
+                    },
+                ],
+            },
+            PopulationReferencePart {
+                part_id: 10,
+                staves: vec![PopulationReferenceStaff {
+                    staff_id: 9,
+                    config: PopulationStaffConfig {
+                        line_count: 6,
+                        is_small: false,
+                    },
+                }],
+            },
+        ];
+        let id = build_population_system_ref(&mut state, &mut registry, 7, &parts);
+        assert_eq!(state.system_ref, Some(id));
+        let reference = registry.get(id).expect("fresh reference");
+        assert_eq!(reference.page_ref_id, 7);
+        assert_eq!(
+            reference
+                .parts
+                .iter()
+                .map(|part| part.staff_configs.clone())
+                .collect::<Vec<_>>(),
+            [
+                vec![
+                    PopulationStaffConfig {
+                        line_count: 5,
+                        is_small: false,
+                    },
+                    PopulationStaffConfig {
+                        line_count: 1,
+                        is_small: true,
+                    },
+                ],
+                vec![PopulationStaffConfig {
+                    line_count: 6,
+                    is_small: false,
+                }],
+            ]
+        );
+        assert!(reference.parts.iter().all(|part| {
+            part.system_ref == id
+                && part.name.is_none()
+                && part.logical_id.is_none()
+                && !part.manual
+        }));
+    }
+
+    #[test]
+    fn page_link_is_separate_and_rebuild_does_not_retarget_old_page_object() {
+        let mut state = PopulationSystemRefState::default();
+        let mut registry = PopulationReferenceRegistry::default();
+        let mut page = PopulationReferencePage {
+            page_ref_id: 3,
+            systems: Vec::new(),
+        };
+        let old = build_population_system_ref(&mut state, &mut registry, 3, &[]);
+        append_population_system_ref(&mut page, &registry, old).unwrap();
+        let new = build_population_system_ref(&mut state, &mut registry, 3, &[]);
+
+        assert_ne!(old, new);
+        assert_eq!(state.system_ref, Some(new));
+        assert_eq!(page.systems, [old]);
+        assert!(registry.get(old).is_some());
+        assert!(registry.get(new).is_some());
+        assert_eq!(registry.len(), 2);
+    }
+
+    #[test]
+    fn wrong_page_link_fails_without_mutating_page_order() {
+        let mut state = PopulationSystemRefState::default();
+        let mut registry = PopulationReferenceRegistry::default();
+        let id = build_population_system_ref(&mut state, &mut registry, 2, &[]);
+        let mut page = PopulationReferencePage {
+            page_ref_id: 4,
+            systems: vec![],
+        };
+        assert_eq!(
+            append_population_system_ref(&mut page, &registry, id),
+            Err(PopulationReferenceError::WrongPage {
+                system_ref: id,
+                expected: 2,
+                actual: 4,
+            })
+        );
+        assert!(page.systems.is_empty());
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum RefCall {
+        Install,
+        Bind,
+        Config(usize),
+        Append(usize, Vec<PopulationStaffConfig>),
+    }
+
+    #[derive(Default)]
+    struct RecordingRefBuilder {
+        calls: Vec<RefCall>,
+        fail_staff: Option<usize>,
+    }
+
+    impl SystemReferenceExecutor for RecordingRefBuilder {
+        type Error = &'static str;
+
+        fn install_empty_system_ref(&mut self) -> Result<(), Self::Error> {
+            self.calls.push(RefCall::Install);
+            Ok(())
+        }
+
+        fn bind_system_ref_to_page(&mut self) -> Result<(), Self::Error> {
+            self.calls.push(RefCall::Bind);
+            Ok(())
+        }
+
+        fn part_ids(&self) -> Vec<usize> {
+            vec![10, 20]
+        }
+
+        fn staff_ids(&self, part_id: usize) -> Vec<usize> {
+            match part_id {
+                10 => vec![1],
+                20 => vec![2, 3],
+                _ => Vec::new(),
+            }
+        }
+
+        fn staff_config(&mut self, staff_id: usize) -> Result<PopulationStaffConfig, Self::Error> {
+            self.calls.push(RefCall::Config(staff_id));
+            if self.fail_staff == Some(staff_id) {
+                Err("staff config failure")
+            } else {
+                Ok(PopulationStaffConfig {
+                    line_count: staff_id,
+                    is_small: false,
+                })
+            }
+        }
+
+        fn append_part_ref(
+            &mut self,
+            part_id: usize,
+            configs: Vec<PopulationStaffConfig>,
+        ) -> Result<(), Self::Error> {
+            self.calls.push(RefCall::Append(part_id, configs));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn build_ref_failure_keeps_new_empty_ref_and_completed_part_prefix() {
+        let mut builder = RecordingRefBuilder {
+            fail_staff: Some(3),
+            ..RecordingRefBuilder::default()
+        };
+        assert_eq!(
+            build_population_system_ref_with(&mut builder),
+            Err("staff config failure")
+        );
+        assert_eq!(
+            builder.calls,
+            [
+                RefCall::Install,
+                RefCall::Bind,
+                RefCall::Config(1),
+                RefCall::Append(
+                    10,
+                    vec![PopulationStaffConfig {
+                        line_count: 1,
+                        is_small: false,
+                    }],
+                ),
+                RefCall::Config(2),
+                RefCall::Config(3),
             ]
         );
     }
