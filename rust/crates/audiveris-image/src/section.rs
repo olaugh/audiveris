@@ -9,7 +9,7 @@
 //! traversal in Java's `SectionFactory`; it is not a generic connected-component
 //! labeller.
 
-use crate::run_table::{Orientation, Run, RunTable};
+use crate::run_table::{GridRunTables, Orientation, Run, RunTable};
 
 /// An absolute, integer pixel bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -323,6 +323,20 @@ fn run_boxes_touch(one: Bounds, two: Bounds) -> bool {
 /// Build sections in the same deterministic creation order as Java `SectionFactory`.
 #[must_use]
 pub fn build_sections(run_table: &RunTable, policy: JunctionPolicy) -> Vec<Section> {
+    build_sections_from_id(run_table, policy, 1)
+}
+
+/// Build sections using `first_id` for the first newly registered section.
+///
+/// Java's `SectionFactory` uses local IDs when it has no lag, but delegates to
+/// the lag's shared entity index when it appends to an existing lag. This entry
+/// point preserves that latter behavior without changing [`build_sections`].
+#[must_use]
+pub fn build_sections_from_id(
+    run_table: &RunTable,
+    policy: JunctionPolicy,
+    first_id: usize,
+) -> Vec<Section> {
     let orientation = run_table.orientation();
     let mut sections = Vec::new();
     let mut processed = Vec::new();
@@ -331,7 +345,7 @@ pub fn build_sections(run_table: &RunTable, policy: JunctionPolicy) -> Vec<Secti
     let create_section =
         |position: usize, run: Run, sections: &mut Vec<Section>, processed: &mut Vec<bool>| {
             let index = sections.len();
-            sections.push(Section::new(index + 1, orientation, position, run));
+            sections.push(Section::new(first_id + index, orientation, position, run));
             processed.push(false);
             index
         };
@@ -406,6 +420,37 @@ pub fn build_sections(run_table: &RunTable, policy: JunctionPolicy) -> Vec<Secti
     sections
 }
 
+/// Initial section lags produced at the end of Java
+/// `LinesRetriever.createBothLags`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialGridLags {
+    /// Sections built from long vertical runs with `JunctionShiftPolicy`.
+    pub vertical: Vec<Section>,
+    /// Sections built from long horizontal runs with
+    /// `JunctionRatioPolicy.DEFAULT`.
+    pub horizontal: Vec<Section>,
+}
+
+/// Build the initial GRID lags from the already-partitioned run tables.
+///
+/// The held-back short horizontal table is deliberately untouched; Java adds
+/// those sections only after staff-line retrieval in `addShortSections`.
+#[must_use]
+pub fn build_initial_grid_lags(
+    tables: &GridRunTables,
+    max_vertical_run_shift: usize,
+) -> InitialGridLags {
+    InitialGridLags {
+        vertical: build_sections(
+            &tables.long_vertical,
+            JunctionPolicy::Shift {
+                max_shift: max_vertical_run_shift,
+            },
+        ),
+        horizontal: build_sections(&tables.long_horizontal, JunctionPolicy::DEFAULT_RATIO),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +466,64 @@ mod tests {
             assert!(table.add_run(position, run).unwrap());
         }
         table
+    }
+
+    #[test]
+    fn initial_grid_lags_use_java_policies_and_leave_short_runs_held_back() {
+        let vertical = table(
+            Orientation::Vertical,
+            4,
+            10,
+            &[
+                (0, Run::new(1, 2)),
+                (1, Run::new(2, 2)),
+                (2, Run::new(3, 2)),
+            ],
+        );
+        let horizontal = table(
+            Orientation::Horizontal,
+            12,
+            4,
+            &[
+                (0, Run::new(0, 4)),
+                (1, Run::new(0, 5)),
+                (2, Run::new(0, 7)),
+            ],
+        );
+        let short_horizontal = table(Orientation::Horizontal, 12, 4, &[(3, Run::new(9, 2))]);
+        let tables = GridRunTables {
+            long_vertical: vertical,
+            short_horizontal: short_horizontal.clone(),
+            long_horizontal: horizontal,
+        };
+
+        let lags = build_initial_grid_lags(&tables, 1);
+
+        assert_eq!(lags.vertical.len(), 1);
+        assert_eq!(lags.vertical[0].run_count(), 3);
+        assert_eq!(lags.horizontal.len(), 2);
+        assert_eq!(lags.horizontal[0].run_count(), 2);
+        assert_eq!(lags.horizontal[1].run_count(), 1);
+        assert_eq!(tables.short_horizontal, short_horizontal);
+        assert!(lags.horizontal.iter().all(|section| section.weight() != 2));
+    }
+
+    #[test]
+    fn initial_vertical_lag_obeys_inclusive_shift_limit() {
+        let vertical = table(
+            Orientation::Vertical,
+            3,
+            8,
+            &[(0, Run::new(1, 3)), (1, Run::new(2, 3))],
+        );
+        let tables = GridRunTables {
+            long_vertical: vertical,
+            short_horizontal: RunTable::new(Orientation::Horizontal, 3, 8).unwrap(),
+            long_horizontal: RunTable::new(Orientation::Horizontal, 3, 8).unwrap(),
+        };
+
+        assert_eq!(build_initial_grid_lags(&tables, 1).vertical.len(), 1);
+        assert_eq!(build_initial_grid_lags(&tables, 0).vertical.len(), 2);
     }
 
     #[test]
