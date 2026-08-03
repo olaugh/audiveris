@@ -5,6 +5,7 @@
 use crate::{
     bar_alignment::VerticalSide,
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
+    peak_graph::PeakGraph,
     run_table::Orientation,
     section::Section,
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -374,6 +375,51 @@ pub fn aggregate_bar_chains(
     Ok(columns)
 }
 
+/// Convert neutral graph components into Java `BarColumn.Chain` scalar facts.
+/// Peak IDs are their one-based successful graph insertion positions, which
+/// remain stable for this immutable build-columns snapshot.
+pub fn graph_bar_chains<R>(graph: &PeakGraph<R>) -> Result<Vec<Vec<BarPeak>>, BarsLogicError> {
+    let id_by_key = graph
+        .vertices()
+        .iter()
+        .enumerate()
+        .map(|(index, peak)| {
+            let value = index
+                .checked_add(1)
+                .ok_or(BarsLogicError::PeakIdExhausted)?;
+            Ok((peak.key(), crate::bar_column::PeakId::new(value)))
+        })
+        .collect::<Result<Vec<_>, BarsLogicError>>()?;
+
+    graph
+        .connected_peak_chains()
+        .into_iter()
+        .map(|chain| {
+            chain
+                .into_iter()
+                .map(|peak| {
+                    let id = id_by_key
+                        .iter()
+                        .find_map(|(key, id)| (*key == peak.key()).then_some(*id))
+                        .expect("graph component peak has an insertion ID");
+                    let deskewed = peak
+                        .deskewed_center()
+                        .ok_or(BarsLogicError::MissingDeskewedCenter(peak.key()))?;
+                    BarPeak::new(
+                        id,
+                        peak.staff_id(),
+                        f64::from(peak.width()),
+                        deskewed.x,
+                        peak.is_brace(),
+                        peak.is_staff_end(HorizontalSide::Left),
+                    )
+                    .map_err(BarsLogicError::from)
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
 #[must_use]
 pub fn peak_extension(
@@ -510,6 +556,8 @@ pub enum BarsLogicError {
     InvalidStartIndex(usize),
     EmptyChain,
     Column(BarColumnError),
+    MissingDeskewedCenter(StaffPeakKey),
+    PeakIdExhausted,
 }
 
 impl From<BarColumnError> for BarsLogicError {
@@ -906,6 +954,55 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn graph_components_convert_to_stable_bar_chains() {
+        let mut top = peak(2, 10, 11);
+        let mut bottom = peak(1, 12, 14);
+        let mut isolated = peak(3, 20, 20);
+        top.compute_deskewed_center(|point| {
+            crate::staff_peak::PeakPoint::new(point.x + 0.25, point.y)
+        })
+        .unwrap();
+        bottom
+            .compute_deskewed_center(|point| {
+                crate::staff_peak::PeakPoint::new(point.x + 0.25, point.y)
+            })
+            .unwrap();
+        isolated
+            .compute_deskewed_center(|point| crate::staff_peak::PeakPoint::new(point.x, point.y))
+            .unwrap();
+        top.set(StaffPeakAttribute::Brace);
+        bottom.set_staff_end(HorizontalSide::Left);
+        let top_key = top.key();
+        let bottom_key = bottom.key();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top);
+        graph.add_vertex(bottom);
+        graph.add_vertex(isolated);
+        graph.add_edge(top_key, bottom_key, ()).unwrap();
+
+        let chains = graph_bar_chains(&graph).unwrap();
+        assert_eq!(chains.len(), 2);
+        // Chain order is StaffPeak order, while scalar IDs retain graph insertion.
+        assert_eq!(chains[0][0].id(), PeakId::new(2));
+        assert_eq!(chains[0][1].id(), PeakId::new(1));
+        assert!(chains[0][0].is_left_staff_end());
+        assert!(chains[0][1].is_brace());
+        assert_eq!(chains[1][0].id(), PeakId::new(3));
+    }
+
+    #[test]
+    fn graph_chain_conversion_requires_deskewed_peak_geometry() {
+        let mut graph = PeakGraph::<()>::new();
+        let value = peak(1, 0, 1);
+        let key = value.key();
+        graph.add_vertex(value);
+        assert_eq!(
+            graph_bar_chains(&graph).unwrap_err(),
+            BarsLogicError::MissingDeskewedCenter(key)
         );
     }
 
