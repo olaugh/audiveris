@@ -11,6 +11,7 @@ pub mod bar_splits;
 pub mod bar_sticks;
 pub mod bars_coordinator;
 pub mod bars_logic;
+pub mod beam_extension;
 pub mod beam_structure;
 pub mod chamfer;
 pub mod cluster_coordinator;

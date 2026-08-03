@@ -816,6 +816,20 @@ fn sample_mask(
     (foreground, count)
 }
 
+/// Count Java `AreaMask` integer samples in a beam-shaped parallelogram.
+/// This is shared by the post-classification extension kernel for middle and
+/// side core-ratio checks.
+#[must_use]
+pub fn sample_beam_core(item: BeamItem, raster: BeamRaster<'_>) -> (usize, usize) {
+    sample_mask(
+        Parallelogram::new(item.median, item.height),
+        None,
+        raster.table,
+        raster.offset_x,
+        raster.offset_y,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
