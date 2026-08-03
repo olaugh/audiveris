@@ -339,12 +339,41 @@ denied, and passed `git diff --check` before commit.
 255. `5127409c` — injected headless `HeaderBuilder` shell and mutation lifecycle.
 256. `03a65cb4` — complete raw 11-stage line-completion composition.
 257. `5381b34b` — raw post-brace purge and exact lines-root correction.
+258. `5e4df552` — neutral clef-column orchestration and injected recognition boundary.
+259. `e01716f8` — raw bracket-end and bracket-middle detection.
+260. `4bf97f99` — neutral key-column orchestration and global offset selection.
+261. `f58eac74` — neutral header-time column orchestration.
+262. `ebcc4a13` — raw left, unaligned, and extending peak purges.
+263. `e6c4bf73` — automatic ordered `ProcessBars` ownership handoff to completion.
+264. `f16a9c4e` — per-staff clef candidate lifecycle around injected proposals.
+265. `9290188f` — per-staff key-signature candidate lifecycle and pitch maps.
+266. `942cf2ce` — raw right-end refinement and C-clef false-bar purge.
+267. `89a57818` — whole and paired header-time candidate lifecycle.
+268. `f5bcb361` — raw width partition and vertical bar/bracket inter creation.
+269. `06ca0e80` — headless `STEM_SEEDS` step lifecycle.
+270. `3c66c442` — concrete stem-width histogram, peaks, fallback, and scale mutation.
+271. `4fd4d55d` — bar-connection inter creation and bar grouping.
+272. `66dce292` — vertical stem-seed factory/checker boundary and mutation order.
+273. `a074a473` — staff bar recording and part-group construction.
+274. `46ffb7ad` — headless `BEAMS` step lifecycle.
+275. `8aee84dc` — raw part construction and contextualization, completing BarsRetriever.
+276. `02bfab02` — concrete beam-spot morphology, thresholds, runs, and dispatch.
+277. `8046eafb` — per-system beam candidate orchestration and grouping order.
+278. `fb5f4f9c` — direct final bar-tail ownership into all line-completion stages.
+279. `397c5f4a` — multiple-rest selection and ordered SIG replacement lifecycle.
+280. `a7d46b29` — headless `LEDGERS` step lifecycle.
+281. `d13d32ea` — native beam-spot connected components and glyph registration.
+282. `e3aa7e71` — raw ledger zoning, filtering, grading, and overlap reduction.
+283. `ad50df70` — concrete ledger StickFactory filament geometry.
+284. `b5a7e36c` — headless `HEADS` step lifecycle and ownership order.
+285. `807095ac` — beam-structure borders, splitting, and core/belt raster impacts.
+286. `192c628a` — ledger glyph/SIG materialization, exclusions, and staff ownership.
 
-At the two-hundred-and-fifty-seventh checkpoint the Rust workspace executes 663 tests:
+At the two-hundred-and-eighty-sixth checkpoint the Rust workspace executes 774 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 460
-- `audiveris-omr`: 150
+- `audiveris-image`: 492
+- `audiveris-omr`: 229
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
