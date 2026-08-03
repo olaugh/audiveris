@@ -310,6 +310,36 @@ pub fn plan_connection_inters(
         .collect()
 }
 
+/// Java `BarsRetriever.extendConnection`: starting at a concrete connection's
+/// top peak, traverse the entire alignment component and return the inters to
+/// freeze in Java discovery order. Both alignments and connections participate.
+pub fn extended_connection_peak_keys(
+    graph: &PeakGraph<BarAlignment>,
+    connection_edge: PeakEdgeId,
+) -> Result<Vec<StaffPeakKey>, BarsLogicError> {
+    let edge = graph
+        .edge(connection_edge)
+        .ok_or(PeakGraphError::MissingEdge(connection_edge))?;
+    if edge.relation().kind() != BarAlignmentKind::Connection {
+        return Err(BarsLogicError::NotConnectionEdge(connection_edge));
+    }
+
+    let mut peaks = vec![edge.source()];
+    let mut index = 0_usize;
+    while index < peaks.len() {
+        let current = peaks[index];
+        for relation in graph.edges_of(current)? {
+            for candidate in [relation.source(), relation.target()] {
+                if !peaks.contains(&candidate) {
+                    peaks.push(candidate);
+                }
+            }
+        }
+        index += 1;
+    }
+    Ok(peaks)
+}
+
 /// Java `getGroups`: collect maximal adjacent peak runs separated by at most
 /// `maximum_double_bar_gap`, omitting singleton runs.
 ///
@@ -1350,6 +1380,7 @@ pub enum BarsLogicError {
     InvalidGroupStartIndex { staff_id: i32, index: usize },
     Graph(PeakGraphError),
     BracketConnectionCycle(StaffPeakKey),
+    NotConnectionEdge(PeakEdgeId),
 }
 
 impl From<BarColumnError> for BarsLogicError {
@@ -1391,6 +1422,9 @@ impl fmt::Display for BarsLogicError {
             Self::Graph(error) => write!(formatter, "peak graph error: {error}"),
             Self::BracketConnectionCycle(key) => {
                 write!(formatter, "cyclic bracket connection at peak {key:?}")
+            }
+            Self::NotConnectionEdge(id) => {
+                write!(formatter, "peak edge {} is not a connection", id.value())
             }
         }
     }
@@ -1910,6 +1944,54 @@ mod tests {
         assert!(!plans[3].endpoints_complete);
         assert!(!plans[3].add_endpoint_support);
         assert!(!plans[3].freeze_and_extend_bar_column);
+    }
+
+    #[test]
+    fn extended_connection_freeze_walk_uses_all_relations_in_discovery_order() {
+        let top = peak(1, 10, 11);
+        let first_bottom = peak(2, 10, 11);
+        let second_bottom = peak(2, 20, 21);
+        let tail = peak(3, 10, 11);
+        let keys = [
+            top.key(),
+            first_bottom.key(),
+            second_bottom.key(),
+            tail.key(),
+        ];
+        let mut graph = PeakGraph::new();
+        for value in [top, first_bottom, second_bottom, tail] {
+            graph.add_vertex(value);
+        }
+        let connection = graph
+            .add_edge(
+                keys[0],
+                keys[1],
+                graph_relation(1, keys[0], keys[1], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        let tail_alignment = graph
+            .add_edge(
+                keys[1],
+                keys[3],
+                graph_relation(2, keys[1], keys[3], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                graph_relation(3, keys[0], keys[2], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+
+        assert_eq!(
+            extended_connection_peak_keys(&graph, connection).unwrap(),
+            [keys[0], keys[1], keys[2], keys[3]]
+        );
+        assert_eq!(
+            extended_connection_peak_keys(&graph, tail_alignment),
+            Err(BarsLogicError::NotConnectionEdge(tail_alignment))
+        );
     }
 
     #[test]
