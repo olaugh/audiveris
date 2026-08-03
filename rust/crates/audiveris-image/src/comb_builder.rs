@@ -8,6 +8,8 @@
 
 use std::{cmp::Ordering, error::Error, fmt};
 
+use audiveris_core::histogram::Histogram;
+
 use crate::{
     filament::{FilamentError, FilamentGeometry},
     filament_comb::{FilamentComb, FilamentCombError},
@@ -131,6 +133,17 @@ pub fn retrieve_combs(
     Ok(columns)
 }
 
+/// Java `retrievePopularSize`: each comb votes with its own line count.
+#[must_use]
+pub fn popular_comb_size(columns: &[CombColumn]) -> Option<usize> {
+    let mut histogram = Histogram::default();
+    for comb in columns.iter().flat_map(|column| &column.combs) {
+        let count = comb.count();
+        histogram.increase_count(count, i32::try_from(count).unwrap_or(i32::MAX));
+    }
+    histogram.max_bucket().copied()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CombBuilderError {
     InvalidSampling,
@@ -242,5 +255,28 @@ mod tests {
             retrieve_combs(10, 0, 1, 2, &filaments),
             Err(CombBuilderError::InvalidSampling)
         );
+    }
+
+    #[test]
+    fn popular_size_weights_each_comb_by_its_line_count_and_keeps_low_tie() {
+        let mut two_a = FilamentComb::new(1);
+        two_a.append_root(1, 1.0).unwrap();
+        two_a.append_root(2, 2.0).unwrap();
+        let mut two_b = FilamentComb::new(2);
+        two_b.append_root(3, 1.0).unwrap();
+        two_b.append_root(4, 2.0).unwrap();
+        let mut four = FilamentComb::new(3);
+        for id in 5..=8 {
+            four.append_root(id, id as f64).unwrap();
+        }
+        let columns = [CombColumn {
+            index: 1,
+            x: 10,
+            combs: vec![four, two_a, two_b],
+        }];
+
+        // Size 2 and size 4 each receive four votes; Histogram keeps size 2.
+        assert_eq!(popular_comb_size(&columns), Some(2));
+        assert_eq!(popular_comb_size(&[]), None);
     }
 }
