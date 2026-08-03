@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::{error::Error, fmt};
 
 use crate::bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide};
-use crate::staff_peak::{StaffPeak, StaffPeakKey};
+use crate::staff_peak::{PeakPoint, StaffPeak, StaffPeakKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PeakEdgeId(usize);
@@ -174,6 +174,35 @@ impl<R> PeakGraph<R> {
             .edges
             .iter()
             .filter(move |edge| edge.source == vertex || edge.target == vertex))
+    }
+
+    /// Java `PeakGraph.checkBraceAlignment`, as called by `BarsRetriever`.
+    ///
+    /// Java deliberately uses integer-truncated horizontal midpoints here,
+    /// unlike `StaffPeak.computeDeskewedCenter`'s precise half-pixel midpoint.
+    /// The callback owns sheet-skew transformation outside this neutral graph.
+    pub fn check_brace_alignment(
+        &self,
+        top: StaffPeakKey,
+        bottom: StaffPeakKey,
+        max_deskewed_dx: f64,
+        mut deskew: impl FnMut(PeakPoint) -> PeakPoint,
+    ) -> Result<bool, PeakGraphError> {
+        let top_peak = self.vertex(top).ok_or(PeakGraphError::MissingVertex(top))?;
+        let bottom_peak = self
+            .vertex(bottom)
+            .ok_or(PeakGraphError::MissingVertex(bottom))?;
+        let top_mid = top_peak.start().wrapping_add(top_peak.stop()) / 2;
+        let bottom_mid = bottom_peak.start().wrapping_add(bottom_peak.stop()) / 2;
+        let top_deskewed = deskew(PeakPoint::new(
+            f64::from(top_mid),
+            f64::from(top_peak.bottom()),
+        ));
+        let bottom_deskewed = deskew(PeakPoint::new(
+            f64::from(bottom_mid),
+            f64::from(bottom_peak.top()),
+        ));
+        Ok((bottom_deskewed.x - top_deskewed.x).abs() <= max_deskewed_dx)
     }
 
     pub fn in_degree(&self, target: StaffPeakKey) -> Result<usize, PeakGraphError> {
@@ -606,6 +635,56 @@ mod tests {
             graph.edges_of(missing),
             Err(PeakGraphError::MissingVertex(key)) if key == missing
         ));
+    }
+
+    #[test]
+    fn brace_alignment_uses_integer_midpoints_inside_ordinates_and_inclusive_limit() {
+        let mut graph = PeakGraph::<()>::new();
+        let top = StaffPeak::new(StaffId::new(1), 10, 20, -13, -10).unwrap();
+        let bottom = StaffPeak::new(StaffId::new(2), 30, 40, -9, -6).unwrap();
+        let top_key = top.key();
+        let bottom_key = bottom.key();
+        graph.add_vertex(top);
+        graph.add_vertex(bottom);
+
+        let mut sampled = Vec::new();
+        let aligned = graph
+            .check_brace_alignment(top_key, bottom_key, 3.0, |point| {
+                sampled.push(point);
+                PeakPoint::new(point.x + (point.y * 0.1), point.y)
+            })
+            .unwrap();
+        // Java integer division truncates -23/2 to -11 and -15/2 to -7.
+        assert_eq!(
+            sampled,
+            [PeakPoint::new(-11.0, 20.0), PeakPoint::new(-7.0, 30.0)]
+        );
+        // Deskewed x values are -9 and -4, so the inclusive limit is 5.
+        assert!(!aligned);
+        assert!(
+            graph
+                .check_brace_alignment(top_key, bottom_key, 5.0, |point| {
+                    PeakPoint::new(point.x + (point.y * 0.1), point.y)
+                })
+                .unwrap()
+        );
+        assert!(
+            !graph
+                .check_brace_alignment(top_key, bottom_key, 4.999, |point| {
+                    PeakPoint::new(point.x + (point.y * 0.1), point.y)
+                })
+                .unwrap()
+        );
+
+        let missing = peak(9, 0, 1).key();
+        assert_eq!(
+            graph.check_brace_alignment(missing, bottom_key, 5.0, |point| point),
+            Err(PeakGraphError::MissingVertex(missing))
+        );
+        assert_eq!(
+            graph.check_brace_alignment(top_key, missing, 5.0, |point| point),
+            Err(PeakGraphError::MissingVertex(missing))
+        );
     }
 
     #[test]
