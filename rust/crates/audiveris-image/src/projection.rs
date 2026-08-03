@@ -127,6 +127,38 @@ pub struct StaffProjectionAccumulation {
     pub bounds: PeakSearchBounds,
 }
 
+/// Scale- and staff-resolved controls for the neutral portion of Java
+/// `StaffProjector.process` plus optional brace discovery.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NeutralStaffProjectorRequest {
+    pub staff_id: StaffId,
+    pub staff_left: i32,
+    pub staff_right: i32,
+    pub blank_threshold: i32,
+    pub minimum_wide_blank_width: i32,
+    pub top_derivative_count: usize,
+    pub minimum_derivative_ratio: f64,
+    pub use_one_line_half_mode: bool,
+    pub is_one_line_staff: bool,
+    pub bar_threshold: i32,
+    pub total_height: i32,
+    pub peak_construction: PeakConstructionParams,
+    pub peak_core: PeakCoreParams,
+    pub brace_search: Option<BraceSearchRequest>,
+}
+
+/// Source-faithful projector state before any `Sheet`, `Staff`, `SystemInfo`,
+/// peak-graph, attribute, or deskew mutation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NeutralStaffProjectorResult {
+    pub projection: ShortProjection,
+    pub derivative_threshold: i32,
+    pub all_blanks: Vec<ProjectionBlank>,
+    pub peak_search_bounds: PeakSearchBounds,
+    pub peaks: Vec<StaffPeak>,
+    pub brace_candidate: Option<ProjectionBraceCandidate>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1455,6 +1487,102 @@ impl ShortProjection {
     }
 }
 
+impl StaffProjectionAccumulation {
+    /// Compose the mutation-free part of Java `StaffProjector.process` from an
+    /// already accumulated raster projection.
+    ///
+    /// The callback supplies source-owned staff ordinates for candidate core
+    /// validation. Returned peaks are graded but remain neutral: graph
+    /// insertion, semantic attributes, and deskew centers belong to later
+    /// source stages. Brace discovery likewise returns projection geometry,
+    /// not a graph-owned `StaffPeak`.
+    pub fn finish_neutral<Geometry>(
+        self,
+        raster_width: usize,
+        raster_height: usize,
+        pixels: &[u8],
+        request: NeutralStaffProjectorRequest,
+        mut core_geometry_at: Geometry,
+    ) -> Result<NeutralStaffProjectorResult, ProjectionError>
+    where
+        Geometry: FnMut(i32) -> PeakCoreGeometry,
+    {
+        let derivative_threshold = self.projection.staff_derivative_threshold(
+            self.bounds.x_min,
+            self.bounds.x_max,
+            request.top_derivative_count,
+            request.minimum_derivative_ratio,
+        )?;
+        let all_blanks = self.projection.blank_regions(request.blank_threshold);
+        let peak_search_bounds = self.projection.peak_search_bounds(
+            &all_blanks,
+            request.staff_left,
+            request.staff_right,
+            request.minimum_wide_blank_width,
+        );
+        let half_mode = request.use_one_line_half_mode && request.is_one_line_staff;
+        let minimum_count = if half_mode {
+            request.bar_threshold / 2
+        } else {
+            request.bar_threshold
+        };
+        let minimum_derivative = if half_mode {
+            derivative_threshold / 2
+        } else {
+            derivative_threshold
+        };
+        let scan = PeakScanRequest::new(
+            peak_search_bounds.x_min,
+            peak_search_bounds.x_max,
+            if half_mode {
+                ProjectionPeakMode::InitialHalf
+            } else {
+                ProjectionPeakMode::Full
+            },
+            minimum_count,
+            minimum_derivative,
+            minimum_derivative,
+            0,
+        );
+        let peaks =
+            self.projection
+                .find_peaks_in_range(scan, request.peak_construction, |candidate| {
+                    let midpoint = candidate.start.wrapping_add(candidate.stop) / 2;
+                    let validation = candidate.validate_core(
+                        raster_width,
+                        raster_height,
+                        pixels,
+                        core_geometry_at(midpoint),
+                        0,
+                        request.peak_core,
+                    )?;
+                    candidate.into_staff_peak(
+                        validation,
+                        request.staff_id,
+                        PeakGradeParams::new(
+                            request.bar_threshold,
+                            request.total_height,
+                            half_mode,
+                        ),
+                    )
+                })?;
+        let brace_candidate = request
+            .brace_search
+            .map(|brace| self.projection.find_brace_candidate(&all_blanks, brace))
+            .transpose()?
+            .flatten();
+
+        Ok(NeutralStaffProjectorResult {
+            projection: self.projection,
+            derivative_threshold,
+            all_blanks,
+            peak_search_bounds,
+            peaks,
+            brace_candidate,
+        })
+    }
+}
+
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
 #[must_use]
 pub fn select_blank(
@@ -1803,6 +1931,91 @@ mod tests {
                 actual: 3,
             })
         );
+    }
+
+    #[test]
+    fn neutral_projector_composes_projection_blanks_peaks_grading_and_brace() {
+        let width = 20;
+        let height = 5;
+        let mut pixels = vec![255; width * height];
+        for x in 0..width {
+            pixels[x] = FOREGROUND;
+            pixels[(height - 1) * width + x] = FOREGROUND;
+        }
+        for x in 5..=6 {
+            for y in 0..height {
+                pixels[y * width + x] = FOREGROUND;
+            }
+        }
+
+        let accumulation = ShortProjection::from_staff_raster(
+            width,
+            height,
+            &pixels,
+            StaffProjectionRequest::new(5, 6, 20),
+            |_| 0,
+            |_| 5,
+        )
+        .unwrap();
+        let peak_refinement = PeakRefinementParams::new(4, 2, 4, 2, 1).unwrap();
+        let result = accumulation
+            .finish_neutral(
+                width,
+                height,
+                &pixels,
+                NeutralStaffProjectorRequest {
+                    staff_id: StaffId::new(1),
+                    staff_left: 5,
+                    staff_right: 6,
+                    blank_threshold: 2,
+                    minimum_wide_blank_width: 2,
+                    top_derivative_count: 2,
+                    minimum_derivative_ratio: 1.0,
+                    use_one_line_half_mode: false,
+                    is_one_line_staff: false,
+                    bar_threshold: 4,
+                    total_height: 5,
+                    peak_construction: PeakConstructionParams::new(peak_refinement, 4).unwrap(),
+                    peak_core: PeakCoreParams::new(1, 0.3).unwrap(),
+                    brace_search: Some(BraceSearchRequest::new(5, 0, 7, 2, 4)),
+                },
+                |x| {
+                    assert_eq!(x, 5);
+                    PeakCoreGeometry::new(0, 4, 2)
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.derivative_threshold, 3);
+        assert_eq!(
+            result.all_blanks,
+            [
+                ProjectionBlank { start: 0, stop: 4 },
+                ProjectionBlank { start: 7, stop: 19 },
+            ]
+        );
+        assert_eq!(
+            result.peak_search_bounds,
+            PeakSearchBounds { x_min: 4, x_max: 7 }
+        );
+        assert_eq!(result.peaks.len(), 1);
+        let peak = &result.peaks[0];
+        assert_eq!(
+            (peak.staff_id().value(), peak.start(), peak.stop()),
+            (1, 5, 6)
+        );
+        assert_eq!((peak.top(), peak.bottom()), (0, 4));
+        assert_eq!(
+            result.brace_candidate,
+            Some(ProjectionBraceCandidate {
+                raw_start: 5,
+                raw_stop: 6,
+                start: 4,
+                stop: 7,
+                search_right: 7,
+            })
+        );
+        assert_eq!(result.projection.value(5), 5);
     }
 
     #[test]
