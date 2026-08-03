@@ -1089,6 +1089,32 @@ pub fn peak_extension(
     }
 }
 
+/// Rectangle attached and searched by Java `BarsRetriever.getSerif` before
+/// section exclusion and filament construction.
+#[must_use]
+pub fn serif_lookup_bounds(
+    peak: &StaffPeak,
+    maximum_foreground_thickness: i32,
+    serif_roi_width: i32,
+    serif_roi_height: i32,
+    side: VerticalSide,
+) -> PeakBounds {
+    let half_line = (f64::from(maximum_foreground_thickness) / 2.0).ceil() as i32;
+    let y = match side {
+        VerticalSide::Top => peak
+            .top()
+            .wrapping_sub(half_line)
+            .wrapping_sub(serif_roi_height),
+        VerticalSide::Bottom => peak.bottom().wrapping_add(half_line),
+    };
+    PeakBounds {
+        x: peak.stop().wrapping_add(1),
+        y,
+        width: serif_roi_width,
+        height: serif_roi_height,
+    }
+}
+
 /// Peak keys selected by Java `purgeExtendingPeaks` for one boundary staff.
 /// A missing start marker makes every peak eligible, matching `iStart == -1`.
 #[must_use]
@@ -1471,6 +1497,40 @@ mod tests {
         assert_eq!(
             peak_extension(&value, wrapped, 2, VerticalSide::Bottom),
             f64::from(i32::MIN) - 1.0 - 30.0
+        );
+    }
+
+    #[test]
+    fn serif_lookup_bounds_use_ceil_half_line_and_java_integer_wrapping() {
+        let value = StaffPeak::new(StaffId::new(1), 10, 30, 5, 8).unwrap();
+        assert_eq!(
+            serif_lookup_bounds(&value, 3, 7, 9, VerticalSide::Top),
+            PeakBounds {
+                x: 9,
+                y: -1,
+                width: 7,
+                height: 9,
+            }
+        );
+        assert_eq!(
+            serif_lookup_bounds(&value, 4, 7, 9, VerticalSide::Bottom),
+            PeakBounds {
+                x: 9,
+                y: 32,
+                width: 7,
+                height: 9,
+            }
+        );
+
+        let overflow = StaffPeak::new(StaffId::new(1), i32::MIN, i32::MAX, 0, i32::MAX).unwrap();
+        assert_eq!(
+            serif_lookup_bounds(&overflow, 2, 1, 1, VerticalSide::Bottom),
+            PeakBounds {
+                x: i32::MIN,
+                y: i32::MIN,
+                width: 1,
+                height: 1,
+            }
         );
     }
 
