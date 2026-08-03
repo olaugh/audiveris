@@ -9,8 +9,11 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
 
+use crate::bar_column::StaffId;
 use crate::run_table::FOREGROUND;
-use crate::staff_peak::HorizontalSide;
+use crate::staff_peak::{HorizontalSide, StaffPeak, StaffPeakError, StaffVerticalImpacts};
+
+const MINIMUM_STAFF_PEAK_GRADE: f64 = 0.08;
 
 /// Java `StaffProjector.Blank`: an inclusive region without staff lines.
 #[derive(Clone, Copy, Debug)]
@@ -188,6 +191,26 @@ pub struct PeakCoreParams {
     minimum_white_ratio_beyond_serif: f64,
 }
 
+/// Resolved projection values used by the last pure portion of Java
+/// `StaffProjector.createPeak`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakGradeParams {
+    pub bar_threshold: i32,
+    pub total_height: i32,
+    pub half_mode: bool,
+}
+
+impl PeakGradeParams {
+    #[must_use]
+    pub const fn new(bar_threshold: i32, total_height: i32, half_mode: bool) -> Self {
+        Self {
+            bar_threshold,
+            total_height,
+            half_mode,
+        }
+    }
+}
+
 impl PeakCoreParams {
     pub fn new(
         gap_threshold: i32,
@@ -224,8 +247,11 @@ pub enum PeakCoreRejection {
 /// peak construction in Java `StaffProjector.createPeak`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PeakCoreValidation {
+    pub start: i32,
+    pub stop: i32,
     pub y_top: i32,
     pub y_bottom: i32,
+    pub gap_threshold: i32,
     pub core: VerticalCoreData,
     pub full_height_core: Option<VerticalCoreData>,
     pub rejection: Option<PeakCoreRejection>,
@@ -332,12 +358,74 @@ impl ProjectionPeakCandidate {
         };
 
         Ok(PeakCoreValidation {
+            start: self.start,
+            stop: self.stop,
             y_top,
             y_bottom,
+            gap_threshold: params.gap_threshold,
             core,
             full_height_core,
             rejection,
         })
+    }
+
+    /// Finish the pure `StaffProjector.createPeak` decision by computing the
+    /// six Java staff-vertical impacts and constructing a neutral `StaffPeak`.
+    ///
+    /// A rejected core or a grade below `Grades.minInterGrade` (`0.08`) returns
+    /// `None`. The returned peak deliberately has no semantic attributes and no
+    /// deskewed center: those are assigned later by source stages that own the
+    /// sheet transform and peak graph.
+    pub fn into_staff_peak(
+        self,
+        validation: PeakCoreValidation,
+        staff_id: StaffId,
+        params: PeakGradeParams,
+    ) -> Result<Option<StaffPeak>, ProjectionError> {
+        if self.start != validation.start || self.stop != validation.stop {
+            return Err(ProjectionError::MismatchedCoreValidation);
+        }
+        if !validation.is_accepted() {
+            return Ok(None);
+        }
+
+        let minimum_value = if params.half_mode {
+            params.bar_threshold / 2
+        } else {
+            params.bar_threshold
+        };
+        let effective_height = if params.half_mode {
+            params.total_height / 2
+        } else {
+            params.total_height
+        };
+        let value_range = effective_height.wrapping_sub(minimum_value);
+        let core_impact =
+            f64::from(self.maximum_value.wrapping_sub(minimum_value)) / f64::from(value_range);
+        let gap_impact =
+            1.0 - (f64::from(validation.core.gap) / f64::from(validation.gap_threshold));
+        let impacts = StaffVerticalImpacts::new(
+            core_impact,
+            gap_impact,
+            self.left.derivative_grade,
+            self.right.derivative_grade,
+            self.left.chunk_grade,
+            self.right.chunk_grade,
+        );
+        if impacts.grade() < MINIMUM_STAFF_PEAK_GRADE || impacts.grade().is_nan() {
+            return Ok(None);
+        }
+
+        StaffPeak::with_impacts(
+            staff_id,
+            validation.y_top,
+            validation.y_bottom,
+            self.start,
+            self.stop,
+            impacts,
+        )
+        .map(Some)
+        .map_err(ProjectionError::StaffPeak)
     }
 }
 
@@ -865,6 +953,8 @@ pub enum ProjectionError {
         y_min: i32,
         y_max: i32,
     },
+    MismatchedCoreValidation,
+    StaffPeak(StaffPeakError),
 }
 
 impl fmt::Display for ProjectionError {
@@ -921,6 +1011,10 @@ impl fmt::Display for ProjectionError {
                 formatter,
                 "core probe ({x_min}..={x_max}, {y_min}..={y_max}) is outside raster",
             ),
+            Self::MismatchedCoreValidation => {
+                formatter.write_str("core validation belongs to a different peak")
+            }
+            Self::StaffPeak(error) => error.fmt(formatter),
         }
     }
 }
@@ -1491,6 +1585,109 @@ mod tests {
                 expected: 72,
                 actual: 10,
             })
+        );
+    }
+
+    #[test]
+    fn validated_candidate_becomes_neutral_graded_staff_peak() {
+        let mut pixels = vec![255; 8 * 9];
+        for y in 0..=8 {
+            pixels[y * 8 + 3] = FOREGROUND;
+        }
+        let source = candidate(3, 3);
+        let validation = source
+            .validate_core(
+                8,
+                9,
+                &pixels,
+                PeakCoreGeometry::new(0, 8, 4),
+                0,
+                PeakCoreParams::new(2, 0.3).unwrap(),
+            )
+            .unwrap();
+        let peak = source
+            .into_staff_peak(
+                validation,
+                StaffId::new(2),
+                PeakGradeParams::new(4, 12, false),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (peak.staff_id().value(), peak.start(), peak.stop()),
+            (2, 3, 3)
+        );
+        assert_eq!((peak.top(), peak.bottom()), (0, 8));
+        assert_eq!(peak.deskewed_center(), None);
+        assert!(peak.attributes().next().is_none());
+
+        let impacts = peak.impacts().unwrap();
+        assert_eq!(impacts.core(), 0.75);
+        assert_eq!(impacts.gap(), 1.0);
+        assert_eq!(impacts.start(), 1.0);
+        assert_eq!(impacts.stop(), 1.0);
+        assert_eq!(impacts.left(), 1.0);
+        assert_eq!(impacts.right(), 1.0);
+        assert!(impacts.grade() > MINIMUM_STAFF_PEAK_GRADE);
+    }
+
+    #[test]
+    fn staff_peak_grade_abstains_below_threshold_and_rejects_mixed_evidence() {
+        let mut pixels = vec![255; 8 * 9];
+        for y in 0..=8 {
+            pixels[y * 8 + 3] = FOREGROUND;
+        }
+        let params = PeakCoreParams::new(2, 0.3).unwrap();
+        let source = candidate(3, 3);
+        let validation = source
+            .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params)
+            .unwrap();
+
+        let mut weak = source;
+        weak.maximum_value = 4;
+        assert_eq!(
+            weak.into_staff_peak(
+                validation,
+                StaffId::new(2),
+                PeakGradeParams::new(4, 12, false),
+            )
+            .unwrap(),
+            None
+        );
+        assert!(matches!(
+            candidate(4, 4).into_staff_peak(
+                validation,
+                StaffId::new(2),
+                PeakGradeParams::new(4, 12, false),
+            ),
+            Err(ProjectionError::MismatchedCoreValidation)
+        ));
+        assert!(matches!(
+            source.into_staff_peak(
+                validation,
+                StaffId::new(0),
+                PeakGradeParams::new(4, 12, false),
+            ),
+            Err(ProjectionError::StaffPeak(StaffPeakError::InvalidStaffId))
+        ));
+
+        pixels.fill(255);
+        for y in [0, 4, 8] {
+            pixels[y * 8 + 3] = FOREGROUND;
+        }
+        let rejected = source
+            .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params)
+            .unwrap();
+        assert_eq!(rejected.rejection, Some(PeakCoreRejection::GapTooLarge));
+        assert_eq!(
+            source
+                .into_staff_peak(
+                    rejected,
+                    StaffId::new(2),
+                    PeakGradeParams::new(4, 12, false),
+                )
+                .unwrap(),
+            None
         );
     }
 

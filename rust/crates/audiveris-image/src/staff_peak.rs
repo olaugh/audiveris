@@ -10,8 +10,98 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
 
+use audiveris_core::grade::clamp;
+
 use crate::bar_alignment::VerticalSide;
 use crate::bar_column::StaffId;
+
+const INTRINSIC_RATIO: f64 = 0.8;
+
+/// Java `AbstractStaffVerticalInter.Impacts`, retained on accepted projection
+/// peaks before any SIG `Inter` exists.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffVerticalImpacts {
+    core: f64,
+    gap: f64,
+    start: f64,
+    stop: f64,
+    left: f64,
+    right: f64,
+    grade: f64,
+}
+
+impl StaffVerticalImpacts {
+    #[must_use]
+    pub fn new(core: f64, gap: f64, start: f64, stop: f64, left: f64, right: f64) -> Self {
+        let impacts = [
+            clamp(core),
+            clamp(gap),
+            clamp(start),
+            clamp(stop),
+            clamp(left),
+            clamp(right),
+        ];
+        let grade = weighted_grade(&impacts, &[1.0, 1.0, 1.0, 1.0, 0.5, 0.5]);
+        Self {
+            core: impacts[0],
+            gap: impacts[1],
+            start: impacts[2],
+            stop: impacts[3],
+            left: impacts[4],
+            right: impacts[5],
+            grade,
+        }
+    }
+
+    #[must_use]
+    pub const fn core(self) -> f64 {
+        self.core
+    }
+
+    #[must_use]
+    pub const fn gap(self) -> f64 {
+        self.gap
+    }
+
+    #[must_use]
+    pub const fn start(self) -> f64 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn stop(self) -> f64 {
+        self.stop
+    }
+
+    #[must_use]
+    pub const fn left(self) -> f64 {
+        self.left
+    }
+
+    #[must_use]
+    pub const fn right(self) -> f64 {
+        self.right
+    }
+
+    #[must_use]
+    pub const fn grade(self) -> f64 {
+        self.grade
+    }
+}
+
+fn weighted_grade(impacts: &[f64], weights: &[f64]) -> f64 {
+    let mut global = 1.0;
+    let mut total_weight = 0.0;
+    for (&impact, &weight) in impacts.iter().zip(weights) {
+        total_weight += weight;
+        if impact == 0.0 {
+            global = 0.0;
+        } else if weight != 0.0 {
+            global *= impact.powf(weight);
+        }
+    }
+    INTRINSIC_RATIO * global.powf(1.0 / total_weight)
+}
 
 /// Java-compatible integer rectangle, including inclusive peak dimensions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +225,7 @@ pub struct StaffPeak {
     stop: i32,
     deskewed_center: Option<PeakPoint>,
     attributes: u16,
+    impacts: Option<StaffVerticalImpacts>,
 }
 
 impl StaffPeak {
@@ -156,7 +247,21 @@ impl StaffPeak {
             stop,
             deskewed_center: None,
             attributes: 0,
+            impacts: None,
         })
+    }
+
+    pub fn with_impacts(
+        staff_id: StaffId,
+        top: i32,
+        bottom: i32,
+        start: i32,
+        stop: i32,
+        impacts: StaffVerticalImpacts,
+    ) -> Result<Self, StaffPeakError> {
+        let mut peak = Self::new(staff_id, top, bottom, start, stop)?;
+        peak.impacts = Some(impacts);
+        Ok(peak)
     }
 
     #[must_use]
@@ -232,6 +337,11 @@ impl StaffPeak {
     #[must_use]
     pub const fn deskewed_center(&self) -> Option<PeakPoint> {
         self.deskewed_center
+    }
+
+    #[must_use]
+    pub const fn impacts(&self) -> Option<StaffVerticalImpacts> {
+        self.impacts
     }
 
     #[must_use]
@@ -409,6 +519,26 @@ mod tests {
         let singleton = peak(2, 5, 5, 7, 7);
         assert_eq!(singleton.width(), 1);
         assert_eq!(singleton.bounds().height, 1);
+    }
+
+    #[test]
+    fn staff_vertical_impacts_clamp_and_use_java_weights() {
+        let impacts = StaffVerticalImpacts::new(0.5, 1.2, 1.0, 1.0, 0.25, -0.5);
+        assert_eq!(impacts.core(), 0.5);
+        assert_eq!(impacts.gap(), 1.0);
+        assert_eq!(impacts.start(), 1.0);
+        assert_eq!(impacts.stop(), 1.0);
+        assert_eq!(impacts.left(), 0.25);
+        assert_eq!(impacts.right(), 0.0);
+        assert_eq!(impacts.grade(), 0.0);
+
+        let impacts = StaffVerticalImpacts::new(0.5, 1.0, 1.0, 1.0, 0.25, 1.0);
+        let expected = 0.8 * (0.5_f64 * 0.25_f64.sqrt()).powf(1.0 / 5.0);
+        assert!((impacts.grade() - expected).abs() < 1.0e-14);
+
+        let peak = StaffPeak::with_impacts(StaffId::new(2), 10, 20, 4, 5, impacts).unwrap();
+        assert_eq!(peak.impacts(), Some(impacts));
+        assert!(peak.attributes().next().is_none());
     }
 
     #[test]
