@@ -17,12 +17,16 @@ use crate::{
     line_cluster::FilamentId,
     lines_coordinator::{
         ClusterPass, ClusterPassState, LinesCoordinatorError, LinesCoordinatorParameters,
-        StaffCandidateKind, retrieve_staff_candidates,
+        StaffCandidateKind, preview_cluster_pass, retrieve_staff_candidates,
+        retrieve_staff_candidates_with_secondary_order,
     },
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridBuildState, RemainingRasterGridStages,
     },
-    raw_line_adapter::{RawLineAdapterError, RawPrimaryPassParameters, build_primary_cluster_pass},
+    raw_line_adapter::{
+        RawLineAdapterError, RawPrimaryPassParameters, RawSecondaryPassParameters,
+        build_primary_cluster_pass, build_secondary_cluster_pass,
+    },
     section::Section,
 };
 
@@ -116,6 +120,8 @@ pub struct RawProductionRetrieveLines<Downstream> {
     lines_parameters: LinesCoordinatorParameters,
     downstream: Downstream,
     primary: Option<ClusterPassState>,
+    secondary_parameters: Option<RawSecondaryPassParameters>,
+    secondary: Option<ClusterPassState>,
     handoff: Option<PreparedStaffHandoff>,
     raw_metadata_handoff: Option<RawLineMetadataHandoff>,
 }
@@ -132,14 +138,29 @@ impl<Downstream> RawProductionRetrieveLines<Downstream> {
             lines_parameters,
             downstream,
             primary: None,
+            secondary_parameters: None,
+            secondary: None,
             handoff: None,
             raw_metadata_handoff: None,
         }
     }
 
+    /// Enable Java's lazy small-interline pass while retaining the existing
+    /// primary-only constructor and behavior by default.
+    #[must_use]
+    pub fn with_small_interline(mut self, parameters: RawSecondaryPassParameters) -> Self {
+        self.secondary_parameters = Some(parameters);
+        self
+    }
+
     #[must_use]
     pub const fn primary(&self) -> Option<&ClusterPassState> {
         self.primary.as_ref()
+    }
+
+    #[must_use]
+    pub const fn secondary(&self) -> Option<&ClusterPassState> {
+        self.secondary.as_ref()
     }
 
     #[must_use]
@@ -311,6 +332,7 @@ where
         self.handoff = None;
         self.raw_metadata_handoff = None;
         self.primary = None;
+        self.secondary = None;
         let lag = state.horizontal_lag().ok_or_else(|| {
             GridStageFailure::Other(ProductionRetrieveLinesError::MissingHorizontalLag)
         })?;
@@ -318,6 +340,7 @@ where
         let built = build_primary_cluster_pass(lag, self.raw_parameters.clone())
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
         let global_slope = built.global_slope();
+        let retained_sloped = built.sloped_filaments().clone();
         let sloped_filaments = built
             .sloped_ids()
             .iter()
@@ -343,11 +366,40 @@ where
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
         self.primary = Some(built.into_state());
         let primary = self.primary.as_mut().expect("raw pass was just installed");
-        let result = retrieve_staff_candidates(primary, None, lines_parameters)
-            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        let result = if let Some(parameters) = self.secondary_parameters.clone() {
+            let preview = preview_cluster_pass(primary).map_err(|error| {
+                GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error))
+            })?;
+            let secondary = build_secondary_cluster_pass(
+                lag.run_table().width(),
+                primary,
+                preview.discarded_filaments(),
+                &retained_sloped,
+                parameters,
+            )
+            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
+            let secondary_order = secondary.filament_order().to_vec();
+            self.secondary = Some(secondary);
+            retrieve_staff_candidates_with_secondary_order(
+                primary,
+                self.secondary
+                    .as_mut()
+                    .expect("raw secondary pass was just installed"),
+                &secondary_order,
+                lines_parameters,
+            )
+        } else {
+            retrieve_staff_candidates(primary, None, lines_parameters)
+        }
+        .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
         self.handoff = Some(
-            materialize_staffs(result.staffs(), primary, None, &lag_sections)
-                .map_err(GridStageFailure::Other)?,
+            materialize_staffs(
+                result.staffs(),
+                primary,
+                self.secondary.as_ref(),
+                &lag_sections,
+            )
+            .map_err(GridStageFailure::Other)?,
         );
         Ok(())
     }
@@ -450,7 +502,9 @@ fn materialize_staffs<DownstreamError>(
             if !seen_filaments.insert(id) {
                 return Err(ProductionRetrieveLinesError::DuplicateFilamentId(id));
             }
-            if line.filament().interline() != candidate.interline() {
+            if candidate.source().pass() == ClusterPass::Main
+                && line.filament().interline() != candidate.interline()
+            {
                 return Err(ProductionRetrieveLinesError::InterlineMismatch {
                     candidate: candidate.id(),
                     filament: id,
@@ -567,6 +621,16 @@ mod tests {
         source
     }
 
+    fn mixed_main_and_small_source() -> RunTable {
+        let mut source = RunTable::new(Orientation::Vertical, 100, 111).unwrap();
+        for x in 0..100 {
+            for y in [10, 20, 30, 40, 50, 70, 75, 80, 85, 90] {
+                source.add_run(x, Run::new(y, 1)).unwrap();
+            }
+        }
+        source
+    }
+
     fn raw_parameters() -> RawPrimaryPassParameters {
         let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
         let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
@@ -619,6 +683,31 @@ mod tests {
             ledger_thickness: 1.0,
             minimum_horizontal_run_length: 10,
             maximum_vertical_run_shift: 1,
+        }
+    }
+
+    fn small_parameters() -> RawSecondaryPassParameters {
+        let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
+        let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
+        let merge = ClusterMergePassParameters::new(compatibility, 0, 1).unwrap();
+        RawSecondaryPassParameters {
+            sampling_dx: 20,
+            minimum_delta_y: 4,
+            maximum_delta_y: 6,
+            retrieval: ClusterRetrievalParameters::new(
+                5,
+                BTreeSet::from([5]),
+                expansion,
+                merge,
+                0.0,
+                0.0,
+                0.0,
+                1,
+                0,
+                None,
+                1,
+            )
+            .unwrap(),
         }
     }
 
@@ -691,5 +780,91 @@ mod tests {
         assert!(builder.stages().raw_metadata_handoff().is_none());
         assert!(builder.stages().downstream().calls.is_empty());
         assert_eq!(builder.stages().downstream().finish_count, 1);
+    }
+
+    #[test]
+    fn raw_small_pass_materializes_candidate_interline_with_original_filament_geometry() {
+        let stages = RawProductionRetrieveLines::new(
+            raw_parameters(),
+            lines_parameters(),
+            Downstream::default(),
+        )
+        .with_small_interline(small_parameters());
+        let mut builder = HeadlessRasterGridBuilder::new(
+            mixed_main_and_small_source(),
+            raster_parameters(),
+            stages,
+        );
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        let handoff = builder
+            .stages()
+            .prepared_staff_handoff()
+            .expect("mixed prepared staff handoff");
+        assert_eq!(handoff.staffs.len(), 2);
+        let main = handoff.staffs.iter().find(|staff| !staff.small).unwrap();
+        let small = handoff.staffs.iter().find(|staff| staff.small).unwrap();
+        assert_eq!(main.interline, 10);
+        assert_eq!(main.lines.len(), 5);
+        assert_eq!(small.interline, 5);
+        assert_eq!(small.lines.len(), 5);
+        assert!(
+            small
+                .lines
+                .iter()
+                .all(|line| line.filament.interline() == 10)
+        );
+        assert!(small.lines.iter().all(|line| {
+            line.filament.sections().iter().all(|section| {
+                builder
+                    .state()
+                    .horizontal_lag()
+                    .unwrap()
+                    .sections()
+                    .iter()
+                    .any(|source| source == section)
+            })
+        }));
+        assert_eq!(
+            builder
+                .stages()
+                .secondary()
+                .unwrap()
+                .parameters()
+                .interline(),
+            5
+        );
+    }
+
+    #[test]
+    fn malformed_small_parameters_fail_after_primary_without_publishing_handoff() {
+        let mut invalid = small_parameters();
+        invalid.sampling_dx = 0;
+        let stages = RawProductionRetrieveLines::new(
+            raw_parameters(),
+            lines_parameters(),
+            Downstream::default(),
+        )
+        .with_small_interline(invalid);
+        let mut builder = HeadlessRasterGridBuilder::new(
+            mixed_main_and_small_source(),
+            raster_parameters(),
+            stages,
+        );
+
+        let outcome = build_grid_info(&mut builder).unwrap();
+        assert!(matches!(
+            outcome,
+            GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::RetrieveLines,
+                error: RasterGridOtherError::Collaborator(ProductionRetrieveLinesError::Raw(_)),
+            }
+        ));
+        assert!(builder.stages().primary().is_some());
+        assert!(builder.stages().secondary().is_none());
+        assert!(builder.stages().prepared_staff_handoff().is_none());
     }
 }

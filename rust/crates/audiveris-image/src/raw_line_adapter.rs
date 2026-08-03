@@ -9,7 +9,7 @@ use crate::{
     cluster_ownership::{ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombBuilderError, CombFilament, popular_comb_size, retrieve_combs},
-    filament::FilamentError,
+    filament::{FilamentError, StaffFilament},
     filament_factory::{
         FilamentFactory, FilamentFactoryIdentityError, FilamentFactoryParams, OverlapParams,
     },
@@ -27,6 +27,18 @@ use crate::{
 pub struct RawPrimaryPassParameters {
     pub factory: FilamentFactoryParams,
     pub overlap: OverlapParams,
+    pub sampling_dx: usize,
+    pub minimum_delta_y: isize,
+    pub maximum_delta_y: isize,
+    pub retrieval: ClusterRetrievalParameters,
+}
+
+/// Sampling and cluster parameters for Java's optional small-interline pass.
+///
+/// The filaments themselves remain the objects created by the main-interline
+/// factory. Only comb sampling and cluster interpretation use these values.
+#[derive(Clone, Debug)]
+pub struct RawSecondaryPassParameters {
     pub sampling_dx: usize,
     pub minimum_delta_y: isize,
     pub maximum_delta_y: isize,
@@ -216,6 +228,82 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
     })
 }
 
+/// Lazily construct Java's secondary/small-interline clustering state.
+///
+/// `primary_discarded` comes from a transactional preview of the primary
+/// cluster pass. Retained slope rejects are added to that set for the later
+/// completion-compatible Rust path. Every value is cloned from the original
+/// main-interline [`StaffFilament`], preserving its ID, sections and geometry;
+/// no filament is rebuilt with the small interline.
+pub fn build_secondary_cluster_pass(
+    picture_width: usize,
+    primary: &ClusterPassState,
+    primary_discarded: &[FilamentId],
+    retained_sloped: &BTreeMap<FilamentId, StaffFilament>,
+    parameters: RawSecondaryPassParameters,
+) -> Result<ClusterPassState, RawLineAdapterError> {
+    let mut filaments = BTreeMap::new();
+    for &id in primary_discarded {
+        let filament = primary
+            .filaments()
+            .get(&id)
+            .ok_or(RawLineAdapterError::MissingFilament(id))?;
+        if filaments.insert(id, filament.clone()).is_some() {
+            return Err(RawLineAdapterError::DuplicateSecondaryFilament(id));
+        }
+    }
+    for (&id, filament) in retained_sloped {
+        if filaments.insert(id, filament.clone()).is_some() {
+            return Err(RawLineAdapterError::DuplicateSecondaryFilament(id));
+        }
+    }
+
+    // Java sorts the second-pass input by entity ID before constructing its
+    // comb network. BTreeMap iteration gives that exact deterministic order.
+    let mut filament_order = filaments.keys().copied().collect::<Vec<_>>();
+    let mut ownership = ClusterOwnership::new();
+    for (&id, filament) in &filaments {
+        ownership.register_filament(id, filament)?;
+    }
+    let samples = filament_order
+        .iter()
+        .map(|id| {
+            let filament = filaments
+                .get(id)
+                .ok_or(RawLineAdapterError::MissingFilament(*id))?;
+            let raw_id =
+                usize::try_from(id.value()).map_err(|_| RawLineAdapterError::IdentityOverflow)?;
+            Ok(CombFilament::new(raw_id, raw_id, filament.geometry()?)?)
+        })
+        .collect::<Result<Vec<_>, RawLineAdapterError>>()?;
+    let columns = retrieve_combs(
+        picture_width,
+        parameters.sampling_dx,
+        parameters.minimum_delta_y,
+        parameters.maximum_delta_y,
+        &samples,
+    )?;
+    let mut combs = BTreeMap::new();
+    let mut next_comb_id = 1_u64;
+    for comb in columns.iter().flat_map(|column| column.combs()) {
+        let id = CombId::new(next_comb_id);
+        next_comb_id = next_comb_id
+            .checked_add(1)
+            .ok_or(RawLineAdapterError::IdentityOverflow)?;
+        ownership.register_comb(id, comb)?;
+        combs.insert(id, RecursiveCombSnapshot::from_comb(comb));
+    }
+    follow_combs_network(&mut ownership, &mut filaments, &combs, &mut filament_order)?;
+
+    Ok(ClusterPassState::new(
+        ownership,
+        filaments,
+        combs,
+        filament_order,
+        parameters.retrieval,
+    ))
+}
+
 #[derive(Clone, Debug)]
 struct FilteredRawFilaments {
     ownership: ClusterOwnership,
@@ -306,6 +394,7 @@ pub enum RawLineAdapterError {
     Ownership(ClusterOwnershipError),
     Follow(FollowCombsNetworkError),
     MissingFilament(FilamentId),
+    DuplicateSecondaryFilament(FilamentId),
     IdentityOverflow,
 }
 
@@ -357,6 +446,9 @@ impl fmt::Display for RawLineAdapterError {
             Self::Ownership(error) => write!(formatter, "raw ownership failed: {error}"),
             Self::Follow(error) => write!(formatter, "raw comb network failed: {error}"),
             Self::MissingFilament(id) => write!(formatter, "missing raw filament {}", id.value()),
+            Self::DuplicateSecondaryFilament(id) => {
+                write!(formatter, "duplicate secondary raw filament {}", id.value())
+            }
             Self::IdentityOverflow => formatter.write_str("raw adapter identity overflow"),
         }
     }
@@ -379,12 +471,19 @@ mod tests {
     };
 
     fn retrieval_parameters() -> ClusterRetrievalParameters {
+        retrieval_parameters_for(10, BTreeSet::from([5]))
+    }
+
+    fn retrieval_parameters_for(
+        interline: usize,
+        desired_sizes: BTreeSet<usize>,
+    ) -> ClusterRetrievalParameters {
         let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
         let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
         let merge = ClusterMergePassParameters::new(compatibility, 0, 1).unwrap();
         ClusterRetrievalParameters::new(
-            10,
-            BTreeSet::from([5]),
+            interline,
+            desired_sizes,
             expansion,
             merge,
             0.0,
@@ -396,6 +495,15 @@ mod tests {
             1,
         )
         .unwrap()
+    }
+
+    fn one_line_filament(interline: usize, y: usize, x: usize, length: usize) -> StaffFilament {
+        let mut table = RunTable::new(Orientation::Horizontal, x + length + 1, y + 2).unwrap();
+        table.add_run(y, Run::new(x, length)).unwrap();
+        let section = build_sections(&table, JunctionPolicy::All).remove(0);
+        let mut filament = StaffFilament::new(interline).unwrap();
+        filament.add_section(section).unwrap();
+        filament
     }
 
     fn parameters() -> RawPrimaryPassParameters {
@@ -574,6 +682,105 @@ mod tests {
 
         assert!(build_primary_cluster_pass(&lag, invalid).is_err());
         assert_eq!(lag, before);
+    }
+
+    #[test]
+    fn secondary_pass_preserves_main_geometry_ids_and_sorted_union_provenance() {
+        let discarded_id = FilamentId::new(5);
+        let sloped_id = FilamentId::new(2);
+        let mut table = RunTable::new(Orientation::Horizontal, 41, 42).unwrap();
+        table.add_run(20, Run::new(0, 40)).unwrap();
+        table.add_run(40, Run::new(0, 40)).unwrap();
+        let mut source_sections = build_sections(&table, JunctionPolicy::All);
+        let discarded_section = source_sections.remove(0);
+        let sloped_section = source_sections.remove(0);
+        let mut discarded = StaffFilament::new(10).unwrap();
+        discarded.add_section(discarded_section).unwrap();
+        let mut sloped = StaffFilament::new(10).unwrap();
+        sloped.add_section(sloped_section).unwrap();
+        let discarded_sections = discarded.sections().to_vec();
+        let sloped_sections = sloped.sections().to_vec();
+
+        let mut primary_ownership = ClusterOwnership::new();
+        primary_ownership
+            .register_filament(discarded_id, &discarded)
+            .unwrap();
+        let primary = ClusterPassState::new(
+            primary_ownership,
+            BTreeMap::from([(discarded_id, discarded)]),
+            BTreeMap::new(),
+            vec![discarded_id],
+            retrieval_parameters_for(10, BTreeSet::from([1])),
+        );
+        let retained_sloped = BTreeMap::from([(sloped_id, sloped)]);
+        let secondary = build_secondary_cluster_pass(
+            100,
+            &primary,
+            &[discarded_id],
+            &retained_sloped,
+            RawSecondaryPassParameters {
+                sampling_dx: 20,
+                minimum_delta_y: 4,
+                maximum_delta_y: 6,
+                retrieval: retrieval_parameters_for(5, BTreeSet::from([1])),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(secondary.filament_order(), [sloped_id, discarded_id]);
+        assert_eq!(secondary.parameters().interline(), 5);
+        assert_eq!(secondary.filaments()[&discarded_id].interline(), 10);
+        assert_eq!(secondary.filaments()[&sloped_id].interline(), 10);
+        assert_eq!(
+            secondary.filaments()[&discarded_id].sections(),
+            discarded_sections
+        );
+        assert_eq!(
+            secondary.filaments()[&sloped_id].sections(),
+            sloped_sections
+        );
+        assert_eq!(
+            secondary
+                .ownership()
+                .section_owner(secondary.filaments()[&discarded_id].sections()[0].id()),
+            Some(discarded_id)
+        );
+    }
+
+    #[test]
+    fn duplicate_secondary_provenance_fails_without_mutating_sources() {
+        let id = FilamentId::new(7);
+        let filament = one_line_filament(10, 20, 0, 40);
+        let mut ownership = ClusterOwnership::new();
+        ownership.register_filament(id, &filament).unwrap();
+        let primary = ClusterPassState::new(
+            ownership,
+            BTreeMap::from([(id, filament.clone())]),
+            BTreeMap::new(),
+            vec![id],
+            retrieval_parameters_for(10, BTreeSet::from([1])),
+        );
+        let sloped = BTreeMap::from([(id, filament.clone())]);
+
+        let error = build_secondary_cluster_pass(
+            100,
+            &primary,
+            &[id],
+            &sloped,
+            RawSecondaryPassParameters {
+                sampling_dx: 20,
+                minimum_delta_y: 4,
+                maximum_delta_y: 6,
+                retrieval: retrieval_parameters_for(5, BTreeSet::from([1])),
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error, RawLineAdapterError::DuplicateSecondaryFilament(id));
+        assert_eq!(primary.filaments()[&id].interline(), filament.interline());
+        assert_eq!(primary.filaments()[&id].sections(), filament.sections());
+        assert_eq!(sloped[&id].interline(), filament.interline());
+        assert_eq!(sloped[&id].sections(), filament.sections());
     }
 
     #[test]

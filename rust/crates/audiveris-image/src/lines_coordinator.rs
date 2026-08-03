@@ -64,6 +64,20 @@ impl ClusterPassState {
     pub const fn filaments(&self) -> &BTreeMap<FilamentId, StaffFilament> {
         &self.filaments
     }
+
+    /// Root order presented to this clustering pass after comb-network
+    /// following. For Java's secondary pass this is derived from the same
+    /// main-interline filament objects, merely interpreted with the small
+    /// pass parameters.
+    #[must_use]
+    pub fn filament_order(&self) -> &[FilamentId] {
+        &self.filament_order
+    }
+
+    #[must_use]
+    pub const fn parameters(&self) -> &ClusterRetrievalParameters {
+        &self.parameters
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,6 +290,27 @@ pub fn retrieve_staff_candidates(
     secondary: Option<&mut ClusterPassState>,
     parameters: LinesCoordinatorParameters,
 ) -> Result<LinesRetrievalResult, LinesCoordinatorError> {
+    retrieve_staff_candidates_inner(primary, secondary, parameters, None)
+}
+
+/// Raw-adapter variant for a secondary state whose sorted union of primary
+/// discards and retained slope rejects has already been comb-followed.
+/// Existing prepared callers deliberately retain Java's discard-only order.
+pub fn retrieve_staff_candidates_with_secondary_order(
+    primary: &mut ClusterPassState,
+    secondary: &mut ClusterPassState,
+    secondary_order: &[FilamentId],
+    parameters: LinesCoordinatorParameters,
+) -> Result<LinesRetrievalResult, LinesCoordinatorError> {
+    retrieve_staff_candidates_inner(primary, Some(secondary), parameters, Some(secondary_order))
+}
+
+fn retrieve_staff_candidates_inner(
+    primary: &mut ClusterPassState,
+    secondary: Option<&mut ClusterPassState>,
+    parameters: LinesCoordinatorParameters,
+    explicit_secondary_order: Option<&[FilamentId]>,
+) -> Result<LinesRetrievalResult, LinesCoordinatorError> {
     let mut next_primary = primary.clone();
     let mut next_secondary = secondary.as_deref().cloned();
     let primary_result = run_pass(&mut next_primary, None)?;
@@ -283,17 +318,33 @@ pub fn retrieve_staff_candidates(
 
     let mut secondary_result = None;
     let mut small_interline = None;
-    if !primary_result.discarded_filaments().is_empty()
-        && let Some(state) = next_secondary.as_mut()
-    {
-        let mut order = primary_result.discarded_filaments().to_vec();
-        order.sort_by_key(|id| id.value());
-        for &id in &order {
+    let should_run_secondary = explicit_secondary_order.map_or_else(
+        || !primary_result.discarded_filaments().is_empty(),
+        |order| !order.is_empty(),
+    );
+    if should_run_secondary && let Some(state) = next_secondary.as_mut() {
+        let mut java_order;
+        let order = if let Some(order) = explicit_secondary_order {
+            // Even when comb following has absorbed one of these into another
+            // root, the exact primary-discard objects must remain available in
+            // the secondary pass for provenance and later completion.
+            for &id in primary_result.discarded_filaments() {
+                if !state.filaments.contains_key(&id) {
+                    return Err(LinesCoordinatorError::MissingSecondaryFilament(id));
+                }
+            }
+            order
+        } else {
+            java_order = primary_result.discarded_filaments().to_vec();
+            java_order.sort_by_key(|id| id.value());
+            &java_order
+        };
+        for &id in order {
             if !state.filaments.contains_key(&id) {
                 return Err(LinesCoordinatorError::MissingSecondaryFilament(id));
             }
         }
-        let result = run_pass(state, Some(&order))?;
+        let result = run_pass(state, Some(order))?;
         located.extend(located_clusters(state, &result, ClusterPass::Small)?);
         small_interline = Some(
             next_primary
@@ -324,6 +375,16 @@ pub fn retrieve_staff_candidates(
         staffs,
         rejected_clusters,
     })
+}
+
+/// Execute one pass against a clone, exposing its discarded-filament set
+/// without committing any ownership, cluster, or comb mutation. The raw
+/// adapter uses this to construct Java's secondary pass lazily.
+pub fn preview_cluster_pass(
+    state: &ClusterPassState,
+) -> Result<ClusterRetrievalResult, LinesCoordinatorError> {
+    let mut preview = state.clone();
+    run_pass(&mut preview, None)
 }
 
 fn run_pass(
@@ -726,7 +787,9 @@ mod tests {
         );
 
         let mut secondary_ownership = ClusterOwnership::new();
-        let secondary_value = filament(5, source[0].clone());
+        // Java reuses the exact main-interline filament object in the small
+        // pass; only ClusterRetrievalParameters carries the small interline.
+        let secondary_value = filament(10, source[0].clone());
         secondary_ownership
             .register_filament(FilamentId::new(1), &secondary_value)
             .unwrap();
@@ -747,11 +810,70 @@ mod tests {
         assert_eq!(result.staffs()[0].source().pass(), ClusterPass::Small);
         assert_eq!(result.staffs()[0].kind(), StaffCandidateKind::OneLine);
         assert!(result.staffs()[0].is_small());
+        assert_eq!(result.staffs()[0].interline(), 5);
+        assert_eq!(secondary.filaments()[&FilamentId::new(1)].interline(), 10);
         assert_eq!(result.staffs()[1].source().pass(), ClusterPass::Main);
         assert_eq!(result.staffs()[1].kind(), StaffCandidateKind::Tablature);
         assert!(!result.staffs()[1].is_small());
         assert_eq!(result.staffs()[0].id(), 1);
         assert_eq!(result.staffs()[1].id(), 2);
+    }
+
+    #[test]
+    fn explicit_secondary_root_order_runs_retained_slope_rejects_without_primary_discards() {
+        let source = sections();
+        let mut primary_ownership = ClusterOwnership::new();
+        let primary_filaments = [
+            (FilamentId::new(2), filament(10, source[1].clone())),
+            (FilamentId::new(3), filament(10, source[2].clone())),
+        ]
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+        for (&id, value) in &primary_filaments {
+            primary_ownership.register_filament(id, value).unwrap();
+        }
+        let mut comb = FilamentComb::new(0);
+        comb.append_root(2, 50.0).unwrap();
+        comb.append_root(3, 60.0).unwrap();
+        let comb_id = CombId::new(1);
+        primary_ownership.register_comb(comb_id, &comb).unwrap();
+        let mut primary = ClusterPassState::new(
+            primary_ownership,
+            primary_filaments,
+            BTreeMap::from([(comb_id, RecursiveCombSnapshot::from_comb(&comb))]),
+            vec![FilamentId::new(2), FilamentId::new(3)],
+            retrieval_parameters(10, BTreeSet::from([2])),
+        );
+
+        let slope_id = FilamentId::new(1);
+        let slope_value = filament(10, source[0].clone());
+        let mut secondary_ownership = ClusterOwnership::new();
+        secondary_ownership
+            .register_filament(slope_id, &slope_value)
+            .unwrap();
+        let mut secondary = ClusterPassState::new(
+            secondary_ownership,
+            BTreeMap::from([(slope_id, slope_value)]),
+            BTreeMap::new(),
+            vec![slope_id],
+            retrieval_parameters(5, BTreeSet::from([1])),
+        );
+        let parameters = LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap();
+
+        let result = retrieve_staff_candidates_with_secondary_order(
+            &mut primary,
+            &mut secondary,
+            &[slope_id],
+            parameters,
+        )
+        .unwrap();
+
+        assert!(result.primary().discarded_filaments().is_empty());
+        assert!(result.secondary().is_some());
+        assert_eq!(result.staffs().len(), 2);
+        assert_eq!(result.staffs()[0].source().pass(), ClusterPass::Small);
+        assert_eq!(result.staffs()[0].interline(), 5);
+        assert_eq!(secondary.filaments()[&slope_id].interline(), 10);
     }
 
     #[test]
