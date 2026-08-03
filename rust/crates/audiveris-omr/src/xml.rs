@@ -23,6 +23,7 @@ const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
 const STEPS_ELEMENT: &[u8] = b"steps";
 const PAGE_ELEMENT: &[u8] = b"page";
 const LAST_TIME_RATIONAL_ELEMENT: &[u8] = b"last-time-rational";
+const SYSTEM_ELEMENT: &[u8] = b"system";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
@@ -138,6 +139,11 @@ impl BookXml {
                             page_index,
                         )?;
                         active_time_rational = Some((sheet_index, page_index));
+                    } else if depth == 3
+                        && element.name().as_ref() == SYSTEM_ELEMENT
+                        && let Some((sheet_index, page_index)) = active_page
+                    {
+                        push_system_ref(&mut sheet_stubs[sheet_index], page_index)?;
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
@@ -214,6 +220,11 @@ impl BookXml {
                             &mut sheet_stubs[sheet_index],
                             page_index,
                         )?;
+                    } else if depth == 3
+                        && element.name().as_ref() == SYSTEM_ELEMENT
+                        && let Some((sheet_index, page_index)) = active_page
+                    {
+                        push_system_ref(&mut sheet_stubs[sheet_index], page_index)?;
                     }
                 }
                 Event::End(element) => {
@@ -498,44 +509,71 @@ impl SheetStub {
 
 /// Lightweight attributes of one direct sheet-stub `page` reference.
 ///
-/// Nested time, system, part, and staff structures deliberately remain opaque.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Nested system parts, staves, and all deeper structures remain opaque.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PageRef {
     id: u32,
     movement_start: Option<bool>,
     delta_measure_id: Option<i32>,
     last_time_rational: Option<TimeRational>,
+    system_refs: Vec<SystemRef>,
 }
 
 impl PageRef {
     /// One-based page rank within the containing sheet.
     #[must_use]
-    pub const fn id(self) -> u32 {
+    pub const fn id(&self) -> u32 {
         self.id
     }
 
     /// Explicit state of the optional JAXB boolean-positive attribute.
     #[must_use]
-    pub const fn movement_start_attribute(self) -> Option<bool> {
+    pub const fn movement_start_attribute(&self) -> Option<bool> {
         self.movement_start
     }
 
     /// Effective Java movement-start state; absent defaults to false.
     #[must_use]
-    pub fn is_movement_start(self) -> bool {
+    pub fn is_movement_start(&self) -> bool {
         self.movement_start.unwrap_or(false)
     }
 
     /// Optional measure-ID increment recorded for the page.
     #[must_use]
-    pub const fn delta_measure_id(self) -> Option<i32> {
+    pub const fn delta_measure_id(&self) -> Option<i32> {
         self.delta_measure_id
     }
 
     /// Last effective time signature in this page, when persisted.
     #[must_use]
-    pub const fn last_time_rational(self) -> Option<TimeRational> {
+    pub fn last_time_rational(&self) -> Option<TimeRational> {
         self.last_time_rational
+    }
+
+    /// Direct system references in persisted document order.
+    ///
+    /// Java stores no system ID; [`SystemRef::id`] is the same one-based list
+    /// position returned by Java `SystemRef.getId()`.
+    #[must_use]
+    pub fn system_refs(&self) -> &[SystemRef] {
+        &self.system_refs
+    }
+}
+
+/// Order-only view of one direct PageRef `system` child.
+///
+/// Java persists no scalar SystemRef fields. Parts and all their descendants
+/// remain opaque; the ID is derived solely from the element's list position.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SystemRef {
+    id: u32,
+}
+
+impl SystemRef {
+    /// One-based position, matching Java `SystemRef.getId()`.
+    #[must_use]
+    pub const fn id(self) -> u32 {
+        self.id
     }
 }
 
@@ -715,6 +753,8 @@ pub enum BookXmlError {
     },
     /// An attribute-only time rational contains nested or scalar content.
     UnexpectedTimeRationalContent { sheet_number: u32, page_id: u32 },
+    /// A page contains too many systems to represent Java's positive `int` ID.
+    TooManySystems { sheet_number: u32, page_id: u32 },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -858,6 +898,13 @@ impl fmt::Display for BookXmlError {
             } => write!(
                 formatter,
                 "sheet stub {sheet_number} page {page_id} time rational contains content"
+            ),
+            Self::TooManySystems {
+                sheet_number,
+                page_id,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} has too many system references"
             ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
@@ -1046,8 +1093,30 @@ fn push_page_ref(
         movement_start,
         delta_measure_id,
         last_time_rational: None,
+        system_refs: Vec::new(),
     });
     Ok(sheet_stub.page_refs.len() - 1)
+}
+
+fn push_system_ref(sheet_stub: &mut SheetStub, page_index: usize) -> Result<(), BookXmlError> {
+    let page = &mut sheet_stub.page_refs[page_index];
+    let id = page
+        .system_refs
+        .len()
+        .checked_add(1)
+        .ok_or(BookXmlError::TooManySystems {
+            sheet_number: sheet_stub.number,
+            page_id: page.id,
+        })?;
+    let id = u32::try_from(id)
+        .ok()
+        .filter(|id| *id <= i32::MAX as u32)
+        .ok_or(BookXmlError::TooManySystems {
+            sheet_number: sheet_stub.number,
+            page_id: page.id,
+        })?;
+    page.system_refs.push(SystemRef { id });
+    Ok(())
 }
 
 fn push_last_time_rational(
@@ -1434,6 +1503,8 @@ mod tests {
                 denominator: 4,
             })
         );
+        assert_eq!(pages[0].system_refs().len(), 1);
+        assert_eq!(pages[0].system_refs()[0].id(), 1);
         assert_eq!(book.original_bytes(), xml);
     }
 
@@ -1472,12 +1543,31 @@ mod tests {
         assert_eq!(pages[0].delta_measure_id(), Some(-3));
         assert_eq!(pages[1].movement_start_attribute(), Some(false));
         assert_eq!(pages[1].delta_measure_id(), None);
+        assert!(pages[0].system_refs().is_empty());
+    }
+
+    #[test]
+    fn derives_java_system_ids_from_direct_document_order_only() {
+        let xml = br#"<book><sheet number="1"><page id="1"><system id="not-persisted"><part logical-id="3"><staff-configuration line-count="5"/></part></system><system future="opaque"/></page><page id="2"/></sheet></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let pages = book.sheet_stubs()[0].page_refs();
+
+        assert_eq!(
+            pages[0]
+                .system_refs()
+                .iter()
+                .map(|system| system.id())
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        assert!(pages[1].system_refs().is_empty());
+        assert_eq!(book.original_bytes(), xml);
     }
 
     #[test]
     fn ignores_nested_and_namespaced_page_lookalikes() {
         let book = BookXml::parse(
-            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><future><av:page id="77"/><last-time-rational num="2" den="2"/></future></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
+            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><f:system/><future><av:page id="77"/><last-time-rational num="2" den="2"/><system/></future><system><part future="opaque"/></system></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
         )
         .unwrap();
 
@@ -1486,6 +1576,8 @@ mod tests {
         assert_eq!(pages[0].id(), 3);
         assert_eq!(pages[0].movement_start_attribute(), None);
         assert_eq!(pages[0].last_time_rational(), None);
+        assert_eq!(pages[0].system_refs().len(), 1);
+        assert_eq!(pages[0].system_refs()[0].id(), 1);
     }
 
     #[test]
