@@ -345,6 +345,42 @@ public final class RustParityProbe
                 points(lineCluster.getPointsAt(5.0, 3, 0.25)),
                 points(lineCluster.getPointsAt(-3.0, 3, 0.25)));
 
+        Scale indexedScale = new Scale(
+                new Scale.InterlineScale(10, 10, 10),
+                new Scale.LineScale(1, 1, 2),
+                null,
+                null,
+                null);
+        LineCluster indexedCluster = new LineCluster(
+                indexedScale,
+                indexedScale.getInterlineScale(),
+                staffFilament(0, 12, 40, 10));
+        indexedCluster.mergeWith(new LineCluster(
+                indexedScale,
+                indexedScale.getInterlineScale(),
+                staffFilament(0, 2, 40, 10)), -1);
+        indexedCluster.mergeWith(new LineCluster(
+                indexedScale,
+                indexedScale.getInterlineScale(),
+                staffFilament(0, 22, 40, 10)), 2);
+        boolean atLimitAccepted = indexedCluster.includeFilamentByIndex(
+                staffFilament(10, 13, 19, 10),
+                1);
+        boolean aboveAccepted = indexedCluster.includeFilamentByIndex(
+                staffFilament(10, 4, 19, 10),
+                0);
+        List<String> indexedLines = new ArrayList<>();
+        for (StaffFilament indexedLine : indexedCluster.getLines()) {
+            indexedLines.add(indexedLine.getClusterPos() + ":" + indexedLine.getMembers().size());
+        }
+        System.out.println(
+                "grid.line-cluster-index.synthetic=max:" + indexedScale.getMaxFore()
+                        + ";limitAccepted:" + atLimitAccepted
+                        + ";aboveAccepted:" + aboveAccepted
+                        + ";lines:" + String.join(",", indexedLines)
+                        + ";starts:" + points(indexedCluster.getStarts())
+                        + ";stops:" + points(indexedCluster.getStops()));
+
         TargetSystem targetSystem = new TargetSystem(
                 new SystemInfo(7, null, new ArrayList<>()),
                 0.0,
@@ -749,8 +785,23 @@ public final class RustParityProbe
                                                 int interline)
         throws Exception
     {
-        RunTable table = new RunTable(Orientation.HORIZONTAL, x + length + 1, y + 2);
-        table.addRun(y, new Run(x, length));
+        return staffFilament(x, y, length, 1, interline);
+    }
+
+    private static StaffFilament staffFilament (int x,
+                                                int y,
+                                                int length,
+                                                int thickness,
+                                                int interline)
+        throws Exception
+    {
+        RunTable table = new RunTable(
+                Orientation.HORIZONTAL,
+                x + length + 1,
+                y + thickness + 1);
+        for (int row = y; row < (y + thickness); row++) {
+            table.addRun(row, new Run(x, length));
+        }
         Section section = new SectionFactory(
                 Orientation.HORIZONTAL,
                 JunctionRatioPolicy.DEFAULT).createSections(table, null, false).get(0);

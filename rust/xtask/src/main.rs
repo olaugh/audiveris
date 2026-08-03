@@ -198,7 +198,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 42] = [
+const VECTOR_KEYS: [&str; 43] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -216,6 +216,7 @@ const VECTOR_KEYS: [&str; 42] = [
     "grid.filament-factory.synthetic=",
     "grid.filament-factory.overlap=",
     "grid.line-cluster.synthetic=",
+    "grid.line-cluster-index.synthetic=",
     "grid.target-line.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
@@ -335,11 +336,23 @@ fn staff_filament(
     length: usize,
     interline: usize,
 ) -> Result<StaffFilament, FilamentError> {
-    let mut table = RunTable::new(Orientation::Horizontal, x + length + 1, y + 2)
+    staff_filament_band(x, y, length, 1, interline)
+}
+
+fn staff_filament_band(
+    x: usize,
+    y: usize,
+    length: usize,
+    thickness: usize,
+    interline: usize,
+) -> Result<StaffFilament, FilamentError> {
+    let mut table = RunTable::new(Orientation::Horizontal, x + length + 1, y + thickness + 1)
         .expect("fixture dimensions are valid");
-    table
-        .add_run(y, Run::new(x, length))
-        .expect("fixture run is in bounds");
+    for row in y..(y + thickness) {
+        table
+            .add_run(row, Run::new(x, length))
+            .expect("fixture run is in bounds");
+    }
     let mut filament = StaffFilament::new(interline)?;
     filament.add_section(build_sections(&table, JunctionPolicy::DEFAULT_RATIO).remove(0))?;
     Ok(filament)
@@ -726,6 +739,44 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         line_cluster.true_length()?,
         cluster_points(&line_cluster.points_at(5.0, 3, 0.25)?),
         cluster_points(&line_cluster.points_at(-3.0, 3, 0.25)?)
+    ));
+    let mut indexed_cluster =
+        LineCluster::new(10, FilamentId::new(10), staff_filament(0, 12, 40, 10)?)?;
+    indexed_cluster.include_line(-1, FilamentId::new(11), staff_filament(0, 2, 40, 10)?)?;
+    indexed_cluster.include_line(1, FilamentId::new(12), staff_filament(0, 22, 40, 10)?)?;
+    let at_limit_accepted = indexed_cluster.include_filament_by_index(
+        FilamentId::new(13),
+        staff_filament(10, 13, 19, 10)?,
+        1,
+        5,
+        2,
+    )?;
+    let above_accepted = indexed_cluster.include_filament_by_index(
+        FilamentId::new(14),
+        staff_filament(10, 4, 19, 10)?,
+        0,
+        5,
+        2,
+    )?;
+    let indexed_lines = indexed_cluster
+        .lines()
+        .map(|(position, line)| format!("{position}:{}", line.filament().sections().len()))
+        .collect::<Vec<_>>()
+        .join(",");
+    lines.push(format!(
+        "grid.line-cluster-index.synthetic=max:2;limitAccepted:{at_limit_accepted};aboveAccepted:{above_accepted};lines:{indexed_lines};starts:{};stops:{}",
+        indexed_cluster
+            .starts()?
+            .into_iter()
+            .map(|(x, y)| format!("{x:.6},{y:.6}"))
+            .collect::<Vec<_>>()
+            .join(";"),
+        indexed_cluster
+            .stops()?
+            .into_iter()
+            .map(|(x, y)| format!("{x:.6},{y:.6}"))
+            .collect::<Vec<_>>()
+            .join(";")
     ));
     let target_line = TargetLine::new(filament.geometry()?, 75.0, 100.0, 300.0)?;
     lines.push(format!(
