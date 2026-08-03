@@ -10,7 +10,9 @@ use audiveris_image::{
     chamfer::ChamferDistance,
     filament::{FilamentError, StaffFilament},
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
-    global_filter, ingest, median,
+    global_filter, ingest,
+    line_cluster::{FilamentId, LineCluster},
+    median,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
@@ -195,7 +197,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 40] = [
+const VECTOR_KEYS: [&str; 41] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -212,6 +214,7 @@ const VECTOR_KEYS: [&str; 40] = [
     "grid.filament.synthetic=",
     "grid.filament-factory.synthetic=",
     "grid.filament-factory.overlap=",
+    "grid.line-cluster.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -322,6 +325,30 @@ fn filament_digest(filaments: &[StaffFilament]) -> Result<u64, FilamentError> {
         }
     }
     Ok(hash)
+}
+
+fn staff_filament(
+    x: usize,
+    y: usize,
+    length: usize,
+    interline: usize,
+) -> Result<StaffFilament, FilamentError> {
+    let mut table = RunTable::new(Orientation::Horizontal, x + length + 1, y + 2)
+        .expect("fixture dimensions are valid");
+    table
+        .add_run(y, Run::new(x, length))
+        .expect("fixture run is in bounds");
+    let mut filament = StaffFilament::new(interline)?;
+    filament.add_section(build_sections(&table, JunctionPolicy::DEFAULT_RATIO).remove(0))?;
+    Ok(filament)
+}
+
+fn cluster_points(points: &[Option<(f64, f64)>]) -> String {
+    points
+        .iter()
+        .map(|point| point.map_or_else(|| "null".to_owned(), |(x, y)| format!("{x:.6},{y:.6}")))
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -660,6 +687,39 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         overlap_filaments.len(),
         overlap_member_counts,
         filament_digest(&overlap_filaments)?
+    ));
+    let mut line_cluster =
+        LineCluster::new(10, FilamentId::new(1), staff_filament(0, 12, 40, 10)?)?;
+    line_cluster.include_line(0, FilamentId::new(2), staff_filament(45, 12, 40, 10)?)?;
+    line_cluster.include_line(-1, FilamentId::new(3), staff_filament(10, 2, 40, 10)?)?;
+    line_cluster.include_line(1, FilamentId::new(4), staff_filament(10, 22, 44, 10)?)?;
+    let cluster_lines = line_cluster
+        .lines()
+        .map(|(position, line)| format!("{position}:{}", line.filament().sections().len()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let first_bounds = line_cluster.first_line().filament().bounds()?;
+    let last_bounds = line_cluster.last_line().filament().bounds()?;
+    let cluster_bounds = line_cluster.bounds()?;
+    lines.push(format!(
+        "grid.line-cluster.synthetic={}/{}/{},{},{},{}/{},{},{},{}/{},{},{},{}/{}/{}/{}",
+        line_cluster.size(),
+        cluster_lines,
+        first_bounds.x,
+        first_bounds.y,
+        first_bounds.width,
+        first_bounds.height,
+        last_bounds.x,
+        last_bounds.y,
+        last_bounds.width,
+        last_bounds.height,
+        cluster_bounds.x,
+        cluster_bounds.y,
+        cluster_bounds.width,
+        cluster_bounds.height,
+        line_cluster.true_length()?,
+        cluster_points(&line_cluster.points_at(5.0, 3, 0.25)?),
+        cluster_points(&line_cluster.points_at(-3.0, 3, 0.25)?)
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

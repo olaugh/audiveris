@@ -47,6 +47,7 @@ import org.audiveris.omr.sheet.ScaleBuilder;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.grid.GridBuilder;
+import org.audiveris.omr.sheet.grid.LineCluster;
 import org.audiveris.omr.sheet.grid.StaffFilament;
 import org.audiveris.omr.sheet.grid.StaffPattern;
 import org.audiveris.omr.step.OmrStep;
@@ -304,6 +305,40 @@ public final class RustParityProbe
                 overlapFilaments.size(),
                 overlapMemberCounts,
                 filamentDigest(overlapFilaments));
+
+        StaffFilament clusterSeed = staffFilament(0, 12, 40, 10);
+        LineCluster lineCluster = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                clusterSeed);
+        lineCluster.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(45, 12, 40, 10)), 0);
+        lineCluster.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(10, 2, 40, 10)), -1);
+        // mergeWith is relative to the receiver's current first key (-1), hence +2 -> position +1.
+        lineCluster.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(10, 22, 44, 10)), 2);
+        List<String> clusterLines = new ArrayList<>();
+        for (StaffFilament clusterLine : lineCluster.getLines()) {
+            clusterLines.add(clusterLine.getClusterPos() + ":" + clusterLine.getMembers().size());
+        }
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.line-cluster.synthetic=%d/%s/%s/%s/%s/%d/%s/%s%n",
+                lineCluster.getSize(),
+                String.join(",", clusterLines),
+                rectangle(lineCluster.getFirstLine().getBounds()),
+                rectangle(lineCluster.getLastLine().getBounds()),
+                rectangle(lineCluster.getBounds()),
+                lineCluster.getTrueLength(),
+                points(lineCluster.getPointsAt(5.0, 3, 0.25)),
+                points(lineCluster.getPointsAt(-3.0, 3, 0.25)));
 
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
@@ -682,6 +717,38 @@ public final class RustParityProbe
             }
         }
         return hash;
+    }
+
+    private static StaffFilament staffFilament (int x,
+                                                int y,
+                                                int length,
+                                                int interline)
+        throws Exception
+    {
+        RunTable table = new RunTable(Orientation.HORIZONTAL, x + length + 1, y + 2);
+        table.addRun(y, new Run(x, length));
+        Section section = new SectionFactory(
+                Orientation.HORIZONTAL,
+                JunctionRatioPolicy.DEFAULT).createSections(table, null, false).get(0);
+        StaffFilament filament = new StaffFilament(interline);
+        filament.addSection(section);
+        return filament;
+    }
+
+    private static String rectangle (java.awt.Rectangle rectangle)
+    {
+        return rectangle.x + "," + rectangle.y + "," + rectangle.width + "," + rectangle.height;
+    }
+
+    private static String points (List<Point2D> points)
+    {
+        List<String> values = new ArrayList<>();
+        for (Point2D point : points) {
+            values.add(point != null
+                    ? String.format(java.util.Locale.ROOT, "%.6f,%.6f", point.getX(), point.getY())
+                    : "null");
+        }
+        return String.join(";", values);
     }
 
     private static long hashSection (long hash,
