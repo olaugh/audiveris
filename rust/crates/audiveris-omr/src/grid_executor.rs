@@ -13,6 +13,7 @@ use std::convert::Infallible;
 use audiveris_image::{
     bar_alignment::BarAlignment,
     bars_logic::{BarsLogicError, ConnectionInterPlan, VerticalInterPlan},
+    discarded_completion::PreparedCompletionSystem,
     filament::StaffFilament,
     grid_lifecycle::{
         GridBuildExecutor, GridBuildOutcome, GridStepExecutor, GridStepStage, build_grid_info,
@@ -27,6 +28,10 @@ use audiveris_image::{
     lines_coordinator::{LinesCoordinatorParameters, StaffCandidateKind},
     peak_graph::{PeakEdgeId, PeakGraph},
     prepared_bars::{PreparedBarsHandoff, PreparedBarsHandoffSource},
+    prepared_completion::{
+        ProductionCompleteLines, ProductionLineCompletion, ProductionLineCompletionParameters,
+        production_line_completion,
+    },
     prepared_lines::{
         PreparedStaffHandoff, PreparedStaffHandoffSource, PreparedStaffLine,
         RawLineMetadataHandoff, RawLineMetadataHandoffSource, RawProductionRetrieveLines,
@@ -621,6 +626,62 @@ where
     }
 }
 
+impl<Downstream>
+    HeadlessGridExecutor<
+        HeadlessRasterGridBuilder<
+            ProductionCompleteLines<
+                RawProductionRetrieveLines<Downstream>,
+                ProductionLineCompletion<Downstream::StepError>,
+            >,
+        >,
+    >
+where
+    Downstream: RemainingRasterGridStages,
+{
+    /// Construct the raw raster path with every concrete Java
+    /// `LinesRetriever.completeLines` collaborator installed.
+    ///
+    /// System/staff ownership is explicit because flat retrieved-staff order
+    /// cannot safely reconstruct side-by-side Java systems. The source clone
+    /// is retained solely for the exact binary-provenance check performed
+    /// before the completion `try/finally` boundary.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw_raster_complete_lines(
+        source: RunTable,
+        raster_parameters: RasterGridParameters,
+        raw_parameters: RawPrimaryPassParameters,
+        lines_parameters: LinesCoordinatorParameters,
+        downstream: Downstream,
+        completion_systems: Vec<PreparedCompletionSystem>,
+        completion_parameters: ProductionLineCompletionParameters,
+        maximum_thin_weight: usize,
+        inspect_crossing_chunks: bool,
+        sheet: HeadlessGridSheet,
+        book: HeadlessGridBook,
+    ) -> Self {
+        let prepared_binary = source.clone();
+        let raw = RawProductionRetrieveLines::new(raw_parameters, lines_parameters, downstream);
+        let completion = production_line_completion(completion_parameters);
+        let stages = ProductionCompleteLines::new(
+            raw,
+            completion,
+            Some(prepared_binary),
+            maximum_thin_weight,
+            inspect_crossing_chunks,
+        )
+        .with_completion_systems(completion_systems);
+        Self::new(
+            HeadlessRasterGridBuilder::new(source, raster_parameters, stages),
+            sheet,
+            book,
+        )
+        .with_raster_grid_handoff()
+        .with_raw_line_metadata_handoff()
+        .with_prepared_staff_handoff()
+    }
+}
+
 impl<Builder> GridStepExecutor for HeadlessGridExecutor<Builder>
 where
     Builder: GridBuildExecutor,
@@ -1142,22 +1203,33 @@ mod tests {
         cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
         cluster_ownership::ClusterOwnership,
         cluster_pipeline::ClusterRetrievalParameters,
+        crossing_completion::InspectCrossingChunksParameters,
+        curvature_completion::{PolishCurvaturesCompletionError, PolishCurvaturesError},
+        discarded_completion::{
+            IncludeDiscardedCompletionError, IncludeDiscardedFilamentsParameters,
+        },
         filament::{FilamentError, StaffFilament},
         filament_factory::{FilamentFactoryParams, OverlapParams},
         grid_lifecycle::{GridBuildStage, GridStageFailure},
         grid_sig::{GridSigNode, GridSigRelation},
         line_cluster::FilamentId,
+        line_completion::LineCompletionStage,
+        line_endpoints::{DefineEndPointsCompletionError, DefineEndPointsParameters},
+        line_holes::{FillHolesCompletionError, HoleFillInvocation},
         line_short_sections::HorizontalSectionLag,
         lines_coordinator::{ClusterPassState, LinesCoordinatorParameters},
         prepared_bars::{PreparedBarsSystem, ProductionProcessBars},
+        prepared_completion::ProductionCompleteLinesError,
         prepared_lines::ProductionRetrieveLines,
         raster_grid_builder::{
-            HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridParameters,
-            RemainingRasterGridStages,
+            HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridOtherError,
+            RasterGridParameters, RemainingRasterGridStages,
         },
         run_table::{Orientation, Run, create_grid_run_tables},
         section::{JunctionPolicy, build_sections},
+        section_completion::{IncludeSectionsCompletionError, IncludeSectionsParameters},
         staff_peak::StaffPeak,
+        sticker_completion::IncludeStickersParameters,
         system_population::{
             BoundarySegment, PopulationReferencePart, PopulationReferenceStaff,
             PopulationStaffConfig, PopulationSystemRefState, StaffBoundary,
@@ -1342,6 +1414,23 @@ mod tests {
         source
     }
 
+    fn split_middle_with_discarded_source() -> RunTable {
+        let mut source = RunTable::new(Orientation::Vertical, 100, 61).unwrap();
+        for x in 0..100 {
+            if (10..=20).contains(&x) {
+                source.add_run(x, Run::new(5, 1)).unwrap();
+            }
+            source.add_run(x, Run::new(10, 1)).unwrap();
+            source.add_run(x, Run::new(20, 1)).unwrap();
+            if x <= 20 || x >= 40 {
+                source.add_run(x, Run::new(30, 1)).unwrap();
+            }
+            source.add_run(x, Run::new(40, 1)).unwrap();
+            source.add_run(x, Run::new(50, 1)).unwrap();
+        }
+        source
+    }
+
     fn positive_slope_source() -> RunTable {
         let mut source = RunTable::new(Orientation::Vertical, 100, 90).unwrap();
         for x in 0..100 {
@@ -1415,6 +1504,52 @@ mod tests {
 
     fn placeholder_slope_lines_parameters() -> LinesCoordinatorParameters {
         LinesCoordinatorParameters::new(-0.75, 1, None, 1.0, 0.0, 100.0).unwrap()
+    }
+
+    fn raw_completion_parameters(
+        minimum_curvature_radius: i32,
+    ) -> ProductionLineCompletionParameters {
+        ProductionLineCompletionParameters {
+            define_end_points: DefineEndPointsParameters {
+                scale_interline: 10,
+                foreground_thickness: 1,
+                maximum_ending_dx: 10,
+                pattern_width: 10,
+                pattern_jitter: 3,
+            },
+            include_discarded_filaments: IncludeDiscardedFilamentsParameters {
+                scale_interline: 10,
+                foreground_thickness: 1,
+                maximum_sticker_thickness: 2.0,
+                maximum_sticker_gap: 1.0,
+                maximum_sticker_extension: 2,
+            },
+            include_sections: IncludeSectionsParameters {
+                scale_interline: 10,
+                foreground_thickness: 1,
+                maximum_sticker_thickness: 2.0,
+                maximum_sticker_gap: 1.0,
+                maximum_sticker_extension: 2,
+            },
+            minimum_curvature_radius,
+            include_stickers: IncludeStickersParameters {
+                maximum_connection_length: 1,
+            },
+            // Deliberately not the measured raw slope. The integration test
+            // proves completion consumes RawLineMetadataHandoff instead.
+            inspect_crossing_chunks: InspectCrossingChunksParameters {
+                minimum_offset: 1_000,
+                global_slope: -0.75,
+                minimum_chunk_slope: 0.04,
+            },
+        }
+    }
+
+    fn raw_completion_systems() -> Vec<PreparedCompletionSystem> {
+        vec![PreparedCompletionSystem {
+            system_id: 1,
+            staff_ids: vec![1],
+        }]
     }
 
     fn cluster_parameters() -> ClusterRetrievalParameters {
@@ -2289,6 +2424,203 @@ mod tests {
             1
         );
         assert_eq!(executor.builder.stages().downstream().finish_count, 1);
+    }
+
+    #[test]
+    fn raw_completion_constructor_runs_every_concrete_stage_in_java_order() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_complete_lines(
+            split_middle_with_discarded_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            raw_completion_systems(),
+            raw_completion_parameters(120),
+            1_000,
+            true,
+            base.sheet,
+            base.book,
+        );
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Completed)
+        ));
+        let stages = executor.builder.stages();
+        let state = stages.state().expect("retained concrete completion state");
+        assert_eq!(
+            state.completed_stages,
+            [
+                LineCompletionStage::DefineEndPoints,
+                LineCompletionStage::IncludeDiscardedFilaments,
+                LineCompletionStage::FillHolesInitial,
+                LineCompletionStage::DispatchHorizontalSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThinSections,
+                LineCompletionStage::PolishCurvatures,
+                LineCompletionStage::FillHolesAfterPolish,
+                LineCompletionStage::IncludeStickers,
+                LineCompletionStage::InspectCrossingChunks,
+                LineCompletionStage::FillHolesFinal,
+            ]
+        );
+        assert_eq!(state.global_slope, Some(0.0));
+        assert_eq!(state.completion_systems, Some(raw_completion_systems()));
+        assert_eq!(state.defined_endpoints.len(), 1);
+        assert_eq!(
+            state
+                .fill_hole_invocations
+                .iter()
+                .map(|audit| (audit.invocation, audit.completed))
+                .collect::<Vec<_>>(),
+            [
+                (HoleFillInvocation::Initial, true),
+                (HoleFillInvocation::AfterPolish, true),
+                (HoleFillInvocation::Final, true),
+            ]
+        );
+        assert!(state.discarded_filament_steals.is_empty());
+        assert!(state.discarded_filament_recomputations.is_empty());
+        assert_eq!(state.discarded_filaments.len(), 1);
+        assert_eq!(
+            state.discarded_filaments[0]
+                .line
+                .filament
+                .sections()
+                .iter()
+                .map(Section::id)
+                .collect::<Vec<_>>(),
+            [1]
+        );
+        assert_eq!(state.section_inclusion_batches.len(), 10);
+        assert!(
+            state
+                .section_inclusion_batches
+                .iter()
+                .all(|batch| batch.endpoints_recomputed)
+        );
+        assert_eq!(
+            state
+                .section_inclusion_batches
+                .iter()
+                .map(|batch| batch.stage)
+                .collect::<Vec<_>>(),
+            [
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThinSections,
+                LineCompletionStage::IncludeThinSections,
+                LineCompletionStage::IncludeThinSections,
+                LineCompletionStage::IncludeThinSections,
+                LineCompletionStage::IncludeThinSections,
+            ]
+        );
+        assert!(state.curvature_removals.is_empty());
+        assert!(state.curvature_recomputations.is_empty());
+        assert_eq!(state.sticker_section_ids, [1]);
+        assert!(state.sticker_inclusion_batches.is_empty());
+        assert!(state.crossing_line_inspections.is_empty());
+        assert_eq!(stages.completion().finish_count(), 1);
+        assert_eq!(stages.upstream().downstream().finish_count, 1);
+        // SigPromotingBuilder consumed the one-shot sheet handoff after
+        // ProcessBars, yet completion still retained the same measured slope.
+        assert_eq!(executor.sheet.skew.expect("forwarded raw slope").slope, 0.0);
+        assert_eq!(executor.sheet.staffs.len(), 1);
+        assert_eq!(executor.sheet.staffs[0].lines.len(), 5);
+    }
+
+    #[test]
+    fn raw_completion_late_failure_retains_exact_audit_and_staff_prefix() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_complete_lines(
+            split_middle_with_discarded_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            raw_completion_systems(),
+            raw_completion_parameters(-1),
+            1_000,
+            true,
+            base.sheet,
+            base.book,
+        );
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome.as_ref(),
+            Some(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::CompleteLines,
+                error: HeadlessBuildOtherError::Builder(RasterGridOtherError::Collaborator(
+                    ProductionCompleteLinesError::Completion(DefineEndPointsCompletionError::Next(
+                        IncludeDiscardedCompletionError::Next(FillHolesCompletionError::Next(
+                            IncludeSectionsCompletionError::Next(
+                                PolishCurvaturesCompletionError::PolishCurvatures(
+                                    PolishCurvaturesError::InvalidMinimumRadius(-1)
+                                )
+                            )
+                        ))
+                    ))
+                )),
+            })
+        ));
+        let stages = executor.builder.stages();
+        let state = stages.state().expect("retained late failure prefix");
+        assert_eq!(
+            state.completed_stages,
+            [
+                LineCompletionStage::DefineEndPoints,
+                LineCompletionStage::IncludeDiscardedFilaments,
+                LineCompletionStage::FillHolesInitial,
+                LineCompletionStage::DispatchHorizontalSections,
+                LineCompletionStage::IncludeThickSections,
+                LineCompletionStage::IncludeThinSections,
+            ]
+        );
+        assert_eq!(state.global_slope, Some(0.0));
+        assert_eq!(state.defined_endpoints.len(), 1);
+        assert_eq!(
+            state
+                .fill_hole_invocations
+                .iter()
+                .map(|audit| (audit.invocation, audit.completed))
+                .collect::<Vec<_>>(),
+            [(HoleFillInvocation::Initial, true)]
+        );
+        assert_eq!(state.section_inclusion_batches.len(), 10);
+        assert!(
+            state
+                .section_inclusion_batches
+                .iter()
+                .all(|batch| batch.endpoints_recomputed)
+        );
+        assert_eq!(state.discarded_filaments.len(), 1);
+        assert!(state.discarded_filament_steals.is_empty());
+        assert!(state.discarded_filament_recomputations.is_empty());
+        assert!(state.curvature_removals.is_empty());
+        assert!(state.curvature_recomputations.is_empty());
+        assert!(state.sticker_section_ids.is_empty());
+        assert!(state.sticker_inclusion_batches.is_empty());
+        assert!(state.crossing_line_inspections.is_empty());
+        assert_eq!(stages.completion().finish_count(), 1);
+        assert_eq!(stages.upstream().downstream().finish_count, 1);
+        // The headless handoff occurs after the swallowed build and must
+        // expose the exact mutation prefix rather than the pre-completion
+        // staff snapshot.
+        assert_eq!(executor.sheet.staffs.len(), 1);
+        assert_eq!(executor.sheet.staffs[0].lines.len(), 5);
+        assert!(executor.sheet.skew.is_some());
     }
 
     #[test]

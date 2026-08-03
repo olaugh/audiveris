@@ -351,6 +351,7 @@ mod tests {
                     filament,
                 }],
             }],
+            global_slope: None,
             completion_systems: Some(vec![PreparedCompletionSystem {
                 system_id: 1,
                 staff_ids: vec![5],

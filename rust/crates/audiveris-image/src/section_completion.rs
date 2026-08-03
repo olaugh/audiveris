@@ -537,6 +537,7 @@ mod tests {
                 short: false,
                 lines: vec![line(7, 10)],
             }],
+            global_slope: None,
             completion_systems: Some(vec![PreparedCompletionSystem {
                 system_id: 3,
                 staff_ids: vec![5],

@@ -9,17 +9,25 @@
 //! completion timer, while every later success or failure does.
 
 use crate::{
-    crossing_completion::PreparedCrossingLineInspection,
-    curvature_completion::{PreparedCurvatureRecomputation, PreparedCurvatureRemoval},
+    crossing_completion::{
+        InspectCrossingChunksCompletion, InspectCrossingChunksParameters,
+        PreparedCrossingLineInspection,
+    },
+    curvature_completion::{
+        PolishCurvaturesCompletion, PreparedCurvatureRecomputation, PreparedCurvatureRemoval,
+    },
     discarded_completion::{
+        IncludeDiscardedFilamentsCompletion, IncludeDiscardedFilamentsParameters,
         PreparedCompletionSystem, PreparedDiscardedFilamentSteal, PreparedFilamentRecomputation,
     },
     grid_lifecycle::{GridBuildStage, GridStageFailure},
     line_completion::{
         LineCompletionExecutor, LineCompletionStage, complete_lines as run_line_completion,
     },
-    line_endpoints::PreparedStaffEndPoints,
-    line_holes::PreparedHoleFillInvocation,
+    line_endpoints::{
+        DefineEndPointsCompletion, DefineEndPointsParameters, PreparedStaffEndPoints,
+    },
+    line_holes::{FillHolesInitialCompletion, PreparedHoleFillInvocation},
     line_section_dispatch::dispatch_horizontal_sections,
     prepared_bars::{PreparedBarsHandoff, PreparedBarsStage},
     prepared_lines::{
@@ -29,13 +37,21 @@ use crate::{
     raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages},
     run_table::RunTable,
     section::Section,
-    section_completion::PreparedSectionInclusionBatch,
-    sticker_completion::PreparedStickerInclusionBatch,
+    section_completion::{
+        IncludeSectionsCompletion, IncludeSectionsParameters, PreparedSectionInclusionBatch,
+    },
+    sticker_completion::{
+        IncludeStickersCompletion, IncludeStickersParameters, PreparedStickerInclusionBatch,
+    },
 };
 
 #[derive(Clone, Debug)]
 pub struct PreparedCompletionState {
     pub staffs: Vec<PreparedStaff>,
+    /// Measured raw sheet slope retained after `RetrieveLines`. Concrete
+    /// crossing inspection consumes this late-bound value instead of the
+    /// placeholder slope supplied before the raster was measured.
+    pub global_slope: Option<f64>,
     /// Exact system/staff traversal. `None` is a bounded missing seam; flat
     /// staff order must not be silently treated as one system.
     pub completion_systems: Option<Vec<PreparedCompletionSystem>>,
@@ -77,6 +93,137 @@ pub trait RemainingLineCompletionStages {
     fn finish(&mut self);
 }
 
+/// All scale-resolved inputs consumed by Java's concrete `completeLines`
+/// collaborators. Stage order is not configurable; it is fixed by
+/// [`crate::line_completion::complete_lines`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProductionLineCompletionParameters {
+    pub define_end_points: DefineEndPointsParameters,
+    pub include_discarded_filaments: IncludeDiscardedFilamentsParameters,
+    pub include_sections: IncludeSectionsParameters,
+    pub minimum_curvature_radius: i32,
+    pub include_stickers: IncludeStickersParameters,
+    pub inspect_crossing_chunks: InspectCrossingChunksParameters,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnclaimedLineCompletionStage(pub LineCompletionStage);
+
+impl std::fmt::Display for UnclaimedLineCompletionStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "unclaimed concrete completion stage {:?}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnclaimedLineCompletionStage {}
+
+#[doc(hidden)]
+pub struct ProductionCompletionTail<StepError> {
+    marker: std::marker::PhantomData<fn() -> StepError>,
+}
+
+impl<StepError> Default for ProductionCompletionTail<StepError> {
+    fn default() -> Self {
+        Self {
+            marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<StepError> RemainingLineCompletionStages for ProductionCompletionTail<StepError> {
+    type StepError = StepError;
+    type OtherError = UnclaimedLineCompletionStage;
+
+    fn run_stage(
+        &mut self,
+        stage: LineCompletionStage,
+        _state: &mut PreparedCompletionState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        Err(GridStageFailure::Other(UnclaimedLineCompletionStage(stage)))
+    }
+
+    fn log_swallowed_error(&mut self, _error: &Self::OtherError) {}
+
+    fn finish(&mut self) {}
+}
+
+type ProductionLineCompletionChain<StepError> = DefineEndPointsCompletion<
+    IncludeDiscardedFilamentsCompletion<
+        FillHolesInitialCompletion<
+            IncludeSectionsCompletion<
+                PolishCurvaturesCompletion<
+                    IncludeStickersCompletion<
+                        InspectCrossingChunksCompletion<ProductionCompletionTail<StepError>>,
+                    >,
+                >,
+            >,
+        >,
+    >,
+>;
+
+/// Strict concrete owner for every non-dispatch `completeLines` stage.
+///
+/// The private terminal rejects any stage not claimed by the wrappers. The
+/// facade also exposes the Java inner `finally` count without requiring
+/// callers to know the nested collaborator shape.
+pub struct ProductionLineCompletion<StepError> {
+    chain: ProductionLineCompletionChain<StepError>,
+    finish_count: usize,
+}
+
+impl<StepError> ProductionLineCompletion<StepError> {
+    #[must_use]
+    pub const fn finish_count(&self) -> usize {
+        self.finish_count
+    }
+}
+
+impl<StepError> RemainingLineCompletionStages for ProductionLineCompletion<StepError> {
+    type StepError = StepError;
+    type OtherError =
+        <ProductionLineCompletionChain<StepError> as RemainingLineCompletionStages>::OtherError;
+
+    fn run_stage(
+        &mut self,
+        stage: LineCompletionStage,
+        state: &mut PreparedCompletionState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.chain.run_stage(stage, state)
+    }
+
+    fn log_swallowed_error(&mut self, error: &Self::OtherError) {
+        self.chain.log_swallowed_error(error);
+    }
+
+    fn finish(&mut self) {
+        self.finish_count += 1;
+        self.chain.finish();
+    }
+}
+
+#[must_use]
+pub fn production_line_completion<StepError>(
+    parameters: ProductionLineCompletionParameters,
+) -> ProductionLineCompletion<StepError> {
+    let tail = ProductionCompletionTail::default();
+    let crossing = InspectCrossingChunksCompletion::new(parameters.inspect_crossing_chunks, tail);
+    let stickers = IncludeStickersCompletion::new(parameters.include_stickers, crossing);
+    let curvature = PolishCurvaturesCompletion::new(parameters.minimum_curvature_radius, stickers);
+    let sections = IncludeSectionsCompletion::new(parameters.include_sections, curvature);
+    let holes = FillHolesInitialCompletion::new(sections);
+    let discarded =
+        IncludeDiscardedFilamentsCompletion::new(parameters.include_discarded_filaments, holes);
+    let chain = DefineEndPointsCompletion::new(parameters.define_end_points, discarded);
+    ProductionLineCompletion {
+        chain,
+        finish_count: 0,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProductionCompleteLinesError<UpstreamError, CompletionError> {
     MissingPreparedStaffs,
@@ -93,8 +240,12 @@ pub struct ProductionCompleteLines<Upstream, Completion> {
     prepared_binary: Option<RunTable>,
     maximum_thin_weight: usize,
     inspect_crossing_chunks: bool,
+    completion_systems: Option<Vec<PreparedCompletionSystem>>,
     state: Option<PreparedCompletionState>,
+    /// Retained copy consumed by concrete completion after ProcessBars.
     raw_metadata: Option<RawLineMetadataHandoff>,
+    /// One-shot clone forwarded to the sheet immediately after ProcessBars.
+    raw_metadata_handoff: Option<RawLineMetadataHandoff>,
 }
 
 impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
@@ -112,9 +263,23 @@ impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
             prepared_binary,
             maximum_thin_weight,
             inspect_crossing_chunks,
+            completion_systems: None,
             state: None,
             raw_metadata: None,
+            raw_metadata_handoff: None,
         }
+    }
+
+    /// Supply exact Java system/staff traversal for discarded-filament and
+    /// section inclusion. Flat prepared-staff order is deliberately not
+    /// inferred as one system.
+    #[must_use]
+    pub fn with_completion_systems(
+        mut self,
+        completion_systems: Vec<PreparedCompletionSystem>,
+    ) -> Self {
+        self.completion_systems = Some(completion_systems);
+        self
     }
 
     #[must_use]
@@ -156,7 +321,7 @@ where
     Upstream: RawLineMetadataStage,
 {
     fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
-        self.raw_metadata
+        self.raw_metadata_handoff
             .take()
             .or_else(|| self.upstream.take_raw_line_metadata_handoff())
     }
@@ -184,9 +349,19 @@ where
         &mut self,
         state: &mut RasterGridBuildState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
-        self.upstream
+        self.raw_metadata = None;
+        self.raw_metadata_handoff = None;
+        let result = self
+            .upstream
             .retrieve_lines(state)
-            .map_err(map_upstream_failure)
+            .map_err(map_upstream_failure);
+        // Raw retrieval installs metadata before its final materialization
+        // join, so retain that legitimate prefix even when the delegated
+        // RetrieveLines attempt fails later.
+        let metadata = self.upstream.take_raw_line_metadata_handoff();
+        self.raw_metadata = metadata.clone();
+        self.raw_metadata_handoff = metadata;
+        result
     }
 
     fn process_bars(
@@ -228,7 +403,11 @@ where
             });
         self.state = Some(PreparedCompletionState {
             staffs,
-            completion_systems: None,
+            global_slope: self
+                .raw_metadata
+                .as_ref()
+                .map(|metadata| metadata.global_slope),
+            completion_systems: self.completion_systems.clone(),
             discarded_filaments,
             horizontal_sections,
             binary_buffer: None,
@@ -584,6 +763,39 @@ mod tests {
     }
 
     #[test]
+    fn production_completion_terminal_rejects_any_unclaimed_stage() {
+        let mut tail = ProductionCompletionTail::<()>::default();
+        let mut state = PreparedCompletionState {
+            staffs: Vec::new(),
+            global_slope: None,
+            completion_systems: None,
+            discarded_filaments: Vec::new(),
+            horizontal_sections: Vec::new(),
+            binary_buffer: None,
+            thick_section_ids: Vec::new(),
+            thin_section_ids: Vec::new(),
+            defined_endpoints: Vec::new(),
+            fill_hole_invocations: Vec::new(),
+            discarded_filament_steals: Vec::new(),
+            discarded_filament_recomputations: Vec::new(),
+            section_inclusion_batches: Vec::new(),
+            sticker_section_ids: Vec::new(),
+            sticker_inclusion_batches: Vec::new(),
+            crossing_line_inspections: Vec::new(),
+            curvature_removals: Vec::new(),
+            curvature_recomputations: Vec::new(),
+            completed_stages: Vec::new(),
+        };
+
+        assert_eq!(
+            tail.run_stage(LineCompletionStage::FillHolesFinal, &mut state),
+            Err(GridStageFailure::Other(UnclaimedLineCompletionStage(
+                LineCompletionStage::FillHolesFinal
+            )))
+        );
+    }
+
+    #[test]
     fn final_discarded_set_is_visible_only_at_completion_and_remains_handoff_safe() {
         let line = prepared_staffs().staffs[0].lines[0].clone();
         let metadata = RawLineMetadataHandoff {
@@ -606,6 +818,7 @@ mod tests {
                 .id,
             line.id
         );
+        assert_eq!(builder.stages().state().unwrap().global_slope, Some(0.0));
         assert_eq!(
             builder.stages().completion().observed_discarded_ids,
             [line.id]

@@ -177,10 +177,14 @@ where
         state: &mut PreparedCompletionState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
         if stage == LineCompletionStage::InspectCrossingChunks {
+            // Raw retrieval measures the authoritative slope only after this
+            // wrapper has been constructed. Prepared callers without raw
+            // metadata retain the explicit parameter as their bounded seam.
+            let global_slope = state.global_slope.unwrap_or(self.parameters.global_slope);
             inspect_prepared_crossing_chunks(
                 &mut state.staffs,
                 self.parameters.minimum_offset,
-                self.parameters.global_slope,
+                global_slope,
                 self.parameters.minimum_chunk_slope,
                 &mut state.crossing_line_inspections,
             )
@@ -371,6 +375,7 @@ mod tests {
     fn completion_state(staffs: Vec<PreparedStaff>) -> PreparedCompletionState {
         PreparedCompletionState {
             staffs,
+            global_slope: None,
             completion_systems: None,
             discarded_filaments: Vec::new(),
             horizontal_sections: Vec::new(),
@@ -530,6 +535,32 @@ mod tests {
         assert_eq!(
             completion.next().0,
             vec![LineCompletionStage::FillHolesFinal]
+        );
+    }
+
+    #[test]
+    fn wrapper_prefers_late_bound_raw_slope_over_constructor_placeholder() {
+        let [one, two] = crossing(10, 10, 10);
+        let survivor = section(30, &[(12, 30, 20)]);
+        let mut state = completion_state(vec![staff(vec![line(3, vec![one, two, survivor])])]);
+        // The crossing pixels have slope 1/3. The static placeholder (0.0)
+        // would remove them; the measured raw slope must retain them.
+        state.global_slope = Some(1.0 / 3.0);
+        let mut completion = InspectCrossingChunksCompletion::new(parameters(), Tail::default());
+
+        completion
+            .run_stage(LineCompletionStage::InspectCrossingChunks, &mut state)
+            .unwrap();
+
+        assert!(state.crossing_line_inspections.is_empty());
+        assert_eq!(
+            state.staffs[0].lines[0]
+                .filament
+                .sections()
+                .iter()
+                .map(Section::id)
+                .collect::<Vec<_>>(),
+            [10, 11, 30]
         );
     }
 }

@@ -519,6 +519,7 @@ mod tests {
     fn state(staffs: Vec<PreparedStaff>) -> PreparedCompletionState {
         PreparedCompletionState {
             staffs,
+            global_slope: None,
             completion_systems: None,
             discarded_filaments: Vec::<RawDiscardedFilament>::new(),
             horizontal_sections: Vec::new(),

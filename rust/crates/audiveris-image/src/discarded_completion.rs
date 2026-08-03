@@ -596,6 +596,7 @@ mod tests {
     fn state() -> PreparedCompletionState {
         PreparedCompletionState {
             staffs: vec![target_staff(1, 11, 10, 100), target_staff(2, 12, 110, 200)],
+            global_slope: None,
             completion_systems: Some(vec![
                 PreparedCompletionSystem {
                     system_id: 7,

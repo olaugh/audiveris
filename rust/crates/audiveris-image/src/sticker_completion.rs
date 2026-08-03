@@ -312,6 +312,7 @@ mod tests {
                 short: false,
                 lines,
             }],
+            global_slope: None,
             completion_systems: None,
             discarded_filaments: Vec::new(),
             horizontal_sections,
