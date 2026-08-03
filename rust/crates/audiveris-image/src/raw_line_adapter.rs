@@ -12,6 +12,10 @@ use crate::{
     filament::FilamentError,
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
     line_cluster::FilamentId,
+    line_rejection::{
+        LineCandidate, LinePoint, LineRejectionError, LineRejectionParameters,
+        reject_line_candidates,
+    },
     line_short_sections::HorizontalSectionLag,
     lines_coordinator::ClusterPassState,
 };
@@ -31,14 +35,26 @@ pub struct RawPrimaryPassParameters {
 #[derive(Clone, Debug)]
 pub struct RawPrimaryPassBuild {
     state: ClusterPassState,
+    survivor_order: Vec<FilamentId>,
     root_order: Vec<FilamentId>,
     popular_comb_size: Option<usize>,
+    global_slope: f64,
+    curved_ids: Vec<FilamentId>,
+    sloped_ids: Vec<FilamentId>,
+    sloped_filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
 }
 
 impl RawPrimaryPassBuild {
     #[must_use]
     pub const fn state(&self) -> &ClusterPassState {
         &self.state
+    }
+
+    /// Rejection survivors in Java's stable reverse-length order, before the
+    /// comb network is allowed to merge roots.
+    #[must_use]
+    pub fn survivor_order(&self) -> &[FilamentId] {
+        &self.survivor_order
     }
 
     #[must_use]
@@ -49,6 +65,34 @@ impl RawPrimaryPassBuild {
     #[must_use]
     pub const fn popular_comb_size(&self) -> Option<usize> {
         self.popular_comb_size
+    }
+
+    #[must_use]
+    pub const fn global_slope(&self) -> f64 {
+        self.global_slope
+    }
+
+    /// Adapter-stable IDs rejected for curvature, in pre-sort order.
+    ///
+    /// These IDs are assigned to final `retrieve_filaments` output before
+    /// rejection. They do not yet reproduce gaps in Java `FilamentIndex` IDs
+    /// left by temporary factory candidates that were subsequently merged.
+    #[must_use]
+    pub fn curved_ids(&self) -> &[FilamentId] {
+        &self.curved_ids
+    }
+
+    /// Adapter-stable IDs rejected for slope, in post-length-sort order.
+    #[must_use]
+    pub fn sloped_ids(&self) -> &[FilamentId] {
+        &self.sloped_ids
+    }
+
+    /// Slope rejects retained for Java's later discarded-filament fallback.
+    /// Curvature rejects are intentionally unavailable here.
+    #[must_use]
+    pub const fn sloped_filaments(&self) -> &BTreeMap<FilamentId, crate::filament::StaffFilament> {
+        &self.sloped_filaments
     }
 
     #[must_use]
@@ -64,18 +108,17 @@ pub fn build_primary_cluster_pass(
 ) -> Result<RawPrimaryPassBuild, RawLineAdapterError> {
     let factory = FilamentFactory::new(parameters.factory);
     let values = factory.retrieve_filaments(lag.sections(), parameters.overlap)?;
-
-    let mut ownership = ClusterOwnership::new();
-    let mut filaments = BTreeMap::new();
-    let mut filament_order = Vec::with_capacity(values.len());
-    for (index, filament) in values.into_iter().enumerate() {
-        let id = FilamentId::new(
-            u64::try_from(index + 1).map_err(|_| RawLineAdapterError::IdentityOverflow)?,
-        );
-        ownership.register_filament(id, &filament)?;
-        filament_order.push(id);
-        filaments.insert(id, filament);
-    }
+    let rejection_parameters =
+        LineRejectionParameters::java_defaults(parameters.factory.interline as f64);
+    let FilteredRawFilaments {
+        mut ownership,
+        mut filaments,
+        mut filament_order,
+        global_slope,
+        curved_ids,
+        sloped_ids,
+        sloped_filaments,
+    } = filter_raw_filaments(values, rejection_parameters)?;
 
     let samples = filament_order
         .iter()
@@ -98,6 +141,7 @@ pub fn build_primary_cluster_pass(
         &samples,
     )?;
     let popular_comb_size = popular_comb_size(&columns);
+    let survivor_order = filament_order.clone();
 
     let mut combs = BTreeMap::new();
     let mut next_comb_id = 1_u64;
@@ -121,14 +165,107 @@ pub fn build_primary_cluster_pass(
     );
     Ok(RawPrimaryPassBuild {
         state,
+        survivor_order,
         root_order,
         popular_comb_size,
+        global_slope,
+        curved_ids,
+        sloped_ids,
+        sloped_filaments,
+    })
+}
+
+#[derive(Clone, Debug)]
+struct FilteredRawFilaments {
+    ownership: ClusterOwnership,
+    filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
+    filament_order: Vec<FilamentId>,
+    global_slope: f64,
+    curved_ids: Vec<FilamentId>,
+    sloped_ids: Vec<FilamentId>,
+    sloped_filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
+}
+
+fn filter_raw_filaments(
+    values: Vec<crate::filament::StaffFilament>,
+    parameters: LineRejectionParameters,
+) -> Result<FilteredRawFilaments, RawLineAdapterError> {
+    let mut all = BTreeMap::new();
+    let mut candidates = Vec::with_capacity(values.len());
+    for (index, filament) in values.into_iter().enumerate() {
+        // Assign once, before either rejection pass, so filtering leaves gaps
+        // rather than renumbering survivors. These are adapter identities over
+        // final factory output, not yet Java FilamentIndex creation identities.
+        let raw_id = index
+            .checked_add(1)
+            .ok_or(RawLineAdapterError::IdentityOverflow)?;
+        let id = FilamentId::new(
+            u64::try_from(raw_id).map_err(|_| RawLineAdapterError::IdentityOverflow)?,
+        );
+        let geometry = filament.geometry()?;
+        let start = geometry.start();
+        let stop = geometry.stop();
+        let x_mid = (start.0 + stop.0) / 2.0;
+        candidates.push(LineCandidate::new(
+            raw_id,
+            LinePoint::new(start.0, start.1),
+            LinePoint::new(stop.0, stop.1),
+            geometry.position_at(x_mid)?,
+            filament.bounds()?.width,
+        )?);
+        all.insert(id, filament);
+    }
+
+    let report = reject_line_candidates(candidates, parameters)?;
+    let curved_ids = report
+        .curved
+        .iter()
+        .map(|rejected| FilamentId::new(rejected.candidate.id() as u64))
+        .collect::<Vec<_>>();
+    let sloped_ids = report
+        .sloped
+        .iter()
+        .map(|rejected| FilamentId::new(rejected.candidate.id() as u64))
+        .collect::<Vec<_>>();
+    let filament_order = report
+        .survivors
+        .iter()
+        .map(|candidate| FilamentId::new(candidate.id() as u64))
+        .collect::<Vec<_>>();
+
+    let mut ownership = ClusterOwnership::new();
+    let mut filaments = BTreeMap::new();
+    for id in &filament_order {
+        let filament = all
+            .remove(id)
+            .ok_or(RawLineAdapterError::MissingFilament(*id))?;
+        ownership.register_filament(*id, &filament)?;
+        filaments.insert(*id, filament);
+    }
+    let mut sloped_filaments = BTreeMap::new();
+    for id in &sloped_ids {
+        let filament = all
+            .remove(id)
+            .ok_or(RawLineAdapterError::MissingFilament(*id))?;
+        sloped_filaments.insert(*id, filament);
+    }
+    // Curvature rejects deliberately remain unregistered and are dropped.
+
+    Ok(FilteredRawFilaments {
+        ownership,
+        filaments,
+        filament_order,
+        global_slope: report.global_slope,
+        curved_ids,
+        sloped_ids,
+        sloped_filaments,
     })
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawLineAdapterError {
     Filament(FilamentError),
+    Rejection(LineRejectionError),
     Comb(CombBuilderError),
     Ownership(ClusterOwnershipError),
     Follow(FollowCombsNetworkError),
@@ -139,6 +276,12 @@ pub enum RawLineAdapterError {
 impl From<FilamentError> for RawLineAdapterError {
     fn from(value: FilamentError) -> Self {
         Self::Filament(value)
+    }
+}
+
+impl From<LineRejectionError> for RawLineAdapterError {
+    fn from(value: LineRejectionError) -> Self {
+        Self::Rejection(value)
     }
 }
 
@@ -164,6 +307,7 @@ impl fmt::Display for RawLineAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Filament(error) => write!(formatter, "raw filament construction failed: {error}"),
+            Self::Rejection(error) => write!(formatter, "raw filament rejection failed: {error}"),
             Self::Comb(error) => write!(formatter, "raw comb sampling failed: {error}"),
             Self::Ownership(error) => write!(formatter, "raw ownership failed: {error}"),
             Self::Follow(error) => write!(formatter, "raw comb network failed: {error}"),
@@ -183,8 +327,10 @@ mod tests {
     use crate::{
         cluster_expand::ClusterExpansionParameters,
         cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
+        filament::StaffFilament,
         lines_coordinator::{LinesCoordinatorParameters, retrieve_staff_candidates},
         run_table::{Orientation, Run, RunTable},
+        section::{JunctionPolicy, build_sections},
     };
 
     fn retrieval_parameters() -> ClusterRetrievalParameters {
@@ -236,6 +382,44 @@ mod tests {
         }
     }
 
+    fn rejection_fixture_filaments() -> Vec<StaffFilament> {
+        let mut runs = RunTable::new(Orientation::Horizontal, 130, 200).unwrap();
+        // ID 1: short horizontal, accepted by the sloped-page tolerance.
+        runs.add_run(10, Run::new(0, 30)).unwrap();
+        // ID 2: long bowed candidate, removed before slope estimation.
+        for (y, x) in [(40, 0), (50, 40), (50, 80), (40, 115)] {
+            runs.add_run(y, Run::new(x, 5)).unwrap();
+        }
+        // ID 3: longest line establishes a positive global slope.
+        for (y, x) in [(90, 0), (92, 40), (94, 80), (96, 115)] {
+            runs.add_run(y, Run::new(x, 5)).unwrap();
+        }
+        // ID 4: ordinary-length positive slope outlier.
+        for (y, x) in [(130, 0), (135, 40), (139, 75)] {
+            runs.add_run(y, Run::new(x, 5)).unwrap();
+        }
+        // ID 5: shorter line consistent with the global slope.
+        for (y, x) in [(170, 0), (172, 50), (175, 95)] {
+            runs.add_run(y, Run::new(x, 5)).unwrap();
+        }
+
+        let sections = build_sections(&runs, JunctionPolicy::All);
+        let mut filaments = (0..5)
+            .map(|_| StaffFilament::new(10).unwrap())
+            .collect::<Vec<_>>();
+        for section in sections {
+            let index = match section.bounds().y {
+                0..=29 => 0,
+                30..=69 => 1,
+                70..=119 => 2,
+                120..=159 => 3,
+                _ => 4,
+            };
+            filaments[index].add_section(section).unwrap();
+        }
+        filaments
+    }
+
     #[test]
     fn split_middle_raw_lag_forms_one_five_line_staff_and_preserves_sections() {
         let mut runs = RunTable::new(Orientation::Horizontal, 100, 61).unwrap();
@@ -254,8 +438,23 @@ mod tests {
         assert_eq!(middle_section_ids.len(), 2);
 
         let built = build_primary_cluster_pass(&lag, parameters()).unwrap();
+        assert_eq!(
+            built.survivor_order(),
+            [
+                FilamentId::new(1),
+                FilamentId::new(2),
+                FilamentId::new(3),
+                FilamentId::new(4),
+                FilamentId::new(5),
+                FilamentId::new(6),
+            ]
+        );
         assert_eq!(built.root_order().len(), 5);
         assert_eq!(built.popular_comb_size(), Some(5));
+        assert_eq!(built.global_slope(), 0.0);
+        assert!(built.curved_ids().is_empty());
+        assert!(built.sloped_ids().is_empty());
+        assert!(built.sloped_filaments().is_empty());
         let first_owner = built
             .state()
             .ownership()
@@ -290,5 +489,66 @@ mod tests {
 
         assert!(build_primary_cluster_pass(&lag, invalid).is_err());
         assert_eq!(lag, before);
+    }
+
+    #[test]
+    fn rejection_precedes_combs_and_preserves_ids_ownership_and_discard_classes() {
+        let values = rejection_fixture_filaments();
+        let survivor_sections = values
+            .iter()
+            .enumerate()
+            .map(|(index, filament)| {
+                (
+                    FilamentId::new((index + 1) as u64),
+                    filament
+                        .sections()
+                        .iter()
+                        .map(|section| section.id())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let filtered =
+            filter_raw_filaments(values, LineRejectionParameters::java_defaults(10.0)).unwrap();
+
+        assert!((filtered.global_slope - (6.0 / 119.0)).abs() < 1e-12);
+        assert_eq!(
+            filtered.filament_order,
+            [FilamentId::new(3), FilamentId::new(5), FilamentId::new(1)]
+        );
+        assert_eq!(filtered.curved_ids, [FilamentId::new(2)]);
+        assert_eq!(filtered.sloped_ids, [FilamentId::new(4)]);
+        assert_eq!(
+            filtered.filaments.keys().copied().collect::<Vec<_>>(),
+            [FilamentId::new(1), FilamentId::new(3), FilamentId::new(5)]
+        );
+        assert_eq!(
+            filtered
+                .sloped_filaments
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [FilamentId::new(4)]
+        );
+
+        for id in [FilamentId::new(1), FilamentId::new(3), FilamentId::new(5)] {
+            for section in &survivor_sections[&id] {
+                assert_eq!(filtered.ownership.section_owner(*section), Some(id));
+            }
+        }
+        for id in [FilamentId::new(2), FilamentId::new(4)] {
+            for section in &survivor_sections[&id] {
+                assert_eq!(filtered.ownership.section_owner(*section), None);
+            }
+        }
+        assert_eq!(
+            filtered.sloped_filaments[&FilamentId::new(4)]
+                .sections()
+                .iter()
+                .map(|section| section.id())
+                .collect::<Vec<_>>(),
+            survivor_sections[&FilamentId::new(4)]
+        );
+        assert!(!filtered.sloped_filaments.contains_key(&FilamentId::new(2)));
     }
 }
