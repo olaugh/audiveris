@@ -180,11 +180,13 @@ denied, and passed `git diff --check` before commit.
 97. `9ba3dedb` — source-guided StaffProjector core-pixel validation.
 98. `4a02e713` — live Java/Rust StaffProjector core-pixel validation vector.
 99. `5977ee01` — source-guided StaffProjector impact grading and neutral peak promotion.
+100. `e2b9b1d4` — source-guided StaffProjector browse/find range orchestration with
+     acceptance-controlled cursor advancement.
 
-At the ninety-ninth checkpoint the Rust workspace executes 294 tests:
+At the one-hundredth checkpoint the Rust workspace executes 298 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 150
+- `audiveris-image`: 154
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -240,11 +242,14 @@ without recreating Java object cycles. Promotion into the production SIG and the
 GRID orchestration remain deliberately unported coupling boundaries.
 
 The StaffProjector slice now includes `ShortProjection`, derivative thresholds, blank
-selection, peak-side refinement, candidate construction, and core-pixel validation.
+selection, peak-side refinement, candidate construction, core-pixel validation, and
+range scanning.
 Every boundary through core-pixel validation has an exact live Java vector. Validated
 evidence now also feeds source-compatible six-impact grading and neutral `StaffPeak`
-promotion. It is still a library slice rather than an end-to-end staff projector:
-sheet/glyph ownership and downstream graph mutation remain queued.
+promotion. Range scanning composes these pieces while advancing only after final
+candidate acceptance, matching Java's rejection behavior. It is still a library slice
+rather than an end-to-end staff projector: sheet/glyph ownership and downstream graph
+mutation remain queued.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
@@ -301,10 +306,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` from StaffProjector core-pixel validation into peak promotion and
-   full staff-line/cluster orchestration. Add the core-pixel live oracle first; keep
-   glyph ownership and UI/SIG integration behind explicit neutral boundaries until
-   their inputs have stable differential vectors.
+1. Continue `GRID` from StaffProjector range scanning into full projection orchestration
+   and staff-line/cluster formation. Keep glyph ownership and UI/SIG integration behind
+   explicit neutral boundaries until their inputs have stable differential vectors.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
