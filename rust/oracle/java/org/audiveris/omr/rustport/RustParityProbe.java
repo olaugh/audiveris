@@ -215,6 +215,21 @@ public final class RustParityProbe
                         + ";right4:" + blank(rightFromFour)
                         + ";left7:" + blank(leftFromSeven));
 
+        StaffProjector tiedPeakProjector = staffProjector(
+                projectorScale,
+                new int[]{0, 0, 0, 0, 0, 10, 10, 10, 5, 0, 0});
+        configurePeakThresholds(tiedPeakProjector, 2, 5);
+        Object tiedPeakSide = refinePeakSide(tiedPeakProjector, 4, 7, 1, false, 4, 0);
+        StaffProjector borderPeakProjector = staffProjector(
+                projectorScale,
+                new int[]{0, 0, 0, 0, 4, 4});
+        configurePeakThresholds(borderPeakProjector, 2, 5);
+        Object borderPeakSide = refinePeakSide(borderPeakProjector, 4, 5, 1, false, 3, 0);
+        System.out.println(
+                "grid.staff-projector-peak-side.synthetic=tie:"
+                        + peakSide(tiedPeakSide)
+                        + ";border:" + peakSide(borderPeakSide));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
@@ -1169,6 +1184,68 @@ public final class RustParityProbe
         throws ReflectiveOperationException
     {
         return blank != null ? field(blank, "start") + "-" + field(blank, "stop") : "null";
+    }
+
+    private static void configurePeakThresholds (StaffProjector projector,
+                                                 int linesThreshold,
+                                                 int chunkThreshold)
+        throws ReflectiveOperationException
+    {
+        Object params = field(projector, "params");
+        setIntField(params, "linesThreshold", linesThreshold);
+        setIntField(params, "chunkThreshold", chunkThreshold);
+    }
+
+    private static Object refinePeakSide (StaffProjector projector,
+                                          int xStart,
+                                          int xStop,
+                                          int direction,
+                                          boolean halfMode,
+                                          int minimumDerivative,
+                                          int addedChunk)
+        throws ReflectiveOperationException
+    {
+        Method method = StaffProjector.class.getDeclaredMethod(
+                "refinePeakSide",
+                int.class,
+                int.class,
+                int.class,
+                boolean.class,
+                int.class,
+                int.class);
+        method.setAccessible(true);
+        return method.invoke(
+                projector,
+                xStart,
+                xStop,
+                direction,
+                halfMode,
+                minimumDerivative,
+                addedChunk);
+    }
+
+    private static String peakSide (Object side)
+        throws ReflectiveOperationException
+    {
+        if (side == null) {
+            return "null";
+        }
+        return String.format(
+                java.util.Locale.ROOT,
+                "%d,%.12f,%.12f",
+                field(side, "abscissa"),
+                field(side, "derGrade"),
+                field(side, "chunkGrade"));
+    }
+
+    private static void setIntField (Object instance,
+                                     String name,
+                                     int value)
+        throws ReflectiveOperationException
+    {
+        Field field = instance.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.setInt(instance, value);
     }
 
     private static StaffFilament staffFilament (int x,

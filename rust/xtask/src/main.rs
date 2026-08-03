@@ -15,7 +15,7 @@ use audiveris_image::{
     global_filter, ingest,
     line_cluster::{FilamentId, LineCluster},
     median,
-    projection::{ShortProjection, select_blank},
+    projection::{PeakRefinementParams, PeakRefinementRequest, ShortProjection, select_blank},
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
@@ -203,7 +203,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 49] = [
+const VECTOR_KEYS: [&str; 50] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -218,6 +218,7 @@ const VECTOR_KEYS: [&str; 49] = [
     "projection.short.synthetic=",
     "grid.staff-projector-threshold.synthetic=",
     "grid.staff-projector-blanks.synthetic=",
+    "grid.staff-projector-peak-side.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -576,6 +577,38 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         blank_name(right_from_two),
         blank_name(right_from_four),
         blank_name(left_from_seven)
+    ));
+
+    let peak_params = PeakRefinementParams::new(25, 2, 5, 2, 2)?;
+    let mut tied_peak_projection = ShortProjection::new(0, 10)?;
+    for (position, value) in [(5, 10), (6, 10), (7, 10), (8, 5)] {
+        tied_peak_projection.increment(position, value);
+    }
+    let tied_peak_side = tied_peak_projection
+        .refine_peak_side(
+            PeakRefinementRequest::new(4, 7, 1, false, 4, 0),
+            peak_params,
+        )?
+        .ok_or("tied peak side fixture was rejected")?;
+    let mut border_peak_projection = ShortProjection::new(0, 5)?;
+    border_peak_projection.increment(4, 4);
+    border_peak_projection.increment(5, 4);
+    let border_peak_side = border_peak_projection
+        .refine_peak_side(
+            PeakRefinementRequest::new(4, 5, 1, false, 3, 0),
+            peak_params,
+        )?
+        .ok_or("border peak side fixture was rejected")?;
+    let peak_side_name = |side: audiveris_image::projection::PeakSide| {
+        format!(
+            "{},{:.12},{:.12}",
+            side.abscissa, side.derivative_grade, side.chunk_grade
+        )
+    };
+    lines.push(format!(
+        "grid.staff-projector-peak-side.synthetic=tie:{};border:{}",
+        peak_side_name(tied_peak_side),
+        peak_side_name(border_peak_side)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
