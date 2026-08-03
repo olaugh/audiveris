@@ -16,7 +16,7 @@ use std::{
 use crate::{
     cluster_ownership::{ClusterId, ClusterOwnership, ClusterOwnershipError},
     filament::FilamentError,
-    line_cluster::{LineCluster, LineClusterError},
+    line_cluster::{FilamentId, LineCluster, LineClusterError},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +56,79 @@ impl ClusterConsistencyResult {
     pub fn into_parts(self) -> (Vec<ClusterId>, Vec<ClusterId>) {
         (self.survivors, self.discarded)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AcceptableClusterLength {
+    median: usize,
+    minimum: f64,
+}
+
+impl AcceptableClusterLength {
+    #[must_use]
+    pub const fn median(self) -> usize {
+        self.median
+    }
+
+    #[must_use]
+    pub const fn minimum(self) -> f64 {
+        self.minimum
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FilamentPartitionResult {
+    remaining: Vec<FilamentId>,
+    discarded: Vec<FilamentId>,
+    merged: Vec<FilamentId>,
+}
+
+impl FilamentPartitionResult {
+    #[must_use]
+    pub fn remaining(&self) -> &[FilamentId] {
+        &self.remaining
+    }
+
+    #[must_use]
+    pub fn discarded(&self) -> &[FilamentId] {
+        &self.discarded
+    }
+
+    #[must_use]
+    pub fn merged(&self) -> &[FilamentId] {
+        &self.merged
+    }
+}
+
+/// Java `computeAcceptableLength`: upper median true length times a ratio.
+pub fn compute_acceptable_cluster_length(
+    clusters: &BTreeMap<ClusterId, LineCluster>,
+    cluster_order: &[ClusterId],
+    minimum_length_ratio: f64,
+) -> Result<AcceptableClusterLength, ClusterFinalizeError> {
+    if !minimum_length_ratio.is_finite() || minimum_length_ratio < 0.0 {
+        return Err(ClusterFinalizeError::InvalidParameters);
+    }
+    if cluster_order.is_empty() {
+        return Err(ClusterFinalizeError::EmptyClusterOrder);
+    }
+    let mut seen = BTreeSet::new();
+    let mut lengths = Vec::with_capacity(cluster_order.len());
+    for &id in cluster_order {
+        if !seen.insert(id) {
+            return Err(ClusterFinalizeError::DuplicateClusterOrder(id));
+        }
+        let cluster = clusters
+            .get(&id)
+            .ok_or(ClusterFinalizeError::MissingClusterValue(id))?;
+        lengths.push(cluster.true_length()?);
+    }
+    lengths.sort_unstable();
+    let median = lengths[lengths.len() / 2];
+    Ok(AcceptableClusterLength {
+        median,
+        minimum: median as f64 * minimum_length_ratio,
+    })
 }
 
 /// Java `isConsistent`: compare the shortest and longest raw line widths.
@@ -119,11 +192,84 @@ pub fn destroy_inconsistent_clusters_in_order(
     })
 }
 
+/// Java `destroyNonDesiredClusters`: destroy and remove clusters whose exact
+/// line count is absent from the requested comb sizes.
+pub fn destroy_non_desired_clusters_in_order(
+    ownership: &mut ClusterOwnership,
+    clusters: &mut BTreeMap<ClusterId, LineCluster>,
+    cluster_order: &[ClusterId],
+    desired_sizes: &BTreeSet<usize>,
+) -> Result<ClusterConsistencyResult, ClusterFinalizeError> {
+    let mut seen = BTreeSet::new();
+    for &id in cluster_order {
+        if !seen.insert(id) {
+            return Err(ClusterFinalizeError::DuplicateClusterOrder(id));
+        }
+        if !clusters.contains_key(&id) {
+            return Err(ClusterFinalizeError::MissingClusterValue(id));
+        }
+    }
+    let mut next_ownership = ownership.clone();
+    let mut next_clusters = clusters.clone();
+    let mut survivors = Vec::new();
+    let mut discarded = Vec::new();
+    for &id in cluster_order {
+        if desired_sizes.contains(&next_clusters[&id].size()) {
+            survivors.push(id);
+        } else {
+            next_ownership.destroy_cluster(id)?;
+            next_clusters.remove(&id);
+            discarded.push(id);
+        }
+    }
+    *ownership = next_ownership;
+    *clusters = next_clusters;
+    Ok(ClusterConsistencyResult {
+        survivors,
+        discarded,
+    })
+}
+
+/// Neutral `discardNonClusteredFilaments` partition in caller list order.
+///
+/// A merged child remains in Java's list at this stage and is reported
+/// separately for the later `removeMergedFilaments` pass. Only unmerged roots
+/// without cluster membership enter the discarded list.
+pub fn partition_non_clustered_filaments_in_order(
+    ownership: &ClusterOwnership,
+    filament_order: &[FilamentId],
+) -> Result<FilamentPartitionResult, ClusterFinalizeError> {
+    let mut seen = BTreeSet::new();
+    let mut remaining = Vec::new();
+    let mut discarded = Vec::new();
+    let mut merged = Vec::new();
+    for &id in filament_order {
+        if !seen.insert(id) {
+            return Err(ClusterFinalizeError::DuplicateFilamentOrder(id));
+        }
+        if ownership.filament_parent(id)?.is_some() {
+            remaining.push(id);
+            merged.push(id);
+        } else if ownership.membership_of(id)?.is_some() {
+            remaining.push(id);
+        } else {
+            discarded.push(id);
+        }
+    }
+    Ok(FilamentPartitionResult {
+        remaining,
+        discarded,
+        merged,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClusterFinalizeError {
     InvalidParameters,
+    EmptyClusterOrder,
     MissingClusterValue(ClusterId),
     DuplicateClusterOrder(ClusterId),
+    DuplicateFilamentOrder(FilamentId),
     Cluster(LineClusterError),
     Filament(FilamentError),
     Ownership(ClusterOwnershipError),
@@ -153,6 +299,7 @@ impl fmt::Display for ClusterFinalizeError {
             Self::InvalidParameters => {
                 formatter.write_str("cluster consistency parameters are invalid")
             }
+            Self::EmptyClusterOrder => formatter.write_str("cluster order is empty"),
             Self::MissingClusterValue(id) => {
                 write!(formatter, "missing cluster value {}", id.value())
             }
@@ -160,6 +307,13 @@ impl fmt::Display for ClusterFinalizeError {
                 write!(
                     formatter,
                     "duplicate cluster {} in consistency order",
+                    id.value()
+                )
+            }
+            Self::DuplicateFilamentOrder(id) => {
+                write!(
+                    formatter,
+                    "duplicate filament {} in finalization order",
                     id.value()
                 )
             }
@@ -336,5 +490,96 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn acceptable_length_uses_upper_median_and_exact_ratio() {
+        let mut ownership = ClusterOwnership::new();
+        let mut clusters = BTreeMap::new();
+        let mut order = Vec::new();
+        for (id, filament) in filaments(&[
+            (1, 0, 10, 10),
+            (2, 0, 20, 20),
+            (3, 0, 30, 30),
+            (4, 0, 40, 40),
+        ]) {
+            ownership.register_filament(id, &filament).unwrap();
+            let cluster = ownership.register_cluster(id).unwrap();
+            clusters.insert(cluster, LineCluster::new(10, id, filament).unwrap());
+            order.push(cluster);
+        }
+
+        let result = compute_acceptable_cluster_length(&clusters, &order, 0.2).unwrap();
+        assert_eq!(result.median(), 30);
+        assert_eq!(result.minimum(), 6.0);
+    }
+
+    #[test]
+    fn non_desired_size_pass_calls_destroy_and_preserves_survivor_order() {
+        let mut ownership = ClusterOwnership::new();
+        let mut clusters = BTreeMap::new();
+        let mut filaments = filaments(&[
+            (1, 0, 10, 30),
+            (2, 50, 20, 30),
+            (3, 50, 30, 30),
+        ])
+        .into_iter();
+        let (single_id, single_value) = filaments.next().unwrap();
+        ownership
+            .register_filament(single_id, &single_value)
+            .unwrap();
+        let single = ownership.register_cluster(single_id).unwrap();
+        clusters.insert(
+            single,
+            LineCluster::new(10, single_id, single_value).unwrap(),
+        );
+        let double = two_line_cluster(
+            &mut ownership,
+            &mut clusters,
+            filaments.next().unwrap(),
+            filaments.next().unwrap(),
+        );
+
+        let result = destroy_non_desired_clusters_in_order(
+            &mut ownership,
+            &mut clusters,
+            &[single, double],
+            &BTreeSet::from([2]),
+        )
+        .unwrap();
+
+        assert_eq!(result.survivors(), [double]);
+        assert_eq!(result.discarded(), [single]);
+        assert_eq!(ownership.membership_of(single_id).unwrap(), None);
+        assert!(clusters.contains_key(&double));
+        assert!(!clusters.contains_key(&single));
+    }
+
+    #[test]
+    fn filament_partition_keeps_merged_children_for_later_removal() {
+        let mut ownership = ClusterOwnership::new();
+        let values = filaments(&[
+            (1, 0, 10, 30),
+            (2, 50, 20, 30),
+            (3, 100, 30, 30),
+        ]);
+        for (id, filament) in &values {
+            ownership.register_filament(*id, filament).unwrap();
+        }
+        let cluster = ownership.register_cluster(values[0].0).unwrap();
+        ownership
+            .merge_filaments(values[0].0, values[2].0)
+            .unwrap();
+
+        let result = partition_non_clustered_filaments_in_order(
+            &ownership,
+            &[values[0].0, values[1].0, values[2].0],
+        )
+        .unwrap();
+
+        assert_eq!(result.remaining(), [values[0].0, values[2].0]);
+        assert_eq!(result.discarded(), [values[1].0]);
+        assert_eq!(result.merged(), [values[2].0]);
+        assert_eq!(ownership.membership_of(values[2].0).unwrap().unwrap().cluster(), cluster);
     }
 }
