@@ -24,6 +24,7 @@ const STEPS_ELEMENT: &[u8] = b"steps";
 const PAGE_ELEMENT: &[u8] = b"page";
 const LAST_TIME_RATIONAL_ELEMENT: &[u8] = b"last-time-rational";
 const SYSTEM_ELEMENT: &[u8] = b"system";
+const PART_ELEMENT: &[u8] = b"part";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
@@ -33,6 +34,9 @@ const MOVEMENT_START_ATTRIBUTE: &[u8] = b"movement-start";
 const DELTA_MEASURE_ID_ATTRIBUTE: &[u8] = b"delta-measure-id";
 const NUM_ATTRIBUTE: &[u8] = b"num";
 const DEN_ATTRIBUTE: &[u8] = b"den";
+const NAME_ATTRIBUTE: &[u8] = b"name";
+const LOGICAL_ID_ATTRIBUTE: &[u8] = b"logical-id";
+const MANUAL_ATTRIBUTE: &[u8] = b"manual";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,6 +66,7 @@ impl BookXml {
         let mut active_steps: Option<(usize, String)> = None;
         let mut active_page = None;
         let mut active_time_rational = None;
+        let mut active_system = None;
         let mut root_closed = false;
 
         loop {
@@ -143,7 +148,20 @@ impl BookXml {
                         && element.name().as_ref() == SYSTEM_ELEMENT
                         && let Some((sheet_index, page_index)) = active_page
                     {
-                        push_system_ref(&mut sheet_stubs[sheet_index], page_index)?;
+                        let system_index =
+                            push_system_ref(&mut sheet_stubs[sheet_index], page_index)?;
+                        active_system = Some((sheet_index, page_index, system_index));
+                    } else if depth == 4
+                        && element.name().as_ref() == PART_ELEMENT
+                        && let Some((sheet_index, page_index, system_index)) = active_system
+                    {
+                        push_part_ref(
+                            &reader,
+                            &element,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                            system_index,
+                        )?;
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
@@ -225,6 +243,17 @@ impl BookXml {
                         && let Some((sheet_index, page_index)) = active_page
                     {
                         push_system_ref(&mut sheet_stubs[sheet_index], page_index)?;
+                    } else if depth == 4
+                        && element.name().as_ref() == PART_ELEMENT
+                        && let Some((sheet_index, page_index, system_index)) = active_system
+                    {
+                        push_part_ref(
+                            &reader,
+                            &element,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                            system_index,
+                        )?;
                     }
                 }
                 Event::End(element) => {
@@ -267,6 +296,9 @@ impl BookXml {
                     }
                     if depth == 3 && active_page.is_some() {
                         active_page = None;
+                    }
+                    if depth == 4 && active_system.is_some() {
+                        active_system = None;
                     }
                     depth = depth.checked_sub(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "unexpected closing tag")
@@ -562,18 +594,69 @@ impl PageRef {
 
 /// Order-only view of one direct PageRef `system` child.
 ///
-/// Java persists no scalar SystemRef fields. Parts and all their descendants
-/// remain opaque; the ID is derived solely from the element's list position.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Java persists no scalar SystemRef fields. Only a narrow PartRef scalar view
+/// is exposed; the ID is derived solely from the element's list position.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SystemRef {
     id: u32,
+    part_refs: Vec<PartRef>,
 }
 
 impl SystemRef {
     /// One-based position, matching Java `SystemRef.getId()`.
     #[must_use]
-    pub const fn id(self) -> u32 {
+    pub const fn id(&self) -> u32 {
         self.id
+    }
+
+    /// Direct part references in persisted document order.
+    #[must_use]
+    pub fn part_refs(&self) -> &[PartRef] {
+        &self.part_refs
+    }
+}
+
+/// Persisted scalar metadata for one direct SystemRef `part` child.
+///
+/// Staff configurations, deprecated line counts, and all descendants remain
+/// opaque. Java exposes only a derived zero-based list index, not a part ID.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PartRef {
+    index: u32,
+    name: Option<String>,
+    logical_id: Option<i32>,
+    manual: Option<bool>,
+}
+
+impl PartRef {
+    /// Zero-based position, matching Java `PartRef.getIndex()`.
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Optional decoded part name; explicit empty remains distinct from absent.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Optional manually assigned logical part ID.
+    #[must_use]
+    pub const fn logical_id(&self) -> Option<i32> {
+        self.logical_id
+    }
+
+    /// Explicit state of the optional JAXB boolean-positive `manual` attribute.
+    #[must_use]
+    pub const fn manual_attribute(&self) -> Option<bool> {
+        self.manual
+    }
+
+    /// Effective Java manual-mapping state; absent defaults to false.
+    #[must_use]
+    pub fn is_manual(&self) -> bool {
+        self.manual.unwrap_or(false)
     }
 }
 
@@ -755,6 +838,28 @@ pub enum BookXmlError {
     UnexpectedTimeRationalContent { sheet_number: u32, page_id: u32 },
     /// A page contains too many systems to represent Java's positive `int` ID.
     TooManySystems { sheet_number: u32, page_id: u32 },
+    /// A system contains too many parts to represent Java's `int` index.
+    TooManyParts {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+    },
+    /// A persisted PartRef integer is malformed or outside Java `int` range.
+    InvalidPartInteger {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A persisted PartRef boolean has an invalid XML Schema spelling.
+    InvalidPartBoolean {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        field: &'static str,
+        value: String,
+    },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -905,6 +1010,34 @@ impl fmt::Display for BookXmlError {
             } => write!(
                 formatter,
                 "sheet stub {sheet_number} page {page_id} has too many system references"
+            ),
+            Self::TooManyParts {
+                sheet_number,
+                page_id,
+                system_id,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} has too many part references"
+            ),
+            Self::InvalidPartInteger {
+                sheet_number,
+                page_id,
+                system_id,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} has invalid part integer {field}: {value:?}"
+            ),
+            Self::InvalidPartBoolean {
+                sheet_number,
+                page_id,
+                system_id,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} has invalid part boolean {field}: {value:?}"
             ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
@@ -1098,7 +1231,7 @@ fn push_page_ref(
     Ok(sheet_stub.page_refs.len() - 1)
 }
 
-fn push_system_ref(sheet_stub: &mut SheetStub, page_index: usize) -> Result<(), BookXmlError> {
+fn push_system_ref(sheet_stub: &mut SheetStub, page_index: usize) -> Result<usize, BookXmlError> {
     let page = &mut sheet_stub.page_refs[page_index];
     let id = page
         .system_refs
@@ -1115,7 +1248,71 @@ fn push_system_ref(sheet_stub: &mut SheetStub, page_index: usize) -> Result<(), 
             sheet_number: sheet_stub.number,
             page_id: page.id,
         })?;
-    page.system_refs.push(SystemRef { id });
+    page.system_refs.push(SystemRef {
+        id,
+        part_refs: Vec::new(),
+    });
+    Ok(page.system_refs.len() - 1)
+}
+
+fn push_part_ref(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+) -> Result<(), BookXmlError> {
+    let page_id = sheet_stub.page_refs[page_index].id;
+    let system = &mut sheet_stub.page_refs[page_index].system_refs[system_index];
+    let index = u32::try_from(system.part_refs.len())
+        .ok()
+        .filter(|index| *index <= i32::MAX as u32)
+        .ok_or(BookXmlError::TooManyParts {
+            sheet_number: sheet_stub.number,
+            page_id,
+            system_id: system.id,
+        })?;
+
+    let mut name = None;
+    let mut logical_id = None;
+    let mut manual = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == NAME_ATTRIBUTE {
+            name = Some(decode_attribute(reader, &attribute)?);
+        } else if key == LOGICAL_ID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            logical_id = Some(value.trim().parse::<i32>().map_err(|_| {
+                BookXmlError::InvalidPartInteger {
+                    sheet_number: sheet_stub.number,
+                    page_id,
+                    system_id: system.id,
+                    field: "sheet/page/system/part/@logical-id",
+                    value: value.clone(),
+                }
+            })?);
+        } else if key == MANUAL_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            manual = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidPartBoolean {
+                    sheet_number: sheet_stub.number,
+                    page_id,
+                    system_id: system.id,
+                    field: "sheet/page/system/part/@manual",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+
+    system.part_refs.push(PartRef {
+        index,
+        name,
+        logical_id,
+        manual,
+    });
     Ok(())
 }
 
@@ -1505,6 +1702,13 @@ mod tests {
         );
         assert_eq!(pages[0].system_refs().len(), 1);
         assert_eq!(pages[0].system_refs()[0].id(), 1);
+        let parts = pages[0].system_refs()[0].part_refs();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].index(), 0);
+        assert_eq!(parts[0].logical_id(), Some(1));
+        assert_eq!(parts[0].name(), None);
+        assert_eq!(parts[0].manual_attribute(), None);
+        assert!(!parts[0].is_manual());
         assert_eq!(book.original_bytes(), xml);
     }
 
@@ -1565,9 +1769,32 @@ mod tests {
     }
 
     #[test]
+    fn reads_part_scalars_and_preserves_order_and_absent_states() {
+        let xml = br#"<book><sheet number="1"><page id="1"><system><part name="P&amp;1" logical-id=" -2 " manual="false"><staff-configuration line-count="5"/></part><part name="" manual="1"/><part/></system></page></sheet></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let parts = book.sheet_stubs()[0].page_refs()[0].system_refs()[0].part_refs();
+
+        assert_eq!(
+            parts.iter().map(|part| part.index()).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert_eq!(parts[0].name(), Some("P&1"));
+        assert_eq!(parts[0].logical_id(), Some(-2));
+        assert_eq!(parts[0].manual_attribute(), Some(false));
+        assert!(!parts[0].is_manual());
+        assert_eq!(parts[1].name(), Some(""));
+        assert_eq!(parts[1].logical_id(), None);
+        assert_eq!(parts[1].manual_attribute(), Some(true));
+        assert!(parts[1].is_manual());
+        assert_eq!(parts[2].name(), None);
+        assert_eq!(parts[2].manual_attribute(), None);
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
     fn ignores_nested_and_namespaced_page_lookalikes() {
         let book = BookXml::parse(
-            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><f:system/><future><av:page id="77"/><last-time-rational num="2" den="2"/><system/></future><system><part future="opaque"/></system></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
+            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><f:system/><future><av:page id="77"/><last-time-rational num="2" den="2"/><system/></future><system><f:part logical-id="88"/><future><part logical-id="77"/></future><part f:logical-id="66" future="opaque"/></system></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
         )
         .unwrap();
 
@@ -1578,6 +1805,10 @@ mod tests {
         assert_eq!(pages[0].last_time_rational(), None);
         assert_eq!(pages[0].system_refs().len(), 1);
         assert_eq!(pages[0].system_refs()[0].id(), 1);
+        let parts = pages[0].system_refs()[0].part_refs();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].index(), 0);
+        assert_eq!(parts[0].logical_id(), None);
     }
 
     #[test]
@@ -1746,6 +1977,58 @@ mod tests {
                     value: invalid.to_owned(),
                 }
             );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_part_scalars() {
+        for invalid in ["", "not-a-number", "2147483648", "-2147483649"] {
+            let xml = format!(
+                "<book><sheet number=\"6\"><page id=\"1\"><system><part logical-id=\"{invalid}\"/></system></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidPartInteger {
+                    sheet_number: 6,
+                    page_id: 1,
+                    system_id: 1,
+                    field: "sheet/page/system/part/@logical-id",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+
+        for invalid in ["", "TRUE", "yes", "2"] {
+            let xml = format!(
+                "<book><sheet number=\"6\"><page id=\"1\"><system><part manual=\"{invalid}\"/></system></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidPartBoolean {
+                    sheet_number: 6,
+                    page_id: 1,
+                    system_id: 1,
+                    field: "sheet/page/system/part/@manual",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_part_attributes_as_malformed_xml() {
+        for attrs in [
+            "name=\"a\" name=\"b\"",
+            "logical-id=\"1\" logical-id=\"2\"",
+            "manual=\"true\" manual=\"false\"",
+        ] {
+            let xml = format!(
+                "<book><sheet number=\"1\"><page id=\"1\"><system><part {attrs}/></system></page></sheet></book>"
+            );
+            assert!(matches!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::Malformed { .. }
+            ));
         }
     }
 
