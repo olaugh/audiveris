@@ -35,6 +35,9 @@ use audiveris_image::{
     target_line::TargetLine,
     watershed,
 };
+use audiveris_omr::score_update::{
+    PageInput as ScorePageInput, PageKey as ScorePageKey, StubPages, create_scores, update_scores,
+};
 use audiveris_testkit::CanonicalVectors;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -213,7 +216,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 60] = [
+const VECTOR_KEYS: [&str; 61] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -250,6 +253,7 @@ const VECTOR_KEYS: [&str; 60] = [
     "grid.bars-columns-start.synthetic=",
     "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
+    "grid.score-update.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -400,6 +404,22 @@ fn cluster_points(points: &[Option<(f64, f64)>]) -> String {
 
 fn target_point(point: (f64, f64)) -> String {
     format!("{:.12},{:.12}", point.0, point.1)
+}
+
+fn format_score_topology(scores: &[audiveris_omr::score_update::ScoreTopology]) -> String {
+    let topologies = scores
+        .iter()
+        .map(|score| {
+            score
+                .pages
+                .iter()
+                .map(|page| format!("{}.{}", page.sheet_number, page.page_id))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!("{}:{topologies}", scores.len())
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -1666,6 +1686,38 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         target_point(target_line.source_of_point((200.0, 65.0))?),
         target_point(target_line.source_of_point((200.0, 85.0))?),
         target_point(target_line.source_of_x(350.0)?)
+    ));
+    let score_page = |sheet_number, page_id, movement_start| ScorePageInput {
+        key: ScorePageKey {
+            sheet_number,
+            page_id,
+        },
+        movement_start,
+    };
+    let mut score_stubs = vec![
+        StubPages {
+            number: 1,
+            valid_selected: true,
+            pages: vec![score_page(1, 1, false)],
+        },
+        StubPages {
+            number: 2,
+            valid_selected: true,
+            pages: vec![score_page(2, 1, false), score_page(2, 2, true)],
+        },
+        StubPages {
+            number: 3,
+            valid_selected: true,
+            pages: vec![score_page(3, 1, false)],
+        },
+    ];
+    let mut score_topology = create_scores(&score_stubs);
+    let initial_score_topology = format_score_topology(&score_topology);
+    score_stubs[1].pages = vec![score_page(2, 1, false)];
+    update_scores(&score_stubs, 2, &mut score_topology)?;
+    lines.push(format!(
+        "grid.score-update.synthetic=initial:{initial_score_topology};updated:{}",
+        format_score_topology(&score_topology)
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

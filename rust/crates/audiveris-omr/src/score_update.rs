@@ -32,6 +32,18 @@ pub enum ScoreUpdateError {
     MissingCurrentStub(u32),
 }
 
+impl std::fmt::Display for ScoreUpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingCurrentStub(number) => {
+                write!(formatter, "score update has no current stub #{number}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ScoreUpdateError {}
+
 /// Java `Book.createScores(null, scores)` over all valid selected stubs.
 #[must_use]
 pub fn create_scores(stubs: &[StubPages]) -> Vec<ScoreTopology> {

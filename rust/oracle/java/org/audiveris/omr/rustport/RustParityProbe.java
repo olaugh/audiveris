@@ -47,6 +47,9 @@ import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
+import org.audiveris.omr.score.PageNumber;
+import org.audiveris.omr.score.PageRef;
+import org.audiveris.omr.score.Score;
 import org.audiveris.omr.sig.GradeUtil;
 import org.audiveris.omr.sheet.Book;
 import org.audiveris.omr.sheet.OneLineStaff;
@@ -1304,6 +1307,28 @@ public final class RustParityProbe
                         + ";below:" + point(targetLine.sourceOf(new Point2D.Double(200.0, 85.0)))
                         + ";extra:" + point(targetLine.sourceOf(350.0)));
 
+        Book scoreBook = new Book(Path.of("score-update.synthetic"));
+        SheetStub scoreStub1 = new SheetStub(scoreBook, 1);
+        SheetStub scoreStub2 = new SheetStub(scoreBook, 2);
+        SheetStub scoreStub3 = new SheetStub(scoreBook, 3);
+        scoreBook.addStub(scoreStub1);
+        scoreBook.addStub(scoreStub2);
+        scoreBook.addStub(scoreStub3);
+        scoreStub1.addPageRef(new PageRef(scoreStub1, 1, false));
+        scoreStub2.addPageRef(new PageRef(scoreStub2, 1, false));
+        scoreStub2.addPageRef(new PageRef(scoreStub2, 2, true));
+        scoreStub3.addPageRef(new PageRef(scoreStub3, 1, false));
+        scoreBook.updateScores(scoreStub1);
+        String initialScoreTopology = scoreTopology(scoreBook.getScores());
+        scoreStub2.getPageRefs().clear();
+        scoreStub2.addPageRef(new PageRef(scoreStub2, 1, false));
+        scoreBook.updateScores(scoreStub2);
+        System.out.println(
+                "grid.score-update.synthetic=initial:"
+                        + initialScoreTopology
+                        + ";updated:"
+                        + scoreTopology(scoreBook.getScores()));
+
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
                 new double[]{1, 6});
@@ -1999,6 +2024,19 @@ public final class RustParityProbe
     private static String point (Point2D point)
     {
         return String.format(java.util.Locale.ROOT, "%.12f,%.12f", point.getX(), point.getY());
+    }
+
+    private static String scoreTopology (List<Score> scores)
+    {
+        List<String> topologies = new ArrayList<>();
+        for (Score score : scores) {
+            List<String> pages = new ArrayList<>();
+            for (PageNumber page : score.getPageNumbers()) {
+                pages.add(page.sheetNumber + "." + page.sheetPageId);
+            }
+            topologies.add(String.join(",", pages));
+        }
+        return scores.size() + ":" + String.join("|", topologies);
     }
 
     private static StaffPeak staffPeak (Staff staff,
