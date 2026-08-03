@@ -20,6 +20,7 @@ const SHEET_ELEMENT: &[u8] = b"sheet";
 const SCORE_ELEMENT: &[u8] = b"score";
 const LOGICAL_PART_ELEMENT: &[u8] = b"logical-part";
 const SHEETS_SELECTION_ELEMENT: &[u8] = b"sheets-selection";
+const DEPRECATED_BEAM_SPECIFICATION_ELEMENT: &[u8] = b"beam-specification";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -66,6 +67,7 @@ pub struct BookXml {
     input_path: Option<String>,
     dirty: Option<bool>,
     sheets_selection: Option<String>,
+    deprecated_beam_specification: Option<i32>,
     sheet_stubs: Vec<SheetStub>,
     score_refs: Vec<ScoreRef>,
 }
@@ -86,6 +88,7 @@ impl BookXml {
         let mut input_path = None;
         let mut dirty = None;
         let mut sheets_selection = None;
+        let mut deprecated_beam_specification = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
@@ -103,6 +106,7 @@ impl BookXml {
         let mut active_logical_staff_leaf: Option<LogicalStaffLeafCapture> = None;
         let mut active_score_page: Option<(u32, ScorePageRef)> = None;
         let mut active_sheets_selection: Option<String> = None;
+        let mut active_deprecated_beam_specification: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -112,6 +116,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_deprecated_beam_specification.is_some() {
+                        return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
+                    }
                     if active_sheets_selection.is_some() {
                         return Err(BookXmlError::UnexpectedSheetsSelectionContent);
                     }
@@ -166,6 +173,11 @@ impl BookXml {
                     } else if depth == 1 && element.name().as_ref() == SHEETS_SELECTION_ELEMENT {
                         begin_sheets_selection(&sheets_selection)?;
                         active_sheets_selection = Some(String::new());
+                    } else if depth == 1
+                        && element.name().as_ref() == DEPRECATED_BEAM_SPECIFICATION_ELEMENT
+                    {
+                        begin_deprecated_beam_specification(&deprecated_beam_specification)?;
+                        active_deprecated_beam_specification = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -273,6 +285,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_deprecated_beam_specification.is_some() {
+                        return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
+                    }
                     if active_sheets_selection.is_some() {
                         return Err(BookXmlError::UnexpectedSheetsSelectionContent);
                     }
@@ -326,6 +341,12 @@ impl BookXml {
                     } else if depth == 1 && element.name().as_ref() == SHEETS_SELECTION_ELEMENT {
                         begin_sheets_selection(&sheets_selection)?;
                         sheets_selection = Some(String::new());
+                    } else if depth == 1
+                        && element.name().as_ref() == DEPRECATED_BEAM_SPECIFICATION_ELEMENT
+                    {
+                        begin_deprecated_beam_specification(&deprecated_beam_specification)?;
+                        deprecated_beam_specification =
+                            Some(parse_deprecated_beam_specification("")?);
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -423,6 +444,13 @@ impl BookXml {
                 }
                 Event::End(element) => {
                     if depth == 2
+                        && element.name().as_ref() == DEPRECATED_BEAM_SPECIFICATION_ELEMENT
+                        && let Some(text) = active_deprecated_beam_specification.take()
+                    {
+                        deprecated_beam_specification =
+                            Some(parse_deprecated_beam_specification(&text)?);
+                    }
+                    if depth == 2
                         && element.name().as_ref() == SHEETS_SELECTION_ELEMENT
                         && let Some(text) = active_sheets_selection.take()
                     {
@@ -508,6 +536,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_deprecated_beam_specification.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_deprecated_beam_specification
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::Text(text) if active_sheets_selection.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -584,6 +621,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_deprecated_beam_specification.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_deprecated_beam_specification
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::CData(text) if active_sheets_selection.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -635,6 +681,9 @@ impl BookXml {
                 }
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
+                }
+                Event::GeneralRef(_) if active_deprecated_beam_specification.is_some() => {
+                    return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
                 }
                 Event::GeneralRef(_) if active_sheets_selection.is_some() => {
                     return Err(BookXmlError::UnexpectedSheetsSelectionContent);
@@ -690,6 +739,11 @@ impl BookXml {
                     });
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_deprecated_beam_specification.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_sheets_selection.is_some() =>
                 {
                     return Err(BookXmlError::UnexpectedSheetsSelectionContent);
@@ -742,6 +796,7 @@ impl BookXml {
             input_path,
             dirty,
             sheets_selection,
+            deprecated_beam_specification,
             sheet_stubs,
             score_refs,
         })
@@ -793,6 +848,12 @@ impl BookXml {
     #[must_use]
     pub fn sheets_selection(&self) -> Option<&str> {
         self.sheets_selection.as_deref()
+    }
+
+    /// Legacy book beam thickness before migration into the parameter structure.
+    #[must_use]
+    pub const fn deprecated_beam_specification(&self) -> Option<i32> {
+        self.deprecated_beam_specification
     }
 
     /// Direct child sheet stubs in document order.
@@ -1305,6 +1366,12 @@ pub enum BookXmlError {
     DuplicateSheetsSelection,
     /// The typed sheet-selection scalar contains markup or an entity reference.
     UnexpectedSheetsSelectionContent,
+    /// A book repeats the deprecated direct beam-specification scalar.
+    DuplicateDeprecatedBeamSpecification,
+    /// The deprecated beam specification is not a Java `int`.
+    InvalidDeprecatedBeamSpecification(String),
+    /// The deprecated beam scalar contains markup or an entity reference.
+    UnexpectedDeprecatedBeamSpecificationContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1576,6 +1643,18 @@ impl fmt::Display for BookXmlError {
             }
             Self::UnexpectedSheetsSelectionContent => {
                 write!(formatter, "book sheets-selection contains non-text content")
+            }
+            Self::DuplicateDeprecatedBeamSpecification => {
+                write!(formatter, "book has duplicate beam-specification elements")
+            }
+            Self::InvalidDeprecatedBeamSpecification(value) => {
+                write!(formatter, "book has invalid beam specification {value:?}")
+            }
+            Self::UnexpectedDeprecatedBeamSpecificationContent => {
+                write!(
+                    formatter,
+                    "book beam-specification contains non-text content"
+                )
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -1885,6 +1964,19 @@ fn begin_sheets_selection(current: &Option<String>) -> Result<(), BookXmlError> 
         return Err(BookXmlError::DuplicateSheetsSelection);
     }
     Ok(())
+}
+
+fn begin_deprecated_beam_specification(current: &Option<i32>) -> Result<(), BookXmlError> {
+    if current.is_some() {
+        return Err(BookXmlError::DuplicateDeprecatedBeamSpecification);
+    }
+    Ok(())
+}
+
+fn parse_deprecated_beam_specification(text: &str) -> Result<i32, BookXmlError> {
+    text.trim()
+        .parse::<i32>()
+        .map_err(|_| BookXmlError::InvalidDeprecatedBeamSpecification(text.to_owned()))
 }
 
 fn parse_book_root(
@@ -3687,6 +3779,64 @@ mod tests {
             assert_eq!(
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::UnexpectedSheetsSelectionContent
+            );
+        }
+    }
+
+    #[test]
+    fn reads_deprecated_book_beam_specification_with_raw_java_int_semantics() {
+        let xml = br#"<book><beam-specification> -2147483648 </beam-specification><parameters><beam-thickness>99</beam-thickness></parameters></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+
+        assert_eq!(book.deprecated_beam_specification(), Some(i32::MIN));
+        assert_eq!(book.original_bytes(), xml);
+        assert_eq!(
+            BookXml::parse(br#"<book/>"#)
+                .unwrap()
+                .deprecated_beam_specification(),
+            None
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><beam-specification>2<![CDATA[1]]></beam-specification></book>"#,
+            )
+            .unwrap()
+            .deprecated_beam_specification(),
+            Some(21)
+        );
+    }
+
+    #[test]
+    fn ignores_non_direct_deprecated_beam_specification_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><future><beam-specification>8</beam-specification></future><f:beam-specification>7</f:beam-specification><sheet number="1"><beam-specification>6</beam-specification></sheet><beam-specification>5</beam-specification></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.deprecated_beam_specification(), Some(5));
+    }
+
+    #[test]
+    fn rejects_invalid_duplicate_or_non_text_deprecated_beam_specification() {
+        for invalid in ["", "not-a-number", "2147483648", "-2147483649"] {
+            let xml = format!("<book><beam-specification>{invalid}</beam-specification></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidDeprecatedBeamSpecification(invalid.to_owned())
+            );
+        }
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><beam-specification>1</beam-specification><beam-specification>2</beam-specification></book>"#,
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateDeprecatedBeamSpecification
+        );
+        for content in ["<future/>", "&#49;", "<!--1-->", "<?pick 1?>"] {
+            let xml = format!("<book><beam-specification>{content}</beam-specification></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedDeprecatedBeamSpecificationContent
             );
         }
     }
