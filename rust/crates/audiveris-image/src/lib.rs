@@ -5,6 +5,7 @@
 pub mod adaptive;
 pub mod bar_alignment;
 pub mod bar_column;
+pub mod bars_logic;
 pub mod chamfer;
 pub mod comb_builder;
 pub mod filament;
