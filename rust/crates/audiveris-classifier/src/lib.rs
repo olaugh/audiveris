@@ -145,12 +145,15 @@ fn forward(inputs: &[f64], weights: &[Vec<f64>]) -> Vec<f64> {
     weights
         .iter()
         .map(|row| {
-            let sum = row[0]
-                + inputs
-                    .iter()
-                    .zip(&row[1..])
-                    .map(|(input, weight)| input * weight)
-                    .sum::<f64>();
+            // `NeuralNetwork.forward` iterates the input cells from the last
+            // index down to zero, then adds the bias. Keep that accumulation
+            // order: raw classifier vectors are a numerical compatibility
+            // boundary, not merely an approximate neural-network result.
+            let mut sum = 0.0;
+            for index in (0..inputs.len()).rev() {
+                sum += row[index + 1] * inputs[index];
+            }
+            sum += row[0];
             1.0 / (1.0 + (-sum).exp())
         })
         .collect()
@@ -362,5 +365,29 @@ mod tests {
             grades[0].grade
         );
         assert!((grades[148].grade - 0.000_001_605_550_197_838_038_7).abs() < 1e-18);
+    }
+
+    #[test]
+    fn synthetic_raw_vector_matches_the_production_java_oracle() {
+        // Kept in lockstep with `RustParityProbe`; the full 149-output oracle
+        // lives in `xtask vectors`, while these separated positions make a
+        // classifier-only regression immediately legible.
+        let classifier = BasicClassifier::bundled().expect("bundled model");
+        let raw: [f64; INPUT_SIZE] =
+            std::array::from_fn(|index| ((index * 17 % 23) as f64 - 11.0) / 7.0);
+        let grades = classifier.evaluate(&raw);
+        for (index, shape, expected) in [
+            (0, "DOT_set", 0.000_005_931_338_051_75),
+            (45, "TIME_TWO_FOUR", 0.001_736_790_154_075_68),
+            (95, "DYNAMICS_P", 0.002_043_468_506_365_16),
+            (148, "CLUTTER", 0.000_303_653_776_463_52),
+        ] {
+            assert_eq!(grades[index].shape, shape);
+            assert!(
+                (grades[index].grade - expected).abs() < 5e-18,
+                "grade for {shape}: {}",
+                grades[index].grade
+            );
+        }
     }
 }

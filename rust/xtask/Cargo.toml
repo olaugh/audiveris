@@ -8,6 +8,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+audiveris-classifier = { path = "../crates/audiveris-classifier" }
 audiveris-core = { path = "../crates/audiveris-core" }
 audiveris-image = { path = "../crates/audiveris-image" }
 audiveris-omr = { path = "../crates/audiveris-omr" }

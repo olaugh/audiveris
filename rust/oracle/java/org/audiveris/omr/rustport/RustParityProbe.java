@@ -9,6 +9,7 @@ import java.awt.image.Raster;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,6 +46,7 @@ import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
 import org.audiveris.omr.math.LineUtil;
+import org.audiveris.omr.math.NeuralNetwork;
 import org.audiveris.omr.math.NaturalSpline;
 import org.audiveris.omr.math.Projection;
 import org.audiveris.omr.math.Range;
@@ -102,6 +104,7 @@ import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
 import org.audiveris.omr.util.WrappedInteger;
+import org.audiveris.omr.util.ZipFileSystem;
 
 /** Emits stable vectors from the production Java classes for Rust parity checks. */
 public final class RustParityProbe
@@ -139,6 +142,43 @@ public final class RustParityProbe
 
         double grade = GradeUtil.contextual(0.2, new double[]{0.5, 0.8}, new double[]{5.0, 2.0});
         System.out.printf(java.util.Locale.ROOT, "grade.contextual=%.17f%n", grade);
+
+        // Load the checked-in production classifier artifact directly. The
+        // BasicClassifier singleton cannot find its application resource from
+        // this isolated Gradle probe classpath, and may otherwise select a
+        // user training override. This gives the oracle the same immutable
+        // model that the Rust crate bundles.
+        Path basicArchive = Path.of("app", "res", "basic-classifier.zip");
+        Path basicRoot = ZipFileSystem.open(basicArchive);
+        NeuralNetwork basicModel;
+        double[] basicMeans;
+        double[] basicStds;
+        try {
+            try (java.io.InputStream input = Files.newInputStream(basicRoot.resolve("model.xml"))) {
+                basicModel = NeuralNetwork.unmarshal(input);
+            }
+            basicMeans = xmlVector(basicRoot.resolve("means.xml"));
+            basicStds = xmlVector(basicRoot.resolve("stds.xml"));
+        } finally {
+            basicRoot.getFileSystem().close();
+        }
+        double[] basicFeatures = new double[110];
+        for (int index = 0; index < basicFeatures.length; index++) {
+            basicFeatures[index] = ((index * 17 % 23) - 11) / 7.0;
+            basicFeatures[index] = (basicFeatures[index] - basicMeans[index]) / basicStds[index];
+        }
+        double[] basicGrades = basicModel.run(basicFeatures, null, null);
+        StringBuilder basicVector = new StringBuilder();
+        String[] basicShapes = basicModel.getOutputLabels();
+        for (int index = 0; index < basicGrades.length; index++) {
+            if (index > 0) {
+                basicVector.append(';');
+            }
+            basicVector.append(basicShapes[index])
+                    .append(':')
+                    .append(String.format(java.util.Locale.ROOT, "%.17f", basicGrades[index]));
+        }
+        System.out.println("classifier.basic.synthetic=" + basicVector);
 
         InjectionSolver solver = new InjectionSolver(
                 3,
@@ -1690,6 +1730,24 @@ public final class RustParityProbe
             values[index] = image.get(index % image.getWidth(), index / image.getWidth());
         }
         return Arrays.toString(values);
+    }
+
+    private static double[] xmlVector (Path path)
+        throws Exception
+    {
+        org.w3c.dom.Document document;
+        try (java.io.InputStream input = Files.newInputStream(path)) {
+            document = javax.xml.parsers.DocumentBuilderFactory
+                    .newInstance()
+                    .newDocumentBuilder()
+                    .parse(input);
+        }
+        org.w3c.dom.NodeList values = document.getElementsByTagName("value");
+        double[] vector = new double[values.getLength()];
+        for (int index = 0; index < vector.length; index++) {
+            vector[index] = Double.parseDouble(values.item(index).getTextContent().trim());
+        }
+        return vector;
     }
 
     private static Object field (Object instance,

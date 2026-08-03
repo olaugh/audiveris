@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use audiveris_classifier::{BasicClassifier, INPUT_SIZE};
 use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
     integer_function::IntegerFunction, natural_spec, natural_spline::NaturalSpline,
@@ -284,7 +285,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 70] = [
+const VECTOR_KEYS: [&str; 71] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -294,6 +295,7 @@ const VECTOR_KEYS: [&str; 70] = [
     "line.origin=",
     "line.one-ten=",
     "grade.contextual=",
+    "classifier.basic.synthetic=",
     "injection=",
     "integer.function=",
     "projection.short.synthetic=",
@@ -1943,6 +1945,28 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     let contextual = grade::contextual_from_partners(0.2, &[0.5, 0.8], &[5.0, 2.0])
         .map_err(|error| error.to_owned())?;
     lines.push(format!("grade.contextual={contextual:.17}"));
+
+    // This fixture deliberately enters the native classifier below feature
+    // extraction. The production Java probe obtains the same bundled
+    // BasicClassifier singleton, normalizes this exact vector in situ, and
+    // invokes its private NeuralNetwork model. Keeping every output in model
+    // order detects weight orientation, normalization, accumulation, and
+    // sigmoid differences without entangling an unported descriptor stage.
+    let classifier = BasicClassifier::bundled()?;
+    let features: [f64; INPUT_SIZE] =
+        std::array::from_fn(|index| ((index * 17 % 23) as f64 - 11.0) / 7.0);
+    let grades = classifier.evaluate(&features);
+    if grades.len() != audiveris_classifier::OUTPUT_SIZE {
+        return Err("bundled classifier returned an unexpected output count".into());
+    }
+    lines.push(format!(
+        "classifier.basic.synthetic={}",
+        grades
+            .iter()
+            .map(|grade| format!("{}:{:.17}", grade.shape, grade.grade))
+            .collect::<Vec<_>>()
+            .join(";")
+    ));
 
     let (mapping, cost) = injection_solver::solve(3, 3, |domain, range| {
         (i32::try_from(domain + 1).expect("small fixture")
