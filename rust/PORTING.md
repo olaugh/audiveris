@@ -37,10 +37,10 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 51 canonical cross-runtime fixtures matching through StaffProjector peak-candidate construction |
+| Live Java/Rust vectors | 52 canonical cross-runtime fixtures matching through StaffProjector core-pixel validation |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 291 tests green at checkpoint 97: core 38, image 147, OMR 91, testkit 6, CLI 4, xtask 5 |
+| Rust workspace | 294 tests green at checkpoint 99: core 38, image 150, OMR 91, testkit 6, CLI 4, xtask 5 |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -65,7 +65,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
 | GRID comb and cluster core | ties-even vertical comb discovery, weighted popular size, neutral stable-ID comb state, ordered line-cluster membership, absorption, merge, trim, endpoints, bounds, mean length, indexed inclusion, and point extrapolation; exact live discovery and lifecycle vectors; full recursive orchestration queued |
 | GRID peaks and peak graph | neutral `StaffPeak`, `PartGroup`, and stable-ID graph storage; incident/connection queries, alignment purge, connection median geometry, and brace checks; production SIG promotion/integration queued |
-| GRID StaffProjector | short projection, derivative threshold, blank selection, peak-side refinement, peak-candidate construction, and core-pixel validation; exact live vectors through candidate construction; end-to-end promotion and sheet ownership queued |
+| GRID StaffProjector | short projection, derivative threshold, blank selection, peak-side refinement, peak-candidate construction, core-pixel validation, six-impact grading, and neutral peak promotion; exact live vectors through core validation; sheet ownership and graph mutation queued |
 | GRID bar columns | neutral fixed staff slots, peak/chain room and overwrite behavior, cached means, start/brace/full status, alignment/connection selection, and explicit connection adjacency; exact production-Java vector; production SIG integration queued |
 | GRID target geometry | source-guided target-line deskew mapping with exact live sloped-line parity plus immutable cycle-free page/system/staff containers |
 | Remaining filters and PDF ingest | queued |

@@ -178,21 +178,22 @@ denied, and passed `git diff --check` before commit.
 95. `cdcdd4e1` — live Java/Rust StaffProjector peak-side refinement vector.
 96. `89ffa5ef` — live Java/Rust StaffProjector peak-candidate construction vector.
 97. `9ba3dedb` — source-guided StaffProjector core-pixel validation.
+98. `4a02e713` — live Java/Rust StaffProjector core-pixel validation vector.
+99. `5977ee01` — source-guided StaffProjector impact grading and neutral peak promotion.
 
-At the ninety-seventh checkpoint the Rust workspace executes 291 tests:
+At the ninety-ninth checkpoint the Rust workspace executes 294 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 147
+- `audiveris-image`: 150
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 51 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 52 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
-refinement, and peak-candidate construction. Core-pixel validation is covered by Rust
-tests but does not yet have its own live Java/Rust vector.
+refinement, peak-candidate construction, and core-pixel validation.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -240,10 +241,10 @@ GRID orchestration remain deliberately unported coupling boundaries.
 
 The StaffProjector slice now includes `ShortProjection`, derivative thresholds, blank
 selection, peak-side refinement, candidate construction, and core-pixel validation.
-Every boundary through candidate construction has an exact live Java vector; the
-core-pixel predicate currently has focused Rust tests and is the next obvious oracle
-candidate. It is still a library slice rather than an end-to-end staff projector: peak
-promotion, sheet/glyph ownership, and downstream graph mutation remain queued.
+Every boundary through core-pixel validation has an exact live Java vector. Validated
+evidence now also feeds source-compatible six-impact grading and neutral `StaffPeak`
+promotion. It is still a library slice rather than an end-to-end staff projector:
+sheet/glyph ownership and downstream graph mutation remain queued.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
