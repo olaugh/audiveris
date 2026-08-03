@@ -23,7 +23,15 @@ use audiveris_image::{
     },
     global_filter::global_filter,
     glyph_factory::{GlyphComponent, build_glyph_components},
+    multiple_rest_serifs::{
+        MultipleRestSerifSearchEvidence, MultipleRestSerifSearchInput, SerifFilamentParameters,
+        SerifGlyphEvidence, SerifMaterializationError, SerifStaffLines, materialize_serif_glyph,
+        search_multiple_rest_serifs,
+    },
+    projection::{MultiRestSideRequest, NeutralStaffProjectorResult, ProjectionError},
     run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
+    section::Section,
+    staff_peak::PeakBounds,
     system_population::PopulationSystemArea,
 };
 
@@ -220,6 +228,7 @@ pub struct NativeBeamKernelConfig {
     pub extension_systems: Vec<NativeBeamExtensionSystem>,
     pub hook_systems: Vec<NativeBeamHookSystem>,
     pub grouping_systems: Vec<NativeBeamGroupingSystem>,
+    pub multiple_rest_systems: Vec<NativeMultipleRestSystem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -244,6 +253,34 @@ pub struct NativeBeamGroupingSystem {
     /// ordinate sort after filtering this list to current raw beam inters.
     pub beams: Vec<GroupingBeam>,
     pub parameters: BeamGroupParameters,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeMultipleRestBeam {
+    pub beam_id: usize,
+    pub bounds: PeakBounds,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeMultipleRestStaff {
+    pub staff_id: usize,
+    pub projector: NeutralStaffProjectorResult,
+    pub lines: SerifStaffLines,
+    pub request: MultiRestSideRequest,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeMultipleRestSystem {
+    pub system_id: usize,
+    /// Java `Picture.SourceKey.BINARY`, including staff lines.
+    pub raster: RunTable,
+    pub system_bounds: PeakBounds,
+    pub beams: Vec<NativeMultipleRestBeam>,
+    pub staves: Vec<NativeMultipleRestStaff>,
+    pub vertical_sections: Vec<Section>,
+    pub horizontal_sections: Vec<Section>,
+    pub foreground_thickness: f64,
+    pub filament: SerifFilamentParameters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -342,13 +379,19 @@ pub struct MultipleRestProbeOutcome<VisualError> {
     pub error: Option<VisualError>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultipleRestProbeInput {
+    pub evidence: MultipleRestBeamEvidence,
+    pub native_evidence: Result<Option<MultipleRestSerifSearchEvidence>, ProjectionError>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum BeamHorizontalSide {
     Left,
     Right,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MultipleRestSerifInput {
     pub sheet_id: usize,
     pub system_id: usize,
@@ -356,6 +399,7 @@ pub struct MultipleRestSerifInput {
     pub side: BeamHorizontalSide,
     pub peak: MultipleRestPeak,
     pub eligible_section_ids: Vec<usize>,
+    pub native_evidence: Result<Option<SerifGlyphEvidence>, SerifMaterializationError>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -402,7 +446,7 @@ pub trait VisualBeams {
 
     fn probe_multiple_rest(
         &mut self,
-        evidence: MultipleRestBeamEvidence,
+        input: MultipleRestProbeInput,
     ) -> MultipleRestProbeOutcome<Self::Error>;
 
     fn materialize_multiple_rest_serif(
@@ -595,7 +639,12 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             {
                 continue;
             }
-            let probe = self.visual.probe_multiple_rest(evidence);
+            let native_evidence =
+                self.native_multiple_rest_search(&sheet.systems[system_index], evidence);
+            let probe = self.visual.probe_multiple_rest(MultipleRestProbeInput {
+                evidence,
+                native_evidence: native_evidence.clone(),
+            });
             if let Some(error) = probe.error {
                 return Ok(Some(error));
             }
@@ -606,7 +655,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                         actual: candidate.beam_id,
                     });
                 }
-                found.push((candidate, evidence));
+                found.push((candidate, evidence, native_evidence));
             }
         }
         if found.is_empty() {
@@ -615,12 +664,12 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
 
         let max_width = found
             .iter()
-            .flat_map(|(candidate, _)| [candidate.left_peak.width, candidate.right_peak.width])
+            .flat_map(|(candidate, _, _)| [candidate.left_peak.width, candidate.right_peak.width])
             .max()
             .unwrap_or(0);
         let eligible_section_ids =
             eligible_multiple_rest_sections(&sheet.systems[system_index], max_width);
-        for (candidate, evidence) in &found {
+        for (candidate, evidence, native_search) in &found {
             let staff_id = evidence.staff_id.expect("filtered multiple-rest staff");
             let rest = NeutralBeamInter {
                 id: candidate.multiple_rest_inter_id,
@@ -649,6 +698,19 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                 (BeamHorizontalSide::Left, candidate.left_peak),
                 (BeamHorizontalSide::Right, candidate.right_peak),
             ] {
+                let native_peak = native_search
+                    .as_ref()
+                    .ok()
+                    .and_then(Option::as_ref)
+                    .and_then(|search| match side {
+                        BeamHorizontalSide::Left => search.left.as_ref(),
+                        BeamHorizontalSide::Right => search.right.as_ref(),
+                    });
+                let native_evidence = self.native_multiple_rest_materialization(
+                    &sheet.systems[system_index],
+                    native_peak,
+                    max_width,
+                );
                 let serif = self
                     .visual
                     .materialize_multiple_rest_serif(MultipleRestSerifInput {
@@ -658,6 +720,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                         side,
                         peak,
                         eligible_section_ids: eligible_section_ids.clone(),
+                        native_evidence,
                     });
                 apply_delta(sheet, system_index, serif.delta)?;
                 if serif.error.is_none() {
@@ -701,7 +764,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             BeamSystemDelta {
                 mutations: found
                     .iter()
-                    .map(|(candidate, _)| BeamSystemMutation::RemoveInter(candidate.beam_id))
+                    .map(|(candidate, _, _)| BeamSystemMutation::RemoveInter(candidate.beam_id))
                     .collect(),
             },
         )?;
@@ -1032,6 +1095,79 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             .filter_map(|id| scene.beams.iter().find(|beam| beam.id == *id).copied())
             .collect::<Vec<_>>();
         Some(group_beam_evidence(&beams, scene.parameters))
+    }
+
+    fn native_multiple_rest_search(
+        &self,
+        system: &NeutralBeamSystem,
+        evidence: MultipleRestBeamEvidence,
+    ) -> Result<Option<MultipleRestSerifSearchEvidence>, ProjectionError> {
+        let Some(config) = self.native_kernel.as_ref() else {
+            return Ok(None);
+        };
+        let Some(scene) = config
+            .multiple_rest_systems
+            .iter()
+            .find(|scene| scene.system_id == system.id)
+        else {
+            return Ok(None);
+        };
+        let Some(beam) = scene
+            .beams
+            .iter()
+            .find(|beam| beam.beam_id == evidence.beam_id)
+        else {
+            return Ok(None);
+        };
+        let Some(staff_id) = evidence.staff_id else {
+            return Ok(None);
+        };
+        let Some(staff) = scene.staves.iter().find(|staff| staff.staff_id == staff_id) else {
+            return Ok(None);
+        };
+        let pixels = scene.raster.to_pixels();
+        search_multiple_rest_serifs(MultipleRestSerifSearchInput {
+            projector: &staff.projector,
+            raster_width: scene.raster.width(),
+            raster_height: scene.raster.height(),
+            pixels: &pixels,
+            beam_bounds: beam.bounds,
+            beam_height: evidence.height,
+            staff_lines: staff.lines,
+            request: staff.request,
+        })
+        .map(Some)
+    }
+
+    fn native_multiple_rest_materialization(
+        &self,
+        system: &NeutralBeamSystem,
+        peak: Option<&audiveris_image::staff_peak::StaffPeak>,
+        maximum_serif_width: i32,
+    ) -> Result<Option<SerifGlyphEvidence>, SerifMaterializationError> {
+        let Some(peak) = peak else {
+            return Ok(None);
+        };
+        let Some(config) = self.native_kernel.as_ref() else {
+            return Ok(None);
+        };
+        let Some(scene) = config
+            .multiple_rest_systems
+            .iter()
+            .find(|scene| scene.system_id == system.id)
+        else {
+            return Ok(None);
+        };
+        materialize_serif_glyph(
+            peak.clone(),
+            maximum_serif_width,
+            scene.system_bounds,
+            &scene.vertical_sections,
+            &scene.horizontal_sections,
+            scene.foreground_thickness,
+            scene.filament,
+        )
+        .map(Some)
     }
 
     fn dispatch_spots(
@@ -1406,6 +1542,7 @@ mod tests {
         hooks: BTreeMap<(usize, usize, BeamHookSide), BeamStageOutcome<&'static str>>,
         groups: BTreeMap<usize, BeamStageOutcome<&'static str>>,
         rest_probes: BTreeMap<usize, MultipleRestProbeOutcome<&'static str>>,
+        rest_probe_inputs: Vec<MultipleRestProbeInput>,
         serifs: BTreeMap<(usize, BeamHorizontalSide), MultipleRestSerifOutcome<&'static str>>,
         calls: Vec<(&'static str, usize)>,
         closing_inputs: Vec<BeamClosingInput>,
@@ -1501,11 +1638,13 @@ mod tests {
 
         fn probe_multiple_rest(
             &mut self,
-            evidence: MultipleRestBeamEvidence,
+            input: MultipleRestProbeInput,
         ) -> MultipleRestProbeOutcome<Self::Error> {
-            self.calls.push(("rest-probe", evidence.beam_id));
+            self.calls.push(("rest-probe", input.evidence.beam_id));
+            let beam_id = input.evidence.beam_id;
+            self.rest_probe_inputs.push(input);
             self.rest_probes
-                .remove(&evidence.beam_id)
+                .remove(&beam_id)
                 .unwrap_or(MultipleRestProbeOutcome {
                     candidate: None,
                     error: None,
@@ -1699,6 +1838,7 @@ mod tests {
             extension_systems: Vec::new(),
             hook_systems: Vec::new(),
             grouping_systems: Vec::new(),
+            multiple_rest_systems: Vec::new(),
         }
     }
 
