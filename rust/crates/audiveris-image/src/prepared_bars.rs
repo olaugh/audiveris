@@ -30,6 +30,10 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct PreparedBarsSystem {
     pub system_id: usize,
+    /// Exact Java `SystemInfo.getStaves()` traversal, expressed as stable
+    /// staff identities. This cannot be reconstructed from `staff_peaks`: a
+    /// valid staff may own no surviving bar peak.
+    pub staff_ids: Vec<usize>,
     pub staff_peaks: Vec<Vec<StaffPeak>>,
     /// Java `StaffProjector.getBracePeak()` per staff, kept detached from the
     /// ordinary peak list and SIG promotion path.
@@ -259,13 +263,13 @@ fn validate_staff_join<UpstreamError>(
     for system in systems {
         for staff in system.staffs() {
             let id = staff.staff_id();
+            if !seen.insert(id) {
+                return Err(ProductionProcessBarsError::DuplicateStaff(id));
+            }
             if previous.is_some_and(|prior: StaffId| prior.value() >= id.value()) {
                 return Err(ProductionProcessBarsError::InvalidStaffOrder(id));
             }
             previous = Some(id);
-            if !seen.insert(id) {
-                return Err(ProductionProcessBarsError::DuplicateStaff(id));
-            }
             let candidate = prepared
                 .staffs
                 .iter()
@@ -342,6 +346,11 @@ fn append_system_in_place<UpstreamError>(
     }
     handoff.systems.push(PreparedBarsSystem {
         system_id: state.system_id(),
+        staff_ids: state
+            .staffs()
+            .iter()
+            .map(|staff| staff.staff_id().value())
+            .collect(),
         staff_peaks: state
             .staffs()
             .iter()
@@ -463,6 +472,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(1, 1), (2, 2)]
         );
+        assert_eq!(handoff.systems[0].staff_ids, [1, 2]);
+        assert_eq!(handoff.systems[1].staff_ids, [3, 4]);
     }
 
     #[test]
@@ -522,6 +533,29 @@ mod tests {
             Err(ProductionProcessBarsError::StaffKindMismatch(StaffId::new(
                 1
             )))
+        );
+    }
+
+    #[test]
+    fn staff_join_reports_duplicate_before_generic_order_failure() {
+        let prepared = PreparedStaffHandoff {
+            staffs: (1..=3)
+                .map(|id| PreparedStaff {
+                    id,
+                    kind: StaffCandidateKind::OneLine,
+                    left: 0.0,
+                    right: 40.0,
+                    interline: 10,
+                    small: false,
+                    short: false,
+                    lines: Vec::new(),
+                })
+                .collect(),
+        };
+
+        assert_eq!(
+            validate_staff_join::<()>(&prepared, &[system(1, 1, 2), system(2, 2, 3)]),
+            Err(ProductionProcessBarsError::DuplicateStaff(StaffId::new(2)))
         );
     }
 

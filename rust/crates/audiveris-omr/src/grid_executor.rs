@@ -12,6 +12,7 @@ use std::convert::Infallible;
 
 use audiveris_image::{
     bar_alignment::BarAlignment,
+    bars_coordinator::{BarsCoordinatorParameters, BarsSystemState},
     bars_logic::{BarsLogicError, ConnectionInterPlan, VerticalInterPlan},
     discarded_completion::PreparedCompletionSystem,
     filament::StaffFilament,
@@ -27,14 +28,18 @@ use audiveris_image::{
     line_short_sections::NoopVipSectionHook,
     lines_coordinator::{LinesCoordinatorParameters, StaffCandidateKind},
     peak_graph::{PeakEdgeId, PeakGraph},
-    prepared_bars::{PreparedBarsHandoff, PreparedBarsHandoffSource},
+    prepared_bars::{
+        PreparedBarsHandoff, PreparedBarsHandoffSource, ProductionProcessBars,
+        ProductionProcessBarsError,
+    },
     prepared_completion::{
         ProductionCompleteLines, ProductionLineCompletion, ProductionLineCompletionParameters,
         production_line_completion,
     },
     prepared_lines::{
         PreparedStaffHandoff, PreparedStaffHandoffSource, PreparedStaffLine,
-        RawLineMetadataHandoff, RawLineMetadataHandoffSource, RawProductionRetrieveLines,
+        ProductionRetrieveLinesError, RawLineMetadataHandoff, RawLineMetadataHandoffSource,
+        RawProductionRetrieveLines,
     },
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridHandoff, RasterGridHandoffSource,
@@ -682,6 +687,69 @@ where
     }
 }
 
+impl<Downstream>
+    HeadlessGridExecutor<
+        HeadlessRasterGridBuilder<
+            ProductionCompleteLines<
+                ProductionProcessBars<RawProductionRetrieveLines<Downstream>>,
+                ProductionLineCompletion<Downstream::StepError>,
+            >,
+        >,
+    >
+where
+    Downstream: RemainingRasterGridStages,
+{
+    /// Construct the first strict raw `GRID` chain whose `ProcessBars`
+    /// producer automatically supplies exact system/staff ownership to every
+    /// concrete `CompleteLines` collaborator.
+    ///
+    /// Ownership comes from the ordered [`BarsSystemState`] values and their
+    /// stable staff IDs. It is never inferred from a flat staff handoff or
+    /// from surviving peak lists.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw_raster_bars_complete_lines(
+        source: RunTable,
+        raster_parameters: RasterGridParameters,
+        raw_parameters: RawPrimaryPassParameters,
+        lines_parameters: LinesCoordinatorParameters,
+        downstream: Downstream,
+        bar_systems: Vec<BarsSystemState>,
+        bars_parameters: BarsCoordinatorParameters,
+        maximum_group_gap: i32,
+        completion_parameters: ProductionLineCompletionParameters,
+        maximum_thin_weight: usize,
+        inspect_crossing_chunks: bool,
+        sheet: HeadlessGridSheet,
+        book: HeadlessGridBook,
+    ) -> Result<
+        Self,
+        ProductionProcessBarsError<ProductionRetrieveLinesError<Downstream::OtherError>>,
+    > {
+        let prepared_binary = source.clone();
+        let raw = RawProductionRetrieveLines::new(raw_parameters, lines_parameters, downstream);
+        let bars =
+            ProductionProcessBars::new(raw, bar_systems, bars_parameters, maximum_group_gap)?;
+        let completion = production_line_completion(completion_parameters);
+        let stages = ProductionCompleteLines::new(
+            bars,
+            completion,
+            Some(prepared_binary),
+            maximum_thin_weight,
+            inspect_crossing_chunks,
+        )
+        .with_completion_systems_from_prepared_bars();
+        Ok(Self::new(
+            HeadlessRasterGridBuilder::new(source, raster_parameters, stages),
+            sheet,
+            book,
+        )
+        .with_raster_grid_handoff()
+        .with_raw_line_metadata_handoff()
+        .with_prepared_staff_handoff()
+        .with_prepared_bars_handoff())
+    }
+}
+
 impl<Builder> GridStepExecutor for HeadlessGridExecutor<Builder>
 where
     Builder: GridBuildExecutor,
@@ -1219,7 +1287,7 @@ mod tests {
         line_short_sections::HorizontalSectionLag,
         lines_coordinator::{ClusterPassState, LinesCoordinatorParameters},
         prepared_bars::{PreparedBarsSystem, ProductionProcessBars},
-        prepared_completion::ProductionCompleteLinesError,
+        prepared_completion::{PreparedCompletionOwnershipError, ProductionCompleteLinesError},
         prepared_lines::ProductionRetrieveLines,
         raster_grid_builder::{
             HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridOtherError,
@@ -1550,6 +1618,33 @@ mod tests {
             system_id: 1,
             staff_ids: vec![1],
         }]
+    }
+
+    fn raw_completion_bar_system(system_id: usize) -> BarsSystemState {
+        let mut bar = peak(1, 10);
+        bar.compute_deskewed_center(|point| point).unwrap();
+        let bar_key = bar.key();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(bar.clone());
+        BarsSystemState::new(
+            system_id,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![bar],
+                    BTreeMap::from([(bar_key, true)]),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap()
+    }
+
+    fn raw_bars_parameters() -> BarsCoordinatorParameters {
+        BarsCoordinatorParameters::new(2, 12, 6, 20, 2, 10, 0.2, None).unwrap()
     }
 
     fn cluster_parameters() -> ClusterRetrievalParameters {
@@ -2232,6 +2327,7 @@ mod tests {
         let handoff = PreparedBarsHandoff {
             systems: vec![PreparedBarsSystem {
                 system_id: 1,
+                staff_ids: vec![1],
                 staff_peaks: vec![vec![bar]],
                 brace_peaks: vec![None],
                 vertical_plans: Vec::new(),
@@ -2535,6 +2631,122 @@ mod tests {
         assert_eq!(executor.sheet.skew.expect("forwarded raw slope").slope, 0.0);
         assert_eq!(executor.sheet.staffs.len(), 1);
         assert_eq!(executor.sheet.staffs[0].lines.len(), 5);
+    }
+
+    #[test]
+    fn raw_bars_completion_constructor_derives_exact_ownership_automatically() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_bars_complete_lines(
+            split_middle_with_discarded_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            vec![raw_completion_bar_system(1)],
+            raw_bars_parameters(),
+            3,
+            raw_completion_parameters(120),
+            1_000,
+            true,
+            base.sheet,
+            base.book,
+        )
+        .unwrap();
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(
+            matches!(executor.build_outcome, Some(GridBuildOutcome::Completed)),
+            "unexpected build outcome: {:?}",
+            executor.build_outcome
+        );
+        let stages = executor.builder.stages();
+        let state = stages.state().expect("automatic completion state");
+        assert_eq!(state.completion_systems, Some(raw_completion_systems()));
+        assert_eq!(state.completed_stages.len(), 11);
+        assert_eq!(stages.completion().finish_count(), 1);
+        assert_eq!(stages.upstream().upstream().downstream().finish_count, 1);
+        assert_eq!(executor.sheet.sig.systems.len(), 1);
+        assert_eq!(executor.sheet.sig.systems[0].system_id, 1);
+        assert_eq!(executor.sheet.staffs.len(), 1);
+        assert_eq!(executor.sheet.skew.expect("raw slope installed").slope, 0.0);
+    }
+
+    #[test]
+    fn duplicate_raw_bar_ownership_retains_retrieval_prefix_and_skips_completion() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_bars_complete_lines(
+            split_middle_with_discarded_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            vec![raw_completion_bar_system(1), raw_completion_bar_system(2)],
+            raw_bars_parameters(),
+            3,
+            raw_completion_parameters(120),
+            1_000,
+            true,
+            base.sheet,
+            base.book,
+        )
+        .unwrap();
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome.as_ref(),
+            Some(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::ProcessBars,
+                error: HeadlessBuildOtherError::Builder(RasterGridOtherError::Collaborator(
+                    ProductionCompleteLinesError::Upstream(
+                        ProductionProcessBarsError::DuplicateStaff(staff)
+                    )
+                )),
+            }) if *staff == StaffId::new(1)
+        ));
+        let stages = executor.builder.stages();
+        assert!(stages.state().is_none());
+        assert_eq!(stages.completion().finish_count(), 0);
+        assert_eq!(stages.upstream().upstream().downstream().finish_count, 1);
+        assert_eq!(executor.sheet.staffs.len(), 1);
+        assert_eq!(executor.sheet.staffs[0].id, 1);
+        assert_eq!(executor.sheet.skew.expect("raw slope prefix").slope, 0.0);
+        assert!(executor.sheet.sig.systems.is_empty());
+    }
+
+    #[test]
+    fn automatic_completion_rejects_unowned_one_line_staff_at_process_bars_join() {
+        // This focused assertion freezes the current Java-removal seam: a
+        // one-line staff omitted by ProcessBars is not silently flattened or
+        // renumbered for completion.
+        let prepared = audiveris_image::prepared_lines::PreparedStaffHandoff {
+            staffs: vec![audiveris_image::prepared_lines::PreparedStaff {
+                id: 1,
+                kind: StaffCandidateKind::OneLine,
+                left: 0.0,
+                right: 40.0,
+                interline: 10,
+                small: false,
+                short: false,
+                lines: Vec::new(),
+            }],
+        };
+        let bars = PreparedBarsHandoff {
+            systems: Vec::new(),
+            peak_graph: PeakGraph::new(),
+            connections: Vec::new(),
+        };
+        assert_eq!(
+            audiveris_image::prepared_completion::validate_prepared_completion_ownership(
+                &prepared, &bars,
+            ),
+            Err(PreparedCompletionOwnershipError::UnownedStaff(1))
+        );
     }
 
     #[test]
