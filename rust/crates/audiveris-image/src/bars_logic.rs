@@ -420,6 +420,34 @@ pub fn graph_bar_chains<R>(graph: &PeakGraph<R>) -> Result<Vec<Vec<BarPeak>>, Ba
         .collect()
 }
 
+/// Java `purgeUnalignedBars` selection for one staff.
+///
+/// Only multi-staff systems run this purge. Projector peaks absent from the
+/// graph are intentionally retained; a present vertex is removed only when it
+/// has no incoming or outgoing alignment/connection edge.
+#[must_use]
+pub fn unaligned_peak_keys<R>(
+    peaks: &[StaffPeak],
+    graph: &PeakGraph<R>,
+    is_multi_staff_system: bool,
+) -> Vec<StaffPeakKey> {
+    if !is_multi_staff_system {
+        return Vec::new();
+    }
+    peaks
+        .iter()
+        .filter(|peak| {
+            graph.contains_vertex(peak.key())
+                && graph
+                    .edges_of(peak.key())
+                    .expect("contains-vertex check makes edges_of valid")
+                    .next()
+                    .is_none()
+        })
+        .map(StaffPeak::key)
+        .collect()
+}
+
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
 #[must_use]
 pub fn peak_extension(
@@ -1004,6 +1032,22 @@ mod tests {
             graph_bar_chains(&graph).unwrap_err(),
             BarsLogicError::MissingDeskewedCenter(key)
         );
+    }
+
+    #[test]
+    fn unaligned_purge_requires_multi_staff_present_isolated_vertex() {
+        let connected = peak(1, 0, 1);
+        let partner = peak(2, 0, 1);
+        let isolated = peak(1, 10, 11);
+        let absent = peak(1, 20, 21);
+        let mut graph = PeakGraph::new();
+        for value in [connected.clone(), partner.clone(), isolated.clone()] {
+            graph.add_vertex(value);
+        }
+        graph.add_edge(connected.key(), partner.key(), ()).unwrap();
+        let peaks = [connected, isolated.clone(), absent];
+        assert!(unaligned_peak_keys(&peaks, &graph, false).is_empty());
+        assert_eq!(unaligned_peak_keys(&peaks, &graph, true), [isolated.key()]);
     }
 
     #[test]
