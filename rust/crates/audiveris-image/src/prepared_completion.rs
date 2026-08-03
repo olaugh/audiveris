@@ -27,6 +27,7 @@ use crate::{
     raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages},
     run_table::RunTable,
     section::Section,
+    section_completion::PreparedSectionInclusionBatch,
 };
 
 #[derive(Clone, Debug)]
@@ -49,6 +50,7 @@ pub struct PreparedCompletionState {
     pub fill_hole_insertions: Vec<PreparedHoleInsertion>,
     pub discarded_filament_steals: Vec<PreparedDiscardedFilamentSteal>,
     pub discarded_filament_recomputations: Vec<PreparedFilamentRecomputation>,
+    pub section_inclusion_batches: Vec<PreparedSectionInclusionBatch>,
     pub completed_stages: Vec<LineCompletionStage>,
 }
 
@@ -227,6 +229,7 @@ where
             fill_hole_insertions: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
+            section_inclusion_batches: Vec::new(),
             completed_stages: Vec::new(),
         });
         let mut executor = CompletionAdapter {

@@ -231,6 +231,46 @@ impl Section {
         (count != 0).then(|| (sum_x / count as f64, sum_y / count as f64))
     }
 
+    /// Java `Section.getCentroid2D`, measured at run-box centers rather than
+    /// integer pixel coordinates.
+    #[must_use]
+    pub fn centroid_2d(&self) -> (f64, f64) {
+        let mut coordinate_twice = 0_usize;
+        let mut position_twice = 0_usize;
+        for (offset, run) in self.runs.iter().enumerate() {
+            let position = self.first_pos + offset;
+            coordinate_twice += run.length * ((2 * run.start) + run.length);
+            position_twice += run.length * (2 * position);
+        }
+        let denominator = (2 * self.weight) as f64;
+        let oriented = (
+            coordinate_twice as f64 / denominator,
+            position_twice as f64 / denominator,
+        );
+        match self.orientation {
+            Orientation::Horizontal => oriented,
+            Orientation::Vertical => (oriented.1, oriented.0),
+        }
+    }
+
+    /// Java `Section.getCentroid`, whose integer divisions truncate.
+    #[must_use]
+    pub fn centroid(&self) -> (usize, usize) {
+        let mut coordinate_twice = 0_usize;
+        let mut position_twice = 0_usize;
+        for (offset, run) in self.runs.iter().enumerate() {
+            let position = self.first_pos + offset;
+            coordinate_twice += run.length * ((2 * run.start) + run.length);
+            position_twice += run.length * (2 * position);
+        }
+        let denominator = 2 * self.weight;
+        let oriented = (coordinate_twice / denominator, position_twice / denominator);
+        match self.orientation {
+            Orientation::Horizontal => oriented,
+            Orientation::Vertical => (oriented.1, oriented.0),
+        }
+    }
+
     /// Whether this section intersects or shares a horizontal/vertical edge
     /// with another section. Corner-only diagonal contact is rejected, matching
     /// Java `BasicSection.touches` and `GeoUtil.touch`.
@@ -821,5 +861,24 @@ mod tests {
 
         assert_eq!(section.weight(), 9);
         assert_eq!(section.mean_run_length(), 4);
+    }
+
+    #[test]
+    fn java_centroids_use_run_box_centers_and_integer_truncation() {
+        let table = table(
+            Orientation::Horizontal,
+            10,
+            3,
+            &[(1, Run::new(2, 3)), (2, Run::new(4, 1))],
+        );
+        let section = build_sections(&table, JunctionPolicy::All).remove(0);
+
+        assert_eq!(section.centroid_2d(), (3.75, 1.25));
+        assert_eq!(section.centroid(), (3, 1));
+        // Pixel-coordinate moments are deliberately a different contract.
+        assert_eq!(
+            section.pixel_centroid_in(section.bounds()),
+            Some((3.25, 1.25))
+        );
     }
 }

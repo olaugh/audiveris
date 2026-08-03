@@ -102,7 +102,15 @@ impl StaffFilament {
         if section.orientation() != Orientation::Horizontal {
             return Err(FilamentError::UnsupportedOrientation);
         }
-        self.sections.push(section);
+        let bounds = section.bounds();
+        if !self.sections.iter().any(|member| {
+            let member_bounds = member.bounds();
+            member_bounds.x == bounds.x
+                && member_bounds.y == bounds.y
+                && member.id() == section.id()
+        }) {
+            self.sections.push(section);
+        }
         // Java's TreeSet uses Section.byFullAbscissa. The stable ID is the
         // final tie-breaker when geometry is otherwise identical.
         self.sections

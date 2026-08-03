@@ -529,6 +529,7 @@ mod tests {
             fill_hole_insertions: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
+            section_inclusion_batches: Vec::new(),
             completed_stages: Vec::new(),
         }
     }
