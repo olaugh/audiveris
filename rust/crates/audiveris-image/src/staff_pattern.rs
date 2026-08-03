@@ -69,6 +69,46 @@ impl StaffPattern {
     }
 }
 
+/// Vertical probe offsets used by Java `LinesRetriever.retrieveEndPoints`.
+/// Even jitter values cover `[-jitter/2, +jitter/2]`; odd values cover the
+/// symmetric integer range through `(jitter + 1) / 2`, always in
+/// `0,+1,-1,+2,-2,...` order.
+#[must_use]
+pub fn ending_pattern_offsets(pattern_jitter: i32) -> Vec<i32> {
+    let radius = (pattern_jitter + 1) / 2;
+    let iter_max = 1 + (2 * radius);
+    let mut offsets = Vec::with_capacity(iter_max.max(0) as usize);
+    let mut dy: i32 = 0;
+    for iter in 1..=iter_max {
+        offsets.push(dy);
+        if dy == 0 {
+            dy = 1;
+        } else {
+            dy += (-dy).signum() * iter;
+        }
+    }
+    offsets
+}
+
+/// Select the first strictly best endpoint-pattern offset, matching Java's
+/// `ratio > bestRatio` update and initial `(bestDy, bestRatio) = (0, 0)`.
+#[must_use]
+pub fn best_ending_pattern_offset(
+    pattern_jitter: i32,
+    mut evaluate: impl FnMut(i32) -> f64,
+) -> (i32, f64) {
+    let mut best_offset = 0;
+    let mut best_ratio = 0.0;
+    for offset in ending_pattern_offsets(pattern_jitter) {
+        let ratio = evaluate(offset);
+        if ratio > best_ratio {
+            best_ratio = ratio;
+            best_offset = offset;
+        }
+    }
+    (best_offset, best_ratio)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +134,24 @@ mod tests {
         assert_eq!(pattern.evaluate((0.5, 0.0), 4, 1, &pixels), 0.5);
         // x=-1 keeps two trials but only x=0 can match.
         assert_eq!(pattern.evaluate((-1.0, 0.0), 4, 1, &pixels), 0.5);
+    }
+
+    #[test]
+    fn endpoint_pattern_offsets_match_java_alternating_jitter_order() {
+        assert_eq!(ending_pattern_offsets(4), [0, 1, -1, 2, -2]);
+        assert_eq!(ending_pattern_offsets(5), [0, 1, -1, 2, -2, 3, -3]);
+        assert_eq!(ending_pattern_offsets(0), [0]);
+    }
+
+    #[test]
+    fn endpoint_pattern_selection_keeps_first_strict_best_and_zero_floor() {
+        let (offset, ratio) = best_ending_pattern_offset(4, |dy| match dy {
+            1 | -1 => 0.75,
+            _ => 0.5,
+        });
+        assert_eq!((offset, ratio), (1, 0.75));
+
+        assert_eq!(best_ending_pattern_offset(2, |_| f64::NAN), (0, 0.0));
     }
 
     #[test]
