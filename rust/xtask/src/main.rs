@@ -559,13 +559,13 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     let factory_sections = build_sections(&factory_runs, JunctionPolicy::DEFAULT_RATIO);
     let factory = FilamentFactory::new(FilamentFactoryParams {
         interline: 10,
-        min_core_section_length: 16,
+        min_core_section_length: 5,
         min_section_aspect: 3.0,
-        max_coord_gap: 5.0,
-        max_pos_gap: 2.0,
+        max_coord_gap: 17.0,
+        max_pos_gap: 1.0,
         max_pos_gap_for_slope: 1.0,
-        max_gap_slope: 0.1,
-        min_length_for_delta_slope: 20.0,
+        max_gap_slope: 0.5,
+        min_length_for_delta_slope: 100.0,
         max_delta_slope: 0.01,
     });
     let factory_filaments = factory.retrieve_core_filaments(&factory_sections)?;
