@@ -274,11 +274,12 @@ denied, and passed `git diff --check` before commit.
 190. `9a8fc090` — system/page population and section ownership.
 191. `c02ab205` — concrete filament glyph registration and persistent staff-line conversion.
 192. `b2882109` — curved GRID system areas and side-by-side slicing.
+193. `04370090` — `SystemInfo.buildRef` soft-reference identity and ownership.
 
-At the one-hundred-and-ninety-second checkpoint the Rust workspace executes 501 tests:
+At the one-hundred-and-ninety-third checkpoint the Rust workspace executes 499 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 348
+- `audiveris-image`: 352
 - `audiveris-omr`: 94
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -372,7 +373,11 @@ slicing under production's x-monotone staff-spline invariant. `StaffFilament.toS
 now builds and registers the union glyph before +0.5 ordinate adjustment, exact iterative
 spline simplification, and glyph assignment. Remaining boundaries include
 `SystemInfo.buildRef` details, concrete sheet-executor attachment, and production SIG
-integration—not an assertion that GRID is fully behaviorally equivalent.
+integration. `SystemInfo.buildRef` now also preserves fresh-reference replacement, shared
+backlinks, physical part/staff order, exact `StaffConfig` defaults, separate PageRef append,
+and Java partial mutation on collaborator failure. The next seam is wiring these stable IDs
+into the concrete page allocator/sheet executor—not an assertion that GRID is fully
+behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -438,8 +443,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete the remaining concrete `GRID` seams: `SystemInfo.buildRef`, sheet-executor
-   attachment, remaining glyph/index ownership, and peak-graph/SIG attachment. Keep UI
+1. Complete the remaining concrete `GRID` seams: page-reference/buildRef wiring,
+   sheet-executor attachment, remaining glyph/index ownership, and peak-graph/SIG attachment. Keep UI
    integration behind explicit neutral boundaries until the headless output has stable
    full-stage differential fixtures.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
