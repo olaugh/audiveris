@@ -35,6 +35,7 @@ pub mod median;
 pub mod part_group;
 pub mod peak_graph;
 pub mod projection;
+pub mod raster_grid_builder;
 pub mod run_table;
 pub mod scale_estimate;
 pub mod scale_runs;
