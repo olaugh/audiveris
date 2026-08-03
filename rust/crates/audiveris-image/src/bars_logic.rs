@@ -95,6 +95,10 @@ pub fn detect_bracket_middles(
                     break;
                 }
                 if marked_set.insert(destination) {
+                    graph
+                        .vertex_mut(destination)
+                        .expect("graph edges reference present vertices")
+                        .set(StaffPeakAttribute::BracketMiddle);
                     marked.push(destination);
                 }
             }
@@ -108,12 +112,6 @@ pub fn detect_bracket_middles(
         }
     }
 
-    for &key in &marked {
-        graph
-            .vertex_mut(key)
-            .expect("marked destinations remain graph vertices")
-            .set(StaffPeakAttribute::BracketMiddle);
-    }
     Ok(marked)
 }
 
@@ -1792,7 +1790,7 @@ mod tests {
     }
 
     #[test]
-    fn bracket_middle_detection_rejects_a_connection_cycle_atomically() {
+    fn bracket_middle_detection_cycle_guard_retains_java_mutation_prefix() {
         let mut top = peak(1, 5, 8);
         top.set_bracket_end(VerticalSide::Top);
         let middle = peak(2, 5, 8);
@@ -1820,7 +1818,8 @@ mod tests {
             detect_bracket_middles(&mut graph, &keys),
             Err(BarsLogicError::BracketConnectionCycle(keys[0]))
         );
-        assert!(!graph.vertex(keys[1]).unwrap().is_bracket());
+        assert!(graph.vertex(keys[1]).unwrap().is_bracket());
+        assert!(graph.vertex(keys[0]).unwrap().is_bracket());
     }
 
     #[test]

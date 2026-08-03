@@ -39,7 +39,9 @@ use audiveris_image::{
         BarsRootEvidence, BarsStaffState, BarsSystemState, process_bars_after_braces,
         process_bars_through_too_far_left,
     },
-    bars_logic::{BarsLogicError, build_bar_columns_from_graph},
+    bars_logic::{
+        BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
+    },
     filament::{FilamentError, FilamentGeometry},
     lines_coordinator::StaffCandidateKind,
     peak_graph::PeakGraph,
@@ -69,6 +71,10 @@ use crate::{
         detect_brace_portions,
     },
     brace_sig::{BracePromotion, BraceSigError, BraceSigStore, promote_brace_filament},
+    bracket_serif::{
+        BracketSerifError, BracketSerifParameters, BracketSerifStore,
+        detect_bracket_ends_from_sections,
+    },
 };
 
 /// Borrowed live sheet raster. Zero is foreground, as in Audiveris run tables.
@@ -169,6 +175,12 @@ pub enum RawSystemGroupingBoundary {
     /// Brace detection, construction, left purge, and one-staff lines-root
     /// verification are complete. Java next detects bracket ends.
     NeedsBracketEndDetection {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Bracket ends and connection-backed middle portions are complete. Java
+    /// next purges ordinary peaks left of each staff root.
+    NeedsLeftPeakPurge {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -291,6 +303,23 @@ pub struct RawBraceStageReport {
     pub systems: Vec<RawBraceSystemReport>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawBracketStageParameters {
+    pub serif: BracketSerifParameters,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawBracketSystemReport {
+    pub system_id: usize,
+    pub ends: Vec<BracketEndDetection>,
+    pub middles: Vec<StaffPeakKey>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawBracketStageReport {
+    pub systems: Vec<RawBracketSystemReport>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -328,6 +357,8 @@ pub enum RawProjectorAdapterError {
     BraceFilament(BraceFilamentError),
     BraceSig(BraceSigError),
     BraceMembers(String),
+    BracketSerif(BracketSerifError),
+    BracketMiddles(BarsLogicError),
 }
 
 impl fmt::Display for RawProjectorAdapterError {
@@ -402,6 +433,10 @@ impl fmt::Display for RawProjectorAdapterError {
             Self::BraceFilament(source) => write!(formatter, "brace filament failed: {source}"),
             Self::BraceSig(source) => write!(formatter, "brace SIG promotion failed: {source}"),
             Self::BraceMembers(source) => write!(formatter, "brace members failed: {source}"),
+            Self::BracketSerif(source) => write!(formatter, "bracket serif failed: {source}"),
+            Self::BracketMiddles(source) => {
+                write!(formatter, "bracket middle detection failed: {source}")
+            }
         }
     }
 }
@@ -422,6 +457,8 @@ impl Error for RawProjectorAdapterError {
             Self::BracePortions(source) => Some(source),
             Self::BraceFilament(source) => Some(source),
             Self::BraceSig(source) => Some(source),
+            Self::BracketSerif(source) => Some(source),
+            Self::BracketMiddles(source) => Some(source),
             _ => None,
         }
     }
@@ -1026,6 +1063,138 @@ pub fn continue_raw_bars_through_lines_root(
         system_count: bridge.bars.len(),
     };
     Ok(report)
+}
+
+/// Continue Java `BarsRetriever.process` through `detectBracketEnds` and then
+/// `detectBracketMiddles` using the registered bar-stick members and both live
+/// section lags.
+///
+/// The caller owns the serif store, so component registrations and accepted
+/// attachments survive a later staff/system failure. Projector copies are
+/// reconciled after every graph traversal, including error returns.
+pub fn continue_raw_bars_through_bracket_middles(
+    bridge: &mut RawBarsPrefixBridge,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    parameters: RawBracketStageParameters,
+    serif_store: &mut BracketSerifStore,
+) -> Result<RawBracketStageReport, RawProjectorAdapterError> {
+    let sticks = bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .sticks
+        .clone();
+    let mut report = RawBracketStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let mut ends = Vec::new();
+        let mut middles = Vec::new();
+        if raw_system.state.staffs().len() > 1 {
+            // detectBracketEnds: systems, staves, then candidate peaks from
+            // start-1 right-to-left; top precedes bottom inside the evidence
+            // adapter.
+            for staff_index in 0..raw_system.state.staffs().len() {
+                let staff_id = raw_system.state.staffs()[staff_index].staff_id();
+                let brace_peak = raw_system.state.staffs()[staff_index].brace_peak().cloned();
+                let mut peaks = raw_system.state.staffs()[staff_index].peaks().to_vec();
+                let start_index = peaks.iter().position(|peak| {
+                    peak.is_staff_end(audiveris_image::staff_peak::HorizontalSide::Left)
+                });
+                let detection = detect_bracket_ends_from_sections(
+                    &mut peaks,
+                    raw_system.state.graph_mut(),
+                    start_index,
+                    &sticks,
+                    vertical_sections,
+                    horizontal_sections,
+                    parameters.serif,
+                    serif_store,
+                );
+                // Java projector and graph share StaffPeak instances. Mirror
+                // every mutation prefix before propagating a neutral error.
+                raw_system
+                    .state
+                    .staff_mut(staff_id)
+                    .expect("staff index came from this system")
+                    .replace_brace_stage(peaks, brace_peak)
+                    .map_err(RawProjectorAdapterError::Bars)?;
+                ends.extend(detection.map_err(RawProjectorAdapterError::BracketSerif)?);
+            }
+
+            // detectBracketMiddles repeats the staff/peak traversal over the
+            // graph after every bracket-end mutation is complete.
+            for staff_index in 0..raw_system.state.staffs().len() {
+                let keys = raw_system.state.staffs()[staff_index]
+                    .peaks()
+                    .iter()
+                    .map(StaffPeak::key)
+                    .collect::<Vec<_>>();
+                let detection = detect_bracket_middles(raw_system.state.graph_mut(), &keys);
+                reconcile_graph_peak_attributes(&mut raw_system.state)?;
+                middles.extend(detection.map_err(RawProjectorAdapterError::BracketMiddles)?);
+            }
+        }
+        report.systems.push(RawBracketSystemReport {
+            system_id,
+            ends,
+            middles,
+        });
+    }
+
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsLeftPeakPurge {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+fn reconcile_graph_peak_attributes(
+    state: &mut BarsSystemState,
+) -> Result<(), RawProjectorAdapterError> {
+    let snapshots = state
+        .staffs()
+        .iter()
+        .map(|staff| {
+            let peaks = staff
+                .peaks()
+                .iter()
+                .map(|peak| {
+                    state
+                        .graph()
+                        .vertex(peak.key())
+                        .cloned()
+                        .ok_or(RawProjectorAdapterError::MissingRegisteredPeak(peak.key()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((staff.staff_id(), peaks, staff.brace_peak().cloned()))
+        })
+        .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+    for (staff_id, peaks, brace_peak) in snapshots {
+        state
+            .staff_mut(staff_id)
+            .expect("snapshot staff remains in the system")
+            .replace_brace_stage(peaks, brace_peak)
+            .map_err(RawProjectorAdapterError::Bars)?;
+    }
+    Ok(())
 }
 
 fn brace_portion_snapshot(state: &BarsSystemState) -> BracePortionSystem {
@@ -1786,6 +1955,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsBracketEndDetection { .. } => {
                 panic!("one retained staff does not require bracket-end grouping")
             }
+            RawSystemGroupingBoundary::NeedsLeftPeakPurge { .. } => {
+                panic!("one retained staff does not require left-peak purge grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2267,6 +2439,52 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsBracketEndDetection {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let next_serif_id = prefix
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .sticks
+            .next_filament_id();
+        let mut serif_store = BracketSerifStore::new(next_serif_id).unwrap();
+        let bracket_report = continue_raw_bars_through_bracket_middles(
+            &mut prefix,
+            &vertical_sections,
+            &[],
+            RawBracketStageParameters {
+                serif: BracketSerifParameters {
+                    interline: 5,
+                    maximum_foreground_thickness: 1,
+                    minimum_bracket_width: 1,
+                    maximum_bracket_extension: 6.0,
+                    serif_roi_width: 10,
+                    serif_roi_height: 10,
+                    serif_minimum_weight: 1,
+                },
+            },
+            &mut serif_store,
+        )
+        .unwrap();
+        assert_eq!(bracket_report.systems.len(), 1);
+        assert!(bracket_report.systems[0].ends.is_empty());
+        assert!(bracket_report.systems[0].middles.is_empty());
+        assert!(serif_store.filaments().is_empty());
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsLeftPeakPurge {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
