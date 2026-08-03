@@ -6,6 +6,7 @@ pub mod adaptive;
 pub mod bar_alignment;
 pub mod bar_alignments;
 pub mod bar_column;
+pub mod bar_connections;
 pub mod bar_sticks;
 pub mod bars_coordinator;
 pub mod bars_logic;

@@ -23,6 +23,10 @@ use audiveris_image::{
         find_all_alignments,
     },
     bar_column::{BarColumn, StaffId},
+    bar_connections::{
+        ConnectionBuildError, ConnectionBuildReport, ConnectionParameters, ConnectionRaster,
+        find_connections,
+    },
     bar_sticks::{BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks},
     bars_logic::{BarsLogicError, build_bar_columns_from_graph},
     filament::{FilamentError, FilamentGeometry},
@@ -110,6 +114,13 @@ pub enum RawSystemGroupingBoundary {
         staff_ids: Vec<StaffId>,
         alignment_count: usize,
     },
+    /// Concrete connections have been promoted, but Java still performs
+    /// merged-peak splitting and conflict purge before system inference.
+    NeedsSplitAndAlignmentPurge {
+        staff_ids: Vec<StaffId>,
+        alignment_count: usize,
+        connection_count: usize,
+    },
 }
 
 /// Ordered peak graph plus the system-grouping boundary reached from it.
@@ -149,6 +160,20 @@ pub struct RawAlignmentGraphBridge {
     pub alignments: AlignmentBuildReport,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawConnectionBridgeParameters {
+    pub alignments: RawAlignmentBridgeParameters,
+    pub maximum_connection_gap: i32,
+    pub maximum_connection_white_ratio: f64,
+}
+
+/// Pixel-backed connection graph, stopped before split/purge semantics.
+#[derive(Clone, Debug)]
+pub struct RawConnectionGraphBridge {
+    pub alignments: RawAlignmentGraphBridge,
+    pub connections: ConnectionBuildReport,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -177,6 +202,7 @@ pub enum RawProjectorAdapterError {
     DuplicateRegisteredPeak(StaffPeakKey),
     BarSticks(BarStickError),
     Alignments(AlignmentBuildError),
+    Connections(ConnectionBuildError),
     BarColumns(BarsLogicError),
 }
 
@@ -239,6 +265,9 @@ impl fmt::Display for RawProjectorAdapterError {
             Self::Alignments(source) => {
                 write!(formatter, "bar-alignment discovery failed: {source}")
             }
+            Self::Connections(source) => {
+                write!(formatter, "bar-connection discovery failed: {source}")
+            }
             Self::BarColumns(source) => {
                 write!(formatter, "bar-column construction failed: {source}")
             }
@@ -254,6 +283,7 @@ impl Error for RawProjectorAdapterError {
             Self::Deskew { source, .. } => Some(source),
             Self::BarSticks(source) => Some(source),
             Self::Alignments(source) => Some(source),
+            Self::Connections(source) => Some(source),
             Self::BarColumns(source) => Some(source),
             _ => None,
         }
@@ -371,6 +401,56 @@ pub fn bridge_raw_projectors_through_alignments(
         };
     }
     Ok(RawAlignmentGraphBridge { bars, alignments })
+}
+
+/// Continue through Java `findConnections`, preserving stick/section
+/// ownership evidence, and stop before merged-peak splitting or edge purge.
+pub fn bridge_raw_projectors_through_connections(
+    handoff: &PreparedStaffHandoff,
+    preparation: &RawProjectorPreparation,
+    raster: RawProjectorRaster<'_>,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    skew: &HeadlessSkew,
+    parameters: RawConnectionBridgeParameters,
+) -> Result<RawConnectionGraphBridge, RawProjectorAdapterError> {
+    let mut alignments = bridge_raw_projectors_through_alignments(
+        handoff,
+        preparation,
+        vertical_sections,
+        horizontal_sections,
+        skew,
+        parameters.alignments,
+    )?;
+    let mut connections = ConnectionBuildReport::default();
+    find_connections(
+        &mut alignments.bars.projectors.graph,
+        ConnectionRaster {
+            width: raster.width,
+            height: raster.height,
+            pixels: raster.pixels,
+        },
+        alignments.bars.sticks.sticks(),
+        ConnectionParameters {
+            maximum_gap: parameters.maximum_connection_gap,
+            maximum_white_ratio: parameters.maximum_connection_white_ratio,
+        },
+        &mut connections,
+    )
+    .map_err(RawProjectorAdapterError::Connections)?;
+
+    if alignments.bars.projectors.retained_staff_ids.len() > 1 {
+        alignments.bars.projectors.grouping =
+            RawSystemGroupingBoundary::NeedsSplitAndAlignmentPurge {
+                staff_ids: alignments.bars.projectors.retained_staff_ids.clone(),
+                alignment_count: alignments.alignments.edge_ids().len(),
+                connection_count: connections.promoted_count(),
+            };
+    }
+    Ok(RawConnectionGraphBridge {
+        alignments,
+        connections,
+    })
 }
 
 fn alignment_staffs(
@@ -677,6 +757,7 @@ fn index_x(x: i32, width: usize) -> usize {
 mod tests {
     use super::*;
     use audiveris_image::{
+        bar_alignment::BarAlignmentKind,
         prepared_lines::PreparedStaffLine,
         run_table::{Orientation, Run, RunTable},
         section::{JunctionPolicy, build_sections},
@@ -726,6 +807,67 @@ mod tests {
                     short: false,
                     lines,
                 }],
+            },
+            pixels,
+        )
+    }
+
+    fn two_staff_connection_fixture() -> (PreparedStaffHandoff, Vec<u8>) {
+        let width = 20;
+        let height = 12;
+        let mut pixels = vec![255; width * height];
+        let line_pair = |first_y: usize, last_y: usize| {
+            let mut table = RunTable::new(Orientation::Horizontal, width, height).unwrap();
+            for y in [first_y, last_y] {
+                table.add_run(y, Run::new(0, width)).unwrap();
+            }
+            build_sections(&table, JunctionPolicy::All)
+                .into_iter()
+                .enumerate()
+                .map(|(index, section)| {
+                    let mut filament = audiveris_image::filament::StaffFilament::new(5).unwrap();
+                    filament.add_section(section).unwrap();
+                    PreparedStaffLine {
+                        id: index + 1,
+                        filament,
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for y in [0, 5, 6, 11] {
+            for x in 0..width {
+                pixels[(y * width) + x] = 0;
+            }
+        }
+        for x in 5..=6 {
+            for y in 0..height {
+                pixels[(y * width) + x] = 0;
+            }
+        }
+        (
+            PreparedStaffHandoff {
+                staffs: vec![
+                    PreparedStaff {
+                        id: 1,
+                        kind: StaffCandidateKind::Standard,
+                        left: 5.0,
+                        right: 6.0,
+                        interline: 5,
+                        small: false,
+                        short: false,
+                        lines: line_pair(0, 5),
+                    },
+                    PreparedStaff {
+                        id: 2,
+                        kind: StaffCandidateKind::Standard,
+                        left: 5.0,
+                        right: 6.0,
+                        interline: 5,
+                        small: false,
+                        short: false,
+                        lines: line_pair(6, 11),
+                    },
+                ],
             },
             pixels,
         )
@@ -860,6 +1002,9 @@ mod tests {
             }
             RawSystemGroupingBoundary::NeedsConnectionDiscovery { .. } => {
                 panic!("one retained staff does not require connection discovery")
+            }
+            RawSystemGroupingBoundary::NeedsSplitAndAlignmentPurge { .. } => {
+                panic!("one retained staff does not require split or alignment purge")
             }
         }
 
@@ -1018,5 +1163,98 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, RawProjectorAdapterError::MissingStaffSettings(1));
+    }
+
+    #[test]
+    fn two_staff_raw_raster_promotes_connection_and_stops_before_split_purge() {
+        let (handoff, pixels) = two_staff_connection_fixture();
+        let settings = [1, 2].map(|staff_id| RawStaffProjectorSettings {
+            staff_id,
+            barline_height: BarlineHeightSpec::Four,
+            brace_search: None,
+        });
+        let skew = HeadlessSkew::new(0.0, 20, 12);
+        let raster = RawProjectorRaster {
+            width: 20,
+            height: 12,
+            pixels: &pixels,
+        };
+        let prepared = prepare_raw_projectors(
+            &handoff,
+            raster,
+            &skew,
+            RawProjectorParameters {
+                large_interline: 1,
+                foreground_thickness: 2,
+                ratios: StaffProjectorScaleRatios {
+                    staff_abscissa_margin: 20.0,
+                    bar_refine_dx: 2.0,
+                    bar_threshold: 0.8,
+                    gap_threshold: 0.2,
+                    minimum_wide_blank_width: 2.0,
+                    maximum_bar_width: 4.0,
+                    chunk_width: 1.0,
+                    ..StaffProjectorScaleRatios::java_defaults()
+                },
+                tuning: StaffProjectorProcessTuning {
+                    top_derivative_count: 2,
+                    minimum_derivative_ratio: 1.0,
+                    blank_threshold_ratio: 2.1,
+                    chunk_threshold_ratio: 0.4,
+                    minimum_white_ratio_beyond_serif: 0.3,
+                },
+                staffs: &settings,
+            },
+        )
+        .unwrap();
+        let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 12).unwrap();
+        vertical_table.add_run(5, Run::new(0, 12)).unwrap();
+        vertical_table.add_run(6, Run::new(0, 12)).unwrap();
+        let vertical_sections = build_sections(&vertical_table, JunctionPolicy::All);
+
+        let connected = bridge_raw_projectors_through_connections(
+            &handoff,
+            &prepared,
+            raster,
+            &vertical_sections,
+            &[],
+            &skew,
+            RawConnectionBridgeParameters {
+                alignments: RawAlignmentBridgeParameters {
+                    sticks: BarStickParameters {
+                        vertical_extension: 0,
+                        minimum_core_section_length: 3,
+                        probe_width: 1,
+                        minimum_probe_weight: 1,
+                        segment_length: 3,
+                        minimum_mean_curvature: 0.0,
+                        first_filament_id: 1,
+                    },
+                    maximum_alignment_slope: 0.06,
+                    maximum_alignment_delta_width: 1,
+                    maximum_column_dx: 2,
+                },
+                maximum_connection_gap: 1,
+                maximum_connection_white_ratio: 0.25,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(connected.connections.decisions().len(), 1);
+        assert_eq!(connected.connections.promoted_count(), 1);
+        let graph = &connected.alignments.bars.projectors.graph;
+        assert_eq!(graph.edges().len(), 1);
+        assert_eq!(
+            graph.edges()[0].relation().kind(),
+            BarAlignmentKind::Connection
+        );
+        assert!(matches!(
+            connected.alignments.bars.projectors.grouping,
+            RawSystemGroupingBoundary::NeedsSplitAndAlignmentPurge {
+                ref staff_ids,
+                alignment_count: 1,
+                connection_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
     }
 }
