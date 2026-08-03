@@ -69,6 +69,8 @@ where
 }
 
 use crate::run_table::Orientation;
+use crate::section::Section;
+use std::collections::BTreeSet;
 use std::{error::Error, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -331,9 +333,287 @@ fn line_intersection(
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InspectedLineFilament {
+    pub id: usize,
+    pub members: Vec<Section>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InspectedStaff {
+    pub id: usize,
+    pub left_abscissa: usize,
+    pub lines: Vec<InspectedLineFilament>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossingChunkRemoval {
+    pub section_ids: Vec<usize>,
+    pub slope: f64,
+    pub relative_slope: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossingLineUpdate {
+    pub staff_id: usize,
+    pub filament_id: usize,
+    /// Chunk order, with section IDs in `Section.byFullAbscissa` order.
+    pub chunks: Vec<CrossingChunkRemoval>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinesInspectorReport {
+    pub updates: Vec<CrossingLineUpdate>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LinesInspectorError<E> {
+    MissingChunkStart {
+        section_id: usize,
+    },
+    InsufficientGlyphPixels {
+        section_ids: Vec<usize>,
+        count: usize,
+    },
+    MissingSectionDuringRemoval {
+        section_id: usize,
+    },
+    Recompute(E),
+}
+
+impl<E: fmt::Display> fmt::Display for LinesInspectorError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingChunkStart { section_id } => {
+                write!(
+                    formatter,
+                    "section {section_id} did not start a crossing chunk"
+                )
+            }
+            Self::InsufficientGlyphPixels { section_ids, count } => write!(
+                formatter,
+                "crossing chunk {section_ids:?} has only {count} distinct pixels"
+            ),
+            Self::MissingSectionDuringRemoval { section_id } => {
+                write!(formatter, "section {section_id} disappeared before removal")
+            }
+            Self::Recompute(error) => write!(formatter, "filament recomputation failed: {error}"),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for LinesInspectorError<E> {}
+
+/// Port Java `LinesRetriever.LinesInspector.process` with real section pixels.
+///
+/// `recompute` is invoked exactly once after all flagged sections have been
+/// deleted from a changed filament. A callback failure retains those deletions,
+/// matching the production method's non-transactional mutation.
+pub fn inspect_crossing_chunks<E>(
+    staves: &mut [InspectedStaff],
+    minimum_offset: usize,
+    global_slope: f64,
+    minimum_chunk_slope: f64,
+    mut recompute: impl FnMut(usize, usize, &[Section]) -> Result<(), E>,
+) -> Result<LinesInspectorReport, LinesInspectorError<E>> {
+    let mut updates = Vec::new();
+
+    for staff in staves {
+        let x_min = staff.left_abscissa + minimum_offset;
+        for filament in &mut staff.lines {
+            // SectionCompound members are a TreeSet(Section.byFullAbscissa).
+            let mut ordered = (0..filament.members.len()).collect::<Vec<_>>();
+            ordered.sort_by_key(|&index| {
+                let section = &filament.members[index];
+                let bounds = section.bounds();
+                (bounds.x, bounds.y, section.id())
+            });
+
+            let mut flagged = Vec::new();
+            let mut chunk = Vec::new();
+            let mut x_end = 0;
+
+            for index in ordered {
+                let section = &filament.members[index];
+                let bounds = section.bounds();
+                if bounds.x < x_min {
+                    continue;
+                }
+
+                if bounds.x > x_end {
+                    check_crossing_chunk(
+                        &chunk,
+                        &filament.members,
+                        global_slope,
+                        minimum_chunk_slope,
+                        &mut flagged,
+                    )?;
+                    chunk.clear();
+                    x_end = 0;
+                } else if chunk.is_empty() {
+                    // With production xMin this is unreachable, but Java would
+                    // dereference a null chunk here. Make the failure explicit.
+                    return Err(LinesInspectorError::MissingChunkStart {
+                        section_id: section.id(),
+                    });
+                }
+
+                chunk.push(index);
+                x_end = x_end.max(bounds.x + bounds.width - 1);
+            }
+            check_crossing_chunk(
+                &chunk,
+                &filament.members,
+                global_slope,
+                minimum_chunk_slope,
+                &mut flagged,
+            )?;
+
+            if flagged.is_empty() {
+                continue;
+            }
+
+            // Java traverses toRemove chunks, then each chunk's sorted members.
+            for removal in &flagged {
+                for &section_id in &removal.section_ids {
+                    let Some(index) = filament
+                        .members
+                        .iter()
+                        .position(|section| section.id() == section_id)
+                    else {
+                        return Err(LinesInspectorError::MissingSectionDuringRemoval {
+                            section_id,
+                        });
+                    };
+                    filament.members.remove(index);
+                }
+            }
+
+            recompute(staff.id, filament.id, &filament.members)
+                .map_err(LinesInspectorError::Recompute)?;
+            updates.push(CrossingLineUpdate {
+                staff_id: staff.id,
+                filament_id: filament.id,
+                chunks: flagged,
+            });
+        }
+    }
+
+    Ok(LinesInspectorReport { updates })
+}
+
+fn check_crossing_chunk<E>(
+    chunk: &[usize],
+    members: &[Section],
+    global_slope: f64,
+    minimum_chunk_slope: f64,
+    flagged: &mut Vec<CrossingChunkRemoval>,
+) -> Result<(), LinesInspectorError<E>> {
+    if chunk.len() <= 1 {
+        return Ok(());
+    }
+    let sections = chunk
+        .iter()
+        .map(|&index| &members[index])
+        .collect::<Vec<_>>();
+    let slope = basic_line_pixel_slope(&sections).map_err(|count| {
+        LinesInspectorError::InsufficientGlyphPixels {
+            section_ids: sections.iter().map(|section| section.id()).collect(),
+            count,
+        }
+    })?;
+    let relative_slope = slope - global_slope;
+    let magnitude = relative_slope.abs();
+    if matches!(
+        magnitude.partial_cmp(&minimum_chunk_slope),
+        Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+    ) {
+        flagged.push(CrossingChunkRemoval {
+            section_ids: sections.iter().map(|section| section.id()).collect(),
+            slope,
+            relative_slope,
+        });
+    }
+    Ok(())
+}
+
+/// Reproduce the `Glyph`/`BasicLine` pixel regression used by LinesInspector.
+fn basic_line_pixel_slope(sections: &[&Section]) -> Result<f64, usize> {
+    // SectionCompound.toBuffer unions pixels before rebuilding its RunTable.
+    let mut pixels = BTreeSet::new();
+    for section in sections {
+        for (offset, run) in section.runs().iter().enumerate() {
+            let position = section.first_pos() + offset;
+            for coordinate in run.start..=run.stop() {
+                let pixel = match section.orientation() {
+                    Orientation::Horizontal => (coordinate, position),
+                    Orientation::Vertical => (position, coordinate),
+                };
+                pixels.insert(pixel);
+            }
+        }
+    }
+    if pixels.len() < 2 {
+        return Err(pixels.len());
+    }
+
+    let mut sum_x = 0.0;
+    let mut sum_x2 = 0.0;
+    let mut sum_xy = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_y2 = 0.0;
+    let mut x_min = f64::MAX;
+    let mut x_max = f64::MIN_POSITIVE;
+    let mut y_min = f64::MAX;
+    let mut y_max = f64::MIN_POSITIVE;
+    for &(x, y) in &pixels {
+        let x = x as f64;
+        let y = y as f64;
+        sum_x += x;
+        sum_x2 += x * x;
+        sum_xy += x * y;
+        sum_y += y;
+        sum_y2 += y * y;
+        x_min = x_min.min(x);
+        x_max = x_max.max(x);
+        y_min = y_min.min(y);
+        y_max = y_max.max(y);
+    }
+    let count = pixels.len() as f64;
+    let horizontal_denominator = (count * sum_x2) - (sum_x * sum_x);
+    let vertical_denominator = (count * sum_y2) - (sum_y * sum_y);
+    let covariance = (count * sum_xy) - (sum_x * sum_y);
+
+    if horizontal_denominator.abs() >= vertical_denominator.abs() {
+        let mut a = covariance / horizontal_denominator;
+        let mut b = -1.0;
+        let mut c = ((sum_y * sum_x2) - (sum_x * sum_xy)) / horizontal_denominator;
+        let norm = a.hypot(b);
+        a /= norm;
+        b /= norm;
+        c /= norm;
+        let y_one = (((-a * x_min) - c) / b) + 0.5;
+        let y_two = (((-a * x_max) - c) / b) + 0.5;
+        Ok((y_two - y_one) / ((x_max + 1.0) - x_min))
+    } else {
+        let mut a: f64 = -1.0;
+        let mut b: f64 = covariance / vertical_denominator;
+        let mut c: f64 = ((sum_x * sum_y2) - (sum_y * sum_xy)) / vertical_denominator;
+        let norm = a.hypot(b);
+        a /= norm;
+        b /= norm;
+        c /= norm;
+        let x_one = (-((b * y_min) + c) / a) + 0.5;
+        let x_two = (-((b * y_max) + c) / a) + 0.5;
+        Ok(((y_max + 1.0) - y_min) / (x_two - x_one))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run_table::{Run, RunTable};
+    use crate::section::{JunctionPolicy, build_sections_from_id};
     use std::convert::Infallible;
 
     #[derive(Debug, Default)]
@@ -687,5 +967,201 @@ mod tests {
             Err(CurvaturePolishError::InvalidPointCount { count: 1 })
         );
         assert!(state.points.is_none());
+    }
+
+    fn pixel_section(id: usize, rows: &[(usize, usize, usize)]) -> Section {
+        let width = rows
+            .iter()
+            .map(|(_, start, length)| start + length)
+            .max()
+            .unwrap_or(1)
+            + 1;
+        let height = rows.iter().map(|(y, _, _)| y + 1).max().unwrap_or(1) + 1;
+        let mut table = RunTable::new(Orientation::Horizontal, width, height).unwrap();
+        for &(y, start, length) in rows {
+            assert!(table.add_run(y, Run::new(start, length)).unwrap());
+        }
+        build_sections_from_id(&table, JunctionPolicy::All, id).remove(0)
+    }
+
+    fn diagonal_chunk(first_id: usize, x: usize, y: usize) -> [Section; 2] {
+        [
+            pixel_section(first_id, &[(y, x, 2)]),
+            pixel_section(first_id + 1, &[(y + 1, x + 1, 2)]),
+        ]
+    }
+
+    fn inspected_staff(members: Vec<Section>) -> Vec<InspectedStaff> {
+        vec![InspectedStaff {
+            id: 1,
+            left_abscissa: 0,
+            lines: vec![InspectedLineFilament { id: 2, members }],
+        }]
+    }
+
+    #[test]
+    fn crossing_slope_comes_from_section_pixels_and_threshold_equality_removes() {
+        let chunk = diagonal_chunk(1, 10, 10);
+        let slope = basic_line_pixel_slope(&[&chunk[0], &chunk[1]]).unwrap();
+        // BasicLine.toCenterLine extends the x span to the pixel limit, so the
+        // center-line slope is 1/3 rather than the raw regression slope 1/2.
+        assert!((slope - (1.0 / 3.0)).abs() < 1e-12);
+
+        let mut at_boundary = inspected_staff(chunk.to_vec());
+        let mut recomputes = 0;
+        let report =
+            inspect_crossing_chunks(&mut at_boundary, 10, 0.0, slope.abs(), |_, _, remaining| {
+                recomputes += 1;
+                assert!(remaining.is_empty());
+                Ok::<_, Infallible>(())
+            })
+            .unwrap();
+        assert_eq!(report.updates[0].chunks[0].section_ids, [1, 2]);
+        assert_eq!(report.updates[0].chunks[0].slope, slope);
+        assert_eq!(recomputes, 1);
+
+        let mut above_boundary = inspected_staff(chunk.to_vec());
+        let next_threshold = f64::from_bits(slope.abs().to_bits() + 1);
+        let report =
+            inspect_crossing_chunks(&mut above_boundary, 10, 0.0, next_threshold, |_, _, _| {
+                Ok::<_, Infallible>(())
+            })
+            .unwrap();
+        assert!(report.updates.is_empty());
+        assert_eq!(above_boundary[0].lines[0].members.len(), 2);
+    }
+
+    #[test]
+    fn header_exclusion_and_inclusive_x_end_preserve_member_order() {
+        let header = pixel_section(9, &[(8, 9, 2)]);
+        let [first, second] = diagonal_chunk(1, 10, 10);
+        // Starts strictly after prior inclusive xEnd=12, so it is a new,
+        // single-member chunk and cannot be removed.
+        let singleton = pixel_section(8, &[(12, 13, 2), (13, 14, 2)]);
+        let mut staves = inspected_staff(vec![second, header, singleton, first]);
+        let mut remaining_ids = Vec::new();
+
+        let report = inspect_crossing_chunks(&mut staves, 10, 0.0, 0.04, |_, _, remaining| {
+            remaining_ids = remaining.iter().map(Section::id).collect();
+            Ok::<_, Infallible>(())
+        })
+        .unwrap();
+
+        assert_eq!(report.updates[0].chunks.len(), 1);
+        assert_eq!(report.updates[0].chunks[0].section_ids, [1, 2]);
+        // Mutation removes in flagged chunk order while preserving unrelated
+        // filament member order. Header x=9 and singleton x=13 survive.
+        assert_eq!(remaining_ids, [9, 8]);
+        assert_eq!(
+            staves[0].lines[0]
+                .members
+                .iter()
+                .map(Section::id)
+                .collect::<Vec<_>>(),
+            [9, 8]
+        );
+    }
+
+    #[test]
+    fn one_member_chunk_is_never_tested_even_with_steep_pixels() {
+        let steep = pixel_section(1, &[(10, 10, 2), (11, 11, 2)]);
+        assert!(basic_line_pixel_slope(&[&steep]).unwrap().abs() > 0.04);
+        let mut staves = inspected_staff(vec![steep]);
+        let mut recomputes = 0;
+
+        let report = inspect_crossing_chunks(&mut staves, 10, 0.0, 0.04, |_, _, _| {
+            recomputes += 1;
+            Ok::<_, Infallible>(())
+        })
+        .unwrap();
+
+        assert!(report.updates.is_empty());
+        assert_eq!(recomputes, 0);
+        assert_eq!(staves[0].lines[0].members.len(), 1);
+    }
+
+    #[test]
+    fn multiple_flagged_chunks_delete_in_chunk_order_and_recompute_once() {
+        let [a1, a2] = diagonal_chunk(10, 10, 10);
+        let [b1, b2] = diagonal_chunk(20, 20, 20);
+        let survivor = pixel_section(30, &[(30, 30, 2)]);
+        let mut staves = inspected_staff(vec![b2, survivor, a2, b1, a1]);
+        let mut callbacks = Vec::new();
+
+        let report = inspect_crossing_chunks(&mut staves, 10, 0.0, 0.04, |staff, line, rest| {
+            callbacks.push((
+                staff,
+                line,
+                rest.iter().map(Section::id).collect::<Vec<_>>(),
+            ));
+            Ok::<_, Infallible>(())
+        })
+        .unwrap();
+
+        assert_eq!(
+            report.updates[0]
+                .chunks
+                .iter()
+                .map(|chunk| chunk.section_ids.clone())
+                .collect::<Vec<_>>(),
+            [vec![10, 11], vec![20, 21]]
+        );
+        assert_eq!(callbacks, [(1, 2, vec![30])]);
+    }
+
+    #[test]
+    fn global_slope_is_subtracted_before_inclusive_magnitude_gate() {
+        let chunk = diagonal_chunk(1, 10, 10);
+        let slope = basic_line_pixel_slope(&[&chunk[0], &chunk[1]]).unwrap();
+        let global_slope = 0.1;
+        let relative_slope = slope - global_slope;
+        let mut staves = inspected_staff(chunk.to_vec());
+        let report = inspect_crossing_chunks(
+            &mut staves,
+            10,
+            global_slope,
+            relative_slope.abs(),
+            |_, _, _| Ok::<_, Infallible>(()),
+        )
+        .unwrap();
+        assert_eq!(report.updates.len(), 1);
+        assert_eq!(report.updates[0].chunks[0].relative_slope, relative_slope);
+    }
+
+    #[test]
+    fn degenerate_union_failure_is_explicit_and_non_mutating() {
+        let one = pixel_section(1, &[(10, 10, 1)]);
+        let two = pixel_section(2, &[(10, 10, 1)]);
+        let mut staves = inspected_staff(vec![two, one]);
+        let result =
+            inspect_crossing_chunks(
+                &mut staves,
+                10,
+                0.0,
+                0.04,
+                |_, _, _| Ok::<_, Infallible>(()),
+            );
+
+        assert_eq!(
+            result,
+            Err(LinesInspectorError::InsufficientGlyphPixels {
+                section_ids: vec![1, 2],
+                count: 1,
+            })
+        );
+        assert_eq!(staves[0].lines[0].members.len(), 2);
+    }
+
+    #[test]
+    fn recompute_failure_retains_ordered_section_deletions() {
+        let chunk = diagonal_chunk(1, 10, 10);
+        let mut staves = inspected_staff(chunk.to_vec());
+        let result = inspect_crossing_chunks(&mut staves, 10, 0.0, 0.04, |_, _, remaining| {
+            assert!(remaining.is_empty());
+            Err("line failed")
+        });
+
+        assert_eq!(result, Err(LinesInspectorError::Recompute("line failed")));
+        assert!(staves[0].lines[0].members.is_empty());
     }
 }
