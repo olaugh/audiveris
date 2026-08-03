@@ -89,6 +89,7 @@ pub enum BarStickError {
     InvalidParameters,
     NonEmptyState,
     MissingPeak(StaffPeakKey),
+    MissingMember(LocatedSectionId),
     FilamentIdExhausted(StaffPeakKey),
 }
 
@@ -101,11 +102,68 @@ impl fmt::Display for BarStickError {
             Self::InvalidParameters => formatter.write_str("invalid bar-stick parameters"),
             Self::NonEmptyState => formatter.write_str("bar-stick build state is not empty"),
             Self::MissingPeak(key) => write!(formatter, "bar peak is absent from graph: {key:?}"),
+            Self::MissingMember(member) => {
+                write!(formatter, "bar filament member is absent: {member:?}")
+            }
             Self::FilamentIdExhausted(key) => {
                 write!(formatter, "bar-filament ID exhausted at peak {key:?}")
             }
         }
     }
+}
+
+/// Build and register one split subfilament from exactly the old filament's
+/// members. Registration precedes attachment to a graph/projector, preserving
+/// Java's observable orphan when construction of the other half later fails.
+pub fn build_sub_stick(
+    peak: &crate::staff_peak::StaffPeak,
+    old_members: &[LocatedSectionId],
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    parameters: BarStickParameters,
+    state: &mut BarStickBuildState,
+) -> Result<Option<BarStick>, BarStickError> {
+    if parameters.vertical_extension < 0
+        || parameters.minimum_core_section_length == 0
+        || parameters.probe_width == 0
+        || parameters.minimum_probe_weight == 0
+        || parameters.segment_length == 0
+        || !parameters.minimum_mean_curvature.is_finite()
+        || parameters.minimum_mean_curvature < 0.0
+        || parameters.first_filament_id != state.next_filament_id
+    {
+        return Err(BarStickError::InvalidParameters);
+    }
+    let mut source = Vec::with_capacity(old_members.len());
+    for &location in old_members {
+        let sections = match location.lag {
+            SectionLag::Vertical => vertical_sections,
+            SectionLag::Horizontal => horizontal_sections,
+        };
+        let section = sections
+            .iter()
+            .find(|section| section.id() == location.id)
+            .ok_or(BarStickError::MissingMember(location))?;
+        source.push(LocatedSection { location, section });
+    }
+    let Some(candidate) = construct_stick(peak, &source, parameters) else {
+        return Ok(None);
+    };
+    let id = state.next_filament_id;
+    state.next_filament_id = id
+        .checked_add(1)
+        .ok_or(BarStickError::FilamentIdExhausted(peak.key()))?;
+    let stick = BarStick {
+        id,
+        peak: peak.key(),
+        members: candidate.members,
+        bounds: candidate.bounds,
+        points: candidate.points,
+        mean_curvature: candidate.mean_curvature,
+        marked_brace: false,
+    };
+    state.sticks.push(stick.clone());
+    Ok(Some(stick))
 }
 
 impl Error for BarStickError {}
@@ -657,6 +715,64 @@ mod tests {
         assert_eq!(state.sticks()[0].peak, order[1]);
         assert!(!graph.contains_vertex(order[0]));
         assert!(graph.contains_vertex(order[1]));
+    }
+
+    #[test]
+    fn sub_sticks_use_only_old_members_and_register_before_graph_attachment() {
+        let (vertical, horizontal) = two_bar_sections();
+        let old = peak(1, 5, 13);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(old.clone());
+        let mut state = BarStickBuildState::new(30).unwrap();
+        build_bar_sticks(
+            &mut graph,
+            &[old.key()],
+            &vertical,
+            &horizontal,
+            parameters(30),
+            &mut state,
+        )
+        .unwrap();
+        let old_members = state.sticks()[0].members.clone();
+        let left = peak(1, 5, 8);
+        let right = peak(1, 10, 13);
+        let left_stick = build_sub_stick(
+            &left,
+            &old_members,
+            &vertical,
+            &horizontal,
+            parameters(31),
+            &mut state,
+        )
+        .unwrap()
+        .unwrap();
+        let right_stick = build_sub_stick(
+            &right,
+            &old_members,
+            &vertical,
+            &horizontal,
+            parameters(32),
+            &mut state,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!((left_stick.id, right_stick.id), (31, 32));
+        assert_eq!(state.next_filament_id(), 33);
+        assert!(!graph.contains_vertex(left.key()));
+        assert!(!graph.contains_vertex(right.key()));
+        assert!(
+            left_stick
+                .members
+                .iter()
+                .all(|member| old_members.contains(member))
+        );
+        assert!(
+            right_stick
+                .members
+                .iter()
+                .all(|member| old_members.contains(member))
+        );
     }
 
     #[test]

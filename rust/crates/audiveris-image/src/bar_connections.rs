@@ -68,6 +68,11 @@ impl ConnectionBuildReport {
             .filter(|decision| decision.promoted_edge.is_some())
             .count()
     }
+
+    /// Append one immediate split-peak `checkConnection` decision.
+    pub fn record(&mut self, decision: ConnectionDecision) {
+        self.decisions.push(decision);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

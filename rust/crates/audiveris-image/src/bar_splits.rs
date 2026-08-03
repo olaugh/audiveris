@@ -88,7 +88,7 @@ pub fn split_merged_groups_and_purge(
     graph: &mut PeakGraph<BarAlignment>,
     staffs: &mut [AlignmentStaff],
     parameters: SplitParameters,
-    mut build_filament: impl FnMut(&StaffPeak) -> Result<bool, String>,
+    mut build_filament: impl FnMut(StaffPeakKey, &StaffPeak) -> Result<bool, String>,
     mut rediscover: impl FnMut(
         &mut PeakGraph<BarAlignment>,
         &[AlignmentStaff],
@@ -261,7 +261,7 @@ fn split_peak(
     staffs: &mut [AlignmentStaff],
     key: StaffPeakKey,
     parameters: SplitParameters,
-    build_filament: &mut impl FnMut(&StaffPeak) -> Result<bool, String>,
+    build_filament: &mut impl FnMut(StaffPeakKey, &StaffPeak) -> Result<bool, String>,
     rediscover: &mut impl FnMut(
         &mut PeakGraph<BarAlignment>,
         &[AlignmentStaff],
@@ -315,10 +315,10 @@ fn split_peak(
         impacts,
     )
     .map_err(SplitBuildError::Peak)?;
-    if !build_filament(&left).map_err(SplitBuildError::Filament)? {
+    if !build_filament(key, &left).map_err(SplitBuildError::Filament)? {
         return Ok(false);
     }
-    if !build_filament(&right).map_err(SplitBuildError::Filament)? {
+    if !build_filament(key, &right).map_err(SplitBuildError::Filament)? {
         report.failed_after_left_registration.push(key);
         return Ok(false);
     }
@@ -537,7 +537,7 @@ mod tests {
                 maximum_close_gap: 4,
                 maximum_width_ratio: 0.0,
             },
-            |replacement| {
+            |_, replacement| {
                 built.push(replacement.key());
                 Ok(true)
             },
@@ -619,7 +619,7 @@ mod tests {
                 maximum_close_gap: 4,
                 maximum_width_ratio: 0.0,
             },
-            |_| {
+            |_, _| {
                 calls += 1;
                 Ok(calls == 1)
             },

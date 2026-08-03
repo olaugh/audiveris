@@ -203,6 +203,46 @@ pub fn alignment_for_pair(
     check_alignment(top_peak, bottom_peak, &peak_ids, parameters)
 }
 
+/// Ordered candidate pairs visited by Java
+/// `findAlignmentsAndConnectionsOf`: all staff neighbors above, then below,
+/// retaining projector peak order within each neighbor.
+pub fn alignment_pairs_for_peak(
+    staffs: &[AlignmentStaff],
+    peak: StaffPeakKey,
+) -> Result<Vec<(StaffPeakKey, StaffPeakKey)>, AlignmentBuildError> {
+    let current_index = staffs
+        .iter()
+        .position(|staff| staff.staff_id == peak.staff_id())
+        .ok_or(AlignmentBuildError::WrongPeakStaff {
+            peak,
+            staff: peak.staff_id(),
+        })?;
+    if !staffs[current_index].peaks.contains(&peak) {
+        return Err(AlignmentBuildError::MissingPeak(peak));
+    }
+    let current = &staffs[current_index];
+    let mut result = Vec::new();
+    let above = vertical_neighbors_above(staffs, current_index);
+    if above
+        .first()
+        .is_some_and(|staff| staff.short == current.short)
+    {
+        for staff in above {
+            result.extend(staff.peaks.iter().map(|&candidate| (candidate, peak)));
+        }
+    }
+    let below = vertical_neighbors_below(staffs, current_index);
+    if below
+        .first()
+        .is_some_and(|staff| staff.short == current.short)
+    {
+        for staff in below {
+            result.extend(staff.peaks.iter().map(|&candidate| (peak, candidate)));
+        }
+    }
+    Ok(result)
+}
+
 fn validate_inputs(
     graph: &PeakGraph<BarAlignment>,
     staffs: &[AlignmentStaff],
@@ -255,6 +295,32 @@ fn vertical_neighbors_below(
     let current = &staffs[current_index];
     let Some(first_index) =
         ((current_index + 1)..staffs.len()).find(|&index| x_overlaps(current, &staffs[index]))
+    else {
+        return Vec::new();
+    };
+    let mut indices = vec![first_index];
+    for direction in [-1_isize, 1] {
+        let mut cursor = first_index;
+        while let Some(next) = horizontal_neighbor(staffs, cursor, direction) {
+            if !indices.contains(&next) {
+                indices.push(next);
+            }
+            cursor = next;
+        }
+    }
+    indices.retain(|&index| index != current_index);
+    indices.sort_unstable_by_key(|&index| staffs[index].staff_id.value());
+    indices.into_iter().map(|index| &staffs[index]).collect()
+}
+
+fn vertical_neighbors_above(
+    staffs: &[AlignmentStaff],
+    current_index: usize,
+) -> Vec<&AlignmentStaff> {
+    let current = &staffs[current_index];
+    let Some(first_index) = (0..current_index)
+        .rev()
+        .find(|&index| x_overlaps(current, &staffs[index]))
     else {
         return Vec::new();
     };
