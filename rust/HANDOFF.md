@@ -307,17 +307,25 @@ denied, and passed `git diff --check` before commit.
 223. `380af50e` — positive, negative, and zero Java/Rust skew-transform vector.
 224. `14050774` — Java-ordered final discarded-line population carried into completion.
 225. `c0712ba7` — live-raster staff projector construction with exact deskew centers.
+226. `c0b91f75` — raw projector registry materialized into the peak-graph boundary.
+227. `ad7ce242` — concrete raster-fitted `DefineEndPoints` completion collaborator.
+228. `36094408` — resolved endpoints installed into mutable filament spline geometry.
+229. `9696f615` — VLAG/HLAG raw bar sticks, section attachment, and curvature marking.
+230. `2b70107f` — concrete discarded-filament inclusion, ownership, and recomputation.
+231. `b94bc88e` — exact raw-raster `retrieveLines` Java/Rust differential vector.
+232. `1955b867` — skew-aware raw `findAllAlignments` traversal and relations.
+233. `0d68e795` — exact Java/Rust raster-fitted endpoint and mutated-spline vector.
 
-At the two-hundred-and-twenty-fifth checkpoint the Rust workspace executes 582 tests:
+At the two-hundred-and-thirty-third checkpoint the Rust workspace executes 598 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 412
-- `audiveris-omr`: 117
+- `audiveris-image`: 427
+- `audiveris-omr`: 118
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 65 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 67 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -435,9 +443,12 @@ reject fallback filaments into sheet state. The measured slope replaces any call
 placeholder during line purge/layout. The secondary pass retries only primary discards,
 preserving Java's separate slope-reject lifecycle. Completion receives the authoritative
 final cluster rejects followed by every original slope reject, with typed provenance and
-exact failure prefixes. Raw peak-graph/system/bar inputs, concrete completion geometry,
-and several transactional exceptional paths remain, so this is not yet a claim that raw-
-page GRID is fully behaviorally equivalent.
+exact failure prefixes. `DefineEndPoints` now performs the live raster pattern search and
+mutates filament endpoints, spline cache, and bounds; `IncludeDiscardedFilaments` performs
+the stable system traversal, inclusion test, section steal, `partOf` assignment, and
+endpoint recomputation. Later completion stages and several transactional exceptional
+paths remain, so this is not yet a claim that raw-page GRID is fully behaviorally
+equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -448,8 +459,11 @@ graph-vertex intents. Downstream SIG promotion, detached brace ownership, and GR
 contextual grading are now concrete. An additive raw adapter constructs each projector
 from prepared staff geometry and the live zero-foreground raster, applies Java rounding,
 and attaches the exact stored deskew center to ordinary and detached-brace peaks before
-registry insertion. The remaining upstream gap is building raw peak-graph/system/bar-
-column inputs from that registry and implementing the remaining completion collaborators.
+registry insertion. Registry peaks now enter a real peak graph, acquire bar sticks from
+VLAG then HLAG sections, receive curvature/brace classification, and run Java's raw-
+endpoint/skew-aware alignment discovery without prematurely purging competing edges.
+Pixel-backed connection discovery, splitting/purging, multi-staff system construction,
+and the remaining completion collaborators are the next boundaries.
 
 The newest composed differential constructs the same two-system synthetic sheet in live
 Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
