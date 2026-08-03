@@ -339,6 +339,52 @@ pub fn start_column_candidate(
     candidate
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct StartColumnStaffFacts<'a> {
+    pub peak: &'a StaffPeak,
+    pub staff_left: i32,
+    pub is_one_line_staff: bool,
+    pub has_standard_blank_to_lines: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartColumnUpdate {
+    pub staff_id: StaffId,
+    pub staff_left: i32,
+    pub peak: StaffPeakKey,
+}
+
+/// Final all-or-nothing validation and mutation intents from Java
+/// `detectStartColumns` after a candidate column has been selected.
+/// One-line staves skip both line-root checks but still receive the accepted
+/// column position and left-end marker.
+#[must_use]
+pub fn validate_start_column(
+    candidate: &[StartColumnStaffFacts<'_>],
+    maximum_lines_left_to_start_bar: i32,
+) -> Option<Vec<StartColumnUpdate>> {
+    for facts in candidate {
+        if facts.is_one_line_staff {
+            continue;
+        }
+        if facts.peak.start().wrapping_sub(facts.staff_left) > maximum_lines_left_to_start_bar
+            || facts.has_standard_blank_to_lines
+        {
+            return None;
+        }
+    }
+    Some(
+        candidate
+            .iter()
+            .map(|facts| StartColumnUpdate {
+                staff_id: facts.peak.staff_id(),
+                staff_left: facts.peak.stop(),
+                peak: facts.peak.key(),
+            })
+            .collect(),
+    )
+}
+
 /// Java `BarsRetriever.buildColumns` aggregation after graph connectivity has
 /// produced peak chains for one system.
 ///
@@ -941,6 +987,65 @@ mod tests {
             start_column_candidate(&mut columns, &relations, 10, 10),
             Some(2)
         );
+    }
+
+    #[test]
+    fn start_column_validation_is_atomic_and_one_line_staves_skip_line_checks() {
+        let top = peak(1, 12, 14);
+        let bottom = peak(2, 13, 15);
+        let facts = [
+            StartColumnStaffFacts {
+                peak: &top,
+                staff_left: 10,
+                is_one_line_staff: false,
+                has_standard_blank_to_lines: false,
+            },
+            StartColumnStaffFacts {
+                peak: &bottom,
+                staff_left: -100,
+                is_one_line_staff: true,
+                has_standard_blank_to_lines: true,
+            },
+        ];
+        assert_eq!(
+            validate_start_column(&facts, 2).unwrap(),
+            [
+                StartColumnUpdate {
+                    staff_id: StaffId::new(1),
+                    staff_left: 14,
+                    peak: top.key()
+                },
+                StartColumnUpdate {
+                    staff_id: StaffId::new(2),
+                    staff_left: 15,
+                    peak: bottom.key()
+                },
+            ]
+        );
+
+        let rejected = [
+            facts[0],
+            StartColumnStaffFacts {
+                peak: &bottom,
+                staff_left: 12,
+                is_one_line_staff: false,
+                has_standard_blank_to_lines: true,
+            },
+        ];
+        assert!(validate_start_column(&rejected, 2).is_none());
+    }
+
+    #[test]
+    fn start_column_validation_uses_java_wrapping_distance() {
+        let value = peak(1, i32::MIN, i32::MIN);
+        let facts = [StartColumnStaffFacts {
+            peak: &value,
+            staff_left: i32::MAX,
+            is_one_line_staff: false,
+            has_standard_blank_to_lines: false,
+        }];
+        // MIN - MAX wraps to 1.
+        assert!(validate_start_column(&facts, 1).is_some());
     }
 
     #[test]
