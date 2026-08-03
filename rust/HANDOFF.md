@@ -182,20 +182,23 @@ denied, and passed `git diff --check` before commit.
 99. `5977ee01` — source-guided StaffProjector impact grading and neutral peak promotion.
 100. `e2b9b1d4` — source-guided StaffProjector browse/find range orchestration with
      acceptance-controlled cursor advancement.
+101. `195de90b` — source-guided StaffProjector brace discovery and neutral brace peak.
+102. `2e2da81b` — regression for continued scanning after an over-wide rejected range.
+103. `d7c982b6` — live Java/Rust StaffProjector range-scanning vector.
 
-At the one-hundredth checkpoint the Rust workspace executes 298 tests:
+At the one-hundred-and-third checkpoint the Rust workspace executes 303 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 154
+- `audiveris-image`: 159
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 52 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 53 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
-refinement, peak-candidate construction, and core-pixel validation.
+refinement, peak-candidate construction, core-pixel validation, and range scanning.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -248,8 +251,8 @@ Every boundary through core-pixel validation has an exact live Java vector. Vali
 evidence now also feeds source-compatible six-impact grading and neutral `StaffPeak`
 promotion. Range scanning composes these pieces while advancing only after final
 candidate acceptance, matching Java's rejection behavior. It is still a library slice
-rather than an end-to-end staff projector: sheet/glyph ownership and downstream graph
-mutation remain queued.
+rather than an end-to-end staff projector. Dependency-light brace discovery is also
+ported; sheet/glyph ownership and downstream graph mutation remain queued.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
