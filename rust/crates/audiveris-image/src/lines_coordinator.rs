@@ -293,8 +293,8 @@ pub fn retrieve_staff_candidates(
     retrieve_staff_candidates_inner(primary, secondary, parameters, None)
 }
 
-/// Raw-adapter variant for a secondary state whose sorted union of primary
-/// discards and retained slope rejects has already been comb-followed.
+/// Raw-adapter variant for a secondary state whose ID-sorted primary discards
+/// have already been comb-followed.
 /// Existing prepared callers deliberately retain Java's discard-only order.
 pub fn retrieve_staff_candidates_with_secondary_order(
     primary: &mut ClusterPassState,
@@ -817,63 +817,6 @@ mod tests {
         assert!(!result.staffs()[1].is_small());
         assert_eq!(result.staffs()[0].id(), 1);
         assert_eq!(result.staffs()[1].id(), 2);
-    }
-
-    #[test]
-    fn explicit_secondary_root_order_runs_retained_slope_rejects_without_primary_discards() {
-        let source = sections();
-        let mut primary_ownership = ClusterOwnership::new();
-        let primary_filaments = [
-            (FilamentId::new(2), filament(10, source[1].clone())),
-            (FilamentId::new(3), filament(10, source[2].clone())),
-        ]
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
-        for (&id, value) in &primary_filaments {
-            primary_ownership.register_filament(id, value).unwrap();
-        }
-        let mut comb = FilamentComb::new(0);
-        comb.append_root(2, 50.0).unwrap();
-        comb.append_root(3, 60.0).unwrap();
-        let comb_id = CombId::new(1);
-        primary_ownership.register_comb(comb_id, &comb).unwrap();
-        let mut primary = ClusterPassState::new(
-            primary_ownership,
-            primary_filaments,
-            BTreeMap::from([(comb_id, RecursiveCombSnapshot::from_comb(&comb))]),
-            vec![FilamentId::new(2), FilamentId::new(3)],
-            retrieval_parameters(10, BTreeSet::from([2])),
-        );
-
-        let slope_id = FilamentId::new(1);
-        let slope_value = filament(10, source[0].clone());
-        let mut secondary_ownership = ClusterOwnership::new();
-        secondary_ownership
-            .register_filament(slope_id, &slope_value)
-            .unwrap();
-        let mut secondary = ClusterPassState::new(
-            secondary_ownership,
-            BTreeMap::from([(slope_id, slope_value)]),
-            BTreeMap::new(),
-            vec![slope_id],
-            retrieval_parameters(5, BTreeSet::from([1])),
-        );
-        let parameters = LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap();
-
-        let result = retrieve_staff_candidates_with_secondary_order(
-            &mut primary,
-            &mut secondary,
-            &[slope_id],
-            parameters,
-        )
-        .unwrap();
-
-        assert!(result.primary().discarded_filaments().is_empty());
-        assert!(result.secondary().is_some());
-        assert_eq!(result.staffs().len(), 2);
-        assert_eq!(result.staffs()[0].source().pass(), ClusterPass::Small);
-        assert_eq!(result.staffs()[0].interline(), 5);
-        assert_eq!(secondary.filaments()[&slope_id].interline(), 10);
     }
 
     #[test]

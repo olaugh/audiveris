@@ -16,8 +16,8 @@ use crate::{
     line_section_dispatch::dispatch_horizontal_sections,
     prepared_bars::{PreparedBarsHandoff, PreparedBarsStage},
     prepared_lines::{
-        PreparedStaff, PreparedStaffHandoff, PreparedStaffStage, RawLineMetadataHandoff,
-        RawLineMetadataStage,
+        PreparedStaff, PreparedStaffHandoff, PreparedStaffStage, RawDiscardedFilament,
+        RawLineMetadataHandoff, RawLineMetadataStage,
     },
     raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages},
     run_table::RunTable,
@@ -27,6 +27,9 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct PreparedCompletionState {
     pub staffs: Vec<PreparedStaff>,
+    /// Exact final candidates consumed by Java's
+    /// `includeDiscardedFilaments` stage, in their pre-top-sort source order.
+    pub discarded_filaments: Vec<RawDiscardedFilament>,
     pub horizontal_sections: Vec<Section>,
     pub binary_buffer: Option<RunTable>,
     pub thick_section_ids: Vec<usize>,
@@ -65,6 +68,7 @@ pub struct ProductionCompleteLines<Upstream, Completion> {
     maximum_thin_weight: usize,
     inspect_crossing_chunks: bool,
     state: Option<PreparedCompletionState>,
+    raw_metadata: Option<RawLineMetadataHandoff>,
 }
 
 impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
@@ -83,6 +87,7 @@ impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
             maximum_thin_weight,
             inspect_crossing_chunks,
             state: None,
+            raw_metadata: None,
         }
     }
 
@@ -125,7 +130,9 @@ where
     Upstream: RawLineMetadataStage,
 {
     fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
-        self.upstream.take_raw_line_metadata_handoff()
+        self.raw_metadata
+            .take()
+            .or_else(|| self.upstream.take_raw_line_metadata_handoff())
     }
 }
 
@@ -141,7 +148,7 @@ where
 impl<Upstream, Completion> RemainingRasterGridStages
     for ProductionCompleteLines<Upstream, Completion>
 where
-    Upstream: RemainingRasterGridStages + PreparedStaffStage,
+    Upstream: RemainingRasterGridStages + PreparedStaffStage + RawLineMetadataStage,
     Completion: RemainingLineCompletionStages<StepError = Upstream::StepError>,
 {
     type StepError = Upstream::StepError;
@@ -184,8 +191,18 @@ where
             })?
             .sections()
             .to_vec();
+        if self.raw_metadata.is_none() {
+            self.raw_metadata = self.upstream.take_raw_line_metadata_handoff();
+        }
+        let discarded_filaments = self
+            .raw_metadata
+            .as_ref()
+            .map_or_else(Vec::new, |metadata| {
+                metadata.final_discarded_filaments.clone()
+            });
         self.state = Some(PreparedCompletionState {
             staffs,
+            discarded_filaments,
             horizontal_sections,
             binary_buffer: None,
             thick_section_ids: Vec::new(),
@@ -337,7 +354,14 @@ mod tests {
     #[derive(Default)]
     struct Upstream {
         handoff: Option<PreparedStaffHandoff>,
+        raw_metadata: Option<RawLineMetadataHandoff>,
         finish_count: usize,
+    }
+
+    impl RawLineMetadataStage for Upstream {
+        fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+            self.raw_metadata.take()
+        }
     }
 
     impl PreparedStaffStage for Upstream {
@@ -387,6 +411,7 @@ mod tests {
         fail_at: Option<(LineCompletionStage, bool)>,
         calls: Vec<LineCompletionStage>,
         warnings: Vec<&'static str>,
+        observed_discarded_ids: Vec<usize>,
         finish_count: usize,
     }
 
@@ -397,9 +422,16 @@ mod tests {
         fn run_stage(
             &mut self,
             stage: LineCompletionStage,
-            _state: &mut PreparedCompletionState,
+            state: &mut PreparedCompletionState,
         ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
             self.calls.push(stage);
+            if stage == LineCompletionStage::IncludeDiscardedFilaments {
+                self.observed_discarded_ids = state
+                    .discarded_filaments
+                    .iter()
+                    .map(|discarded| discarded.line.id)
+                    .collect();
+            }
             match self.fail_at {
                 Some((failed, true)) if failed == stage => {
                     Err(GridStageFailure::Step("completion step failure"))
@@ -474,6 +506,23 @@ mod tests {
         )
     }
 
+    fn builder_with_metadata(
+        completion: Completion,
+        binary: Option<RunTable>,
+        metadata: RawLineMetadataHandoff,
+    ) -> HeadlessRasterGridBuilder<ProductionCompleteLines<Upstream, Completion>> {
+        let upstream = Upstream {
+            handoff: Some(prepared_staffs()),
+            raw_metadata: Some(metadata),
+            ..Upstream::default()
+        };
+        HeadlessRasterGridBuilder::new(
+            source(),
+            raster_parameters(),
+            ProductionCompleteLines::new(upstream, completion, binary, 20, true),
+        )
+    }
+
     #[test]
     fn success_loads_binary_dispatches_sections_and_finishes_inner_boundary() {
         let mut builder = builder(Completion::default(), Some(source()));
@@ -491,6 +540,41 @@ mod tests {
         assert_eq!(state.completed_stages.len(), 11);
         assert_eq!(stages.completion().finish_count, 1);
         assert_eq!(stages.upstream().finish_count, 1);
+    }
+
+    #[test]
+    fn final_discarded_set_is_visible_only_at_completion_and_remains_handoff_safe() {
+        let line = prepared_staffs().staffs[0].lines[0].clone();
+        let metadata = RawLineMetadataHandoff {
+            global_slope: 0.0,
+            final_discarded_filaments: vec![RawDiscardedFilament {
+                provenance: crate::prepared_lines::RawDiscardedFilamentProvenance::PrimaryDiscarded,
+                line: line.clone(),
+            }],
+            sloped_filaments: Vec::new(),
+        };
+        let mut builder = builder_with_metadata(Completion::default(), Some(source()), metadata);
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        assert_eq!(
+            builder.stages().state().unwrap().discarded_filaments[0]
+                .line
+                .id,
+            line.id
+        );
+        assert_eq!(
+            builder.stages().completion().observed_discarded_ids,
+            [line.id]
+        );
+        let forwarded = builder
+            .stages_mut()
+            .take_raw_line_metadata_handoff()
+            .expect("completion must retain metadata for sheet installation");
+        assert_eq!(forwarded.final_discarded_filaments.len(), 1);
+        assert!(forwarded.sloped_filaments.is_empty());
     }
 
     #[test]
@@ -538,6 +622,36 @@ mod tests {
             stages.state().unwrap().completed_stages.last(),
             Some(&LineCompletionStage::IncludeThickSections)
         );
+    }
+
+    #[test]
+    fn completion_failure_retains_final_discarded_prefix_before_first_stage() {
+        let line = prepared_staffs().staffs[0].lines[0].clone();
+        let metadata = RawLineMetadataHandoff {
+            global_slope: 0.0,
+            final_discarded_filaments: vec![RawDiscardedFilament {
+                provenance: crate::prepared_lines::RawDiscardedFilamentProvenance::Sloped,
+                line: line.clone(),
+            }],
+            sloped_filaments: vec![line],
+        };
+        let mut builder = builder_with_metadata(
+            Completion {
+                fail_at: Some((LineCompletionStage::DefineEndPoints, true)),
+                ..Completion::default()
+            },
+            Some(source()),
+            metadata,
+        );
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Err("completion step failure")
+        );
+        let state = builder.stages().state().expect("completion state prefix");
+        assert_eq!(state.discarded_filaments.len(), 1);
+        assert!(state.completed_stages.is_empty());
+        assert_eq!(builder.stages().completion().finish_count, 1);
     }
 
     #[test]

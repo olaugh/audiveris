@@ -9,7 +9,7 @@ use crate::{
     cluster_ownership::{ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombBuilderError, CombFilament, popular_comb_size, retrieve_combs},
-    filament::{FilamentError, StaffFilament},
+    filament::FilamentError,
     filament_factory::{
         FilamentFactory, FilamentFactoryIdentityError, FilamentFactoryParams, OverlapParams,
     },
@@ -231,15 +231,14 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
 /// Lazily construct Java's secondary/small-interline clustering state.
 ///
 /// `primary_discarded` comes from a transactional preview of the primary
-/// cluster pass. Retained slope rejects are added to that set for the later
-/// completion-compatible Rust path. Every value is cloned from the original
-/// main-interline [`StaffFilament`], preserving its ID, sections and geometry;
-/// no filament is rebuilt with the small interline.
+/// cluster pass. Java does not feed slope rejects into this pass; it retains
+/// them separately for `includeDiscardedFilaments`. Every value is cloned from
+/// the original main-interline [`StaffFilament`], preserving its ID, sections
+/// and geometry; no filament is rebuilt with the small interline.
 pub fn build_secondary_cluster_pass(
     picture_width: usize,
     primary: &ClusterPassState,
     primary_discarded: &[FilamentId],
-    retained_sloped: &BTreeMap<FilamentId, StaffFilament>,
     parameters: RawSecondaryPassParameters,
 ) -> Result<ClusterPassState, RawLineAdapterError> {
     let mut filaments = BTreeMap::new();
@@ -252,12 +251,6 @@ pub fn build_secondary_cluster_pass(
             return Err(RawLineAdapterError::DuplicateSecondaryFilament(id));
         }
     }
-    for (&id, filament) in retained_sloped {
-        if filaments.insert(id, filament.clone()).is_some() {
-            return Err(RawLineAdapterError::DuplicateSecondaryFilament(id));
-        }
-    }
-
     // Java sorts the second-pass input by entity ID before constructing its
     // comb network. BTreeMap iteration gives that exact deterministic order.
     let mut filament_order = filaments.keys().copied().collect::<Vec<_>>();
@@ -685,39 +678,45 @@ mod tests {
     }
 
     #[test]
-    fn secondary_pass_preserves_main_geometry_ids_and_sorted_union_provenance() {
+    fn secondary_pass_preserves_main_geometry_ids_and_sorted_discard_provenance() {
         let discarded_id = FilamentId::new(5);
-        let sloped_id = FilamentId::new(2);
+        let other_discarded_id = FilamentId::new(2);
         let mut table = RunTable::new(Orientation::Horizontal, 41, 42).unwrap();
         table.add_run(20, Run::new(0, 40)).unwrap();
         table.add_run(40, Run::new(0, 40)).unwrap();
         let mut source_sections = build_sections(&table, JunctionPolicy::All);
         let discarded_section = source_sections.remove(0);
-        let sloped_section = source_sections.remove(0);
+        let other_discarded_section = source_sections.remove(0);
         let mut discarded = StaffFilament::new(10).unwrap();
         discarded.add_section(discarded_section).unwrap();
-        let mut sloped = StaffFilament::new(10).unwrap();
-        sloped.add_section(sloped_section).unwrap();
+        let mut other_discarded = StaffFilament::new(10).unwrap();
+        other_discarded
+            .add_section(other_discarded_section)
+            .unwrap();
         let discarded_sections = discarded.sections().to_vec();
-        let sloped_sections = sloped.sections().to_vec();
+        let other_discarded_sections = other_discarded.sections().to_vec();
 
         let mut primary_ownership = ClusterOwnership::new();
         primary_ownership
             .register_filament(discarded_id, &discarded)
             .unwrap();
+        primary_ownership
+            .register_filament(other_discarded_id, &other_discarded)
+            .unwrap();
         let primary = ClusterPassState::new(
             primary_ownership,
-            BTreeMap::from([(discarded_id, discarded)]),
+            BTreeMap::from([
+                (discarded_id, discarded),
+                (other_discarded_id, other_discarded),
+            ]),
             BTreeMap::new(),
             vec![discarded_id],
             retrieval_parameters_for(10, BTreeSet::from([1])),
         );
-        let retained_sloped = BTreeMap::from([(sloped_id, sloped)]);
         let secondary = build_secondary_cluster_pass(
             100,
             &primary,
-            &[discarded_id],
-            &retained_sloped,
+            &[other_discarded_id, discarded_id],
             RawSecondaryPassParameters {
                 sampling_dx: 20,
                 minimum_delta_y: 4,
@@ -727,17 +726,20 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(secondary.filament_order(), [sloped_id, discarded_id]);
+        assert_eq!(
+            secondary.filament_order(),
+            [other_discarded_id, discarded_id]
+        );
         assert_eq!(secondary.parameters().interline(), 5);
         assert_eq!(secondary.filaments()[&discarded_id].interline(), 10);
-        assert_eq!(secondary.filaments()[&sloped_id].interline(), 10);
+        assert_eq!(secondary.filaments()[&other_discarded_id].interline(), 10);
         assert_eq!(
             secondary.filaments()[&discarded_id].sections(),
             discarded_sections
         );
         assert_eq!(
-            secondary.filaments()[&sloped_id].sections(),
-            sloped_sections
+            secondary.filaments()[&other_discarded_id].sections(),
+            other_discarded_sections
         );
         assert_eq!(
             secondary
@@ -760,13 +762,10 @@ mod tests {
             vec![id],
             retrieval_parameters_for(10, BTreeSet::from([1])),
         );
-        let sloped = BTreeMap::from([(id, filament.clone())]);
-
         let error = build_secondary_cluster_pass(
             100,
             &primary,
-            &[id],
-            &sloped,
+            &[id, id],
             RawSecondaryPassParameters {
                 sampling_dx: 20,
                 minimum_delta_y: 4,
@@ -779,8 +778,6 @@ mod tests {
         assert_eq!(error, RawLineAdapterError::DuplicateSecondaryFilament(id));
         assert_eq!(primary.filaments()[&id].interline(), filament.interline());
         assert_eq!(primary.filaments()[&id].sections(), filament.sections());
-        assert_eq!(sloped[&id].interline(), filament.interline());
-        assert_eq!(sloped[&id].sections(), filament.sections());
     }
 
     #[test]

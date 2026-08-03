@@ -53,11 +53,31 @@ pub struct PreparedStaffHandoff {
     pub staffs: Vec<PreparedStaff>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RawDiscardedFilamentProvenance {
+    PrimaryDiscarded,
+    Sloped,
+    SecondaryDiscarded,
+}
+
+/// One exact factory filament still eligible for Java's later
+/// `includeDiscardedFilaments` fallback.
+#[derive(Clone, Debug)]
+pub struct RawDiscardedFilament {
+    pub provenance: RawDiscardedFilamentProvenance,
+    pub line: PreparedStaffLine,
+}
+
 /// Raw-line state retained after rejection for sheet skew and later fallback
 /// inclusion. Curvature rejects are deliberately not represented.
 #[derive(Clone, Debug)]
 pub struct RawLineMetadataHandoff {
     pub global_slope: f64,
+    /// Authoritative, ordered final fallback set.
+    pub final_discarded_filaments: Vec<RawDiscardedFilament>,
+    /// Compatibility projection consumed by the current sheet installer.
+    /// Java keeps every original slope reject outside both cluster passes, so
+    /// this is their exact original order.
     pub sloped_filaments: Vec<PreparedStaffLine>,
 }
 
@@ -104,6 +124,8 @@ pub enum ProductionRetrieveLinesError<DownstreamError> {
         filament: FilamentId,
         section: usize,
     },
+    MissingDiscardedFilament(FilamentId),
+    DuplicateDiscardedFilament(FilamentId),
     InterlineMismatch {
         candidate: usize,
         filament: FilamentId,
@@ -341,25 +363,7 @@ where
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
         let global_slope = built.global_slope();
         let retained_sloped = built.sloped_filaments().clone();
-        let sloped_filaments = built
-            .sloped_ids()
-            .iter()
-            .map(|id| {
-                let filament = built
-                    .sloped_filaments()
-                    .get(id)
-                    .expect("sloped ID comes from the retained sloped-filament map")
-                    .clone();
-                let id = usize::try_from(id.value()).map_err(|_| {
-                    GridStageFailure::Other(ProductionRetrieveLinesError::FilamentIdOverflow(*id))
-                })?;
-                Ok(PreparedStaffLine { id, filament })
-            })
-            .collect::<Result<Vec<_>, GridStageFailure<_, _>>>()?;
-        self.raw_metadata_handoff = Some(RawLineMetadataHandoff {
-            global_slope,
-            sloped_filaments,
-        });
+        let sloped_ids = built.sloped_ids().to_vec();
         let lines_parameters = self
             .lines_parameters
             .with_global_slope(global_slope)
@@ -374,7 +378,6 @@ where
                 lag.run_table().width(),
                 primary,
                 preview.discarded_filaments(),
-                &retained_sloped,
                 parameters,
             )
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
@@ -392,6 +395,20 @@ where
             retrieve_staff_candidates(primary, None, lines_parameters)
         }
         .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        self.raw_metadata_handoff = Some(
+            build_raw_metadata_handoff(
+                global_slope,
+                result.primary().discarded_filaments(),
+                result
+                    .secondary()
+                    .map(crate::cluster_pipeline::ClusterRetrievalResult::discarded_filaments),
+                primary,
+                self.secondary.as_ref(),
+                &sloped_ids,
+                &retained_sloped,
+            )
+            .map_err(GridStageFailure::Other)?,
+        );
         self.handoff = Some(
             materialize_staffs(
                 result.staffs(),
@@ -431,6 +448,98 @@ where
     fn finish(&mut self) {
         self.downstream.finish();
     }
+}
+
+fn build_raw_metadata_handoff<DownstreamError>(
+    global_slope: f64,
+    primary_discarded: &[FilamentId],
+    secondary_discarded: Option<&[FilamentId]>,
+    primary: &ClusterPassState,
+    secondary: Option<&ClusterPassState>,
+    sloped_ids: &[FilamentId],
+    sloped: &BTreeMap<FilamentId, StaffFilament>,
+) -> Result<RawLineMetadataHandoff, ProductionRetrieveLinesError<DownstreamError>> {
+    let final_discarded_filaments = materialize_final_discarded_filaments(
+        primary_discarded,
+        secondary_discarded,
+        primary,
+        secondary,
+        sloped_ids,
+        sloped,
+    )?;
+    let sloped_filaments = final_discarded_filaments
+        .iter()
+        .filter(|discarded| discarded.provenance == RawDiscardedFilamentProvenance::Sloped)
+        .map(|discarded| discarded.line.clone())
+        .collect();
+    Ok(RawLineMetadataHandoff {
+        global_slope,
+        final_discarded_filaments,
+        sloped_filaments,
+    })
+}
+
+fn materialize_final_discarded_filaments<DownstreamError>(
+    primary_discarded: &[FilamentId],
+    secondary_discarded: Option<&[FilamentId]>,
+    primary: &ClusterPassState,
+    secondary: Option<&ClusterPassState>,
+    sloped_ids: &[FilamentId],
+    sloped: &BTreeMap<FilamentId, StaffFilament>,
+) -> Result<Vec<RawDiscardedFilament>, ProductionRetrieveLinesError<DownstreamError>> {
+    let mut seen = BTreeSet::new();
+    let mut result = Vec::new();
+    let mut append = |id: FilamentId,
+                      provenance: RawDiscardedFilamentProvenance,
+                      filaments: &BTreeMap<FilamentId, StaffFilament>|
+     -> Result<(), ProductionRetrieveLinesError<DownstreamError>> {
+        if !seen.insert(id) {
+            return Err(ProductionRetrieveLinesError::DuplicateDiscardedFilament(id));
+        }
+        let filament = filaments
+            .get(&id)
+            .ok_or(ProductionRetrieveLinesError::MissingDiscardedFilament(id))?
+            .clone();
+        let raw_id = usize::try_from(id.value())
+            .map_err(|_| ProductionRetrieveLinesError::FilamentIdOverflow(id))?;
+        result.push(RawDiscardedFilament {
+            provenance,
+            line: PreparedStaffLine {
+                id: raw_id,
+                filament,
+            },
+        });
+        Ok(())
+    };
+
+    if let Some(ids) = secondary_discarded {
+        if !ids.is_empty() {
+            let pass = secondary.ok_or(ProductionRetrieveLinesError::MissingDiscardedFilament(
+                ids[0],
+            ))?;
+            for &id in ids {
+                append(
+                    id,
+                    RawDiscardedFilamentProvenance::SecondaryDiscarded,
+                    pass.filaments(),
+                )?;
+            }
+        }
+    } else {
+        for &id in primary_discarded {
+            append(
+                id,
+                RawDiscardedFilamentProvenance::PrimaryDiscarded,
+                primary.filaments(),
+            )?;
+        }
+    }
+    // Java retains slope rejects outside both cluster passes and appends them
+    // after the final discarded set before the stable top-ordinate sort.
+    for &id in sloped_ids {
+        append(id, RawDiscardedFilamentProvenance::Sloped, sloped)?;
+    }
+    Ok(result)
 }
 
 fn map_downstream_failure<StepError, DownstreamError>(
@@ -552,6 +661,7 @@ mod tests {
     use crate::{
         cluster_expand::ClusterExpansionParameters,
         cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
+        cluster_ownership::ClusterOwnership,
         cluster_pipeline::ClusterRetrievalParameters,
         filament_factory::{FilamentFactoryParams, OverlapParams},
         grid_lifecycle::{GridBuildOutcome, build_grid_info},
@@ -715,6 +825,23 @@ mod tests {
         LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap()
     }
 
+    fn synthetic_pass(
+        values: impl IntoIterator<Item = (FilamentId, StaffFilament)>,
+        interline: usize,
+    ) -> ClusterPassState {
+        let mut parameters = raw_parameters().retrieval;
+        if interline != parameters.interline() {
+            parameters = small_parameters().retrieval;
+        }
+        ClusterPassState::new(
+            ClusterOwnership::new(),
+            values.into_iter().collect(),
+            BTreeMap::new(),
+            Vec::new(),
+            parameters,
+        )
+    }
+
     #[test]
     fn raster_lag_retrieve_lines_materializes_split_middle_staff_in_stage_order() {
         let stages = RawProductionRetrieveLines::new(
@@ -837,6 +964,117 @@ mod tests {
                 .interline(),
             5
         );
+        let metadata = builder.stages().raw_metadata_handoff().unwrap();
+        assert!(metadata.final_discarded_filaments.is_empty());
+        assert!(metadata.sloped_filaments.is_empty());
+    }
+
+    #[test]
+    fn secondary_acceptance_does_not_consume_separate_slope_rejects() {
+        let slope_id = FilamentId::new(8);
+        let slope = StaffFilament::new(10).unwrap();
+        let primary = synthetic_pass(Vec::new(), 10);
+        let secondary = synthetic_pass(Vec::new(), 5);
+        let metadata = build_raw_metadata_handoff::<&'static str>(
+            0.25,
+            &[],
+            Some(&[]),
+            &primary,
+            Some(&secondary),
+            &[slope_id],
+            &BTreeMap::from([(slope_id, slope)]),
+        )
+        .unwrap();
+
+        assert_eq!(metadata.global_slope, 0.25);
+        assert_eq!(metadata.final_discarded_filaments.len(), 1);
+        assert_eq!(metadata.final_discarded_filaments[0].line.id, 8);
+        assert_eq!(
+            metadata.final_discarded_filaments[0].provenance,
+            RawDiscardedFilamentProvenance::Sloped
+        );
+        assert_eq!(metadata.sloped_filaments.len(), 1);
+        assert_eq!(metadata.sloped_filaments[0].id, 8);
+    }
+
+    #[test]
+    fn secondary_rejects_replace_original_classes_without_duplicates() {
+        let primary_id = FilamentId::new(3);
+        let slope_id = FilamentId::new(8);
+        let primary_value = StaffFilament::new(10).unwrap();
+        let slope = StaffFilament::new(10).unwrap();
+        let primary = synthetic_pass([(primary_id, primary_value.clone())], 10);
+        let secondary = synthetic_pass([(primary_id, primary_value)], 5);
+        let metadata = build_raw_metadata_handoff::<&'static str>(
+            0.0,
+            &[primary_id],
+            Some(&[primary_id]),
+            &primary,
+            Some(&secondary),
+            &[slope_id],
+            &BTreeMap::from([(slope_id, slope)]),
+        )
+        .unwrap();
+
+        assert_eq!(metadata.final_discarded_filaments.len(), 2);
+        assert_eq!(metadata.final_discarded_filaments[0].line.id, 3);
+        assert_eq!(
+            metadata.final_discarded_filaments[0].provenance,
+            RawDiscardedFilamentProvenance::SecondaryDiscarded
+        );
+        assert_eq!(metadata.final_discarded_filaments[1].line.id, 8);
+        assert_eq!(
+            metadata.final_discarded_filaments[1].provenance,
+            RawDiscardedFilamentProvenance::Sloped
+        );
+        assert_eq!(metadata.sloped_filaments.len(), 1);
+        assert_eq!(metadata.sloped_filaments[0].id, 8);
+    }
+
+    #[test]
+    fn no_secondary_preserves_java_primary_then_sloped_order_and_rejects_duplicates() {
+        let primary_id = FilamentId::new(9);
+        let slope_id = FilamentId::new(2);
+        let primary_value = StaffFilament::new(10).unwrap();
+        let slope = StaffFilament::new(10).unwrap();
+        let primary = synthetic_pass([(primary_id, primary_value)], 10);
+        let sloped = BTreeMap::from([(slope_id, slope.clone())]);
+        let metadata = build_raw_metadata_handoff::<&'static str>(
+            0.0,
+            &[primary_id],
+            None,
+            &primary,
+            None,
+            &[slope_id],
+            &sloped,
+        )
+        .unwrap();
+
+        assert_eq!(
+            metadata
+                .final_discarded_filaments
+                .iter()
+                .map(|discarded| discarded.line.id)
+                .collect::<Vec<_>>(),
+            [9, 2]
+        );
+        assert_eq!(metadata.sloped_filaments.len(), 1);
+        assert_eq!(metadata.sloped_filaments[0].id, 2);
+
+        let duplicate = build_raw_metadata_handoff::<&'static str>(
+            0.0,
+            &[slope_id],
+            None,
+            &synthetic_pass([(slope_id, slope.clone())], 10),
+            None,
+            &[slope_id],
+            &sloped,
+        )
+        .unwrap_err();
+        assert_eq!(
+            duplicate,
+            ProductionRetrieveLinesError::DuplicateDiscardedFilament(slope_id)
+        );
     }
 
     #[test]
@@ -866,5 +1104,6 @@ mod tests {
         assert!(builder.stages().primary().is_some());
         assert!(builder.stages().secondary().is_none());
         assert!(builder.stages().prepared_staff_handoff().is_none());
+        assert!(builder.stages().raw_metadata_handoff().is_none());
     }
 }
