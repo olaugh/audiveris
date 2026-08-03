@@ -4,9 +4,9 @@
 //!
 //! The cluster owns horizontal staff filaments in relative-position order and
 //! refers to their source identities with stable IDs. This avoids Java's
-//! bidirectional filament/cluster object graph. Comb discovery, cluster-parent
-//! merging, SIG integration, trimming, persistence, and UI/VIP behavior are
-//! deliberately outside this slice.
+//! bidirectional filament/cluster object graph. Recursive ownership mutation is
+//! coordinated by `cluster_coordinator`; Sheet/SIG integration, persistence, and
+//! UI/VIP behavior remain deliberately outside this value type.
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
@@ -150,8 +150,20 @@ impl LineCluster {
     pub fn merge_with(&mut self, other: Self, delta_position: i32) -> Result<(), LineClusterError> {
         let self_first = *self.lines.first_key_value().expect("seeded cluster").0;
         let other_first = *other.lines.first_key_value().expect("seeded cluster").0;
-        let shift = delta_position + self_first - other_first;
+        let shift = delta_position
+            .checked_add(self_first)
+            .and_then(|value| value.checked_sub(other_first))
+            .ok_or(LineClusterError::PositionOverflow)?;
+        self.merge_with_shift(other, shift)
+    }
 
+    /// Java's private cluster inclusion with an already resolved raw key shift.
+    ///
+    /// Recursive comb traversal computes this shift from a member's desired
+    /// position and current `clusterPos`, without the public `mergeWith` first-key
+    /// adjustment. The operation is transactional on duplicate IDs, invalid
+    /// filament sections, and relative-position overflow.
+    pub fn merge_with_shift(&mut self, other: Self, shift: i32) -> Result<(), LineClusterError> {
         for line in other.lines.values() {
             if self.contains_id(line.primary_id) {
                 return Err(LineClusterError::DuplicateFilamentId(line.primary_id));
@@ -168,7 +180,9 @@ impl LineCluster {
 
         let mut merged_lines = self.lines.clone();
         for (position, incoming) in other.lines {
-            let target_position = position + shift;
+            let target_position = position
+                .checked_add(shift)
+                .ok_or(LineClusterError::PositionOverflow)?;
             if let Some(current) = merged_lines.get_mut(&target_position) {
                 for section in incoming.filament.sections() {
                     current.filament.add_section(section.clone())?;
@@ -270,6 +284,12 @@ impl LineCluster {
     /// Members in stable top-to-bottom relative-position order.
     pub fn lines(&self) -> impl DoubleEndedIterator<Item = (i32, &ClusterLine)> {
         self.lines.iter().map(|(&position, line)| (position, line))
+    }
+
+    /// Member at one raw relative-position key.
+    #[must_use]
+    pub fn line_at(&self, position: i32) -> Option<&ClusterLine> {
+        self.lines.get(&position)
     }
 
     #[must_use]
@@ -512,6 +532,7 @@ pub enum LineClusterError {
     EmptyCombSizes,
     InvalidTrimParameters,
     NonContiguousTablatureLines,
+    PositionOverflow,
 }
 
 impl From<FilamentError> for LineClusterError {
@@ -534,6 +555,7 @@ impl fmt::Display for LineClusterError {
             Self::NonContiguousTablatureLines => {
                 formatter.write_str("six-line tablature positions are not contiguous")
             }
+            Self::PositionOverflow => formatter.write_str("line-cluster position overflow"),
         }
     }
 }
