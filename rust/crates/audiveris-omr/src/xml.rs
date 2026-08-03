@@ -21,10 +21,14 @@ const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
 const STEPS_ELEMENT: &[u8] = b"steps";
+const PAGE_ELEMENT: &[u8] = b"page";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
 const INVALID_ATTRIBUTE: &[u8] = b"invalid";
+const ID_ATTRIBUTE: &[u8] = b"id";
+const MOVEMENT_START_ATTRIBUTE: &[u8] = b"movement-start";
+const DELTA_MEASURE_ID_ATTRIBUTE: &[u8] = b"delta-measure-id";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -104,6 +108,11 @@ impl BookXml {
                     {
                         begin_steps(&sheet_stubs, sheet_index)?;
                         active_steps = Some((sheet_index, String::new()));
+                    } else if depth == 2
+                        && element.local_name().as_ref() == PAGE_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        push_page_ref(&reader, &element, &mut sheet_stubs[sheet_index])?;
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
@@ -158,6 +167,11 @@ impl BookXml {
                     {
                         begin_steps(&sheet_stubs, sheet_index)?;
                         sheet_stubs[sheet_index].done_steps = Some(Vec::new());
+                    } else if depth == 2
+                        && element.local_name().as_ref() == PAGE_ELEMENT
+                        && let Some(sheet_index) = active_sheet
+                    {
+                        push_page_ref(&reader, &element, &mut sheet_stubs[sheet_index])?;
                     }
                 }
                 Event::End(element) => {
@@ -322,6 +336,7 @@ pub struct SheetStub {
     invalid: Option<bool>,
     input: Option<SheetInput>,
     done_steps: Option<Vec<OmrStep>>,
+    page_refs: Vec<PageRef>,
 }
 
 impl SheetStub {
@@ -382,6 +397,51 @@ impl SheetStub {
         self.done_steps
             .as_deref()
             .and_then(|steps| steps.iter().copied().max())
+    }
+
+    /// Direct JAXB page references in persisted document order.
+    ///
+    /// JAXB uses an unwrapped repeated element, so an absent sequence is
+    /// represented by the same empty slice as Java's initially empty list.
+    #[must_use]
+    pub fn page_refs(&self) -> &[PageRef] {
+        &self.page_refs
+    }
+}
+
+/// Lightweight attributes of one direct sheet-stub `page` reference.
+///
+/// Nested time, system, part, and staff structures deliberately remain opaque.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PageRef {
+    id: u32,
+    movement_start: Option<bool>,
+    delta_measure_id: Option<i32>,
+}
+
+impl PageRef {
+    /// One-based page rank within the containing sheet.
+    #[must_use]
+    pub const fn id(self) -> u32 {
+        self.id
+    }
+
+    /// Explicit state of the optional JAXB boolean-positive attribute.
+    #[must_use]
+    pub const fn movement_start_attribute(self) -> Option<bool> {
+        self.movement_start
+    }
+
+    /// Effective Java movement-start state; absent defaults to false.
+    #[must_use]
+    pub fn is_movement_start(self) -> bool {
+        self.movement_start.unwrap_or(false)
+    }
+
+    /// Optional measure-ID increment recorded for the page.
+    #[must_use]
+    pub const fn delta_measure_id(self) -> Option<i32> {
+        self.delta_measure_id
     }
 }
 
@@ -495,6 +555,33 @@ pub enum BookXmlError {
         /// Exact decoded attribute value.
         value: String,
     },
+    /// A direct page reference has no unqualified `id` attribute.
+    MissingPageId(u32),
+    /// A direct page reference integer is malformed or out of Java `int` range.
+    InvalidPageInteger {
+        /// Containing sheet number.
+        sheet_number: u32,
+        /// Stable typed attribute path.
+        field: &'static str,
+        /// Exact decoded attribute value.
+        value: String,
+    },
+    /// A direct page reference boolean has an invalid XML Schema spelling.
+    InvalidPageBoolean {
+        /// Containing sheet number.
+        sheet_number: u32,
+        /// Stable typed attribute path.
+        field: &'static str,
+        /// Exact decoded attribute value.
+        value: String,
+    },
+    /// Two direct page references in one sheet declare the same ID.
+    DuplicatePageId {
+        /// Containing sheet number.
+        sheet_number: u32,
+        /// Repeated page rank.
+        page_id: u32,
+    },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -582,6 +669,32 @@ impl fmt::Display for BookXmlError {
             Self::InvalidSheetBoolean { field, value } => {
                 write!(formatter, "invalid sheet boolean {field}: {value:?}")
             }
+            Self::MissingPageId(sheet_number) => {
+                write!(formatter, "sheet stub {sheet_number} page has no id")
+            }
+            Self::InvalidPageInteger {
+                sheet_number,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} has invalid page integer {field}: {value:?}"
+            ),
+            Self::InvalidPageBoolean {
+                sheet_number,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} has invalid page boolean {field}: {value:?}"
+            ),
+            Self::DuplicatePageId {
+                sheet_number,
+                page_id,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} has duplicate page ID {page_id}"
+            ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
                     formatter,
@@ -686,6 +799,7 @@ fn push_sheet_stub(
         invalid,
         input: None,
         done_steps: None,
+        page_refs: Vec::new(),
     });
     Ok(())
 }
@@ -706,6 +820,69 @@ fn parse_jaxb_boolean(value: &str) -> Option<bool> {
         "false" | "0" => Some(false),
         _ => None,
     }
+}
+
+fn push_page_ref(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_stub: &mut SheetStub,
+) -> Result<(), BookXmlError> {
+    let mut id = None;
+    let mut movement_start = None;
+    let mut delta_measure_id = None;
+
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == ID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            id = Some(
+                value
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|id| *id > 0 && *id <= i32::MAX as u32)
+                    .ok_or_else(|| BookXmlError::InvalidPageInteger {
+                        sheet_number: sheet_stub.number,
+                        field: "sheet/page/@id",
+                        value: value.clone(),
+                    })?,
+            );
+        } else if key == MOVEMENT_START_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            movement_start = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidPageBoolean {
+                    sheet_number: sheet_stub.number,
+                    field: "sheet/page/@movement-start",
+                    value: value.clone(),
+                }
+            })?);
+        } else if key == DELTA_MEASURE_ID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            delta_measure_id = Some(value.trim().parse::<i32>().map_err(|_| {
+                BookXmlError::InvalidPageInteger {
+                    sheet_number: sheet_stub.number,
+                    field: "sheet/page/@delta-measure-id",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+
+    let id = id.ok_or(BookXmlError::MissingPageId(sheet_stub.number))?;
+    if sheet_stub.page_refs.iter().any(|page| page.id == id) {
+        return Err(BookXmlError::DuplicatePageId {
+            sheet_number: sheet_stub.number,
+            page_id: id,
+        });
+    }
+    sheet_stub.page_refs.push(PageRef {
+        id,
+        movement_start,
+        delta_measure_id,
+    });
+    Ok(())
 }
 
 fn begin_steps(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), BookXmlError> {
@@ -980,6 +1157,64 @@ mod tests {
     }
 
     #[test]
+    fn reads_real_page_reference_spelling_without_interpreting_children() {
+        // Exact page attributes and representative child spelling from the
+        // frozen Audiveris 5.11.0 K.545 archive.
+        let xml = br#"<?xml version="1.0" ?>
+<book software-version="5.11.0">
+  <sheet number="1">
+    <page id="1" movement-start="true" delta-measure-id="12">
+      <last-time-rational num="4" den="4"/>
+      <system><part logical-id="1"><staff-configuration line-count="5"/></part></system>
+    </page>
+  </sheet>
+  <score><page sheet-number="1" sheet-page-id="1"/></score>
+</book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let pages = book.sheet_stubs()[0].page_refs();
+
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].id(), 1);
+        assert_eq!(pages[0].movement_start_attribute(), Some(true));
+        assert!(pages[0].is_movement_start());
+        assert_eq!(pages[0].delta_measure_id(), Some(12));
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn preserves_page_order_optional_states_and_empty_list() {
+        let book = BookXml::parse(
+            br#"<book><sheet number="1"/><sheet number="2"><page id=" 2 " movement-start="false" delta-measure-id="-3"/><page id="1" movement-start="0"/></sheet></book>"#,
+        )
+        .unwrap();
+
+        assert!(book.sheet_stubs()[0].page_refs().is_empty());
+        let pages = book.sheet_stubs()[1].page_refs();
+        assert_eq!(
+            pages.iter().map(|page| page.id()).collect::<Vec<_>>(),
+            [2, 1]
+        );
+        assert_eq!(pages[0].movement_start_attribute(), Some(false));
+        assert!(!pages[0].is_movement_start());
+        assert_eq!(pages[0].delta_measure_id(), Some(-3));
+        assert_eq!(pages[1].movement_start_attribute(), Some(false));
+        assert_eq!(pages[1].delta_measure_id(), None);
+    }
+
+    #[test]
+    fn ignores_nested_and_namespaced_page_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><future><av:page id="77"/></future></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
+        )
+        .unwrap();
+
+        let pages = book.sheet_stubs()[0].page_refs();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].id(), 3);
+        assert_eq!(pages[0].movement_start_attribute(), None);
+    }
+
+    #[test]
     fn distinguishes_absent_input_and_accepts_explicit_empty_path() {
         let book = BookXml::parse(
             br#"<book><sheet number="1"/><sheet number="2"><input><path/><number>2</number></input></sheet></book>"#,
@@ -1083,6 +1318,77 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn rejects_missing_invalid_and_duplicate_page_ids() {
+        assert_eq!(
+            BookXml::parse(br#"<book><sheet number="4"><page future-id="1"/></sheet></book>"#)
+                .unwrap_err(),
+            BookXmlError::MissingPageId(4)
+        );
+
+        for invalid in ["0", "-1", "not-a-number", "2147483648"] {
+            let xml = format!("<book><sheet number=\"4\"><page id=\"{invalid}\"/></sheet></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidPageInteger {
+                    sheet_number: 4,
+                    field: "sheet/page/@id",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="4"><page id="1"/><page id="1"/></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicatePageId {
+                sheet_number: 4,
+                page_id: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_optional_page_attributes() {
+        for invalid in ["", "TRUE", "yes", "2"] {
+            let xml = format!(
+                "<book><sheet number=\"6\"><page id=\"1\" movement-start=\"{invalid}\"/></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidPageBoolean {
+                    sheet_number: 6,
+                    field: "sheet/page/@movement-start",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+
+        for invalid in ["", "not-a-number", "2147483648", "-2147483649"] {
+            let xml = format!(
+                "<book><sheet number=\"6\"><page id=\"1\" delta-measure-id=\"{invalid}\"/></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidPageInteger {
+                    sheet_number: 6,
+                    field: "sheet/page/@delta-measure-id",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_page_attributes_as_malformed_xml() {
+        let error =
+            BookXml::parse(br#"<book><sheet number="1"><page id="1" id="2"/></sheet></book>"#)
+                .unwrap_err();
+        assert!(matches!(error, BookXmlError::Malformed { .. }));
     }
 
     #[test]
