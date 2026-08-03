@@ -246,17 +246,23 @@ denied, and passed `git diff --check` before commit.
 162. `2a170c3f` — transactional neutral BarsRetriever stage coordinator.
 163. `71823e49` — merged two-staff/eleven-line part classification.
 164. `5411d5e7` — transactional headless LinesRetriever/BarsRetriever GRID join.
+165. `af9cf6cf` — exact outer GridBuilder order and Java exception semantics.
+166. `b57618fb` — source-preserving GRID run dispatch with ties-even thresholding.
+167. `5acc18ec` — long-vertical and long/short-horizontal run-table partitioning.
+168. `19035959` — initial vertical-shift and horizontal-ratio lag construction.
+169. `2f702ae9` — append-only short-section registration with lag-global IDs.
+170. `fce93241` — production Java/Rust GRID run-dispatch differential vector.
 
-At the one-hundred-and-sixty-fourth checkpoint the Rust workspace executes 409 tests:
+At the one-hundred-and-seventieth checkpoint the Rust workspace executes 421 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 265
+- `audiveris-image`: 277
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 59 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 60 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -264,6 +270,9 @@ brace discovery, composed projection, lines-root correction, recursive cluster
 coordination, and StaffProjector result operations.
 The latest vector additionally drives production Java and Rust through connected
 bar-chain aggregation, column geometry/connectivity, and initial start selection.
+The newest vector invokes production Java `LagManager.dispatchRuns` and matches Rust
+on preservation of the source table, the long-vertical partition, and the reoriented
+short-vertical pixels used for horizontal staff processing.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
