@@ -242,6 +242,79 @@ pub struct StaffLineThresholds {
     pub chunk_threshold: i32,
 }
 
+/// Configurable Java `StaffProjector.Constants` fractions consumed by its
+/// `Parameters` constructor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffProjectorScaleRatios {
+    pub staff_abscissa_margin: f64,
+    pub bar_chunk_dx: f64,
+    pub bar_refine_dx: f64,
+    pub bar_threshold: f64,
+    pub brace_threshold: f64,
+    pub gap_threshold: f64,
+    pub minimum_small_blank_width: f64,
+    pub minimum_standard_blank_width: f64,
+    pub minimum_wide_blank_width: f64,
+    pub maximum_bar_width: f64,
+    pub maximum_left_extremum: f64,
+    pub maximum_right_extremum: f64,
+    pub chunk_width: f64,
+    pub vertical_serif_width: f64,
+}
+
+impl StaffProjectorScaleRatios {
+    /// Values declared by Java `StaffProjector.Constants`.
+    #[must_use]
+    pub const fn java_defaults() -> Self {
+        Self {
+            staff_abscissa_margin: 15.0,
+            bar_chunk_dx: 0.4,
+            bar_refine_dx: 0.25,
+            bar_threshold: 2.5,
+            brace_threshold: 1.1,
+            gap_threshold: 0.6,
+            minimum_small_blank_width: 0.1,
+            minimum_standard_blank_width: 1.0,
+            minimum_wide_blank_width: 2.0,
+            maximum_bar_width: 1.5,
+            maximum_left_extremum: 1.0,
+            maximum_right_extremum: 0.3,
+            chunk_width: 0.15,
+            vertical_serif_width: 0.25,
+        }
+    }
+}
+
+/// Neutral scale/staff facts consumed by Java `StaffProjector.Parameters`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffProjectorScaleRequest {
+    pub large_interline: i32,
+    pub staff_specific_interline: i32,
+    pub is_one_line_staff: bool,
+    pub barline_height: BarlineHeightSpec,
+    pub ratios: StaffProjectorScaleRatios,
+}
+
+/// Scale-derived, staff-stable fields of Java `StaffProjector.Parameters`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StaffProjectorScaleParameters {
+    pub chunk_width: i32,
+    pub staff_abscissa_margin: i32,
+    pub bar_chunk_dx: i32,
+    pub bar_refine_dx: i32,
+    pub minimum_small_blank_width: i32,
+    pub minimum_standard_blank_width: i32,
+    pub minimum_wide_blank_width: i32,
+    pub maximum_bar_width: i32,
+    pub maximum_left_extremum: i32,
+    pub maximum_right_extremum: i32,
+    pub use_one_line_half_mode: bool,
+    pub vertical_serif_width: i32,
+    pub bar_threshold: i32,
+    pub brace_threshold: i32,
+    pub gap_threshold: i32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1827,6 +1900,54 @@ pub fn staff_line_thresholds(request: StaffLineThresholdRequest<'_>) -> StaffLin
     }
 }
 
+/// Java `StaffProjector.Parameters` scale conversion without a `Sheet` or
+/// mutable constant registry.
+#[must_use]
+pub fn staff_projector_scale_parameters(
+    request: StaffProjectorScaleRequest,
+) -> StaffProjectorScaleParameters {
+    let large = request.large_interline;
+    let specific = if request.staff_specific_interline == 0 {
+        large
+    } else {
+        request.staff_specific_interline
+    };
+    let pixels =
+        |interline: i32, ratio: f64| (f64::from(interline) * ratio).round_ties_even() as i32;
+    let ratios = request.ratios;
+    let bar_threshold = if request.is_one_line_staff {
+        (f64::from(barline_height(
+            request.barline_height,
+            request.staff_specific_interline,
+        )) * ratios.bar_threshold
+            / 4.0)
+            .round_ties_even() as i32
+    } else {
+        pixels(specific, ratios.bar_threshold)
+    };
+
+    StaffProjectorScaleParameters {
+        chunk_width: pixels(large, ratios.chunk_width),
+        staff_abscissa_margin: pixels(large, ratios.staff_abscissa_margin),
+        bar_chunk_dx: pixels(large, ratios.bar_chunk_dx),
+        bar_refine_dx: pixels(large, ratios.bar_refine_dx),
+        minimum_small_blank_width: pixels(large, ratios.minimum_small_blank_width),
+        minimum_standard_blank_width: pixels(large, ratios.minimum_standard_blank_width),
+        minimum_wide_blank_width: pixels(large, ratios.minimum_wide_blank_width),
+        maximum_bar_width: pixels(large, ratios.maximum_bar_width),
+        maximum_left_extremum: pixels(large, ratios.maximum_left_extremum),
+        maximum_right_extremum: pixels(large, ratios.maximum_right_extremum),
+        use_one_line_half_mode: matches!(
+            request.barline_height,
+            BarlineHeightSpec::OneThenTwo | BarlineHeightSpec::TwoThenFour
+        ),
+        vertical_serif_width: pixels(large, ratios.vertical_serif_width),
+        bar_threshold,
+        brace_threshold: pixels(specific, ratios.brace_threshold),
+        gap_threshold: pixels(specific, ratios.gap_threshold),
+    }
+}
+
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
 #[must_use]
 pub fn select_blank(
@@ -2626,6 +2747,82 @@ mod tests {
         // The source scales the thickness sum by Staff.getLineCount, while
         // chunk ink uses Staff.getLines().size(). Keep those facts distinct.
         assert_eq!(core_lines_thickness(&[2.0, 2.0, 2.0], 2), 3.0);
+    }
+
+    #[test]
+    fn staff_projector_scale_parameters_match_java_constructor() {
+        let ratios = StaffProjectorScaleRatios::java_defaults();
+        let parameters = staff_projector_scale_parameters(StaffProjectorScaleRequest {
+            large_interline: 10,
+            staff_specific_interline: 8,
+            is_one_line_staff: false,
+            barline_height: BarlineHeightSpec::Four,
+            ratios,
+        });
+        assert_eq!(
+            parameters,
+            StaffProjectorScaleParameters {
+                chunk_width: 2,
+                staff_abscissa_margin: 150,
+                bar_chunk_dx: 4,
+                bar_refine_dx: 2,
+                minimum_small_blank_width: 1,
+                minimum_standard_blank_width: 10,
+                minimum_wide_blank_width: 20,
+                maximum_bar_width: 15,
+                maximum_left_extremum: 10,
+                maximum_right_extremum: 3,
+                use_one_line_half_mode: false,
+                vertical_serif_width: 2,
+                bar_threshold: 20,
+                brace_threshold: 9,
+                gap_threshold: 5,
+            }
+        );
+
+        let one_line = staff_projector_scale_parameters(StaffProjectorScaleRequest {
+            is_one_line_staff: true,
+            barline_height: BarlineHeightSpec::OneThenTwo,
+            ..StaffProjectorScaleRequest {
+                large_interline: 10,
+                staff_specific_interline: 8,
+                is_one_line_staff: false,
+                barline_height: BarlineHeightSpec::Four,
+                ratios,
+            }
+        });
+        assert_eq!(one_line.bar_threshold, 10);
+        assert!(one_line.use_one_line_half_mode);
+
+        // A zero staff-specific interline falls back to the large scale for
+        // standard thresholds. The one-line bar formula deliberately calls
+        // getBarlineHeight with the original zero value instead.
+        let fallback = staff_projector_scale_parameters(StaffProjectorScaleRequest {
+            large_interline: 10,
+            staff_specific_interline: 0,
+            is_one_line_staff: false,
+            barline_height: BarlineHeightSpec::Two,
+            ratios,
+        });
+        assert_eq!(
+            (
+                fallback.bar_threshold,
+                fallback.brace_threshold,
+                fallback.gap_threshold
+            ),
+            (25, 11, 6)
+        );
+        let fallback_one_line = staff_projector_scale_parameters(StaffProjectorScaleRequest {
+            is_one_line_staff: true,
+            ..StaffProjectorScaleRequest {
+                large_interline: 10,
+                staff_specific_interline: 0,
+                is_one_line_staff: false,
+                barline_height: BarlineHeightSpec::Two,
+                ratios,
+            }
+        });
+        assert_eq!(fallback_one_line.bar_threshold, 0);
     }
 
     #[test]
