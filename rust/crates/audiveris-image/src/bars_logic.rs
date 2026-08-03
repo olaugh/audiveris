@@ -4,6 +4,7 @@
 
 use crate::{
     bar_alignment::VerticalSide,
+    bar_column::BarColumn,
     staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
@@ -104,6 +105,30 @@ pub fn peaks_too_far_left(
     Ok(removed)
 }
 
+/// Java `purgeLeftOfBraces` selection in right-to-left insertion order.
+#[must_use]
+pub fn peaks_left_of_brace(
+    peaks: &[StaffPeak],
+    start_index: Option<usize>,
+    brace_start: i32,
+) -> Vec<StaffPeakKey> {
+    let Some(start_index) = start_index.filter(|&index| index <= peaks.len()) else {
+        return Vec::new();
+    };
+    peaks[..start_index]
+        .iter()
+        .rev()
+        .filter(|peak| peak.stop() < brace_start)
+        .map(StaffPeak::key)
+        .collect()
+}
+
+/// First Java `BarColumn.isStart()` index, or `None` for Java's `-1`.
+#[must_use]
+pub fn start_column_index(columns: &[BarColumn]) -> Option<usize> {
+    columns.iter().position(BarColumn::is_start)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarsLogicError {
     InvalidStartIndex(usize),
@@ -112,7 +137,7 @@ pub enum BarsLogicError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bar_column::StaffId;
+    use crate::bar_column::{BarPeak, PeakId, StaffId};
 
     fn peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
         StaffPeak::new(StaffId::new(staff), 0, 40, start, stop).unwrap()
@@ -192,5 +217,36 @@ mod tests {
             peaks_too_far_left(&chained, 3, 5),
             Err(BarsLogicError::InvalidStartIndex(3))
         );
+    }
+
+    #[test]
+    fn brace_purge_uses_start_prefix_and_returns_reverse_order() {
+        let peaks = [peak(1, 0, 1), peak(1, 3, 4), peak(1, 7, 8), peak(1, 10, 11)];
+        assert_eq!(
+            peaks_left_of_brace(&peaks, Some(3), 7),
+            [peaks[1].key(), peaks[0].key()]
+        );
+        assert!(peaks_left_of_brace(&peaks, None, 7).is_empty());
+        assert!(peaks_left_of_brace(&peaks, Some(99), 7).is_empty());
+    }
+
+    #[test]
+    fn start_column_lookup_returns_first_marked_column() {
+        let staff_ids = vec![StaffId::new(1), StaffId::new(2)];
+        let mut plain = BarColumn::new(staff_ids.clone()).unwrap();
+        plain
+            .add_peak(
+                BarPeak::new(PeakId::new(1), StaffId::new(1), 2.0, 10.0, false, false).unwrap(),
+            )
+            .unwrap();
+        let mut start = BarColumn::new(staff_ids).unwrap();
+        start
+            .add_peak(
+                BarPeak::new(PeakId::new(2), StaffId::new(1), 2.0, 20.0, false, true).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(start_column_index(&[plain.clone(), start]), Some(1));
+        assert_eq!(start_column_index(&[plain]), None);
     }
 }
