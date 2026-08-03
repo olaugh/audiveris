@@ -315,17 +315,25 @@ denied, and passed `git diff --check` before commit.
 231. `b94bc88e` — exact raw-raster `retrieveLines` Java/Rust differential vector.
 232. `1955b867` — skew-aware raw `findAllAlignments` traversal and relations.
 233. `0d68e795` — exact Java/Rust raster-fitted endpoint and mutated-spline vector.
+234. `d4d40a4f` — pixel-backed raw bar connections and relation replacement order.
+235. `80b27163` — targeted single-pair alignment and connection helpers for splitting.
+236. `32f83337` — exact Java/Rust raw alignment discovery differential vector.
+237. `f05db960` — concrete initial staff-filament hole filling and spline regeneration.
+238. `9b1baf9b` — fixed-point merged-bar split and post-success alignment purge kernel.
+239. `a33b86fd` — exact Java/Rust pixel-backed connection differential vector.
+240. `c49b8628` — raw split subfilaments, rediscovery, connection, and purge integration.
+241. `b5d54b66` — shared concrete thick/thin section inclusion completion stages.
 
-At the two-hundred-and-thirty-third checkpoint the Rust workspace executes 598 tests:
+At the two-hundred-and-forty-first checkpoint the Rust workspace executes 614 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 427
-- `audiveris-omr`: 118
+- `audiveris-image`: 442
+- `audiveris-omr`: 119
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 67 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 69 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -446,9 +454,12 @@ final cluster rejects followed by every original slope reject, with typed proven
 exact failure prefixes. `DefineEndPoints` now performs the live raster pattern search and
 mutates filament endpoints, spline cache, and bounds; `IncludeDiscardedFilaments` performs
 the stable system traversal, inclusion test, section steal, `partOf` assignment, and
-endpoint recomputation. Later completion stages and several transactional exceptional
-paths remain, so this is not yet a claim that raw-page GRID is fully behaviorally
-equivalent.
+endpoint recomputation. Initial hole filling preserves cluster-position interpolation,
+virtual-point fallback, point-before-spline partial mutation, and old-spline retention on
+failure. Thick and thin candidate sections share the exact stable, ID-indexed batched
+inclusion core with explicit systems and once-per-line recomputation. Curvature polishing,
+later hole/sticker passes, crossing inspection, and several transactional exceptional paths
+remain, so this is not yet a claim that raw-page GRID is fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -462,8 +473,9 @@ and attaches the exact stored deskew center to ordinary and detached-brace peaks
 registry insertion. Registry peaks now enter a real peak graph, acquire bar sticks from
 VLAG then HLAG sections, receive curvature/brace classification, and run Java's raw-
 endpoint/skew-aware alignment discovery without prematurely purging competing edges.
-Pixel-backed connection discovery, splitting/purging, multi-staff system construction,
-and the remaining completion collaborators are the next boundaries.
+They then undergo pixel-backed connection promotion, fixed-point merged-group splitting,
+targeted edge rediscovery, and the correctly delayed alignment conflict purge. Multi-staff
+system construction and the remaining completion collaborators are the next boundaries.
 
 The newest composed differential constructs the same two-system synthetic sheet in live
 Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
