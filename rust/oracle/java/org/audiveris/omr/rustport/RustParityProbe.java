@@ -7,11 +7,13 @@ import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
@@ -24,8 +26,10 @@ import org.audiveris.omr.image.ImageLoading;
 import org.audiveris.omr.image.MedianGrayFilter;
 import org.audiveris.omr.image.VerticalFilter;
 import org.audiveris.omr.image.WatershedGrayLevel;
+import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.dynamic.FilamentFactory;
 import org.audiveris.omr.glyph.dynamic.FilamentIndex;
+import org.audiveris.omr.glyph.dynamic.StraightFilament;
 import org.audiveris.omr.lag.BasicLag;
 import org.audiveris.omr.lag.JunctionRatioPolicy;
 import org.audiveris.omr.lag.Lag;
@@ -64,6 +68,7 @@ import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.Skew;
 import org.audiveris.omr.sheet.Staff;
+import org.audiveris.omr.sheet.StaffLine;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.grid.BarAlignment;
 import org.audiveris.omr.sheet.grid.BarColumn;
@@ -81,6 +86,13 @@ import org.audiveris.omr.sheet.grid.StaffProjector;
 import org.audiveris.omr.sheet.grid.TargetLine;
 import org.audiveris.omr.sheet.grid.TargetStaff;
 import org.audiveris.omr.sheet.grid.TargetSystem;
+import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.inter.AbstractVerticalConnectorInter;
+import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.relation.BarConnectionRelation;
+import org.audiveris.omr.sig.relation.BarGroupRelation;
+import org.audiveris.omr.sig.relation.NoExclusion;
+import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -1379,6 +1391,8 @@ public final class RustParityProbe
                         + ";same:" + (referencePageRef.getSystems().get(0) == referenceSystemRef)
                         + ";field:" + (referenceSystem.getRef() == referenceSystemRef));
 
+        System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
+
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
                 new double[]{1, 6});
@@ -2074,6 +2088,309 @@ public final class RustParityProbe
     private static String point (Point2D point)
     {
         return String.format(java.util.Locale.ROOT, "%.12f,%.12f", point.getX(), point.getY());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String gridOutputBoundary ()
+        throws Exception
+    {
+        final int width = 120;
+        final int height = 280;
+        final int interline = 10;
+        Book book = new Book(Path.of("grid-output-boundary.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, new RunTable(Orientation.VERTICAL, width, height));
+        sheet.setScale(new Scale(
+                new Scale.InterlineScale(interline, interline, interline),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+        Skew skew = new Skew(0.0, sheet);
+        sheet.setSkew(skew);
+
+        Staff staff1 = outputBoundaryStaff(1, 20, interline);
+        Staff staff2 = outputBoundaryStaff(2, 90, interline);
+        Staff staff3 = outputBoundaryStaff(3, 190, interline);
+        SystemInfo system1 = new SystemInfo(1, sheet, List.of(staff1, staff2));
+        SystemInfo system2 = new SystemInfo(2, sheet, List.of(staff3));
+        system2.setIndented(true);
+        sheet.getSystemManager().setSystems(List.of(system1, system2));
+
+        Part part1 = new Part(system1);
+        part1.addStaff(staff1);
+        part1.addStaff(staff2);
+        system1.addPart(part1);
+        Part part2 = new Part(system2);
+        part2.addStaff(staff3);
+        system2.addPart(part2);
+
+        BarsRetriever bars = new BarsRetriever(sheet);
+        PeakGraph graph = (PeakGraph) field(bars, "peakGraph");
+        List<StaffProjector> projectors = (List<StaffProjector>) field(bars, "projectors");
+        StaffProjector projector1 = new StaffProjector(sheet, staff1, graph);
+        StaffProjector projector2 = new StaffProjector(sheet, staff2, graph);
+        StaffProjector projector3 = new StaffProjector(sheet, staff3, graph);
+        projectors.add(projector1);
+        projectors.add(projector2);
+        projectors.add(projector3);
+
+        StaffPeak s1a = outputBoundaryPeak(staff1, 20, 60, 10, skew, interline);
+        StaffPeak s1b = outputBoundaryPeak(staff1, 20, 60, 12, skew, interline);
+        StaffPeak missing = outputBoundaryPeak(staff1, 20, 60, 14, skew, interline);
+        StaffPeak s2a = outputBoundaryPeak(staff2, 90, 130, 10, skew, interline);
+        StaffPeak s2b = outputBoundaryPeak(staff2, 90, 130, 12, skew, interline);
+        StaffPeak s3a = outputBoundaryPeak(staff3, 190, 230, 20, skew, interline);
+        List<StaffPeak> peaks1 = (List<StaffPeak>) field(projector1, "peaks");
+        List<StaffPeak> peaks2 = (List<StaffPeak>) field(projector2, "peaks");
+        List<StaffPeak> peaks3 = (List<StaffPeak>) field(projector3, "peaks");
+        peaks1.add(s1a);
+        peaks1.add(s1b);
+        peaks2.add(s2a);
+        peaks2.add(s2b);
+        peaks3.add(s3a);
+        for (StaffPeak peak : List.of(s1a, s1b, s2a, s2b, s3a)) {
+            graph.addVertex(peak);
+        }
+        connectBars(sheet, graph, s1a, s2a);
+
+        invokePrivate(bars, "createInters");
+        peaks1.add(missing); // Deliberately absent from createInters promotion.
+        invokePrivate(bars, "createConnectionInters");
+        boolean swallowed = false;
+        try {
+            invokePrivate(bars, "groupBarlines");
+        } catch (InvocationTargetException ex) {
+            swallowed = (ex.getCause() instanceof RuntimeException)
+                    && (missing.getInter() == null);
+            if (!swallowed) {
+                throw ex;
+            }
+        }
+        if (!swallowed) {
+            throw new IllegalStateException("missing bar inter was not swallowed at PROCESS_BARS");
+        }
+
+        for (Staff staff : List.of(staff1, staff2, staff3)) {
+            staff.simplifyLines(sheet);
+        }
+        Method allocatePages = sheet.getSystemManager().getClass().getDeclaredMethod("allocatePages");
+        allocatePages.setAccessible(true);
+        allocatePages.invoke(sheet.getSystemManager());
+        book.updateScores(stub);
+
+        long staffDigest = outputBoundaryStaffDigest(List.of(staff1, staff2, staff3));
+        int staffGlyphs = 15;
+        int totalGlyphs = sheet.getGlyphIndex().getEntities().size();
+        int barGlyphs = totalGlyphs - staffGlyphs;
+        if ((barGlyphs != 5) || (sheet.getPages().size() != 2)
+                || (stub.getPageRefs().size() != 2)) {
+            throw new IllegalStateException("unexpected GRID output-boundary cardinality");
+        }
+
+        IdentityHashMap<Inter, String> system1Names = new IdentityHashMap<>();
+        system1Names.put(s1a.getInter(), "b1.1@10");
+        system1Names.put(s1b.getInter(), "b1.1@12");
+        system1Names.put(s2a.getInter(), "b1.2@10");
+        system1Names.put(s2b.getInter(), "b1.2@12");
+        int connectorCount = 0;
+        for (Inter inter : system1.getSig().vertexSet()) {
+            if (inter instanceof AbstractVerticalConnectorInter) {
+                system1Names.put(inter, "c1.1-2@10");
+                connectorCount++;
+            }
+        }
+        if (connectorCount != 1) {
+            throw new IllegalStateException("expected exactly one promoted connector");
+        }
+        IdentityHashMap<Inter, String> system2Names = new IdentityHashMap<>();
+        system2Names.put(s3a.getInter(), "b2.3@20");
+
+        String sigs = outputBoundarySig(system1.getSig(), system1Names)
+                + "|" + outputBoundarySig(system2.getSig(), system2Names);
+        String pages = outputBoundaryPages(sheet, stub);
+        String refs = outputBoundaryRefs(List.of(system1, system2));
+        return String.format(
+                java.util.Locale.ROOT,
+                "build:swallowed@PROCESS_BARS/missing:s1.staff1.x14;staffs:%d/%016x;glyphs:staff%d,bar%d,total%d;sig:%s;pages:%s;refs:%s;scores:%s;done:builder1,cleaner1,step1",
+                staffGlyphs,
+                staffDigest,
+                staffGlyphs,
+                barGlyphs,
+                totalGlyphs,
+                sigs,
+                pages,
+                refs,
+                scoreTopology(book.getScores()));
+    }
+
+    private static Staff outputBoundaryStaff (int id,
+                                               int firstY,
+                                               int interline)
+        throws Exception
+    {
+        List<org.audiveris.omr.sheet.grid.LineInfo> lines = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            StaffFilament filament = staffFilament(
+                    10,
+                    firstY + (index * interline),
+                    100,
+                    interline);
+            filament.computeLine();
+            lines.add(filament);
+        }
+        return new Staff(id, 10.0, 109.0, interline, lines);
+    }
+
+    private static StaffPeak outputBoundaryPeak (Staff staff,
+                                                  int top,
+                                                  int bottom,
+                                                  int x,
+                                                  Skew skew,
+                                                  int interline)
+        throws Exception
+    {
+        StaffPeak peak = staffPeak(staff, top, bottom, x, x, skew);
+        RunTable table = new RunTable(Orientation.VERTICAL, x + 2, bottom + 2);
+        table.addRun(x, new Run(top, (bottom - top) + 1));
+        Section section = new SectionFactory(
+                Orientation.VERTICAL,
+                JunctionRatioPolicy.DEFAULT).createSections(table, null, false).get(0);
+        StraightFilament filament = new StraightFilament(interline);
+        filament.addSection(section);
+        peak.setFilament(filament);
+        return peak;
+    }
+
+    private static void invokePrivate (Object instance,
+                                       String methodName)
+        throws Exception
+    {
+        Method method = instance.getClass().getDeclaredMethod(methodName);
+        method.setAccessible(true);
+        method.invoke(instance);
+    }
+
+    private static long outputBoundaryStaffDigest (List<Staff> staves)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (Staff staff : staves) {
+            int ordinal = 0;
+            for (org.audiveris.omr.sheet.grid.LineInfo info : staff.getLines()) {
+                if (!(info instanceof StaffLine line)) {
+                    throw new IllegalStateException("staff line was not simplified");
+                }
+                Glyph glyph = line.getGlyph();
+                java.awt.Rectangle bounds = glyph.getBounds();
+                hash = hashInt(hash, staff.getId());
+                hash = hashInt(hash, ordinal++);
+                hash = hashInt(hash, bounds.x);
+                hash = hashInt(hash, bounds.y);
+                hash = hashInt(hash, bounds.width);
+                hash = hashInt(hash, bounds.height);
+                hash = hashInt(hash, glyph.getWeight());
+                RunTable runs = glyph.getRunTable();
+                hash = hashInt(hash, runs.getOrientation() == Orientation.HORIZONTAL ? 0 : 1);
+                for (int sequence = 0; sequence < runs.getSize(); sequence++) {
+                    for (java.util.Iterator<Run> it = runs.iterator(sequence); it.hasNext();) {
+                        Run run = it.next();
+                        hash = hashInt(hash, sequence);
+                        hash = hashInt(hash, run.getStart());
+                        hash = hashInt(hash, run.getLength());
+                    }
+                }
+                hash = hashInt(hash, line.getPoints().size());
+                for (Point2D point : line.getPoints()) {
+                    hash = hashInt(hash, (int) Math.round(point.getX() * 1_000_000.0));
+                    hash = hashInt(hash, (int) Math.round(point.getY() * 1_000_000.0));
+                }
+                hash = hashInt(hash, (int) Math.round(line.getThickness() * 1_000_000.0));
+            }
+        }
+        return hash;
+    }
+
+    private static String outputBoundarySig (SIGraph sig,
+                                             IdentityHashMap<Inter, String> names)
+        throws Exception
+    {
+        List<String> nodes = new ArrayList<>();
+        for (Inter inter : sig.vertexSet()) {
+            String name = names.get(inter);
+            if (name == null) {
+                throw new IllegalStateException("SIG node has no semantic fixture identity");
+            }
+            nodes.add(name + (inter.isFrozen() ? "*" : ""));
+        }
+        Collections.sort(nodes);
+        List<String> edges = new ArrayList<>();
+        for (Relation relation : sig.edgeSet()) {
+            String source = names.get(sig.getEdgeSource(relation));
+            String target = names.get(sig.getEdgeTarget(relation));
+            if ((source == null) || (target == null)) {
+                throw new IllegalStateException("SIG relation endpoint has no semantic identity");
+            }
+            if (relation instanceof NoExclusion) {
+                edges.add("N:" + source + ">" + target);
+            } else if (relation instanceof BarConnectionRelation support) {
+                edges.add(String.format(
+                        java.util.Locale.ROOT,
+                        "C:%s>%s@%.12f",
+                        source,
+                        target,
+                        support.getGrade()));
+            } else if (relation instanceof BarGroupRelation) {
+                edges.add(String.format(
+                        java.util.Locale.ROOT,
+                        "G:%s>%s@%.12f",
+                        source,
+                        target,
+                        (Double) field(relation, "xGap")));
+            } else {
+                throw new IllegalStateException("unexpected GRID relation class");
+            }
+        }
+        Collections.sort(edges);
+        int systemId = sig.getSystem().getId();
+        return "S" + systemId + "{nodes:" + String.join(",", nodes)
+                + ";edges:" + (edges.isEmpty() ? "-" : String.join(",", edges)) + "}";
+    }
+
+    private static String outputBoundaryPages (Sheet sheet,
+                                               SheetStub stub)
+    {
+        List<String> values = new ArrayList<>();
+        for (int index = 0; index < sheet.getPages().size(); index++) {
+            Page page = sheet.getPages().get(index);
+            PageRef pageRef = stub.getPageRefs().get(index);
+            List<String> systems = new ArrayList<>();
+            for (SystemInfo system : page.getSystems()) {
+                systems.add("S" + system.getId() + "#" + system.getRef().getId());
+            }
+            values.add("P" + page.getId() + "[m" + (pageRef.isMovementStart() ? 1 : 0)
+                    + ":" + String.join(",", systems) + "]");
+        }
+        return String.join(",", values);
+    }
+
+    private static String outputBoundaryRefs (List<SystemInfo> systems)
+    {
+        List<String> values = new ArrayList<>();
+        for (SystemInfo system : systems) {
+            SystemRef reference = system.getRef();
+            PageRef page = reference.getPage();
+            List<String> parts = new ArrayList<>();
+            boolean back = page.getSystems().contains(reference);
+            for (org.audiveris.omr.score.PartRef part : reference.getParts()) {
+                parts.add(StaffConfig.toCsvString(part.getStaffConfigs()));
+                back &= part.getSystem() == reference;
+            }
+            values.add("S" + system.getId() + "#" + reference.getId()
+                    + "[p" + page.getId() + ";parts:" + String.join("|", parts)
+                    + ";back" + (back ? 1 : 0) + "]");
+        }
+        return String.join(",", values);
     }
 
     private static String scoreTopology (List<Score> scores)

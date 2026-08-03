@@ -6,14 +6,19 @@ use audiveris_core::{
     rational::Rational, step::OmrStep,
 };
 use audiveris_image::system_population::{
-    PopulationPage, PopulationReferencePage, PopulationReferencePart, PopulationReferenceRegistry,
-    PopulationReferenceStaff, PopulationStaffConfig, PopulationSystem, PopulationSystemRefState,
-    allocate_population_pages,
+    BoundarySegment, PopulationPage, PopulationReferencePage, PopulationReferencePart,
+    PopulationReferenceRegistry, PopulationReferenceStaff, PopulationSection,
+    PopulationStaffConfig, PopulationSystem, PopulationSystemGeometry, PopulationSystemRefState,
+    StaffBoundary, SystemSectionOwnership, SystemStaffBoundaries, allocate_population_pages,
 };
 use audiveris_image::{
     adaptive,
+    bar_alignment::{AlignmentPeak, BarAlignment, BarImpacts},
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
-    bars_logic::{aggregate_bar_chains, start_column_candidate},
+    bars_logic::{
+        PeakWidthClass, VerticalInterKind, VerticalInterPlan, VerticalMedian, aggregate_bar_chains,
+        plan_connection_inters, start_column_candidate,
+    },
     chamfer::ChamferDistance,
     cluster_coordinator::{RecursiveCombSnapshot, include_from_combs},
     cluster_ownership::{ClusterOwnership, CombId},
@@ -21,9 +26,16 @@ use audiveris_image::{
     filament::{FilamentError, StaffFilament},
     filament_comb::FilamentComb,
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
-    global_filter, ingest,
+    global_filter,
+    grid_lifecycle::{GridBuildExecutor, GridBuildStage, GridStageFailure},
+    grid_sig::{BarGroupPromotionError, GridSig, GridSigNode, GridSigRelation},
+    ingest,
+    lag_rebuild::RegisteredHorizontalLag,
     line_cluster::{FilamentId, LineCluster},
+    line_short_sections::HorizontalSectionLag,
+    lines_coordinator::StaffCandidateKind,
     median,
+    peak_graph::PeakGraph,
     projection::{
         BraceSearchRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
         PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams, PeakCoreRejection,
@@ -36,9 +48,14 @@ use audiveris_image::{
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
-    staff_peak::{HorizontalSide, StaffPeakAttribute},
+    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute},
     target_line::TargetLine,
     watershed,
+};
+use audiveris_omr::grid_executor::{
+    HeadlessBuildOtherError, HeadlessConnectionPlan, HeadlessGlyphRegistry, HeadlessGridBook,
+    HeadlessGridExecutor, HeadlessGridPromotionError, HeadlessGridSheet, HeadlessGridSigState,
+    HeadlessPopulationState, HeadlessStaff, HeadlessStaffLine, HeadlessSystemSigState,
 };
 use audiveris_omr::score_update::{
     PageInput as ScorePageInput, PageKey as ScorePageKey, StubPages, create_scores, update_scores,
@@ -68,6 +85,34 @@ struct TestCounts {
     failures: u64,
     errors: u64,
     skipped: u64,
+}
+
+#[derive(Debug, Default)]
+struct OutputBoundaryBuilder {
+    stages: Vec<GridBuildStage>,
+    finish_count: usize,
+    warnings: Vec<GridBuildStage>,
+}
+
+impl GridBuildExecutor for OutputBoundaryBuilder {
+    type StepError = &'static str;
+    type OtherError = &'static str;
+
+    fn run_stage(
+        &mut self,
+        stage: GridBuildStage,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.stages.push(stage);
+        Ok(())
+    }
+
+    fn log_swallowed_error(&mut self, stage: GridBuildStage, _error: &Self::OtherError) {
+        self.warnings.push(stage);
+    }
+
+    fn finish(&mut self) {
+        self.finish_count += 1;
+    }
 }
 
 fn attribute(tag: &str, name: &str) -> Result<u64, Box<dyn Error>> {
@@ -221,7 +266,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 62] = [
+const VECTOR_KEYS: [&str; 63] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -260,6 +305,7 @@ const VECTOR_KEYS: [&str; 62] = [
     "grid.target-line.synthetic=",
     "grid.score-update.synthetic=",
     "grid.system-ref.synthetic=",
+    "grid.output-boundary.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -309,6 +355,492 @@ fn run_table_digest(table: &RunTable) -> u64 {
         }
     }
     hash
+}
+
+fn output_boundary_peak(staff_id: usize, top: i32, bottom: i32, x: i32) -> StaffPeak {
+    StaffPeak::new(StaffId::new(staff_id), top, bottom, x, x)
+        .expect("output-boundary peak geometry is valid")
+}
+
+fn output_boundary_vertical_plan(peak: &StaffPeak) -> VerticalInterPlan {
+    VerticalInterPlan {
+        peak: peak.key(),
+        median: VerticalMedian {
+            x: f64::from(peak.start()) + 0.5,
+            top: f64::from(peak.top()),
+            bottom: f64::from(peak.bottom()) + 1.0,
+        },
+        width: 1.0,
+        impacts: None,
+        kind: VerticalInterKind::Barline {
+            width_class: PeakWidthClass::Thin,
+            left_staff_end: false,
+            right_staff_end: false,
+        },
+    }
+}
+
+fn output_boundary_staff_digest(staffs: &[HeadlessStaff]) -> Result<u64, Box<dyn Error>> {
+    let mut hash = 0xcbf2_9ce4_8422_2325;
+    for staff in staffs {
+        for (ordinal, staff_line) in staff.lines.iter().enumerate() {
+            let HeadlessStaffLine::Persistent { line, .. } = staff_line else {
+                return Err("staff line was not simplified".into());
+            };
+            hash = hash_u32(hash, staff.id);
+            hash = hash_u32(hash, ordinal);
+            hash = hash_u32(hash, line.glyph.x);
+            hash = hash_u32(hash, line.glyph.y);
+            hash = hash_u32(hash, line.glyph.runs.width());
+            hash = hash_u32(hash, line.glyph.runs.height());
+            hash = hash_u32(hash, line.glyph.runs.weight());
+            hash = hash_u32(
+                hash,
+                usize::from(line.glyph.runs.orientation() == Orientation::Vertical),
+            );
+            for sequence in 0..line.glyph.runs.sequence_count() {
+                for run in line.glyph.runs.sequence(sequence).unwrap_or_default() {
+                    hash = hash_u32(hash, sequence);
+                    hash = hash_u32(hash, run.start);
+                    hash = hash_u32(hash, run.length);
+                }
+            }
+            hash = hash_u32(hash, line.points.len());
+            for &(x, y) in &line.points {
+                hash = hash_u32(hash, (x * 1_000_000.0).round() as usize);
+                hash = hash_u32(hash, (y * 1_000_000.0).round() as usize);
+            }
+            hash = hash_u32(hash, (line.thickness * 1_000_000.0).round() as usize);
+        }
+    }
+    Ok(hash)
+}
+
+fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
+    const WIDTH: usize = 120;
+    const HEIGHT: usize = 280;
+    const INTERLINE: usize = 10;
+    let line_ys = [
+        20, 30, 40, 50, 60, 90, 100, 110, 120, 130, 190, 200, 210, 220, 230,
+    ];
+    let mut staff_table = RunTable::new(Orientation::Horizontal, WIDTH, HEIGHT)?;
+    for y in line_ys {
+        staff_table.add_run(y, Run::new(10, 100))?;
+    }
+    let lag = HorizontalSectionLag::from_long_runs(staff_table)?;
+    if lag.sections().len() != 15 {
+        return Err("staff fixture did not create fifteen isolated sections".into());
+    }
+    let mut staffs = Vec::new();
+    for staff_index in 0..3 {
+        let mut lines = Vec::new();
+        for line_index in 0..5 {
+            let source_index = (staff_index * 5) + line_index;
+            let mut filament = StaffFilament::new(INTERLINE)?;
+            filament.add_section(lag.sections()[source_index].clone())?;
+            lines.push(HeadlessStaffLine::Filament {
+                line_id: source_index + 1,
+                filament,
+            });
+        }
+        staffs.push(HeadlessStaff {
+            id: staff_index + 1,
+            kind: StaffCandidateKind::Standard,
+            left: 10.0,
+            right: 109.0,
+            interline: INTERLINE,
+            small: false,
+            short: false,
+            lines,
+        });
+    }
+
+    let s1a = output_boundary_peak(1, 20, 60, 10);
+    let s1b = output_boundary_peak(1, 20, 60, 12);
+    let missing = output_boundary_peak(1, 20, 60, 14);
+    let s2a = output_boundary_peak(2, 90, 130, 10);
+    let s2b = output_boundary_peak(2, 90, 130, 12);
+    let s3a = output_boundary_peak(3, 190, 230, 20);
+
+    let mut peak_graph = PeakGraph::new();
+    for peak in [&s1a, &s1b, &s2a, &s2b, &s3a] {
+        peak_graph.add_vertex(peak.clone());
+    }
+    let alignment = BarAlignment::new(
+        AlignmentPeak::new(PeakId::new(1), s1a.key().staff_id(), 10, 1.0)?,
+        AlignmentPeak::new(PeakId::new(2), s2a.key().staff_id(), 10, 1.0)?,
+        0.0,
+        0.0,
+        BarImpacts::alignment(1.0, 1.0)?,
+    )?;
+    peak_graph.add_edge(
+        s1a.key(),
+        s2a.key(),
+        BarAlignment::connection(&alignment, 1.0, 1.0)?,
+    )?;
+    let connection_plans = plan_connection_inters(&peak_graph, |_| true);
+    if connection_plans.len() != 1 {
+        return Err("connection fixture did not create exactly one plan".into());
+    }
+
+    let staff_config = PopulationStaffConfig {
+        line_count: 5,
+        is_small: false,
+    };
+    let part = |part_id: usize, staff_ids: &[usize]| PopulationReferencePart {
+        part_id,
+        staves: staff_ids
+            .iter()
+            .copied()
+            .map(|staff_id| PopulationReferenceStaff {
+                staff_id,
+                config: staff_config,
+            })
+            .collect(),
+    };
+    let boundary = |y: f64| StaffBoundary {
+        segments: vec![BoundarySegment::Line {
+            start: (10.0, y),
+            end: (109.0, y),
+        }],
+    };
+    let population = HeadlessPopulationState {
+        sheet_width: WIDTH as i32,
+        sheet_height: HEIGHT as i32,
+        vertical_margin: 1,
+        minimum_indentation: 4.0,
+        geometries: vec![
+            PopulationSystemGeometry {
+                system_id: 1,
+                left: 0,
+                width: WIDTH as i32,
+                top: 20,
+                bottom: 130,
+                area_left: 0,
+                deskewed_upper_left_x: 0.0,
+            },
+            PopulationSystemGeometry {
+                system_id: 2,
+                left: 10,
+                width: 110,
+                top: 190,
+                bottom: 230,
+                area_left: 0,
+                deskewed_upper_left_x: 10.0,
+            },
+        ],
+        staff_boundaries: vec![
+            SystemStaffBoundaries {
+                first_line: boundary(20.5),
+                last_line: boundary(130.5),
+            },
+            SystemStaffBoundaries {
+                first_line: boundary(190.5),
+                last_line: boundary(230.5),
+            },
+        ],
+        vertical_sections: Vec::<PopulationSection>::new(),
+        section_ownership: vec![
+            SystemSectionOwnership {
+                system_id: 1,
+                horizontal_sections: Vec::new(),
+                vertical_sections: Vec::new(),
+            },
+            SystemSectionOwnership {
+                system_id: 2,
+                horizontal_sections: Vec::new(),
+                vertical_sections: Vec::new(),
+            },
+        ],
+        systems: vec![
+            PopulationSystem {
+                id: 1,
+                indented: false,
+                parts: vec![part(1, &[1, 2])],
+                system_ref: PopulationSystemRefState::default(),
+                page_id: None,
+            },
+            PopulationSystem {
+                id: 2,
+                indented: true,
+                parts: vec![part(2, &[3])],
+                system_ref: PopulationSystemRefState::default(),
+                page_id: None,
+            },
+        ],
+        areas: Vec::new(),
+        staff_areas_computed: Vec::new(),
+        pages: Vec::new(),
+        page_refs: Vec::new(),
+        references: PopulationReferenceRegistry::default(),
+        reports: Vec::new(),
+    };
+
+    let mut executor = HeadlessGridExecutor::new(
+        OutputBoundaryBuilder::default(),
+        HeadlessGridSheet {
+            sheet_number: 1,
+            staffs,
+            glyphs: HeadlessGlyphRegistry::default(),
+            sig: HeadlessGridSigState {
+                systems: vec![
+                    HeadlessSystemSigState {
+                        system_id: 1,
+                        sig: GridSig::default(),
+                        vertical_plans: [&s1a, &s1b, &s2a, &s2b]
+                            .map(output_boundary_vertical_plan)
+                            .to_vec(),
+                        staff_peaks: vec![
+                            vec![s1a.clone(), s1b.clone(), missing.clone()],
+                            vec![s2a.clone(), s2b.clone()],
+                        ],
+                        maximum_group_gap: 3,
+                        interline: INTERLINE as f64,
+                    },
+                    HeadlessSystemSigState {
+                        system_id: 2,
+                        sig: GridSig::default(),
+                        vertical_plans: vec![output_boundary_vertical_plan(&s3a)],
+                        staff_peaks: vec![vec![s3a.clone()]],
+                        maximum_group_gap: 3,
+                        interline: INTERLINE as f64,
+                    },
+                ],
+                peak_graph,
+                connections: vec![HeadlessConnectionPlan {
+                    system_id: 1,
+                    plan: connection_plans[0],
+                }],
+                connection_warnings: Vec::new(),
+            },
+            promotion_failure: None,
+            no_staff_table: None,
+            max_fore: Some(3),
+            ledger_thickness: 1.0,
+            vertical_lag: None,
+            horizontal_lag: Some(RegisteredHorizontalLag::Populated(lag)),
+            installed_raster_prefix: None,
+            population,
+        },
+        HeadlessGridBook {
+            stubs: vec![StubPages {
+                number: 1,
+                valid_selected: true,
+                pages: Vec::new(),
+            }],
+            scores: Vec::new(),
+        },
+    );
+    executor
+        .run()
+        .map_err(|error| format!("GRID output-boundary executor failed: {error:?}"))?;
+
+    let expected_failure = HeadlessGridPromotionError::BarGroup {
+        system_id: 1,
+        source: BarGroupPromotionError::MissingInter(missing.key()),
+    };
+    if executor.sheet.promotion_failure != Some(expected_failure)
+        || executor.builder.stages.last() != Some(&GridBuildStage::ProcessBars)
+        || executor.builder.finish_count != 1
+        || !executor.cleaner_finished
+        || !executor.step_finished
+    {
+        return Err("GRID output-boundary lifecycle did not reach the expected state".into());
+    }
+    if !matches!(
+        executor.build_outcome,
+        Some(audiveris_image::grid_lifecycle::GridBuildOutcome::Swallowed {
+            stage: GridBuildStage::ProcessBars,
+            error: HeadlessBuildOtherError::Promotion(error),
+        }) if error == expected_failure
+    ) {
+        return Err("GRID promotion failure was not swallowed at PROCESS_BARS".into());
+    }
+
+    let staff_glyphs = executor.sheet.glyphs.originals.len();
+    let staff_digest = output_boundary_staff_digest(&executor.sheet.staffs)?;
+    let bar_glyphs = executor
+        .sheet
+        .sig
+        .systems
+        .iter()
+        .flat_map(|system| system.sig.nodes_in_order())
+        .filter(|(_, node)| matches!(node, GridSigNode::Vertical { .. }))
+        .count();
+    let total_glyphs = staff_glyphs + bar_glyphs;
+
+    let sig_name = |system: &HeadlessSystemSigState,
+                    peaks: &[(&StaffPeak, &str)],
+                    connector_name: Option<&str>|
+     -> Result<String, Box<dyn Error>> {
+        let mut names = BTreeMap::new();
+        for &(peak, name) in peaks {
+            let inter = system
+                .sig
+                .inter_of(peak.key())
+                .ok_or("promoted peak has no SIG backlink")?;
+            names.insert(inter, name.to_owned());
+        }
+        let connectors = system
+            .sig
+            .nodes_in_order()
+            .filter_map(|(id, node)| matches!(node, GridSigNode::Connector { .. }).then_some(id))
+            .collect::<Vec<_>>();
+        match (connectors.as_slice(), connector_name) {
+            ([connector], Some(name)) => {
+                names.insert(*connector, name.to_owned());
+            }
+            ([], None) => {}
+            _ => return Err("unexpected connector cardinality".into()),
+        }
+        let mut nodes = system
+            .sig
+            .nodes_in_order()
+            .map(|(id, node)| -> Result<String, Box<dyn Error>> {
+                let mut name = names
+                    .get(&id)
+                    .cloned()
+                    .ok_or("SIG node lacks semantic identity")?;
+                let frozen = match node {
+                    GridSigNode::Vertical { frozen, .. }
+                    | GridSigNode::Connector { frozen, .. } => *frozen,
+                };
+                if frozen {
+                    name.push('*');
+                }
+                Ok(name)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        nodes.sort();
+        let mut edges = system
+            .sig
+            .edges()
+            .iter()
+            .map(|edge| -> Result<String, Box<dyn Error>> {
+                let source = names.get(&edge.source).ok_or("missing semantic source")?;
+                let target = names.get(&edge.target).ok_or("missing semantic target")?;
+                Ok(match edge.relation {
+                    GridSigRelation::NoExclusion => format!("N:{source}>{target}"),
+                    GridSigRelation::BarConnectionSupport { grade } => {
+                        format!("C:{source}>{target}@{grade:.12}")
+                    }
+                    GridSigRelation::BarGroup { gap_fraction } => {
+                        format!("G:{source}>{target}@{gap_fraction:.12}")
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        edges.sort();
+        Ok(format!(
+            "S{}{{nodes:{};edges:{}}}",
+            system.system_id,
+            nodes.join(","),
+            if edges.is_empty() {
+                "-".to_owned()
+            } else {
+                edges.join(",")
+            }
+        ))
+    };
+    let sigs = [
+        sig_name(
+            &executor.sheet.sig.systems[0],
+            &[
+                (&s1a, "b1.1@10"),
+                (&s1b, "b1.1@12"),
+                (&s2a, "b1.2@10"),
+                (&s2b, "b1.2@12"),
+            ],
+            Some("c1.1-2@10"),
+        )?,
+        sig_name(&executor.sheet.sig.systems[1], &[(&s3a, "b2.3@20")], None)?,
+    ]
+    .join("|");
+
+    let pages = executor
+        .sheet
+        .population
+        .pages
+        .iter()
+        .zip(&executor.sheet.population.page_refs)
+        .map(|(page, page_ref)| {
+            let systems = page
+                .system_ids
+                .iter()
+                .map(|system_id| format!("S{system_id}#1"))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "P{}[m{}:{systems}]",
+                page.id,
+                usize::from(page_ref.movement_start)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let refs = executor
+        .sheet
+        .population
+        .systems
+        .iter()
+        .map(|system| -> Result<String, Box<dyn Error>> {
+            let reference_id = system
+                .system_ref
+                .system_ref
+                .ok_or("physical system has no soft reference")?;
+            let page_id = system.page_id.ok_or("physical system has no page")?;
+            let page_ref = executor
+                .sheet
+                .population
+                .page_refs
+                .iter()
+                .find(|page| page.id == page_id)
+                .ok_or("soft page reference is missing")?;
+            let rank = page_ref
+                .systems
+                .iter()
+                .position(|candidate| *candidate == reference_id)
+                .ok_or("system reference is absent from page")?
+                + 1;
+            let reference = executor
+                .sheet
+                .population
+                .references
+                .get(reference_id)
+                .ok_or("system reference is absent from registry")?;
+            let mut back = reference.page_ref_id == page_ref.object_id;
+            let parts = reference
+                .parts
+                .iter()
+                .map(|part| {
+                    back &= part.system_ref == reference_id;
+                    part.staff_configs
+                        .iter()
+                        .map(|config| {
+                            format!(
+                                "{}{}",
+                                config.line_count,
+                                if config.is_small { "s" } else { "" }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .collect::<Vec<_>>()
+                .join("|");
+            Ok(format!(
+                "S{}#{rank}[p{page_id};parts:{parts};back{}]",
+                system.id,
+                usize::from(back)
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .join(",");
+
+    Ok(format!(
+        "build:swallowed@PROCESS_BARS/missing:s1.staff1.x14;staffs:{staff_glyphs}/{staff_digest:016x};glyphs:staff{staff_glyphs},bar{bar_glyphs},total{total_glyphs};sig:{sigs};pages:{pages};refs:{refs};scores:{};done:builder1,cleaner1,step1",
+        format_score_topology(&executor.book.scores)
+    ))
 }
 
 fn section_shape(section: &Section) -> String {
@@ -1811,6 +2343,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         reference_page_refs[0].systems.len(),
         reference_page_refs[0].systems.first() == Some(&reference_id),
         reference_systems[0].system_ref.system_ref == Some(reference_id)
+    ));
+    lines.push(format!(
+        "grid.output-boundary.synthetic={}",
+        output_boundary_vector()?
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;
