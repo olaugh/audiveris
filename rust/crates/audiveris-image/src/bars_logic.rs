@@ -4,7 +4,7 @@
 
 use crate::{
     bar_alignment::VerticalSide,
-    staff_peak::{StaffPeak, StaffPeakAttribute, StaffPeakKey},
+    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
 /// Java `BracketKind`; `None` from [`bracket_kind`] remains distinct from
@@ -65,6 +65,50 @@ pub fn peak_groups(peaks: &[StaffPeak], maximum_double_bar_gap: i32) -> Vec<Vec<
     groups
 }
 
+/// Java `purgeLeftPeaks` selection, stopping at the first peak strictly to the
+/// right of the staff limit because callers provide abscissa-ordered peaks.
+#[must_use]
+pub fn peaks_before_staff_start(peaks: &[StaffPeak], staff_left: i32) -> Vec<StaffPeakKey> {
+    peaks
+        .iter()
+        .take_while(|peak| peak.start() <= staff_left)
+        .filter(|peak| {
+            !peak.is_staff_end(HorizontalSide::Left) && !peak.is_brace() && !peak.is_bracket()
+        })
+        .map(StaffPeak::key)
+        .collect()
+}
+
+/// Java `purgeTooLeft` selection in its right-to-left insertion order.
+///
+/// The start peak anchors the chain. A distant peak is removed without moving
+/// the anchor; a nearby peak becomes the next anchor. Java wrapping `int`
+/// arithmetic is retained for the gap expression.
+pub fn peaks_too_far_left(
+    peaks: &[StaffPeak],
+    start_index: usize,
+    maximum_brace_bar_gap: i32,
+) -> Result<Vec<StaffPeakKey>, BarsLogicError> {
+    let Some(mut previous) = peaks.get(start_index) else {
+        return Err(BarsLogicError::InvalidStartIndex(start_index));
+    };
+    let mut removed = Vec::new();
+    for peak in peaks[..start_index].iter().rev() {
+        let gap = previous.start().wrapping_sub(peak.stop()).wrapping_add(1);
+        if gap > maximum_brace_bar_gap {
+            removed.push(peak.key());
+        } else {
+            previous = peak;
+        }
+    }
+    Ok(removed)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarsLogicError {
+    InvalidStartIndex(usize),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +157,40 @@ mod tests {
         let peaks = [peak(1, 0, i32::MIN), peak(1, i32::MAX, i32::MAX)];
         // MAX - MIN - 1 wraps to -2, so Java keeps the pair even at maxGap -1.
         assert_eq!(peak_groups(&peaks, -1).len(), 1);
+    }
+
+    #[test]
+    fn left_staff_purge_stops_in_order_and_preserves_structural_peaks() {
+        let mut staff_end = peak(1, 2, 2);
+        staff_end.set_staff_end(HorizontalSide::Left);
+        let mut brace = peak(1, 3, 3);
+        brace.set(StaffPeakAttribute::Brace);
+        let mut bracket = peak(1, 4, 4);
+        bracket.set(StaffPeakAttribute::BracketMiddle);
+        let plain = peak(1, 5, 5);
+        let later = peak(1, 10, 10);
+        let out_of_order_left = peak(1, 1, 1);
+        let peaks = [staff_end, brace, bracket, plain, later, out_of_order_left];
+
+        assert_eq!(peaks_before_staff_start(&peaks, 5), [peaks[3].key()]);
+    }
+
+    #[test]
+    fn too_left_purge_keeps_near_chain_anchor_and_returns_reverse_order() {
+        let peaks = [peak(1, 0, 0), peak(1, 4, 4), peak(1, 8, 8), peak(1, 20, 20)];
+
+        // From start x=20: x=8 is too far and does not replace the anchor;
+        // x=4 and x=0 are therefore also too far, in right-to-left order.
+        assert_eq!(
+            peaks_too_far_left(&peaks, 3, 5).unwrap(),
+            [peaks[2].key(), peaks[1].key(), peaks[0].key()]
+        );
+
+        let chained = [peak(1, 0, 0), peak(1, 4, 4), peak(1, 8, 8)];
+        assert!(peaks_too_far_left(&chained, 2, 5).unwrap().is_empty());
+        assert_eq!(
+            peaks_too_far_left(&chained, 3, 5),
+            Err(BarsLogicError::InvalidStartIndex(3))
+        );
     }
 }
