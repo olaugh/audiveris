@@ -178,6 +178,48 @@ pub fn bar_filament_section_ids(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionLag {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocatedSectionId {
+    pub lag: SectionLag,
+    pub id: usize,
+}
+
+/// Java `BarsRetriever.getSectionsByWidth`: filter VLAG then HLAG and perform
+/// a stable x-only sort. Equal-x sections therefore retain lag and entity order.
+#[must_use]
+pub fn sections_by_width(
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    maximum_width: i32,
+) -> Vec<LocatedSectionId> {
+    if maximum_width < 0 {
+        return Vec::new();
+    }
+    let maximum_width = maximum_width as usize;
+    let mut selected = vertical_sections
+        .iter()
+        .filter(|section| section.length(Orientation::Horizontal) <= maximum_width)
+        .map(|section| (section.bounds().x, SectionLag::Vertical, section.id()))
+        .chain(
+            horizontal_sections
+                .iter()
+                .filter(|section| section.length(Orientation::Horizontal) <= maximum_width)
+                .map(|section| (section.bounds().x, SectionLag::Horizontal, section.id())),
+        )
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|(x, _, _)| *x);
+    selected
+        .into_iter()
+        .map(|(_, lag, id)| LocatedSectionId { lag, id })
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarsLogicError {
     InvalidStartIndex(usize),
 }
@@ -343,5 +385,51 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn section_width_filter_preserves_vertical_then_horizontal_order_on_x_ties() {
+        let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 20).unwrap();
+        vertical_table.add_run(5, Run::new(2, 3)).unwrap();
+        vertical_table.add_run(9, Run::new(1, 5)).unwrap(); // horizontal length 1
+        let vertical = build_sections(&vertical_table, JunctionPolicy::All);
+
+        let mut horizontal_table = RunTable::new(Orientation::Horizontal, 20, 20).unwrap();
+        horizontal_table.add_run(3, Run::new(5, 2)).unwrap();
+        horizontal_table.add_run(8, Run::new(12, 5)).unwrap(); // filtered at max 3
+        let horizontal = build_sections(&horizontal_table, JunctionPolicy::All);
+
+        let selected = sections_by_width(&vertical, &horizontal, 3);
+        let vertical_at_five = vertical
+            .iter()
+            .find(|section| section.bounds().x == 5)
+            .unwrap();
+        let horizontal_at_five = horizontal
+            .iter()
+            .find(|section| section.bounds().x == 5)
+            .unwrap();
+        assert_eq!(
+            &selected[..2],
+            [
+                LocatedSectionId {
+                    lag: SectionLag::Vertical,
+                    id: vertical_at_five.id(),
+                },
+                LocatedSectionId {
+                    lag: SectionLag::Horizontal,
+                    id: horizontal_at_five.id(),
+                },
+            ]
+        );
+        assert!(selected.iter().all(|entry| {
+            !(entry.lag == SectionLag::Horizontal
+                && entry.id
+                    == horizontal
+                        .iter()
+                        .find(|section| section.bounds().x == 12)
+                        .unwrap()
+                        .id())
+        }));
+        assert!(sections_by_width(&vertical, &horizontal, -1).is_empty());
     }
 }
