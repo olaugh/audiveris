@@ -301,17 +301,23 @@ denied, and passed `git diff --check` before commit.
 217. `cd8a3583` — raw filament rejection before comb sampling and clustering.
 218. `fc1e8338` — Java `FilamentIndex` creation identities and swallowed gaps.
 219. `d48742c5` — measured raw slope, fallback handoff, and short-filament parity.
+220. `01130871` — measured raw GRID slope documented at the executor boundary.
+221. `eca69716` — exact sheet skew applied across downstream GRID geometry.
+222. `62ac6567` — lazy small-interline raw cluster pass with preserved identities.
+223. `380af50e` — positive, negative, and zero Java/Rust skew-transform vector.
+224. `14050774` — Java-ordered final discarded-line population carried into completion.
+225. `c0712ba7` — live-raster staff projector construction with exact deskew centers.
 
-At the two-hundred-and-nineteenth checkpoint the Rust workspace executes 569 tests:
+At the two-hundred-and-twenty-fifth checkpoint the Rust workspace executes 582 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 403
-- `audiveris-omr`: 113
+- `audiveris-image`: 412
+- `audiveris-omr`: 117
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 64 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 65 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -422,13 +428,16 @@ regrouping. A stage-owned raster builder now concretely creates both initial lag
 short sections, and installs every completed prefix into the sheet on success, swallowed
 failure, or step failure. Prepared cluster, bar-system, and completion adapters call the
 production-backed Rust coordinators and preserve their outputs across the sheet-aware
-driver. An additive raw `RetrieveLines` adapter now builds the primary state from that
-live lag, materializes a staff handoff, and the concrete raw-raster executor installs the
-staff, raster prefix, measured skew, and ordered slope-reject fallback filaments into
-sheet state. The measured slope replaces any caller placeholder during line purge/layout.
-Secondary/small-interline construction, downstream use of the stored deskew transform,
-raw projector/bar/completion inputs, and several transactional exceptional paths remain,
-so this is not yet a claim that raw-page GRID is fully behaviorally equivalent.
+driver. An additive raw `RetrieveLines` adapter now builds primary and lazy small-
+interline states from that live lag, materializes a staff handoff, and the concrete raw-
+raster executor installs the staff, raster prefix, measured skew, and ordered slope-
+reject fallback filaments into sheet state. The measured slope replaces any caller
+placeholder during line purge/layout. The secondary pass retries only primary discards,
+preserving Java's separate slope-reject lifecycle. Completion receives the authoritative
+final cluster rejects followed by every original slope reject, with typed provenance and
+exact failure prefixes. Raw peak-graph/system/bar inputs, concrete completion geometry,
+and several transactional exceptional paths remain, so this is not yet a claim that raw-
+page GRID is fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -436,9 +445,11 @@ validation, multi-rest serif rejection, six-impact grading, brace discovery, and
 neutral peak output. Result-list, lines-root, and right-end decisions are also ported,
 and the BarsRetriever registry preserves retained-staff/projector order and unique
 graph-vertex intents. Downstream SIG promotion, detached brace ownership, and GRID
-contextual grading are now concrete. The remaining upstream gap is constructing
-projector/system/bar/completion inputs directly from the live lag and raster, plus
-secondary line recovery and applying the stored raw slope throughout downstream geometry.
+contextual grading are now concrete. An additive raw adapter constructs each projector
+from prepared staff geometry and the live zero-foreground raster, applies Java rounding,
+and attaches the exact stored deskew center to ordinary and detached-brace peaks before
+registry insertion. The remaining upstream gap is building raw peak-graph/system/bar-
+column inputs from that registry and implementing the remaining completion collaborators.
 
 The newest composed differential constructs the same two-system synthetic sheet in live
 Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
