@@ -3,6 +3,7 @@
 //! Raster and run-length primitives for the headless recognition pipeline.
 
 pub mod adaptive;
+pub mod bar_alignment;
 pub mod bar_column;
 pub mod chamfer;
 pub mod comb_builder;
