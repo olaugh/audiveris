@@ -18,6 +18,77 @@ pub struct ProjectionBlank {
     stop: i32,
 }
 
+/// Scale-resolved inputs consumed by Java `StaffProjector.refinePeakSide`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakRefinementParams {
+    bar_threshold: i32,
+    lines_threshold: i32,
+    chunk_threshold: i32,
+    refine_dx: i32,
+    chunk_width: i32,
+}
+
+/// Per-side controls supplied by Java `createPeak` to `refinePeakSide`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakRefinementRequest {
+    pub x_start: i32,
+    pub x_stop: i32,
+    pub direction: i32,
+    pub half_mode: bool,
+    pub minimum_derivative: i32,
+    pub added_chunk: i32,
+}
+
+impl PeakRefinementRequest {
+    #[must_use]
+    pub const fn new(
+        x_start: i32,
+        x_stop: i32,
+        direction: i32,
+        half_mode: bool,
+        minimum_derivative: i32,
+        added_chunk: i32,
+    ) -> Self {
+        Self {
+            x_start,
+            x_stop,
+            direction,
+            half_mode,
+            minimum_derivative,
+            added_chunk,
+        }
+    }
+}
+
+impl PeakRefinementParams {
+    pub fn new(
+        bar_threshold: i32,
+        lines_threshold: i32,
+        chunk_threshold: i32,
+        refine_dx: i32,
+        chunk_width: i32,
+    ) -> Result<Self, ProjectionError> {
+        if refine_dx < 0 || chunk_width <= 0 {
+            return Err(ProjectionError::InvalidRefinementParameters);
+        }
+        Ok(Self {
+            bar_threshold,
+            lines_threshold,
+            chunk_threshold,
+            refine_dx,
+            chunk_width,
+        })
+    }
+}
+
+/// Java `StaffProjector.PeakSide` numeric result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeakSide {
+    pub abscissa: i32,
+    pub derivative_grade: f64,
+    pub chunk_grade: f64,
+}
+
 impl ProjectionBlank {
     #[must_use]
     pub const fn start(self) -> i32 {
@@ -203,6 +274,118 @@ impl ShortProjection {
         blanks
     }
 
+    /// Pure numeric kernel from Java `StaffProjector.refinePeakSide`.
+    pub fn refine_peak_side(
+        &self,
+        request: PeakRefinementRequest,
+        params: PeakRefinementParams,
+    ) -> Result<Option<PeakSide>, ProjectionError> {
+        let PeakRefinementRequest {
+            x_start,
+            x_stop,
+            direction,
+            half_mode,
+            minimum_derivative,
+            added_chunk,
+        } = request;
+        if direction != -1 && direction != 1 {
+            return Err(ProjectionError::InvalidDirection(direction));
+        }
+        if x_start < self.start || x_stop > self.stop || x_start > x_stop {
+            return Err(ProjectionError::InvalidPeakRange { x_start, x_stop });
+        }
+
+        let minimum_bar = if half_mode {
+            params.bar_threshold / 2
+        } else {
+            params.bar_threshold
+        };
+        let minimum_chunk = added_chunk.wrapping_add(params.lines_threshold);
+        let maximum_chunk = added_chunk.wrapping_add(params.chunk_threshold);
+        let midpoint = f64::from(x_stop.wrapping_add(x_start)) / 2.0;
+        let x1 = if direction > 0 {
+            midpoint.ceil() as i32
+        } else {
+            midpoint.floor() as i32
+        };
+        let x2 = if direction > 0 {
+            x_stop.wrapping_add(params.refine_dx)
+        } else {
+            x_start.wrapping_sub(params.refine_dx)
+        }
+        .clamp(self.start, self.stop);
+
+        let mut best_derivative = 0_i32;
+        let mut best_x = None;
+        let mut x = x1;
+        while direction.wrapping_mul(x2.wrapping_sub(x)) >= 0 {
+            let derivative = self.derivative(x);
+            if direction.wrapping_mul(best_derivative.wrapping_sub(derivative)) > 0 {
+                best_derivative = derivative;
+                best_x = Some(x);
+            }
+            x = x.wrapping_add(direction);
+        }
+
+        best_derivative = best_derivative.abs();
+        let derivative_denominator = minimum_bar.wrapping_sub(minimum_derivative);
+        if best_derivative >= minimum_derivative
+            && let Some(best_x) = best_x
+        {
+            let abscissa = if direction > 0 {
+                best_x.wrapping_sub(1)
+            } else {
+                best_x
+            };
+            let derivative_grade = f64::from(best_derivative) / f64::from(derivative_denominator);
+            let chunk = self.chunk_minimum(abscissa, direction, params.chunk_width);
+            let chunk_grade = if chunk < minimum_chunk {
+                1.0
+            } else if chunk > maximum_chunk {
+                0.0
+            } else {
+                f64::from(maximum_chunk.wrapping_sub(chunk))
+                    / f64::from(maximum_chunk.wrapping_sub(minimum_chunk))
+            };
+            return Ok(Some(PeakSide {
+                abscissa,
+                derivative_grade,
+                chunk_grade,
+            }));
+        }
+
+        let border = if direction > 0 { self.stop } else { self.start };
+        if x2 == border {
+            let derivative = self.value(border);
+            if derivative >= minimum_derivative {
+                return Ok(Some(PeakSide {
+                    abscissa: border,
+                    derivative_grade: f64::from(derivative) / f64::from(derivative_denominator),
+                    chunk_grade: 1.0,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Java `StaffProjector.getChunk`: minimum projection immediately outside
+    /// a refined peak side, or zero when the full probe leaves the image.
+    fn chunk_minimum(&self, x0: i32, direction: i32, chunk_width: i32) -> i32 {
+        let x1 = x0.wrapping_add(direction);
+        let x2 = x1.wrapping_add(direction.wrapping_mul(chunk_width.wrapping_sub(1)));
+        if x2 < self.start || x2 > self.stop {
+            return 0;
+        }
+
+        let mut chunk = i32::MAX;
+        let mut x = x1;
+        while direction.wrapping_mul(x2.wrapping_sub(x)) >= 0 {
+            chunk = chunk.min(self.value(x));
+            x = x.wrapping_add(direction);
+        }
+        chunk
+    }
+
     fn index(&self, position: i32) -> usize {
         assert!(
             (self.start..=self.stop).contains(&position),
@@ -258,6 +441,9 @@ pub enum ProjectionError {
     InvalidDomain { start: i32, stop: i32 },
     InvalidDerivativeRange { x_min: i32, x_max: i32 },
     InsufficientDerivativeSamples { available: usize, required: usize },
+    InvalidDirection(i32),
+    InvalidPeakRange { x_start: i32, x_stop: i32 },
+    InvalidRefinementParameters,
 }
 
 impl fmt::Display for ProjectionError {
@@ -276,6 +462,18 @@ impl fmt::Display for ProjectionError {
                 formatter,
                 "only {available} derivative samples available, need {required}"
             ),
+            Self::InvalidDirection(direction) => {
+                write!(
+                    formatter,
+                    "peak refinement direction must be -1 or 1, got {direction}"
+                )
+            }
+            Self::InvalidPeakRange { x_start, x_stop } => {
+                write!(formatter, "invalid peak range {x_start}..={x_stop}")
+            }
+            Self::InvalidRefinementParameters => {
+                formatter.write_str("peak refinement dx and chunk width are invalid")
+            }
         }
     }
 }
@@ -498,6 +696,117 @@ mod tests {
         assert!(!has_blank_between(&blanks, 2, 2, 2));
         assert!(!has_blank_between(&blanks, 2, 9, 5));
         assert!(!has_blank_between(&blanks, 9, 3, 1));
+    }
+
+    #[test]
+    fn peak_side_refinement_finds_directional_extrema_and_grades_chunks() {
+        let mut projection = ShortProjection::new(0, 12).unwrap();
+        for (position, value) in [(3, 2), (4, 8), (5, 10), (6, 10), (7, 10), (8, 5), (9, 3)] {
+            projection.increment(position, value);
+        }
+        let params = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+
+        let left = projection
+            .refine_peak_side(PeakRefinementRequest::new(4, 7, -1, false, 4, 0), params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(left.abscissa, 4);
+        assert_eq!(left.derivative_grade, 1.0);
+        assert_eq!(left.chunk_grade, 1.0);
+
+        let right = projection
+            .refine_peak_side(PeakRefinementRequest::new(4, 7, 1, false, 4, 0), params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(right.abscissa, 7);
+        assert!((right.derivative_grade - (5.0 / 6.0)).abs() < 1.0e-14);
+        assert!((right.chunk_grade - (2.0 / 3.0)).abs() < 1.0e-14);
+
+        let added = projection
+            .refine_peak_side(PeakRefinementRequest::new(4, 7, 1, false, 4, 2), params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(added.chunk_grade, 1.0);
+
+        let half = projection
+            .refine_peak_side(PeakRefinementRequest::new(4, 7, -1, true, 4, 0), params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(half.derivative_grade, 6.0);
+    }
+
+    #[test]
+    fn peak_side_refinement_keeps_first_equal_extremum() {
+        let mut projection = ShortProjection::new(0, 10).unwrap();
+        for (position, value) in [(5, 10), (6, 10), (7, 10), (8, 5)] {
+            projection.increment(position, value);
+        }
+        let params = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        // Derivatives at x=8 and x=9 are both -5. Java's strict comparison
+        // retains x=8, then the right peak side is x=8-1.
+        assert_eq!(
+            projection
+                .refine_peak_side(PeakRefinementRequest::new(4, 7, 1, false, 4, 0), params)
+                .unwrap()
+                .unwrap()
+                .abscissa,
+            7
+        );
+    }
+
+    #[test]
+    fn peak_side_refinement_uses_java_border_fallback() {
+        let mut projection = ShortProjection::new(0, 5).unwrap();
+        projection.increment(4, 4);
+        projection.increment(5, 4);
+        let params = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let side = projection
+            .refine_peak_side(PeakRefinementRequest::new(4, 5, 1, false, 3, 0), params)
+            .unwrap()
+            .unwrap();
+        assert_eq!(side.abscissa, 5);
+        assert!((side.derivative_grade - (4.0 / 7.0)).abs() < 1.0e-14);
+        assert_eq!(side.chunk_grade, 1.0);
+
+        let projection = ShortProjection::new(0, 9).unwrap();
+        assert_eq!(
+            projection
+                .refine_peak_side(PeakRefinementRequest::new(2, 3, 1, false, 3, 0), params)
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn peak_side_refinement_rejects_invalid_control_inputs() {
+        let projection = ShortProjection::new(0, 9).unwrap();
+        let params = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        assert_eq!(
+            projection.refine_peak_side(PeakRefinementRequest::new(2, 3, 0, false, 3, 0), params),
+            Err(ProjectionError::InvalidDirection(0))
+        );
+        assert_eq!(
+            projection.refine_peak_side(PeakRefinementRequest::new(-1, 3, 1, false, 3, 0), params),
+            Err(ProjectionError::InvalidPeakRange {
+                x_start: -1,
+                x_stop: 3,
+            })
+        );
+        assert_eq!(
+            projection.refine_peak_side(PeakRefinementRequest::new(4, 3, 1, false, 3, 0), params),
+            Err(ProjectionError::InvalidPeakRange {
+                x_start: 4,
+                x_stop: 3,
+            })
+        );
+        assert_eq!(
+            PeakRefinementParams::new(10, 2, 5, -1, 2),
+            Err(ProjectionError::InvalidRefinementParameters)
+        );
+        assert_eq!(
+            PeakRefinementParams::new(10, 2, 5, 1, 0),
+            Err(ProjectionError::InvalidRefinementParameters)
+        );
     }
 
     #[test]
