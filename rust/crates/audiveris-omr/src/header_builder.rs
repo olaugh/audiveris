@@ -44,6 +44,12 @@ pub struct HeaderBarGroupRelation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeaderSigExclusion {
+    pub one: usize,
+    pub two: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeaderComponentStage {
     Clefs,
     Keys,
@@ -528,6 +534,9 @@ fn remove_barline<RecognitionError>(
     system
         .bar_group_relations
         .retain(|relation| relation.source != inter_id && relation.target != inter_id);
+    system
+        .sig_exclusions
+        .retain(|exclusion| exclusion.one != inter_id && exclusion.two != inter_id);
     system
         .header_mutations
         .push(HeaderBuilderMutation::SigVertexRemoved { inter_id });

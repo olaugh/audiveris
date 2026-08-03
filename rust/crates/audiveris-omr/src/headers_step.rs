@@ -9,7 +9,9 @@ use std::error::Error;
 use std::fmt;
 
 use crate::{
-    header_builder::{HeaderBarGroupRelation, HeaderBarline, HeaderBuilderMutation},
+    header_builder::{
+        HeaderBarGroupRelation, HeaderBarline, HeaderBuilderMutation, HeaderSigExclusion,
+    },
     staff_header::StaffHeader,
 };
 
@@ -17,6 +19,9 @@ use crate::{
 pub struct HeadlessHeaderStaff {
     pub id: usize,
     pub tablature: bool,
+    pub one_line: bool,
+    /// Staff-scale conversion of Java's 4.5-interline clef browse limit.
+    pub maximum_clef_end: i32,
     pub left_abscissa: i32,
     pub right_abscissa: i32,
     pub first_line_y_at_left: i32,
@@ -34,6 +39,8 @@ impl HeadlessHeaderStaff {
         Self {
             id,
             tablature: false,
+            one_line: false,
+            maximum_clef_end: 0,
             left_abscissa: 0,
             right_abscissa: 0,
             first_line_y_at_left: 0,
@@ -57,6 +64,7 @@ pub struct HeadlessHeaderSystem {
     pub barlines: Vec<HeaderBarline>,
     pub sig_vertex_ids: Vec<usize>,
     pub bar_group_relations: Vec<HeaderBarGroupRelation>,
+    pub sig_exclusions: Vec<HeaderSigExclusion>,
     pub header_mutations: Vec<HeaderBuilderMutation>,
 }
 
@@ -70,6 +78,7 @@ impl HeadlessHeaderSystem {
             barlines: Vec::new(),
             sig_vertex_ids: Vec::new(),
             bar_group_relations: Vec::new(),
+            sig_exclusions: Vec::new(),
             header_mutations: Vec::new(),
         }
     }
