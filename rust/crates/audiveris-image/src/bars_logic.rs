@@ -8,7 +8,7 @@ use crate::{
     bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
     part_group::PartGroup,
-    peak_graph::{PeakEdgeId, PeakGraph},
+    peak_graph::{PeakEdgeId, PeakGraph, PeakGraphError},
     run_table::Orientation,
     section::Section,
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -39,6 +39,79 @@ pub fn bracket_kind(peak: &StaffPeak) -> Option<BracketKind> {
         (false, true) => Some(BracketKind::Bottom),
         (false, false) => None,
     }
+}
+
+/// Java `BarsRetriever.detectBracketMiddles` over one system's projector peaks.
+///
+/// Concrete outgoing connections are visited in graph insertion order. A
+/// bottom-end destination abandons the current top-end traversal immediately,
+/// while any destinations marked earlier in that same edge iteration remain
+/// middle portions, matching Java's labeled `continue` behavior.
+pub fn detect_bracket_middles(
+    graph: &mut PeakGraph<BarAlignment>,
+    projector_peaks: &[StaffPeakKey],
+) -> Result<Vec<StaffPeakKey>, BarsLogicError> {
+    for &key in projector_peaks {
+        if graph.vertex(key).is_none() {
+            return Err(PeakGraphError::MissingVertex(key).into());
+        }
+    }
+
+    let mut marked = Vec::new();
+    let mut marked_set = std::collections::HashSet::new();
+    for &root in projector_peaks {
+        if !graph
+            .vertex(root)
+            .expect("projector peaks were validated above")
+            .is_bracket_end(VerticalSide::Top)
+        {
+            continue;
+        }
+
+        let mut current = root;
+        let mut traversed = std::collections::HashSet::new();
+        loop {
+            if !traversed.insert(current) {
+                return Err(BarsLogicError::BracketConnectionCycle(current));
+            }
+            let destinations = graph
+                .outgoing_edges(current)?
+                .filter(|edge| edge.relation().kind() == BarAlignmentKind::Connection)
+                .map(|edge| edge.target())
+                .collect::<Vec<_>>();
+            let mut next = None;
+            let mut reached_bottom = false;
+            for destination in destinations {
+                next = Some(destination);
+                if graph
+                    .vertex(destination)
+                    .expect("graph edges reference present vertices")
+                    .is_bracket_end(VerticalSide::Bottom)
+                {
+                    reached_bottom = true;
+                    break;
+                }
+                if marked_set.insert(destination) {
+                    marked.push(destination);
+                }
+            }
+            if reached_bottom {
+                break;
+            }
+            let Some(destination) = next else {
+                break;
+            };
+            current = destination;
+        }
+    }
+
+    for &key in &marked {
+        graph
+            .vertex_mut(key)
+            .expect("marked destinations remain graph vertices")
+            .set(StaffPeakAttribute::BracketMiddle);
+    }
+    Ok(marked)
 }
 
 /// Java `getGroups`: collect maximal adjacent peak runs separated by at most
@@ -1051,11 +1124,19 @@ pub enum BarsLogicError {
     InvalidStaffRange { first: i32, last: i32 },
     StaffIdExhausted,
     InvalidGroupStartIndex { staff_id: i32, index: usize },
+    Graph(PeakGraphError),
+    BracketConnectionCycle(StaffPeakKey),
 }
 
 impl From<BarColumnError> for BarsLogicError {
     fn from(value: BarColumnError) -> Self {
         Self::Column(value)
+    }
+}
+
+impl From<PeakGraphError> for BarsLogicError {
+    fn from(value: PeakGraphError) -> Self {
+        Self::Graph(value)
     }
 }
 
@@ -1083,6 +1164,10 @@ impl fmt::Display for BarsLogicError {
                     "invalid group start index {index} for staff {staff_id}"
                 )
             }
+            Self::Graph(error) => write!(formatter, "peak graph error: {error}"),
+            Self::BracketConnectionCycle(key) => {
+                write!(formatter, "cyclic bracket connection at peak {key:?}")
+            }
         }
     }
 }
@@ -1091,6 +1176,7 @@ impl Error for BarsLogicError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Column(error) => Some(error),
+            Self::Graph(error) => Some(error),
             _ => None,
         }
     }
@@ -1109,6 +1195,34 @@ mod tests {
         StaffPeak::new(StaffId::new(staff), 0, 40, start, stop).unwrap()
     }
 
+    fn graph_relation(
+        id: usize,
+        top: StaffPeakKey,
+        bottom: StaffPeakKey,
+        kind: BarAlignmentKind,
+    ) -> BarAlignment {
+        use crate::bar_alignment::{AlignmentPeak, BarImpacts};
+
+        let alignment = BarAlignment::new(
+            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), 0.9).unwrap(),
+            AlignmentPeak::new(
+                PeakId::new(id + 100),
+                bottom.staff_id(),
+                bottom.start(),
+                0.9,
+            )
+            .unwrap(),
+            0.0,
+            0.0,
+            BarImpacts::alignment(0.9, 0.9).unwrap(),
+        )
+        .unwrap();
+        match kind {
+            BarAlignmentKind::Alignment => alignment,
+            BarAlignmentKind::Connection => BarAlignment::connection(&alignment, 0.9, 0.9).unwrap(),
+        }
+    }
+
     #[test]
     fn bracket_kind_distinguishes_absence_middle_and_end_combinations() {
         let mut value = peak(1, 4, 5);
@@ -1124,6 +1238,126 @@ mod tests {
         assert_eq!(bracket_kind(&value), Some(BracketKind::Both));
         value.unset(StaffPeakAttribute::BracketTop);
         assert_eq!(bracket_kind(&value), Some(BracketKind::Bottom));
+    }
+
+    #[test]
+    fn bracket_middle_detection_marks_connection_chain_until_bottom_end() {
+        let mut top = peak(1, 5, 8);
+        top.set_bracket_end(VerticalSide::Top);
+        let middle = peak(2, 5, 8);
+        let mut bottom = peak(3, 5, 8);
+        bottom.set_bracket_end(VerticalSide::Bottom);
+        let keys = [top.key(), middle.key(), bottom.key()];
+        let mut graph = PeakGraph::new();
+        for value in [top, middle, bottom] {
+            graph.add_vertex(value);
+        }
+        graph
+            .add_edge(
+                keys[0],
+                keys[1],
+                graph_relation(1, keys[0], keys[1], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[1],
+                keys[2],
+                graph_relation(2, keys[1], keys[2], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+
+        assert_eq!(
+            detect_bracket_middles(&mut graph, &keys).unwrap(),
+            [keys[1]]
+        );
+        assert!(
+            graph
+                .vertex(keys[1])
+                .unwrap()
+                .is_set(StaffPeakAttribute::BracketMiddle)
+        );
+        assert!(
+            !graph
+                .vertex(keys[2])
+                .unwrap()
+                .is_set(StaffPeakAttribute::BracketMiddle)
+        );
+    }
+
+    #[test]
+    fn bracket_middle_detection_preserves_marks_before_bottom_branch_abort() {
+        let mut top = peak(1, 5, 8);
+        top.set_bracket_end(VerticalSide::Top);
+        let first_branch = peak(2, 5, 8);
+        let mut bottom_branch = peak(2, 12, 15);
+        bottom_branch.set_bracket_end(VerticalSide::Bottom);
+        let ignored_alignment = peak(2, 20, 23);
+        let keys = [
+            top.key(),
+            first_branch.key(),
+            bottom_branch.key(),
+            ignored_alignment.key(),
+        ];
+        let mut graph = PeakGraph::new();
+        for value in [top, first_branch, bottom_branch, ignored_alignment] {
+            graph.add_vertex(value);
+        }
+        for (index, (target, kind)) in [
+            (keys[1], BarAlignmentKind::Connection),
+            (keys[2], BarAlignmentKind::Connection),
+            (keys[3], BarAlignmentKind::Alignment),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            graph
+                .add_edge(
+                    keys[0],
+                    target,
+                    graph_relation(index + 1, keys[0], target, kind),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            detect_bracket_middles(&mut graph, &keys).unwrap(),
+            [keys[1]]
+        );
+        assert!(graph.vertex(keys[1]).unwrap().is_bracket());
+        assert!(!graph.vertex(keys[3]).unwrap().is_bracket());
+    }
+
+    #[test]
+    fn bracket_middle_detection_rejects_a_connection_cycle_atomically() {
+        let mut top = peak(1, 5, 8);
+        top.set_bracket_end(VerticalSide::Top);
+        let middle = peak(2, 5, 8);
+        let keys = [top.key(), middle.key()];
+        let mut graph = PeakGraph::new();
+        for value in [top, middle] {
+            graph.add_vertex(value);
+        }
+        graph
+            .add_edge(
+                keys[0],
+                keys[1],
+                graph_relation(1, keys[0], keys[1], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[1],
+                keys[0],
+                graph_relation(2, keys[1], keys[0], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+
+        assert_eq!(
+            detect_bracket_middles(&mut graph, &keys),
+            Err(BarsLogicError::BracketConnectionCycle(keys[0]))
+        );
+        assert!(!graph.vertex(keys[1]).unwrap().is_bracket());
     }
 
     #[test]
