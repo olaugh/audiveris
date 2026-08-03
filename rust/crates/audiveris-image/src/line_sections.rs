@@ -91,6 +91,76 @@ pub fn all_stickers(
         .collect())
 }
 
+/// Select the isolated one-run sections touching a staff line immediately
+/// above or below, matching Java `LinesRetriever.includeStickers` discovery.
+///
+/// Line members are traversed in caller order, with the top side before the
+/// bottom side. Candidate order within a row is the tally's stable coordinate
+/// order. The result preserves first discovery and de-duplicates sections like
+/// Java's `LinkedHashSet`.
+pub fn adjacent_stickers(
+    line_members: &[Section],
+    stickers: &[Section],
+    sheet_height: usize,
+) -> Result<Vec<Section>, LineSectionsError> {
+    let mut sticker_ids = HashSet::with_capacity(stickers.len());
+    for sticker in stickers {
+        if sticker.orientation() != Orientation::Horizontal {
+            return Err(LineSectionsError::UnsupportedOrientation { id: sticker.id() });
+        }
+        if sticker.run_count() != 1 {
+            return Err(LineSectionsError::NonStickerSection(sticker.id()));
+        }
+        if !sticker_ids.insert(sticker.id()) {
+            return Err(LineSectionsError::DuplicateSectionId(sticker.id()));
+        }
+    }
+    for member in line_members {
+        if member.orientation() != Orientation::Horizontal {
+            return Err(LineSectionsError::UnsupportedOrientation { id: member.id() });
+        }
+    }
+
+    let tally = SectionTally::new(sheet_height, stickers)?;
+    let mut selected_ids = HashSet::new();
+    let mut selected = Vec::new();
+
+    for source in line_members {
+        for top in [true, false] {
+            let (predecessor, next_position) = if top {
+                let Some(position) = source.first_pos().checked_sub(1) else {
+                    return Err(LineSectionsError::AdjacentPositionOutOfRange {
+                        source_id: source.id(),
+                        top,
+                    });
+                };
+                (source.first_run(), position)
+            } else {
+                let position = source.last_pos().checked_add(1).ok_or(
+                    LineSectionsError::AdjacentPositionOutOfRange {
+                        source_id: source.id(),
+                        top,
+                    },
+                )?;
+                (source.last_run(), position)
+            };
+
+            let candidates = tally.at(next_position)?;
+            for target in candidates {
+                let run = target.first_run();
+                if run.start > predecessor.stop() {
+                    break;
+                }
+                if run.stop() >= predecessor.start && selected_ids.insert(target.id()) {
+                    selected.push(target.clone());
+                }
+            }
+        }
+    }
+
+    Ok(selected)
+}
+
 fn touching_length(
     source_start: usize,
     source_stop: usize,
@@ -116,6 +186,8 @@ fn touching_length(
 pub enum LineSectionsError {
     DuplicateSectionId(usize),
     UnsupportedOrientation { id: usize },
+    NonStickerSection(usize),
+    AdjacentPositionOutOfRange { source_id: usize, top: bool },
     Tally(SectionTallyError),
 }
 
@@ -132,6 +204,14 @@ impl fmt::Display for LineSectionsError {
             Self::UnsupportedOrientation { id } => {
                 write!(formatter, "section {id} is not horizontal")
             }
+            Self::NonStickerSection(id) => {
+                write!(formatter, "section {id} is not a one-run sticker")
+            }
+            Self::AdjacentPositionOutOfRange { source_id, top } => write!(
+                formatter,
+                "section {source_id} has no {} adjacent row",
+                if *top { "top" } else { "bottom" }
+            ),
             Self::Tally(error) => write!(formatter, "section tally error: {error}"),
         }
     }
@@ -224,6 +304,54 @@ mod tests {
                     pos_count: 6,
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn adjacent_stickers_preserve_top_bottom_and_coordinate_discovery_order() {
+        let mut line_table = RunTable::new(Orientation::Horizontal, 12, 7).unwrap();
+        line_table.add_run(2, Run::new(2, 4)).unwrap();
+        line_table.add_run(3, Run::new(2, 4)).unwrap();
+        let members = build_sections(&line_table, JunctionPolicy::All);
+
+        let mut sticker_table = RunTable::new(Orientation::Horizontal, 12, 7).unwrap();
+        for (position, run) in [
+            (1, Run::new(0, 3)),
+            (1, Run::new(5, 2)),
+            (4, Run::new(4, 2)),
+            (4, Run::new(8, 2)),
+        ] {
+            sticker_table.add_run(position, run).unwrap();
+        }
+        let stickers = build_sections(&sticker_table, JunctionPolicy::All);
+
+        let selected = adjacent_stickers(&members, &stickers, 7).unwrap();
+        assert_eq!(
+            selected.iter().map(Section::id).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn adjacent_stickers_deduplicate_and_reject_invalid_candidate_contracts() {
+        let mut line_table = RunTable::new(Orientation::Horizontal, 10, 7).unwrap();
+        line_table.add_run(2, Run::new(1, 4)).unwrap();
+        line_table.add_run(4, Run::new(1, 4)).unwrap();
+        let members = build_sections(&line_table, JunctionPolicy::All);
+
+        let mut sticker_table = RunTable::new(Orientation::Horizontal, 10, 7).unwrap();
+        sticker_table.add_run(3, Run::new(2, 2)).unwrap();
+        let stickers = build_sections(&sticker_table, JunctionPolicy::All);
+        let selected = adjacent_stickers(&members, &stickers, 7).unwrap();
+        assert_eq!(selected.len(), 1);
+
+        let mut multi_table = RunTable::new(Orientation::Horizontal, 10, 7).unwrap();
+        multi_table.add_run(1, Run::new(2, 2)).unwrap();
+        multi_table.add_run(2, Run::new(2, 2)).unwrap();
+        let multi = build_sections(&multi_table, JunctionPolicy::All);
+        assert_eq!(
+            adjacent_stickers(&members, &multi, 7),
+            Err(LineSectionsError::NonStickerSection(1))
         );
     }
 }
