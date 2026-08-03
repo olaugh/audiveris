@@ -139,18 +139,62 @@ denied, and passed `git diff --check` before commit.
     variants without normalizing raw JAXB integer and boolean states.
 64. `1bd4bdc3` — live production-Java bar-column vector using real staff peaks,
     graph relations, overwrite/cache invalidation, and status transitions.
+65. `b1849e37` — source-guided line-cluster merging and absorption across compatible
+    clusters while preserving stable identities and lineage.
+66. `50d22e4f` — source-guided line-cluster trimming with deterministic side removal
+    and cluster geometry updates.
+67. `7e87fe61` — lossless typed score page-link persistence, including movement and
+    page identity metadata.
+68. `ca02fe74` — source-guided median geometry for connected bar alignments.
+69. `9888733a` — live Java/Rust comb-discovery vector covering sampled columns and
+    regular staff candidates.
+70. `34c82630` — neutral `StaffPeak` value semantics, ordering, geometry, and flags.
+71. `e77fb6e0` — lossless typed logical-part persistence in score order.
+72. `818c3e6e` — neutral stable-ID `PeakGraph` storage without Java object cycles.
+73. `c4deea44` — lossless typed score-root metadata while retaining unknown XML.
+74. `495b0ef2` — source-guided `PeakGraph` connection and adjacency queries.
+75. `cef45219` — lossless typed sheet-selection persistence.
+76. `2651fdd6` — neutral `PartGroup` value semantics and hierarchy metadata.
+77. `ae387c1c` — source-guided purging of incompatible peak alignments.
+78. `df3bb9c7` — deterministic incident-edge queries over the neutral `PeakGraph`.
+79. `957dc146` — lossless typed legacy beam metadata from persisted archives.
+80. `a8cf4ae6` — source-guided brace-alignment checks over peak-graph geometry.
+81. `53341825` — lossless typed legacy OCR metadata from persisted archives.
+82. `9bbe2b7f` — live Java/Rust line-cluster lifecycle vector spanning merge and trim.
+83. `4d67b856` — dependency-light `ShortProjection` storage and indexed access.
+84. `e46b9ad5` — source-guided StaffProjector derivative-threshold computation.
+85. `132df1ed` — live Java/Rust short-projection vector.
+86. `68734e9b` — lossless typed book interline parameters with inherited and explicit
+    states kept distinct.
+87. `c8b83bdf` — source-guided StaffProjector blank-column selection.
+88. `9bc82cd7` — lossless typed book beam parameters.
+89. `6ed30bad` — lossless typed book OCR parameters.
+90. `2f08078a` — live Java/Rust StaffProjector derivative-threshold vector.
+91. `69c7f5f8` — source-guided StaffProjector peak-side refinement.
+92. `194346bc` — live Java/Rust StaffProjector blank-selection vector.
+93. `9d1607f7` — lossless typed book lyrics switches, preserving absent, inherited,
+    explicit-false, and explicit-true states.
+94. `72a7f8d4` — source-guided StaffProjector peak-candidate construction.
+95. `cdcdd4e1` — live Java/Rust StaffProjector peak-side refinement vector.
+96. `89ffa5ef` — live Java/Rust StaffProjector peak-candidate construction vector.
+97. `9ba3dedb` — source-guided StaffProjector core-pixel validation.
 
-At the sixty-fourth checkpoint the Rust workspace executes 210 tests:
+At the ninety-seventh checkpoint the Rust workspace executes 291 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 100
-- `audiveris-omr`: 57
+- `audiveris-image`: 147
+- `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 44 canonical vectors at this checkpoint. SCALE
-matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
+The live Java/Rust oracle compares 51 canonical vectors at this checkpoint. Since
+checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
+short projections, StaffProjector derivative thresholds, blank selection, peak-side
+refinement, and peak-candidate construction. Core-pixel validation is covered by Rust
+tests but does not yet have its own live Java/Rust vector.
+
+SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
 out-of-domain combo behavior; `87b6a4e3` corrects it and freezes the Java behavior in
@@ -174,24 +218,39 @@ or duplicate step tokens.
 Direct sheet input path and positive image rank are also typed atomically; an absent
 input remains distinct because Java then falls back to the book-level source.
 The same lossless view now exposes sheet compatibility attributes and direct page
-references while leaving nested page/system/SIG content opaque. GRID additionally
-has the dependency-light sticker filter, comb state, and early ordered line-cluster
-core; recursive comb discovery, cluster merging, trimming, SIG, and UI behavior remain
-outside the ported surface. The line-cluster core now also has direct live Java parity,
-ordered endpoints, and indexed inclusion, while target-line deskew mapping begins the
-neutral destination geometry used later in GRID cleanup.
+references while leaving nested SIG content opaque. GRID additionally has the
+dependency-light sticker filter, comb state, regular comb discovery, and ordered
+line-cluster core. Cluster merge, absorption, trimming, geometry, and the combined
+lifecycle now have exact live Java parity. Full recursive cluster orchestration,
+glyph ownership, SIG integration, and UI behavior remain outside the ported surface.
+Target-line deskew mapping begins the neutral destination geometry used later in GRID
+cleanup.
 Target-line mapping now has exact live parity on a sloped source, and the surrounding
 page/system/staff target containers preserve source order without recreating Java's
 object cycles. The `.omr` view derives order-only system references exactly as Java
 does rather than inventing persisted IDs.
-Regular vertical comb sampling now feeds the neutral comb representation, and the
-line-cluster indexed-inclusion boundary has exact production-Java parity. Early bar
-column semantics are available without `PeakGraph` object cycles. The `.omr` view now
-continues through order-preserving part metadata while staff configuration stays opaque.
-Bar columns now have exact production-Java parity across fixed slots, cached means,
-overwrite invalidation, full/start/brace status, and concrete graph connectivity.
-Alignment selection and weighted popular comb size are source-guided. Staff configuration
-is typed while explicitly preserving legacy `<line-count>` separately from current JAXB.
+Regular vertical comb sampling feeds the neutral comb representation, and both comb
+discovery and the line-cluster lifecycle have exact production-Java vectors. Bar
+columns have exact parity across fixed slots, cached means, overwrite invalidation,
+full/start/brace status, and concrete graph connectivity. Neutral `StaffPeak`,
+`PartGroup`, and stable-ID `PeakGraph` types now cover graph storage, incident and
+connection queries, alignment purge, median connection geometry, and brace checks
+without recreating Java object cycles. Promotion into the production SIG and the full
+GRID orchestration remain deliberately unported coupling boundaries.
+
+The StaffProjector slice now includes `ShortProjection`, derivative thresholds, blank
+selection, peak-side refinement, candidate construction, and core-pixel validation.
+Every boundary through candidate construction has an exact live Java vector; the
+core-pixel predicate currently has focused Rust tests and is the next obvious oracle
+candidate. It is still a library slice rather than an end-to-end staff projector: peak
+promotion, sheet/glyph ownership, and downstream graph mutation remain queued.
+
+The `.omr` view now continues through ordered score page links, logical parts, score-root
+metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
+parameters in addition to page, system, part, and staff configuration data. Parameter
+views preserve absent, inherited, and explicit integer/string/boolean states, including
+explicit false versus true. Legacy `<line-count>` remains distinct from current JAXB;
+unknown XML and archive members remain byte-preserved.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
@@ -241,9 +300,10 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` with source-guided staff-line comb/cluster formation around the
-   now-ported pattern, tally, and filament-factory primitives; keep glyph ownership and
-   UI/SIG integration out until the neutral behavior has stronger live vectors.
+1. Continue `GRID` from StaffProjector core-pixel validation into peak promotion and
+   full staff-line/cluster orchestration. Add the core-pixel live oracle first; keep
+   glyph ownership and UI/SIG integration behind explicit neutral boundaries until
+   their inputs have stable differential vectors.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
