@@ -109,17 +109,25 @@ denied, and passed `git diff --check` before commit.
     ordering, ordinates, and processed-state behavior without Java object cycles.
 49. `d205596a` — early `LineCluster` membership, absorption lineage, bounds, mean
     true length, and Java-style vertical/horizontal point extrapolation.
+50. `5a5c8b6a` — source-guided target-line mapping from ideal deskewed coordinates
+    back to physical filament points, including orthogonal offsets.
+51. `237680d0` — ordered cluster endpoints and Java-compatible indexed filament
+    inclusion with overlap midpoint, probe thickness, and atomic rejection.
+52. `2d58cc6e` — live Java/Rust line-cluster vector for ordered positions,
+    absorption, bounds, mean true length, and both extrapolation branches.
+53. `5beb9bb5` — optional direct page time-rational metadata with raw JAXB integer
+    semantics and lossless opaque retention of nested page content.
 
-At the forty-ninth checkpoint the Rust workspace executes 177 tests:
+At the fifty-third checkpoint the Rust workspace executes 187 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 78
-- `audiveris-omr`: 46
+- `audiveris-image`: 84
+- `audiveris-omr`: 50
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 40 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 41 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -147,7 +155,9 @@ The same lossless view now exposes sheet compatibility attributes and direct pag
 references while leaving nested page/system/SIG content opaque. GRID additionally
 has the dependency-light sticker filter, comb state, and early ordered line-cluster
 core; recursive comb discovery, cluster merging, trimming, SIG, and UI behavior remain
-outside the ported surface.
+outside the ported surface. The line-cluster core now also has direct live Java parity,
+ordered endpoints, and indexed inclusion, while target-line deskew mapping begins the
+neutral destination geometry used later in GRID cleanup.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
