@@ -214,12 +214,26 @@ pub fn define_end_points(
         .binary_buffer
         .as_ref()
         .ok_or(DefineEndPointsError::MissingBinaryBuffer)?;
+    let raster_width = binary.width();
+    let raster_height = binary.height();
     let pixels = binary.to_pixels();
     state.defined_endpoints.clear();
 
-    for staff in &state.staffs {
+    for staff in &mut state.staffs {
         let resolved =
-            resolve_staff_endpoints(staff, parameters, binary.width(), binary.height(), &pixels)?;
+            resolve_staff_endpoints(staff, parameters, raster_width, raster_height, &pixels)?;
+        for (line, endpoints) in staff.lines.iter_mut().zip(&resolved.lines) {
+            line.filament
+                .set_ending_points(
+                    (endpoints.left.x, endpoints.left.y),
+                    (endpoints.right.x, endpoints.right.y),
+                )
+                .map_err(|source| DefineEndPointsError::Filament {
+                    staff_id: staff.id,
+                    line_id: line.id,
+                    source,
+                })?;
+        }
         state.defined_endpoints.push(resolved);
     }
     Ok(())
@@ -547,6 +561,13 @@ mod tests {
         assert_eq!(staff.lines[0].left, LineEnding { x: 10.0, y: 10.0 });
         assert_eq!(staff.lines[0].right, LineEnding { x: 100.0, y: 11.0 });
         assert_eq!(staff.lines[1].right, LineEnding { x: 100.0, y: 20.0 });
+        let mutated = state.staffs[0].lines[0].filament.geometry().unwrap();
+        assert_eq!(mutated.start(), (10.0, 10.0));
+        assert_eq!(mutated.stop(), (100.0, 11.0));
+        assert_eq!(
+            state.staffs[0].lines[0].filament.ending_points(),
+            Some(((10.0, 10.0), (100.0, 11.0)))
+        );
 
         completion
             .run_stage(LineCompletionStage::IncludeDiscardedFilaments, &mut state)

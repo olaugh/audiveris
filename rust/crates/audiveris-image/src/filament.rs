@@ -7,6 +7,7 @@
 //! `FilamentFactory` grouping, combs/clusters, hole filling, glyph ownership,
 //! curvature polishing, vertical splines, persistence, and all UI behavior.
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 
@@ -65,6 +66,9 @@ impl FilamentGeometry {
 pub struct StaffFilament {
     interline: usize,
     sections: Vec<Section>,
+    ending_points: Option<((f64, f64), (f64, f64))>,
+    geometry_cache: RefCell<Option<FilamentGeometry>>,
+    expanded_bounds: Option<Bounds>,
 }
 
 impl StaffFilament {
@@ -75,6 +79,9 @@ impl StaffFilament {
         Ok(Self {
             interline,
             sections: Vec::new(),
+            ending_points: None,
+            geometry_cache: RefCell::new(None),
+            expanded_bounds: None,
         })
     }
 
@@ -87,6 +94,11 @@ impl StaffFilament {
         // final tie-breaker when geometry is otherwise identical.
         self.sections
             .sort_by_key(|section| (section.bounds().x, section.bounds().y, section.id()));
+        // Java member mutation invalidates Filament and CurvedFilament caches,
+        // including explicitly installed ending points.
+        self.ending_points = None;
+        self.geometry_cache.get_mut().take();
+        self.expanded_bounds = None;
         Ok(())
     }
 
@@ -101,6 +113,11 @@ impl StaffFilament {
     }
 
     pub fn bounds(&self) -> Result<Bounds, FilamentError> {
+        self.expanded_bounds
+            .map_or_else(|| self.section_bounds(), Ok)
+    }
+
+    fn section_bounds(&self) -> Result<Bounds, FilamentError> {
         let first = self.sections.first().ok_or(FilamentError::Empty)?;
         let mut bounds = first.bounds();
         let mut max_x = bounds.x + bounds.width - 1;
@@ -149,7 +166,16 @@ impl StaffFilament {
 
     /// Compute the source-compatible probe centroids and natural spline.
     pub fn geometry(&self) -> Result<FilamentGeometry, FilamentError> {
-        let bounds = self.bounds()?;
+        if let Some(geometry) = self.geometry_cache.borrow().as_ref() {
+            return Ok(geometry.clone());
+        }
+        let geometry = self.compute_geometry()?;
+        self.geometry_cache.replace(Some(geometry.clone()));
+        Ok(geometry)
+    }
+
+    fn compute_geometry(&self) -> Result<FilamentGeometry, FilamentError> {
+        let bounds = self.section_bounds()?;
         let probe_width = ((self.interline as f64) * 0.5).round_ties_even() as usize;
         let minimum_weight = (((self.interline as f64) * 0.2).round_ties_even() as usize).max(1);
         let segment_length = ((self.interline as f64) * 4.0).round_ties_even();
@@ -157,8 +183,12 @@ impl StaffFilament {
             return Err(FilamentError::DegenerateGeometry);
         }
 
-        let start_x = bounds.x as f64;
-        let stop_x = (bounds.x + bounds.width - 1) as f64;
+        let start_x = self
+            .ending_points
+            .map_or(bounds.x as f64, |(start, _)| start.0);
+        let stop_x = self
+            .ending_points
+            .map_or((bounds.x + bounds.width - 1) as f64, |(_, stop)| stop.0);
         let length = stop_x - start_x + 1.0;
         let segment_count = (length / segment_length).round_ties_even() as usize;
         // Java permits `segCount == 0`: `length / 0.0` becomes infinity,
@@ -166,16 +196,20 @@ impl StaffFilament {
         // defines a valid line spline.
         let precise_segment_length = length / segment_count as f64;
 
-        let first_roi = Bounds {
-            x: start_x.ceil() as usize,
-            y: bounds.y,
-            width: probe_width,
-            height: bounds.height,
+        let start = if let Some((start, _)) = self.ending_points {
+            start
+        } else {
+            let first_roi = Bounds {
+                x: start_x.ceil() as usize,
+                y: bounds.y,
+                width: probe_width,
+                height: bounds.height,
+            };
+            let first_centroid = self
+                .centroid(first_roi, 1)
+                .ok_or(FilamentError::EmptyProbe)?;
+            (start_x, first_centroid.1)
         };
-        let first_centroid = self
-            .centroid(first_roi, 1)
-            .ok_or(FilamentError::EmptyProbe)?;
-        let start = (start_x, first_centroid.1);
         let mut points = vec![start];
 
         for index in 1..segment_count {
@@ -190,17 +224,21 @@ impl StaffFilament {
             }
         }
 
-        let final_x = (stop_x - probe_width as f64 + 1.0).floor() as usize;
-        let final_roi = Bounds {
-            x: final_x,
-            y: bounds.y,
-            width: probe_width,
-            height: bounds.height,
+        let stop = if let Some((_, stop)) = self.ending_points {
+            stop
+        } else {
+            let final_x = (stop_x - probe_width as f64 + 1.0).floor() as usize;
+            let final_roi = Bounds {
+                x: final_x,
+                y: bounds.y,
+                width: probe_width,
+                height: bounds.height,
+            };
+            let final_centroid = self
+                .centroid(final_roi, 1)
+                .ok_or(FilamentError::EmptyProbe)?;
+            (stop_x, final_centroid.1)
         };
-        let final_centroid = self
-            .centroid(final_roi, 1)
-            .ok_or(FilamentError::EmptyProbe)?;
-        let stop = (stop_x, final_centroid.1);
         points.push(stop);
         let spline = NaturalSpline::interpolate(&points)?;
 
@@ -210,6 +248,45 @@ impl StaffFilament {
             points,
             spline,
         })
+    }
+
+    /// Java `Filament.setEndingPoints` for a horizontal `StaffFilament`.
+    ///
+    /// The supplied endpoints become observable before recomputation. If
+    /// recomputation fails, they remain installed while spline/point cache is
+    /// absent, matching Java's non-transactional mutation order. On success,
+    /// the section bounds are enlarged to contain both endpoints.
+    pub fn set_ending_points(
+        &mut self,
+        start: (f64, f64),
+        stop: (f64, f64),
+    ) -> Result<FilamentGeometry, FilamentError> {
+        self.geometry_cache.get_mut().take();
+        self.expanded_bounds = None;
+        self.ending_points = Some((start, stop));
+
+        let computed = self.compute_geometry();
+        let expanded = self
+            .section_bounds()
+            .and_then(|bounds| expand_bounds(bounds, start, stop));
+        match computed {
+            Ok(geometry) => {
+                self.geometry_cache.get_mut().replace(geometry.clone());
+                self.expanded_bounds = Some(expanded?);
+                Ok(geometry)
+            }
+            Err(error) => {
+                if let Ok(bounds) = expanded {
+                    self.expanded_bounds = Some(bounds);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn ending_points(&self) -> Option<((f64, f64), (f64, f64))> {
+        self.ending_points
     }
 
     fn centroid(&self, roi: Bounds, minimum_weight: usize) -> Option<(f64, f64)> {
@@ -240,6 +317,38 @@ impl StaffFilament {
 
         (weight >= minimum_weight).then(|| (sum_x / weight as f64, sum_y / weight as f64))
     }
+}
+
+fn expand_bounds(
+    bounds: Bounds,
+    start: (f64, f64),
+    stop: (f64, f64),
+) -> Result<Bounds, FilamentError> {
+    if !start.0.is_finite()
+        || !start.1.is_finite()
+        || !stop.0.is_finite()
+        || !stop.1.is_finite()
+        || start.0 < 0.0
+        || start.1 < 0.0
+        || stop.0 < 0.0
+        || stop.1 < 0.0
+    {
+        return Err(FilamentError::InvalidEndingPoints);
+    }
+    let minimum_x = (bounds.x as f64).min(start.0).min(stop.0).floor() as usize;
+    let minimum_y = (bounds.y as f64).min(start.1).min(stop.1).floor() as usize;
+    let maximum_x = ((bounds.x + bounds.width) as f64)
+        .max(start.0.ceil())
+        .max(stop.0.ceil()) as usize;
+    let maximum_y = ((bounds.y + bounds.height) as f64)
+        .max(start.1.ceil())
+        .max(stop.1.ceil()) as usize;
+    Ok(Bounds {
+        x: minimum_x,
+        y: minimum_y,
+        width: maximum_x - minimum_x,
+        height: maximum_y - minimum_y,
+    })
 }
 
 /// Geometry already sampled for Java `LinesRetriever.canIncludeFilament`.
@@ -409,6 +518,7 @@ pub enum FilamentError {
     EmptyProbe,
     DegenerateGeometry,
     InvalidVirtualSegmentLength,
+    InvalidEndingPoints,
     Spline(SplineError),
 }
 
@@ -430,6 +540,9 @@ impl fmt::Display for FilamentError {
             Self::DegenerateGeometry => formatter.write_str("filament geometry is degenerate"),
             Self::InvalidVirtualSegmentLength => {
                 formatter.write_str("virtual segment length must be positive")
+            }
+            Self::InvalidEndingPoints => {
+                formatter.write_str("filament ending points must be finite and nonnegative")
             }
             Self::Spline(error) => write!(formatter, "filament spline error: {error}"),
         }
@@ -475,6 +588,43 @@ mod tests {
             max_sticker_gap: 0.0,
             max_sticker_extension: 2,
         }
+    }
+
+    #[test]
+    fn set_endings_rebuilds_cached_spline_and_enlarges_bounds() {
+        let mut filament = fixture();
+        let original = filament.geometry().unwrap();
+        assert_eq!((original.start().0, original.stop().0), (0.0, 164.0));
+
+        let rebuilt = filament
+            .set_ending_points((0.0, 1.0), (180.0, 13.0))
+            .unwrap();
+
+        assert_eq!(rebuilt.start(), (0.0, 1.0));
+        assert_eq!(rebuilt.stop(), (180.0, 13.0));
+        assert_eq!(filament.ending_points(), Some(((0.0, 1.0), (180.0, 13.0))));
+        assert_eq!(filament.geometry().unwrap(), rebuilt);
+        assert_eq!(
+            filament.bounds().unwrap(),
+            Bounds {
+                x: 0,
+                y: 1,
+                width: 180,
+                height: 12,
+            }
+        );
+    }
+
+    #[test]
+    fn failed_endpoint_recompute_retains_installed_endpoint_prefix() {
+        let mut filament = StaffFilament::new(10).unwrap();
+
+        assert_eq!(
+            filament.set_ending_points((2.0, 3.0), (20.0, 4.0)),
+            Err(FilamentError::Empty)
+        );
+        assert_eq!(filament.ending_points(), Some(((2.0, 3.0), (20.0, 4.0))));
+        assert_eq!(filament.geometry(), Err(FilamentError::Empty));
     }
 
     #[test]
