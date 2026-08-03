@@ -17,8 +17,8 @@ use audiveris_image::{
     median,
     projection::{
         PeakConstructionParams, PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams,
-        PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest, ShortProjection,
-        select_blank,
+        PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest, PeakScanRequest,
+        ProjectionPeakMode, ShortProjection, select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -207,7 +207,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 52] = [
+const VECTOR_KEYS: [&str; 53] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -225,6 +225,7 @@ const VECTOR_KEYS: [&str; 52] = [
     "grid.staff-projector-peak-side.synthetic=",
     "grid.staff-projector-peak-candidate.synthetic=",
     "grid.staff-projector-core.synthetic=",
+    "grid.staff-projector-ranges.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -722,6 +723,54 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .full_height_core
             .ok_or("serif fixture has no full-height core")?
             .white_ratio
+    ));
+
+    let mut rejected_range_projection = ShortProjection::new(0, 22)?;
+    for position in 2..=18 {
+        rejected_range_projection.increment(position, 30);
+    }
+    rejected_range_projection.increment(20, 40);
+    let rejected_browse = rejected_range_projection.browse_peak_range(
+        audiveris_image::projection::PeakRangeRequest::new(2, 18, false, 20, 20, 0),
+        peak_candidate_params,
+    )?;
+    let after_rejected = rejected_range_projection.find_peaks_in_range(
+        PeakScanRequest::new(0, 21, ProjectionPeakMode::Full, 25, 20, 20, 0),
+        peak_candidate_params,
+        |candidate| Ok(Some(candidate)),
+    )?;
+    let mut right_edge_projection = ShortProjection::new(0, 4)?;
+    for position in 2..=4 {
+        right_edge_projection.increment(position, 20);
+    }
+    let initial_half_edge = right_edge_projection.find_peaks_in_range(
+        PeakScanRequest::new(0, 4, ProjectionPeakMode::InitialHalf, 12, 10, 10, 0),
+        peak_candidate_params,
+        |candidate| Ok(Some(candidate)),
+    )?;
+    let full_edge = right_edge_projection.find_peaks_in_range(
+        PeakScanRequest::new(0, 4, ProjectionPeakMode::Full, 25, 10, 10, 0),
+        peak_candidate_params,
+        |candidate| Ok(Some(candidate)),
+    )?;
+    let candidate_ranges =
+        |candidates: &[audiveris_image::projection::ProjectionPeakCandidate]| {
+            if candidates.is_empty() {
+                "none".to_owned()
+            } else {
+                candidates
+                    .iter()
+                    .map(|candidate| format!("{}-{}", candidate.start, candidate.stop))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        };
+    lines.push(format!(
+        "grid.staff-projector-ranges.synthetic=rejectedBrowse:{};afterRejected:{};initialHalfEdge:{};fullEdge:{}",
+        candidate_ranges(&rejected_browse),
+        candidate_ranges(&after_rejected),
+        candidate_ranges(&initial_half_edge),
+        candidate_ranges(&full_edge)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

@@ -300,6 +300,69 @@ public final class RustParityProbe
                 staffPeakRange(serifCorePeak),
                 acceptedCore.whiteRatio);
 
+        StaffProjector rejectedRangeProjector = staffProjector(
+                projectorScale,
+                new int[]{
+                    0, 0, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+                    30, 30, 30, 30, 30, 30, 30, 0, 40, 0, 0
+                },
+                new int[]{0, 10, 20, 30, 40});
+        configurePeakThresholds(rejectedRangeProjector, 2, 5);
+        List<StaffPeak> rejectedBrowse = browseRange(
+                rejectedRangeProjector,
+                2,
+                18,
+                false,
+                20,
+                20,
+                0);
+        List<StaffPeak> afterRejected = findPeaksInRange(
+                rejectedRangeProjector,
+                0,
+                21,
+                "FULL",
+                25,
+                20,
+                20,
+                0);
+        StaffProjector rightEdgeProjector;
+        try {
+            // A five-column sheet has only four derivative samples. The threshold is
+            // irrelevant to this direct range test, so use Java's verified zero-top path.
+            topDerivativeNumber.setValue(0);
+            rightEdgeProjector = staffProjector(
+                    projectorScale,
+                    new int[]{0, 0, 20, 20, 20},
+                    new int[]{0, 10, 20, 30, 40});
+        } finally {
+            topDerivativeNumber.setValue(savedTopDerivativeNumber);
+        }
+        configurePeakThresholds(rightEdgeProjector, 2, 5);
+        List<StaffPeak> initialHalfEdge = findPeaksInRange(
+                rightEdgeProjector,
+                0,
+                4,
+                "INITIAL_HALF",
+                12,
+                10,
+                10,
+                0);
+        List<StaffPeak> fullEdge = findPeaksInRange(
+                rightEdgeProjector,
+                0,
+                4,
+                "FULL",
+                25,
+                10,
+                10,
+                0);
+        System.out.println(
+                "grid.staff-projector-ranges.synthetic=rejectedBrowse:"
+                        + staffPeakRanges(rejectedBrowse)
+                        + ";afterRejected:" + staffPeakRanges(afterRejected)
+                        + ";initialHalfEdge:" + staffPeakRanges(initialHalfEdge)
+                        + ";fullEdge:" + staffPeakRanges(fullEdge));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
@@ -1320,9 +1383,84 @@ public final class RustParityProbe
                 addedChunk);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<StaffPeak> findPeaksInRange (StaffProjector projector,
+                                                    int xMin,
+                                                    int xMax,
+                                                    String modeName,
+                                                    int minimumCount,
+                                                    int minimumDerivativeUp,
+                                                    int minimumDerivativeDown,
+                                                    int addedChunk)
+        throws ReflectiveOperationException
+    {
+        Class<?> modeClass = Class.forName(StaffProjector.class.getName() + "$PeakMode");
+        Object mode = Enum.valueOf((Class<? extends Enum>) modeClass, modeName);
+        Method method = StaffProjector.class.getDeclaredMethod(
+                "findPeaksInRange",
+                int.class,
+                int.class,
+                modeClass,
+                int.class,
+                int.class,
+                int.class,
+                int.class);
+        method.setAccessible(true);
+        return (List<StaffPeak>) method.invoke(
+                projector,
+                xMin,
+                xMax,
+                mode,
+                minimumCount,
+                minimumDerivativeUp,
+                minimumDerivativeDown,
+                addedChunk);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<StaffPeak> browseRange (StaffProjector projector,
+                                               int rangeStart,
+                                               int rangeStop,
+                                               boolean halfMode,
+                                               int minimumDerivativeUp,
+                                               int minimumDerivativeDown,
+                                               int addedChunk)
+        throws ReflectiveOperationException
+    {
+        Method method = StaffProjector.class.getDeclaredMethod(
+                "browseRange",
+                int.class,
+                int.class,
+                boolean.class,
+                int.class,
+                int.class,
+                int.class);
+        method.setAccessible(true);
+        return (List<StaffPeak>) method.invoke(
+                projector,
+                rangeStart,
+                rangeStop,
+                halfMode,
+                minimumDerivativeUp,
+                minimumDerivativeDown,
+                addedChunk);
+    }
+
     private static String staffPeakRange (StaffPeak peak)
     {
         return peak != null ? peak.getStart() + "-" + peak.getStop() : "null";
+    }
+
+    private static String staffPeakRanges (List<StaffPeak> peaks)
+    {
+        if (peaks.isEmpty()) {
+            return "none";
+        }
+        List<String> ranges = new ArrayList<>();
+        for (StaffPeak peak : peaks) {
+            ranges.add(staffPeakRange(peak));
+        }
+        return String.join(",", ranges);
     }
 
     private static String blank (Object blank)
