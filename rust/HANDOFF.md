@@ -272,11 +272,13 @@ denied, and passed `git diff --check` before commit.
 188. `f5f85dae` — live Java/Rust score-regrouping differential fixture.
 189. `428e722d` — no-staff horizontal-lag rebuild and reset semantics.
 190. `9a8fc090` — system/page population and section ownership.
+191. `c02ab205` — concrete filament glyph registration and persistent staff-line conversion.
+192. `b2882109` — curved GRID system areas and side-by-side slicing.
 
-At the one-hundred-and-ninetieth checkpoint the Rust workspace executes 488 tests:
+At the one-hundred-and-ninety-second checkpoint the Rust workspace executes 501 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 341
+- `audiveris-image`: 348
 - `audiveris-omr`: 94
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -364,9 +366,13 @@ through staff-line simplification, lag-section removal, no-staff horizontal-lag 
 system population, and movement-aware score regrouping. System population now preserves
 Java's clear-first/non-transactional failure behavior, horizontal and vertical section
 ownership order, indentation traversal, physical page/PageRef allocation, and report
-maxima. Remaining boundaries include concrete curved staff areas, `StaffFilament.toStaffLine`
-glyph creation, `SystemInfo.buildRef` details, and production sheet/SIG attachment—not an
-assertion that GRID is fully behaviorally equivalent.
+maxima. Curved line/quadratic/cubic staff boundaries now reproduce neighbor expansion,
+vertical margins, strict containment, reversed south paths, and side-by-side midpoint
+slicing under production's x-monotone staff-spline invariant. `StaffFilament.toStaffLine`
+now builds and registers the union glyph before +0.5 ordinate adjustment, exact iterative
+spline simplification, and glyph assignment. Remaining boundaries include
+`SystemInfo.buildRef` details, concrete sheet-executor attachment, and production SIG
+integration—not an assertion that GRID is fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -432,10 +438,10 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete the remaining concrete `GRID` seams: curved staff-area construction,
-   `StaffFilament.toStaffLine`, `SystemInfo.buildRef`, glyph/index ownership, and
-   peak-graph/SIG attachment. Keep UI integration behind explicit neutral boundaries
-   until the headless output has stable full-stage differential fixtures.
+1. Complete the remaining concrete `GRID` seams: `SystemInfo.buildRef`, sheet-executor
+   attachment, remaining glyph/index ownership, and peak-graph/SIG attachment. Keep UI
+   integration behind explicit neutral boundaries until the headless output has stable
+   full-stage differential fixtures.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
