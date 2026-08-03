@@ -18,6 +18,7 @@ use audiveris_image::{
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
+    target_line::TargetLine,
     watershed,
 };
 use audiveris_testkit::CanonicalVectors;
@@ -197,7 +198,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 41] = [
+const VECTOR_KEYS: [&str; 42] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -215,6 +216,7 @@ const VECTOR_KEYS: [&str; 41] = [
     "grid.filament-factory.synthetic=",
     "grid.filament-factory.overlap=",
     "grid.line-cluster.synthetic=",
+    "grid.target-line.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -349,6 +351,10 @@ fn cluster_points(points: &[Option<(f64, f64)>]) -> String {
         .map(|point| point.map_or_else(|| "null".to_owned(), |(x, y)| format!("{x:.6},{y:.6}")))
         .collect::<Vec<_>>()
         .join(";")
+}
+
+fn target_point(point: (f64, f64)) -> String {
+    format!("{:.12},{:.12}", point.0, point.1)
 }
 
 fn optional_i32(value: Option<i32>) -> String {
@@ -720,6 +726,17 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         line_cluster.true_length()?,
         cluster_points(&line_cluster.points_at(5.0, 3, 0.25)?),
         cluster_points(&line_cluster.points_at(-3.0, 3, 0.25)?)
+    ));
+    let target_line = TargetLine::new(filament.geometry()?, 75.0, 100.0, 300.0)?;
+    lines.push(format!(
+        "grid.target-line.synthetic=y:{:.12};left:{};mid:{};right:{};above:{};below:{};extra:{}",
+        target_line.target_y(),
+        target_point(target_line.source_of_x(100.0)?),
+        target_point(target_line.source_of_x(200.0)?),
+        target_point(target_line.source_of_x(300.0)?),
+        target_point(target_line.source_of_point((200.0, 65.0))?),
+        target_point(target_line.source_of_point((200.0, 85.0))?),
+        target_point(target_line.source_of_x(350.0)?)
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

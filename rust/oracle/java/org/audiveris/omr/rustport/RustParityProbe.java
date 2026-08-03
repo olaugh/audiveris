@@ -46,10 +46,15 @@ import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.ScaleBuilder;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
+import org.audiveris.omr.sheet.Staff;
+import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.grid.GridBuilder;
 import org.audiveris.omr.sheet.grid.LineCluster;
 import org.audiveris.omr.sheet.grid.StaffFilament;
 import org.audiveris.omr.sheet.grid.StaffPattern;
+import org.audiveris.omr.sheet.grid.TargetLine;
+import org.audiveris.omr.sheet.grid.TargetStaff;
+import org.audiveris.omr.sheet.grid.TargetSystem;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -339,6 +344,25 @@ public final class RustParityProbe
                 lineCluster.getTrueLength(),
                 points(lineCluster.getPointsAt(5.0, 3, 0.25)),
                 points(lineCluster.getPointsAt(-3.0, 3, 0.25)));
+
+        TargetSystem targetSystem = new TargetSystem(
+                new SystemInfo(7, null, new ArrayList<>()),
+                0.0,
+                100.0,
+                300.0);
+        TargetStaff targetStaff = new TargetStaff(
+                new Staff(3, 100.0, 300.0, 10, new ArrayList<>()),
+                50.0,
+                targetSystem);
+        TargetLine targetLine = new TargetLine(filament, 75.0, targetStaff);
+        System.out.println(
+                "grid.target-line.synthetic=y:75.000000000000"
+                        + ";left:" + point(targetLine.sourceOf(100.0))
+                        + ";mid:" + point(targetLine.sourceOf(200.0))
+                        + ";right:" + point(targetLine.sourceOf(300.0))
+                        + ";above:" + point(targetLine.sourceOf(new Point2D.Double(200.0, 65.0)))
+                        + ";below:" + point(targetLine.sourceOf(new Point2D.Double(200.0, 85.0)))
+                        + ";extra:" + point(targetLine.sourceOf(350.0)));
 
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
@@ -749,6 +773,11 @@ public final class RustParityProbe
                     : "null");
         }
         return String.join(";", values);
+    }
+
+    private static String point (Point2D point)
+    {
+        return String.format(java.util.Locale.ROOT, "%.12f,%.12f", point.getX(), point.getY());
     }
 
     private static long hashSection (long hash,
