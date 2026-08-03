@@ -47,6 +47,7 @@ pub mod line_short_sections;
 pub mod lines_coordinator;
 pub mod mask;
 pub mod median;
+pub mod multiple_rest_serifs;
 pub mod part_group;
 pub mod peak_graph;
 pub mod prepared_bars;
