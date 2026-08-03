@@ -12,6 +12,11 @@ use std::error::Error;
 use std::f64::consts::TAU;
 use std::fmt;
 
+use audiveris_image::{
+    glyph_factory::{GlyphComponent, build_glyph_components},
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
+};
+
 use crate::{
     clef_column::NeutralClefKind,
     headers_step::HeadlessHeaderSystem,
@@ -908,10 +913,600 @@ fn java_rint_to_i32(value: f64) -> i32 {
     value.round_ties_even() as i32
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeKeyStaffContext {
+    pub browse_stop: i32,
+    pub envelope_top: i32,
+    pub envelope_bottom: i32,
+    pub staff_mid_y: f64,
+    pub interline: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeKeyParameters {
+    pub minimum_component_weight: usize,
+    pub maximum_component_gap: i32,
+    pub minimum_glyph_weight: usize,
+    pub maximum_alter_width: i32,
+    pub maximum_alter_height: i32,
+    pub maximum_alters: usize,
+    pub maximum_rank: usize,
+    pub minimum_classifier_grade: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeKeyGlyph {
+    pub id: usize,
+    pub part_ids: Vec<usize>,
+    pub bounds: HeaderBounds,
+    pub weight: usize,
+    pub centroid_x: f64,
+    pub centroid_y: f64,
+    pub raster: RunTable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KeyShapeEvaluation {
+    pub shape: NeutralKeyAlterShape,
+    pub grade: f64,
+}
+
+/// The sole production seam: Audiveris `ShapeClassifier` output.
+pub trait KeyShapeClassifier {
+    type Error;
+    fn evaluate(
+        &mut self,
+        glyph: &NativeKeyGlyph,
+        interline: i32,
+        maximum_rank: usize,
+        minimum_grade: f64,
+    ) -> Result<Vec<KeyShapeEvaluation>, Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeKeyMutation {
+    ComponentRegistered {
+        staff_id: usize,
+        glyph_id: usize,
+    },
+    CompoundRegistered {
+        staff_id: usize,
+        glyph_id: usize,
+    },
+    GlyphEvaluated {
+        staff_id: usize,
+        glyph_id: usize,
+        shape: NeutralKeyAlterShape,
+    },
+    ClassifierRejected {
+        staff_id: usize,
+        glyph_id: usize,
+        shape: NeutralKeyAlterShape,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeKeyError<E> {
+    MissingSource(usize),
+    MissingContext(usize),
+    MissingParameters(usize),
+    InvalidBrowseRange {
+        staff_id: usize,
+    },
+    GlyphIdExhausted,
+    InterIdExhausted,
+    RunTable(RunTableError),
+    Classifier {
+        staff_id: usize,
+        glyph_id: usize,
+        source: E,
+    },
+}
+
+impl<E: fmt::Display> fmt::Display for NativeKeyError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSource(id) => write!(f, "missing key raster for system {id}"),
+            Self::MissingContext(id) => write!(f, "missing key context for staff {id}"),
+            Self::MissingParameters(id) => write!(f, "missing key parameters for staff {id}"),
+            Self::InvalidBrowseRange { staff_id } => {
+                write!(f, "invalid key browse range for staff {staff_id}")
+            }
+            Self::GlyphIdExhausted => f.write_str("key glyph ID exhausted"),
+            Self::InterIdExhausted => f.write_str("key inter ID exhausted"),
+            Self::RunTable(source) => write!(f, "key run table failed: {source}"),
+            Self::Classifier {
+                staff_id,
+                glyph_id,
+                source,
+            } => {
+                write!(
+                    f,
+                    "staff {staff_id} key glyph {glyph_id} classifier failed: {source}"
+                )
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct NativeKeyPart {
+    id: usize,
+    component: GlyphComponent,
+}
+
+/// Concrete staff envelope → projection range → connected glyphs → accidental
+/// proposals. Hypotheses are evaluated in Java `Shape` order: FLAT, then SHARP.
+pub struct NativeKeyProposalRecognizer<Classifier> {
+    classifier: Classifier,
+    sources: BTreeMap<usize, RunTable>,
+    contexts: BTreeMap<usize, NativeKeyStaffContext>,
+    parameters: BTreeMap<usize, NativeKeyParameters>,
+    next_glyph_id: usize,
+    next_inter_id: usize,
+    mutations: Vec<NativeKeyMutation>,
+    projections: BTreeMap<usize, Vec<usize>>,
+}
+
+impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
+    #[must_use]
+    pub fn new(
+        classifier: Classifier,
+        sources: BTreeMap<usize, RunTable>,
+        contexts: BTreeMap<usize, NativeKeyStaffContext>,
+        parameters: BTreeMap<usize, NativeKeyParameters>,
+        next_glyph_id: usize,
+        next_inter_id: usize,
+    ) -> Self {
+        Self {
+            classifier,
+            sources,
+            contexts,
+            parameters,
+            next_glyph_id,
+            next_inter_id,
+            mutations: Vec::new(),
+            projections: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn mutations(&self) -> &[NativeKeyMutation] {
+        &self.mutations
+    }
+    #[must_use]
+    pub const fn classifier(&self) -> &Classifier {
+        &self.classifier
+    }
+    #[must_use]
+    pub fn projection(&self, staff_id: usize) -> Option<&[usize]> {
+        self.projections.get(&staff_id).map(Vec::as_slice)
+    }
+
+    fn glyph_id(&mut self) -> Result<usize, NativeKeyError<Classifier::Error>> {
+        self.next_glyph_id = self
+            .next_glyph_id
+            .checked_add(1)
+            .ok_or(NativeKeyError::GlyphIdExhausted)?;
+        Ok(self.next_glyph_id)
+    }
+    fn inter_id(&mut self) -> Result<usize, NativeKeyError<Classifier::Error>> {
+        self.next_inter_id = self
+            .next_inter_id
+            .checked_add(1)
+            .ok_or(NativeKeyError::InterIdExhausted)?;
+        Ok(self.next_inter_id)
+    }
+}
+
+impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
+    for NativeKeyProposalRecognizer<Classifier>
+{
+    type Error = NativeKeyError<Classifier::Error>;
+
+    fn classify_key_shapes(
+        &mut self,
+        input: KeyRecognitionInput,
+    ) -> Result<Vec<KeyShapeClassifierProposal>, Self::Error> {
+        let source = self
+            .sources
+            .get(&input.system_id)
+            .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+        let context = *self
+            .contexts
+            .get(&input.staff_id)
+            .ok_or(NativeKeyError::MissingContext(input.staff_id))?;
+        let parameters = *self
+            .parameters
+            .get(&input.staff_id)
+            .ok_or(NativeKeyError::MissingParameters(input.staff_id))?;
+        let start = input.browse_start.max(input.measure_start);
+        let stop = context
+            .browse_stop
+            .min(input.measure_start + input.projection_width - 1);
+        if start > stop || context.envelope_top > context.envelope_bottom {
+            return Err(NativeKeyError::InvalidBrowseRange {
+                staff_id: input.staff_id,
+            });
+        }
+        let rect = HeaderBounds {
+            x: start,
+            y: context.envelope_top,
+            width: stop - start + 1,
+            height: context.envelope_bottom - context.envelope_top + 1,
+        };
+        let crop = crop_key(source, rect).map_err(NativeKeyError::RunTable)?;
+        self.projections
+            .insert(input.staff_id, key_projection(&crop));
+        let components = build_glyph_components(&crop, rect.x, rect.y)
+            .into_iter()
+            .filter(|component| component.weight >= parameters.minimum_component_weight)
+            .collect::<Vec<_>>();
+        let mut parts = Vec::with_capacity(components.len());
+        for component in components {
+            let id = self.glyph_id()?;
+            self.mutations.push(NativeKeyMutation::ComponentRegistered {
+                staff_id: input.staff_id,
+                glyph_id: id,
+            });
+            parts.push(NativeKeyPart { id, component });
+        }
+        parts.sort_by_key(|part| part.component.left);
+        let groups = group_key_parts(&parts, parameters.maximum_component_gap);
+        let mut proposals = Vec::new();
+        for shape in [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Sharp] {
+            let mut alters = Vec::new();
+            for group in &groups {
+                let glyph = self.compound(input.staff_id, &parts, group)?;
+                if glyph.bounds.width > parameters.maximum_alter_width
+                    || glyph.bounds.height > parameters.maximum_alter_height
+                    || glyph.weight < parameters.minimum_glyph_weight
+                {
+                    continue;
+                }
+                self.mutations.push(NativeKeyMutation::GlyphEvaluated {
+                    staff_id: input.staff_id,
+                    glyph_id: glyph.id,
+                    shape,
+                });
+                let evaluations = self
+                    .classifier
+                    .evaluate(
+                        &glyph,
+                        context.interline,
+                        parameters.maximum_rank,
+                        parameters.minimum_classifier_grade,
+                    )
+                    .map_err(|source| NativeKeyError::Classifier {
+                        staff_id: input.staff_id,
+                        glyph_id: glyph.id,
+                        source,
+                    })?;
+                if let Some(evaluation) = evaluations
+                    .into_iter()
+                    .take(parameters.maximum_rank)
+                    .find(|evaluation| {
+                        evaluation.shape == shape
+                            && evaluation.grade >= parameters.minimum_classifier_grade
+                    })
+                {
+                    let id = self.inter_id()?;
+                    alters.push(KeyAlterClassifierProposal {
+                        id,
+                        start: glyph.bounds.x,
+                        width: glyph.bounds.width,
+                        bounds: glyph.bounds,
+                        classifier_grade: evaluation.grade,
+                        measured_pitch: (2.0 * (glyph.centroid_y - context.staff_mid_y))
+                            / f64::from(context.interline),
+                    });
+                    if alters.len() == parameters.maximum_alters.min(7) {
+                        break;
+                    }
+                } else {
+                    self.mutations.push(NativeKeyMutation::ClassifierRejected {
+                        staff_id: input.staff_id,
+                        glyph_id: glyph.id,
+                        shape,
+                    });
+                }
+            }
+            if !alters.is_empty() {
+                let id = self.inter_id()?;
+                let left = alters.first().unwrap().bounds.x;
+                let right = alters.last().unwrap().bounds.right();
+                proposals.push(KeyShapeClassifierProposal {
+                    id,
+                    shape,
+                    range: native_key_range(start, stop, left, right),
+                    alters,
+                });
+            }
+        }
+        Ok(proposals)
+    }
+
+    fn replicate_key(
+        &mut self,
+        _system_id: usize,
+        _target_staff_id: usize,
+        _source: &NeutralKeyCandidate,
+        _global_offsets: &[i32],
+    ) -> Result<KeyReplication, Self::Error> {
+        Ok(KeyReplication {
+            status: KeyReplicationStatus::NoReplicate,
+            replacement: None,
+        })
+    }
+}
+
+impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
+    fn compound(
+        &mut self,
+        staff_id: usize,
+        parts: &[NativeKeyPart],
+        group: &[usize],
+    ) -> Result<NativeKeyGlyph, NativeKeyError<Classifier::Error>> {
+        let id = if group.len() == 1 {
+            parts[group[0]].id
+        } else {
+            let id = self.glyph_id()?;
+            self.mutations.push(NativeKeyMutation::CompoundRegistered {
+                staff_id,
+                glyph_id: id,
+            });
+            id
+        };
+        native_key_glyph(id, parts, group).map_err(NativeKeyError::RunTable)
+    }
+}
+
+fn group_key_parts(parts: &[NativeKeyPart], maximum_gap: i32) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, part) in parts.iter().enumerate() {
+        let joins = groups
+            .last()
+            .and_then(|group| group.last())
+            .is_some_and(|previous| {
+                let right = parts[*previous].component.left
+                    + i32::try_from(parts[*previous].component.width).unwrap_or(i32::MAX)
+                    - 1;
+                part.component.left - right - 1 <= maximum_gap
+            });
+        if joins {
+            groups.last_mut().unwrap().push(index);
+        } else {
+            groups.push(vec![index]);
+        }
+    }
+    groups
+}
+
+fn native_key_range(
+    browse_start: i32,
+    browse_stop: i32,
+    start: i32,
+    stop: i32,
+) -> StaffHeaderRange {
+    let mut range = StaffHeaderRange::default();
+    range.valid = true;
+    range.browse_start = browse_start;
+    range.browse_stop = browse_stop;
+    range.set_start(start);
+    range.set_stop(stop);
+    range
+}
+
+fn crop_key(source: &RunTable, rect: HeaderBounds) -> Result<RunTable, RunTableError> {
+    let x = usize::try_from(rect.x).map_err(|_| RunTableError::OutOfBounds)?;
+    let y = usize::try_from(rect.y).map_err(|_| RunTableError::OutOfBounds)?;
+    let width = usize::try_from(rect.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(rect.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    if x + width > source.width() || y + height > source.height() {
+        return Err(RunTableError::OutOfBounds);
+    }
+    let mut pixels = vec![BACKGROUND; width * height];
+    for local_y in 0..height {
+        for local_x in 0..width {
+            pixels[local_y * width + local_x] = source.get(x + local_x, y + local_y);
+        }
+    }
+    RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)
+}
+
+fn key_projection(source: &RunTable) -> Vec<usize> {
+    (0..source.width())
+        .map(|x| {
+            (0..source.height())
+                .filter(|y| source.get(x, *y) == FOREGROUND)
+                .count()
+        })
+        .collect()
+}
+
+fn native_key_glyph(
+    id: usize,
+    parts: &[NativeKeyPart],
+    group: &[usize],
+) -> Result<NativeKeyGlyph, RunTableError> {
+    let left = group
+        .iter()
+        .map(|index| parts[*index].component.left)
+        .min()
+        .unwrap();
+    let top = group
+        .iter()
+        .map(|index| parts[*index].component.top)
+        .min()
+        .unwrap();
+    let right = group
+        .iter()
+        .map(|index| {
+            parts[*index].component.left + i32::try_from(parts[*index].component.width).unwrap() - 1
+        })
+        .max()
+        .unwrap();
+    let bottom = group
+        .iter()
+        .map(|index| {
+            parts[*index].component.top + i32::try_from(parts[*index].component.height).unwrap() - 1
+        })
+        .max()
+        .unwrap();
+    let bounds = HeaderBounds {
+        x: left,
+        y: top,
+        width: right - left + 1,
+        height: bottom - top + 1,
+    };
+    let width = usize::try_from(bounds.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(bounds.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    let mut pixels = vec![BACKGROUND; width * height];
+    let mut weight = 0usize;
+    let mut sx = 0.0;
+    let mut sy = 0.0;
+    for index in group {
+        let component = &parts[*index].component;
+        weight += component.weight;
+        sx += component.centroid_x * component.weight as f64;
+        sy += component.centroid_y * component.weight as f64;
+        let raster = component_key_pixels(component);
+        for (x, y) in raster {
+            pixels
+                [usize::try_from(y - top).unwrap() * width + usize::try_from(x - left).unwrap()] =
+                FOREGROUND;
+        }
+    }
+    Ok(NativeKeyGlyph {
+        id,
+        part_ids: group.iter().map(|index| parts[*index].id).collect(),
+        bounds,
+        weight,
+        centroid_x: sx / weight as f64,
+        centroid_y: sy / weight as f64,
+        raster: RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)?,
+    })
+}
+
+fn component_key_pixels(component: &GlyphComponent) -> Vec<(i32, i32)> {
+    let min_sequence = component
+        .runs
+        .iter()
+        .map(|entry| entry.sequence)
+        .min()
+        .unwrap();
+    let min_coordinate = component
+        .runs
+        .iter()
+        .map(|entry| entry.run.start)
+        .min()
+        .unwrap();
+    let mut pixels = Vec::with_capacity(component.weight);
+    for entry in &component.runs {
+        for coordinate in entry.run.start..=entry.run.stop() {
+            match component.orientation {
+                Orientation::Horizontal => pixels.push((
+                    component.left + i32::try_from(coordinate - min_coordinate).unwrap(),
+                    component.top + i32::try_from(entry.sequence - min_sequence).unwrap(),
+                )),
+                Orientation::Vertical => pixels.push((
+                    component.left + i32::try_from(entry.sequence - min_sequence).unwrap(),
+                    component.top + i32::try_from(coordinate - min_coordinate).unwrap(),
+                )),
+            }
+        }
+    }
+    pixels
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{headers_step::HeadlessHeaderStaff, staff_header::StaffHeader};
+
+    #[derive(Default)]
+    struct FakeKeyClassifier {
+        calls: Vec<(usize, HeaderBounds, usize)>,
+        fail_call: Option<usize>,
+    }
+
+    impl KeyShapeClassifier for FakeKeyClassifier {
+        type Error = &'static str;
+
+        fn evaluate(
+            &mut self,
+            glyph: &NativeKeyGlyph,
+            _interline: i32,
+            _maximum_rank: usize,
+            _minimum_grade: f64,
+        ) -> Result<Vec<KeyShapeEvaluation>, Self::Error> {
+            self.calls.push((glyph.id, glyph.bounds, glyph.weight));
+            if self.fail_call == Some(self.calls.len()) {
+                return Err("classifier failed");
+            }
+            Ok(vec![
+                KeyShapeEvaluation {
+                    shape: NeutralKeyAlterShape::Flat,
+                    grade: 0.8,
+                },
+                KeyShapeEvaluation {
+                    shape: NeutralKeyAlterShape::Sharp,
+                    grade: 0.7,
+                },
+            ])
+        }
+    }
+
+    fn native_recognizer(
+        classifier: FakeKeyClassifier,
+    ) -> NativeKeyProposalRecognizer<FakeKeyClassifier> {
+        let mut pixels = vec![BACKGROUND; 40 * 30];
+        for y in 7..11 {
+            for x in [12usize, 13, 18, 19] {
+                pixels[y * 40 + x] = FOREGROUND;
+            }
+        }
+        let source = RunTable::from_pixels(Orientation::Horizontal, 40, 30, &pixels).unwrap();
+        NativeKeyProposalRecognizer::new(
+            classifier,
+            BTreeMap::from([(7, source)]),
+            BTreeMap::from([(
+                1,
+                NativeKeyStaffContext {
+                    browse_stop: 25,
+                    envelope_top: 5,
+                    envelope_bottom: 15,
+                    staff_mid_y: 10.0,
+                    interline: 4,
+                },
+            )]),
+            BTreeMap::from([(
+                1,
+                NativeKeyParameters {
+                    minimum_component_weight: 2,
+                    maximum_component_gap: 2,
+                    minimum_glyph_weight: 4,
+                    maximum_alter_width: 4,
+                    maximum_alter_height: 8,
+                    maximum_alters: 7,
+                    maximum_rank: 3,
+                    minimum_classifier_grade: 0.5,
+                },
+            )]),
+            100,
+            200,
+        )
+    }
+
+    fn native_input() -> KeyRecognitionInput {
+        KeyRecognitionInput {
+            system_id: 7,
+            staff_id: 1,
+            projection_width: 20,
+            measure_start: 8,
+            browse_start: 10,
+        }
+    }
 
     #[derive(Default)]
     struct FakeVisual {
@@ -1345,6 +1940,97 @@ mod tests {
                 })
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn native_key_sources_staff_envelope_components_and_flat_then_sharp_hypotheses() {
+        let mut recognizer = native_recognizer(FakeKeyClassifier::default());
+
+        let proposals = recognizer.classify_key_shapes(native_input()).unwrap();
+
+        assert_eq!(proposals.len(), 2);
+        assert_eq!(proposals[0].shape, NeutralKeyAlterShape::Flat);
+        assert_eq!(proposals[1].shape, NeutralKeyAlterShape::Sharp);
+        assert_eq!(proposals[0].alters.len(), 2);
+        assert_eq!(
+            proposals[0]
+                .alters
+                .iter()
+                .map(|alter| alter.start)
+                .collect::<Vec<_>>(),
+            [12, 18]
+        );
+        assert_eq!(proposals[0].range.start(), Ok(12));
+        assert_eq!(proposals[0].range.stop(), 19);
+        assert_eq!(recognizer.projection(1).unwrap()[2], 4);
+        assert_eq!(recognizer.projection(1).unwrap()[8], 4);
+        assert_eq!(recognizer.classifier().calls.len(), 4);
+        assert_eq!(
+            recognizer
+                .mutations()
+                .iter()
+                .filter_map(|mutation| match mutation {
+                    NativeKeyMutation::GlyphEvaluated { shape, .. } => Some(*shape),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [
+                NeutralKeyAlterShape::Flat,
+                NeutralKeyAlterShape::Flat,
+                NeutralKeyAlterShape::Sharp,
+                NeutralKeyAlterShape::Sharp,
+            ]
+        );
+    }
+
+    #[test]
+    fn native_key_preserves_registered_prefix_on_classifier_failure() {
+        let mut recognizer = native_recognizer(FakeKeyClassifier {
+            fail_call: Some(2),
+            ..FakeKeyClassifier::default()
+        });
+
+        let error = recognizer.classify_key_shapes(native_input()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            NativeKeyError::Classifier {
+                staff_id: 1,
+                source: "classifier failed",
+                ..
+            }
+        ));
+        assert_eq!(recognizer.classifier().calls.len(), 2);
+        assert_eq!(
+            recognizer
+                .mutations()
+                .iter()
+                .filter(|mutation| matches!(
+                    mutation,
+                    NativeKeyMutation::ComponentRegistered { .. }
+                ))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn native_key_clips_candidate_source_to_header_browse_range() {
+        let mut recognizer = native_recognizer(FakeKeyClassifier::default());
+        let mut input = native_input();
+        input.browse_start = 16;
+
+        let proposals = recognizer.classify_key_shapes(input).unwrap();
+
+        assert_eq!(proposals[0].alters.len(), 1);
+        assert_eq!(proposals[0].alters[0].start, 18);
+        assert!(
+            recognizer
+                .classifier()
+                .calls
+                .iter()
+                .all(|call| call.1.x >= 16)
         );
     }
 }
