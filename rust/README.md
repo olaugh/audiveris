@@ -16,7 +16,7 @@ cargo run -p xtask -- manifest
 ```
 
 `xtask vectors` compiles a probe against the frozen production Java classes and
-compares 43 canonical utility, geometry, assignment, image, run-table, section, and
+compares 44 canonical utility, geometry, assignment, image, run-table, section, and
 pipeline-order results with Rust. Geometry is canonicalized to a declared `1e-15`
 decimal boundary; integer, byte raster, topology, string, and ordering fields remain
 exact.

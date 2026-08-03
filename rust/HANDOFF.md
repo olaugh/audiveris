@@ -131,17 +131,25 @@ denied, and passed `git diff --check` before commit.
     sample columns with ties-even spacing and inclusive interline bounds.
 60. `549ab8db` — neutral fixed-slot bar-column state, mean geometry, start/brace/full
     status, overwrite behavior, and explicit connection relations.
+61. `7311c915` — Java-compatible weighted popular-comb-size selection, including
+    the histogram's lower-bucket tie behavior.
+62. `1d0ee9ed` — neutral bar alignment/connection impacts, identity, ordering, and
+    exact connection-preferred contextual `bestOf` selection.
+63. `be225960` — ordered current and deprecated staff-configuration persistence
+    variants without normalizing raw JAXB integer and boolean states.
+64. `1bd4bdc3` — live production-Java bar-column vector using real staff peaks,
+    graph relations, overwrite/cache invalidation, and status transitions.
 
-At the sixtieth checkpoint the Rust workspace executes 201 tests:
+At the sixty-fourth checkpoint the Rust workspace executes 210 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 94
-- `audiveris-omr`: 54
+- `audiveris-image`: 100
+- `audiveris-omr`: 57
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 43 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 44 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -180,6 +188,10 @@ Regular vertical comb sampling now feeds the neutral comb representation, and th
 line-cluster indexed-inclusion boundary has exact production-Java parity. Early bar
 column semantics are available without `PeakGraph` object cycles. The `.omr` view now
 continues through order-preserving part metadata while staff configuration stays opaque.
+Bar columns now have exact production-Java parity across fixed slots, cached means,
+overwrite invalidation, full/start/brace status, and concrete graph connectivity.
+Alignment selection and weighted popular comb size are source-guided. Staff configuration
+is typed while explicitly preserving legacy `<line-count>` separately from current JAXB.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545

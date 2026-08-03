@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 43 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 44 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Rust workspace | building |
@@ -63,11 +63,11 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID section tally | stable first-position indexing with explicit sorted/range validation for staff-line sticker retrieval |
 | GRID line stickers | owned-member exclusion, stable full-position order, cumulative above/below contact, and one-run retention |
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
-| GRID comb and cluster core | ties-even vertical comb discovery and neutral stable-ID comb state plus ordered line-cluster membership, absorption, endpoints, bounds, mean length, indexed inclusion, and point extrapolation; exact live cluster vectors; recursive merge queued |
-| GRID bar columns | neutral fixed staff slots, peak/chain room and overwrite behavior, cached means, start/brace/full status, and explicit connection adjacency; PeakGraph/SIG integration queued |
+| GRID comb and cluster core | ties-even vertical comb discovery, weighted popular size, and neutral stable-ID comb state plus ordered line-cluster membership, absorption, endpoints, bounds, mean length, indexed inclusion, and point extrapolation; exact live cluster vectors; recursive merge queued |
+| GRID bar columns | neutral fixed staff slots, peak/chain room and overwrite behavior, cached means, start/brace/full status, alignment/connection selection, and explicit connection adjacency; exact production-Java vector; wider PeakGraph/SIG integration queued |
 | GRID target geometry | source-guided target-line deskew mapping with exact live sloped-line parity plus immutable cycle-free page/system/staff containers |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline completion status, atomic sheet input provenance, compatibility attributes, direct page references with optional raw JAXB time rationals, order-derived systems, and persisted part metadata |
+| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline completion status, atomic sheet input provenance, compatibility attributes, direct page references with optional raw JAXB time rationals, order-derived systems, part metadata, and current/deprecated staff configurations |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
