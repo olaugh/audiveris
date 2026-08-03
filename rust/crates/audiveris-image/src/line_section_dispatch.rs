@@ -7,6 +7,7 @@
 //! a staff line is not considered here (that removal belongs to
 //! `getAllStickers`). Each output retains the lag's ID order.
 
+use crate::filament::FilamentInclusionDecision;
 use crate::section::Section;
 use std::collections::HashSet;
 
@@ -252,9 +253,156 @@ pub fn plan_section_inclusions(
     batches
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FilamentOwner {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub line_id: usize,
+}
+
+/// Neutral candidate record consumed by `includeDiscardedFilaments` traversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiscardedFilamentCandidate {
+    pub id: usize,
+    pub top_ordinate: usize,
+    /// Integer centroid x returned by Java `Filament.getCentroid()`.
+    pub centroid_x: isize,
+    pub initial_owner: Option<FilamentOwner>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilamentEndpoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilamentAssignmentLine {
+    pub staff_id: usize,
+    pub line_id: usize,
+    pub min_y: usize,
+    pub max_y: usize,
+    pub start_endpoint: FilamentEndpoint,
+    pub stop_endpoint: FilamentEndpoint,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FilamentAssignmentSystem {
+    pub system_id: usize,
+    pub lines: Vec<FilamentAssignmentLine>,
+}
+
+/// One immediate `filament.stealSections(candidate)` ownership transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilamentSteal {
+    pub candidate_id: usize,
+    pub new_owner: FilamentOwner,
+}
+
+/// One post-scan `setEndingPoints(startPt, stopPt)` cache/line recomputation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilamentEndpointRecomputation {
+    pub owner: FilamentOwner,
+    pub preserved_start: FilamentEndpoint,
+    pub preserved_stop: FilamentEndpoint,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscardedFilamentTraversal {
+    /// Steals in their immediate execution order.
+    pub steals: Vec<FilamentSteal>,
+    /// At most one recomputation per modified target line.
+    pub endpoint_recomputations: Vec<FilamentEndpointRecomputation>,
+}
+
+/// Port `LinesRetriever.includeDiscardedFilaments` traversal and ownership.
+///
+/// Java concatenates discarded candidates before sloped candidates and then
+/// performs a stable top-ordinate sort. Accepted steals mark ownership
+/// immediately; endpoint geometry is recomputed once after the line scan.
+#[must_use]
+pub fn plan_discarded_filament_inclusions(
+    discarded: &[DiscardedFilamentCandidate],
+    sloped: &[DiscardedFilamentCandidate],
+    systems: &[FilamentAssignmentSystem],
+    mut decide: impl FnMut(usize, usize, usize, usize) -> FilamentInclusionDecision,
+) -> DiscardedFilamentTraversal {
+    let mut candidates = Vec::with_capacity(discarded.len() + sloped.len());
+    candidates.extend_from_slice(discarded);
+    candidates.extend_from_slice(sloped);
+    // Collections.sort is stable and topComparator compares only bounds.y.
+    candidates.sort_by_key(|candidate| candidate.top_ordinate);
+
+    let mut owned = candidates
+        .iter()
+        .filter(|candidate| candidate.initial_owner.is_some())
+        .map(|candidate| candidate.id)
+        .collect::<HashSet<_>>();
+    let mut steals = Vec::new();
+    let mut endpoint_recomputations = Vec::new();
+
+    for system in systems {
+        // Side-by-side systems restart from the top of the candidate list.
+        let mut i_min = 0;
+
+        for line in &system.lines {
+            let owner = FilamentOwner {
+                system_id: system.system_id,
+                staff_id: line.staff_id,
+                line_id: line.line_id,
+            };
+            let mut modified = false;
+
+            for (index, candidate) in candidates.iter().enumerate().skip(i_min) {
+                // Java checks getPartOf before the y window.
+                if owned.contains(&candidate.id) {
+                    continue;
+                }
+                if candidate.top_ordinate < line.min_y {
+                    i_min = index;
+                    continue;
+                }
+                if candidate.top_ordinate > line.max_y {
+                    break;
+                }
+
+                let center_x = candidate.centroid_x as f64;
+                if center_x >= line.start_endpoint.x
+                    && center_x <= line.stop_endpoint.x
+                    && decide(system.system_id, line.staff_id, line.line_id, candidate.id)
+                        == FilamentInclusionDecision::Include
+                {
+                    // stealSections sets candidate.partOf immediately, before
+                    // the next candidate or target line is considered.
+                    owned.insert(candidate.id);
+                    steals.push(FilamentSteal {
+                        candidate_id: candidate.id,
+                        new_owner: owner,
+                    });
+                    modified = true;
+                }
+            }
+
+            if modified {
+                endpoint_recomputations.push(FilamentEndpointRecomputation {
+                    owner,
+                    preserved_start: line.start_endpoint,
+                    preserved_stop: line.stop_endpoint,
+                });
+            }
+        }
+    }
+
+    DiscardedFilamentTraversal {
+        steals,
+        endpoint_recomputations,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filament::FilamentInclusionRejection;
     use crate::run_table::{Orientation, Run, RunTable};
     use crate::section::{JunctionPolicy, build_sections_from_id};
 
@@ -562,5 +710,178 @@ mod tests {
             }
         );
         assert!(batches[1].restore_endpoints.recompute_y_at_preserved_x);
+    }
+
+    fn filament_candidate(
+        id: usize,
+        top_ordinate: usize,
+        centroid_x: isize,
+    ) -> DiscardedFilamentCandidate {
+        DiscardedFilamentCandidate {
+            id,
+            top_ordinate,
+            centroid_x,
+            initial_owner: None,
+        }
+    }
+
+    fn filament_line(
+        staff_id: usize,
+        line_id: usize,
+        min_x: f64,
+        max_x: f64,
+        min_y: usize,
+        max_y: usize,
+    ) -> FilamentAssignmentLine {
+        FilamentAssignmentLine {
+            staff_id,
+            line_id,
+            min_y,
+            max_y,
+            start_endpoint: FilamentEndpoint { x: min_x, y: 20.5 },
+            stop_endpoint: FilamentEndpoint { x: max_x, y: 21.5 },
+        }
+    }
+
+    #[test]
+    fn discarded_then_sloped_concatenation_has_stable_top_sort() {
+        let discarded = [filament_candidate(1, 10, 20), filament_candidate(2, 10, 20)];
+        let sloped = [filament_candidate(3, 10, 20), filament_candidate(4, 5, 20)];
+        let systems = [FilamentAssignmentSystem {
+            system_id: 1,
+            lines: vec![filament_line(2, 3, 0.0, 40.0, 0, 20)],
+        }];
+        let mut evaluated = Vec::new();
+
+        let plan =
+            plan_discarded_filament_inclusions(&discarded, &sloped, &systems, |_, _, _, id| {
+                evaluated.push(id);
+                FilamentInclusionDecision::Include
+            });
+
+        assert_eq!(evaluated, [4, 1, 2, 3]);
+        assert_eq!(
+            plan.steals
+                .iter()
+                .map(|steal| steal.candidate_id)
+                .collect::<Vec<_>>(),
+            [4, 1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn filament_windows_are_strict_in_y_and_inclusive_in_x() {
+        let discarded = [
+            filament_candidate(1, 9, 20),
+            filament_candidate(2, 10, 0),
+            filament_candidate(3, 10, 100),
+            filament_candidate(4, 10, 101),
+            filament_candidate(5, 20, 50),
+            filament_candidate(6, 21, 50),
+        ];
+        let systems = [FilamentAssignmentSystem {
+            system_id: 1,
+            lines: vec![filament_line(1, 1, 0.0, 100.0, 10, 20)],
+        }];
+        let mut evaluated = Vec::new();
+
+        let plan = plan_discarded_filament_inclusions(&discarded, &[], &systems, |_, _, _, id| {
+            evaluated.push(id);
+            FilamentInclusionDecision::Include
+        });
+
+        assert_eq!(evaluated, [2, 3, 5]);
+        assert_eq!(
+            plan.steals
+                .iter()
+                .map(|steal| steal.candidate_id)
+                .collect::<Vec<_>>(),
+            [2, 3, 5]
+        );
+    }
+
+    #[test]
+    fn side_by_side_systems_restart_but_owned_candidates_are_skipped() {
+        let mut initially_owned = filament_candidate(9, 10, 60);
+        initially_owned.initial_owner = Some(FilamentOwner {
+            system_id: 99,
+            staff_id: 99,
+            line_id: 99,
+        });
+        let discarded = [filament_candidate(1, 10, 50), initially_owned];
+        let systems = [
+            FilamentAssignmentSystem {
+                system_id: 1,
+                lines: vec![filament_line(1, 1, 0.0, 100.0, 30, 40)],
+            },
+            FilamentAssignmentSystem {
+                system_id: 2,
+                lines: vec![filament_line(2, 1, 0.0, 100.0, 10, 10)],
+            },
+            FilamentAssignmentSystem {
+                system_id: 3,
+                lines: vec![filament_line(3, 1, 0.0, 100.0, 10, 10)],
+            },
+        ];
+        let mut evaluated = Vec::new();
+
+        let plan =
+            plan_discarded_filament_inclusions(&discarded, &[], &systems, |system, _, _, id| {
+                evaluated.push((system, id));
+                FilamentInclusionDecision::Include
+            });
+
+        // System 2 restarts and steals ID 1. System 3 sees its new owner; ID 9
+        // is never evaluated because it arrived already owned.
+        assert_eq!(evaluated, [(2, 1)]);
+        assert_eq!(plan.steals.len(), 1);
+        assert_eq!(plan.steals[0].new_owner.system_id, 2);
+        assert_eq!(plan.endpoint_recomputations.len(), 1);
+        assert_eq!(plan.endpoint_recomputations[0].owner.system_id, 2);
+    }
+
+    #[test]
+    fn steals_are_immediate_but_line_recompute_occurs_once_when_modified() {
+        let discarded = [
+            filament_candidate(1, 10, 20),
+            filament_candidate(2, 10, 30),
+            filament_candidate(3, 10, 40),
+        ];
+        let systems = [FilamentAssignmentSystem {
+            system_id: 7,
+            lines: vec![
+                filament_line(8, 9, 0.0, 50.0, 10, 10),
+                filament_line(8, 10, 0.0, 50.0, 10, 10),
+            ],
+        }];
+
+        let plan =
+            plan_discarded_filament_inclusions(&discarded, &[], &systems, |_, _, line_id, id| {
+                if line_id == 9 && id == 3 {
+                    FilamentInclusionDecision::Reject(FilamentInclusionRejection::CenterGap {
+                        observed: 2.0,
+                        maximum: 1.0,
+                    })
+                } else {
+                    FilamentInclusionDecision::Include
+                }
+            });
+
+        // IDs 1 and 2 are owned immediately by line 9 and skipped by line 10;
+        // rejected ID 3 remains available and is stolen by line 10.
+        assert_eq!(
+            plan.steals
+                .iter()
+                .map(|steal| (steal.new_owner.line_id, steal.candidate_id))
+                .collect::<Vec<_>>(),
+            [(9, 1), (9, 2), (10, 3)]
+        );
+        assert_eq!(plan.endpoint_recomputations.len(), 2);
+        assert_eq!(plan.endpoint_recomputations[0].owner.line_id, 9);
+        assert_eq!(
+            plan.endpoint_recomputations[0].preserved_start,
+            FilamentEndpoint { x: 0.0, y: 20.5 }
+        );
+        assert_eq!(plan.endpoint_recomputations[1].owner.line_id, 10);
     }
 }
