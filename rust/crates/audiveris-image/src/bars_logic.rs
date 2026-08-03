@@ -245,6 +245,22 @@ pub fn start_column_index(columns: &[BarColumn]) -> Option<usize> {
     columns.iter().position(BarColumn::is_start)
 }
 
+/// Original column indices removed by Java `purgePartialColumns`.
+///
+/// Java represents a missing start column as `-1`, so in that case every
+/// partial column is eligible. Columns through the first start column are
+/// retained even when partial.
+#[must_use]
+pub fn partial_column_indices_after_start(columns: &[BarColumn]) -> Vec<usize> {
+    let first_eligible = start_column_index(columns).map_or(0, |index| index + 1);
+    columns
+        .iter()
+        .enumerate()
+        .skip(first_eligible)
+        .filter_map(|(index, column)| (!column.is_full()).then_some(index))
+        .collect()
+}
+
 /// Java `BarFilamentBuilder.buildFilament` section preselection.
 ///
 /// The caller supplies sections in nondecreasing x order. Intersection uses
@@ -463,6 +479,45 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn partial_column_purge_starts_strictly_after_first_start_column() {
+        fn column(first: Option<BarPeak>, second: Option<BarPeak>) -> BarColumn {
+            let mut column = BarColumn::new(vec![StaffId::new(1), StaffId::new(2)]).unwrap();
+            if let Some(peak) = first {
+                column.add_peak(peak).unwrap();
+            }
+            if let Some(peak) = second {
+                column.add_peak(peak).unwrap();
+            }
+            column
+        }
+        fn bar(id: usize, staff: usize, start: bool) -> BarPeak {
+            BarPeak::new(
+                PeakId::new(id),
+                StaffId::new(staff),
+                2.0,
+                id as f64,
+                false,
+                start,
+            )
+            .unwrap()
+        }
+
+        let columns = vec![
+            column(Some(bar(1, 1, false)), None),
+            column(Some(bar(2, 1, true)), None),
+            column(Some(bar(3, 1, false)), Some(bar(4, 2, false))),
+            column(None, Some(bar(5, 2, false))),
+        ];
+        assert_eq!(partial_column_indices_after_start(&columns), [3]);
+
+        let no_start = vec![
+            column(Some(bar(6, 1, false)), None),
+            column(Some(bar(7, 1, false)), Some(bar(8, 2, false))),
+        ];
+        assert_eq!(partial_column_indices_after_start(&no_start), [0]);
     }
 
     #[test]
