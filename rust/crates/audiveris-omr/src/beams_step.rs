@@ -56,11 +56,17 @@ pub struct NeutralBeamSystem {
     pub id: usize,
     pub left: i32,
     pub right: i32,
+    pub top: i32,
+    pub bottom: i32,
     pub area: PopulationSystemArea,
     pub free_glyphs: Vec<NeutralBeamGlyph>,
     pub inters: Vec<NeutralBeamInter>,
     pub relations: Vec<NeutralBeamRelation>,
     pub beam_group_ids: Vec<usize>,
+    pub multiple_rest_min_length: i32,
+    pub multiple_rest_evidence: Vec<MultipleRestBeamEvidence>,
+    pub multiple_rest_sections: Vec<MultipleRestSection>,
+    pub multiple_rests: Vec<NeutralMultipleRestRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -207,6 +213,90 @@ pub struct BeamGroupingInput {
     pub raw_beam_ids: Vec<usize>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MultipleRestBeamEvidence {
+    pub beam_id: usize,
+    pub width: i32,
+    pub grade: f64,
+    pub height: f64,
+    pub staff_id: Option<usize>,
+    pub staff_tablature: bool,
+    pub start_pitch: f64,
+    pub stop_pitch: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MultipleRestSectionLag {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MultipleRestSection {
+    pub id: usize,
+    pub lag: MultipleRestSectionLag,
+    pub horizontal_length: i32,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MultipleRestPeak {
+    pub id: usize,
+    pub width: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MultipleRestCandidate {
+    pub beam_id: usize,
+    pub multiple_rest_inter_id: usize,
+    pub left_peak: MultipleRestPeak,
+    pub right_peak: MultipleRestPeak,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MultipleRestProbeOutcome<VisualError> {
+    pub candidate: Option<MultipleRestCandidate>,
+    pub error: Option<VisualError>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BeamHorizontalSide {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MultipleRestSerifInput {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub multiple_rest_inter_id: usize,
+    pub side: BeamHorizontalSide,
+    pub peak: MultipleRestPeak,
+    pub eligible_section_ids: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MultipleRestSerifOutcome<VisualError> {
+    /// Ordered prefix: glyph registration, serif inter, then relation.
+    pub delta: BeamSystemDelta,
+    pub relation_id: Option<usize>,
+    pub error: Option<VisualError>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NeutralMultipleRestRecord {
+    pub inter_id: usize,
+    pub source_beam_id: usize,
+    pub grade: f64,
+    pub height: f64,
+    pub staff_id: usize,
+    pub left_relation_id: Option<usize>,
+    pub right_relation_id: Option<usize>,
+}
+
 /// First unavailable dependencies in Java: ImageJ morphology, connected-glyph
 /// construction, `BeamsBuilder`, and `MultipleRestsBuilder` geometry.
 pub trait VisualBeams {
@@ -233,8 +323,15 @@ pub trait VisualBeams {
 
     fn group_beams(&mut self, input: BeamGroupingInput) -> BeamStageOutcome<Self::Error>;
 
-    fn build_multiple_rests(&mut self, input: BeamSystemInput<'_>)
-    -> BeamStageOutcome<Self::Error>;
+    fn probe_multiple_rest(
+        &mut self,
+        evidence: MultipleRestBeamEvidence,
+    ) -> MultipleRestProbeOutcome<Self::Error>;
+
+    fn materialize_multiple_rest_serif(
+        &mut self,
+        input: MultipleRestSerifInput,
+    ) -> MultipleRestSerifOutcome<Self::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,6 +349,9 @@ pub enum BeamsContractError {
     DuplicateRelation(usize),
     DuplicateBeamGroup(usize),
     InvalidSpotRaster(RunTableError),
+    MultipleRestBeamMismatch { expected: usize, actual: usize },
+    MissingRelationEndpoint { relation_id: usize, inter_id: usize },
+    InvalidMultipleRestRelation(usize),
 }
 
 impl fmt::Display for BeamsContractError {
@@ -264,6 +364,20 @@ impl fmt::Display for BeamsContractError {
             Self::DuplicateRelation(id) => write!(formatter, "duplicate relation {id}"),
             Self::DuplicateBeamGroup(id) => write!(formatter, "duplicate beam group {id}"),
             Self::InvalidSpotRaster(error) => write!(formatter, "invalid spot raster: {error}"),
+            Self::MultipleRestBeamMismatch { expected, actual } => write!(
+                formatter,
+                "multiple-rest candidate beam {actual} does not match source {expected}"
+            ),
+            Self::MissingRelationEndpoint {
+                relation_id,
+                inter_id,
+            } => write!(
+                formatter,
+                "relation {relation_id} references missing inter {inter_id}"
+            ),
+            Self::InvalidMultipleRestRelation(id) => {
+                write!(formatter, "invalid multiple-rest serif relation {id}")
+            }
         }
     }
 }
@@ -346,12 +460,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                 continue;
             }
 
-            let rests = self.visual.build_multiple_rests(BeamSystemInput {
-                sheet_id: sheet.id,
-                system: &sheet.systems[system_index],
-            });
-            apply_delta(sheet, system_index, rests.delta)?;
-            if let Some(error) = rests.error {
+            if let Some(error) = self.build_multiple_rests(sheet, system_index)? {
                 sheet
                     .mutations
                     .push(BeamsMutation::SystemFailed { system_id });
@@ -365,6 +474,149 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             spot_warning,
             system_errors,
         })
+    }
+
+    fn build_multiple_rests(
+        &mut self,
+        sheet: &mut NeutralBeamSheet,
+        system_index: usize,
+    ) -> Result<Option<Visual::Error>, BeamsContractError> {
+        let system_id = sheet.systems[system_index].id;
+        let beam_ids = sheet.systems[system_index]
+            .inters
+            .iter()
+            .filter(|inter| inter.kind == NeutralBeamInterKind::Beam)
+            .map(|inter| inter.id)
+            .collect::<Vec<_>>();
+        let mut found = Vec::new();
+        for beam_id in beam_ids {
+            let Some(evidence) = sheet.systems[system_index]
+                .multiple_rest_evidence
+                .iter()
+                .find(|evidence| evidence.beam_id == beam_id)
+                .copied()
+            else {
+                continue;
+            };
+            if evidence.width < sheet.systems[system_index].multiple_rest_min_length
+                || evidence.staff_id.is_none()
+                || evidence.staff_tablature
+                || evidence.start_pitch.abs() > 0.2
+                || evidence.stop_pitch.abs() > 0.2
+            {
+                continue;
+            }
+            let probe = self.visual.probe_multiple_rest(evidence);
+            if let Some(error) = probe.error {
+                return Ok(Some(error));
+            }
+            if let Some(candidate) = probe.candidate {
+                if candidate.beam_id != beam_id {
+                    return Err(BeamsContractError::MultipleRestBeamMismatch {
+                        expected: beam_id,
+                        actual: candidate.beam_id,
+                    });
+                }
+                found.push((candidate, evidence));
+            }
+        }
+        if found.is_empty() {
+            return Ok(None);
+        }
+
+        let max_width = found
+            .iter()
+            .flat_map(|(candidate, _)| [candidate.left_peak.width, candidate.right_peak.width])
+            .max()
+            .unwrap_or(0);
+        let eligible_section_ids =
+            eligible_multiple_rest_sections(&sheet.systems[system_index], max_width);
+        for (candidate, evidence) in &found {
+            let staff_id = evidence.staff_id.expect("filtered multiple-rest staff");
+            let rest = NeutralBeamInter {
+                id: candidate.multiple_rest_inter_id,
+                kind: NeutralBeamInterKind::MultipleRest,
+            };
+            apply_delta(
+                sheet,
+                system_index,
+                BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::AddInter(rest)],
+                },
+            )?;
+            sheet.systems[system_index]
+                .multiple_rests
+                .push(NeutralMultipleRestRecord {
+                    inter_id: candidate.multiple_rest_inter_id,
+                    source_beam_id: candidate.beam_id,
+                    grade: evidence.grade,
+                    height: evidence.height,
+                    staff_id,
+                    left_relation_id: None,
+                    right_relation_id: None,
+                });
+
+            for (side, peak) in [
+                (BeamHorizontalSide::Left, candidate.left_peak),
+                (BeamHorizontalSide::Right, candidate.right_peak),
+            ] {
+                let serif = self
+                    .visual
+                    .materialize_multiple_rest_serif(MultipleRestSerifInput {
+                        sheet_id: sheet.id,
+                        system_id,
+                        multiple_rest_inter_id: candidate.multiple_rest_inter_id,
+                        side,
+                        peak,
+                        eligible_section_ids: eligible_section_ids.clone(),
+                    });
+                apply_delta(sheet, system_index, serif.delta)?;
+                if serif.error.is_none() {
+                    let Some(relation_id) = serif.relation_id else {
+                        return Err(BeamsContractError::InvalidMultipleRestRelation(0));
+                    };
+                    let valid = sheet.systems[system_index]
+                        .relations
+                        .iter()
+                        .find(|relation| relation.id == relation_id)
+                        .is_some_and(|relation| {
+                            relation.source_inter_id == candidate.multiple_rest_inter_id
+                        });
+                    if !valid {
+                        return Err(BeamsContractError::InvalidMultipleRestRelation(relation_id));
+                    }
+                }
+                let record = sheet.systems[system_index]
+                    .multiple_rests
+                    .last_mut()
+                    .expect("record added before serifs");
+                match side {
+                    BeamHorizontalSide::Left => {
+                        record.left_relation_id = serif.relation_id;
+                    }
+                    BeamHorizontalSide::Right => {
+                        record.right_relation_id = serif.relation_id;
+                    }
+                }
+                if let Some(error) = serif.error {
+                    return Ok(Some(error));
+                }
+            }
+        }
+
+        // Java deletes every source beam only after all replacement inters and
+        // both serif sides for every found candidate have been created.
+        apply_delta(
+            sheet,
+            system_index,
+            BeamSystemDelta {
+                mutations: found
+                    .iter()
+                    .map(|(candidate, _)| BeamSystemMutation::RemoveInter(candidate.beam_id))
+                    .collect(),
+            },
+        )?;
+        Ok(None)
     }
 
     fn build_system_beams(
@@ -611,6 +863,30 @@ fn raw_beam_ids(system: &NeutralBeamSystem) -> Vec<usize> {
         .collect()
 }
 
+fn eligible_multiple_rest_sections(system: &NeutralBeamSystem, max_width: i32) -> Vec<usize> {
+    let mut sections = [
+        MultipleRestSectionLag::Vertical,
+        MultipleRestSectionLag::Horizontal,
+    ]
+    .into_iter()
+    .flat_map(|lag| {
+        system
+            .multiple_rest_sections
+            .iter()
+            .filter(move |section| section.lag == lag)
+    })
+    .filter(|section| {
+        section.horizontal_length <= max_width
+            && section.x < system.right.saturating_add(1)
+            && section.x.saturating_add(section.width) > system.left
+            && section.y < system.bottom.saturating_add(1)
+            && section.y.saturating_add(section.height) > system.top
+    })
+    .collect::<Vec<_>>();
+    sections.sort_by_key(|section| section.x);
+    sections.into_iter().map(|section| section.id).collect()
+}
+
 fn apply_delta(
     sheet: &mut NeutralBeamSheet,
     system_index: usize,
@@ -658,6 +934,18 @@ fn apply_delta(
                 });
             }
             BeamSystemMutation::AddRelation(relation) => {
+                for inter_id in [relation.source_inter_id, relation.target_inter_id] {
+                    if !sheet.systems[system_index]
+                        .inters
+                        .iter()
+                        .any(|inter| inter.id == inter_id)
+                    {
+                        return Err(BeamsContractError::MissingRelationEndpoint {
+                            relation_id: relation.id,
+                            inter_id,
+                        });
+                    }
+                }
                 if sheet.systems[system_index]
                     .relations
                     .iter()
@@ -723,7 +1011,8 @@ mod tests {
         extensions: BTreeMap<usize, BeamStageOutcome<&'static str>>,
         hooks: BTreeMap<(usize, usize, BeamHookSide), BeamStageOutcome<&'static str>>,
         groups: BTreeMap<usize, BeamStageOutcome<&'static str>>,
-        rests: BTreeMap<usize, BeamStageOutcome<&'static str>>,
+        rest_probes: BTreeMap<usize, MultipleRestProbeOutcome<&'static str>>,
+        serifs: BTreeMap<(usize, BeamHorizontalSide), MultipleRestSerifOutcome<&'static str>>,
         calls: Vec<(&'static str, usize)>,
         closing_inputs: Vec<BeamClosingInput>,
         head_sizing_inputs: Vec<bool>,
@@ -732,6 +1021,7 @@ mod tests {
         extension_inputs: Vec<BeamExtensionInput>,
         hook_inputs: Vec<BeamHookInput>,
         grouping_inputs: Vec<BeamGroupingInput>,
+        serif_inputs: Vec<MultipleRestSerifInput>,
     }
 
     impl VisualBeams for FakeVisual {
@@ -809,14 +1099,34 @@ mod tests {
                 .unwrap_or_else(|| BeamStageOutcome::success(BeamSystemDelta::default()))
         }
 
-        fn build_multiple_rests(
+        fn probe_multiple_rest(
             &mut self,
-            input: BeamSystemInput<'_>,
-        ) -> BeamStageOutcome<Self::Error> {
-            self.calls.push(("rests", input.system.id));
-            self.rests
-                .remove(&input.system.id)
-                .unwrap_or_else(|| BeamStageOutcome::success(BeamSystemDelta::default()))
+            evidence: MultipleRestBeamEvidence,
+        ) -> MultipleRestProbeOutcome<Self::Error> {
+            self.calls.push(("rest-probe", evidence.beam_id));
+            self.rest_probes
+                .remove(&evidence.beam_id)
+                .unwrap_or(MultipleRestProbeOutcome {
+                    candidate: None,
+                    error: None,
+                })
+        }
+
+        fn materialize_multiple_rest_serif(
+            &mut self,
+            input: MultipleRestSerifInput,
+        ) -> MultipleRestSerifOutcome<Self::Error> {
+            self.calls.push((
+                match input.side {
+                    BeamHorizontalSide::Left => "serif-left",
+                    BeamHorizontalSide::Right => "serif-right",
+                },
+                input.multiple_rest_inter_id,
+            ));
+            self.serif_inputs.push(input.clone());
+            self.serifs
+                .remove(&(input.multiple_rest_inter_id, input.side))
+                .unwrap()
         }
     }
 
@@ -834,11 +1144,17 @@ mod tests {
             id,
             left,
             right,
+            top: 0,
+            bottom: 99,
             area,
             free_glyphs: Vec::new(),
             inters: Vec::new(),
             relations: Vec::new(),
             beam_group_ids: Vec::new(),
+            multiple_rest_min_length: 40,
+            multiple_rest_evidence: Vec::new(),
+            multiple_rest_sections: Vec::new(),
+            multiple_rests: Vec::new(),
         }
     }
 
@@ -930,10 +1246,8 @@ mod tests {
                 ("standard", 7),
                 ("extend", 2),
                 ("group", 2),
-                ("rests", 2),
                 ("extend", 1),
                 ("group", 1),
-                ("rests", 1)
             ]
         );
         assert!(
@@ -996,7 +1310,7 @@ mod tests {
             report.spot_warning,
             Some(BeamSpotWarning::Visual("closing failed"))
         );
-        assert_eq!(step.visual().calls.len(), 7);
+        assert_eq!(step.visual().calls.len(), 5);
         assert!(sheet.registered_glyph_ids.is_empty());
     }
 
@@ -1027,14 +1341,7 @@ mod tests {
         assert_eq!(report.spot_warning, Some(BeamSpotWarning::MissingBeamScale));
         assert_eq!(
             step.visual().calls,
-            vec![
-                ("extend", 2),
-                ("group", 2),
-                ("rests", 2),
-                ("extend", 1),
-                ("group", 1),
-                ("rests", 1)
-            ]
+            vec![("extend", 2), ("group", 2), ("extend", 1), ("group", 1),]
         );
         assert!(sheet.head_spot_runs.is_none());
     }
@@ -1247,15 +1554,6 @@ mod tests {
                 error: Some("beam failure"),
             },
         );
-        visual.rests.insert(
-            1,
-            BeamStageOutcome::success(BeamSystemDelta {
-                mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
-                    id: 30,
-                    kind: NeutralBeamInterKind::MultipleRest,
-                })],
-            }),
-        );
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
 
@@ -1269,12 +1567,11 @@ mod tests {
                 ("glyphs", 9),
                 ("extend", 2),
                 ("extend", 1),
-                ("group", 1),
-                ("rests", 1)
+                ("group", 1)
             ]
         );
         assert_eq!(sheet.systems[0].inters[0].id, 20);
-        assert_eq!(sheet.systems[1].inters[0].id, 30);
+        assert!(sheet.systems[1].inters.is_empty());
         assert_eq!(
             sheet.mutations,
             vec![
@@ -1284,10 +1581,6 @@ mod tests {
                     inter_id: 20
                 },
                 BeamsMutation::SystemFailed { system_id: 2 },
-                BeamsMutation::InterAdded {
-                    system_id: 1,
-                    inter_id: 30
-                },
             ]
         );
     }
@@ -1307,42 +1600,191 @@ mod tests {
                 ],
             }),
         );
-        visual.rests.insert(
+        visual.rest_probes.insert(
+            20,
+            MultipleRestProbeOutcome {
+                candidate: Some(MultipleRestCandidate {
+                    beam_id: 20,
+                    multiple_rest_inter_id: 21,
+                    left_peak: MultipleRestPeak { id: 40, width: 3 },
+                    right_peak: MultipleRestPeak { id: 41, width: 5 },
+                }),
+                error: None,
+            },
+        );
+        for (side, glyph_id, serif_id, relation_id) in [
+            (BeamHorizontalSide::Left, 70, 22, 300),
+            (BeamHorizontalSide::Right, 71, 23, 301),
+        ] {
+            visual.serifs.insert(
+                (21, side),
+                MultipleRestSerifOutcome {
+                    delta: BeamSystemDelta {
+                        mutations: vec![
+                            BeamSystemMutation::RegisterGlyph(NeutralBeamGlyph {
+                                id: glyph_id,
+                                top: 0,
+                                left: 0,
+                                groups: vec![NeutralBeamGlyphGroup::Other],
+                            }),
+                            BeamSystemMutation::AddInter(NeutralBeamInter {
+                                id: serif_id,
+                                kind: NeutralBeamInterKind::VerticalSerif,
+                            }),
+                            BeamSystemMutation::AddRelation(NeutralBeamRelation {
+                                id: relation_id,
+                                source_inter_id: 21,
+                                target_inter_id: serif_id,
+                            }),
+                        ],
+                    },
+                    relation_id: Some(relation_id),
+                    error: None,
+                },
+            );
+        }
+        let mut step = HeadlessBeamsStep::new(visual);
+        let mut sheet = sheet();
+        sheet.systems[0].multiple_rest_evidence = vec![MultipleRestBeamEvidence {
+            beam_id: 20,
+            width: 40,
+            grade: 0.8,
+            height: 8.0,
+            staff_id: Some(5),
+            staff_tablature: false,
+            start_pitch: -0.2,
+            stop_pitch: 0.2,
+        }];
+        sheet.systems[0].multiple_rest_sections = vec![
+            MultipleRestSection {
+                id: 1,
+                lag: MultipleRestSectionLag::Vertical,
+                horizontal_length: 5,
+                x: 30,
+                y: 20,
+                width: 2,
+                height: 10,
+            },
+            MultipleRestSection {
+                id: 2,
+                lag: MultipleRestSectionLag::Horizontal,
+                horizontal_length: 4,
+                x: 20,
+                y: 20,
+                width: 4,
+                height: 2,
+            },
+            MultipleRestSection {
+                id: 3,
+                lag: MultipleRestSectionLag::Horizontal,
+                horizontal_length: 6,
+                x: 10,
+                y: 20,
+                width: 6,
+                height: 2,
+            },
+        ];
+
+        step.process(&mut sheet).unwrap();
+
+        assert_eq!(sheet.registered_glyph_ids, vec![70, 71]);
+        assert_eq!(sheet.systems[0].inters[0].id, 21);
+        assert_eq!(sheet.systems[0].beam_group_ids, vec![200]);
+        assert_eq!(sheet.systems[0].relations[0].id, 300);
+        assert_eq!(
+            step.visual()
+                .serif_inputs
+                .iter()
+                .map(|input| (input.side, input.eligible_section_ids.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (BeamHorizontalSide::Left, vec![2, 1]),
+                (BeamHorizontalSide::Right, vec![2, 1]),
+            ]
+        );
+        assert_eq!(
+            sheet.systems[0].multiple_rests,
+            vec![NeutralMultipleRestRecord {
+                inter_id: 21,
+                source_beam_id: 20,
+                grade: 0.8,
+                height: 8.0,
+                staff_id: 5,
+                left_relation_id: Some(300),
+                right_relation_id: Some(301),
+            }]
+        );
+    }
+
+    #[test]
+    fn serif_failure_keeps_rest_and_side_prefix_without_deleting_source_beam() {
+        let mut visual = visual_with_spots(Vec::new());
+        visual.extensions.insert(
             2,
             BeamStageOutcome::success(BeamSystemDelta {
-                mutations: vec![
-                    BeamSystemMutation::AddInter(NeutralBeamInter {
-                        id: 21,
-                        kind: NeutralBeamInterKind::MultipleRest,
-                    }),
-                    BeamSystemMutation::RegisterGlyph(NeutralBeamGlyph {
+                mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
+                    id: 20,
+                    kind: NeutralBeamInterKind::Beam,
+                })],
+            }),
+        );
+        visual.rest_probes.insert(
+            20,
+            MultipleRestProbeOutcome {
+                candidate: Some(MultipleRestCandidate {
+                    beam_id: 20,
+                    multiple_rest_inter_id: 21,
+                    left_peak: MultipleRestPeak { id: 40, width: 3 },
+                    right_peak: MultipleRestPeak { id: 41, width: 3 },
+                }),
+                error: None,
+            },
+        );
+        visual.serifs.insert(
+            (21, BeamHorizontalSide::Left),
+            MultipleRestSerifOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::RegisterGlyph(NeutralBeamGlyph {
                         id: 70,
                         top: 0,
                         left: 0,
                         groups: vec![NeutralBeamGlyphGroup::Other],
-                    }),
-                    BeamSystemMutation::AddInter(NeutralBeamInter {
-                        id: 22,
-                        kind: NeutralBeamInterKind::VerticalSerif,
-                    }),
-                    BeamSystemMutation::AddRelation(NeutralBeamRelation {
-                        id: 300,
-                        source_inter_id: 21,
-                        target_inter_id: 22,
-                    }),
-                    BeamSystemMutation::RemoveInter(20),
-                ],
-            }),
+                    })],
+                },
+                relation_id: None,
+                error: Some("filament failed after registration"),
+            },
         );
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
+        sheet.systems[0].multiple_rest_evidence = vec![MultipleRestBeamEvidence {
+            beam_id: 20,
+            width: 50,
+            grade: 0.7,
+            height: 8.0,
+            staff_id: Some(5),
+            staff_tablature: false,
+            start_pitch: 0.0,
+            stop_pitch: 0.0,
+        }];
 
-        step.process(&mut sheet).unwrap();
+        let report = step.process(&mut sheet).unwrap();
 
+        assert_eq!(
+            report.system_errors,
+            vec![(2, "filament failed after registration")]
+        );
         assert_eq!(sheet.registered_glyph_ids, vec![70]);
-        assert_eq!(sheet.systems[0].inters[0].id, 21);
-        assert_eq!(sheet.systems[0].beam_group_ids, vec![200]);
-        assert_eq!(sheet.systems[0].relations[0].id, 300);
+        assert_eq!(
+            sheet.systems[0]
+                .inters
+                .iter()
+                .map(|inter| inter.id)
+                .collect::<Vec<_>>(),
+            vec![20, 21]
+        );
+        assert_eq!(step.visual().serif_inputs.len(), 1);
+        assert_eq!(step.visual().serif_inputs[0].side, BeamHorizontalSide::Left);
     }
 
     #[test]
