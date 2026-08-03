@@ -123,17 +123,25 @@ denied, and passed `git diff --check` before commit.
     stable IDs, append-order preservation, ownership, and geometry validation.
 56. `ee562e3e` — direct page systems in persisted order with Java's derived
     one-based `SystemRef` identity; part/staff content remains opaque.
+57. `6c0584e3` — live Java/Rust indexed line-cluster inclusion vector covering
+    overlap midpoint, exact thickness acceptance, rejection atomicity, and endpoints.
+58. `4351f852` — ordered direct part references with persisted name, logical ID,
+    manual state, and Java's derived zero-based part index.
+59. `85df1d76` — source-guided regular filament-comb discovery across interior
+    sample columns with ties-even spacing and inclusive interline bounds.
+60. `549ab8db` — neutral fixed-slot bar-column state, mean geometry, start/brace/full
+    status, overwrite behavior, and explicit connection relations.
 
-At the fifty-sixth checkpoint the Rust workspace executes 191 tests:
+At the sixtieth checkpoint the Rust workspace executes 201 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 87
-- `audiveris-omr`: 51
+- `audiveris-image`: 94
+- `audiveris-omr`: 54
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 42 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 43 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -168,6 +176,10 @@ Target-line mapping now has exact live parity on a sloped source, and the surrou
 page/system/staff target containers preserve source order without recreating Java's
 object cycles. The `.omr` view derives order-only system references exactly as Java
 does rather than inventing persisted IDs.
+Regular vertical comb sampling now feeds the neutral comb representation, and the
+line-cluster indexed-inclusion boundary has exact production-Java parity. Early bar
+column semantics are available without `PeakGraph` object cycles. The `.omr` view now
+continues through order-preserving part metadata while staff configuration stays opaque.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
