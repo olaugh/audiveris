@@ -215,22 +215,36 @@ denied, and passed `git diff --check` before commit.
 131. `84ef60f1` — same-size cluster pair pass and short-cluster discard behavior.
 132. `bf5b9b5d` — initial start-bar-column candidate selection.
 133. `cab56e0c` — ordered BarsRetriever/StaffProjector registry and graph-vertex intents.
+134. `24e4f07c` — connected peak-chain aggregation into bar columns.
+135. `6f98719d` — direction-neutral peak-graph connected components.
+136. `552acf2a` — inconsistent cluster destruction and ownership cleanup.
+137. `74760c3c` — graph-component conversion to stable scalar bar chains.
+138. `21c4c880` — multi-staff unaligned-peak purge selection.
+139. `84651a74` — composed peak-graph-to-bar-column construction.
+140. `a463cc8f` — atomic start-column staff-line validation.
+141. `363a5d9b` — true brace-group part decision.
+142. `1ca7abe5` — standard typed errors for the BarsRetriever seam.
+143. `8825ca43` — ordered two-sided cluster expansion with isolated filaments.
+144. `6aeaf78c` — rustfmt normalization of cluster-pair fixtures.
+145. `4a43e358` — live Java/Rust bar-column construction and start selection vector.
 
-At the one-hundred-and-thirty-third checkpoint the Rust workspace executes 357 tests:
+At the one-hundred-and-forty-fifth checkpoint the Rust workspace executes 375 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 213
+- `audiveris-image`: 231
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 58 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 59 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
 brace discovery, composed projection, lines-root correction, recursive cluster
 coordination, and StaffProjector result operations.
+The latest vector additionally drives production Java and Rust through connected
+bar-chain aggregation, column geometry/connectivity, and initial start selection.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -261,7 +275,8 @@ dependency-light sticker filter, comb state, regular comb discovery, and ordered
 line-cluster core. Cluster merge, absorption, trimming, geometry, and the combined
 lifecycle now have exact live Java parity. Recursive cluster construction, general
 merge orchestration, and the same-size pair pass are now ported with transactional
-stable-ID ownership. Glyph creation, SIG integration, and UI behavior remain outside.
+stable-ID ownership. Cluster consistency destruction and two-sided isolated-filament
+expansion are also ported. Glyph creation, SIG integration, and UI behavior remain outside.
 Target-line deskew mapping begins the neutral destination geometry used later in GRID
 cleanup.
 Target-line mapping now has exact live parity on a sloped source, and the surrounding
