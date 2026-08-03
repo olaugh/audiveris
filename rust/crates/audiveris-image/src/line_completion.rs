@@ -426,6 +426,28 @@ pub fn inspect_crossing_chunks<E>(
     minimum_chunk_slope: f64,
     mut recompute: impl FnMut(usize, usize, &[Section]) -> Result<(), E>,
 ) -> Result<LinesInspectorReport, LinesInspectorError<E>> {
+    inspect_crossing_chunks_detailed(
+        staves,
+        minimum_offset,
+        global_slope,
+        minimum_chunk_slope,
+        |staff_id, filament_id, _, remaining| recompute(staff_id, filament_id, remaining),
+    )
+}
+
+/// Detailed form of [`inspect_crossing_chunks`] used by concrete adapters.
+///
+/// The callback observes the ordered chunks after their sections have been
+/// removed and before the line update is reported successful. This exposes
+/// Java's exact non-transactional mutation boundary without changing the
+/// simpler kernel API.
+pub fn inspect_crossing_chunks_detailed<E>(
+    staves: &mut [InspectedStaff],
+    minimum_offset: usize,
+    global_slope: f64,
+    minimum_chunk_slope: f64,
+    mut recompute: impl FnMut(usize, usize, &[CrossingChunkRemoval], &[Section]) -> Result<(), E>,
+) -> Result<LinesInspectorReport, LinesInspectorError<E>> {
     let mut updates = Vec::new();
 
     for staff in staves {
@@ -499,7 +521,7 @@ pub fn inspect_crossing_chunks<E>(
                 }
             }
 
-            recompute(staff.id, filament.id, &filament.members)
+            recompute(staff.id, filament.id, &flagged, &filament.members)
                 .map_err(LinesInspectorError::Recompute)?;
             updates.push(CrossingLineUpdate {
                 staff_id: staff.id,

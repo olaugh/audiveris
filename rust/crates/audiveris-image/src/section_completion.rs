@@ -553,6 +553,7 @@ mod tests {
             section_inclusion_batches: Vec::new(),
             sticker_section_ids: Vec::new(),
             sticker_inclusion_batches: Vec::new(),
+            crossing_line_inspections: Vec::new(),
             curvature_removals: Vec::new(),
             curvature_recomputations: Vec::new(),
             completed_stages: Vec::new(),

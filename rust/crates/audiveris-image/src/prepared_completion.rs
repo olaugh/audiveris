@@ -9,6 +9,7 @@
 //! completion timer, while every later success or failure does.
 
 use crate::{
+    crossing_completion::PreparedCrossingLineInspection,
     curvature_completion::{PreparedCurvatureRecomputation, PreparedCurvatureRemoval},
     discarded_completion::{
         PreparedCompletionSystem, PreparedDiscardedFilamentSteal, PreparedFilamentRecomputation,
@@ -56,6 +57,7 @@ pub struct PreparedCompletionState {
     /// Ordered fixed candidate tally produced by Java `getAllStickers`.
     pub sticker_section_ids: Vec<usize>,
     pub sticker_inclusion_batches: Vec<PreparedStickerInclusionBatch>,
+    pub crossing_line_inspections: Vec<PreparedCrossingLineInspection>,
     pub curvature_removals: Vec<PreparedCurvatureRemoval>,
     pub curvature_recomputations: Vec<PreparedCurvatureRecomputation>,
     pub completed_stages: Vec<LineCompletionStage>,
@@ -239,6 +241,7 @@ where
             section_inclusion_batches: Vec::new(),
             sticker_section_ids: Vec::new(),
             sticker_inclusion_batches: Vec::new(),
+            crossing_line_inspections: Vec::new(),
             curvature_removals: Vec::new(),
             curvature_recomputations: Vec::new(),
             completed_stages: Vec::new(),
