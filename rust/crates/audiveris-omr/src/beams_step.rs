@@ -17,12 +17,15 @@ use audiveris_image::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NeutralBeamGlyphGroup {
     BeamSpot,
+    VerticalSeed,
     Other,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NeutralBeamGlyph {
     pub id: usize,
+    pub top: i32,
+    pub left: i32,
     pub groups: Vec<NeutralBeamGlyphGroup>,
 }
 
@@ -79,6 +82,8 @@ pub struct NeutralBeamSheet {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DetectedBeamSpot {
     pub glyph_id: usize,
+    pub top: i32,
+    pub left: i32,
     pub center_x: i32,
     pub center_y: i32,
 }
@@ -147,6 +152,61 @@ pub struct BeamSystemInput<'a> {
     pub system: &'a NeutralBeamSystem,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BeamCandidateClass {
+    Standard,
+    Small,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BeamSpotCandidateInput {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub glyph_id: usize,
+    pub class: BeamCandidateClass,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeamCandidateOutcome<VisualError> {
+    pub delta: BeamSystemDelta,
+    /// Java `checkBeamGlyph` returned null and appended this spot to assignedSpots.
+    pub accepted: bool,
+    pub error: Option<VisualError>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BeamHookSide {
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeamExtensionInput {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub remaining_spot_ids: Vec<usize>,
+    pub vertical_seed_ids: Vec<usize>,
+    pub raw_beam_ids: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeamHookInput {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub beam_id: usize,
+    pub side: BeamHookSide,
+    /// Snapshot after initial assignment removal; Java does not remove newly
+    /// assigned hook spots between beam/side probes.
+    pub remaining_spot_ids: Vec<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeamGroupingInput {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub raw_beam_ids: Vec<usize>,
+}
+
 /// First unavailable dependencies in Java: ImageJ morphology, connected-glyph
 /// construction, `BeamsBuilder`, and `MultipleRestsBuilder` geometry.
 pub trait VisualBeams {
@@ -162,7 +222,16 @@ pub trait VisualBeams {
         input: BeamGlyphBuildInput<'_>,
     ) -> Result<Vec<DetectedBeamSpot>, Self::Error>;
 
-    fn build_beams(&mut self, input: BeamSystemInput<'_>) -> BeamStageOutcome<Self::Error>;
+    fn classify_beam_spot(
+        &mut self,
+        input: BeamSpotCandidateInput,
+    ) -> BeamCandidateOutcome<Self::Error>;
+
+    fn extend_beams(&mut self, input: BeamExtensionInput) -> BeamStageOutcome<Self::Error>;
+
+    fn build_hooks(&mut self, input: BeamHookInput) -> BeamStageOutcome<Self::Error>;
+
+    fn group_beams(&mut self, input: BeamGroupingInput) -> BeamStageOutcome<Self::Error>;
 
     fn build_multiple_rests(&mut self, input: BeamSystemInput<'_>)
     -> BeamStageOutcome<Self::Error>;
@@ -269,12 +338,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
         let mut system_errors = Vec::new();
         for system_index in 0..sheet.systems.len() {
             let system_id = sheet.systems[system_index].id;
-            let beams = self.visual.build_beams(BeamSystemInput {
-                sheet_id: sheet.id,
-                system: &sheet.systems[system_index],
-            });
-            apply_delta(sheet, system_index, beams.delta)?;
-            if let Some(error) = beams.error {
+            if let Some(error) = self.build_system_beams(sheet, system_index)? {
                 sheet
                     .mutations
                     .push(BeamsMutation::SystemFailed { system_id });
@@ -301,6 +365,110 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             spot_warning,
             system_errors,
         })
+    }
+
+    fn build_system_beams(
+        &mut self,
+        sheet: &mut NeutralBeamSheet,
+        system_index: usize,
+    ) -> Result<Option<Visual::Error>, BeamsContractError> {
+        let system_id = sheet.systems[system_index].id;
+        let mut spots = sheet.systems[system_index]
+            .free_glyphs
+            .iter()
+            .filter(|glyph| glyph.groups.contains(&NeutralBeamGlyphGroup::BeamSpot))
+            .cloned()
+            .collect::<Vec<_>>();
+        spots.sort_by(java_full_ordinate_order);
+        let has_small = sheet.small_beam_height.is_some() || sheet.small_beams_enabled;
+        let mut assigned = Vec::new();
+
+        for spot in &spots {
+            let standard = self.visual.classify_beam_spot(BeamSpotCandidateInput {
+                sheet_id: sheet.id,
+                system_id,
+                glyph_id: spot.id,
+                class: BeamCandidateClass::Standard,
+            });
+            apply_delta(sheet, system_index, standard.delta)?;
+            if let Some(error) = standard.error {
+                return Ok(Some(error));
+            }
+            if standard.accepted {
+                assigned.push(spot.id);
+                continue;
+            }
+            if has_small {
+                let small = self.visual.classify_beam_spot(BeamSpotCandidateInput {
+                    sheet_id: sheet.id,
+                    system_id,
+                    glyph_id: spot.id,
+                    class: BeamCandidateClass::Small,
+                });
+                apply_delta(sheet, system_index, small.delta)?;
+                if let Some(error) = small.error {
+                    return Ok(Some(error));
+                }
+                if small.accepted {
+                    assigned.push(spot.id);
+                }
+            }
+        }
+
+        let remaining_spot_ids = spots
+            .iter()
+            .filter(|spot| !assigned.contains(&spot.id))
+            .map(|spot| spot.id)
+            .collect::<Vec<_>>();
+        let vertical_seed_ids = sheet.systems[system_index]
+            .free_glyphs
+            .iter()
+            .filter(|glyph| glyph.groups.contains(&NeutralBeamGlyphGroup::VerticalSeed))
+            .map(|glyph| glyph.id)
+            .collect::<Vec<_>>();
+        let extension = self.visual.extend_beams(BeamExtensionInput {
+            sheet_id: sheet.id,
+            system_id,
+            remaining_spot_ids: remaining_spot_ids.clone(),
+            vertical_seed_ids,
+            raw_beam_ids: raw_beam_ids(&sheet.systems[system_index]),
+        });
+        apply_delta(sheet, system_index, extension.delta)?;
+        if let Some(error) = extension.error {
+            return Ok(Some(error));
+        }
+
+        // Java snapshots BeamInter (not SmallBeamInter or BeamHookInter) in SIG
+        // source order, then probes TOP followed by BOTTOM for each beam.
+        let base_beam_ids = sheet.systems[system_index]
+            .inters
+            .iter()
+            .filter(|inter| inter.kind == NeutralBeamInterKind::Beam)
+            .map(|inter| inter.id)
+            .collect::<Vec<_>>();
+        for beam_id in base_beam_ids {
+            for side in [BeamHookSide::Top, BeamHookSide::Bottom] {
+                let hooks = self.visual.build_hooks(BeamHookInput {
+                    sheet_id: sheet.id,
+                    system_id,
+                    beam_id,
+                    side,
+                    remaining_spot_ids: remaining_spot_ids.clone(),
+                });
+                apply_delta(sheet, system_index, hooks.delta)?;
+                if let Some(error) = hooks.error {
+                    return Ok(Some(error));
+                }
+            }
+        }
+
+        let grouping = self.visual.group_beams(BeamGroupingInput {
+            sheet_id: sheet.id,
+            system_id,
+            raw_beam_ids: raw_beam_ids(&sheet.systems[system_index]),
+        });
+        apply_delta(sheet, system_index, grouping.delta)?;
+        Ok(grouping.error)
     }
 
     fn dispatch_spots(
@@ -337,6 +505,8 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                     .free_glyphs
                     .push(NeutralBeamGlyph {
                         id: spot.glyph_id,
+                        top: spot.top,
+                        left: spot.left,
                         groups: vec![NeutralBeamGlyphGroup::BeamSpot],
                     });
                 sheet.mutations.push(BeamsMutation::SpotAttached {
@@ -411,6 +581,34 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
 
 fn java_rint(value: f64) -> i32 {
     value.round_ties_even() as i32
+}
+
+fn java_full_ordinate_order(one: &NeutralBeamGlyph, two: &NeutralBeamGlyph) -> std::cmp::Ordering {
+    let dy = one.top.wrapping_sub(two.top);
+    if dy != 0 {
+        return dy.cmp(&0);
+    }
+    let dx = one.left.wrapping_sub(two.left);
+    if dx != 0 {
+        return dx.cmp(&0);
+    }
+    one.id.cmp(&two.id)
+}
+
+fn raw_beam_ids(system: &NeutralBeamSystem) -> Vec<usize> {
+    system
+        .inters
+        .iter()
+        .filter(|inter| {
+            matches!(
+                inter.kind,
+                NeutralBeamInterKind::Beam
+                    | NeutralBeamInterKind::SmallBeam
+                    | NeutralBeamInterKind::BeamHook
+            )
+        })
+        .map(|inter| inter.id)
+        .collect()
 }
 
 fn apply_delta(
@@ -520,12 +718,20 @@ mod tests {
     struct FakeVisual {
         closed: Option<Result<ClosedBeamRaster, &'static str>>,
         spots: Option<Result<Vec<DetectedBeamSpot>, &'static str>>,
-        beams: BTreeMap<usize, BeamStageOutcome<&'static str>>,
+        candidates:
+            BTreeMap<(usize, usize, BeamCandidateClass), BeamCandidateOutcome<&'static str>>,
+        extensions: BTreeMap<usize, BeamStageOutcome<&'static str>>,
+        hooks: BTreeMap<(usize, usize, BeamHookSide), BeamStageOutcome<&'static str>>,
+        groups: BTreeMap<usize, BeamStageOutcome<&'static str>>,
         rests: BTreeMap<usize, BeamStageOutcome<&'static str>>,
         calls: Vec<(&'static str, usize)>,
         closing_inputs: Vec<BeamClosingInput>,
         head_sizing_inputs: Vec<bool>,
         spot_run_pixels: Vec<Vec<u8>>,
+        candidate_inputs: Vec<BeamSpotCandidateInput>,
+        extension_inputs: Vec<BeamExtensionInput>,
+        hook_inputs: Vec<BeamHookInput>,
+        grouping_inputs: Vec<BeamGroupingInput>,
     }
 
     impl VisualBeams for FakeVisual {
@@ -552,10 +758,54 @@ mod tests {
             self.spots.take().unwrap()
         }
 
-        fn build_beams(&mut self, input: BeamSystemInput<'_>) -> BeamStageOutcome<Self::Error> {
-            self.calls.push(("beams", input.system.id));
-            self.beams
-                .remove(&input.system.id)
+        fn classify_beam_spot(
+            &mut self,
+            input: BeamSpotCandidateInput,
+        ) -> BeamCandidateOutcome<Self::Error> {
+            self.candidate_inputs.push(input);
+            self.calls.push((
+                match input.class {
+                    BeamCandidateClass::Standard => "standard",
+                    BeamCandidateClass::Small => "small",
+                },
+                input.glyph_id,
+            ));
+            self.candidates
+                .remove(&(input.system_id, input.glyph_id, input.class))
+                .unwrap_or(BeamCandidateOutcome {
+                    delta: BeamSystemDelta::default(),
+                    accepted: false,
+                    error: None,
+                })
+        }
+
+        fn extend_beams(&mut self, input: BeamExtensionInput) -> BeamStageOutcome<Self::Error> {
+            self.calls.push(("extend", input.system_id));
+            self.extension_inputs.push(input.clone());
+            self.extensions
+                .remove(&input.system_id)
+                .unwrap_or_else(|| BeamStageOutcome::success(BeamSystemDelta::default()))
+        }
+
+        fn build_hooks(&mut self, input: BeamHookInput) -> BeamStageOutcome<Self::Error> {
+            self.calls.push((
+                match input.side {
+                    BeamHookSide::Top => "hook-top",
+                    BeamHookSide::Bottom => "hook-bottom",
+                },
+                input.beam_id,
+            ));
+            self.hook_inputs.push(input.clone());
+            self.hooks
+                .remove(&(input.system_id, input.beam_id, input.side))
+                .unwrap_or_else(|| BeamStageOutcome::success(BeamSystemDelta::default()))
+        }
+
+        fn group_beams(&mut self, input: BeamGroupingInput) -> BeamStageOutcome<Self::Error> {
+            self.calls.push(("group", input.system_id));
+            self.grouping_inputs.push(input.clone());
+            self.groups
+                .remove(&input.system_id)
                 .unwrap_or_else(|| BeamStageOutcome::success(BeamSystemDelta::default()))
         }
 
@@ -661,6 +911,8 @@ mod tests {
     fn runs_prolog_system_stages_and_epilog_in_java_order() {
         let visual = visual_with_spots(vec![DetectedBeamSpot {
             glyph_id: 7,
+            top: 20,
+            left: 40,
             center_x: 44,
             center_y: 25,
         }]);
@@ -675,9 +927,12 @@ mod tests {
             vec![
                 ("close", 9),
                 ("glyphs", 9),
-                ("beams", 2),
+                ("standard", 7),
+                ("extend", 2),
+                ("group", 2),
                 ("rests", 2),
-                ("beams", 1),
+                ("extend", 1),
+                ("group", 1),
                 ("rests", 1)
             ]
         );
@@ -741,7 +996,7 @@ mod tests {
             report.spot_warning,
             Some(BeamSpotWarning::Visual("closing failed"))
         );
-        assert_eq!(step.visual().calls.len(), 5);
+        assert_eq!(step.visual().calls.len(), 7);
         assert!(sheet.registered_glyph_ids.is_empty());
     }
 
@@ -772,7 +1027,14 @@ mod tests {
         assert_eq!(report.spot_warning, Some(BeamSpotWarning::MissingBeamScale));
         assert_eq!(
             step.visual().calls,
-            vec![("beams", 2), ("rests", 2), ("beams", 1), ("rests", 1)]
+            vec![
+                ("extend", 2),
+                ("group", 2),
+                ("rests", 2),
+                ("extend", 1),
+                ("group", 1),
+                ("rests", 1)
+            ]
         );
         assert!(sheet.head_spot_runs.is_none());
     }
@@ -803,6 +1065,8 @@ mod tests {
     fn dispatch_keeps_spot_on_inclusive_system_left_boundary() {
         let visual = visual_with_spots(vec![DetectedBeamSpot {
             glyph_id: 8,
+            top: 20,
+            left: 8,
             center_x: 10,
             center_y: 25,
         }]);
@@ -821,9 +1085,157 @@ mod tests {
     }
 
     #[test]
+    fn per_system_builder_sorts_spots_retries_small_tracks_assignment_and_hooks_beams_only() {
+        let mut visual = visual_with_spots(vec![
+            DetectedBeamSpot {
+                glyph_id: 10,
+                top: 10,
+                left: 5,
+                center_x: 20,
+                center_y: 25,
+            },
+            DetectedBeamSpot {
+                glyph_id: 30,
+                top: 5,
+                left: 20,
+                center_x: 30,
+                center_y: 25,
+            },
+            DetectedBeamSpot {
+                glyph_id: 20,
+                top: 5,
+                left: 10,
+                center_x: 25,
+                center_y: 25,
+            },
+        ]);
+        visual.candidates.insert(
+            (2, 20, BeamCandidateClass::Standard),
+            BeamCandidateOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![
+                        BeamSystemMutation::AddInter(NeutralBeamInter {
+                            id: 201,
+                            kind: NeutralBeamInterKind::BeamHook,
+                        }),
+                        BeamSystemMutation::AddInter(NeutralBeamInter {
+                            id: 202,
+                            kind: NeutralBeamInterKind::Beam,
+                        }),
+                        BeamSystemMutation::AddRelation(NeutralBeamRelation {
+                            id: 203,
+                            source_inter_id: 201,
+                            target_inter_id: 202,
+                        }),
+                    ],
+                },
+                accepted: true,
+                error: None,
+            },
+        );
+        visual.candidates.insert(
+            (2, 30, BeamCandidateClass::Small),
+            BeamCandidateOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
+                        id: 301,
+                        kind: NeutralBeamInterKind::SmallBeam,
+                    })],
+                },
+                accepted: true,
+                error: None,
+            },
+        );
+        let mut step = HeadlessBeamsStep::new(visual);
+        let mut sheet = sheet();
+        sheet.small_beams_enabled = true;
+
+        step.process(&mut sheet).unwrap();
+
+        assert_eq!(
+            step.visual()
+                .candidate_inputs
+                .iter()
+                .map(|input| (input.glyph_id, input.class))
+                .collect::<Vec<_>>(),
+            vec![
+                (20, BeamCandidateClass::Standard),
+                (30, BeamCandidateClass::Standard),
+                (30, BeamCandidateClass::Small),
+                (10, BeamCandidateClass::Standard),
+                (10, BeamCandidateClass::Small),
+            ]
+        );
+        assert_eq!(
+            step.visual().extension_inputs[0].remaining_spot_ids,
+            vec![10]
+        );
+        assert_eq!(
+            step.visual()
+                .hook_inputs
+                .iter()
+                .map(|input| (input.beam_id, input.side, input.remaining_spot_ids.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (202, BeamHookSide::Top, vec![10]),
+                (202, BeamHookSide::Bottom, vec![10]),
+            ]
+        );
+        assert_eq!(
+            step.visual().grouping_inputs[0].raw_beam_ids,
+            vec![201, 202, 301]
+        );
+        assert_eq!(sheet.systems[0].relations[0].id, 203);
+    }
+
+    #[test]
+    fn classifier_failure_keeps_mutation_prefix_and_skips_remaining_system_stages() {
+        let mut visual = visual_with_spots(vec![DetectedBeamSpot {
+            glyph_id: 10,
+            top: 10,
+            left: 5,
+            center_x: 20,
+            center_y: 25,
+        }]);
+        visual.candidates.insert(
+            (2, 10, BeamCandidateClass::Standard),
+            BeamCandidateOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
+                        id: 100,
+                        kind: NeutralBeamInterKind::BeamHook,
+                    })],
+                },
+                accepted: false,
+                error: Some("candidate geometry failed"),
+            },
+        );
+        let mut step = HeadlessBeamsStep::new(visual);
+        let mut sheet = sheet();
+
+        let report = step.process(&mut sheet).unwrap();
+
+        assert_eq!(report.system_errors, vec![(2, "candidate geometry failed")]);
+        assert_eq!(sheet.systems[0].inters[0].id, 100);
+        assert!(
+            !step
+                .visual()
+                .extension_inputs
+                .iter()
+                .any(|input| input.system_id == 2)
+        );
+        assert!(
+            step.visual()
+                .extension_inputs
+                .iter()
+                .any(|input| input.system_id == 1)
+        );
+    }
+
+    #[test]
     fn checked_beam_failure_keeps_prefix_skips_rests_continues_and_cleans_up() {
         let mut visual = visual_with_spots(Vec::new());
-        visual.beams.insert(
+        visual.extensions.insert(
             2,
             BeamStageOutcome {
                 delta: BeamSystemDelta {
@@ -855,8 +1267,9 @@ mod tests {
             vec![
                 ("close", 9),
                 ("glyphs", 9),
-                ("beams", 2),
-                ("beams", 1),
+                ("extend", 2),
+                ("extend", 1),
+                ("group", 1),
                 ("rests", 1)
             ]
         );
@@ -882,7 +1295,7 @@ mod tests {
     #[test]
     fn multiple_rest_delta_preserves_registration_add_remove_relation_order() {
         let mut visual = visual_with_spots(Vec::new());
-        visual.beams.insert(
+        visual.extensions.insert(
             2,
             BeamStageOutcome::success(BeamSystemDelta {
                 mutations: vec![
@@ -904,6 +1317,8 @@ mod tests {
                     }),
                     BeamSystemMutation::RegisterGlyph(NeutralBeamGlyph {
                         id: 70,
+                        top: 0,
+                        left: 0,
                         groups: vec![NeutralBeamGlyphGroup::Other],
                     }),
                     BeamSystemMutation::AddInter(NeutralBeamInter {
@@ -937,6 +1352,8 @@ mod tests {
         let mut sheet = sheet();
         sheet.systems[0].free_glyphs.push(NeutralBeamGlyph {
             id: 5,
+            top: 0,
+            left: 0,
             groups: vec![
                 NeutralBeamGlyphGroup::BeamSpot,
                 NeutralBeamGlyphGroup::Other,
