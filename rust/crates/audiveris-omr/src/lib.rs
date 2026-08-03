@@ -29,6 +29,7 @@ pub mod grid_executor;
 pub mod header_builder;
 pub mod header_time_column;
 pub mod headers_step;
+pub mod heads_step;
 pub mod key_column;
 pub mod ledgers_step;
 pub mod raw_ledger_filter;
