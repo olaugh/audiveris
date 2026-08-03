@@ -21,7 +21,9 @@ use audiveris_image::{
     grid_sig::{BarGroupPromotionError, ConnectionPromotionWarning, GridSig},
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
+    lines_coordinator::StaffCandidateKind,
     peak_graph::{PeakEdgeId, PeakGraph},
+    prepared_lines::{PreparedStaffHandoff, PreparedStaffHandoffSource},
     raster_grid_builder::{RasterGridHandoff, RasterGridHandoffSource},
     run_table::{RunTable, RunTableError},
     section::Section,
@@ -60,6 +62,12 @@ pub enum HeadlessStaffLine {
 #[derive(Clone, Debug)]
 pub struct HeadlessStaff {
     pub id: usize,
+    pub kind: StaffCandidateKind,
+    pub left: f64,
+    pub right: f64,
+    pub interline: usize,
+    pub small: bool,
+    pub short: bool,
     pub lines: Vec<HeadlessStaffLine>,
 }
 
@@ -179,6 +187,30 @@ pub struct HeadlessGridSheet {
 }
 
 impl HeadlessGridSheet {
+    pub fn install_prepared_staff_handoff(&mut self, handoff: PreparedStaffHandoff) {
+        self.staffs = handoff
+            .staffs
+            .into_iter()
+            .map(|staff| HeadlessStaff {
+                id: staff.id,
+                kind: staff.kind,
+                left: staff.left,
+                right: staff.right,
+                interline: staff.interline,
+                small: staff.small,
+                short: staff.short,
+                lines: staff
+                    .lines
+                    .into_iter()
+                    .map(|line| HeadlessStaffLine::Filament {
+                        line_id: line.id,
+                        filament: line.filament,
+                    })
+                    .collect(),
+            })
+            .collect();
+    }
+
     /// Transfer the builder-owned lag prefix into sheet ownership before
     /// `StaffLineCleaner`, including prefixes from swallowed build failures.
     pub fn install_raster_grid_handoff(&mut self, handoff: RasterGridHandoff) {
@@ -239,6 +271,7 @@ where
     pub book: HeadlessGridBook,
     pub build_outcome: Option<GridBuildOutcome<HeadlessBuildOtherError<Builder::OtherError>>>,
     raster_handoff: Option<fn(&mut Builder) -> Option<RasterGridHandoff>>,
+    staff_handoff: Option<fn(&mut Builder) -> Option<PreparedStaffHandoff>>,
     pub cleaner_finished: bool,
     pub step_finished: bool,
 }
@@ -255,6 +288,7 @@ where
             book,
             build_outcome: None,
             raster_handoff: None,
+            staff_handoff: None,
             cleaner_finished: false,
             step_finished: false,
         }
@@ -268,6 +302,17 @@ where
         Builder: RasterGridHandoffSource,
     {
         self.raster_handoff = Some(Builder::take_raster_grid_handoff);
+        self
+    }
+
+    /// Install production-retrieved staff candidates into concrete sheet
+    /// ownership before staff-line cleanup.
+    #[must_use]
+    pub fn with_prepared_staff_handoff(mut self) -> Self
+    where
+        Builder: PreparedStaffHandoffSource,
+    {
+        self.staff_handoff = Some(Builder::take_prepared_staff_handoff);
         self
     }
 
@@ -327,6 +372,11 @@ where
                     && let Some(handoff) = extract(&mut self.builder)
                 {
                     self.sheet.install_raster_grid_handoff(handoff);
+                }
+                if let Some(extract) = self.staff_handoff
+                    && let Some(handoff) = extract(&mut self.builder)
+                {
+                    self.sheet.install_prepared_staff_handoff(handoff);
                 }
                 match result {
                     Ok(outcome) => {
@@ -719,20 +769,30 @@ fn dispatch_to_areas(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
     use super::*;
     use audiveris_image::{
         bar_alignment::{AlignmentPeak, BarImpacts},
         bar_column::{PeakId, StaffId},
         bars_logic::{PeakWidthClass, VerticalInterKind, VerticalMedian, plan_connection_inters},
-        filament::FilamentError,
+        cluster_expand::ClusterExpansionParameters,
+        cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
+        cluster_ownership::ClusterOwnership,
+        cluster_pipeline::ClusterRetrievalParameters,
+        filament::{FilamentError, StaffFilament},
         grid_lifecycle::{GridBuildStage, GridStageFailure},
         grid_sig::{GridSigNode, GridSigRelation},
+        line_cluster::FilamentId,
         line_short_sections::HorizontalSectionLag,
+        lines_coordinator::{ClusterPassState, LinesCoordinatorParameters},
+        prepared_lines::ProductionRetrieveLines,
         raster_grid_builder::{
             HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridParameters,
             RemainingRasterGridStages,
         },
-        run_table::{Orientation, Run},
+        run_table::{Orientation, Run, create_grid_run_tables},
+        section::{JunctionPolicy, build_sections},
         staff_peak::StaffPeak,
         system_population::{
             BoundarySegment, PopulationReferencePart, PopulationReferenceStaff,
@@ -845,6 +905,86 @@ mod tests {
             minimum_horizontal_run_length: 2,
             maximum_vertical_run_shift: 1,
         }
+    }
+
+    fn production_source() -> RunTable {
+        let mut table = RunTable::new(Orientation::Vertical, 42, 20).unwrap();
+        for x in 0..=40 {
+            table.add_run(x, Run::new(10, 1)).unwrap();
+        }
+        table
+    }
+
+    fn production_raster_parameters() -> RasterGridParameters {
+        RasterGridParameters {
+            max_fore: 3,
+            ledger_thickness: 1.0,
+            minimum_horizontal_run_length: 4,
+            maximum_vertical_run_shift: 1,
+        }
+    }
+
+    fn cluster_parameters() -> ClusterRetrievalParameters {
+        let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
+        let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
+        ClusterRetrievalParameters::new(
+            10,
+            BTreeSet::from([1]),
+            expansion,
+            ClusterMergePassParameters::new(compatibility, 0, 1).unwrap(),
+            0.0,
+            0.0,
+            0.0,
+            1,
+            0,
+            None,
+            1,
+        )
+        .unwrap()
+    }
+
+    fn prepared_primary(section: Section) -> ClusterPassState {
+        let id = FilamentId::new(7);
+        let mut filament = StaffFilament::new(10).unwrap();
+        filament.add_section(section).unwrap();
+        let mut ownership = ClusterOwnership::new();
+        ownership.register_filament(id, &filament).unwrap();
+        ClusterPassState::new(
+            ownership,
+            BTreeMap::from([(id, filament)]),
+            BTreeMap::new(),
+            vec![id],
+            cluster_parameters(),
+        )
+    }
+
+    fn production_section() -> Section {
+        let tables = create_grid_run_tables(&production_source(), 3, 1.0, 4).unwrap();
+        HorizontalSectionLag::from_long_runs(tables.long_horizontal)
+            .unwrap()
+            .sections()[0]
+            .clone()
+    }
+
+    fn production_executor(
+        primary: ClusterPassState,
+    ) -> HeadlessGridExecutor<HeadlessRasterGridBuilder<ProductionRetrieveLines<RasterStages>>>
+    {
+        let base = executor();
+        let parameters = LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap();
+        let stages =
+            ProductionRetrieveLines::new(primary, None, parameters, RasterStages::default());
+        HeadlessGridExecutor::new(
+            HeadlessRasterGridBuilder::new(
+                production_source(),
+                production_raster_parameters(),
+                stages,
+            ),
+            base.sheet,
+            base.book,
+        )
+        .with_raster_grid_handoff()
+        .with_prepared_staff_handoff()
     }
 
     fn boundary(y: f64) -> StaffBoundary {
@@ -1003,6 +1143,12 @@ mod tests {
                 sheet_number: 1,
                 staffs: vec![HeadlessStaff {
                     id: 1,
+                    kind: StaffCandidateKind::OneLine,
+                    left: 0.0,
+                    right: 7.0,
+                    interline: 10,
+                    small: false,
+                    short: false,
                     lines: vec![HeadlessStaffLine::Filament {
                         line_id: 10,
                         filament,
@@ -1470,5 +1616,54 @@ mod tests {
         assert!(!executor.step_finished);
         assert!(executor.book.scores.is_empty());
         assert_eq!(executor.builder.stages().finish_count, 1);
+    }
+
+    #[test]
+    fn production_retrieve_materializes_candidate_metadata_and_filament() {
+        let mut executor = production_executor(prepared_primary(production_section()));
+
+        executor.run().unwrap();
+
+        let [staff] = executor.sheet.staffs.as_slice() else {
+            panic!("one prepared staff expected");
+        };
+        assert_eq!(staff.id, 1);
+        assert_eq!(staff.kind, StaffCandidateKind::OneLine);
+        assert_eq!((staff.left, staff.right), (0.0, 40.0));
+        assert_eq!(staff.interline, 10);
+        assert!(!staff.small);
+        assert!(!staff.short);
+        assert!(matches!(
+            staff.lines.as_slice(),
+            [HeadlessStaffLine::Persistent {
+                source_line_id: 7,
+                ..
+            }]
+        ));
+        assert!(executor.cleaner_finished);
+        assert!(executor.step_finished);
+    }
+
+    #[test]
+    fn production_retrieve_rejects_filament_from_different_lag_provenance() {
+        let mut alien_table = RunTable::new(Orientation::Horizontal, 42, 20).unwrap();
+        alien_table.add_run(11, Run::new(0, 40)).unwrap();
+        let alien = build_sections(&alien_table, JunctionPolicy::All).remove(0);
+        assert_eq!(alien.id(), production_section().id());
+        let mut executor = production_executor(prepared_primary(alien));
+        executor.sheet.staffs.clear();
+
+        executor.run().unwrap();
+
+        assert!(executor.sheet.staffs.is_empty());
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::RetrieveLines,
+                ..
+            })
+        ));
+        assert!(executor.cleaner_finished);
+        assert!(executor.step_finished);
     }
 }
