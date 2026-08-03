@@ -15,6 +15,7 @@ use audiveris_image::{
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
+    staff_pattern::StaffPattern,
     watershed,
 };
 use audiveris_testkit::CanonicalVectors;
@@ -194,7 +195,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 39] = [
+const VECTOR_KEYS: [&str; 40] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -218,6 +219,7 @@ const VECTOR_KEYS: [&str; 39] = [
     "watershed.synthetic=",
     "image.runs=",
     "image.adaptive=",
+    "staff-pattern.synthetic=",
     "load.chula=",
     "binary.chula=",
     "scale.vertical-runs=",
@@ -725,6 +727,25 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "image.adaptive={:?}",
         adaptive::default_adaptive_filter(5, 3, &pixels)
+    ));
+
+    let mut staff_pixels = vec![255; 8 * 10];
+    for (x, y) in [(2, 1), (3, 1), (4, 1), (2, 4), (3, 4), (2, 8)] {
+        staff_pixels[y * 8 + x] = 0;
+    }
+    let fractional_pattern = StaffPattern::new(3, 3, 1, 3.5);
+    let tie_pixels = [0, 255, 255, 255];
+    let tie_pattern = StaffPattern::new(1, 2, 1, 4.0);
+    let inclusive_pixels = [0; 3 * 3];
+    let inclusive_pattern = StaffPattern::new(1, 1, 2, 4.0);
+    let empty_pixels = [255];
+    lines.push(format!(
+        "staff-pattern.synthetic={:.12}/{:.12}/{:.12}/{:.12}/{:.12}",
+        fractional_pattern.evaluate((2.0, 1.0), 8, 10, &staff_pixels),
+        tie_pattern.evaluate((0.5, 0.0), 4, 1, &tie_pixels),
+        inclusive_pattern.evaluate((1.0, 1.0), 3, 3, &inclusive_pixels),
+        inclusive_pattern.evaluate((0.0, 0.0), 1, 1, &empty_pixels),
+        tie_pattern.evaluate((-1.0, 0.0), 4, 1, &tie_pixels)
     ));
 
     if let Some(root) = root {

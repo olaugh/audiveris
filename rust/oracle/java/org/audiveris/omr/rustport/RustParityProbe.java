@@ -2,6 +2,7 @@
 
 package org.audiveris.omr.rustport;
 
+import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
 import java.lang.reflect.Field;
@@ -47,6 +48,7 @@ import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.grid.GridBuilder;
 import org.audiveris.omr.sheet.grid.StaffFilament;
+import org.audiveris.omr.sheet.grid.StaffPattern;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.util.NaturalSpec;
 import org.audiveris.omr.util.Table;
@@ -356,6 +358,31 @@ public final class RustParityProbe
         RunTable extracted = new RunTableFactory(Orientation.HORIZONTAL).createTable(binary);
         System.out.println("image.runs=" + extracted.getTotalRunCount() + "/" + extracted.getWeight() + "/" + extracted.getRunAt(1, 0) + "/" + extracted.getRunAt(4, 2));
         System.out.println("image.adaptive=" + pixels(new VerticalFilter(raster, 0.7, 0.9).filteredImage()));
+
+        ByteProcessor staffPixels = new ByteProcessor(8, 10);
+        staffPixels.setValue(255);
+        staffPixels.fill();
+        for (int[] point : new int[][]{{2, 1}, {3, 1}, {4, 1}, {2, 4}, {3, 4}, {2, 8}}) {
+            staffPixels.set(point[0], point[1], 0);
+        }
+        StaffPattern fractionalPattern = new StaffPattern(3, 3, 1, 3.5);
+        ByteProcessor tiePixels = new ByteProcessor(4, 1);
+        tiePixels.setValue(255);
+        tiePixels.fill();
+        tiePixels.set(0, 0, 0);
+        StaffPattern tiePattern = new StaffPattern(1, 2, 1, 4.0);
+        ByteProcessor inclusivePixels = new ByteProcessor(3, 3);
+        StaffPattern inclusivePattern = new StaffPattern(1, 1, 2, 4.0);
+        ByteProcessor emptyPixels = new ByteProcessor(1, 1);
+        emptyPixels.set(0, 0, 255);
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "staff-pattern.synthetic=%.12f/%.12f/%.12f/%.12f/%.12f%n",
+                fractionalPattern.evaluate(new Point2D.Double(2.0, 1.0), staffPixels),
+                tiePattern.evaluate(new Point2D.Double(0.5, 0.0), tiePixels),
+                inclusivePattern.evaluate(new Point2D.Double(1.0, 1.0), inclusivePixels),
+                inclusivePattern.evaluate(new Point2D.Double(0.0, 0.0), emptyPixels),
+                tiePattern.evaluate(new Point2D.Double(-1.0, 0.0), tiePixels));
 
         ImageLoading.Loader loader = ImageLoading.getLoader(Path.of("data/examples/chula.png"));
         try {
