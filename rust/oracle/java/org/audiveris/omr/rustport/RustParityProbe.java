@@ -1395,6 +1395,7 @@ public final class RustParityProbe
                         + ";field:" + (referenceSystem.getRef() == referenceSystemRef));
 
         System.out.println("grid.skew.synthetic=" + gridSkew());
+        System.out.println("grid.raw-lines.synthetic=" + gridRawLines());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
         System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
@@ -2118,6 +2119,100 @@ public final class RustParityProbe
                     point(roundtrip)));
         }
         return String.join("|", values);
+    }
+
+    /**
+     * Run the production raw-raster line path through {@code retrieveLines()} only.
+     *
+     * <p>The stepped staff makes measured skew non-zero. The middle line has a gap wider than
+     * the resolved 17-pixel factory merge limit, but comb connectivity on both sides still folds
+     * its two filaments into one five-line staff. Later GRID stages are deliberately excluded and
+     * named in the canonical value.</p>
+     */
+    @SuppressWarnings("unchecked")
+    private static String gridRawLines ()
+        throws Exception
+    {
+        final int width = 320;
+        final int height = 61;
+        final int interline = 10;
+        RunTable source = new RunTable(Orientation.VERTICAL, width, height);
+        for (int x = 0; x < width; x++) {
+            for (int base : new int[]{10, 20, 30, 40, 50}) {
+                if ((base == 30) && (x >= 130) && (x < 150)) {
+                    continue;
+                }
+                source.addRun(x, new Run(base + (x / 64), 1));
+            }
+        }
+
+        Book book = new Book(Path.of("grid-raw-lines.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, source);
+        sheet.setScale(new Scale(
+                new Scale.InterlineScale(interline, interline, interline),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+
+        GridBuilder grid = new GridBuilder(sheet);
+        grid.linesRetriever.createBothLags();
+        Lag horizontalLag = sheet.getLagManager().getLag(Lags.HLAG);
+        RunTable shortHorizontal = (RunTable) field(grid.linesRetriever, "shortHoriTable");
+        String lag = String.format(
+                java.util.Locale.ROOT,
+                "%d/%d/%d;short:%d/%d",
+                horizontalLag.getEntities().size(),
+                horizontalLag.getRunTable().getTotalRunCount(),
+                horizontalLag.getRunTable().getWeight(),
+                shortHorizontal.getTotalRunCount(),
+                shortHorizontal.getWeight());
+
+        grid.linesRetriever.retrieveLines();
+        List<StaffFilament> roots = (List<StaffFilament>) field(
+                grid.linesRetriever,
+                "filaments");
+        List<StaffFilament> sloped = (List<StaffFilament>) field(
+                grid.linesRetriever,
+                "slopedFilaments");
+        List<StaffFilament> discarded = (List<StaffFilament>) field(
+                grid.linesRetriever,
+                "discardedFilaments");
+        List<String> staves = new ArrayList<>();
+        for (Staff staff : sheet.getStaffManager().getStaves()) {
+            List<String> members = new ArrayList<>();
+            for (org.audiveris.omr.sheet.grid.LineInfo line : staff.getLines()) {
+                members.add(Integer.toString(((StaffFilament) line).getMembers().size()));
+            }
+            staves.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%d:standard:%d-%d:i%d:small%s:short%s:members%s",
+                    staff.getId(),
+                    staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT),
+                    staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.RIGHT),
+                    staff.getSpecificInterline(),
+                    staff.isSmall(),
+                    staff.isShort(),
+                    String.join(",", members)));
+        }
+
+        return String.format(
+                java.util.Locale.ROOT,
+                "boundary:retrieveLines;source:%dx%d/%d/%d;lag:%s;factory:%d;roots:%d;slope:%.12f;rejects:sloped%d,discarded%d;staffs:%d/%s;next:addShortSections,bars,completeLines:not-compared",
+                width,
+                height,
+                source.getTotalRunCount(),
+                source.getWeight(),
+                lag,
+                sheet.getFilamentIndex().getLastId(),
+                roots.size(),
+                sheet.getSkew().getSlope(),
+                sloped.size(),
+                discarded.size(),
+                staves.size(),
+                String.join("|", staves));
     }
 
     @SuppressWarnings("unchecked")

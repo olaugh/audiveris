@@ -21,7 +21,10 @@ use audiveris_image::{
     },
     chamfer::ChamferDistance,
     cluster_coordinator::{RecursiveCombSnapshot, include_from_combs},
+    cluster_expand::ClusterExpansionParameters,
+    cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
     cluster_ownership::{ClusterOwnership, CombId},
+    cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombFilament, popular_comb_size, retrieve_combs},
     filament::{FilamentError, StaffFilament},
     filament_comb::FilamentComb,
@@ -33,7 +36,9 @@ use audiveris_image::{
     lag_rebuild::RegisteredHorizontalLag,
     line_cluster::{FilamentId, LineCluster},
     line_short_sections::HorizontalSectionLag,
-    lines_coordinator::StaffCandidateKind,
+    lines_coordinator::{
+        LinesCoordinatorParameters, StaffCandidateKind, retrieve_staff_candidates,
+    },
     median,
     peak_graph::PeakGraph,
     projection::{
@@ -43,7 +48,8 @@ use audiveris_image::{
         ShortProjection, StaffProjectionRequest, check_lines_root_transition,
         refine_right_end_transition, select_blank,
     },
-    run_table::{Orientation, Run, RunTable, dispatch_grid_runs},
+    raw_line_adapter::{RawPrimaryPassParameters, build_primary_cluster_pass},
+    run_table::{Orientation, Run, RunTable, create_grid_run_tables, dispatch_grid_runs},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
@@ -267,7 +273,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 65] = [
+const VECTOR_KEYS: [&str; 66] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -307,6 +313,7 @@ const VECTOR_KEYS: [&str; 65] = [
     "grid.score-update.synthetic=",
     "grid.system-ref.synthetic=",
     "grid.skew.synthetic=",
+    "grid.raw-lines.synthetic=",
     "grid.output-boundary.synthetic=",
     "grid.contextualize.synthetic=",
     "spline.synthetic=",
@@ -380,6 +387,125 @@ fn grid_skew_vector() -> String {
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn grid_raw_lines_vector() -> Result<String, Box<dyn Error>> {
+    const WIDTH: usize = 320;
+    const HEIGHT: usize = 61;
+    const INTERLINE: usize = 10;
+    // This is the exact endpoint slope of each uninterrupted stepped line.
+    const EXPECTED_SLOPE: f64 = 4.0 / 319.0;
+
+    let mut source = RunTable::new(Orientation::Vertical, WIDTH, HEIGHT)?;
+    for x in 0..WIDTH {
+        for base in [10, 20, 30, 40, 50] {
+            if base == 30 && (130..150).contains(&x) {
+                continue;
+            }
+            source.add_run(x, Run::new(base + (x / 64), 1))?;
+        }
+    }
+
+    // Numeric production defaults resolved at interline=10, line thickness=1.
+    let tables = create_grid_run_tables(&source, 1, 1.2, 2)?;
+    let lag = HorizontalSectionLag::from_long_runs(tables.long_horizontal.clone())?;
+    let expansion = ClusterExpansionParameters::new(EXPECTED_SLOPE, 60, 20, 20, 2.0, 5, 1)?;
+    let compatibility = ClusterMergeParameters::new(EXPECTED_SLOPE, 60, 4.0, 60, 5, 1)?;
+    let retrieval = ClusterRetrievalParameters::new(
+        INTERLINE,
+        BTreeSet::from([5]),
+        expansion,
+        ClusterMergePassParameters::new(compatibility, 100, 20)?,
+        EXPECTED_SLOPE,
+        0.5,
+        0.2,
+        10,
+        60,
+        None,
+        20,
+    )?;
+    let built = build_primary_cluster_pass(
+        &lag,
+        RawPrimaryPassParameters {
+            factory: FilamentFactoryParams {
+                interline: INTERLINE,
+                min_core_section_length: 5,
+                min_section_aspect: 3.0,
+                max_coord_gap: 17.0,
+                max_pos_gap: 1.0,
+                max_pos_gap_for_slope: 1.0,
+                max_gap_slope: 0.5,
+                min_length_for_delta_slope: 100.0,
+                max_delta_slope: 0.01,
+            },
+            overlap: OverlapParams {
+                probe_width: 5,
+                max_overlap_delta_pos: 2.0,
+                max_thickness: 2.0,
+                max_overlap_space: 2.0,
+                max_expansion_space: 0.0,
+                max_involving_length: 20.0,
+                max_consistent_ratio: 1.7,
+            },
+            sampling_dx: 10,
+            minimum_delta_y: 10,
+            maximum_delta_y: 10,
+            retrieval,
+        },
+    )?;
+    let slope = built.global_slope();
+    let factory_count = built.factory_creation_ids().len();
+    let root_count = built.root_order().len();
+    let sloped_count = built.sloped_ids().len();
+    let mut primary = built.into_state();
+    let result = retrieve_staff_candidates(
+        &mut primary,
+        None,
+        LinesCoordinatorParameters::new(slope, 300, Some(1), 0.001, 0.3, 50.0)?,
+    )?;
+    let discarded_count = result.primary().discarded_filaments().len();
+    let staves = result
+        .staffs()
+        .iter()
+        .map(|staff| -> Result<String, Box<dyn Error>> {
+            let members = staff
+                .line_ids()
+                .iter()
+                .map(|id| {
+                    primary
+                        .filaments()
+                        .get(id)
+                        .map(|filament| filament.sections().len().to_string())
+                        .ok_or_else(|| format!("raw staff line {} is missing", id.value()))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
+            Ok(format!(
+                "{}:{:?}:{:.0}-{:.0}:i{}:small{}:short{}:members{}",
+                staff.id(),
+                staff.kind(),
+                staff.left(),
+                staff.right(),
+                staff.interline(),
+                staff.is_small(),
+                staff.is_short(),
+                members,
+            )
+            .replace(":Standard:", ":standard:"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(format!(
+        "boundary:retrieveLines;source:{WIDTH}x{HEIGHT}/{}/{};lag:{}/{}/{};short:{}/{};factory:{factory_count};roots:{root_count};slope:{slope:.12};rejects:sloped{sloped_count},discarded{discarded_count};staffs:{}/{};next:addShortSections,bars,completeLines:not-compared",
+        source.total_run_count(),
+        source.weight(),
+        lag.sections().len(),
+        lag.run_table().total_run_count(),
+        lag.run_table().weight(),
+        tables.short_horizontal.total_run_count(),
+        tables.short_horizontal.weight(),
+        staves.len(),
+        staves.join("|"),
+    ))
 }
 
 fn output_boundary_peak(staff_id: usize, top: i32, bottom: i32, x: i32) -> StaffPeak {
@@ -2487,6 +2613,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         reference_systems[0].system_ref.system_ref == Some(reference_id)
     ));
     lines.push(format!("grid.skew.synthetic={}", grid_skew_vector()));
+    lines.push(format!(
+        "grid.raw-lines.synthetic={}",
+        grid_raw_lines_vector()?
+    ));
     lines.push(format!(
         "grid.output-boundary.synthetic={}",
         output_boundary_vector()?
