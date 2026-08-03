@@ -264,7 +264,7 @@ fn convex_intersects(one: &[(f64, f64)], two: &[(f64, f64)]) -> bool {
             };
             let one = range(one);
             let two = range(two);
-            one.0 <= two.1 && two.0 <= one.1
+            one.0 < two.1 && two.0 < one.1
         })
 }
 
