@@ -2,6 +2,8 @@
 
 //! Pixel-domain fit score for an idealized set of parallel staff lines.
 
+use crate::staff_peak::HorizontalSide;
+
 /// Source-compatible neutral form of Java `StaffPattern`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StaffPattern {
@@ -109,6 +111,118 @@ pub fn best_ending_pattern_offset(
     (best_offset, best_ratio)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineEnding {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EndpointRetrieval {
+    pub endings: Vec<LineEnding>,
+    /// `(pattern_x, estimated_top_y, best_offset, best_ratio)` when at least
+    /// one ending required pattern recovery.
+    pub pattern_fit: Option<(i32, f64, i32, f64)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndpointRetrievalError {
+    NoLines,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EndpointRetrievalParams {
+    pub side: HorizontalSide,
+    pub staff_x: i32,
+    pub mean_interline: f64,
+    pub ending_slope: f64,
+    pub max_ending_dx: f64,
+    pub pattern_width: i32,
+    pub pattern_jitter: i32,
+}
+
+/// Retrieve final staff-line endpoints like Java
+/// `LinesRetriever.retrieveEndPoints`.
+///
+/// The callback receives the integer pattern x and candidate upper y. Close
+/// line endings are extrapolated directly; missing ordinates share the first
+/// strictly best pattern offset. If every line is distant, the closest line
+/// (first on an absolute-distance tie) supplies the upper-y estimate.
+pub fn retrieve_line_endpoints(
+    params: EndpointRetrievalParams,
+    line_endings: &[LineEnding],
+    mut evaluate_pattern: impl FnMut(i32, f64) -> f64,
+) -> Result<EndpointRetrieval, EndpointRetrievalError> {
+    if line_endings.is_empty() {
+        return Err(EndpointRetrievalError::NoLines);
+    }
+
+    let mut endings = vec![None; line_endings.len()];
+    let mut top_sum = 0.0;
+    let mut top_count = 0_usize;
+    let mut best_index = 0_usize;
+    let mut best_dx = f64::MAX;
+    let mut missing = false;
+
+    for (index, line_point) in line_endings.iter().copied().enumerate() {
+        let dx = f64::from(params.staff_x) - line_point.x;
+        let dx_abs = dx.abs();
+        if dx_abs <= params.max_ending_dx {
+            let y = line_point.y + (dx * params.ending_slope);
+            endings[index] = Some(LineEnding {
+                x: f64::from(params.staff_x),
+                y,
+            });
+            top_sum += y - (index as f64 * params.mean_interline);
+            top_count += 1;
+        } else {
+            missing = true;
+            if dx_abs < best_dx {
+                best_dx = dx_abs;
+                best_index = index;
+            }
+        }
+    }
+
+    let pattern_fit = if missing {
+        let upper_y = if top_count > 0 {
+            top_sum / top_count as f64
+        } else {
+            let line_point = line_endings[best_index];
+            let dx = f64::from(params.staff_x) - line_point.x;
+            (line_point.y + (dx * params.ending_slope))
+                - (best_index as f64 * params.mean_interline)
+        };
+        let pattern_x = match params.side {
+            HorizontalSide::Left => params.staff_x,
+            HorizontalSide::Right => params.staff_x - params.pattern_width,
+        };
+        let (best_offset, best_ratio) =
+            best_ending_pattern_offset(params.pattern_jitter, |offset| {
+                evaluate_pattern(pattern_x, upper_y + f64::from(offset))
+            });
+        for (index, ending) in endings.iter_mut().enumerate() {
+            if ending.is_none() {
+                *ending = Some(LineEnding {
+                    x: f64::from(params.staff_x),
+                    y: upper_y + f64::from(best_offset) + (index as f64 * params.mean_interline),
+                });
+            }
+        }
+        Some((pattern_x, upper_y, best_offset, best_ratio))
+    } else {
+        None
+    };
+
+    Ok(EndpointRetrieval {
+        endings: endings
+            .into_iter()
+            .map(|ending| ending.expect("every missing ending is filled"))
+            .collect(),
+        pattern_fit,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +275,110 @@ mod tests {
 
         // Java samples yMid-line/2 through yMid+line/2 inclusively: 3 rows.
         assert_eq!(pattern.evaluate((1.0, 1.0), 3, 3, &pixels), 1.0);
+    }
+
+    #[test]
+    fn endpoint_retrieval_combines_close_extrapolation_and_pattern_recovery() {
+        let mut probes = Vec::new();
+        let result = retrieve_line_endpoints(
+            EndpointRetrievalParams {
+                side: HorizontalSide::Right,
+                staff_x: 100,
+                mean_interline: 10.0,
+                ending_slope: 1.0,
+                max_ending_dx: 2.0,
+                pattern_width: 4,
+                pattern_jitter: 2,
+            },
+            &[
+                LineEnding { x: 98.0, y: 10.0 },
+                LineEnding { x: 90.0, y: 30.0 },
+            ],
+            |x, y| {
+                probes.push((x, y));
+                if y == 11.0 { 0.9 } else { 0.2 }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.endings,
+            [
+                LineEnding { x: 100.0, y: 12.0 },
+                LineEnding { x: 100.0, y: 21.0 }
+            ]
+        );
+        assert_eq!(result.pattern_fit, Some((96, 12.0, -1, 0.9)));
+        assert_eq!(probes, [(96, 12.0), (96, 13.0), (96, 11.0)]);
+    }
+
+    #[test]
+    fn endpoint_retrieval_uses_first_closest_line_when_all_are_missing() {
+        let result = retrieve_line_endpoints(
+            EndpointRetrievalParams {
+                side: HorizontalSide::Left,
+                staff_x: 100,
+                mean_interline: 10.0,
+                ending_slope: 0.5,
+                max_ending_dx: 2.0,
+                pattern_width: 4,
+                pattern_jitter: 0,
+            },
+            &[
+                LineEnding { x: 95.0, y: 20.0 },
+                LineEnding { x: 105.0, y: 40.0 },
+            ],
+            |x, y| {
+                assert_eq!(x, 100);
+                assert_eq!(y, 22.5);
+                0.0
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.endings,
+            [
+                LineEnding { x: 100.0, y: 22.5 },
+                LineEnding { x: 100.0, y: 32.5 }
+            ]
+        );
+        assert_eq!(result.pattern_fit, Some((100, 22.5, 0, 0.0)));
+    }
+
+    #[test]
+    fn endpoint_retrieval_skips_pattern_when_every_line_is_close() {
+        let result = retrieve_line_endpoints(
+            EndpointRetrievalParams {
+                side: HorizontalSide::Left,
+                staff_x: 10,
+                mean_interline: 8.0,
+                ending_slope: 0.25,
+                max_ending_dx: 1.0,
+                pattern_width: 3,
+                pattern_jitter: 4,
+            },
+            &[LineEnding { x: 9.0, y: 3.0 }],
+            |_, _| panic!("pattern must not be evaluated"),
+        )
+        .unwrap();
+        assert_eq!(result.endings, [LineEnding { x: 10.0, y: 3.25 }]);
+        assert_eq!(result.pattern_fit, None);
+        assert_eq!(
+            retrieve_line_endpoints(
+                EndpointRetrievalParams {
+                    side: HorizontalSide::Left,
+                    staff_x: 0,
+                    mean_interline: 1.0,
+                    ending_slope: 0.0,
+                    max_ending_dx: 1.0,
+                    pattern_width: 1,
+                    pattern_jitter: 0,
+                },
+                &[],
+                |_, _| 0.0
+            ),
+            Err(EndpointRetrievalError::NoLines)
+        );
     }
 }
