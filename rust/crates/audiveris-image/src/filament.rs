@@ -366,6 +366,35 @@ pub fn plan_hole_fills(
     Ok(plans)
 }
 
+/// Point supplied by a neighboring staff filament for hole interpolation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HoleNeighbor {
+    pub cluster_position: i32,
+    pub point: (f64, f64),
+}
+
+/// Interpolate a virtual hole point from the nearest available filament above
+/// and below, matching `StaffFilament.Filler.findInsertion`.
+///
+/// `above` and `below` are in top-to-bottom staff order. Missing references are
+/// represented by `None`; the search walks upward from the current line and
+/// downward from it. Extrapolation is deliberately refused.
+#[must_use]
+pub fn interpolate_hole_point(
+    current_cluster_position: i32,
+    above: &[Option<HoleNeighbor>],
+    below: &[Option<HoleNeighbor>],
+) -> Option<(f64, f64)> {
+    let one = above.iter().rev().flatten().next()?;
+    let two = below.iter().flatten().next()?;
+    let ratio = f64::from(current_cluster_position - one.cluster_position)
+        / f64::from(two.cluster_position - one.cluster_position);
+    Some((
+        ((1.0 - ratio) * one.point.0) + (ratio * two.point.0),
+        ((1.0 - ratio) * one.point.1) + (ratio * two.point.1),
+    ))
+}
+
 /// Failure in the supported neutral staff-filament surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilamentError {
@@ -528,6 +557,43 @@ mod tests {
             plan_hole_fills(&[0.0, 20.0], 10, 0),
             Err(FilamentError::InvalidVirtualSegmentLength)
         );
+    }
+
+    #[test]
+    fn hole_point_interpolation_uses_nearest_available_above_and_below() {
+        let above = [
+            Some(HoleNeighbor {
+                cluster_position: -2,
+                point: (8.0, 10.0),
+            }),
+            None,
+            Some(HoleNeighbor {
+                cluster_position: 0,
+                point: (10.0, 20.0),
+            }),
+        ];
+        let below = [
+            None,
+            Some(HoleNeighbor {
+                cluster_position: 4,
+                point: (14.0, 40.0),
+            }),
+        ];
+
+        assert_eq!(
+            interpolate_hole_point(1, &above, &below),
+            Some((11.0, 25.0))
+        );
+    }
+
+    #[test]
+    fn hole_point_interpolation_refuses_one_sided_extrapolation() {
+        let neighbor = Some(HoleNeighbor {
+            cluster_position: 0,
+            point: (10.0, 20.0),
+        });
+        assert_eq!(interpolate_hole_point(1, &[neighbor], &[]), None);
+        assert_eq!(interpolate_hole_point(1, &[], &[neighbor]), None);
     }
 
     fn near(actual: f64, expected: f64) {
