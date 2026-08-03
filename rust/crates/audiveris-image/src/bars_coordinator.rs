@@ -13,14 +13,14 @@ use crate::{
     bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
     bar_column::{BarColumn, PeakId, PeakRelation, StaffId},
     bars_logic::{
-        BarsLogicError, ConnectionInterPlan, PeakWidthAssignment, PeakWidthClass,
+        BarsLogicError, CClefDetection, ConnectionInterPlan, PeakWidthAssignment, PeakWidthClass,
         StartColumnStaffFacts, VerticalInterPlan, build_bar_columns_from_graph,
         classify_bar_peak_widths, extending_peak_keys, peaks_before_staff_start,
         peaks_too_far_left, plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks,
         start_column_candidate, unaligned_peak_keys, validate_start_column,
     },
     peak_graph::{PeakGraph, PeakGraphError},
-    projection::{ProjectionBlank, check_lines_root_transition},
+    projection::{ProjectionBlank, check_lines_root_transition, refine_right_end_transition},
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
@@ -28,6 +28,7 @@ use crate::{
 pub struct BarsStaffState {
     staff_id: StaffId,
     left: i32,
+    right: i32,
     one_line: bool,
     peaks: Vec<StaffPeak>,
     brace_peak: Option<StaffPeak>,
@@ -51,6 +52,7 @@ impl BarsStaffState {
         Ok(Self {
             staff_id,
             left,
+            right: left,
             one_line,
             peaks,
             brace_peak: None,
@@ -66,6 +68,17 @@ impl BarsStaffState {
     #[must_use]
     pub const fn left(&self) -> i32 {
         self.left
+    }
+
+    #[must_use]
+    pub const fn right(&self) -> i32 {
+        self.right
+    }
+
+    #[must_use]
+    pub fn with_right(mut self, right: i32) -> Self {
+        self.right = right;
+        self
     }
 
     #[must_use]
@@ -333,6 +346,53 @@ pub struct BarsPurgeParameters {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BarsPurgeResult {
     removed_peaks: Vec<RemovedPeak>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BarsRightEvidence {
+    pub staff_id: StaffId,
+    pub blanks: Vec<ProjectionBlank>,
+    pub sheet_right: i32,
+    pub minimum_small_blank_width: i32,
+    pub maximum_right_extremum: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RightEndUpdate {
+    pub staff_id: StaffId,
+    pub lines_right: i32,
+    pub staff_right: i32,
+    pub marked_peak: Option<StaffPeakKey>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BarsRightCClefParameters {
+    pub maximum_double_bar_gap: i32,
+    pub c_clef: CClefParameters,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BarsRightCClefResult {
+    right_updates: Vec<RightEndUpdate>,
+    c_clef_detections: Vec<(StaffId, CClefDetection)>,
+    removed_peaks: Vec<RemovedPeak>,
+}
+
+impl BarsRightCClefResult {
+    #[must_use]
+    pub fn right_updates(&self) -> &[RightEndUpdate] {
+        &self.right_updates
+    }
+
+    #[must_use]
+    pub fn c_clef_detections(&self) -> &[(StaffId, CClefDetection)] {
+        &self.c_clef_detections
+    }
+
+    #[must_use]
+    pub fn removed_peaks(&self) -> &[RemovedPeak] {
+        &self.removed_peaks
+    }
 }
 
 impl BarsPurgeResult {
@@ -742,6 +802,108 @@ pub fn process_bars_peak_purges(
     Ok(result)
 }
 
+/// Continue Java `BarsRetriever.process` through `refineRightEnds` and
+/// `purgeCClefs`.
+///
+/// Right endpoints are committed for every staff before C-clef traversal
+/// begins. A missing later staff's evidence therefore retains the exact
+/// earlier projector/graph mutation prefix.
+pub fn process_bars_right_ends_and_c_clefs(
+    state: &mut BarsSystemState,
+    right_evidence: &[BarsRightEvidence],
+    parameters: BarsRightCClefParameters,
+) -> Result<BarsRightCClefResult, BarsCoordinatorError> {
+    if parameters.maximum_double_bar_gap < 0
+        || parameters.c_clef.minimum_first_peak_width < 0
+        || parameters.c_clef.maximum_second_peak_width < 0
+        || parameters.c_clef.minimum_measure_width < 0
+        || parameters.c_clef.tail_width < 0
+    {
+        return Err(BarsCoordinatorError::InvalidRightCClefParameters);
+    }
+    let mut result = BarsRightCClefResult::default();
+    for staff_index in 0..state.staffs.len() {
+        let staff_id = state.staffs[staff_index].staff_id;
+        let evidence = right_evidence
+            .iter()
+            .find(|evidence| evidence.staff_id == staff_id)
+            .ok_or(BarsCoordinatorError::MissingRightEvidence(staff_id))?;
+        if evidence.sheet_right < 0
+            || evidence.minimum_small_blank_width < 0
+            || evidence.maximum_right_extremum < 0
+        {
+            return Err(BarsCoordinatorError::InvalidRightEvidence(staff_id));
+        }
+        let lines_right = state.staffs[staff_index].right;
+        let transition = refine_right_end_transition(
+            &state.staffs[staff_index].peaks,
+            &evidence.blanks,
+            lines_right,
+            evidence.sheet_right,
+            evidence.minimum_small_blank_width,
+            evidence.maximum_right_extremum,
+        );
+        let marked_peak = transition
+            .set_staff_right_end_at
+            .map(|index| state.staffs[staff_index].peaks[index].key());
+        state.staffs[staff_index].right = transition.staff_right;
+        if let Some(index) = transition.set_staff_right_end_at {
+            state.staffs[staff_index].peaks[index].set_staff_end(HorizontalSide::Right);
+            state
+                .graph
+                .vertex_mut(state.staffs[staff_index].peaks[index].key())
+                .expect("projector right peak remains in its system graph")
+                .set_staff_end(HorizontalSide::Right);
+        }
+        result.right_updates.push(RightEndUpdate {
+            staff_id,
+            lines_right,
+            staff_right: transition.staff_right,
+            marked_peak,
+        });
+    }
+
+    let id_to_key = state.peak_ids.clone();
+    for staff_index in 0..state.staffs.len() {
+        let staff_id = state.staffs[staff_index].staff_id;
+        let peaks = state.staffs[staff_index].peaks.clone();
+        let graph = &state.graph;
+        let purge = purge_c_clef_peaks(
+            &peaks,
+            state.staffs[staff_index].left,
+            parameters.c_clef.minimum_first_peak_width,
+            parameters.c_clef.maximum_second_peak_width,
+            parameters.maximum_double_bar_gap,
+            parameters.c_clef.minimum_measure_width,
+            parameters.c_clef.tail_width,
+            |key, side| graph.is_connected(key, side).unwrap_or(false),
+        );
+        let survivors = purge
+            .survivors
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let keys = peaks
+            .iter()
+            .map(StaffPeak::key)
+            .filter(|key| !survivors.contains(key))
+            .collect::<Vec<_>>();
+        result.c_clef_detections.extend(
+            purge
+                .detections
+                .into_iter()
+                .map(|detection| (staff_id, detection)),
+        );
+        remove_keys_and_related_columns_java_order(
+            state,
+            &keys,
+            &id_to_key,
+            PeakRemovalStage::CClef,
+            &mut result.removed_peaks,
+        );
+    }
+    Ok(result)
+}
+
 fn process_prefix(
     next: &mut BarsSystemState,
     parameters: BarsCoordinatorParameters,
@@ -1081,6 +1243,9 @@ pub enum BarsCoordinatorError {
     InvalidRootEvidence(StaffId),
     InvalidPurgeParameters,
     MissingFilamentBounds(StaffPeakKey),
+    InvalidRightCClefParameters,
+    MissingRightEvidence(StaffId),
+    InvalidRightEvidence(StaffId),
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
     Graph(PeakGraphError),
@@ -1150,6 +1315,23 @@ impl fmt::Display for BarsCoordinatorError {
             Self::InvalidPurgeParameters => formatter.write_str("invalid bar purge parameters"),
             Self::MissingFilamentBounds(peak) => {
                 write!(formatter, "missing bar filament bounds for {peak:?}")
+            }
+            Self::InvalidRightCClefParameters => {
+                formatter.write_str("invalid right-end/C-clef parameters")
+            }
+            Self::MissingRightEvidence(staff) => {
+                write!(
+                    formatter,
+                    "missing right-end evidence for staff {}",
+                    staff.value()
+                )
+            }
+            Self::InvalidRightEvidence(staff) => {
+                write!(
+                    formatter,
+                    "invalid right-end evidence for staff {}",
+                    staff.value()
+                )
             }
             Self::InvalidColumnIndex(index) => {
                 write!(formatter, "invalid bar column index {index}")
@@ -1601,5 +1783,186 @@ mod tests {
         assert!(!state.graph().contains_vertex(left.key()));
         assert_eq!(state.staffs()[0].peaks().len(), 2);
         assert!(state.graph().contains_vertex(bar.key()));
+    }
+
+    #[test]
+    fn right_end_is_committed_before_c_clef_pair_is_removed() {
+        let mut start = peak(1, 0, 1);
+        start.set_staff_end(HorizontalSide::Left);
+        let first = peak(1, 10, 13);
+        let second = peak(1, 15, 15);
+        let end = peak(1, 30, 30);
+        let mut graph = PeakGraph::new();
+        for value in [&start, &first, &second, &end] {
+            graph.add_vertex(value.clone());
+        }
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![start, first.clone(), second.clone(), end.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_right(25);
+        let mut state = BarsSystemState::new(1, vec![staff], graph).unwrap();
+        let mut projection = ShortProjection::new(0, 40).unwrap();
+        for position in (0..=31).chain(36..=40) {
+            projection.increment_one(position);
+        }
+        let evidence = [BarsRightEvidence {
+            staff_id: StaffId::new(1),
+            blanks: projection.blank_regions(0),
+            sheet_right: 40,
+            minimum_small_blank_width: 3,
+            maximum_right_extremum: 3,
+        }];
+
+        let result = process_bars_right_ends_and_c_clefs(
+            &mut state,
+            &evidence,
+            BarsRightCClefParameters {
+                maximum_double_bar_gap: 2,
+                c_clef: CClefParameters {
+                    minimum_first_peak_width: 4,
+                    maximum_second_peak_width: 1,
+                    minimum_measure_width: 20,
+                    tail_width: 5,
+                },
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.right_updates(),
+            [RightEndUpdate {
+                staff_id: StaffId::new(1),
+                lines_right: 25,
+                staff_right: 30,
+                marked_peak: Some(end.key()),
+            }]
+        );
+        assert_eq!(result.c_clef_detections().len(), 1);
+        assert_eq!(
+            result.removed_peaks(),
+            [
+                RemovedPeak {
+                    peak: first.key(),
+                    stage: PeakRemovalStage::CClef
+                },
+                RemovedPeak {
+                    peak: second.key(),
+                    stage: PeakRemovalStage::CClef
+                },
+            ]
+        );
+        assert_eq!(state.staffs()[0].right(), 30);
+        assert!(
+            state.staffs()[0]
+                .peaks()
+                .last()
+                .unwrap()
+                .is_staff_end(HorizontalSide::Right)
+        );
+        assert!(
+            state
+                .graph()
+                .vertex(end.key())
+                .unwrap()
+                .is_staff_end(HorizontalSide::Right)
+        );
+    }
+
+    #[test]
+    fn missing_later_right_evidence_retains_earlier_right_end_without_c_clef_purge() {
+        let mut top_start = peak(1, 0, 1);
+        top_start.set_staff_end(HorizontalSide::Left);
+        let top_first = peak(1, 10, 13);
+        let top_second = peak(1, 15, 15);
+        let top_end = peak(1, 30, 30);
+        let mut bottom_start = peak(2, 0, 1);
+        bottom_start.set_staff_end(HorizontalSide::Left);
+        let bottom_end = peak(2, 30, 30);
+        let mut graph = PeakGraph::new();
+        for value in [
+            &top_start,
+            &top_first,
+            &top_second,
+            &top_end,
+            &bottom_start,
+            &bottom_end,
+        ] {
+            graph.add_vertex(value.clone());
+        }
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![
+                top_start,
+                top_first.clone(),
+                top_second.clone(),
+                top_end.clone(),
+            ],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_right(25);
+        let bottom = BarsStaffState::new(
+            StaffId::new(2),
+            0,
+            false,
+            vec![bottom_start, bottom_end],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_right(25);
+        let mut state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let mut projection = ShortProjection::new(0, 40).unwrap();
+        for position in (0..=31).chain(36..=40) {
+            projection.increment_one(position);
+        }
+        let evidence = [BarsRightEvidence {
+            staff_id: StaffId::new(1),
+            blanks: projection.blank_regions(0),
+            sheet_right: 40,
+            minimum_small_blank_width: 3,
+            maximum_right_extremum: 3,
+        }];
+
+        assert_eq!(
+            process_bars_right_ends_and_c_clefs(
+                &mut state,
+                &evidence,
+                BarsRightCClefParameters {
+                    maximum_double_bar_gap: 2,
+                    c_clef: CClefParameters {
+                        minimum_first_peak_width: 4,
+                        maximum_second_peak_width: 1,
+                        minimum_measure_width: 20,
+                        tail_width: 5,
+                    },
+                },
+            ),
+            Err(BarsCoordinatorError::MissingRightEvidence(StaffId::new(2)))
+        );
+        assert_eq!(state.staffs()[0].right(), 30);
+        assert_eq!(state.staffs()[1].right(), 25);
+        assert!(
+            state.staffs()[0]
+                .peaks()
+                .last()
+                .unwrap()
+                .is_staff_end(HorizontalSide::Right)
+        );
+        assert!(
+            state
+                .graph()
+                .vertex(top_end.key())
+                .unwrap()
+                .is_staff_end(HorizontalSide::Right)
+        );
+        assert!(state.graph().contains_vertex(top_first.key()));
+        assert!(state.graph().contains_vertex(top_second.key()));
     }
 }

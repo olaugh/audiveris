@@ -36,8 +36,10 @@ use audiveris_image::{
     },
     bars_coordinator::{
         BarsCoordinatorError, BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult,
-        BarsPurgeParameters, BarsPurgeResult, BarsRootEvidence, BarsStaffState, BarsSystemState,
-        process_bars_after_braces, process_bars_peak_purges, process_bars_through_too_far_left,
+        BarsPurgeParameters, BarsPurgeResult, BarsRightCClefParameters, BarsRightCClefResult,
+        BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
+        process_bars_after_braces, process_bars_peak_purges, process_bars_right_ends_and_c_clefs,
+        process_bars_through_too_far_left,
     },
     bars_logic::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
@@ -187,6 +189,12 @@ pub enum RawSystemGroupingBoundary {
     /// Left, isolated, and vertically extending peak purges are complete.
     /// Java next refines every staff's right endpoint.
     NeedsRightEndRefinement {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Staff right endpoints and C-clef false positives are resolved. Java
+    /// next partitions surviving peaks into thin and thick classes.
+    NeedsWidthPartition {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -342,8 +350,25 @@ pub struct RawPeakPurgeStageReport {
     pub systems: Vec<RawPeakPurgeSystemReport>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawRightCClefStageParameters {
+    pub bars: BarsRightCClefParameters,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRightCClefSystemReport {
+    pub system_id: usize,
+    pub result: BarsRightCClefResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawRightCClefStageReport {
+    pub systems: Vec<RawRightCClefSystemReport>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
+    InvalidRasterShape,
     DuplicateStaffSettings(usize),
     UnknownStaffSettings(usize),
     MissingStaffSettings(usize),
@@ -387,6 +412,7 @@ pub enum RawProjectorAdapterError {
 impl fmt::Display for RawProjectorAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidRasterShape => formatter.write_str("invalid raw raster shape"),
             Self::DuplicateStaffSettings(id) => {
                 write!(formatter, "staff {id} has duplicate projector settings")
             }
@@ -932,7 +958,8 @@ pub fn bridge_raw_projectors_through_bars_prefix(
                 peaks,
                 blanks,
             )
-            .map_err(RawProjectorAdapterError::Bars)?;
+            .map_err(RawProjectorAdapterError::Bars)?
+            .with_right(prepared.right.round_ties_even() as i32);
             if let Some(brace) = systems
                 .split
                 .connections
@@ -1245,6 +1272,72 @@ pub fn continue_raw_bars_through_peak_purges(
         .bars
         .projectors
         .grouping = RawSystemGroupingBoundary::NeedsRightEndRefinement {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+/// Continue through `StaffProjector.refineRightEnd` for every retained staff,
+/// then Java `BarsRetriever.purgeCClefs`.
+pub fn continue_raw_bars_through_right_ends_and_c_clefs(
+    bridge: &mut RawBarsPrefixBridge,
+    preparation: &RawProjectorPreparation,
+    sheet_width: usize,
+    parameters: RawRightCClefStageParameters,
+) -> Result<RawRightCClefStageReport, RawProjectorAdapterError> {
+    let sheet_right = sheet_width
+        .checked_sub(1)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or(RawProjectorAdapterError::InvalidRasterShape)?;
+    let mut report = RawRightCClefStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let evidence = raw_system
+            .state
+            .staffs()
+            .iter()
+            .map(|staff| {
+                let projector = preparation
+                    .registry
+                    .projectors()
+                    .iter()
+                    .find(|projector| projector.staff_id == staff.staff_id())
+                    .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                        staff.staff_id().value(),
+                    ))?;
+                Ok(BarsRightEvidence {
+                    staff_id: staff.staff_id(),
+                    blanks: projector.result.all_blanks.clone(),
+                    sheet_right,
+                    minimum_small_blank_width: projector.scale_parameters.minimum_small_blank_width,
+                    maximum_right_extremum: projector.scale_parameters.maximum_right_extremum,
+                })
+            })
+            .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+        let result =
+            process_bars_right_ends_and_c_clefs(&mut raw_system.state, &evidence, parameters.bars)
+                .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawRightCClefSystemReport { system_id, result });
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsWidthPartition {
         staff_ids: bridge
             .systems
             .split
@@ -2054,6 +2147,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsRightEndRefinement { .. } => {
                 panic!("one retained staff does not require right-end refinement grouping")
             }
+            RawSystemGroupingBoundary::NeedsWidthPartition { .. } => {
+                panic!("one retained staff does not require width partition grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2609,6 +2705,47 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsRightEndRefinement {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let right_report = continue_raw_bars_through_right_ends_and_c_clefs(
+            &mut prefix,
+            &prepared,
+            raster.width,
+            RawRightCClefStageParameters {
+                bars: BarsRightCClefParameters {
+                    maximum_double_bar_gap: 2,
+                    c_clef: audiveris_image::bars_coordinator::CClefParameters {
+                        minimum_first_peak_width: 2,
+                        maximum_second_peak_width: 1,
+                        minimum_measure_width: 10,
+                        tail_width: 4,
+                    },
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(right_report.systems.len(), 1);
+        assert_eq!(right_report.systems[0].result.right_updates().len(), 2);
+        assert!(
+            right_report.systems[0]
+                .result
+                .c_clef_detections()
+                .is_empty()
+        );
+        assert!(right_report.systems[0].result.removed_peaks().is_empty());
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsWidthPartition {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
