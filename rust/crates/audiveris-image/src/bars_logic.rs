@@ -420,6 +420,17 @@ pub fn graph_bar_chains<R>(graph: &PeakGraph<R>) -> Result<Vec<Vec<BarPeak>>, Ba
         .collect()
 }
 
+/// Complete dependency-light `buildColumns` path from neutral peak graph to
+/// ordered columns for one system.
+pub fn build_bar_columns_from_graph<R>(
+    graph: &PeakGraph<R>,
+    staff_ids: &[StaffId],
+    maximum_column_dx: i32,
+) -> Result<Vec<BarColumn>, BarsLogicError> {
+    let chains = graph_bar_chains(graph)?;
+    aggregate_bar_chains(staff_ids, &chains, maximum_column_dx)
+}
+
 /// Java `purgeUnalignedBars` selection for one staff.
 ///
 /// Only multi-staff systems run this purge. Projector peaks absent from the
@@ -1032,6 +1043,36 @@ mod tests {
             graph_bar_chains(&graph).unwrap_err(),
             BarsLogicError::MissingDeskewedCenter(key)
         );
+    }
+
+    #[test]
+    fn graph_to_columns_composes_connectivity_conversion_and_aggregation() {
+        let mut top_left = peak(1, 10, 11);
+        let mut bottom_left = peak(2, 10, 11);
+        let mut top_right = peak(1, 30, 31);
+        let mut bottom_right = peak(2, 30, 31);
+        for value in [&mut top_left, &mut bottom_left] {
+            value
+                .compute_deskewed_center(|point| crate::staff_peak::PeakPoint::new(10.0, point.y))
+                .unwrap();
+        }
+        for value in [&mut top_right, &mut bottom_right] {
+            value
+                .compute_deskewed_center(|point| crate::staff_peak::PeakPoint::new(30.0, point.y))
+                .unwrap();
+        }
+        let left_keys = [top_left.key(), bottom_left.key()];
+        let right_keys = [top_right.key(), bottom_right.key()];
+        let mut graph = PeakGraph::new();
+        for value in [top_right, bottom_left, top_left, bottom_right] {
+            graph.add_vertex(value);
+        }
+        graph.add_edge(left_keys[0], left_keys[1], ()).unwrap();
+        graph.add_edge(right_keys[0], right_keys[1], ()).unwrap();
+        let columns =
+            build_bar_columns_from_graph(&graph, &[StaffId::new(1), StaffId::new(2)], 2).unwrap();
+        assert_eq!(columns.len(), 2);
+        assert!(columns.iter().all(BarColumn::is_full));
     }
 
     #[test]
