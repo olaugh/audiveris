@@ -8,20 +8,71 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::staff_header::StaffHeader;
+use crate::{
+    header_builder::{HeaderBarGroupRelation, HeaderBarline, HeaderBuilderMutation},
+    staff_header::StaffHeader,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HeadlessHeaderStaff {
     pub id: usize,
     pub tablature: bool,
+    pub left_abscissa: i32,
+    pub right_abscissa: i32,
+    pub first_line_y_at_left: i32,
+    pub last_line_y_at_left: i32,
+    /// Java staff barline list in center-abscissa order.
+    pub barline_ids: Vec<usize>,
+    pub left_side_barline_id: Option<usize>,
+    pub right_side_barline_id: Option<usize>,
     pub header: Option<StaffHeader>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl HeadlessHeaderStaff {
+    #[must_use]
+    pub fn new(id: usize) -> Self {
+        Self {
+            id,
+            tablature: false,
+            left_abscissa: 0,
+            right_abscissa: 0,
+            first_line_y_at_left: 0,
+            last_line_y_at_left: 0,
+            barline_ids: Vec::new(),
+            left_side_barline_id: None,
+            right_side_barline_id: None,
+            header: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct HeadlessHeaderSystem {
     pub id: usize,
     /// Preserved source order; `HeaderBuilder` relies on system staff order.
     pub staffs: Vec<HeadlessHeaderStaff>,
+    pub last_inter_id: usize,
+    /// Registered barline objects, including removed objects retained by the
+    /// inter index; `sig_vertex_ids` is the live graph membership.
+    pub barlines: Vec<HeaderBarline>,
+    pub sig_vertex_ids: Vec<usize>,
+    pub bar_group_relations: Vec<HeaderBarGroupRelation>,
+    pub header_mutations: Vec<HeaderBuilderMutation>,
+}
+
+impl HeadlessHeaderSystem {
+    #[must_use]
+    pub fn new(id: usize, staffs: Vec<HeadlessHeaderStaff>) -> Self {
+        Self {
+            id,
+            staffs,
+            last_inter_id: 0,
+            barlines: Vec::new(),
+            sig_vertex_ids: Vec::new(),
+            bar_group_relations: Vec::new(),
+            header_mutations: Vec::new(),
+        }
+    }
 }
 
 /// Explicit boundary where Java constructs `HeaderBuilder(system)` and calls
@@ -197,14 +248,7 @@ mod tests {
 
     fn systems(ids: &[usize]) -> Vec<HeadlessHeaderSystem> {
         ids.iter()
-            .map(|&id| HeadlessHeaderSystem {
-                id,
-                staffs: vec![HeadlessHeaderStaff {
-                    id: id * 10,
-                    tablature: false,
-                    header: None,
-                }],
-            })
+            .map(|&id| HeadlessHeaderSystem::new(id, vec![HeadlessHeaderStaff::new(id * 10)]))
             .collect()
     }
 

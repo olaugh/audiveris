@@ -23,6 +23,7 @@ pub mod brace_filament;
 pub mod brace_portions;
 pub mod brace_sig;
 pub mod grid_executor;
+pub mod header_builder;
 pub mod headers_step;
 pub mod raw_projector_adapter;
 pub mod score_update;
