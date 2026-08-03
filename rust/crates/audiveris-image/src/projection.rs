@@ -99,6 +99,34 @@ pub struct PeakSearchBounds {
     pub x_max: i32,
 }
 
+/// Sheet-resolved horizontal inputs to Java
+/// `StaffProjector.computeProjection`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StaffProjectionRequest {
+    pub staff_left: i32,
+    pub staff_right: i32,
+    pub staff_abscissa_margin: i32,
+}
+
+impl StaffProjectionRequest {
+    #[must_use]
+    pub const fn new(staff_left: i32, staff_right: i32, staff_abscissa_margin: i32) -> Self {
+        Self {
+            staff_left,
+            staff_right,
+            staff_abscissa_margin,
+        }
+    }
+}
+
+/// Pure raster result of Java `StaffProjector.computeProjection`, before its
+/// derivative threshold is computed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaffProjectionAccumulation {
+    pub projection: ShortProjection,
+    pub bounds: PeakSearchBounds,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -704,6 +732,88 @@ impl ShortProjection {
             start,
             stop,
             values: vec![0; length],
+        })
+    }
+
+    /// Accumulate the foreground pixels between the first and last staff-line
+    /// ordinates, exactly as Java `StaffProjector.computeProjection` does.
+    ///
+    /// The callbacks own staff-specific geometry. For a one-line staff, the
+    /// caller supplies the already translated top and bottom line ordinates.
+    /// Pixels are row-major and zero denotes foreground.
+    pub fn from_staff_raster<First, Last>(
+        raster_width: usize,
+        raster_height: usize,
+        pixels: &[u8],
+        request: StaffProjectionRequest,
+        mut first_ordinate_at: First,
+        mut last_ordinate_at: Last,
+    ) -> Result<StaffProjectionAccumulation, ProjectionError>
+    where
+        First: FnMut(i32) -> i32,
+        Last: FnMut(i32) -> i32,
+    {
+        let expected = raster_width.checked_mul(raster_height).ok_or(
+            ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            },
+        )?;
+        let width =
+            i32::try_from(raster_width).map_err(|_| ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            })?;
+        let height =
+            i32::try_from(raster_height).map_err(|_| ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            })?;
+        if width == 0 || height == 0 {
+            return Err(ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            });
+        }
+        if pixels.len() != expected {
+            return Err(ProjectionError::InvalidRasterPixels {
+                expected,
+                actual: pixels.len(),
+            });
+        }
+
+        let last_x = width - 1;
+        let last_y = height - 1;
+        let x_min = request
+            .staff_left
+            .wrapping_sub(request.staff_abscissa_margin)
+            .clamp(0, last_x);
+        let x_max = request
+            .staff_right
+            .wrapping_add(request.staff_abscissa_margin)
+            .clamp(0, last_x);
+        let mut projection = Self::new(0, last_x)?;
+
+        if x_min <= x_max {
+            for x in x_min..=x_max {
+                let y_min = first_ordinate_at(x).clamp(0, last_y);
+                let y_max = last_ordinate_at(x).wrapping_sub(1).clamp(0, last_y);
+                let mut count = 0_i16;
+                if y_min <= y_max {
+                    for y in y_min..=y_max {
+                        let index = y as usize * raster_width + x as usize;
+                        if pixels[index] == FOREGROUND {
+                            count = count.wrapping_add(1);
+                        }
+                    }
+                }
+                projection.increment(x, i32::from(count));
+            }
+        }
+
+        Ok(StaffProjectionAccumulation {
+            projection,
+            bounds: PeakSearchBounds { x_min, x_max },
         })
     }
 
@@ -1565,6 +1675,134 @@ mod tests {
         assert_eq!(projection.value(1), 1);
         projection.increment(1, i32::MAX);
         assert_eq!(projection.value(1), 0);
+    }
+
+    #[test]
+    fn staff_raster_accumulation_matches_java_bounds_and_ordinates() {
+        let width = 6;
+        let height = 5;
+        let mut pixels = vec![255; width * height];
+        for (x, ys) in [
+            (0, vec![0, 1, 2, 3, 4]),
+            (1, vec![0, 4]),
+            (2, vec![0, 1, 2, 4]),
+            (3, vec![0, 1, 2, 3, 4]),
+            (4, vec![3]),
+            (5, vec![0, 1, 2, 3, 4]),
+        ] {
+            for y in ys {
+                pixels[y * width + x] = FOREGROUND;
+            }
+        }
+
+        let accumulation = ShortProjection::from_staff_raster(
+            width,
+            height,
+            &pixels,
+            StaffProjectionRequest::new(2, 3, 1),
+            |x| match x {
+                1 => -2,
+                2 => 1,
+                3 => 4,
+                4 => 3,
+                _ => unreachable!(),
+            },
+            |x| match x {
+                1 => 6,
+                2 => 4,
+                3 => 2,
+                4 => 4,
+                _ => unreachable!(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(accumulation.bounds, PeakSearchBounds { x_min: 1, x_max: 4 });
+        assert_eq!(accumulation.projection.start(), 0);
+        assert_eq!(accumulation.projection.stop(), 5);
+        assert_eq!(
+            (0..width as i32)
+                .map(|x| accumulation.projection.value(x))
+                .collect::<Vec<_>>(),
+            [0, 2, 2, 0, 1, 0]
+        );
+    }
+
+    #[test]
+    fn staff_raster_accumulation_preserves_java_short_count_wrapping() {
+        let height = usize::from(i16::MAX as u16) + 2;
+        let pixels = vec![FOREGROUND; height];
+        let accumulation = ShortProjection::from_staff_raster(
+            1,
+            height,
+            &pixels,
+            StaffProjectionRequest::new(0, 0, 0),
+            |_| 0,
+            |_| i32::try_from(height).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(accumulation.projection.value(0), i32::from(i16::MIN) + 1);
+    }
+
+    #[test]
+    fn staff_raster_accumulation_uses_wrapping_margin_and_empty_reverse_window() {
+        use std::cell::Cell;
+
+        let callback_count = Cell::new(0);
+        let accumulation = ShortProjection::from_staff_raster(
+            4,
+            2,
+            &[FOREGROUND; 8],
+            StaffProjectionRequest::new(i32::MIN, i32::MAX, 1),
+            |_| {
+                callback_count.set(callback_count.get() + 1);
+                0
+            },
+            |_| 2,
+        )
+        .unwrap();
+
+        assert_eq!(accumulation.bounds, PeakSearchBounds { x_min: 3, x_max: 0 });
+        assert_eq!(callback_count.get(), 0);
+        assert_eq!(
+            (0..4)
+                .map(|x| accumulation.projection.value(x))
+                .collect::<Vec<_>>(),
+            [0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn staff_raster_accumulation_rejects_invalid_rasters() {
+        assert_eq!(
+            ShortProjection::from_staff_raster(
+                0,
+                1,
+                &[],
+                StaffProjectionRequest::new(0, 0, 0),
+                |_| 0,
+                |_| 1,
+            ),
+            Err(ProjectionError::InvalidRasterDimensions {
+                width: 0,
+                height: 1,
+            })
+        );
+        assert_eq!(
+            ShortProjection::from_staff_raster(
+                2,
+                2,
+                &[255; 3],
+                StaffProjectionRequest::new(0, 1, 0),
+                |_| 0,
+                |_| 2,
+            ),
+            Err(ProjectionError::InvalidRasterPixels {
+                expected: 4,
+                actual: 3,
+            })
+        );
     }
 
     #[test]
