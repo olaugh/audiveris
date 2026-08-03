@@ -35,12 +35,15 @@ use audiveris_image::{
     ingest,
     lag_rebuild::RegisteredHorizontalLag,
     line_cluster::{FilamentId, LineCluster},
+    line_endpoints::{DefineEndPointsParameters, define_end_points},
     line_short_sections::HorizontalSectionLag,
     lines_coordinator::{
         LinesCoordinatorParameters, StaffCandidateKind, retrieve_staff_candidates,
     },
     median,
     peak_graph::PeakGraph,
+    prepared_completion::PreparedCompletionState,
+    prepared_lines::{PreparedStaff, PreparedStaffLine},
     projection::{
         BraceSearchRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
         PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams, PeakCoreRejection,
@@ -273,7 +276,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 66] = [
+const VECTOR_KEYS: [&str; 67] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -314,6 +317,7 @@ const VECTOR_KEYS: [&str; 66] = [
     "grid.system-ref.synthetic=",
     "grid.skew.synthetic=",
     "grid.raw-lines.synthetic=",
+    "grid.line-endpoints.synthetic=",
     "grid.output-boundary.synthetic=",
     "grid.contextualize.synthetic=",
     "spline.synthetic=",
@@ -505,6 +509,109 @@ fn grid_raw_lines_vector() -> Result<String, Box<dyn Error>> {
         tables.short_horizontal.weight(),
         staves.len(),
         staves.join("|"),
+    ))
+}
+
+fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
+    const WIDTH: usize = 120;
+    const HEIGHT: usize = 70;
+    const INTERLINE: usize = 10;
+
+    let mut binary = RunTable::new(Orientation::Horizontal, WIDTH, HEIGHT)?;
+    for y in [11, 21, 31, 41, 51] {
+        binary.add_run(y, Run::new(90, 10))?;
+    }
+    let lines = [10, 20, 30, 40, 50]
+        .into_iter()
+        .enumerate()
+        .map(|(index, y)| -> Result<PreparedStaffLine, Box<dyn Error>> {
+            let stop = if index == 0 { 89 } else { 100 };
+            let mut table = RunTable::new(Orientation::Horizontal, WIDTH, HEIGHT)?;
+            table.add_run(y, Run::new(10, stop - 9))?;
+            let section = build_sections(&table, JunctionPolicy::All)
+                .into_iter()
+                .next()
+                .ok_or("endpoint fixture line produced no section")?;
+            let mut filament = StaffFilament::new(INTERLINE)?;
+            filament.add_section(section)?;
+            Ok(PreparedStaffLine {
+                id: index + 10,
+                filament,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut state = PreparedCompletionState {
+        staffs: vec![PreparedStaff {
+            id: 1,
+            kind: StaffCandidateKind::Standard,
+            left: 10.0,
+            right: 100.0,
+            interline: INTERLINE,
+            small: false,
+            short: false,
+            lines,
+        }],
+        completion_systems: None,
+        discarded_filaments: Vec::new(),
+        horizontal_sections: Vec::new(),
+        binary_buffer: Some(binary),
+        thick_section_ids: Vec::new(),
+        thin_section_ids: Vec::new(),
+        defined_endpoints: Vec::new(),
+        discarded_filament_steals: Vec::new(),
+        discarded_filament_recomputations: Vec::new(),
+        completed_stages: Vec::new(),
+    };
+    define_end_points(
+        &mut state,
+        DefineEndPointsParameters {
+            scale_interline: INTERLINE as i32,
+            foreground_thickness: 1,
+            maximum_ending_dx: 10,
+            pattern_width: 10,
+            pattern_jitter: 2,
+        },
+    )?;
+
+    let resolved = state
+        .defined_endpoints
+        .first()
+        .ok_or("endpoint fixture produced no resolved staff")?;
+    let (fit_x, fit_y, fit_offset, fit_ratio) = resolved
+        .right_pattern_fit
+        .ok_or("endpoint fixture did not use the right raster pattern")?;
+    let recovered = resolved
+        .lines
+        .first()
+        .ok_or("endpoint fixture has no recovered line")?;
+    let close = resolved
+        .lines
+        .get(1)
+        .ok_or("endpoint fixture has no close line")?;
+    let binary = state
+        .binary_buffer
+        .as_ref()
+        .ok_or("endpoint fixture lost its binary raster")?;
+    let pixels = binary.to_pixels();
+    let pattern = StaffPattern::new(5, 10, 1, INTERLINE as f64);
+    let fit_at_zero = pattern.evaluate((90.0, 10.0), WIDTH, HEIGHT, &pixels);
+    let fit_at_one = pattern.evaluate((90.0, 11.0), WIDTH, HEIGHT, &pixels);
+    let fit_at_minus_one = pattern.evaluate((90.0, 9.0), WIDTH, HEIGHT, &pixels);
+    let geometry = state.staffs[0].lines[0].filament.geometry()?;
+    Ok(format!(
+        "mean:{:.12};slope:{:.12};right-fit:{fit_x},{fit_y:.12},{fit_offset},{fit_ratio:.12}/probes:{fit_at_zero:.12},{fit_at_one:.12},{fit_at_minus_one:.12};close:l1@{:.12},{:.12};recovered:l0@{:.12},{:.12};geometry:{:.12},{:.12}>{:.12},{:.12};at95:{:.12}/{:.12}",
+        resolved.mean_interline,
+        resolved.right_ending_slope,
+        close.right.x,
+        close.right.y,
+        recovered.right.x,
+        recovered.right.y,
+        geometry.start().0,
+        geometry.start().1,
+        geometry.stop().0,
+        geometry.stop().1,
+        geometry.position_at(95.0)?,
+        geometry.slope_at(95.0)?,
     ))
 }
 
@@ -2616,6 +2723,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.raw-lines.synthetic={}",
         grid_raw_lines_vector()?
+    ));
+    lines.push(format!(
+        "grid.line-endpoints.synthetic={}",
+        grid_line_endpoints_vector()?
     ));
     lines.push(format!(
         "grid.output-boundary.synthetic={}",

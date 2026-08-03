@@ -1396,6 +1396,7 @@ public final class RustParityProbe
 
         System.out.println("grid.skew.synthetic=" + gridSkew());
         System.out.println("grid.raw-lines.synthetic=" + gridRawLines());
+        System.out.println("grid.line-endpoints.synthetic=" + gridLineEndPoints());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
         System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
@@ -2213,6 +2214,86 @@ public final class RustParityProbe
                 discarded.size(),
                 staves.size(),
                 String.join("|", staves));
+    }
+
+    /** Freeze the live {@code LinesRetriever.defineEndPoints} mutation boundary. */
+    private static String gridLineEndPoints ()
+        throws Exception
+    {
+        final int width = 120;
+        final int height = 70;
+        final int interline = 10;
+        RunTable binary = new RunTable(Orientation.VERTICAL, width, height);
+        for (int x = 90; x < 100; x++) {
+            for (int y : new int[]{11, 21, 31, 41, 51}) {
+                binary.addRun(x, new Run(y, 1));
+            }
+        }
+
+        Book book = new Book(Path.of("grid-line-endpoints.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, binary);
+        sheet.setScale(new Scale(
+                new Scale.InterlineScale(interline, interline, interline),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+
+        List<org.audiveris.omr.sheet.grid.LineInfo> lines = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            int stop = (index == 0) ? 89 : 100;
+            lines.add(staffFilament(10, 10 + (index * interline), stop - 9, interline));
+        }
+        Staff staff = new Staff(1, 10.0, 100.0, interline, lines);
+        SystemInfo system = new SystemInfo(1, sheet, List.of(staff));
+        sheet.getSystemManager().setSystems(List.of(system));
+        sheet.getStaffManager().addStaff(staff);
+
+        GridBuilder grid = new GridBuilder(sheet);
+        ByteProcessor buffer = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        Field binaryBuffer = grid.linesRetriever.getClass().getDeclaredField("binaryBuffer");
+        binaryBuffer.setAccessible(true);
+        binaryBuffer.set(grid.linesRetriever, buffer);
+
+        double meanInterline = staff.getMeanInterline();
+        double rightSlope = staff.getEndingSlope(
+                org.audiveris.omr.util.HorizontalSide.RIGHT);
+        StaffPattern pattern = new StaffPattern(5, 10, 1, interline);
+        double fitAtZero = pattern.evaluate(new Point2D.Double(90, 10), buffer);
+        double fitAtOne = pattern.evaluate(new Point2D.Double(90, 11), buffer);
+        double fitAtMinusOne = pattern.evaluate(new Point2D.Double(90, 9), buffer);
+
+        invokePrivate(grid.linesRetriever, "defineEndPoints");
+
+        StaffFilament recovered = (StaffFilament) staff.getLines().get(0);
+        StaffFilament close = (StaffFilament) staff.getLines().get(1);
+        Point2D recoveredLeft = recovered.getEndPoint(
+                org.audiveris.omr.util.HorizontalSide.LEFT);
+        Point2D recoveredRight = recovered.getEndPoint(
+                org.audiveris.omr.util.HorizontalSide.RIGHT);
+        Point2D closeRight = close.getEndPoint(
+                org.audiveris.omr.util.HorizontalSide.RIGHT);
+        return String.format(
+                java.util.Locale.ROOT,
+                "mean:%.12f;slope:%.12f;right-fit:90,10.000000000000,1,%.12f/probes:%.12f,%.12f,%.12f;close:l1@%.12f,%.12f;recovered:l0@%.12f,%.12f;geometry:%.12f,%.12f>%.12f,%.12f;at95:%.12f/%.12f",
+                meanInterline,
+                rightSlope,
+                fitAtOne,
+                fitAtZero,
+                fitAtOne,
+                fitAtMinusOne,
+                closeRight.getX(),
+                closeRight.getY(),
+                recoveredRight.getX(),
+                recoveredRight.getY(),
+                recoveredLeft.getX(),
+                recoveredLeft.getY(),
+                recoveredRight.getX(),
+                recoveredRight.getY(),
+                recovered.getPositionAt(95, Orientation.HORIZONTAL),
+                recovered.getSlopeAt(95, Orientation.HORIZONTAL));
     }
 
     @SuppressWarnings("unchecked")
