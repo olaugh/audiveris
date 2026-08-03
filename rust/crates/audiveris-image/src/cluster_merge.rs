@@ -1023,8 +1023,7 @@ mod tests {
 
     #[test]
     fn pair_pass_uses_inclusive_gap_and_center_limits() {
-        let (mut ownership, mut clusters, order) =
-            cluster_state(&[(1, 0, 10), (2, 80, 12)]);
+        let (mut ownership, mut clusters, order) = cluster_state(&[(1, 0, 10), (2, 80, 12)]);
         let result = merge_cluster_pairs_in_order(
             &mut ownership,
             &mut clusters,
@@ -1034,8 +1033,7 @@ mod tests {
         .unwrap();
         assert_eq!(result.survivors(), [order[0]]);
 
-        let (mut ownership, mut clusters, order) =
-            cluster_state(&[(1, 0, 10), (2, 80, 13)]);
+        let (mut ownership, mut clusters, order) = cluster_state(&[(1, 0, 10), (2, 80, 13)]);
         let result = merge_cluster_pairs_in_order(
             &mut ownership,
             &mut clusters,
@@ -1078,11 +1076,8 @@ mod tests {
 
     #[test]
     fn pair_pass_discards_only_unmerged_clusters_strictly_below_length() {
-        let (mut ownership, mut clusters, order) = cluster_state_with_lengths(&[
-            (1, 0, 10, 19),
-            (2, 100, 20, 20),
-            (3, 121, 20, 10),
-        ]);
+        let (mut ownership, mut clusters, order) =
+            cluster_state_with_lengths(&[(1, 0, 10, 19), (2, 100, 20, 20), (3, 121, 20, 10)]);
 
         let result = merge_cluster_pairs_in_order(
             &mut ownership,
