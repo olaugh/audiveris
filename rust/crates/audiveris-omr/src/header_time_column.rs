@@ -80,6 +80,168 @@ pub trait VisualHeaderTimeRecognizer {
     ) -> Result<HeaderTimeRecognition, Self::Error>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimeWholeClassifierProposal {
+    pub id: usize,
+    pub value: NeutralTimeValue,
+    pub grade: f64,
+    pub symbol_bounds: HeaderBounds,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimeNumberClassifierProposal {
+    pub id: usize,
+    pub value: i32,
+    pub grade: f64,
+    pub bounds: HeaderBounds,
+    pub center_x: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeaderTimeClassifierProposals {
+    pub range: StaffHeaderRange,
+    pub wholes: Vec<TimeWholeClassifierProposal>,
+    pub numerators: Vec<TimeNumberClassifierProposal>,
+    pub denominators: Vec<TimeNumberClassifierProposal>,
+}
+
+pub trait VisualHeaderTimeProposalRecognizer {
+    type Error;
+
+    fn classify_time_parts(
+        &mut self,
+        input: HeaderTimeRecognitionInput,
+        range: &StaffHeaderRange,
+    ) -> Result<HeaderTimeClassifierProposals, Self::Error>;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeaderTimeLifecycleContext {
+    pub maximum_halves_dx: i32,
+    pub top_bottom_source_ratio: f64,
+    /// Stable pair inter IDs allocated outside the classifier seam.
+    pub pair_ids: BTreeMap<(usize, usize), usize>,
+    /// Java defaults plus configured optional time values, in no special order.
+    pub supported_values: Vec<(i32, i32)>,
+}
+
+/// Native whole/number lifecycle around injected classifier proposals.
+pub struct HeaderTimeLifecycleRecognizer<Visual> {
+    visual: Visual,
+    contexts: BTreeMap<usize, HeaderTimeLifecycleContext>,
+}
+
+impl<Visual> HeaderTimeLifecycleRecognizer<Visual> {
+    #[must_use]
+    pub fn new(visual: Visual, contexts: BTreeMap<usize, HeaderTimeLifecycleContext>) -> Self {
+        Self { visual, contexts }
+    }
+
+    #[must_use]
+    pub const fn visual(&self) -> &Visual {
+        &self.visual
+    }
+}
+
+impl<Visual> VisualHeaderTimeRecognizer for HeaderTimeLifecycleRecognizer<Visual>
+where
+    Visual: VisualHeaderTimeProposalRecognizer,
+{
+    type Error = Visual::Error;
+
+    fn recognize_time(
+        &mut self,
+        input: HeaderTimeRecognitionInput,
+        range: &StaffHeaderRange,
+    ) -> Result<HeaderTimeRecognition, Self::Error> {
+        let proposals = self.visual.classify_time_parts(input, range)?;
+        let context = &self.contexts[&input.staff_id];
+        let mut candidates = proposals
+            .wholes
+            .into_iter()
+            .map(|whole| NeutralTimeCandidate {
+                id: whole.id,
+                kind: NeutralTimeCandidateKind::Whole,
+                value: whole.value,
+                grade: whole.grade,
+                symbol_bounds: whole.symbol_bounds,
+                member_ids: Vec::new(),
+                staff_id: Some(input.staff_id),
+                in_sig: false,
+                original_glyphs_registered: false,
+                removed: false,
+            })
+            .collect::<Vec<_>>();
+
+        // Java top list outer loop, bottom list inner loop, strict dx gate.
+        for numerator in &proposals.numerators {
+            for denominator in &proposals.denominators {
+                if denominator.center_x.wrapping_sub(numerator.center_x).abs()
+                    > context.maximum_halves_dx
+                    || !context
+                        .supported_values
+                        .contains(&(numerator.value, denominator.value))
+                {
+                    continue;
+                }
+                let Some(pair_id) = context.pair_ids.get(&(numerator.id, denominator.id)) else {
+                    continue;
+                };
+                let top_contribution =
+                    contribution_of(denominator.grade, context.top_bottom_source_ratio);
+                let bottom_contribution =
+                    contribution_of(numerator.grade, context.top_bottom_source_ratio);
+                let grade = (contextual(numerator.grade, top_contribution)
+                    + contextual(denominator.grade, bottom_contribution))
+                    / 2.0;
+                candidates.push(NeutralTimeCandidate {
+                    id: *pair_id,
+                    kind: NeutralTimeCandidateKind::Pair,
+                    value: NeutralTimeValue {
+                        specific_shape: None,
+                        numerator: numerator.value,
+                        denominator: denominator.value,
+                    },
+                    grade,
+                    symbol_bounds: union_bounds(numerator.bounds, denominator.bounds),
+                    member_ids: vec![numerator.id, denominator.id],
+                    staff_id: Some(input.staff_id),
+                    in_sig: false,
+                    original_glyphs_registered: false,
+                    removed: false,
+                });
+            }
+        }
+        let filter_passed = !candidates.is_empty();
+        Ok(HeaderTimeRecognition {
+            range: proposals.range,
+            candidates,
+            filter_passed,
+        })
+    }
+}
+
+fn contribution_of(partner: f64, ratio: f64) -> f64 {
+    partner * (ratio - 1.0)
+}
+
+fn contextual(intrinsic: f64, contribution: f64) -> f64 {
+    ((1.0 + contribution) * intrinsic) / (1.0 + (contribution * intrinsic))
+}
+
+fn union_bounds(one: HeaderBounds, two: HeaderBounds) -> HeaderBounds {
+    let x = one.x.min(two.x);
+    let y = one.y.min(two.y);
+    let right = one.right().max(two.right());
+    let bottom = (one.y + one.height - 1).max(two.y + two.height - 1);
+    HeaderBounds {
+        x,
+        y,
+        width: right - x + 1,
+        height: bottom - y + 1,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum HeaderTimeColumnError<VisualError> {
     MissingHeader {
@@ -528,6 +690,23 @@ mod tests {
         calls: Vec<HeaderTimeRecognitionInput>,
     }
 
+    #[derive(Default)]
+    struct FakeProposalVisual {
+        proposals: BTreeMap<usize, HeaderTimeClassifierProposals>,
+    }
+
+    impl VisualHeaderTimeProposalRecognizer for FakeProposalVisual {
+        type Error = &'static str;
+
+        fn classify_time_parts(
+            &mut self,
+            input: HeaderTimeRecognitionInput,
+            _range: &StaffHeaderRange,
+        ) -> Result<HeaderTimeClassifierProposals, Self::Error> {
+            Ok(self.proposals.remove(&input.staff_id).unwrap())
+        }
+    }
+
     impl VisualHeaderTimeRecognizer for FakeVisual {
         type Error = &'static str;
 
@@ -832,5 +1011,167 @@ mod tests {
         let mut column = HeadlessHeaderTimeColumn::new(visual);
         assert!(column.retrieve_time(&mut system).unwrap() >= 0);
         assert_eq!(column.time_value(), Some(expected));
+    }
+
+    fn lifecycle_range() -> StaffHeaderRange {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 15;
+        range.browse_stop = 45;
+        range.set_start(18);
+        range.set_stop(35);
+        range.valid = true;
+        range
+    }
+
+    fn number(
+        id: usize,
+        value: i32,
+        grade: f64,
+        center_x: i32,
+        y: i32,
+    ) -> TimeNumberClassifierProposal {
+        TimeNumberClassifierProposal {
+            id,
+            value,
+            grade,
+            bounds: HeaderBounds {
+                x: center_x - 3,
+                y,
+                width: 7,
+                height: 10,
+            },
+            center_x,
+        }
+    }
+
+    fn lifecycle_context() -> HeaderTimeLifecycleContext {
+        HeaderTimeLifecycleContext {
+            maximum_halves_dx: 3,
+            top_bottom_source_ratio: 2.0,
+            pair_ids: BTreeMap::from([((11, 21), 100), ((12, 21), 101)]),
+            supported_values: vec![
+                (2, 2),
+                (3, 2),
+                (2, 4),
+                (3, 4),
+                (4, 4),
+                (5, 4),
+                (6, 4),
+                (3, 8),
+                (6, 8),
+                (9, 8),
+                (12, 8),
+            ],
+        }
+    }
+
+    #[test]
+    fn time_lifecycle_preserves_whole_then_top_bottom_pair_order_and_contextual_grade() {
+        let proposals = HeaderTimeClassifierProposals {
+            range: lifecycle_range(),
+            wholes: vec![TimeWholeClassifierProposal {
+                id: 1,
+                value: value(4, 4),
+                grade: 0.7,
+                symbol_bounds: bounds(18, 8),
+            }],
+            numerators: vec![number(11, 3, 0.8, 25, 10), number(12, 6, 0.6, 26, 10)],
+            denominators: vec![number(21, 8, 0.9, 24, 25)],
+        };
+        let visual = FakeProposalVisual {
+            proposals: BTreeMap::from([(1, proposals)]),
+        };
+        let mut lifecycle =
+            HeaderTimeLifecycleRecognizer::new(visual, BTreeMap::from([(1, lifecycle_context())]));
+        let result = lifecycle
+            .recognize_time(
+                HeaderTimeRecognitionInput {
+                    system_id: 7,
+                    staff_id: 1,
+                    browse_start: 15,
+                },
+                &StaffHeaderRange::default(),
+            )
+            .unwrap();
+        assert!(result.filter_passed);
+        assert_eq!(
+            result
+                .candidates
+                .iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            vec![1, 100, 101]
+        );
+        assert_eq!(result.candidates[1].member_ids, vec![11, 21]);
+        assert!(result.candidates[1].grade > 0.85);
+        assert_eq!(
+            result.candidates[1].symbol_bounds,
+            HeaderBounds {
+                x: 21,
+                y: 10,
+                width: 8,
+                height: 25
+            }
+        );
+    }
+
+    #[test]
+    fn time_lifecycle_rejects_unsupported_or_misaligned_pairs_and_fails_empty_filter() {
+        let proposals = HeaderTimeClassifierProposals {
+            range: lifecycle_range(),
+            wholes: Vec::new(),
+            numerators: vec![number(11, 7, 0.8, 10, 10), number(12, 3, 0.8, 30, 10)],
+            denominators: vec![number(21, 8, 0.9, 20, 25)],
+        };
+        let visual = FakeProposalVisual {
+            proposals: BTreeMap::from([(1, proposals)]),
+        };
+        let mut lifecycle =
+            HeaderTimeLifecycleRecognizer::new(visual, BTreeMap::from([(1, lifecycle_context())]));
+        let result = lifecycle
+            .recognize_time(
+                HeaderTimeRecognitionInput {
+                    system_id: 7,
+                    staff_id: 1,
+                    browse_start: 15,
+                },
+                &StaffHeaderRange::default(),
+            )
+            .unwrap();
+        assert!(!result.filter_passed);
+        assert!(result.candidates.is_empty());
+        assert_eq!(result.range.precise_stop(), Some(35));
+    }
+
+    #[test]
+    fn lifecycle_integrates_with_column_cleanup_on_empty_standard_staff() {
+        let visual = FakeProposalVisual {
+            proposals: BTreeMap::from([(
+                1,
+                HeaderTimeClassifierProposals {
+                    range: lifecycle_range(),
+                    wholes: Vec::new(),
+                    numerators: Vec::new(),
+                    denominators: Vec::new(),
+                },
+            )]),
+        };
+        let lifecycle =
+            HeaderTimeLifecycleRecognizer::new(visual, BTreeMap::from([(1, lifecycle_context())]));
+        let mut column = HeadlessHeaderTimeColumn::new(lifecycle);
+        let mut system = HeadlessHeaderSystem::new(7, vec![staff(1, 10, 15)]);
+        assert_eq!(column.retrieve_time(&mut system), Ok(-1));
+        assert!(system.sig_vertex_ids.is_empty());
+        assert_eq!(
+            system.staffs[0]
+                .header
+                .as_ref()
+                .unwrap()
+                .time_range
+                .as_ref()
+                .unwrap()
+                .precise_stop(),
+            Some(35)
+        );
     }
 }
