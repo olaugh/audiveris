@@ -209,6 +209,381 @@ fn horizontal_neighbor(
     None
 }
 
+/// One exact path segment from a staff-line spline.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BoundarySegment {
+    Line {
+        start: (f64, f64),
+        end: (f64, f64),
+    },
+    Quadratic {
+        start: (f64, f64),
+        control: (f64, f64),
+        end: (f64, f64),
+    },
+    Cubic {
+        start: (f64, f64),
+        control1: (f64, f64),
+        control2: (f64, f64),
+        end: (f64, f64),
+    },
+}
+
+impl BoundarySegment {
+    fn start(self) -> (f64, f64) {
+        match self {
+            Self::Line { start, .. }
+            | Self::Quadratic { start, .. }
+            | Self::Cubic { start, .. } => start,
+        }
+    }
+
+    fn end(self) -> (f64, f64) {
+        match self {
+            Self::Line { end, .. } | Self::Quadratic { end, .. } | Self::Cubic { end, .. } => end,
+        }
+    }
+
+    fn translated_y(self, delta: f64) -> Self {
+        let point = |(x, y): (f64, f64)| (x, y + delta);
+        match self {
+            Self::Line { start, end } => Self::Line {
+                start: point(start),
+                end: point(end),
+            },
+            Self::Quadratic {
+                start,
+                control,
+                end,
+            } => Self::Quadratic {
+                start: point(start),
+                control: point(control),
+                end: point(end),
+            },
+            Self::Cubic {
+                start,
+                control1,
+                control2,
+                end,
+            } => Self::Cubic {
+                start: point(start),
+                control1: point(control1),
+                control2: point(control2),
+                end: point(end),
+            },
+        }
+    }
+
+    fn reversed(self) -> Self {
+        match self {
+            Self::Line { start, end } => Self::Line {
+                start: end,
+                end: start,
+            },
+            Self::Quadratic {
+                start,
+                control,
+                end,
+            } => Self::Quadratic {
+                start: end,
+                control,
+                end: start,
+            },
+            Self::Cubic {
+                start,
+                control1,
+                control2,
+                end,
+            } => Self::Cubic {
+                start: end,
+                control1: control2,
+                control2: control1,
+                end: start,
+            },
+        }
+    }
+
+    fn y_at_x(self, x: f64) -> Option<f64> {
+        let (start_x, _) = self.start();
+        let (end_x, _) = self.end();
+        if x < start_x || x > end_x {
+            return None;
+        }
+        if end_x == start_x {
+            return None;
+        }
+        let mut low = 0.0;
+        let mut high = 1.0;
+        // Staff splines are x-monotone. Bisection evaluates their actual
+        // quadratic/cubic x controls, unlike `GeoPath.yAtX`'s convenience
+        // parameterization, because Java Area containment uses path geometry.
+        for _ in 0..64 {
+            let middle = (low + high) / 2.0;
+            if self.point_at(middle).0 < x {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        Some(self.point_at((low + high) / 2.0).1)
+    }
+
+    fn point_at(self, t: f64) -> (f64, f64) {
+        let u = 1.0 - t;
+        match self {
+            Self::Line { start, end } => ((u * start.0) + (t * end.0), (u * start.1) + (t * end.1)),
+            Self::Quadratic {
+                start,
+                control,
+                end,
+            } => (
+                (u * u * start.0) + (2.0 * u * t * control.0) + (t * t * end.0),
+                (u * u * start.1) + (2.0 * u * t * control.1) + (t * t * end.1),
+            ),
+            Self::Cubic {
+                start,
+                control1,
+                control2,
+                end,
+            } => (
+                (u * u * u * start.0)
+                    + (3.0 * u * u * t * control1.0)
+                    + (3.0 * u * t * t * control2.0)
+                    + (t * t * t * end.0),
+                (u * u * u * start.1)
+                    + (3.0 * u * u * t * control1.1)
+                    + (3.0 * u * t * t * control2.1)
+                    + (t * t * t * end.1),
+            ),
+        }
+    }
+}
+
+/// Ordered spline path for one first or last staff line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StaffBoundary {
+    pub segments: Vec<BoundarySegment>,
+}
+
+impl StaffBoundary {
+    fn first_point(&self) -> (f64, f64) {
+        self.segments
+            .first()
+            .expect("a staff line has a spline segment")
+            .start()
+    }
+
+    fn last_point(&self) -> (f64, f64) {
+        self.segments
+            .last()
+            .expect("a staff line has a spline segment")
+            .end()
+    }
+
+    /// Java `ReversePathIterator` geometry: segment order and direction are
+    /// reversed, including the cubic control-point swap.
+    #[must_use]
+    pub fn reversed(&self) -> Self {
+        Self {
+            segments: self
+                .segments
+                .iter()
+                .rev()
+                .copied()
+                .map(BoundarySegment::reversed)
+                .collect(),
+        }
+    }
+}
+
+/// Staff boundaries associated with one system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SystemStaffBoundaries {
+    pub first_line: StaffBoundary,
+    pub last_line: StaffBoundary,
+}
+
+/// Curved system area produced by Java `computeSystemArea`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopulationSystemArea {
+    pub system_id: SystemId,
+    pub left: i32,
+    pub right: i32,
+    north: StaffBoundary,
+    south: StaffBoundary,
+}
+
+impl PopulationSystemArea {
+    /// Java `Area.contains(Point2D)` behavior for the x-monotone system path.
+    /// Boundary points are excluded, including the vertical slice boundaries.
+    #[must_use]
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        if x <= f64::from(self.left) || x >= f64::from(self.right) {
+            return false;
+        }
+        let Some(north) = boundary_y_at_x(&self.north, x) else {
+            return false;
+        };
+        let Some(south) = boundary_y_at_x(&self.south, x) else {
+            return false;
+        };
+        y > north && y < south
+    }
+
+    #[must_use]
+    pub fn north(&self) -> &StaffBoundary {
+        &self.north
+    }
+
+    #[must_use]
+    pub fn south(&self) -> &StaffBoundary {
+        &self.south
+    }
+
+    /// Raw Java `wholePath` segment order before optional slice intersection:
+    /// north left-to-right, a connector, south right-to-left, and closure.
+    #[must_use]
+    pub fn outline_segments(&self) -> Vec<BoundarySegment> {
+        let mut outline = self.north.segments.clone();
+        let reversed_south = self.south.reversed();
+        let north_end = self.north.last_point();
+        let south_start = reversed_south.first_point();
+        if north_end != south_start {
+            outline.push(BoundarySegment::Line {
+                start: north_end,
+                end: south_start,
+            });
+        }
+        outline.extend(reversed_south.segments);
+        let south_end = self.south.first_point();
+        let north_start = self.north.first_point();
+        if south_end != north_start {
+            outline.push(BoundarySegment::Line {
+                start: south_end,
+                end: north_start,
+            });
+        }
+        outline
+    }
+}
+
+fn boundary_y_at_x(boundary: &StaffBoundary, x: f64) -> Option<f64> {
+    boundary
+        .segments
+        .iter()
+        .copied()
+        .find_map(|segment| segment.y_at_x(x))
+}
+
+/// Build every system area in sheet order, including side-by-side slices.
+///
+/// `vertical_margin` is the pixel conversion of Java's `verticalAreaMargin`.
+/// Neighbor rows are concatenated by system ID exactly as `getGlobalLine` does.
+#[must_use]
+pub fn build_population_system_areas(
+    systems: &[PopulationSystemGeometry],
+    staff_lines: &[SystemStaffBoundaries],
+    sheet_width: i32,
+    sheet_height: i32,
+    vertical_margin: i32,
+) -> Vec<PopulationSystemArea> {
+    assert_eq!(systems.len(), staff_lines.len());
+    systems
+        .iter()
+        .enumerate()
+        .map(|(index, system)| {
+            let left_neighbor = horizontal_neighbor(systems, index, -1);
+            let left = left_neighbor.map_or(0, |neighbor| {
+                ((systems[neighbor].left + systems[neighbor].width) + system.left) / 2
+            });
+            let right_neighbor = horizontal_neighbor(systems, index, 1);
+            let right = right_neighbor.map_or(sheet_width, |neighbor| {
+                ((system.left + system.width) + systems[neighbor].left) / 2
+            });
+
+            let aboves = vertical_neighbors(systems, index, -1);
+            let north = if aboves.is_empty() {
+                horizontal_boundary(left, right, 0)
+            } else {
+                global_boundary(&aboves, staff_lines, false, sheet_width, vertical_margin)
+            };
+            let belows = vertical_neighbors(systems, index, 1);
+            let south = if belows.is_empty() {
+                horizontal_boundary(left, right, sheet_height)
+            } else {
+                global_boundary(&belows, staff_lines, true, sheet_width, -vertical_margin)
+            };
+
+            PopulationSystemArea {
+                system_id: system.system_id,
+                left,
+                right,
+                north,
+                south,
+            }
+        })
+        .collect()
+}
+
+fn horizontal_boundary(left: i32, right: i32, y: i32) -> StaffBoundary {
+    StaffBoundary {
+        segments: vec![BoundarySegment::Line {
+            start: (f64::from(left), f64::from(y)),
+            end: (f64::from(right), f64::from(y)),
+        }],
+    }
+}
+
+fn global_boundary(
+    system_indices: &[usize],
+    staff_lines: &[SystemStaffBoundaries],
+    first_line: bool,
+    sheet_width: i32,
+    vertical_translation: i32,
+) -> StaffBoundary {
+    let chosen = |index: usize| {
+        if first_line {
+            &staff_lines[index].first_line
+        } else {
+            &staff_lines[index].last_line
+        }
+    };
+    let delta = f64::from(vertical_translation);
+    let first_point = chosen(system_indices[0]).first_point();
+    let mut current = (0.0, first_point.1 + delta);
+    let mut segments = Vec::new();
+    for &index in system_indices {
+        let line = chosen(index);
+        let start = line.first_point();
+        let translated_start = (start.0, start.1 + delta);
+        if current != translated_start {
+            segments.push(BoundarySegment::Line {
+                start: current,
+                end: translated_start,
+            });
+        }
+        segments.extend(
+            line.segments
+                .iter()
+                .copied()
+                .map(|segment| segment.translated_y(delta)),
+        );
+        current = (line.last_point().0, line.last_point().1 + delta);
+    }
+    let last_y = chosen(*system_indices.last().expect("nonempty neighbor row"))
+        .last_point()
+        .1
+        + delta;
+    let right = (f64::from(sheet_width), last_y);
+    if current != right {
+        segments.push(BoundarySegment::Line {
+            start: current,
+            end: right,
+        });
+    }
+    StaffBoundary { segments }
+}
+
 /// System state consumed and mutated by Java `allocatePages`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PopulationSystem<Reference> {
@@ -356,6 +731,15 @@ pub fn population_page_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn straight_boundary(x1: f64, y1: f64, x2: f64, y2: f64) -> StaffBoundary {
+        StaffBoundary {
+            segments: vec![BoundarySegment::Line {
+                start: (x1, y1),
+                end: (x2, y2),
+            }],
+        }
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Call {
@@ -651,6 +1035,171 @@ mod tests {
             },
         ];
         assert!(!check_population_indentation(&systems, 1, 1.0));
+    }
+
+    #[test]
+    fn system_areas_concatenate_neighbor_row_by_id_and_apply_vertical_margin() {
+        let systems = [
+            PopulationSystemGeometry {
+                system_id: 1,
+                left: 0,
+                width: 90,
+                top: 0,
+                bottom: 30,
+                area_left: 0,
+                deskewed_upper_left_x: 0.0,
+            },
+            PopulationSystemGeometry {
+                system_id: 2,
+                left: 110,
+                width: 90,
+                top: 0,
+                bottom: 30,
+                area_left: 100,
+                deskewed_upper_left_x: 110.0,
+            },
+            PopulationSystemGeometry {
+                system_id: 3,
+                left: 20,
+                width: 160,
+                top: 100,
+                bottom: 130,
+                area_left: 0,
+                deskewed_upper_left_x: 20.0,
+            },
+        ];
+        let lines = [
+            SystemStaffBoundaries {
+                first_line: straight_boundary(10.0, 10.0, 80.0, 10.0),
+                last_line: straight_boundary(10.0, 20.0, 80.0, 20.0),
+            },
+            SystemStaffBoundaries {
+                first_line: straight_boundary(120.0, 12.0, 190.0, 12.0),
+                last_line: straight_boundary(120.0, 30.0, 190.0, 30.0),
+            },
+            SystemStaffBoundaries {
+                first_line: straight_boundary(20.0, 105.0, 180.0, 105.0),
+                last_line: straight_boundary(20.0, 125.0, 180.0, 125.0),
+            },
+        ];
+        let areas = build_population_system_areas(&systems, &lines, 200, 180, 5);
+        let lower = &areas[2];
+        assert_eq!((lower.left, lower.right), (0, 200));
+        // The initially found upper neighbor is #2, but Java expands the row
+        // and sorts it by ID before concatenating #1 then #2.
+        assert_eq!(boundary_y_at_x(lower.north(), 50.0), Some(25.0));
+        assert_eq!(boundary_y_at_x(lower.north(), 150.0), Some(35.0));
+        assert!(lower.contains(50.0, 25.1));
+        assert!(!lower.contains(50.0, 25.0));
+    }
+
+    #[test]
+    fn side_by_side_slice_uses_java_get_right_midpoint_and_excludes_divider() {
+        let systems = [
+            PopulationSystemGeometry {
+                system_id: 1,
+                left: 0,
+                width: 90,
+                top: 0,
+                bottom: 40,
+                area_left: 0,
+                deskewed_upper_left_x: 0.0,
+            },
+            PopulationSystemGeometry {
+                system_id: 2,
+                left: 111,
+                width: 89,
+                top: 0,
+                bottom: 40,
+                area_left: 100,
+                deskewed_upper_left_x: 111.0,
+            },
+        ];
+        let lines = [
+            SystemStaffBoundaries {
+                first_line: straight_boundary(0.0, 10.0, 90.0, 10.0),
+                last_line: straight_boundary(0.0, 30.0, 90.0, 30.0),
+            },
+            SystemStaffBoundaries {
+                first_line: straight_boundary(111.0, 10.0, 200.0, 10.0),
+                last_line: straight_boundary(111.0, 30.0, 200.0, 30.0),
+            },
+        ];
+        let areas = build_population_system_areas(&systems, &lines, 200, 100, 0);
+        // Java getRight() is left + width, so (90 + 111) / 2 truncates to 100.
+        assert_eq!((areas[0].left, areas[0].right), (0, 100));
+        assert_eq!((areas[1].left, areas[1].right), (100, 200));
+        assert!(areas[0].contains(99.999, 50.0));
+        assert!(!areas[0].contains(100.0, 50.0));
+        assert!(!areas[1].contains(100.0, 50.0));
+        assert!(areas[1].contains(100.001, 50.0));
+    }
+
+    #[test]
+    fn area_containment_evaluates_actual_cubic_x_controls() {
+        let curved = StaffBoundary {
+            segments: vec![BoundarySegment::Cubic {
+                start: (0.0, 10.0),
+                control1: (0.0, 40.0),
+                control2: (20.0, 40.0),
+                end: (100.0, 10.0),
+            }],
+        };
+        let north = boundary_y_at_x(&curved, 50.0).expect("x is on cubic");
+        // A linear endpoint parameter would yield 32.5 at x=50. The Area
+        // path uses cubic x controls and therefore reaches a later parameter.
+        assert!((north - 32.5).abs() > 0.5);
+        let area = PopulationSystemArea {
+            system_id: 1,
+            left: 0,
+            right: 100,
+            north: curved,
+            south: straight_boundary(0.0, 80.0, 100.0, 80.0),
+        };
+        assert!(!area.contains(50.0, north));
+        assert!(area.contains(50.0, north + 0.001));
+        assert!(!area.contains(50.0, 80.0));
+    }
+
+    #[test]
+    fn outline_reverses_south_segments_and_cubic_controls_like_java_iterator() {
+        let area = PopulationSystemArea {
+            system_id: 1,
+            left: 0,
+            right: 100,
+            north: straight_boundary(0.0, 10.0, 100.0, 10.0),
+            south: StaffBoundary {
+                segments: vec![BoundarySegment::Cubic {
+                    start: (0.0, 70.0),
+                    control1: (20.0, 75.0),
+                    control2: (80.0, 65.0),
+                    end: (100.0, 70.0),
+                }],
+            },
+        };
+        assert_eq!(
+            area.outline_segments(),
+            [
+                BoundarySegment::Line {
+                    start: (0.0, 10.0),
+                    end: (100.0, 10.0),
+                },
+                BoundarySegment::Line {
+                    start: (100.0, 10.0),
+                    end: (100.0, 70.0),
+                },
+                BoundarySegment::Cubic {
+                    start: (100.0, 70.0),
+                    control1: (80.0, 65.0),
+                    control2: (20.0, 75.0),
+                    end: (0.0, 70.0),
+                },
+                BoundarySegment::Line {
+                    start: (0.0, 70.0),
+                    end: (0.0, 10.0),
+                },
+            ]
+        );
     }
 
     #[test]
