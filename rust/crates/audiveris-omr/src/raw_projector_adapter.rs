@@ -6,17 +6,23 @@
 //! then runs the already ported neutral projection logic. Every retained peak
 //! receives the sheet's exact deskew transform before it enters
 //! [`BarsProjectorRegistry`]. Detached brace candidates receive the same
-//! treatment. Peak-graph alignment and system/column grouping remain later
-//! stages.
+//! treatment. The adapter can also materialize the exact ordered peak-graph
+//! vertices. A single retained staff has an unambiguous one-system grouping
+//! and can therefore reach bar-column construction without any invented
+//! alignment edges. Multi-staff grouping stops explicitly at the still-
+//! missing Java alignment and connection-discovery collaborators.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
 use audiveris_image::{
-    bar_column::StaffId,
+    bar_alignment::BarAlignment,
+    bar_column::{BarColumn, StaffId},
+    bars_logic::{BarsLogicError, build_bar_columns_from_graph},
     filament::{FilamentError, FilamentGeometry},
     lines_coordinator::StaffCandidateKind,
+    peak_graph::PeakGraph,
     prepared_lines::{PreparedStaff, PreparedStaffHandoff},
     projection::{
         BarlineHeightSpec, BarsProjectorRegistry, BraceSearchRequest, PeakCoreGeometry,
@@ -24,7 +30,7 @@ use audiveris_image::{
         StaffProjectorProcessTuning, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
         barline_height, process_staff_projection,
     },
-    staff_peak::{StaffPeak, StaffPeakError},
+    staff_peak::{StaffPeak, StaffPeakError, StaffPeakKey},
 };
 
 use crate::grid_executor::HeadlessSkew;
@@ -74,6 +80,39 @@ pub struct RawProjectorPreparation {
     pub brace_peaks: Vec<PreparedBracePeak>,
 }
 
+/// Deepest honest downstream boundary available from raw projectors alone.
+///
+/// Java discovers cross-staff alignments and concrete connections before it
+/// decides system membership. Those collaborators are not ported yet, so the
+/// multi-staff case is represented as pending rather than as fabricated
+/// singleton systems.
+#[derive(Clone, Debug)]
+pub enum RawSystemGroupingBoundary {
+    /// With one retained staff, Java's fallback grouping is unambiguous and
+    /// isolated graph vertices are valid one-peak bar chains.
+    CompleteSingleStaff {
+        system_id: usize,
+        staff_id: StaffId,
+        columns: Vec<BarColumn>,
+    },
+    /// The graph vertices are complete, but the edges and resulting system
+    /// partition require Java's missing alignment/connection discovery.
+    NeedsAlignmentAndConnectionDiscovery { staff_ids: Vec<StaffId> },
+}
+
+/// Ordered peak graph plus the system-grouping boundary reached from it.
+#[derive(Clone, Debug)]
+pub struct RawProjectorGraphBridge {
+    pub graph: PeakGraph<BarAlignment>,
+    /// Retained projector staff IDs in Java projector order.
+    pub retained_staff_ids: Vec<StaffId>,
+    /// One-line staves discarded by `findBarPeaks`, in encounter order.
+    pub discarded_one_line_staff_ids: Vec<StaffId>,
+    /// Brace candidates remain detached from ordinary graph registration.
+    pub brace_peaks: Vec<PreparedBracePeak>,
+    pub grouping: RawSystemGroupingBoundary,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -97,6 +136,9 @@ pub enum RawProjectorAdapterError {
         staff_id: usize,
         source: StaffPeakError,
     },
+    MissingRegisteredPeak(StaffPeakKey),
+    DuplicateRegisteredPeak(StaffPeakKey),
+    BarColumns(BarsLogicError),
 }
 
 impl fmt::Display for RawProjectorAdapterError {
@@ -134,6 +176,21 @@ impl fmt::Display for RawProjectorAdapterError {
             Self::Deskew { staff_id, source } => {
                 write!(formatter, "staff {staff_id} peak deskew failed: {source}")
             }
+            Self::MissingRegisteredPeak(key) => write!(
+                formatter,
+                "registered peak on staff {} at {}-{} is absent from retained projectors",
+                key.staff_id().value(),
+                key.start(),
+                key.stop()
+            ),
+            Self::DuplicateRegisteredPeak(key) => write!(
+                formatter,
+                "registered peak on staff {} at {}-{} occurs twice in graph order",
+                key.staff_id().value(),
+                key.start(),
+                key.stop()
+            ),
+            Self::BarColumns(source) => write!(formatter, "bar-column construction failed: {source}"),
         }
     }
 }
@@ -144,9 +201,67 @@ impl Error for RawProjectorAdapterError {
             Self::Filament { source, .. } => Some(source),
             Self::Projection { source, .. } => Some(source),
             Self::Deskew { source, .. } => Some(source),
+            Self::BarColumns(source) => Some(source),
             _ => None,
         }
     }
+}
+
+/// Materialize Java's ordered `PeakGraph` vertices and proceed only as far as
+/// the available evidence permits.
+///
+/// No alignment edge is synthesized here. A multi-staff result deliberately
+/// stops before system grouping because `findAllAlignments`, `findConnections`,
+/// and their pixel-evidence checks are not ported yet.
+pub fn bridge_raw_projectors_to_graph(
+    preparation: &RawProjectorPreparation,
+    maximum_column_dx: i32,
+) -> Result<RawProjectorGraphBridge, RawProjectorAdapterError> {
+    let mut graph = PeakGraph::new();
+    for &key in preparation.registry.graph_vertex_order() {
+        let peak = preparation
+            .registry
+            .projectors()
+            .iter()
+            .flat_map(|projector| &projector.result.peaks)
+            .find(|peak| peak.key() == key)
+            .cloned()
+            .ok_or(RawProjectorAdapterError::MissingRegisteredPeak(key))?;
+        if !graph.add_vertex(peak) {
+            return Err(RawProjectorAdapterError::DuplicateRegisteredPeak(key));
+        }
+    }
+
+    let retained_staff_ids = preparation
+        .registry
+        .projectors()
+        .iter()
+        .map(|projector| projector.staff_id)
+        .collect::<Vec<_>>();
+    let grouping = if let [staff_id] = retained_staff_ids.as_slice() {
+        let columns = build_bar_columns_from_graph(&graph, &[*staff_id], maximum_column_dx)
+            .map_err(RawProjectorAdapterError::BarColumns)?;
+        RawSystemGroupingBoundary::CompleteSingleStaff {
+            system_id: 1,
+            staff_id: *staff_id,
+            columns,
+        }
+    } else {
+        RawSystemGroupingBoundary::NeedsAlignmentAndConnectionDiscovery {
+            staff_ids: retained_staff_ids.clone(),
+        }
+    };
+
+    Ok(RawProjectorGraphBridge {
+        graph,
+        retained_staff_ids,
+        discarded_one_line_staff_ids: preparation
+            .registry
+            .discarded_one_line_staves()
+            .to_vec(),
+        brace_peaks: preparation.brace_peaks.clone(),
+        grouping,
+    })
 }
 
 /// Build and register raw per-staff projectors with construction-time deskew.
@@ -520,6 +635,99 @@ mod tests {
                 search_right: 7,
             })
         );
+
+        let expected_key = peak.key();
+        let expected_center = peak.deskewed_center().unwrap();
+        let mut bridge = bridge_raw_projectors_to_graph(&prepared, 2).unwrap();
+        assert_eq!(
+            bridge
+                .graph
+                .vertices()
+                .iter()
+                .map(StaffPeak::key)
+                .collect::<Vec<_>>(),
+            prepared.registry.graph_vertex_order()
+        );
+        assert_eq!(
+            bridge.graph.vertex(expected_key).unwrap().deskewed_center(),
+            Some(expected_center)
+        );
+        assert_eq!(bridge.retained_staff_ids, vec![StaffId::new(1)]);
+        assert!(bridge.discarded_one_line_staff_ids.is_empty());
+        assert_eq!(bridge.brace_peaks, prepared.brace_peaks);
+        match &mut bridge.grouping {
+            RawSystemGroupingBoundary::CompleteSingleStaff {
+                system_id,
+                staff_id,
+                columns,
+            } => {
+                assert_eq!(*system_id, 1);
+                assert_eq!(*staff_id, StaffId::new(1));
+                assert_eq!(columns.len(), 1);
+                let peak = columns[0].peaks()[0].unwrap();
+                assert_eq!(peak.id().value(), 1);
+                assert_eq!(peak.staff_id(), StaffId::new(1));
+                assert_eq!(peak.deskewed_x(), expected_center.x);
+                assert_eq!(columns[0].deskewed_x(), expected_center.x);
+            }
+            RawSystemGroupingBoundary::NeedsAlignmentAndConnectionDiscovery { .. } => {
+                panic!("one retained staff does not require alignment discovery")
+            }
+        }
+    }
+
+    #[test]
+    fn multiple_staffs_stop_before_missing_alignment_discovery() {
+        let (mut handoff, pixels) = one_system_fixture();
+        let mut second = handoff.staffs[0].clone();
+        second.id = 2;
+        handoff.staffs.push(second);
+        let settings = [1, 2].map(|staff_id| RawStaffProjectorSettings {
+            staff_id,
+            barline_height: BarlineHeightSpec::Four,
+            brace_search: None,
+        });
+        let prepared = prepare_raw_projectors(
+            &handoff,
+            RawProjectorRaster {
+                width: 20,
+                height: 6,
+                pixels: &pixels,
+            },
+            &HeadlessSkew::new(0.0, 20, 6),
+            RawProjectorParameters {
+                large_interline: 1,
+                foreground_thickness: 2,
+                ratios: StaffProjectorScaleRatios {
+                    staff_abscissa_margin: 20.0,
+                    bar_refine_dx: 2.0,
+                    bar_threshold: 0.8,
+                    gap_threshold: 0.2,
+                    minimum_wide_blank_width: 2.0,
+                    maximum_bar_width: 4.0,
+                    chunk_width: 1.0,
+                    ..StaffProjectorScaleRatios::java_defaults()
+                },
+                tuning: StaffProjectorProcessTuning {
+                    top_derivative_count: 2,
+                    minimum_derivative_ratio: 1.0,
+                    blank_threshold_ratio: 2.1,
+                    chunk_threshold_ratio: 0.4,
+                    minimum_white_ratio_beyond_serif: 0.3,
+                },
+                staffs: &settings,
+            },
+        )
+        .unwrap();
+
+        let bridge = bridge_raw_projectors_to_graph(&prepared, 2).unwrap();
+        assert_eq!(bridge.graph.vertices().len(), 2);
+        assert!(bridge.graph.edges().is_empty());
+        assert!(matches!(
+            bridge.grouping,
+            RawSystemGroupingBoundary::NeedsAlignmentAndConnectionDiscovery { ref staff_ids }
+                if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
     }
 
     #[test]
