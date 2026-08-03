@@ -9,9 +9,13 @@
 use std::{error::Error, fmt};
 
 use audiveris_image::{
+    beam_structure::{
+        BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster,
+        BeamStructureParameters, analyze_beam_structure, compute_beam_impacts,
+    },
     global_filter::global_filter,
     glyph_factory::{GlyphComponent, build_glyph_components},
-    run_table::{Orientation, RunTable, RunTableError},
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
     system_population::PopulationSystemArea,
 };
 
@@ -28,6 +32,8 @@ pub struct NeutralBeamGlyph {
     pub top: i32,
     pub left: i32,
     pub geometry: Option<NeutralGlyphGeometry>,
+    /// Tight vertical run table retained for native `BeamStructure` analysis.
+    pub raster: Option<RunTable>,
     pub groups: Vec<NeutralBeamGlyphGroup>,
 }
 
@@ -167,12 +173,42 @@ pub enum BeamCandidateClass {
     Small,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamSpotCandidateInput {
     pub sheet_id: usize,
     pub system_id: usize,
     pub glyph_id: usize,
     pub class: BeamCandidateClass,
+    /// Java line-major/item-major order. Empty when the optional native kernel
+    /// is not configured, preserving the legacy injected seam.
+    pub native_candidates: Vec<NativeBeamCandidate>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeBeamCandidate {
+    pub line_index: usize,
+    pub item_index: usize,
+    pub item: BeamItem,
+    pub impacts: BeamImpacts,
+    pub grade: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeBeamClassParameters {
+    pub structure: BeamStructureParameters,
+    pub impacts: BeamImpactParameters,
+    pub distance_impact: f64,
+    pub minimum_grade: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeBeamKernelConfig {
+    /// Java `Picture.SourceKey.NO_STAFF`, not the morphologically closed spot image.
+    pub pixel_filter: RunTable,
+    pub pixel_filter_offset_x: i32,
+    pub pixel_filter_offset_y: i32,
+    pub standard: NativeBeamClassParameters,
+    pub small: Option<NativeBeamClassParameters>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -428,12 +464,22 @@ pub enum BeamsMutation {
 
 pub struct HeadlessBeamsStep<Visual> {
     visual: Visual,
+    native_kernel: Option<NativeBeamKernelConfig>,
 }
 
 impl<Visual> HeadlessBeamsStep<Visual> {
     #[must_use]
     pub const fn new(visual: Visual) -> Self {
-        Self { visual }
+        Self {
+            visual,
+            native_kernel: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_native_beam_kernel(mut self, config: NativeBeamKernelConfig) -> Self {
+        self.native_kernel = Some(config);
+        self
     }
 
     #[must_use]
@@ -638,26 +684,35 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
         let mut assigned = Vec::new();
 
         for spot in &spots {
-            let standard = self.visual.classify_beam_spot(BeamSpotCandidateInput {
-                sheet_id: sheet.id,
-                system_id,
-                glyph_id: spot.id,
-                class: BeamCandidateClass::Standard,
-            });
-            apply_delta(sheet, system_index, standard.delta)?;
-            if let Some(error) = standard.error {
-                return Ok(Some(error));
-            }
-            if standard.accepted {
-                assigned.push(spot.id);
-                continue;
+            let standard_candidates = self.native_candidates(spot, BeamCandidateClass::Standard);
+            if !standard_candidates.as_ref().is_some_and(Vec::is_empty) {
+                let standard = self.visual.classify_beam_spot(BeamSpotCandidateInput {
+                    sheet_id: sheet.id,
+                    system_id,
+                    glyph_id: spot.id,
+                    class: BeamCandidateClass::Standard,
+                    native_candidates: standard_candidates.unwrap_or_default(),
+                });
+                apply_delta(sheet, system_index, standard.delta)?;
+                if let Some(error) = standard.error {
+                    return Ok(Some(error));
+                }
+                if standard.accepted {
+                    assigned.push(spot.id);
+                    continue;
+                }
             }
             if has_small {
+                let small_candidates = self.native_candidates(spot, BeamCandidateClass::Small);
+                if small_candidates.as_ref().is_some_and(Vec::is_empty) {
+                    continue;
+                }
                 let small = self.visual.classify_beam_spot(BeamSpotCandidateInput {
                     sheet_id: sheet.id,
                     system_id,
                     glyph_id: spot.id,
                     class: BeamCandidateClass::Small,
+                    native_candidates: small_candidates.unwrap_or_default(),
                 });
                 apply_delta(sheet, system_index, small.delta)?;
                 if let Some(error) = small.error {
@@ -725,6 +780,64 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
         Ok(grouping.error)
     }
 
+    fn native_candidates(
+        &self,
+        spot: &NeutralBeamGlyph,
+        class: BeamCandidateClass,
+    ) -> Option<Vec<NativeBeamCandidate>> {
+        let config = self.native_kernel.as_ref()?;
+        let glyph = spot.raster.as_ref()?;
+        let parameters = match class {
+            BeamCandidateClass::Standard => config.standard,
+            BeamCandidateClass::Small => config.small?,
+        };
+        let mut structure =
+            match analyze_beam_structure(glyph, spot.left, spot.top, parameters.structure) {
+                Ok(structure) => structure,
+                Err(_) => return Some(Vec::new()),
+            };
+        structure.adjust_sides(
+            spot.left,
+            glyph.width(),
+            parameters.structure.min_beam_width_low,
+        );
+        structure.split_stuck_lines(parameters.structure.typical_height);
+        let raster = BeamRaster {
+            table: &config.pixel_filter,
+            offset_x: config.pixel_filter_offset_x,
+            offset_y: config.pixel_filter_offset_y,
+        };
+        let line_count = structure.lines.len();
+        let mut candidates = Vec::new();
+        for (line_index, line) in structure.lines.into_iter().enumerate() {
+            for (item_index, item) in line.items.into_iter().enumerate() {
+                let Ok(impacts) = compute_beam_impacts(
+                    item,
+                    BeamBeltSides {
+                        above: line_index == 0,
+                        below: line_index == line_count - 1,
+                    },
+                    raster,
+                    parameters.distance_impact,
+                    parameters.impacts,
+                ) else {
+                    continue;
+                };
+                let grade = native_beam_grade(impacts);
+                if grade >= parameters.minimum_grade {
+                    candidates.push(NativeBeamCandidate {
+                        line_index,
+                        item_index,
+                        item,
+                        impacts,
+                        grade,
+                    });
+                }
+            }
+        }
+        Some(candidates)
+    }
+
     fn dispatch_spots(
         &self,
         sheet: &mut NeutralBeamSheet,
@@ -778,6 +891,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                         top: component.top,
                         left: component.left,
                         geometry: Some(geometry),
+                        raster: Some(component_vertical_raster(&component)?),
                         groups: vec![NeutralBeamGlyphGroup::BeamSpot],
                     });
                 sheet.mutations.push(BeamsMutation::SpotAttached {
@@ -853,6 +967,70 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
 
 fn java_rint(value: f64) -> i32 {
     value.round_ties_even() as i32
+}
+
+fn native_beam_grade(impacts: BeamImpacts) -> f64 {
+    let values = [
+        impacts.width,
+        impacts.min_height,
+        impacts.max_height,
+        impacts.core,
+        impacts.belt,
+        impacts.distance,
+    ];
+    let weights = [0.5, 1.0, 1.0, 2.0, 2.0, 2.0];
+    let mut product = 1.0;
+    let mut total_weight = 0.0;
+    for (impact, weight) in values.into_iter().zip(weights) {
+        total_weight += weight;
+        if impact == 0.0 {
+            product = 0.0;
+        } else if weight != 0.0 {
+            product *= impact.powf(weight);
+        }
+    }
+    0.8 * product.powf(1.0 / total_weight)
+}
+
+fn component_vertical_raster(component: &GlyphComponent) -> Result<RunTable, BeamsContractError> {
+    let mut pixels = vec![BACKGROUND; component.width * component.height];
+    let minimum_sequence = component
+        .runs
+        .iter()
+        .map(|entry| entry.sequence)
+        .min()
+        .expect("glyph component has at least one run");
+    let minimum_coordinate = component
+        .runs
+        .iter()
+        .map(|entry| entry.run.start)
+        .min()
+        .expect("glyph component has at least one run");
+    for entry in &component.runs {
+        match component.orientation {
+            Orientation::Horizontal => {
+                let y = entry.sequence - minimum_sequence;
+                for source_x in entry.run.start..=entry.run.stop() {
+                    let x = source_x - minimum_coordinate;
+                    pixels[(y * component.width) + x] = FOREGROUND;
+                }
+            }
+            Orientation::Vertical => {
+                let x = entry.sequence - minimum_sequence;
+                for source_y in entry.run.start..=entry.run.stop() {
+                    let y = source_y - minimum_coordinate;
+                    pixels[(y * component.width) + x] = FOREGROUND;
+                }
+            }
+        }
+    }
+    RunTable::from_pixels(
+        Orientation::Vertical,
+        component.width,
+        component.height,
+        &pixels,
+    )
+    .map_err(BeamsContractError::InvalidSpotRaster)
 }
 
 fn java_full_ordinate_order(one: &NeutralBeamGlyph, two: &NeutralBeamGlyph) -> std::cmp::Ordering {
@@ -1078,7 +1256,7 @@ mod tests {
             &mut self,
             input: BeamSpotCandidateInput,
         ) -> BeamCandidateOutcome<Self::Error> {
-            self.candidate_inputs.push(input);
+            self.candidate_inputs.push(input.clone());
             self.calls.push((
                 match input.class {
                     BeamCandidateClass::Standard => "standard",
@@ -1278,6 +1456,70 @@ mod tests {
             top,
             left,
             geometry: None,
+            raster: None,
+            groups: vec![NeutralBeamGlyphGroup::BeamSpot],
+        }
+    }
+
+    fn native_kernel_config(standard_minimum_grade: f64) -> NativeBeamKernelConfig {
+        let mut pixels = vec![BACKGROUND; 40 * 40];
+        for y in 20..24 {
+            for x in 10..18 {
+                pixels[(y * 40) + x] = FOREGROUND;
+            }
+        }
+        let class = NativeBeamClassParameters {
+            structure: BeamStructureParameters {
+                typical_height: 4.0,
+                core_section_width: 2,
+                min_hook_width_low: 2.0,
+                max_item_x_gap: 1,
+                min_beam_width_low: 4.0,
+                max_hook_width: 7.0,
+            },
+            impacts: BeamImpactParameters {
+                belt_margin_dx: 1,
+                belt_margin_dy: 1,
+                min_core_black_ratio: 0.75,
+                max_belt_black_ratio: 0.25,
+                min_width_low: 4.0,
+                min_width_high: 10.0,
+                min_height_low: 2.0,
+                typical_height: 4.0,
+                max_height_high: 6.0,
+            },
+            distance_impact: 1.0,
+            minimum_grade: standard_minimum_grade,
+        };
+        NativeBeamKernelConfig {
+            pixel_filter: RunTable::from_pixels(Orientation::Horizontal, 40, 40, &pixels).unwrap(),
+            pixel_filter_offset_x: 0,
+            pixel_filter_offset_y: 0,
+            standard: class,
+            small: Some(NativeBeamClassParameters {
+                minimum_grade: 0.08,
+                ..class
+            }),
+        }
+    }
+
+    fn native_beam_glyph(id: usize) -> NeutralBeamGlyph {
+        NeutralBeamGlyph {
+            id,
+            top: 20,
+            left: 10,
+            geometry: Some(NeutralGlyphGeometry {
+                width: 8,
+                height: 4,
+                weight: 32,
+                centroid_x: 13.5,
+                centroid_y: 21.5,
+                rounded_centroid_x: 14,
+                rounded_centroid_y: 22,
+            }),
+            raster: Some(
+                RunTable::from_pixels(Orientation::Vertical, 8, 4, &[FOREGROUND; 32]).unwrap(),
+            ),
             groups: vec![NeutralBeamGlyphGroup::BeamSpot],
         }
     }
@@ -1620,6 +1862,87 @@ mod tests {
     }
 
     #[test]
+    fn native_core_belt_candidates_reach_classifier_in_java_item_order_with_grade() {
+        let mut visual = visual_with_spots(Vec::new());
+        visual.candidates.insert(
+            (2, 10, BeamCandidateClass::Standard),
+            BeamCandidateOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
+                        id: 100,
+                        kind: NeutralBeamInterKind::Beam,
+                    })],
+                },
+                accepted: true,
+                error: None,
+            },
+        );
+        let mut step =
+            HeadlessBeamsStep::new(visual).with_native_beam_kernel(native_kernel_config(0.08));
+        let mut sheet = sheet();
+        sheet.systems[0].free_glyphs.push(native_beam_glyph(10));
+
+        assert_eq!(step.build_system_beams(&mut sheet, 0).unwrap(), None);
+
+        assert_eq!(step.visual().candidate_inputs.len(), 1);
+        let input = &step.visual().candidate_inputs[0];
+        assert_eq!(input.class, BeamCandidateClass::Standard);
+        assert_eq!(input.native_candidates.len(), 1);
+        let candidate = input.native_candidates[0];
+        assert_eq!((candidate.line_index, candidate.item_index), (0, 0));
+        assert_eq!(
+            (
+                candidate.impacts.raster.core_foreground,
+                candidate.impacts.raster.core_count,
+                candidate.impacts.raster.belt_foreground,
+            ),
+            (32, 32, 0)
+        );
+        assert!(candidate.grade >= 0.08);
+        assert_eq!(sheet.systems[0].inters[0].id, 100);
+    }
+
+    #[test]
+    fn native_rejection_skips_standard_then_small_failure_keeps_delta_prefix() {
+        let mut visual = visual_with_spots(Vec::new());
+        visual.candidates.insert(
+            (2, 10, BeamCandidateClass::Small),
+            BeamCandidateOutcome {
+                delta: BeamSystemDelta {
+                    mutations: vec![BeamSystemMutation::AddInter(NeutralBeamInter {
+                        id: 101,
+                        kind: NeutralBeamInterKind::SmallBeam,
+                    })],
+                },
+                accepted: false,
+                error: Some("small materializer failed"),
+            },
+        );
+        let mut step =
+            HeadlessBeamsStep::new(visual).with_native_beam_kernel(native_kernel_config(2.0));
+        let mut sheet = sheet();
+        sheet.small_beams_enabled = true;
+        sheet.systems[0].free_glyphs.push(native_beam_glyph(10));
+
+        assert_eq!(
+            step.build_system_beams(&mut sheet, 0).unwrap(),
+            Some("small materializer failed")
+        );
+
+        assert_eq!(
+            step.visual()
+                .candidate_inputs
+                .iter()
+                .map(|input| input.class)
+                .collect::<Vec<_>>(),
+            vec![BeamCandidateClass::Small]
+        );
+        assert_eq!(step.visual().candidate_inputs[0].native_candidates.len(), 1);
+        assert_eq!(sheet.systems[0].inters[0].id, 101);
+        assert!(step.visual().extension_inputs.is_empty());
+    }
+
+    #[test]
     fn checked_beam_failure_keeps_prefix_skips_rests_continues_and_cleans_up() {
         let mut visual = visual_with_spots(Vec::new());
         visual.extensions.insert(
@@ -1706,6 +2029,7 @@ mod tests {
                                 top: 0,
                                 left: 0,
                                 geometry: None,
+                                raster: None,
                                 groups: vec![NeutralBeamGlyphGroup::Other],
                             }),
                             BeamSystemMutation::AddInter(NeutralBeamInter {
@@ -1830,6 +2154,7 @@ mod tests {
                         top: 0,
                         left: 0,
                         geometry: None,
+                        raster: None,
                         groups: vec![NeutralBeamGlyphGroup::Other],
                     })],
                 },
@@ -1879,6 +2204,7 @@ mod tests {
             top: 0,
             left: 0,
             geometry: None,
+            raster: None,
             groups: vec![
                 NeutralBeamGlyphGroup::BeamSpot,
                 NeutralBeamGlyphGroup::Other,
