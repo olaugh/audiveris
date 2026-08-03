@@ -7,11 +7,13 @@
 //! remains the geometric value. Sheet ordering, skew-based candidate selection,
 //! cluster consistency policy, glyph ownership, and SIG integration stay outside.
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{cmp::Reverse, collections::BTreeMap, error::Error, fmt};
+
+use audiveris_core::histogram::Histogram;
 
 use crate::{
     cluster_ownership::{ClusterId, ClusterOwnership, ClusterOwnershipError, CombId},
-    filament::StaffFilament,
+    filament::{FilamentError, StaffFilament},
     filament_comb::FilamentComb,
     line_cluster::{FilamentId, LineCluster, LineClusterError},
 };
@@ -46,6 +48,123 @@ impl RecursiveCombSnapshot {
     pub const fn is_processed(&self) -> bool {
         self.processed
     }
+}
+
+/// Observable result of Java `createClusters`' neutral batch boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClusterFormation {
+    cluster_ids: Vec<ClusterId>,
+    popular_comb_size: Option<usize>,
+}
+
+impl ClusterFormation {
+    /// Surviving clusters in seed-creation order.
+    #[must_use]
+    pub fn cluster_ids(&self) -> &[ClusterId] {
+        &self.cluster_ids
+    }
+
+    /// Java histogram winner, where every comb votes with its member count.
+    #[must_use]
+    pub const fn popular_comb_size(&self) -> Option<usize> {
+        self.popular_comb_size
+    }
+}
+
+/// Form all eligible seed clusters in Java's stable reverse-length order.
+///
+/// `seed_candidates` is the original filament-list order. Each candidate is
+/// sorted by its own horizontal bounds width before current ancestry is
+/// resolved, matching Java's sort-then-`getAncestor` sequence. A root already
+/// clustered by an earlier recursive traversal is skipped. Unless
+/// `allow_single` is set, roots without reverse comb membership are skipped.
+/// The complete batch is transactional.
+pub fn form_clusters_from_combs(
+    ownership: &mut ClusterOwnership,
+    clusters: &mut BTreeMap<ClusterId, LineCluster>,
+    filaments: &BTreeMap<FilamentId, StaffFilament>,
+    combs: &mut BTreeMap<CombId, RecursiveCombSnapshot>,
+    seed_candidates: &[FilamentId],
+    interline: usize,
+    allow_single: bool,
+) -> Result<ClusterFormation, RecursiveIncludeError> {
+    let popular_comb_size = popular_snapshot_size(combs);
+    let mut ordered = seed_candidates
+        .iter()
+        .copied()
+        .map(|id| {
+            let width = filaments
+                .get(&id)
+                .ok_or(RecursiveIncludeError::MissingFilamentValue(id))?
+                .bounds()?
+                .width;
+            Ok((id, width))
+        })
+        .collect::<Result<Vec<_>, RecursiveIncludeError>>()?;
+    // Rust's slice sort is stable, like Collections.sort. The explicit key
+    // avoids inventing an ID tie-breaker Java does not have.
+    ordered.sort_by_key(|(_, width)| Reverse(*width));
+
+    let mut next_ownership = ownership.clone();
+    let mut next_clusters = clusters.clone();
+    let mut next_combs = combs.clone();
+    let mut created = Vec::new();
+    for (candidate, _) in ordered {
+        let seed = next_ownership.filament_ancestor(candidate)?;
+        if next_ownership.membership_of(seed)?.is_some() {
+            continue;
+        }
+        if !allow_single && next_ownership.combs_of(seed)?.is_empty() {
+            continue;
+        }
+
+        let seed_value = filaments
+            .get(&seed)
+            .cloned()
+            .ok_or(RecursiveIncludeError::MissingFilamentValue(seed))?;
+        let cluster_id = next_ownership.register_cluster(seed)?;
+        let cluster = LineCluster::new(interline, seed, seed_value)?;
+        if next_clusters.insert(cluster_id, cluster).is_some() {
+            return Err(RecursiveIncludeError::DuplicateClusterValue(cluster_id));
+        }
+        include_from_combs(
+            &mut next_ownership,
+            &mut next_clusters,
+            filaments,
+            &mut next_combs,
+            cluster_id,
+            seed,
+            0,
+        )?;
+        created.push(cluster_id);
+    }
+
+    // Java removes cluster objects that acquired a parent during recursive
+    // inclusion while preserving the creation order of survivors.
+    let mut survivors = Vec::with_capacity(created.len());
+    for id in created {
+        if next_clusters.contains_key(&id) && next_ownership.cluster_parent(id)?.is_none() {
+            survivors.push(id);
+        }
+    }
+    *ownership = next_ownership;
+    *clusters = next_clusters;
+    *combs = next_combs;
+    Ok(ClusterFormation {
+        cluster_ids: survivors,
+        popular_comb_size,
+    })
+}
+
+/// Java `retrievePopularSize` over explicit snapshots.
+#[must_use]
+pub fn popular_snapshot_size(combs: &BTreeMap<CombId, RecursiveCombSnapshot>) -> Option<usize> {
+    let mut histogram = Histogram::default();
+    for comb in combs.values() {
+        let count = comb.members.len();
+        histogram.increase_count(count, i32::try_from(count).unwrap_or(i32::MAX));
+    }
+    histogram.max_bucket().copied()
 }
 
 /// Recursively dispatch the pivot's comb network into a destination cluster.
@@ -231,9 +350,11 @@ fn merge_cluster_values(
 pub enum RecursiveIncludeError {
     Ownership(ClusterOwnershipError),
     Cluster(LineClusterError),
+    Filament(FilamentError),
     MissingCombSnapshot(CombId),
     MissingFilamentValue(FilamentId),
     MissingClusterValue(ClusterId),
+    DuplicateClusterValue(ClusterId),
     PivotMissingFromComb { pivot: FilamentId, comb: CombId },
     PositionOverflow,
 }
@@ -250,11 +371,18 @@ impl From<LineClusterError> for RecursiveIncludeError {
     }
 }
 
+impl From<FilamentError> for RecursiveIncludeError {
+    fn from(value: FilamentError) -> Self {
+        Self::Filament(value)
+    }
+}
+
 impl fmt::Display for RecursiveIncludeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ownership(error) => write!(formatter, "recursive ownership error: {error}"),
             Self::Cluster(error) => write!(formatter, "recursive cluster error: {error}"),
+            Self::Filament(error) => write!(formatter, "recursive filament error: {error}"),
             Self::MissingCombSnapshot(id) => {
                 write!(formatter, "missing comb snapshot {}", id.value())
             }
@@ -263,6 +391,9 @@ impl fmt::Display for RecursiveIncludeError {
             }
             Self::MissingClusterValue(id) => {
                 write!(formatter, "missing cluster value {}", id.value())
+            }
+            Self::DuplicateClusterValue(id) => {
+                write!(formatter, "duplicate cluster value {}", id.value())
             }
             Self::PivotMissingFromComb { pivot, comb } => write!(
                 formatter,
@@ -285,15 +416,24 @@ mod tests {
         section::{JunctionPolicy, build_sections},
     };
 
-    fn fixture(count: usize) -> (ClusterOwnership, BTreeMap<FilamentId, StaffFilament>) {
-        let mut table = RunTable::new(Orientation::Horizontal, 160, (count * 3) + 2).unwrap();
-        for index in 0..count {
+    fn fixture_with_lengths(
+        lengths: &[usize],
+    ) -> (ClusterOwnership, BTreeMap<FilamentId, StaffFilament>) {
+        let width = lengths
+            .iter()
+            .enumerate()
+            .map(|(index, length)| (index * 20) + length + 1)
+            .max()
+            .unwrap_or(1);
+        let mut table =
+            RunTable::new(Orientation::Horizontal, width, (lengths.len() * 3) + 2).unwrap();
+        for (index, length) in lengths.iter().copied().enumerate() {
             table
-                .add_run((index * 3) + 1, Run::new(index * 20, 18))
+                .add_run((index * 3) + 1, Run::new(index * 20, length))
                 .unwrap();
         }
         let sections = build_sections(&table, JunctionPolicy::All);
-        assert_eq!(sections.len(), count);
+        assert_eq!(sections.len(), lengths.len());
 
         let mut ownership = ClusterOwnership::new();
         let mut filaments = BTreeMap::new();
@@ -305,6 +445,10 @@ mod tests {
             filaments.insert(id, filament);
         }
         (ownership, filaments)
+    }
+
+    fn fixture(count: usize) -> (ClusterOwnership, BTreeMap<FilamentId, StaffFilament>) {
+        fixture_with_lengths(&vec![18; count])
     }
 
     fn add_comb(
@@ -322,6 +466,127 @@ mod tests {
         let id = CombId::new(id);
         ownership.register_comb(id, &comb).unwrap();
         snapshots.insert(id, RecursiveCombSnapshot::from_comb(&comb));
+    }
+
+    #[test]
+    fn batch_formation_is_stable_filters_ancestors_and_reports_popular_size() {
+        let (mut ownership, mut filaments) = fixture_with_lengths(&[40, 20, 30, 25, 25, 10]);
+        let one = FilamentId::new(1);
+        let two = FilamentId::new(2);
+        // Model followCombsNetwork having selected filament 2 as ancestor. Java
+        // still sorts the original filament 1 entry by its own longer width,
+        // then resolves it to 2 before deciding whether to seed.
+        let mut merged_two = filaments[&two].clone();
+        for section in filaments[&one].sections() {
+            merged_two.add_section(section.clone()).unwrap();
+        }
+        ownership.merge_filaments(two, one).unwrap();
+        filaments.insert(two, merged_two);
+
+        let mut snapshots = BTreeMap::new();
+        add_comb(&mut ownership, &mut snapshots, 10, 1, &[2, 3]);
+        add_comb(&mut ownership, &mut snapshots, 11, 2, &[4, 5]);
+        let mut clusters = BTreeMap::new();
+        let formation = form_clusters_from_combs(
+            &mut ownership,
+            &mut clusters,
+            &filaments,
+            &mut snapshots,
+            &[
+                FilamentId::new(3),
+                two,
+                one,
+                FilamentId::new(5),
+                FilamentId::new(4),
+                FilamentId::new(6),
+            ],
+            10,
+            false,
+        )
+        .unwrap();
+
+        // Alias 1 is longest, so its current ancestor 2 seeds first. Equal-width
+        // 5 and 4 retain input order, making 5 the second seed.
+        assert_eq!(
+            formation.cluster_ids(),
+            [
+                ClusterId::from_seed(two),
+                ClusterId::from_seed(FilamentId::new(5))
+            ]
+        );
+        assert_eq!(formation.popular_comb_size(), Some(2));
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(ownership.filament_ancestor(one).unwrap(), two);
+        assert_eq!(
+            ownership
+                .membership_of(FilamentId::new(3))
+                .unwrap()
+                .unwrap()
+                .cluster(),
+            ClusterId::from_seed(two)
+        );
+        assert!(
+            ownership
+                .membership_of(FilamentId::new(6))
+                .unwrap()
+                .is_none()
+        );
+        assert!(snapshots.values().all(RecursiveCombSnapshot::is_processed));
+    }
+
+    #[test]
+    fn batch_single_flag_controls_combless_seed_eligibility() {
+        let (mut ownership, filaments) = fixture(1);
+        let seed = FilamentId::new(1);
+        let mut clusters = BTreeMap::new();
+        let mut snapshots = BTreeMap::new();
+
+        let skipped = form_clusters_from_combs(
+            &mut ownership,
+            &mut clusters,
+            &filaments,
+            &mut snapshots,
+            &[seed],
+            10,
+            false,
+        )
+        .unwrap();
+        assert!(skipped.cluster_ids().is_empty());
+        assert_eq!(skipped.popular_comb_size(), None);
+        assert_eq!(ownership.membership_of(seed).unwrap(), None);
+
+        let formed = form_clusters_from_combs(
+            &mut ownership,
+            &mut clusters,
+            &filaments,
+            &mut snapshots,
+            &[seed],
+            10,
+            true,
+        )
+        .unwrap();
+        assert_eq!(formed.cluster_ids(), [ClusterId::from_seed(seed)]);
+        assert_eq!(clusters[&ClusterId::from_seed(seed)].size(), 1);
+    }
+
+    #[test]
+    fn snapshot_popularity_weights_members_and_keeps_lower_tie() {
+        let snapshot = |members: &[u64]| {
+            let mut comb = FilamentComb::new(1);
+            for (index, member) in members.iter().copied().enumerate() {
+                comb.append_root(member as usize, index as f64).unwrap();
+            }
+            RecursiveCombSnapshot::from_comb(&comb)
+        };
+        let snapshots = BTreeMap::from([
+            (CombId::new(1), snapshot(&[1, 2])),
+            (CombId::new(2), snapshot(&[3, 4])),
+            (CombId::new(3), snapshot(&[5, 6, 7, 8])),
+        ]);
+
+        // Two 2-member combs cast four votes; one 4-member comb also casts
+        // four. Java Histogram keeps the lower bucket on a count tie.
+        assert_eq!(popular_snapshot_size(&snapshots), Some(2));
     }
 
     #[test]
