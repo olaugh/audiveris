@@ -22,6 +22,7 @@ const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
 const STEPS_ELEMENT: &[u8] = b"steps";
 const PAGE_ELEMENT: &[u8] = b"page";
+const LAST_TIME_RATIONAL_ELEMENT: &[u8] = b"last-time-rational";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
@@ -29,6 +30,8 @@ const INVALID_ATTRIBUTE: &[u8] = b"invalid";
 const ID_ATTRIBUTE: &[u8] = b"id";
 const MOVEMENT_START_ATTRIBUTE: &[u8] = b"movement-start";
 const DELTA_MEASURE_ID_ATTRIBUTE: &[u8] = b"delta-measure-id";
+const NUM_ATTRIBUTE: &[u8] = b"num";
+const DEN_ATTRIBUTE: &[u8] = b"den";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,6 +59,8 @@ impl BookXml {
         let mut active_input: Option<(usize, SheetInputBuilder)> = None;
         let mut active_input_scalar: Option<InputScalarCapture> = None;
         let mut active_steps: Option<(usize, String)> = None;
+        let mut active_page = None;
+        let mut active_time_rational = None;
         let mut root_closed = false;
 
         loop {
@@ -65,6 +70,13 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if let Some((sheet_index, page_index)) = active_time_rational {
+                        return Err(unexpected_time_rational_content(
+                            &sheet_stubs,
+                            sheet_index,
+                            page_index,
+                        ));
+                    }
                     if let Some((sheet_index, _)) = active_steps.as_ref() {
                         return Err(BookXmlError::UnexpectedStepsContent(
                             sheet_stubs[*sheet_index].number,
@@ -112,13 +124,33 @@ impl BookXml {
                         && element.local_name().as_ref() == PAGE_ELEMENT
                         && let Some(sheet_index) = active_sheet
                     {
-                        push_page_ref(&reader, &element, &mut sheet_stubs[sheet_index])?;
+                        let page_index =
+                            push_page_ref(&reader, &element, &mut sheet_stubs[sheet_index])?;
+                        active_page = Some((sheet_index, page_index));
+                    } else if depth == 3
+                        && element.name().as_ref() == LAST_TIME_RATIONAL_ELEMENT
+                        && let Some((sheet_index, page_index)) = active_page
+                    {
+                        push_last_time_rational(
+                            &reader,
+                            &element,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                        )?;
+                        active_time_rational = Some((sheet_index, page_index));
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
                     })?;
                 }
                 Event::Empty(element) => {
+                    if let Some((sheet_index, page_index)) = active_time_rational {
+                        return Err(unexpected_time_rational_content(
+                            &sheet_stubs,
+                            sheet_index,
+                            page_index,
+                        ));
+                    }
                     if let Some((sheet_index, _)) = active_steps.as_ref() {
                         return Err(BookXmlError::UnexpectedStepsContent(
                             sheet_stubs[*sheet_index].number,
@@ -172,9 +204,22 @@ impl BookXml {
                         && let Some(sheet_index) = active_sheet
                     {
                         push_page_ref(&reader, &element, &mut sheet_stubs[sheet_index])?;
+                    } else if depth == 3
+                        && element.name().as_ref() == LAST_TIME_RATIONAL_ELEMENT
+                        && let Some((sheet_index, page_index)) = active_page
+                    {
+                        push_last_time_rational(
+                            &reader,
+                            &element,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                        )?;
                     }
                 }
                 Event::End(element) => {
+                    if element.name().as_ref() == LAST_TIME_RATIONAL_ELEMENT && depth == 4 {
+                        active_time_rational = None;
+                    }
                     if depth == 4
                         && let Some(capture) = active_input_scalar.take()
                     {
@@ -209,6 +254,9 @@ impl BookXml {
                     if depth == 2 && active_sheet.is_some() {
                         active_sheet = None;
                     }
+                    if depth == 3 && active_page.is_some() {
+                        active_page = None;
+                    }
                     depth = depth.checked_sub(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "unexpected closing tag")
                     })?;
@@ -240,6 +288,19 @@ impl BookXml {
                         .text
                         .push_str(&decoded);
                 }
+                Event::Text(text) if active_time_rational.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    if !decoded.trim().is_empty() {
+                        let (sheet_index, page_index) = active_time_rational.unwrap();
+                        return Err(unexpected_time_rational_content(
+                            &sheet_stubs,
+                            sheet_index,
+                            page_index,
+                        ));
+                    }
+                }
                 Event::CData(text) if depth == 0 => {
                     let text = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -264,6 +325,14 @@ impl BookXml {
                         .text
                         .push_str(&decoded);
                 }
+                Event::CData(_) if active_time_rational.is_some() => {
+                    let (sheet_index, page_index) = active_time_rational.unwrap();
+                    return Err(unexpected_time_rational_content(
+                        &sheet_stubs,
+                        sheet_index,
+                        page_index,
+                    ));
+                }
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
@@ -279,6 +348,24 @@ impl BookXml {
                         sheet_number: sheet_stubs[capture.sheet_index].number,
                         field: capture.scalar.field(),
                     });
+                }
+                Event::GeneralRef(_) if active_time_rational.is_some() => {
+                    let (sheet_index, page_index) = active_time_rational.unwrap();
+                    return Err(unexpected_time_rational_content(
+                        &sheet_stubs,
+                        sheet_index,
+                        page_index,
+                    ));
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_time_rational.is_some() =>
+                {
+                    let (sheet_index, page_index) = active_time_rational.unwrap();
+                    return Err(unexpected_time_rational_content(
+                        &sheet_stubs,
+                        sheet_index,
+                        page_index,
+                    ));
                 }
                 Event::Eof => break,
                 _ => {}
@@ -417,6 +504,7 @@ pub struct PageRef {
     id: u32,
     movement_start: Option<bool>,
     delta_measure_id: Option<i32>,
+    last_time_rational: Option<TimeRational>,
 }
 
 impl PageRef {
@@ -442,6 +530,34 @@ impl PageRef {
     #[must_use]
     pub const fn delta_measure_id(self) -> Option<i32> {
         self.delta_measure_id
+    }
+
+    /// Last effective time signature in this page, when persisted.
+    #[must_use]
+    pub const fn last_time_rational(self) -> Option<TimeRational> {
+        self.last_time_rational
+    }
+}
+
+/// Non-reduced numerator and denominator persisted by Java `TimeRational`.
+///
+/// The JAXB object uses raw Java `int` fields and does not normalize, impose
+/// positivity, or reject a zero denominator while unmarshalling.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TimeRational {
+    numerator: i32,
+    denominator: i32,
+}
+
+impl TimeRational {
+    #[must_use]
+    pub const fn numerator(self) -> i32 {
+        self.numerator
+    }
+
+    #[must_use]
+    pub const fn denominator(self) -> i32 {
+        self.denominator
     }
 }
 
@@ -582,6 +698,23 @@ pub enum BookXmlError {
         /// Repeated page rank.
         page_id: u32,
     },
+    /// A page contains more than one direct `last-time-rational` element.
+    DuplicateLastTimeRational { sheet_number: u32, page_id: u32 },
+    /// A present time rational lacks one of its required integer attributes.
+    MissingTimeRationalField {
+        sheet_number: u32,
+        page_id: u32,
+        field: &'static str,
+    },
+    /// A time-rational attribute is malformed or outside Java `int` range.
+    InvalidTimeRationalInteger {
+        sheet_number: u32,
+        page_id: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// An attribute-only time rational contains nested or scalar content.
+    UnexpectedTimeRationalContent { sheet_number: u32, page_id: u32 },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
     /// A `steps` XML list contains an element or entity rather than plain text.
@@ -694,6 +827,37 @@ impl fmt::Display for BookXmlError {
             } => write!(
                 formatter,
                 "sheet stub {sheet_number} has duplicate page ID {page_id}"
+            ),
+            Self::DuplicateLastTimeRational {
+                sheet_number,
+                page_id,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} repeats last-time-rational"
+            ),
+            Self::MissingTimeRationalField {
+                sheet_number,
+                page_id,
+                field,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} time rational is missing {field}"
+            ),
+            Self::InvalidTimeRationalInteger {
+                sheet_number,
+                page_id,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} has invalid time-rational integer {field}: {value:?}"
+            ),
+            Self::UnexpectedTimeRationalContent {
+                sheet_number,
+                page_id,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} time rational contains content"
             ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
@@ -826,7 +990,7 @@ fn push_page_ref(
     reader: &Reader<Cursor<&[u8]>>,
     element: &BytesStart<'_>,
     sheet_stub: &mut SheetStub,
-) -> Result<(), BookXmlError> {
+) -> Result<usize, BookXmlError> {
     let mut id = None;
     let mut movement_start = None;
     let mut delta_measure_id = None;
@@ -881,8 +1045,93 @@ fn push_page_ref(
         id,
         movement_start,
         delta_measure_id,
+        last_time_rational: None,
+    });
+    Ok(sheet_stub.page_refs.len() - 1)
+}
+
+fn push_last_time_rational(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+) -> Result<(), BookXmlError> {
+    let page = &sheet_stub.page_refs[page_index];
+    if page.last_time_rational.is_some() {
+        return Err(BookXmlError::DuplicateLastTimeRational {
+            sheet_number: sheet_stub.number,
+            page_id: page.id,
+        });
+    }
+
+    let mut numerator = None;
+    let mut denominator = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == NUM_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            numerator = Some(parse_time_integer(
+                &value,
+                sheet_stub.number,
+                page.id,
+                "sheet/page/last-time-rational/@num",
+            )?);
+        } else if key == DEN_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            denominator = Some(parse_time_integer(
+                &value,
+                sheet_stub.number,
+                page.id,
+                "sheet/page/last-time-rational/@den",
+            )?);
+        }
+    }
+
+    let numerator = numerator.ok_or(BookXmlError::MissingTimeRationalField {
+        sheet_number: sheet_stub.number,
+        page_id: page.id,
+        field: "sheet/page/last-time-rational/@num",
+    })?;
+    let denominator = denominator.ok_or(BookXmlError::MissingTimeRationalField {
+        sheet_number: sheet_stub.number,
+        page_id: page.id,
+        field: "sheet/page/last-time-rational/@den",
+    })?;
+    sheet_stub.page_refs[page_index].last_time_rational = Some(TimeRational {
+        numerator,
+        denominator,
     });
     Ok(())
+}
+
+fn parse_time_integer(
+    value: &str,
+    sheet_number: u32,
+    page_id: u32,
+    field: &'static str,
+) -> Result<i32, BookXmlError> {
+    value
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| BookXmlError::InvalidTimeRationalInteger {
+            sheet_number,
+            page_id,
+            field,
+            value: value.to_owned(),
+        })
+}
+
+fn unexpected_time_rational_content(
+    sheet_stubs: &[SheetStub],
+    sheet_index: usize,
+    page_index: usize,
+) -> BookXmlError {
+    BookXmlError::UnexpectedTimeRationalContent {
+        sheet_number: sheet_stubs[sheet_index].number,
+        page_id: sheet_stubs[sheet_index].page_refs[page_index].id,
+    }
 }
 
 fn begin_steps(sheet_stubs: &[SheetStub], sheet_index: usize) -> Result<(), BookXmlError> {
@@ -1178,7 +1427,31 @@ mod tests {
         assert_eq!(pages[0].movement_start_attribute(), Some(true));
         assert!(pages[0].is_movement_start());
         assert_eq!(pages[0].delta_measure_id(), Some(12));
+        assert_eq!(
+            pages[0].last_time_rational(),
+            Some(TimeRational {
+                numerator: 4,
+                denominator: 4,
+            })
+        );
         assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn preserves_non_reduced_and_raw_java_int_time_rationals() {
+        let book = BookXml::parse(
+            br#"<book><sheet number="1"><page id="1"><last-time-rational num="6" den="8"/></page><page id="2"><last-time-rational num=" -2147483648 " den="0">  </last-time-rational></page><page id="3"/></sheet></book>"#,
+        )
+        .unwrap();
+        let pages = book.sheet_stubs()[0].page_refs();
+
+        let compound = pages[0].last_time_rational().unwrap();
+        assert_eq!(compound.numerator(), 6);
+        assert_eq!(compound.denominator(), 8);
+        let raw = pages[1].last_time_rational().unwrap();
+        assert_eq!(raw.numerator(), i32::MIN);
+        assert_eq!(raw.denominator(), 0);
+        assert_eq!(pages[2].last_time_rational(), None);
     }
 
     #[test]
@@ -1204,7 +1477,7 @@ mod tests {
     #[test]
     fn ignores_nested_and_namespaced_page_lookalikes() {
         let book = BookXml::parse(
-            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><future><av:page id="77"/></future></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
+            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><future><av:page id="77"/><last-time-rational num="2" den="2"/></future></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
         )
         .unwrap();
 
@@ -1212,6 +1485,7 @@ mod tests {
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].id(), 3);
         assert_eq!(pages[0].movement_start_attribute(), None);
+        assert_eq!(pages[0].last_time_rational(), None);
     }
 
     #[test]
@@ -1389,6 +1663,98 @@ mod tests {
             BookXml::parse(br#"<book><sheet number="1"><page id="1" id="2"/></sheet></book>"#)
                 .unwrap_err();
         assert!(matches!(error, BookXmlError::Malformed { .. }));
+    }
+
+    #[test]
+    fn rejects_duplicate_or_incomplete_time_rationals() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><last-time-rational num="3" den="4"/><last-time-rational num="2" den="2"/></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateLastTimeRational {
+                sheet_number: 2,
+                page_id: 1,
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><last-time-rational den="4"/></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::MissingTimeRationalField {
+                sheet_number: 2,
+                page_id: 1,
+                field: "sheet/page/last-time-rational/@num",
+            }
+        );
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><last-time-rational num="3"/></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::MissingTimeRationalField {
+                sheet_number: 2,
+                page_id: 1,
+                field: "sheet/page/last-time-rational/@den",
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_time_rational_integers_and_duplicate_attributes() {
+        for (field, attribute, invalid) in [
+            ("sheet/page/last-time-rational/@num", "num", "2147483648"),
+            ("sheet/page/last-time-rational/@den", "den", "not-a-number"),
+        ] {
+            let attrs = if attribute == "num" {
+                format!("num=\"{invalid}\" den=\"4\"")
+            } else {
+                format!("num=\"3\" den=\"{invalid}\"")
+            };
+            let xml = format!(
+                "<book><sheet number=\"2\"><page id=\"1\"><last-time-rational {attrs}/></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidTimeRationalInteger {
+                    sheet_number: 2,
+                    page_id: 1,
+                    field,
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+
+        assert!(matches!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><last-time-rational num="3" num="4" den="4"/></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::Malformed { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_time_rational_text_entities_and_markup() {
+        for content in [
+            "text",
+            "&#32;",
+            "<![CDATA[]]>",
+            "<!--comment-->",
+            "<future/>",
+        ] {
+            let xml = format!(
+                "<book><sheet number=\"2\"><page id=\"1\"><last-time-rational num=\"3\" den=\"4\">{content}</last-time-rational></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedTimeRationalContent {
+                    sheet_number: 2,
+                    page_id: 1,
+                }
+            );
+        }
     }
 
     #[test]
