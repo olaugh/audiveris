@@ -11,14 +11,24 @@
 use std::convert::Infallible;
 
 use audiveris_image::{
+    bar_alignment::BarAlignment,
+    bars_logic::{BarsLogicError, ConnectionInterPlan, VerticalInterPlan},
+    filament::StaffFilament,
     grid_lifecycle::{
         GridBuildExecutor, GridBuildOutcome, GridStepExecutor, GridStepStage, build_grid_info,
         run_grid_step,
     },
+    grid_sig::{BarGroupPromotionError, ConnectionPromotionWarning, GridSig},
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
+    peak_graph::{PeakEdgeId, PeakGraph},
     run_table::{RunTable, RunTableError},
     staff_line_cleaner::{OriginalStaffLine, StaffLineCleanerExecutor, clean_staff_lines},
+    staff_line_conversion::{
+        OriginalGlyphRegistrar, PersistentStaffLine, StaffGlyph, StaffLineConversionError,
+        to_registered_staff_line,
+    },
+    staff_peak::StaffPeak,
     system_population::{
         PopulationLag, PopulationPage, PopulationPageReport, PopulationReferencePage,
         PopulationReferenceRegistry, PopulationSection, PopulationSystem, PopulationSystemArea,
@@ -33,16 +43,90 @@ use crate::score_update::{
     PageInput, PageKey, ScoreTopology, ScoreUpdateError, StubPages, update_scores,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum HeadlessStaffLine {
-    Detailed(OriginalStaffLine),
-    Simplified { source_line_id: usize },
+    Filament {
+        line_id: usize,
+        filament: StaffFilament,
+    },
+    Persistent {
+        source_line_id: usize,
+        line: PersistentStaffLine,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct HeadlessStaff {
     pub id: usize,
     pub lines: Vec<HeadlessStaffLine>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HeadlessGlyphRegistry {
+    pub originals: Vec<StaffGlyph>,
+}
+
+impl OriginalGlyphRegistrar for HeadlessGlyphRegistry {
+    type Error = Infallible;
+
+    fn register_original(&mut self, glyph: StaffGlyph) -> Result<StaffGlyph, Self::Error> {
+        self.originals.push(glyph.clone());
+        Ok(glyph)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessSystemSigState {
+    pub system_id: usize,
+    pub sig: GridSig,
+    pub vertical_plans: Vec<VerticalInterPlan>,
+    pub staff_peaks: Vec<Vec<StaffPeak>>,
+    pub maximum_group_gap: i32,
+    pub interline: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeadlessConnectionPlan {
+    pub system_id: usize,
+    pub plan: ConnectionInterPlan,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessGridSigState {
+    pub systems: Vec<HeadlessSystemSigState>,
+    /// Global `peakGraph` used by Java `createConnectionInters`.
+    pub peak_graph: PeakGraph<BarAlignment>,
+    /// Plans in the exact global `peakGraph.edgeSet()` iteration order.
+    pub connections: Vec<HeadlessConnectionPlan>,
+    pub connection_warnings: Vec<HeadlessConnectionWarning>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HeadlessConnectionWarning {
+    Endpoint {
+        system_id: usize,
+        warning: ConnectionPromotionWarning,
+    },
+    Logic {
+        system_id: usize,
+        edge: PeakEdgeId,
+        error: BarsLogicError,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeadlessGridPromotionError {
+    MissingSystem(usize),
+    BarGroup {
+        system_id: usize,
+        source: BarGroupPromotionError,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HeadlessBuildOtherError<BuilderError> {
+    Builder(BuilderError),
+    Promotion(HeadlessGridPromotionError),
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +152,9 @@ pub struct HeadlessPopulationState {
 pub struct HeadlessGridSheet {
     pub sheet_number: u32,
     pub staffs: Vec<HeadlessStaff>,
+    pub glyphs: HeadlessGlyphRegistry,
+    pub sig: HeadlessGridSigState,
+    pub promotion_failure: Option<HeadlessGridPromotionError>,
     pub no_staff_table: Option<RunTable>,
     pub max_fore: Option<usize>,
     pub ledger_thickness: f64,
@@ -81,11 +168,12 @@ pub struct HeadlessGridBook {
     pub scores: Vec<ScoreTopology>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum HeadlessGridError<StepError> {
     Build(StepError),
     MissingStaff(usize),
     PersistentStaffLine { staff_id: usize, line_id: usize },
+    StaffLineConversion(StaffLineConversionError<Infallible>),
     MissingHorizontalLag,
     RemoveStaffSections(RunTableError),
     RebuildHorizontalLag(RebuildHorizontalLagError),
@@ -100,7 +188,7 @@ where
     pub builder: Builder,
     pub sheet: HeadlessGridSheet,
     pub book: HeadlessGridBook,
-    pub build_outcome: Option<GridBuildOutcome<Builder::OtherError>>,
+    pub build_outcome: Option<GridBuildOutcome<HeadlessBuildOtherError<Builder::OtherError>>>,
     pub cleaner_finished: bool,
     pub step_finished: bool,
 }
@@ -165,8 +253,13 @@ where
     fn run_grid_step_stage(&mut self, stage: GridStepStage) -> Result<(), Self::Error> {
         match stage {
             GridStepStage::BuildGrid => {
+                let mut builder = SigPromotingBuilder {
+                    builder: &mut self.builder,
+                    sig: &mut self.sheet.sig,
+                    promotion_failure: &mut self.sheet.promotion_failure,
+                };
                 self.build_outcome =
-                    Some(build_grid_info(&mut self.builder).map_err(HeadlessGridError::Build)?);
+                    Some(build_grid_info(&mut builder).map_err(HeadlessGridError::Build)?);
                 Ok(())
             }
             GridStepStage::CleanStaffLines => clean_staff_lines(self),
@@ -177,6 +270,125 @@ where
     fn finish_successfully(&mut self) {
         self.step_finished = true;
     }
+}
+
+struct SigPromotingBuilder<'a, Builder> {
+    builder: &'a mut Builder,
+    sig: &'a mut HeadlessGridSigState,
+    promotion_failure: &'a mut Option<HeadlessGridPromotionError>,
+}
+
+impl<Builder> GridBuildExecutor for SigPromotingBuilder<'_, Builder>
+where
+    Builder: GridBuildExecutor,
+{
+    type StepError = Builder::StepError;
+    type OtherError = HeadlessBuildOtherError<Builder::OtherError>;
+
+    fn run_stage(
+        &mut self,
+        stage: audiveris_image::grid_lifecycle::GridBuildStage,
+    ) -> Result<
+        (),
+        audiveris_image::grid_lifecycle::GridStageFailure<Self::StepError, Self::OtherError>,
+    > {
+        self.builder
+            .run_stage(stage)
+            .map_err(|failure| match failure {
+                audiveris_image::grid_lifecycle::GridStageFailure::Step(error) => {
+                    audiveris_image::grid_lifecycle::GridStageFailure::Step(error)
+                }
+                audiveris_image::grid_lifecycle::GridStageFailure::Other(error) => {
+                    audiveris_image::grid_lifecycle::GridStageFailure::Other(
+                        HeadlessBuildOtherError::Builder(error),
+                    )
+                }
+            })?;
+        if stage == audiveris_image::grid_lifecycle::GridBuildStage::ProcessBars {
+            promote_grid_sigs(self.sig).map_err(|error| {
+                audiveris_image::grid_lifecycle::GridStageFailure::Other(
+                    HeadlessBuildOtherError::Promotion(error),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn log_swallowed_error(
+        &mut self,
+        stage: audiveris_image::grid_lifecycle::GridBuildStage,
+        error: &Self::OtherError,
+    ) {
+        match error {
+            HeadlessBuildOtherError::Builder(error) => {
+                self.builder.log_swallowed_error(stage, error);
+            }
+            HeadlessBuildOtherError::Promotion(error) => {
+                *self.promotion_failure = Some(*error);
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        self.builder.finish();
+    }
+}
+
+fn promote_grid_sigs(state: &mut HeadlessGridSigState) -> Result<(), HeadlessGridPromotionError> {
+    // Java createInters traverses every system before connection promotion.
+    for system in &mut state.systems {
+        system.sig.promote_vertical_inters(&system.vertical_plans);
+    }
+
+    // createConnectionInters catches each individual connection exception.
+    state.connection_warnings.clear();
+    for connection in &state.connections {
+        let system = state
+            .systems
+            .iter_mut()
+            .find(|system| system.system_id == connection.system_id)
+            .ok_or(HeadlessGridPromotionError::MissingSystem(
+                connection.system_id,
+            ))?;
+        match system
+            .sig
+            .promote_connection_inters(&state.peak_graph, &[connection.plan])
+        {
+            Ok(warnings) => {
+                state
+                    .connection_warnings
+                    .extend(warnings.into_iter().map(|warning| {
+                        HeadlessConnectionWarning::Endpoint {
+                            system_id: connection.system_id,
+                            warning,
+                        }
+                    }))
+            }
+            Err(error) => state
+                .connection_warnings
+                .push(HeadlessConnectionWarning::Logic {
+                    system_id: connection.system_id,
+                    edge: connection.plan.edge,
+                    error,
+                }),
+        }
+    }
+
+    // groupBarlines has no local catch: prior relations remain and the failure
+    // reaches GridBuilder.buildInfo's ordinary-Throwable catch.
+    for system in &mut state.systems {
+        let interline = system.interline;
+        system
+            .sig
+            .group_barlines(&system.staff_peaks, system.maximum_group_gap, |gap| {
+                f64::from(gap) / interline
+            })
+            .map_err(|source| HeadlessGridPromotionError::BarGroup {
+                system_id: system.system_id,
+                source,
+            })?;
+    }
+    Ok(())
 }
 
 impl<Builder> StaffLineCleanerExecutor for HeadlessGridExecutor<Builder>
@@ -193,8 +405,8 @@ where
         &mut self,
         staff_id: usize,
     ) -> Result<Vec<OriginalStaffLine>, Self::Error> {
-        let staff = self
-            .sheet
+        let sheet = &mut self.sheet;
+        let staff = sheet
             .staffs
             .iter_mut()
             .find(|staff| staff.id == staff_id)
@@ -203,13 +415,24 @@ where
         let mut detailed = Vec::with_capacity(originals.len());
         for line in originals {
             match line {
-                HeadlessStaffLine::Detailed(original) => {
-                    staff.lines.push(HeadlessStaffLine::Simplified {
-                        source_line_id: original.line_id,
+                HeadlessStaffLine::Filament { line_id, filament } => {
+                    let original = OriginalStaffLine {
+                        line_id,
+                        section_ids: filament
+                            .sections()
+                            .iter()
+                            .map(audiveris_image::section::Section::id)
+                            .collect(),
+                    };
+                    let persistent = to_registered_staff_line(&filament, &mut sheet.glyphs)
+                        .map_err(HeadlessGridError::StaffLineConversion)?;
+                    staff.lines.push(HeadlessStaffLine::Persistent {
+                        source_line_id: line_id,
+                        line: persistent,
                     });
                     detailed.push(original);
                 }
-                HeadlessStaffLine::Simplified { source_line_id } => {
+                HeadlessStaffLine::Persistent { source_line_id, .. } => {
                     return Err(HeadlessGridError::PersistentStaffLine {
                         staff_id,
                         line_id: source_line_id,
@@ -424,9 +647,15 @@ fn dispatch_to_areas(
 mod tests {
     use super::*;
     use audiveris_image::{
+        bar_alignment::{AlignmentPeak, BarImpacts},
+        bar_column::{PeakId, StaffId},
+        bars_logic::{PeakWidthClass, VerticalInterKind, VerticalMedian, plan_connection_inters},
+        filament::FilamentError,
         grid_lifecycle::{GridBuildStage, GridStageFailure},
+        grid_sig::{GridSigNode, GridSigRelation},
         line_short_sections::HorizontalSectionLag,
         run_table::{Orientation, Run},
+        staff_peak::StaffPeak,
         system_population::{
             BoundarySegment, PopulationReferencePart, PopulationReferenceStaff,
             PopulationStaffConfig, PopulationSystemRefState, StaffBoundary,
@@ -469,14 +698,14 @@ mod tests {
     }
 
     fn horizontal_table() -> RunTable {
-        let mut table = RunTable::new(Orientation::Horizontal, 20, 20).unwrap();
-        table.add_run(5, Run::new(1, 5)).unwrap();
+        let mut table = RunTable::new(Orientation::Horizontal, 100, 20).unwrap();
+        table.add_run(5, Run::new(10, 81)).unwrap();
         table.add_run(12, Run::new(10, 4)).unwrap();
         table
     }
 
     fn vertical_no_staff() -> RunTable {
-        let mut table = RunTable::new(Orientation::Vertical, 20, 20).unwrap();
+        let mut table = RunTable::new(Orientation::Vertical, 100, 20).unwrap();
         table.add_run(3, Run::new(4, 2)).unwrap();
         table.add_run(12, Run::new(11, 2)).unwrap();
         table
@@ -486,26 +715,113 @@ mod tests {
         StaffBoundary {
             segments: vec![BoundarySegment::Line {
                 start: (0.0, y),
-                end: (20.0, y),
+                end: (100.0, y),
             }],
+        }
+    }
+
+    fn peak(staff: usize, x: i32) -> StaffPeak {
+        StaffPeak::new(StaffId::new(staff), 4, 15, x, x).unwrap()
+    }
+
+    fn vertical_plan(peak: &StaffPeak) -> VerticalInterPlan {
+        VerticalInterPlan {
+            peak: peak.key(),
+            median: VerticalMedian {
+                x: f64::from(peak.start()) + 0.5,
+                top: 3.5,
+                bottom: 16.5,
+            },
+            width: 1.0,
+            impacts: None,
+            kind: VerticalInterKind::Barline {
+                width_class: PeakWidthClass::Thin,
+                left_staff_end: false,
+                right_staff_end: false,
+            },
+        }
+    }
+
+    fn connection_graph(top: StaffPeak, bottom: StaffPeak) -> PeakGraph<BarAlignment> {
+        let mut graph = PeakGraph::new();
+        add_connection(&mut graph, top, bottom, 1);
+        graph
+    }
+
+    fn add_connection(
+        graph: &mut PeakGraph<BarAlignment>,
+        top: StaffPeak,
+        bottom: StaffPeak,
+        id: usize,
+    ) {
+        let top_key = top.key();
+        let bottom_key = bottom.key();
+        graph.add_vertex(top);
+        graph.add_vertex(bottom);
+        let alignment = BarAlignment::new(
+            AlignmentPeak::new(PeakId::new(id), top_key.staff_id(), 10, 1.0).unwrap(),
+            AlignmentPeak::new(PeakId::new(id + 100), bottom_key.staff_id(), 10, 1.0).unwrap(),
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0).unwrap(),
+        )
+        .unwrap();
+        graph
+            .add_edge(
+                top_key,
+                bottom_key,
+                BarAlignment::connection(&alignment, 1.0, 1.0).unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn sig_state(
+        peaks: Vec<Vec<StaffPeak>>,
+        vertical_plans: Vec<VerticalInterPlan>,
+    ) -> HeadlessSystemSigState {
+        HeadlessSystemSigState {
+            system_id: 1,
+            sig: GridSig::default(),
+            vertical_plans,
+            staff_peaks: peaks,
+            maximum_group_gap: 3,
+            interline: 10.0,
+        }
+    }
+
+    fn grid_sig_state(
+        system: HeadlessSystemSigState,
+        peak_graph: PeakGraph<BarAlignment>,
+        plans: Vec<ConnectionInterPlan>,
+    ) -> HeadlessGridSigState {
+        HeadlessGridSigState {
+            systems: vec![system],
+            peak_graph,
+            connections: plans
+                .into_iter()
+                .map(|plan| HeadlessConnectionPlan { system_id: 1, plan })
+                .collect(),
+            connection_warnings: Vec::new(),
         }
     }
 
     fn executor() -> HeadlessGridExecutor<SuccessfulBuilder> {
         let lag = HorizontalSectionLag::from_long_runs(horizontal_table()).unwrap();
+        let mut filament = StaffFilament::new(10).unwrap();
+        filament.add_section(lag.sections()[0].clone()).unwrap();
         let staff_config = PopulationStaffConfig {
             line_count: 5,
             is_small: false,
         };
         let population = HeadlessPopulationState {
-            sheet_width: 20,
+            sheet_width: 100,
             sheet_height: 20,
             vertical_margin: 1,
             minimum_indentation: 4.0,
             geometries: vec![PopulationSystemGeometry {
                 system_id: 1,
                 left: 0,
-                width: 20,
+                width: 100,
                 top: 2,
                 bottom: 18,
                 area_left: 0,
@@ -551,11 +867,19 @@ mod tests {
                 sheet_number: 1,
                 staffs: vec![HeadlessStaff {
                     id: 1,
-                    lines: vec![HeadlessStaffLine::Detailed(OriginalStaffLine {
+                    lines: vec![HeadlessStaffLine::Filament {
                         line_id: 10,
-                        section_ids: vec![1],
-                    })],
+                        filament,
+                    }],
                 }],
+                glyphs: HeadlessGlyphRegistry::default(),
+                sig: HeadlessGridSigState {
+                    systems: Vec::new(),
+                    peak_graph: PeakGraph::new(),
+                    connections: Vec::new(),
+                    connection_warnings: Vec::new(),
+                },
+                promotion_failure: None,
                 no_staff_table: Some(vertical_no_staff()),
                 max_fore: Some(3),
                 ledger_thickness: 1.0,
@@ -581,10 +905,14 @@ mod tests {
 
         assert_eq!(executor.builder.stages, GridBuildStage::ORDER);
         assert_eq!(executor.builder.finish_count, 1);
-        assert_eq!(
-            executor.sheet.staffs[0].lines,
-            [HeadlessStaffLine::Simplified { source_line_id: 10 }]
-        );
+        assert!(matches!(
+            executor.sheet.staffs[0].lines.as_slice(),
+            [HeadlessStaffLine::Persistent {
+                source_line_id: 10,
+                ..
+            }]
+        ));
+        assert_eq!(executor.sheet.glyphs.originals.len(), 1);
         assert_eq!(executor.sheet.population.pages[0].system_ids, [1]);
         assert_eq!(executor.sheet.population.page_refs[0].systems.len(), 1);
         let system_ref = executor.sheet.population.page_refs[0].systems[0];
@@ -623,10 +951,13 @@ mod tests {
 
         assert_eq!(executor.run(), Err(HeadlessGridError::MissingHorizontalLag));
 
-        assert_eq!(
-            executor.sheet.staffs[0].lines,
-            [HeadlessStaffLine::Simplified { source_line_id: 10 }]
-        );
+        assert!(matches!(
+            executor.sheet.staffs[0].lines.as_slice(),
+            [HeadlessStaffLine::Persistent {
+                source_line_id: 10,
+                ..
+            }]
+        ));
         assert!(executor.sheet.population.pages.is_empty());
         assert!(executor.book.scores.is_empty());
         assert!(!executor.cleaner_finished);
@@ -654,7 +985,7 @@ mod tests {
         assert_eq!(executor.builder.finish_count, 1);
         assert!(matches!(
             executor.sheet.staffs[0].lines[0],
-            HeadlessStaffLine::Detailed(_)
+            HeadlessStaffLine::Filament { .. }
         ));
         assert!(executor.sheet.population.pages.is_empty());
         assert!(executor.book.scores.is_empty());
@@ -672,7 +1003,7 @@ mod tests {
             executor.build_outcome,
             Some(GridBuildOutcome::Swallowed {
                 stage: GridBuildStage::ProcessBars,
-                error: "ordinary grid failure",
+                error: HeadlessBuildOtherError::Builder("ordinary grid failure"),
             })
         ));
         assert_eq!(executor.sheet.population.pages.len(), 1);
@@ -697,5 +1028,214 @@ mod tests {
         assert_eq!(executor.sheet.population.page_refs[0].systems.len(), 1);
         assert!(executor.book.scores.is_empty());
         assert!(!executor.step_finished);
+    }
+
+    #[test]
+    fn process_bars_promotes_backlinks_connections_and_freezing_before_cleanup() {
+        let top = peak(1, 10);
+        let bottom = peak(2, 10);
+        let graph = connection_graph(top.clone(), bottom.clone());
+        let plans = plan_connection_inters(&graph, |_| true);
+        let mut executor = executor();
+        executor.sheet.sig = grid_sig_state(
+            sig_state(
+                vec![vec![top.clone()], vec![bottom.clone()]],
+                vec![vertical_plan(&top), vertical_plan(&bottom)],
+            ),
+            graph,
+            plans,
+        );
+
+        executor.run().unwrap();
+
+        let state = &executor.sheet.sig.systems[0];
+        let top_inter = state.sig.inter_of(top.key()).expect("top backlink");
+        let bottom_inter = state.sig.inter_of(bottom.key()).expect("bottom backlink");
+        assert!(matches!(
+            state.sig.node(top_inter),
+            Some(GridSigNode::Vertical { frozen: true, .. })
+        ));
+        assert!(matches!(
+            state.sig.node(bottom_inter),
+            Some(GridSigNode::Vertical { frozen: true, .. })
+        ));
+        assert_eq!(state.sig.edges().len(), 3);
+        assert!(executor.sheet.sig.connection_warnings.is_empty());
+        assert!(executor.cleaner_finished);
+    }
+
+    #[test]
+    fn connection_extension_failure_is_caught_per_edge_with_partial_sig_retained() {
+        let top = peak(1, 10);
+        let bottom = peak(2, 10);
+        let source_graph = connection_graph(top.clone(), bottom.clone());
+        let plans = plan_connection_inters(&source_graph, |_| true);
+        let missing_edge = plans[0].edge;
+        let mut state = grid_sig_state(
+            sig_state(
+                vec![vec![top.clone()], vec![bottom.clone()]],
+                vec![vertical_plan(&top), vertical_plan(&bottom)],
+            ),
+            PeakGraph::new(),
+            plans,
+        );
+
+        promote_grid_sigs(&mut state).unwrap();
+
+        assert!(matches!(
+            state.connection_warnings.as_slice(),
+            [HeadlessConnectionWarning::Logic { edge, .. }] if *edge == missing_edge
+        ));
+        assert_eq!(state.systems[0].sig.edges().len(), 3);
+        assert!(matches!(
+            state.systems[0]
+                .sig
+                .nodes_in_order()
+                .last()
+                .map(|(_, node)| node),
+            Some(GridSigNode::Connector { frozen: true, .. })
+        ));
+    }
+
+    #[test]
+    fn group_failure_is_swallowed_at_process_bars_after_retaining_group_prefix() {
+        let first = peak(1, 10);
+        let second = peak(1, 12);
+        let missing = peak(1, 14);
+        let expected = HeadlessGridPromotionError::BarGroup {
+            system_id: 1,
+            source: BarGroupPromotionError::MissingInter(missing.key()),
+        };
+        let mut executor = executor();
+        executor.sheet.sig = grid_sig_state(
+            sig_state(
+                vec![vec![first.clone(), second.clone(), missing]],
+                vec![vertical_plan(&first), vertical_plan(&second)],
+            ),
+            PeakGraph::new(),
+            Vec::new(),
+        );
+
+        executor.run().unwrap();
+
+        assert_eq!(
+            executor.builder.stages.last(),
+            Some(&GridBuildStage::ProcessBars)
+        );
+        assert_eq!(executor.sheet.promotion_failure, Some(expected));
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::ProcessBars,
+                error: HeadlessBuildOtherError::Promotion(error),
+            }) if error == expected
+        ));
+        assert_eq!(
+            executor.sheet.sig.systems[0]
+                .sig
+                .edges()
+                .iter()
+                .filter(|edge| matches!(edge.relation, GridSigRelation::BarGroup { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(executor.sheet.population.pages.len(), 1);
+        assert!(executor.step_finished);
+    }
+
+    #[test]
+    fn second_filament_failure_retains_converted_prefix_and_detaches_remainder() {
+        let mut executor = executor();
+        let valid = match &executor.sheet.staffs[0].lines[0] {
+            HeadlessStaffLine::Filament { filament, .. } => filament.clone(),
+            HeadlessStaffLine::Persistent { .. } => unreachable!(),
+        };
+        executor.sheet.staffs[0].lines = vec![
+            HeadlessStaffLine::Filament {
+                line_id: 10,
+                filament: valid.clone(),
+            },
+            HeadlessStaffLine::Filament {
+                line_id: 20,
+                filament: StaffFilament::new(10).unwrap(),
+            },
+            HeadlessStaffLine::Filament {
+                line_id: 30,
+                filament: valid,
+            },
+        ];
+
+        assert_eq!(
+            executor.run(),
+            Err(HeadlessGridError::StaffLineConversion(
+                StaffLineConversionError::Filament(FilamentError::Empty)
+            ))
+        );
+
+        assert!(matches!(
+            executor.sheet.staffs[0].lines.as_slice(),
+            [HeadlessStaffLine::Persistent {
+                source_line_id: 10,
+                ..
+            }]
+        ));
+        assert_eq!(executor.sheet.glyphs.originals.len(), 1);
+        assert!(executor.sheet.population.pages.is_empty());
+        assert!(!executor.cleaner_finished);
+    }
+
+    #[test]
+    fn connections_follow_global_peak_edge_order_across_target_systems() {
+        let one_top = peak(1, 10);
+        let one_bottom = peak(2, 10);
+        let two_top = peak(3, 20);
+        let two_bottom = peak(4, 20);
+        let mut source_graph = PeakGraph::new();
+        add_connection(&mut source_graph, one_top.clone(), one_bottom.clone(), 1);
+        add_connection(&mut source_graph, two_top.clone(), two_bottom.clone(), 2);
+        let plans = plan_connection_inters(&source_graph, |_| true);
+        let mut second_system = sig_state(
+            vec![vec![two_top.clone()], vec![two_bottom.clone()]],
+            vec![vertical_plan(&two_top), vertical_plan(&two_bottom)],
+        );
+        second_system.system_id = 2;
+        let mut state = HeadlessGridSigState {
+            systems: vec![
+                sig_state(
+                    vec![vec![one_top.clone()], vec![one_bottom.clone()]],
+                    vec![vertical_plan(&one_top), vertical_plan(&one_bottom)],
+                ),
+                second_system,
+            ],
+            // Force one caught extension error per globally ordered plan.
+            peak_graph: PeakGraph::new(),
+            connections: vec![
+                HeadlessConnectionPlan {
+                    system_id: 2,
+                    plan: plans[1],
+                },
+                HeadlessConnectionPlan {
+                    system_id: 1,
+                    plan: plans[0],
+                },
+            ],
+            connection_warnings: Vec::new(),
+        };
+
+        promote_grid_sigs(&mut state).unwrap();
+
+        assert_eq!(
+            state
+                .connection_warnings
+                .iter()
+                .map(|warning| match warning {
+                    HeadlessConnectionWarning::Endpoint { system_id, .. }
+                    | HeadlessConnectionWarning::Logic { system_id, .. } => *system_id,
+                })
+                .collect::<Vec<_>>(),
+            [2, 1]
+        );
+        assert_eq!(state.systems[0].sig.edges().len(), 3);
+        assert_eq!(state.systems[1].sig.edges().len(), 3);
     }
 }
