@@ -223,6 +223,20 @@ impl LinesCoordinatorParameters {
             maximum_right_indentation,
         })
     }
+
+    /// Return these line-layout thresholds with a newly measured sheet slope.
+    pub fn with_global_slope(mut self, global_slope: f64) -> Result<Self, LinesCoordinatorError> {
+        if !global_slope.is_finite() {
+            return Err(LinesCoordinatorError::InvalidParameters);
+        }
+        self.global_slope = global_slope;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn global_slope(self) -> f64 {
+        self.global_slope
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

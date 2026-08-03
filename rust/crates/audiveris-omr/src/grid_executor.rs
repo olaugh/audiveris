@@ -28,7 +28,8 @@ use audiveris_image::{
     peak_graph::{PeakEdgeId, PeakGraph},
     prepared_bars::{PreparedBarsHandoff, PreparedBarsHandoffSource},
     prepared_lines::{
-        PreparedStaffHandoff, PreparedStaffHandoffSource, RawProductionRetrieveLines,
+        PreparedStaffHandoff, PreparedStaffHandoffSource, PreparedStaffLine,
+        RawLineMetadataHandoff, RawLineMetadataHandoffSource, RawProductionRetrieveLines,
     },
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridHandoff, RasterGridHandoffSource,
@@ -216,6 +217,11 @@ pub struct InstalledRasterGridPrefix {
     pub horizontal_lag_present: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeadlessSkew {
+    pub slope: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct HeadlessGridSheet {
     pub sheet_number: u32,
@@ -229,10 +235,19 @@ pub struct HeadlessGridSheet {
     pub vertical_lag: Option<HeadlessVerticalLag>,
     pub horizontal_lag: Option<RegisteredHorizontalLag>,
     pub installed_raster_prefix: Option<InstalledRasterGridPrefix>,
+    pub skew: Option<HeadlessSkew>,
+    pub sloped_line_fallbacks: Vec<PreparedStaffLine>,
     pub population: HeadlessPopulationState,
 }
 
 impl HeadlessGridSheet {
+    pub fn install_raw_line_metadata_handoff(&mut self, handoff: RawLineMetadataHandoff) {
+        self.skew = Some(HeadlessSkew {
+            slope: handoff.global_slope,
+        });
+        self.sloped_line_fallbacks = handoff.sloped_filaments;
+    }
+
     pub fn install_prepared_staff_handoff(&mut self, handoff: PreparedStaffHandoff) {
         self.staffs = handoff
             .staffs
@@ -319,6 +334,7 @@ where
     pub build_outcome: Option<GridBuildOutcome<HeadlessBuildOtherError<Builder::OtherError>>>,
     raster_handoff: Option<fn(&mut Builder) -> Option<RasterGridHandoff>>,
     staff_handoff: Option<fn(&mut Builder) -> Option<PreparedStaffHandoff>>,
+    raw_line_metadata_handoff: Option<fn(&mut Builder) -> Option<RawLineMetadataHandoff>>,
     bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
     bar_tail_parameters: BarTailParameters,
     pub cleaner_finished: bool,
@@ -338,6 +354,7 @@ where
             build_outcome: None,
             raster_handoff: None,
             staff_handoff: None,
+            raw_line_metadata_handoff: None,
             bars_handoff: None,
             bar_tail_parameters: BarTailParameters::default(),
             cleaner_finished: false,
@@ -364,6 +381,17 @@ where
         Builder: PreparedStaffHandoffSource,
     {
         self.staff_handoff = Some(Builder::take_prepared_staff_handoff);
+        self
+    }
+
+    /// Install raw slope and retained slope rejects into sheet ownership after
+    /// the build, provided raw line construction reached that handoff.
+    #[must_use]
+    pub fn with_raw_line_metadata_handoff(mut self) -> Self
+    where
+        Builder: RawLineMetadataHandoffSource,
+    {
+        self.raw_line_metadata_handoff = Some(Builder::take_raw_line_metadata_handoff);
         self
     }
 
@@ -452,6 +480,7 @@ where
             book,
         )
         .with_raster_grid_handoff()
+        .with_raw_line_metadata_handoff()
         .with_prepared_staff_handoff()
     }
 }
@@ -480,6 +509,11 @@ where
                     && let Some(handoff) = extract(&mut self.builder)
                 {
                     self.sheet.install_raster_grid_handoff(handoff);
+                }
+                if let Some(extract) = self.raw_line_metadata_handoff
+                    && let Some(handoff) = extract(&mut self.builder)
+                {
+                    self.sheet.install_raw_line_metadata_handoff(handoff);
                 }
                 if let Some(extract) = self.staff_handoff
                     && let Some(handoff) = extract(&mut self.builder)
@@ -1104,6 +1138,19 @@ mod tests {
         source
     }
 
+    fn positive_slope_source() -> RunTable {
+        let mut source = RunTable::new(Orientation::Vertical, 100, 90).unwrap();
+        for x in 0..100 {
+            for base in [10, 20, 30, 40, 50] {
+                source.add_run(x, Run::new(base + (x / 20), 1)).unwrap();
+            }
+            if x < 60 {
+                source.add_run(x, Run::new(65 + (x / 10), 1)).unwrap();
+            }
+        }
+        source
+    }
+
     fn raw_primary_parameters() -> RawPrimaryPassParameters {
         let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
         let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
@@ -1160,6 +1207,10 @@ mod tests {
 
     fn raw_lines_parameters() -> LinesCoordinatorParameters {
         LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap()
+    }
+
+    fn placeholder_slope_lines_parameters() -> LinesCoordinatorParameters {
+        LinesCoordinatorParameters::new(-0.75, 1, None, 1.0, 0.0, 100.0).unwrap()
     }
 
     fn cluster_parameters() -> ClusterRetrievalParameters {
@@ -1455,6 +1506,8 @@ mod tests {
                 vertical_lag: None,
                 horizontal_lag: Some(RegisteredHorizontalLag::Populated(lag)),
                 installed_raster_prefix: None,
+                skew: None,
+                sloped_line_fallbacks: Vec::new(),
                 population,
             },
             HeadlessGridBook {
@@ -1963,10 +2016,11 @@ mod tests {
             .run_grid_step_stage(GridStepStage::BuildGrid)
             .unwrap();
 
-        assert!(matches!(
-            executor.build_outcome,
-            Some(GridBuildOutcome::Completed)
-        ));
+        assert!(
+            matches!(executor.build_outcome, Some(GridBuildOutcome::Completed)),
+            "unexpected build outcome: {:?}",
+            executor.build_outcome
+        );
         assert_eq!(
             executor.sheet.installed_raster_prefix,
             Some(InstalledRasterGridPrefix {
@@ -1992,6 +2046,43 @@ mod tests {
             1
         );
         assert_eq!(executor.builder.stages().downstream().finish_count, 1);
+    }
+
+    #[test]
+    fn raw_raster_constructor_uses_measured_slope_and_installs_sloped_fallback() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_lines(
+            positive_slope_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            base.sheet,
+            base.book,
+        );
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(
+            matches!(executor.build_outcome, Some(GridBuildOutcome::Completed)),
+            "unexpected build outcome: {:?}",
+            executor.build_outcome
+        );
+        let slope = executor.sheet.skew.expect("installed raw skew").slope;
+        assert!(slope > 0.03 && slope < 0.06, "measured slope: {slope}");
+        assert_ne!(slope, placeholder_slope_lines_parameters().global_slope());
+        assert_eq!(executor.sheet.staffs.len(), 1);
+        assert_eq!(executor.sheet.staffs[0].lines.len(), 5);
+        assert_eq!(executor.sheet.sloped_line_fallbacks.len(), 1);
+        let fallback_geometry = executor.sheet.sloped_line_fallbacks[0]
+            .filament
+            .geometry()
+            .unwrap();
+        let (start_x, start_y) = fallback_geometry.start();
+        let (stop_x, stop_y) = fallback_geometry.stop();
+        assert!((stop_y - start_y) / (stop_x - start_x) > 0.08);
     }
 
     #[test]
@@ -2030,6 +2121,8 @@ mod tests {
             })
         );
         assert!(executor.sheet.staffs.is_empty());
+        assert!(executor.sheet.skew.is_none());
+        assert!(executor.sheet.sloped_line_fallbacks.is_empty());
         assert_eq!(executor.builder.stages().downstream().finish_count, 1);
     }
 

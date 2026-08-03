@@ -626,6 +626,8 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
             vertical_lag: None,
             horizontal_lag: Some(RegisteredHorizontalLag::Populated(lag)),
             installed_raster_prefix: None,
+            skew: None,
+            sloped_line_fallbacks: Vec::new(),
             population,
         },
         HeadlessGridBook {

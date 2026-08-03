@@ -161,9 +161,9 @@ impl StaffFilament {
         let stop_x = (bounds.x + bounds.width - 1) as f64;
         let length = stop_x - start_x + 1.0;
         let segment_count = (length / segment_length).round_ties_even() as usize;
-        if segment_count == 0 {
-            return Err(FilamentError::DegenerateGeometry);
-        }
+        // Java permits `segCount == 0`: `length / 0.0` becomes infinity,
+        // there are no intermediate probes, and the endpoint pair still
+        // defines a valid line spline.
         let precise_segment_length = length / segment_count as f64;
 
         let first_roi = Bounds {
@@ -642,6 +642,21 @@ mod tests {
             [-1.0, 0.0, 164.0, 165.0].map(|x| geometry.is_within_range(x)),
             [false, true, true, false]
         );
+    }
+
+    #[test]
+    fn short_filament_uses_endpoint_spline_when_segment_count_is_zero() {
+        let mut table = RunTable::new(Orientation::Horizontal, 10, 3).unwrap();
+        table.add_run(1, Run::new(2, 5)).unwrap();
+        let mut filament = StaffFilament::new(10).unwrap();
+        filament
+            .add_section(build_sections(&table, JunctionPolicy::All).remove(0))
+            .unwrap();
+
+        let geometry = filament.geometry().unwrap();
+        assert_eq!(geometry.points(), [(2.0, 1.0), (6.0, 1.0)]);
+        near(geometry.position_at(4.0).unwrap(), 1.0);
+        near(geometry.slope_at(4.0).unwrap(), 0.0);
     }
 
     #[test]

@@ -49,13 +49,29 @@ pub struct PreparedStaffHandoff {
     pub staffs: Vec<PreparedStaff>,
 }
 
+/// Raw-line state retained after rejection for sheet skew and later fallback
+/// inclusion. Curvature rejects are deliberately not represented.
+#[derive(Clone, Debug)]
+pub struct RawLineMetadataHandoff {
+    pub global_slope: f64,
+    pub sloped_filaments: Vec<PreparedStaffLine>,
+}
+
 pub trait PreparedStaffHandoffSource {
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff>;
+}
+
+pub trait RawLineMetadataHandoffSource {
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff>;
 }
 
 pub trait PreparedStaffStage {
     fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff>;
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff>;
+}
+
+pub trait RawLineMetadataStage {
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +117,7 @@ pub struct RawProductionRetrieveLines<Downstream> {
     downstream: Downstream,
     primary: Option<ClusterPassState>,
     handoff: Option<PreparedStaffHandoff>,
+    raw_metadata_handoff: Option<RawLineMetadataHandoff>,
 }
 
 impl<Downstream> RawProductionRetrieveLines<Downstream> {
@@ -116,6 +133,7 @@ impl<Downstream> RawProductionRetrieveLines<Downstream> {
             downstream,
             primary: None,
             handoff: None,
+            raw_metadata_handoff: None,
         }
     }
 
@@ -127,6 +145,11 @@ impl<Downstream> RawProductionRetrieveLines<Downstream> {
     #[must_use]
     pub const fn downstream(&self) -> &Downstream {
         &self.downstream
+    }
+
+    #[must_use]
+    pub const fn raw_metadata_handoff(&self) -> Option<&RawLineMetadataHandoff> {
+        self.raw_metadata_handoff.as_ref()
     }
 }
 
@@ -176,6 +199,15 @@ where
     }
 }
 
+impl<Stages, Vip> RawLineMetadataHandoffSource for HeadlessRasterGridBuilder<Stages, Vip>
+where
+    Stages: RawLineMetadataStage,
+{
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+        self.stages_mut().take_raw_line_metadata_handoff()
+    }
+}
+
 impl<Downstream> PreparedStaffStage for ProductionRetrieveLines<Downstream> {
     fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff> {
         self.handoff.as_ref()
@@ -193,6 +225,12 @@ impl<Downstream> PreparedStaffStage for RawProductionRetrieveLines<Downstream> {
 
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
         self.handoff.take()
+    }
+}
+
+impl<Downstream> RawLineMetadataStage for RawProductionRetrieveLines<Downstream> {
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+        self.raw_metadata_handoff.take()
     }
 }
 
@@ -271,6 +309,7 @@ where
         state: &mut RasterGridBuildState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
         self.handoff = None;
+        self.raw_metadata_handoff = None;
         self.primary = None;
         let lag = state.horizontal_lag().ok_or_else(|| {
             GridStageFailure::Other(ProductionRetrieveLinesError::MissingHorizontalLag)
@@ -278,9 +317,33 @@ where
         let lag_sections = index_lag_sections(lag.sections()).map_err(GridStageFailure::Other)?;
         let built = build_primary_cluster_pass(lag, self.raw_parameters.clone())
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
+        let global_slope = built.global_slope();
+        let sloped_filaments = built
+            .sloped_ids()
+            .iter()
+            .map(|id| {
+                let filament = built
+                    .sloped_filaments()
+                    .get(id)
+                    .expect("sloped ID comes from the retained sloped-filament map")
+                    .clone();
+                let id = usize::try_from(id.value()).map_err(|_| {
+                    GridStageFailure::Other(ProductionRetrieveLinesError::FilamentIdOverflow(*id))
+                })?;
+                Ok(PreparedStaffLine { id, filament })
+            })
+            .collect::<Result<Vec<_>, GridStageFailure<_, _>>>()?;
+        self.raw_metadata_handoff = Some(RawLineMetadataHandoff {
+            global_slope,
+            sloped_filaments,
+        });
+        let lines_parameters = self
+            .lines_parameters
+            .with_global_slope(global_slope)
+            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
         self.primary = Some(built.into_state());
         let primary = self.primary.as_mut().expect("raw pass was just installed");
-        let result = retrieve_staff_candidates(primary, None, self.lines_parameters)
+        let result = retrieve_staff_candidates(primary, None, lines_parameters)
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
         self.handoff = Some(
             materialize_staffs(result.staffs(), primary, None, &lag_sections)
@@ -582,6 +645,12 @@ mod tests {
             .expect("prepared staff handoff");
         assert_eq!(handoff.staffs.len(), 1);
         assert_eq!(handoff.staffs[0].lines.len(), 5);
+        let metadata = builder
+            .stages()
+            .raw_metadata_handoff()
+            .expect("raw metadata handoff");
+        assert_eq!(metadata.global_slope, 0.0);
+        assert!(metadata.sloped_filaments.is_empty());
         assert_eq!(
             handoff.staffs[0]
                 .lines
@@ -619,6 +688,7 @@ mod tests {
         assert!(!builder.state().short_sections_added());
         assert!(builder.stages().primary().is_none());
         assert!(builder.stages().prepared_staff_handoff().is_none());
+        assert!(builder.stages().raw_metadata_handoff().is_none());
         assert!(builder.stages().downstream().calls.is_empty());
         assert_eq!(builder.stages().downstream().finish_count, 1);
     }
