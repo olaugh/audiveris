@@ -105,6 +105,48 @@ where
     Ok(GridBuildOutcome::Completed)
 }
 
+/// Production stages in Java `GridStep.doit`, outside `GridBuilder` itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridStepStage {
+    BuildGrid,
+    CleanStaffLines,
+    UpdateBookScores,
+}
+
+impl GridStepStage {
+    pub const ORDER: [Self; 3] = [
+        Self::BuildGrid,
+        Self::CleanStaffLines,
+        Self::UpdateBookScores,
+    ];
+}
+
+/// Adapter for the production `GRID` step driver.
+pub trait GridStepExecutor {
+    type Error;
+
+    fn run_grid_step_stage(&mut self, stage: GridStepStage) -> Result<(), Self::Error>;
+
+    /// Java prints its optional stopwatch only after all three stages succeed;
+    /// there is no `finally` around `GridStep.doit`.
+    fn finish_successfully(&mut self);
+}
+
+/// Execute the exact non-UI `GridStep.doit` lifecycle.
+///
+/// Failures propagate immediately and prior mutations are retained. No cleanup,
+/// rollback, later stage, or success-finalization callback is run after failure.
+pub fn run_grid_step<Executor>(executor: &mut Executor) -> Result<(), Executor::Error>
+where
+    Executor: GridStepExecutor,
+{
+    for stage in GridStepStage::ORDER {
+        executor.run_grid_step_stage(stage)?;
+    }
+    executor.finish_successfully();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +276,51 @@ mod tests {
             [(GridBuildStage::ProcessBars, "recognizer failure")]
         );
         assert_eq!(executor.finish_count, 1);
+    }
+
+    #[derive(Debug, Default)]
+    struct RecordingGridStep {
+        calls: Vec<GridStepStage>,
+        fail_at: Option<GridStepStage>,
+        finishes: usize,
+    }
+
+    impl GridStepExecutor for RecordingGridStep {
+        type Error = &'static str;
+
+        fn run_grid_step_stage(&mut self, stage: GridStepStage) -> Result<(), Self::Error> {
+            self.calls.push(stage);
+            if self.fail_at == Some(stage) {
+                Err("grid step failed")
+            } else {
+                Ok(())
+            }
+        }
+
+        fn finish_successfully(&mut self) {
+            self.finishes += 1;
+        }
+    }
+
+    #[test]
+    fn grid_step_runs_builder_cleaner_then_score_update() {
+        let mut executor = RecordingGridStep::default();
+        assert_eq!(run_grid_step(&mut executor), Ok(()));
+        assert_eq!(executor.calls, GridStepStage::ORDER);
+        assert_eq!(executor.finishes, 1);
+    }
+
+    #[test]
+    fn grid_step_failure_propagates_without_rollback_or_success_finish() {
+        let mut executor = RecordingGridStep {
+            fail_at: Some(GridStepStage::CleanStaffLines),
+            ..RecordingGridStep::default()
+        };
+        assert_eq!(run_grid_step(&mut executor), Err("grid step failed"));
+        assert_eq!(
+            executor.calls,
+            [GridStepStage::BuildGrid, GridStepStage::CleanStaffLines]
+        );
+        assert_eq!(executor.finishes, 0);
     }
 }
