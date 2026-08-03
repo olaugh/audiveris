@@ -19,6 +19,7 @@ pub mod filament;
 pub mod filament_comb;
 pub mod filament_factory;
 pub mod global_filter;
+pub mod grid_coordinator;
 pub mod ingest;
 pub mod line_cluster;
 pub mod line_sections;
