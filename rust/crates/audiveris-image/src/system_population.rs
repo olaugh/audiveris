@@ -597,6 +597,17 @@ impl PopulationSystemRefId {
     }
 }
 
+/// Stable identity replacing Java's shared `PageRef` object reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PopulationPageRefId(u64);
+
+impl PopulationPageRefId {
+    #[must_use]
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
 /// Exact value returned by `Staff.getStaffConfig()`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PopulationStaffConfig {
@@ -631,7 +642,7 @@ pub struct PopulationPartRef {
 /// Fresh `SystemRef` produced by `SystemInfo.buildRef`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PopulationSystemRef {
-    pub page_ref_id: usize,
+    pub page_ref_id: PopulationPageRefId,
     pub parts: Vec<PopulationPartRef>,
 }
 
@@ -644,6 +655,7 @@ pub struct PopulationSystemRefState {
 /// Headless ownership registry for shared Java soft-reference objects.
 #[derive(Clone, Debug, Default)]
 pub struct PopulationReferenceRegistry {
+    next_page_ref_id: u64,
     next_system_ref_id: u64,
     system_refs: BTreeMap<PopulationSystemRefId, PopulationSystemRef>,
 }
@@ -669,7 +681,9 @@ impl PopulationReferenceRegistry {
 /// retain the same shared identity without self-referential Rust values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PopulationReferencePage {
-    pub page_ref_id: usize,
+    pub object_id: PopulationPageRefId,
+    pub id: usize,
+    pub movement_start: bool,
     pub systems: Vec<PopulationSystemRefId>,
 }
 
@@ -681,7 +695,7 @@ pub struct PopulationReferencePage {
 pub fn build_population_system_ref(
     state: &mut PopulationSystemRefState,
     registry: &mut PopulationReferenceRegistry,
-    page_ref_id: usize,
+    page_ref_id: PopulationPageRefId,
     parts: &[PopulationReferencePart],
 ) -> PopulationSystemRefId {
     registry.next_system_ref_id += 1;
@@ -722,11 +736,11 @@ pub fn append_population_system_ref(
     let reference = registry
         .get(system_ref)
         .ok_or(PopulationReferenceError::UnknownSystemRef(system_ref))?;
-    if reference.page_ref_id != page.page_ref_id {
+    if reference.page_ref_id != page.object_id {
         return Err(PopulationReferenceError::WrongPage {
             system_ref,
             expected: reference.page_ref_id,
-            actual: page.page_ref_id,
+            actual: page.object_id,
         });
     }
     page.systems.push(system_ref);
@@ -738,8 +752,8 @@ pub enum PopulationReferenceError {
     UnknownSystemRef(PopulationSystemRefId),
     WrongPage {
         system_ref: PopulationSystemRefId,
-        expected: usize,
-        actual: usize,
+        expected: PopulationPageRefId,
+        actual: PopulationPageRefId,
     },
 }
 
@@ -780,10 +794,11 @@ where
 
 /// System state consumed and mutated by Java `allocatePages`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PopulationSystem<Reference> {
+pub struct PopulationSystem {
     pub id: SystemId,
     pub indented: bool,
-    pub system_ref: Reference,
+    pub parts: Vec<PopulationReferencePart>,
+    pub system_ref: PopulationSystemRefState,
     pub page_id: Option<usize>,
 }
 
@@ -797,24 +812,42 @@ pub struct PopulationPage {
 }
 
 /// Soft page reference allocated on the sheet stub.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PopulationPageRef<Reference> {
-    pub id: usize,
-    pub movement_start: bool,
-    pub systems: Vec<Reference>,
-}
-
 /// Allocate pages and page references exactly as Java `allocatePages` does.
 ///
 /// Existing pages and references are retained. This matters because the Java
 /// helper itself does not clear them; callers such as `rebuildPages` do so.
 /// System references are appended in sheet order, and an indented system closes
 /// the preceding page before starting a movement page.
-pub fn allocate_population_pages<Reference: Clone>(
-    systems: &mut [PopulationSystem<Reference>],
+pub fn allocate_population_pages(
+    systems: &mut [PopulationSystem],
     pages: &mut Vec<PopulationPage>,
-    page_refs: &mut Vec<PopulationPageRef<Reference>>,
+    page_refs: &mut Vec<PopulationReferencePage>,
+    registry: &mut PopulationReferenceRegistry,
 ) {
+    let result = allocate_population_pages_with(systems, pages, page_refs, registry, |staff| {
+        Ok::<_, std::convert::Infallible>(staff.config)
+    });
+    match result {
+        Ok(()) => {}
+        Err(never) => match never {},
+    }
+}
+
+/// Fallible form of [`allocate_population_pages`] used to preserve Java's
+/// unchecked-failure boundary around `Staff.getStaffConfig()`.
+///
+/// A failure leaves a newly allocated physical page and `PageRef`, the
+/// system-to-page link, and the fresh replacement `SystemRef` (including any
+/// completed part prefix) in place. The failing system reference is not added
+/// to `PageRef.systems`, and the current page's cached system slice is not
+/// finalized.
+pub fn allocate_population_pages_with<Error>(
+    systems: &mut [PopulationSystem],
+    pages: &mut Vec<PopulationPage>,
+    page_refs: &mut Vec<PopulationReferencePage>,
+    registry: &mut PopulationReferenceRegistry,
+    mut staff_config: impl FnMut(&PopulationReferenceStaff) -> Result<PopulationStaffConfig, Error>,
+) -> Result<(), Error> {
     let mut active_page_index: Option<usize> = None;
     let mut active_ref_index: Option<usize> = None;
 
@@ -828,7 +861,9 @@ pub fn allocate_population_pages<Reference: Clone>(
                 set_page_systems_from(&mut pages[page_index], systems);
             }
 
-            page_refs.push(PopulationPageRef {
+            registry.next_page_ref_id += 1;
+            page_refs.push(PopulationReferencePage {
+                object_id: PopulationPageRefId(registry.next_page_ref_id),
                 id: page_id,
                 movement_start: true,
                 systems: Vec::new(),
@@ -842,7 +877,9 @@ pub fn allocate_population_pages<Reference: Clone>(
             active_page_index = Some(pages.len() - 1);
             active_ref_index = Some(page_refs.len() - 1);
         } else if active_page_index.is_none() {
-            page_refs.push(PopulationPageRef {
+            registry.next_page_ref_id += 1;
+            page_refs.push(PopulationReferencePage {
+                object_id: PopulationPageRefId(registry.next_page_ref_id),
                 id: page_id,
                 movement_start: false,
                 systems: Vec::new(),
@@ -861,20 +898,47 @@ pub fn allocate_population_pages<Reference: Clone>(
         let page_ref_index =
             active_ref_index.expect("physical and soft pages are allocated together");
         systems[index].page_id = Some(pages[page_index].id);
-        page_refs[page_ref_index]
-            .systems
-            .push(systems[index].system_ref.clone());
+        let page_ref_id = page_refs[page_ref_index].object_id;
+
+        registry.next_system_ref_id += 1;
+        let system_ref_id = PopulationSystemRefId(registry.next_system_ref_id);
+        registry.system_refs.insert(
+            system_ref_id,
+            PopulationSystemRef {
+                page_ref_id,
+                parts: Vec::new(),
+            },
+        );
+        systems[index].system_ref.system_ref = Some(system_ref_id);
+
+        for part in &systems[index].parts {
+            let mut configs = Vec::with_capacity(part.staves.len());
+            for staff in &part.staves {
+                configs.push(staff_config(staff)?);
+            }
+            registry
+                .system_refs
+                .get_mut(&system_ref_id)
+                .expect("fresh system reference remains registered")
+                .parts
+                .push(PopulationPartRef {
+                    system_ref: system_ref_id,
+                    staff_configs: configs,
+                    name: None,
+                    logical_id: None,
+                    manual: false,
+                });
+        }
+        page_refs[page_ref_index].systems.push(system_ref_id);
     }
 
     if let Some(page_index) = active_page_index {
         set_page_systems_from(&mut pages[page_index], systems);
     }
+    Ok(())
 }
 
-fn set_page_systems_from<Reference>(
-    page: &mut PopulationPage,
-    systems: &[PopulationSystem<Reference>],
-) {
+fn set_page_systems_from(page: &mut PopulationPage, systems: &[PopulationSystem]) {
     let first = page.first_system_id.unwrap_or(1) - 1;
     let last = page.last_system_id.unwrap_or(systems.len()) - 1;
     page.system_ids = systems[first..=last]
@@ -925,6 +989,16 @@ pub fn population_page_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference_system(id: SystemId, indented: bool) -> PopulationSystem {
+        PopulationSystem {
+            id,
+            indented,
+            parts: Vec::new(),
+            system_ref: PopulationSystemRefState::default(),
+            page_id: None,
+        }
+    }
 
     fn straight_boundary(x1: f64, y1: f64, x2: f64, y2: f64) -> StaffBoundary {
         StaffBoundary {
@@ -1103,40 +1177,16 @@ mod tests {
     #[test]
     fn page_allocation_splits_movements_and_links_both_ownership_trees() {
         let mut systems = vec![
-            PopulationSystem {
-                id: 1,
-                indented: false,
-                system_ref: "s1",
-                page_id: None,
-            },
-            PopulationSystem {
-                id: 2,
-                indented: false,
-                system_ref: "s2",
-                page_id: None,
-            },
-            PopulationSystem {
-                id: 3,
-                indented: true,
-                system_ref: "s3",
-                page_id: None,
-            },
-            PopulationSystem {
-                id: 4,
-                indented: false,
-                system_ref: "s4",
-                page_id: None,
-            },
-            PopulationSystem {
-                id: 5,
-                indented: true,
-                system_ref: "s5",
-                page_id: None,
-            },
+            reference_system(1, false),
+            reference_system(2, false),
+            reference_system(3, true),
+            reference_system(4, false),
+            reference_system(5, true),
         ];
         let mut pages = Vec::new();
         let mut refs = Vec::new();
-        allocate_population_pages(&mut systems, &mut pages, &mut refs);
+        let mut registry = PopulationReferenceRegistry::default();
+        allocate_population_pages(&mut systems, &mut pages, &mut refs, &mut registry);
 
         assert_eq!(
             systems
@@ -1174,9 +1224,181 @@ mod tests {
         );
         assert_eq!(
             refs.iter()
-                .map(|page| page.systems.clone())
+                .map(|page| { page.systems.iter().map(|id| id.value()).collect::<Vec<_>>() })
                 .collect::<Vec<_>>(),
-            [vec!["s1", "s2"], vec!["s3", "s4"], vec!["s5"]]
+            [vec![1, 2], vec![3, 4], vec![5]]
+        );
+        assert_eq!(
+            systems
+                .iter()
+                .map(|system| system.system_ref.system_ref.expect("built").value())
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5]
+        );
+        for page_ref in &refs {
+            for system_ref in &page_ref.systems {
+                assert_eq!(
+                    registry.get(*system_ref).expect("registered").page_ref_id,
+                    page_ref.object_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn page_allocation_builds_fresh_refs_after_page_link_and_preserves_parts() {
+        let mut registry = PopulationReferenceRegistry::default();
+        let mut old_state = PopulationSystemRefState::default();
+        let old = build_population_system_ref(
+            &mut old_state,
+            &mut registry,
+            PopulationPageRefId(99),
+            &[],
+        );
+        let parts = vec![
+            PopulationReferencePart {
+                part_id: 8,
+                staves: vec![
+                    PopulationReferenceStaff {
+                        staff_id: 12,
+                        config: PopulationStaffConfig {
+                            line_count: 1,
+                            is_small: true,
+                        },
+                    },
+                    PopulationReferenceStaff {
+                        staff_id: 11,
+                        config: PopulationStaffConfig {
+                            line_count: 5,
+                            is_small: false,
+                        },
+                    },
+                ],
+            },
+            PopulationReferencePart {
+                part_id: 3,
+                staves: Vec::new(),
+            },
+        ];
+        let mut systems = vec![PopulationSystem {
+            id: 1,
+            indented: false,
+            parts,
+            system_ref: old_state,
+            page_id: None,
+        }];
+        let mut pages = Vec::new();
+        let mut page_refs = Vec::new();
+
+        allocate_population_pages(&mut systems, &mut pages, &mut page_refs, &mut registry);
+
+        let fresh = systems[0].system_ref.system_ref.expect("replacement ref");
+        assert_ne!(fresh, old);
+        assert_eq!(page_refs[0].systems, [fresh]);
+        let reference = registry.get(fresh).expect("fresh ref registered");
+        assert_eq!(reference.page_ref_id, page_refs[0].object_id);
+        assert_eq!(
+            reference
+                .parts
+                .iter()
+                .map(|part| part.staff_configs.clone())
+                .collect::<Vec<_>>(),
+            [
+                vec![
+                    PopulationStaffConfig {
+                        line_count: 1,
+                        is_small: true,
+                    },
+                    PopulationStaffConfig {
+                        line_count: 5,
+                        is_small: false,
+                    },
+                ],
+                vec![],
+            ]
+        );
+        assert!(reference.parts.iter().all(|part| part.system_ref == fresh));
+        assert!(registry.get(old).is_some());
+    }
+
+    #[test]
+    fn page_allocation_failure_retains_exact_built_prefix_and_unfinalized_page() {
+        let mut first = reference_system(1, false);
+        first.parts.push(PopulationReferencePart {
+            part_id: 1,
+            staves: vec![PopulationReferenceStaff {
+                staff_id: 10,
+                config: PopulationStaffConfig {
+                    line_count: 5,
+                    is_small: false,
+                },
+            }],
+        });
+        let mut failing = reference_system(2, true);
+        failing.parts = vec![
+            PopulationReferencePart {
+                part_id: 2,
+                staves: vec![PopulationReferenceStaff {
+                    staff_id: 20,
+                    config: PopulationStaffConfig {
+                        line_count: 5,
+                        is_small: false,
+                    },
+                }],
+            },
+            PopulationReferencePart {
+                part_id: 3,
+                staves: vec![PopulationReferenceStaff {
+                    staff_id: 21,
+                    config: PopulationStaffConfig {
+                        line_count: 5,
+                        is_small: false,
+                    },
+                }],
+            },
+        ];
+        let mut systems = vec![first, failing];
+        let mut pages = Vec::new();
+        let mut page_refs = Vec::new();
+        let mut registry = PopulationReferenceRegistry::default();
+        let mut visited = Vec::new();
+
+        let result = allocate_population_pages_with(
+            &mut systems,
+            &mut pages,
+            &mut page_refs,
+            &mut registry,
+            |staff| {
+                visited.push(staff.staff_id);
+                if staff.staff_id == 21 {
+                    Err("staff config failure")
+                } else {
+                    Ok(staff.config)
+                }
+            },
+        );
+
+        assert_eq!(result, Err("staff config failure"));
+        assert_eq!(visited, [10, 20, 21]);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].last_system_id, Some(1));
+        assert_eq!(pages[0].system_ids, [1]);
+        assert!(pages[1].system_ids.is_empty());
+        assert_eq!(systems[1].page_id, Some(2));
+        assert_eq!(page_refs[0].systems.len(), 1);
+        assert!(page_refs[1].systems.is_empty());
+        assert!(page_refs[1].movement_start);
+
+        let failed_ref = systems[1].system_ref.system_ref.expect("fresh failed ref");
+        let failed = registry.get(failed_ref).expect("failed ref retained");
+        assert_eq!(failed.page_ref_id, page_refs[1].object_id);
+        assert_eq!(failed.parts.len(), 1);
+        assert_eq!(
+            failed.parts[0].staff_configs,
+            [PopulationStaffConfig {
+                line_count: 5,
+                is_small: false,
+            }]
         );
     }
 
@@ -1431,10 +1653,11 @@ mod tests {
                 }],
             },
         ];
-        let id = build_population_system_ref(&mut state, &mut registry, 7, &parts);
+        let page_ref_id = PopulationPageRefId(7);
+        let id = build_population_system_ref(&mut state, &mut registry, page_ref_id, &parts);
         assert_eq!(state.system_ref, Some(id));
         let reference = registry.get(id).expect("fresh reference");
-        assert_eq!(reference.page_ref_id, 7);
+        assert_eq!(reference.page_ref_id, page_ref_id);
         assert_eq!(
             reference
                 .parts
@@ -1470,13 +1693,16 @@ mod tests {
     fn page_link_is_separate_and_rebuild_does_not_retarget_old_page_object() {
         let mut state = PopulationSystemRefState::default();
         let mut registry = PopulationReferenceRegistry::default();
+        let page_ref_id = PopulationPageRefId(3);
         let mut page = PopulationReferencePage {
-            page_ref_id: 3,
+            object_id: page_ref_id,
+            id: 3,
+            movement_start: false,
             systems: Vec::new(),
         };
-        let old = build_population_system_ref(&mut state, &mut registry, 3, &[]);
+        let old = build_population_system_ref(&mut state, &mut registry, page_ref_id, &[]);
         append_population_system_ref(&mut page, &registry, old).unwrap();
-        let new = build_population_system_ref(&mut state, &mut registry, 3, &[]);
+        let new = build_population_system_ref(&mut state, &mut registry, page_ref_id, &[]);
 
         assert_ne!(old, new);
         assert_eq!(state.system_ref, Some(new));
@@ -1490,17 +1716,21 @@ mod tests {
     fn wrong_page_link_fails_without_mutating_page_order() {
         let mut state = PopulationSystemRefState::default();
         let mut registry = PopulationReferenceRegistry::default();
-        let id = build_population_system_ref(&mut state, &mut registry, 2, &[]);
+        let source_page = PopulationPageRefId(2);
+        let other_page = PopulationPageRefId(4);
+        let id = build_population_system_ref(&mut state, &mut registry, source_page, &[]);
         let mut page = PopulationReferencePage {
-            page_ref_id: 4,
+            object_id: other_page,
+            id: 4,
+            movement_start: false,
             systems: vec![],
         };
         assert_eq!(
             append_population_system_ref(&mut page, &registry, id),
             Err(PopulationReferenceError::WrongPage {
                 system_ref: id,
-                expected: 2,
-                actual: 4,
+                expected: source_page,
+                actual: other_page,
             })
         );
         assert!(page.systems.is_empty());
@@ -1598,15 +1828,11 @@ mod tests {
 
     #[test]
     fn first_indented_system_is_a_movement_page_without_first_id_override() {
-        let mut systems = vec![PopulationSystem {
-            id: 1,
-            indented: true,
-            system_ref: 10,
-            page_id: None,
-        }];
+        let mut systems = vec![reference_system(1, true)];
         let mut pages = Vec::new();
         let mut refs = Vec::new();
-        allocate_population_pages(&mut systems, &mut pages, &mut refs);
+        let mut registry = PopulationReferenceRegistry::default();
+        allocate_population_pages(&mut systems, &mut pages, &mut refs, &mut registry);
         assert_eq!(pages[0].first_system_id, None);
         assert_eq!(pages[0].system_ids, [1]);
         assert!(refs[0].movement_start);
