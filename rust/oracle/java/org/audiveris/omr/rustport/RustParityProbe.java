@@ -1394,6 +1394,7 @@ public final class RustParityProbe
                         + ";same:" + (referencePageRef.getSystems().get(0) == referenceSystemRef)
                         + ";field:" + (referenceSystem.getRef() == referenceSystemRef));
 
+        System.out.println("grid.skew.synthetic=" + gridSkew());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
         System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
@@ -2092,6 +2093,31 @@ public final class RustParityProbe
     private static String point (Point2D point)
     {
         return String.format(java.util.Locale.ROOT, "%.12f,%.12f", point.getX(), point.getY());
+    }
+
+    private static String gridSkew ()
+        throws Exception
+    {
+        List<String> values = new ArrayList<>();
+        for (double slope : new double[]{0.5, -0.5, 0.0}) {
+            Book book = new Book(Path.of("grid-skew-" + slope + ".synthetic"));
+            SheetStub stub = new SheetStub(book, 1);
+            book.addStub(stub);
+            Sheet sheet = new Sheet(stub, new RunTable(Orientation.VERTICAL, 100, 50));
+            Skew skew = new Skew(slope, sheet);
+            Point2D input = new Point2D.Double(10.0, 20.0);
+            Point2D deskewed = skew.deskewed(input);
+            Point2D roundtrip = skew.skewed(deskewed);
+            values.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%.1f:point:%s;size:%.12f,%.12f;back:%s",
+                    slope,
+                    point(deskewed),
+                    skew.getDeskewedWidth(),
+                    skew.getDeskewedHeight(),
+                    point(roundtrip)));
+        }
+        return String.join("|", values);
     }
 
     @SuppressWarnings("unchecked")

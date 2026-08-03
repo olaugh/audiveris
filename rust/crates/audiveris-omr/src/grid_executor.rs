@@ -303,6 +303,17 @@ impl HeadlessSkew {
         )
     }
 
+    /// Apply Java `Skew.skewed`, the inverse of the stored deskew transform.
+    #[must_use]
+    pub fn skewed(&self, point: PeakPoint) -> PeakPoint {
+        let x = point.x - self.translate_x;
+        let y = point.y - self.translate_y;
+        PeakPoint::new(
+            (self.cosine * x) + (self.sine * y),
+            (-self.sine * x) + (self.cosine * y),
+        )
+    }
+
     #[must_use]
     pub fn deskewed_x(&self, x: f64, y: f64) -> f64 {
         self.deskewed(PeakPoint::new(x, y)).x
@@ -1170,6 +1181,9 @@ mod tests {
         near(transformed.y, 53.416_407_864_998_74);
         near(positive.deskewed_width(), 111.803_398_874_989_48);
         near(positive.deskewed_height(), 89.442_719_099_991_59);
+        let roundtrip = positive.skewed(transformed);
+        near(roundtrip.x, point.x);
+        near(roundtrip.y, point.y);
 
         let negative = HeadlessSkew::new(-0.5, 100, 50);
         let transformed = negative.deskewed(point);
@@ -1177,9 +1191,13 @@ mod tests {
         near(transformed.y, 32.360_679_774_997_9);
         near(negative.deskewed_width(), 111.803_398_874_989_48);
         near(negative.deskewed_height(), 89.442_719_099_991_59);
+        let roundtrip = negative.skewed(transformed);
+        near(roundtrip.x, point.x);
+        near(roundtrip.y, point.y);
 
         let zero = HeadlessSkew::new(0.0, 100, 50);
         assert_eq!(zero.deskewed(point), point);
+        assert_eq!(zero.skewed(point), point);
         assert_eq!(
             (zero.deskewed_width(), zero.deskewed_height()),
             (100.0, 50.0)

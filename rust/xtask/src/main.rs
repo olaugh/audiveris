@@ -48,14 +48,15 @@ use audiveris_image::{
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
-    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffVerticalImpacts},
+    staff_peak::{HorizontalSide, PeakPoint, StaffPeak, StaffPeakAttribute, StaffVerticalImpacts},
     target_line::TargetLine,
     watershed,
 };
 use audiveris_omr::grid_executor::{
     HeadlessBuildOtherError, HeadlessConnectionPlan, HeadlessGlyphRegistry, HeadlessGridBook,
     HeadlessGridExecutor, HeadlessGridPromotionError, HeadlessGridSheet, HeadlessGridSigState,
-    HeadlessPopulationState, HeadlessStaff, HeadlessStaffLine, HeadlessSystemSigState,
+    HeadlessPopulationState, HeadlessSkew, HeadlessStaff, HeadlessStaffLine,
+    HeadlessSystemSigState,
 };
 use audiveris_omr::score_update::{
     PageInput as ScorePageInput, PageKey as ScorePageKey, StubPages, create_scores, update_scores,
@@ -266,7 +267,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 64] = [
+const VECTOR_KEYS: [&str; 65] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -305,6 +306,7 @@ const VECTOR_KEYS: [&str; 64] = [
     "grid.target-line.synthetic=",
     "grid.score-update.synthetic=",
     "grid.system-ref.synthetic=",
+    "grid.skew.synthetic=",
     "grid.output-boundary.synthetic=",
     "grid.contextualize.synthetic=",
     "spline.synthetic=",
@@ -356,6 +358,28 @@ fn run_table_digest(table: &RunTable) -> u64 {
         }
     }
     hash
+}
+
+fn grid_skew_vector() -> String {
+    [0.5_f64, -0.5, 0.0]
+        .into_iter()
+        .map(|slope| {
+            let skew = HeadlessSkew::new(slope, 100, 50);
+            let input = PeakPoint::new(10.0, 20.0);
+            let deskewed = skew.deskewed(input);
+            let roundtrip = skew.skewed(deskewed);
+            format!(
+                "{slope:.1}:point:{:.12},{:.12};size:{:.12},{:.12};back:{:.12},{:.12}",
+                deskewed.x,
+                deskewed.y,
+                skew.deskewed_width(),
+                skew.deskewed_height(),
+                roundtrip.x,
+                roundtrip.y,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn output_boundary_peak(staff_id: usize, top: i32, bottom: i32, x: i32) -> StaffPeak {
@@ -2462,6 +2486,7 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         reference_page_refs[0].systems.first() == Some(&reference_id),
         reference_systems[0].system_ref.system_ref == Some(reference_id)
     ));
+    lines.push(format!("grid.skew.synthetic={}", grid_skew_vector()));
     lines.push(format!(
         "grid.output-boundary.synthetic={}",
         output_boundary_vector()?
