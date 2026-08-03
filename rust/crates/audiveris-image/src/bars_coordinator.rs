@@ -20,8 +20,10 @@ use crate::{
         start_column_candidate, unaligned_peak_keys, validate_start_column,
     },
     grid_sig::{
-        BarGroupPromotionError, ConnectionPromotionWarning, GridInterId, GridSig, GridSigEdge,
+        BarGroupPromotionError, BarTailError, BarTailResult, ConnectionPromotionWarning,
+        GridInterId, GridSig, GridSigEdge,
     },
+    part_group::PartGroup,
     peak_graph::{PeakGraph, PeakGraphError},
     projection::{ProjectionBlank, check_lines_root_transition, refine_right_end_transition},
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -407,6 +409,24 @@ pub struct BarsConnectionGroupResult {
     connection_inters: Vec<ConnectionInterPlan>,
     connection_warnings: Vec<ConnectionPromotionWarning>,
     group_relations: Vec<GridSigEdge>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BarsRecordGroupResult {
+    staff_barlines: BTreeMap<usize, Vec<GridInterId>>,
+    part_groups: Vec<PartGroup>,
+}
+
+impl BarsRecordGroupResult {
+    #[must_use]
+    pub fn staff_barlines(&self) -> &BTreeMap<usize, Vec<GridInterId>> {
+        &self.staff_barlines
+    }
+
+    #[must_use]
+    pub fn part_groups(&self) -> &[PartGroup] {
+        &self.part_groups
+    }
 }
 
 impl BarsConnectionGroupResult {
@@ -1055,6 +1075,41 @@ pub fn process_bars_connections_and_groups(
     })
 }
 
+/// Continue Java `BarsRetriever.process` through `recordBars` and
+/// `createGroups`.
+///
+/// Explicit staff identities preserve empty-staff ownership. Barline lists
+/// are committed staff by staff before group construction begins, so a later
+/// invalid brace/group fact retains the exact `recordBars` prefix.
+pub fn process_bars_record_and_groups(
+    state: &BarsSystemState,
+    sig: &GridSig,
+    tail: &mut BarTailResult,
+) -> Result<BarsRecordGroupResult, BarsCoordinatorError> {
+    let staff_ids = state
+        .staffs
+        .iter()
+        .map(|staff| staff.staff_id)
+        .collect::<Vec<_>>();
+    let staff_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.peaks.clone())
+        .collect::<Vec<_>>();
+    let brace_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.brace_peak.clone())
+        .collect::<Vec<_>>();
+
+    sig.record_bars_for_staffs(tail, &staff_ids, &staff_peaks)?;
+    sig.create_groups_for_staffs(tail, &staff_ids, &staff_peaks, &brace_peaks, &state.graph)?;
+    Ok(BarsRecordGroupResult {
+        staff_barlines: tail.staff_barlines.clone(),
+        part_groups: tail.part_groups.clone(),
+    })
+}
+
 fn process_prefix(
     next: &mut BarsSystemState,
     parameters: BarsCoordinatorParameters,
@@ -1402,6 +1457,7 @@ pub enum BarsCoordinatorError {
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
     BarGroup(BarGroupPromotionError),
+    BarTail(BarTailError),
     Graph(PeakGraphError),
 }
 
@@ -1420,6 +1476,12 @@ impl From<PeakGraphError> for BarsCoordinatorError {
 impl From<BarGroupPromotionError> for BarsCoordinatorError {
     fn from(value: BarGroupPromotionError) -> Self {
         Self::BarGroup(value)
+    }
+}
+
+impl From<BarTailError> for BarsCoordinatorError {
+    fn from(value: BarTailError) -> Self {
+        Self::BarTail(value)
     }
 }
 
@@ -1504,6 +1566,7 @@ impl fmt::Display for BarsCoordinatorError {
             }
             Self::Logic(error) => write!(formatter, "bars logic failed: {error}"),
             Self::BarGroup(error) => write!(formatter, "bar grouping failed: {error:?}"),
+            Self::BarTail(error) => write!(formatter, "bar tail failed: {error:?}"),
             Self::Graph(error) => write!(formatter, "peak graph failed: {error}"),
         }
     }
@@ -2383,5 +2446,120 @@ mod tests {
             crate::grid_sig::GridSigRelation::BarGroup { gap_fraction }
                 if (gap_fraction - 0.1).abs() < f64::EPSILON
         ));
+    }
+
+    #[test]
+    fn record_bars_then_create_detached_brace_group_in_staff_order() {
+        let mut top_bar = peak(1, 10, 10);
+        top_bar.set_staff_end(HorizontalSide::Left);
+        let mut bottom_bar = peak(2, 10, 10);
+        bottom_bar.set_staff_end(HorizontalSide::Left);
+        let mut top_brace = peak(1, 4, 5);
+        top_brace.set(StaffPeakAttribute::BraceTop);
+        let mut bottom_brace = peak(2, 4, 5);
+        bottom_brace.set(StaffPeakAttribute::BraceBottom);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top_bar.clone());
+        graph.add_vertex(bottom_bar.clone());
+        graph
+            .add_edge(
+                top_bar.key(),
+                bottom_bar.key(),
+                connection(top_bar.key(), bottom_bar.key()),
+            )
+            .unwrap();
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![top_bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_brace_peak(top_brace)
+        .unwrap();
+        let bottom = BarsStaffState::new(
+            StaffId::new(2),
+            0,
+            false,
+            vec![bottom_bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap()
+        .with_brace_peak(bottom_brace)
+        .unwrap();
+        let state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let staff_peaks = state
+            .staffs()
+            .iter()
+            .map(|staff| staff.peaks().to_vec())
+            .collect::<Vec<_>>();
+        let mut sig = GridSig::default();
+        let inters = sig.promote_vertical_inters(&plan_vertical_inters(&staff_peaks, 2));
+        let mut tail = BarTailResult::default();
+
+        let result = process_bars_record_and_groups(&state, &sig, &mut tail).unwrap();
+
+        assert_eq!(result.staff_barlines()[&1], [inters[0]]);
+        assert_eq!(result.staff_barlines()[&2], [inters[1]]);
+        assert_eq!(result.part_groups().len(), 1);
+        assert_eq!(
+            result.part_groups()[0].symbol(),
+            crate::part_group::PartGroupingSymbol::Brace
+        );
+        assert_eq!(result.part_groups()[0].first_staff_id(), 1);
+        assert_eq!(result.part_groups()[0].last_staff_id(), 2);
+    }
+
+    #[test]
+    fn invalid_later_brace_retains_all_recorded_staff_barlines() {
+        let mut top_bar = peak(1, 10, 10);
+        top_bar.set_staff_end(HorizontalSide::Left);
+        let mut bottom_bar = peak(2, 10, 10);
+        bottom_bar.set_staff_end(HorizontalSide::Left);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top_bar.clone());
+        graph.add_vertex(bottom_bar.clone());
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![top_bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let bottom = BarsStaffState::new(
+            StaffId::new(2),
+            0,
+            false,
+            vec![bottom_bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let mut foreign_brace = peak(1, 4, 5);
+        foreign_brace.set(StaffPeakAttribute::BraceBottom);
+        state.staffs[1].brace_peak = Some(foreign_brace);
+        let staff_peaks = state
+            .staffs()
+            .iter()
+            .map(|staff| staff.peaks().to_vec())
+            .collect::<Vec<_>>();
+        let mut sig = GridSig::default();
+        let inters = sig.promote_vertical_inters(&plan_vertical_inters(&staff_peaks, 2));
+        let mut tail = BarTailResult::default();
+
+        assert_eq!(
+            process_bars_record_and_groups(&state, &sig, &mut tail),
+            Err(BarsCoordinatorError::BarTail(
+                BarTailError::BracePeakStaffMismatch {
+                    expected: 2,
+                    actual: 1,
+                }
+            ))
+        );
+        assert_eq!(tail.staff_barlines[&1], [inters[0]]);
+        assert_eq!(tail.staff_barlines[&2], [inters[1]]);
+        assert!(tail.part_groups.is_empty());
     }
 }

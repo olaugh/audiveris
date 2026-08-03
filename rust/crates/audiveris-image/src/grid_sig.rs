@@ -496,6 +496,135 @@ impl GridSig {
         Ok(())
     }
 
+    /// Java `recordBars` with explicit system-owned staff identities, including
+    /// staffs whose projector has no surviving peak.
+    pub fn record_bars_for_staffs(
+        &self,
+        result: &mut BarTailResult,
+        staff_ids: &[StaffId],
+        staff_peaks: &[Vec<StaffPeak>],
+    ) -> Result<(), BarTailError> {
+        if staff_ids.len() != staff_peaks.len() {
+            return Err(BarTailError::StaffPeakCount {
+                staffs: staff_ids.len(),
+                peak_sets: staff_peaks.len(),
+            });
+        }
+        for (&staff_id, peaks) in staff_ids.iter().zip(staff_peaks) {
+            if let Some(peak) = peaks.iter().find(|peak| peak.staff_id() != staff_id) {
+                return Err(BarTailError::PeakStaffMismatch {
+                    expected: staff_id.value(),
+                    actual: peak.staff_id().value(),
+                });
+            }
+            let bars = peaks
+                .iter()
+                .filter_map(|peak| self.inter_of(peak.key()))
+                .filter(|&inter| {
+                    matches!(
+                        self.node(inter),
+                        Some(GridSigNode::Vertical {
+                            plan: VerticalInterPlan {
+                                kind: VerticalInterKind::Barline { .. },
+                                ..
+                            },
+                            ..
+                        })
+                    )
+                })
+                .collect::<Vec<_>>();
+            // Java calls Staff.setBarlines after the whole projector scan.
+            result.staff_barlines.insert(staff_id.value(), bars);
+        }
+        Ok(())
+    }
+
+    /// Java `createGroups` with explicit staff ownership and detached brace
+    /// candidates. Previously completed `recordBars` mutations remain if this
+    /// traversal encounters invalid later staff evidence.
+    pub fn create_groups_for_staffs(
+        &self,
+        result: &mut BarTailResult,
+        staff_ids: &[StaffId],
+        staff_peaks: &[Vec<StaffPeak>],
+        brace_peaks: &[Option<StaffPeak>],
+        peak_graph: &PeakGraph<BarAlignment>,
+    ) -> Result<(), BarTailError> {
+        if staff_ids.len() != staff_peaks.len() {
+            return Err(BarTailError::StaffPeakCount {
+                staffs: staff_ids.len(),
+                peak_sets: staff_peaks.len(),
+            });
+        }
+        if brace_peaks.len() != staff_peaks.len() {
+            return Err(BarTailError::BracePeakCount {
+                staffs: staff_peaks.len(),
+                braces: brace_peaks.len(),
+            });
+        }
+
+        let facts = staff_peaks
+            .iter()
+            .map(|peaks| {
+                peaks
+                    .iter()
+                    .map(|peak| group_peak_facts(peak, peak_graph))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut staff_facts = Vec::with_capacity(staff_ids.len());
+        for (((&staff_id, peaks), facts), detached_brace) in staff_ids
+            .iter()
+            .zip(staff_peaks)
+            .zip(&facts)
+            .zip(brace_peaks)
+        {
+            if let Some(peak) = peaks.iter().find(|peak| peak.staff_id() != staff_id) {
+                return Err(BarTailError::PeakStaffMismatch {
+                    expected: staff_id.value(),
+                    actual: peak.staff_id().value(),
+                });
+            }
+            let start_peak_index = peaks
+                .iter()
+                .position(|peak| peak.is_staff_end(crate::staff_peak::HorizontalSide::Left));
+            let start_peak = start_peak_index.map(|index| &peaks[index]);
+            let brace_peak = if let Some(brace) = detached_brace {
+                if brace.staff_id() != staff_id {
+                    return Err(BarTailError::BracePeakStaffMismatch {
+                        expected: staff_id.value(),
+                        actual: brace.staff_id().value(),
+                    });
+                }
+                if !brace.is_brace() {
+                    return Err(BarTailError::InvalidBracePeak(brace.key()));
+                }
+                Some(group_peak_facts(brace, peak_graph))
+            } else {
+                peaks
+                    .iter()
+                    .position(StaffPeak::is_brace)
+                    .map(|index| facts[index])
+            };
+            staff_facts.push(GroupStaffFacts {
+                staff_id: i32::try_from(staff_id.value())
+                    .map_err(|_| BarTailError::StaffIdOverflow(staff_id.value()))?,
+                peaks: facts,
+                start_peak_index,
+                brace_peak,
+                part_connected_below: !part_connection_edge_ids(
+                    peak_graph,
+                    staff_id,
+                    VerticalSide::Bottom,
+                    start_peak,
+                )
+                .is_empty(),
+            });
+        }
+        result.part_groups = create_part_groups(&staff_facts)?;
+        Ok(())
+    }
+
     fn record_bars(
         &self,
         result: &mut BarTailResult,
@@ -551,6 +680,8 @@ pub struct BarTailParameters {
 pub enum BarTailError {
     MissingStaffRange,
     StaffIdOverflow(usize),
+    StaffPeakCount { staffs: usize, peak_sets: usize },
+    PeakStaffMismatch { expected: usize, actual: usize },
     BracePeakCount { staffs: usize, braces: usize },
     BracePeakStaffMismatch { expected: usize, actual: usize },
     InvalidBracePeak(crate::staff_peak::StaffPeakKey),
@@ -1100,5 +1231,38 @@ mod tests {
             orphan.node(orphan_connector).unwrap().contextual_grade(),
             Some(plans[0].grade)
         );
+    }
+
+    #[test]
+    fn explicit_staff_ownership_records_empty_staff_and_preserves_error_prefix() {
+        let first = peak(1, 10);
+        let foreign = peak(1, 20);
+        let mut sig = GridSig::default();
+        let ids = sig.promote_vertical_inters(&[vertical_plan(&first), vertical_plan(&foreign)]);
+        let mut result = BarTailResult::default();
+
+        sig.record_bars_for_staffs(
+            &mut result,
+            &[StaffId::new(1), StaffId::new(2)],
+            &[vec![first.clone()], Vec::new()],
+        )
+        .unwrap();
+        assert_eq!(result.staff_barlines[&1], [ids[0]]);
+        assert!(result.staff_barlines[&2].is_empty());
+
+        let mut partial = BarTailResult::default();
+        assert_eq!(
+            sig.record_bars_for_staffs(
+                &mut partial,
+                &[StaffId::new(1), StaffId::new(2)],
+                &[vec![first], vec![foreign]],
+            ),
+            Err(BarTailError::PeakStaffMismatch {
+                expected: 2,
+                actual: 1,
+            })
+        );
+        assert_eq!(partial.staff_barlines[&1], [ids[0]]);
+        assert!(!partial.staff_barlines.contains_key(&2));
     }
 }

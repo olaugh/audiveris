@@ -37,17 +37,18 @@ use audiveris_image::{
     bars_coordinator::{
         BarsConnectionGroupParameters, BarsConnectionGroupResult, BarsCoordinatorError,
         BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult, BarsPurgeParameters,
-        BarsPurgeResult, BarsRightCClefParameters, BarsRightCClefResult, BarsRightEvidence,
-        BarsRootEvidence, BarsStaffState, BarsSystemState, BarsWidthInterParameters,
-        BarsWidthInterResult, process_bars_after_braces, process_bars_connections_and_groups,
-        process_bars_peak_purges, process_bars_right_ends_and_c_clefs,
+        BarsPurgeResult, BarsRecordGroupResult, BarsRightCClefParameters, BarsRightCClefResult,
+        BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
+        BarsWidthInterParameters, BarsWidthInterResult, process_bars_after_braces,
+        process_bars_connections_and_groups, process_bars_peak_purges,
+        process_bars_record_and_groups, process_bars_right_ends_and_c_clefs,
         process_bars_through_too_far_left, process_bars_widths_and_inters,
     },
     bars_logic::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
     },
     filament::{FilamentError, FilamentGeometry},
-    grid_sig::GridSig,
+    grid_sig::{BarTailResult, GridSig},
     lines_coordinator::StaffCandidateKind,
     peak_graph::PeakGraph,
     prepared_lines::{PreparedStaff, PreparedStaffHandoff},
@@ -213,6 +214,12 @@ pub enum RawSystemGroupingBoundary {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
+    /// Staff barline ownership and structural groups are recorded. Java next
+    /// creates logical parts from these groups.
+    NeedsPartCreation {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
 }
 
 /// Ordered peak graph plus the system-grouping boundary reached from it.
@@ -305,6 +312,7 @@ pub struct RawBarsPrefixSystem {
     pub state: BarsSystemState,
     pub result: BarsPrefixResult,
     pub sig: GridSig,
+    pub bar_tail: BarTailResult,
 }
 
 #[derive(Clone, Debug)]
@@ -412,6 +420,17 @@ pub struct RawConnectionGroupSystemReport {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RawConnectionGroupStageReport {
     pub systems: Vec<RawConnectionGroupSystemReport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRecordGroupSystemReport {
+    pub system_id: usize,
+    pub result: BarsRecordGroupResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawRecordGroupStageReport {
+    pub systems: Vec<RawRecordGroupSystemReport>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1032,6 +1051,7 @@ pub fn bridge_raw_projectors_through_bars_prefix(
             state,
             result,
             sig: GridSig::default(),
+            bar_tail: BarTailResult::default(),
         });
     }
     systems
@@ -1474,6 +1494,47 @@ pub fn continue_raw_bars_through_connections_and_groups(
         .bars
         .projectors
         .grouping = RawSystemGroupingBoundary::NeedsBarRecording {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+/// Continue through Java `recordBars` and `createGroups` for every system,
+/// retaining exact empty-staff ownership and any completed record prefix when
+/// later structural evidence fails.
+pub fn continue_raw_bars_through_recording_and_groups(
+    bridge: &mut RawBarsPrefixBridge,
+) -> Result<RawRecordGroupStageReport, RawProjectorAdapterError> {
+    let mut report = RawRecordGroupStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let result = process_bars_record_and_groups(
+            &raw_system.state,
+            &raw_system.sig,
+            &mut raw_system.bar_tail,
+        )
+        .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawRecordGroupSystemReport { system_id, result });
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsPartCreation {
         staff_ids: bridge
             .systems
             .split
@@ -2292,6 +2353,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsBarRecording { .. } => {
                 panic!("one retained staff does not require bar-recording grouping")
             }
+            RawSystemGroupingBoundary::NeedsPartCreation { .. } => {
+                panic!("one retained staff does not require part-creation grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2984,6 +3048,32 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsBarRecording {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let recording_report = continue_raw_bars_through_recording_and_groups(&mut prefix).unwrap();
+        assert_eq!(recording_report.systems.len(), 1);
+        assert_eq!(
+            recording_report.systems[0]
+                .result
+                .staff_barlines()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsPartCreation {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
