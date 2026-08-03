@@ -22,7 +22,9 @@ use audiveris_image::{
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
     peak_graph::{PeakEdgeId, PeakGraph},
+    raster_grid_builder::{RasterGridHandoff, RasterGridHandoffSource},
     run_table::{RunTable, RunTableError},
+    section::Section,
     staff_line_cleaner::{OriginalStaffLine, StaffLineCleanerExecutor, clean_staff_lines},
     staff_line_conversion::{
         OriginalGlyphRegistrar, PersistentStaffLine, StaffGlyph, StaffLineConversionError,
@@ -148,6 +150,18 @@ pub struct HeadlessPopulationState {
     pub reports: Vec<PopulationPageReport>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeadlessVerticalLag {
+    pub run_table: RunTable,
+    pub sections: Vec<Section>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstalledRasterGridPrefix {
+    pub short_sections_added: bool,
+    pub horizontal_lag_present: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct HeadlessGridSheet {
     pub sheet_number: u32,
@@ -158,8 +172,43 @@ pub struct HeadlessGridSheet {
     pub no_staff_table: Option<RunTable>,
     pub max_fore: Option<usize>,
     pub ledger_thickness: f64,
+    pub vertical_lag: Option<HeadlessVerticalLag>,
     pub horizontal_lag: Option<RegisteredHorizontalLag>,
+    pub installed_raster_prefix: Option<InstalledRasterGridPrefix>,
     pub population: HeadlessPopulationState,
+}
+
+impl HeadlessGridSheet {
+    /// Transfer the builder-owned lag prefix into sheet ownership before
+    /// `StaffLineCleaner`, including prefixes from swallowed build failures.
+    pub fn install_raster_grid_handoff(&mut self, handoff: RasterGridHandoff) {
+        let horizontal_lag_present = handoff.horizontal_lag.is_some();
+        self.vertical_lag = Some(HeadlessVerticalLag {
+            run_table: handoff.vertical_run_table,
+            sections: handoff.vertical_sections.clone(),
+        });
+        self.population.vertical_sections = handoff
+            .vertical_sections
+            .iter()
+            .map(|section| {
+                let (centroid_x, centroid_y) = section
+                    .pixel_centroid_in(section.bounds())
+                    .expect("a registered vertical section contains pixels");
+                PopulationSection {
+                    id: section.id(),
+                    centroid_x,
+                    centroid_y,
+                }
+            })
+            .collect();
+        self.horizontal_lag = handoff
+            .horizontal_lag
+            .map(RegisteredHorizontalLag::Populated);
+        self.installed_raster_prefix = Some(InstalledRasterGridPrefix {
+            short_sections_added: handoff.short_sections_added,
+            horizontal_lag_present,
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -189,6 +238,7 @@ where
     pub sheet: HeadlessGridSheet,
     pub book: HeadlessGridBook,
     pub build_outcome: Option<GridBuildOutcome<HeadlessBuildOtherError<Builder::OtherError>>>,
+    raster_handoff: Option<fn(&mut Builder) -> Option<RasterGridHandoff>>,
     pub cleaner_finished: bool,
     pub step_finished: bool,
 }
@@ -204,9 +254,21 @@ where
             sheet,
             book,
             build_outcome: None,
+            raster_handoff: None,
             cleaner_finished: false,
             step_finished: false,
         }
+    }
+
+    /// Enable automatic transfer from a concrete raster builder into the
+    /// sheet immediately after `buildInfo` and before cleanup.
+    #[must_use]
+    pub fn with_raster_grid_handoff(mut self) -> Self
+    where
+        Builder: RasterGridHandoffSource,
+    {
+        self.raster_handoff = Some(Builder::take_raster_grid_handoff);
+        self
     }
 
     pub fn run(&mut self) -> Result<(), HeadlessGridError<Builder::StepError>> {
@@ -253,14 +315,26 @@ where
     fn run_grid_step_stage(&mut self, stage: GridStepStage) -> Result<(), Self::Error> {
         match stage {
             GridStepStage::BuildGrid => {
-                let mut builder = SigPromotingBuilder {
-                    builder: &mut self.builder,
-                    sig: &mut self.sheet.sig,
-                    promotion_failure: &mut self.sheet.promotion_failure,
+                let result = {
+                    let mut builder = SigPromotingBuilder {
+                        builder: &mut self.builder,
+                        sig: &mut self.sheet.sig,
+                        promotion_failure: &mut self.sheet.promotion_failure,
+                    };
+                    build_grid_info(&mut builder)
                 };
-                self.build_outcome =
-                    Some(build_grid_info(&mut builder).map_err(HeadlessGridError::Build)?);
-                Ok(())
+                if let Some(extract) = self.raster_handoff
+                    && let Some(handoff) = extract(&mut self.builder)
+                {
+                    self.sheet.install_raster_grid_handoff(handoff);
+                }
+                match result {
+                    Ok(outcome) => {
+                        self.build_outcome = Some(outcome);
+                        Ok(())
+                    }
+                    Err(error) => Err(HeadlessGridError::Build(error)),
+                }
             }
             GridStepStage::CleanStaffLines => clean_staff_lines(self),
             GridStepStage::UpdateBookScores => self.update_book_scores(),
@@ -654,6 +728,10 @@ mod tests {
         grid_lifecycle::{GridBuildStage, GridStageFailure},
         grid_sig::{GridSigNode, GridSigRelation},
         line_short_sections::HorizontalSectionLag,
+        raster_grid_builder::{
+            HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridParameters,
+            RemainingRasterGridStages,
+        },
         run_table::{Orientation, Run},
         staff_peak::StaffPeak,
         system_population::{
@@ -668,6 +746,48 @@ mod tests {
         finish_count: usize,
         failure: Option<(GridBuildStage, bool)>,
         warnings: Vec<GridBuildStage>,
+    }
+
+    #[derive(Default)]
+    struct RasterStages {
+        retrieve_failure: Option<bool>,
+        finish_count: usize,
+    }
+
+    impl RemainingRasterGridStages for RasterStages {
+        type StepError = &'static str;
+        type OtherError = &'static str;
+
+        fn retrieve_lines(
+            &mut self,
+            _state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            match self.retrieve_failure {
+                Some(true) => Err(GridStageFailure::Step("retrieve step failure")),
+                Some(false) => Err(GridStageFailure::Other("retrieve ordinary failure")),
+                None => Ok(()),
+            }
+        }
+
+        fn process_bars(
+            &mut self,
+            _state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            Ok(())
+        }
+
+        fn complete_lines(
+            &mut self,
+            _state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            Ok(())
+        }
+
+        fn log_swallowed_error(&mut self, _stage: GridBuildStage, _error: &Self::OtherError) {}
+
+        fn finish(&mut self) {
+            self.finish_count += 1;
+        }
     }
 
     impl GridBuildExecutor for SuccessfulBuilder {
@@ -709,6 +829,22 @@ mod tests {
         table.add_run(3, Run::new(4, 2)).unwrap();
         table.add_run(12, Run::new(11, 2)).unwrap();
         table
+    }
+
+    fn raster_source() -> RunTable {
+        let mut table = RunTable::new(Orientation::Vertical, 100, 20).unwrap();
+        table.add_run(3, Run::new(1, 8)).unwrap();
+        table.add_run(12, Run::new(11, 2)).unwrap();
+        table
+    }
+
+    fn raster_parameters() -> RasterGridParameters {
+        RasterGridParameters {
+            max_fore: 3,
+            ledger_thickness: 1.0,
+            minimum_horizontal_run_length: 2,
+            maximum_vertical_run_shift: 1,
+        }
     }
 
     fn boundary(y: f64) -> StaffBoundary {
@@ -883,7 +1019,9 @@ mod tests {
                 no_staff_table: Some(vertical_no_staff()),
                 max_fore: Some(3),
                 ledger_thickness: 1.0,
+                vertical_lag: None,
                 horizontal_lag: Some(RegisteredHorizontalLag::Populated(lag)),
+                installed_raster_prefix: None,
                 population,
             },
             HeadlessGridBook {
@@ -895,6 +1033,18 @@ mod tests {
                 scores: Vec::new(),
             },
         )
+    }
+
+    fn raster_executor(
+        stages: RasterStages,
+    ) -> HeadlessGridExecutor<HeadlessRasterGridBuilder<RasterStages>> {
+        let base = executor();
+        HeadlessGridExecutor::new(
+            HeadlessRasterGridBuilder::new(raster_source(), raster_parameters(), stages),
+            base.sheet,
+            base.book,
+        )
+        .with_raster_grid_handoff()
     }
 
     #[test]
@@ -1237,5 +1387,88 @@ mod tests {
         );
         assert_eq!(state.systems[0].sig.edges().len(), 3);
         assert_eq!(state.systems[1].sig.edges().len(), 3);
+    }
+
+    #[test]
+    fn raster_builder_installs_completed_lags_before_cleaner() {
+        let mut executor = raster_executor(RasterStages::default());
+        executor.sheet.horizontal_lag = None;
+        executor.sheet.population.vertical_sections.clear();
+
+        executor.run().unwrap();
+
+        assert_eq!(
+            executor.sheet.installed_raster_prefix,
+            Some(InstalledRasterGridPrefix {
+                short_sections_added: true,
+                horizontal_lag_present: true,
+            })
+        );
+        assert!(
+            !executor
+                .sheet
+                .vertical_lag
+                .as_ref()
+                .expect("installed vertical lag")
+                .sections
+                .is_empty()
+        );
+        assert!(!executor.sheet.population.vertical_sections.is_empty());
+        assert!(executor.cleaner_finished);
+        assert!(executor.step_finished);
+    }
+
+    #[test]
+    fn swallowed_retrieve_installs_initial_prefix_then_continues_cleanup() {
+        let mut executor = raster_executor(RasterStages {
+            retrieve_failure: Some(false),
+            ..RasterStages::default()
+        });
+        executor.sheet.horizontal_lag = None;
+
+        executor.run().unwrap();
+
+        assert_eq!(
+            executor.sheet.installed_raster_prefix,
+            Some(InstalledRasterGridPrefix {
+                short_sections_added: false,
+                horizontal_lag_present: true,
+            })
+        );
+        assert!(executor.sheet.vertical_lag.is_some());
+        assert!(executor.cleaner_finished);
+        assert!(executor.step_finished);
+        assert_eq!(executor.builder.stages().finish_count, 1);
+    }
+
+    #[test]
+    fn retrieve_step_failure_installs_created_prefix_but_aborts_cleaner_and_scores() {
+        let mut executor = raster_executor(RasterStages {
+            retrieve_failure: Some(true),
+            ..RasterStages::default()
+        });
+        executor.sheet.horizontal_lag = None;
+
+        assert_eq!(
+            executor.run(),
+            Err(HeadlessGridError::Build("retrieve step failure"))
+        );
+
+        assert_eq!(
+            executor.sheet.installed_raster_prefix,
+            Some(InstalledRasterGridPrefix {
+                short_sections_added: false,
+                horizontal_lag_present: true,
+            })
+        );
+        assert!(executor.sheet.vertical_lag.is_some());
+        assert!(matches!(
+            executor.sheet.staffs[0].lines[0],
+            HeadlessStaffLine::Filament { .. }
+        ));
+        assert!(!executor.cleaner_finished);
+        assert!(!executor.step_finished);
+        assert!(executor.book.scores.is_empty());
+        assert_eq!(executor.builder.stages().finish_count, 1);
     }
 }

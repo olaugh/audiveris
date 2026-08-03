@@ -76,6 +76,11 @@ pub struct RasterGridHandoff {
     pub short_sections_added: bool,
 }
 
+/// Builder capability consumed by the sheet-aware `GRID` executor.
+pub trait RasterGridHandoffSource {
+    fn take_raster_grid_handoff(&mut self) -> Option<RasterGridHandoff>;
+}
+
 /// Supplied implementations for the three GRID stages whose complete raster
 /// dependencies have not yet been joined.
 pub trait RemainingRasterGridStages {
@@ -175,6 +180,12 @@ impl<Stages, Vip> HeadlessRasterGridBuilder<Stages, Vip> {
             horizontal_lag: self.state.horizontal_lag.take(),
             short_sections_added: self.state.short_sections_added,
         })
+    }
+}
+
+impl<Stages, Vip> RasterGridHandoffSource for HeadlessRasterGridBuilder<Stages, Vip> {
+    fn take_raster_grid_handoff(&mut self) -> Option<RasterGridHandoff> {
+        self.take_handoff()
     }
 }
 
