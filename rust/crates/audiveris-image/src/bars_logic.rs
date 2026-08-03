@@ -11,7 +11,10 @@ use crate::{
     peak_graph::{PeakEdgeId, PeakGraph, PeakGraphError},
     run_table::Orientation,
     section::Section,
-    staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
+    staff_peak::{
+        HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey,
+        StaffVerticalImpacts,
+    },
 };
 
 /// Java `BracketKind`; `None` from [`bracket_kind`] remains distinct from
@@ -159,6 +162,82 @@ pub fn detect_bracket_ends(
         }
     }
     Ok(detections)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalMedian {
+    pub x: f64,
+    pub top: f64,
+    pub bottom: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerticalInterKind {
+    Bracket(BracketKind),
+    Barline {
+        width_class: PeakWidthClass,
+        left_staff_end: bool,
+        right_staff_end: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalInterPlan {
+    pub peak: StaffPeakKey,
+    pub median: VerticalMedian,
+    pub width: f64,
+    pub impacts: Option<StaffVerticalImpacts>,
+    pub kind: VerticalInterKind,
+}
+
+/// Dependency-light half of Java `BarsRetriever.createInters`.
+///
+/// Glyph registration and SIG insertion remain with the caller; this preserves
+/// the exact median adjustment, shape selection, bracket kind, staff-end flags,
+/// and projector traversal order needed to construct those inters headlessly.
+#[must_use]
+pub fn plan_vertical_inters(
+    staff_peaks: &[Vec<StaffPeak>],
+    foreground_thickness: i32,
+) -> Vec<VerticalInterPlan> {
+    let half_line = f64::from(foreground_thickness) / 2.0;
+    let mut plans = Vec::new();
+    for peaks in staff_peaks {
+        for peak in peaks {
+            if peak.is_brace() {
+                continue;
+            }
+            let width = f64::from(peak.width());
+            let median = VerticalMedian {
+                x: f64::from(peak.start()) + (width / 2.0),
+                top: f64::from(peak.top()) - half_line + 0.5,
+                bottom: f64::from(peak.bottom()) + half_line + 0.5,
+            };
+            let kind = if peak.is_bracket() {
+                VerticalInterKind::Bracket(
+                    bracket_kind(peak).expect("a bracket peak always has a bracket kind"),
+                )
+            } else {
+                VerticalInterKind::Barline {
+                    width_class: if peak.is_set(StaffPeakAttribute::Thick) {
+                        PeakWidthClass::Thick
+                    } else {
+                        PeakWidthClass::Thin
+                    },
+                    left_staff_end: peak.is_staff_end(HorizontalSide::Left),
+                    right_staff_end: peak.is_staff_end(HorizontalSide::Right),
+                }
+            };
+            plans.push(VerticalInterPlan {
+                peak: peak.key(),
+                median,
+                width,
+                impacts: peak.impacts(),
+                kind,
+            });
+        }
+    }
+    plans
 }
 
 /// Java `getGroups`: collect maximal adjacent peak runs separated by at most
@@ -1488,6 +1567,73 @@ mod tests {
             Err(BarsLogicError::InvalidStartIndex(1))
         );
         assert!(!values[0].is_bracket());
+    }
+
+    #[test]
+    fn vertical_inter_plans_preserve_java_geometry_kind_and_projector_order() {
+        let mut thick_end = StaffPeak::new(StaffId::new(1), 10, 30, 4, 7).unwrap();
+        thick_end.set(StaffPeakAttribute::Thick);
+        thick_end.set_staff_end(HorizontalSide::Left);
+        let mut brace = peak(1, 9, 12);
+        brace.set(StaffPeakAttribute::Brace);
+        let mut bracket = StaffPeak::new(StaffId::new(2), 20, 40, 12, 14).unwrap();
+        bracket.set(StaffPeakAttribute::BracketMiddle);
+        let plain = StaffPeak::new(StaffId::new(2), 21, 41, 20, 20).unwrap();
+
+        let plans = plan_vertical_inters(
+            &[
+                vec![thick_end.clone(), brace],
+                vec![bracket.clone(), plain.clone()],
+            ],
+            3,
+        );
+
+        assert_eq!(
+            plans,
+            [
+                VerticalInterPlan {
+                    peak: thick_end.key(),
+                    median: VerticalMedian {
+                        x: 6.0,
+                        top: 9.0,
+                        bottom: 32.0,
+                    },
+                    width: 4.0,
+                    impacts: None,
+                    kind: VerticalInterKind::Barline {
+                        width_class: PeakWidthClass::Thick,
+                        left_staff_end: true,
+                        right_staff_end: false,
+                    },
+                },
+                VerticalInterPlan {
+                    peak: bracket.key(),
+                    median: VerticalMedian {
+                        x: 13.5,
+                        top: 19.0,
+                        bottom: 42.0,
+                    },
+                    width: 3.0,
+                    impacts: None,
+                    kind: VerticalInterKind::Bracket(BracketKind::None),
+                },
+                VerticalInterPlan {
+                    peak: plain.key(),
+                    median: VerticalMedian {
+                        x: 20.5,
+                        top: 20.0,
+                        bottom: 43.0,
+                    },
+                    width: 1.0,
+                    impacts: None,
+                    kind: VerticalInterKind::Barline {
+                        width_class: PeakWidthClass::Thin,
+                        left_staff_end: false,
+                        right_staff_end: false,
+                    },
+                },
+            ]
+        );
     }
 
     #[test]
