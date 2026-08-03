@@ -13,9 +13,291 @@ use std::f64::consts::TAU;
 use std::fmt;
 
 use crate::{
+    clef_column::NeutralClefKind,
     headers_step::HeadlessHeaderSystem,
     staff_header::{HeaderBounds, HeaderComponent, StaffHeaderRange},
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NeutralKeyAlterShape {
+    Flat,
+    Sharp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KeyAlterClassifierProposal {
+    pub id: usize,
+    pub start: i32,
+    pub width: i32,
+    pub bounds: HeaderBounds,
+    pub classifier_grade: f64,
+    pub measured_pitch: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyShapeClassifierProposal {
+    pub id: usize,
+    pub shape: NeutralKeyAlterShape,
+    pub range: StaffHeaderRange,
+    pub alters: Vec<KeyAlterClassifierProposal>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KeyClefSupport {
+    pub id: usize,
+    pub kind: NeutralClefKind,
+    pub grade: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeyLifecycleContext {
+    pub clefs: Vec<KeyClefSupport>,
+    pub maximum_delta_pitch_one: f64,
+    pub maximum_delta_pitch_four: f64,
+    pub clef_key_source_ratio: f64,
+    pub key_alters_source_ratio: f64,
+}
+
+pub trait VisualKeyProposalRecognizer {
+    type Error;
+
+    fn classify_key_shapes(
+        &mut self,
+        input: KeyRecognitionInput,
+    ) -> Result<Vec<KeyShapeClassifierProposal>, Self::Error>;
+
+    fn replicate_key(
+        &mut self,
+        system_id: usize,
+        target_staff_id: usize,
+        source: &NeutralKeyCandidate,
+        global_offsets: &[i32],
+    ) -> Result<KeyReplication, Self::Error>;
+}
+
+/// Native per-staff key lifecycle around injected accidental proposals.
+pub struct KeyLifecycleRecognizer<Visual> {
+    visual: Visual,
+    contexts: BTreeMap<usize, KeyLifecycleContext>,
+    selected_clefs: BTreeMap<usize, usize>,
+}
+
+impl<Visual> KeyLifecycleRecognizer<Visual> {
+    #[must_use]
+    pub fn new(visual: Visual, contexts: BTreeMap<usize, KeyLifecycleContext>) -> Self {
+        Self {
+            visual,
+            contexts,
+            selected_clefs: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn visual(&self) -> &Visual {
+        &self.visual
+    }
+
+    #[must_use]
+    pub fn selected_clefs(&self) -> &BTreeMap<usize, usize> {
+        &self.selected_clefs
+    }
+}
+
+impl<Visual> VisualKeyRecognizer for KeyLifecycleRecognizer<Visual>
+where
+    Visual: VisualKeyProposalRecognizer,
+{
+    type Error = Visual::Error;
+
+    fn recognize_keys(
+        &mut self,
+        input: KeyRecognitionInput,
+    ) -> Result<Vec<NeutralKeyCandidate>, Self::Error> {
+        let proposals = self.visual.classify_key_shapes(input)?;
+        let context = &self.contexts[&input.staff_id];
+        let mut candidates = Vec::new();
+        for proposal in proposals {
+            if let Some((candidate, clef_id)) = lifecycle_key_candidate(input, proposal, context) {
+                self.selected_clefs.insert(input.staff_id, clef_id);
+                candidates.push(candidate);
+            }
+        }
+        Ok(candidates)
+    }
+
+    fn replicate_key(
+        &mut self,
+        system_id: usize,
+        target_staff_id: usize,
+        source: &NeutralKeyCandidate,
+        global_offsets: &[i32],
+    ) -> Result<KeyReplication, Self::Error> {
+        self.visual
+            .replicate_key(system_id, target_staff_id, source, global_offsets)
+    }
+}
+
+fn lifecycle_key_candidate(
+    input: KeyRecognitionInput,
+    mut proposal: KeyShapeClassifierProposal,
+    context: &KeyLifecycleContext,
+) -> Option<(NeutralKeyCandidate, usize)> {
+    proposal.alters.sort_by_key(|alter| alter.start);
+    if proposal.alters.is_empty() || proposal.alters.len() > 7 || context.clefs.is_empty() {
+        return None;
+    }
+    let mut best_compatible = None;
+    let mut best_compatible_contextual = 0.0;
+    let mut best_pitched = Vec::new();
+    let mut best_key_grade = 0.0;
+    for clef in &context.clefs {
+        if clef.kind == NeutralClefKind::Percussion {
+            continue;
+        }
+        let Some(pitched) = pitched_key_grades(&proposal, clef.kind, context) else {
+            continue;
+        };
+        let key_grade = aggregate_key_grade(&pitched, context.key_alters_source_ratio);
+        let contribution = contribution_of(key_grade, context.clef_key_source_ratio);
+        let clef_contextual = contextual(clef.grade, contribution);
+        if clef_contextual > best_compatible_contextual {
+            best_compatible = Some(*clef);
+            best_compatible_contextual = clef_contextual;
+            best_pitched = pitched;
+            best_key_grade = key_grade;
+        }
+    }
+    let compatible = best_compatible?;
+    let mut best_clef = None;
+    let mut best_grade = -1.0;
+    for clef in &context.clefs {
+        let grade = if clef.id == compatible.id {
+            best_compatible_contextual
+        } else {
+            clef.grade
+        };
+        if grade > best_grade {
+            best_grade = grade;
+            best_clef = Some(*clef);
+        }
+    }
+    if best_clef?.id != compatible.id {
+        return None;
+    }
+    let fifths = match proposal.shape {
+        NeutralKeyAlterShape::Flat => -(proposal.alters.len() as i8),
+        NeutralKeyAlterShape::Sharp => proposal.alters.len() as i8,
+    };
+    let mut bounds = proposal.alters[0].bounds;
+    for alter in &proposal.alters[1..] {
+        let right = bounds.right().max(alter.bounds.right());
+        let bottom = (bounds.y + bounds.height - 1).max(alter.bounds.y + alter.bounds.height - 1);
+        bounds.x = bounds.x.min(alter.bounds.x);
+        bounds.y = bounds.y.min(alter.bounds.y);
+        bounds.width = right - bounds.x + 1;
+        bounds.height = bottom - bounds.y + 1;
+    }
+    let slices = proposal
+        .alters
+        .iter()
+        .map(|alter| NeutralKeySlice {
+            start: alter.start,
+            width: alter.width,
+            alter_id: Some(alter.id),
+            alter_bounds: Some(alter.bounds),
+        })
+        .collect::<Vec<_>>();
+    let intrinsic = best_pitched.iter().sum::<f64>() / best_pitched.len() as f64;
+    Some((
+        NeutralKeyCandidate {
+            id: proposal.id,
+            fifths,
+            grade: intrinsic,
+            contextual_grade: Some(best_key_grade),
+            bounds,
+            range: proposal.range,
+            slices,
+            in_sig: false,
+            staff_id: Some(input.staff_id),
+            frozen: false,
+            removed: false,
+        },
+        compatible.id,
+    ))
+}
+
+fn pitched_key_grades(
+    proposal: &KeyShapeClassifierProposal,
+    clef: NeutralClefKind,
+    context: &KeyLifecycleContext,
+) -> Option<Vec<f64>> {
+    let expected = key_pitches(clef, proposal.shape)?;
+    let count = proposal.alters.len();
+    let maximum = if count >= 4 {
+        context.maximum_delta_pitch_four
+    } else {
+        context.maximum_delta_pitch_one
+            + (((context.maximum_delta_pitch_four - context.maximum_delta_pitch_one)
+                * (count - 1) as f64)
+                / 3.0)
+    };
+    let mut grades = Vec::with_capacity(count);
+    for (index, alter) in proposal.alters.iter().enumerate() {
+        let delta = (alter.measured_pitch - f64::from(expected[index])).abs();
+        if delta > maximum {
+            return None;
+        }
+        grades.push(alter.classifier_grade * (1.0 - (delta / maximum)));
+    }
+    Some(grades)
+}
+
+fn aggregate_key_grade(grades: &[f64], ratio: f64) -> f64 {
+    let contributions = grades
+        .iter()
+        .map(|grade| contribution_of(*grade, ratio))
+        .collect::<Vec<_>>();
+    let mut key_grade = 0.0;
+    for (index, grade) in grades.iter().enumerate() {
+        let contribution = contributions
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .map(|(_, contribution)| contribution)
+            .sum::<f64>();
+        key_grade += contextual(*grade, contribution);
+    }
+    key_grade / grades.len() as f64
+}
+
+fn contribution_of(partner: f64, ratio: f64) -> f64 {
+    partner * (ratio - 1.0)
+}
+
+fn contextual(intrinsic: f64, contribution: f64) -> f64 {
+    ((1.0 + contribution) * intrinsic) / (1.0 + (contribution * intrinsic))
+}
+
+fn key_pitches(kind: NeutralClefKind, shape: NeutralKeyAlterShape) -> Option<&'static [i32; 7]> {
+    use NeutralClefKind::{Alto, Baritone, Bass, MezzoSoprano, Soprano, Tenor, Treble};
+    match (shape, kind) {
+        (NeutralKeyAlterShape::Sharp, Treble) => Some(&[-4, -1, -5, -2, 1, -3, 0]),
+        (NeutralKeyAlterShape::Sharp, Bass) => Some(&[-2, 1, -3, 0, 3, -1, 2]),
+        (NeutralKeyAlterShape::Sharp, Baritone) => Some(&[0, 3, -1, 2, -2, 1, -3]),
+        (NeutralKeyAlterShape::Sharp, Tenor) => Some(&[2, -2, 1, -3, 0, -4, -1]),
+        (NeutralKeyAlterShape::Sharp, Alto) => Some(&[-3, 0, -4, -1, 2, -2, 1]),
+        (NeutralKeyAlterShape::Sharp, MezzoSoprano) => Some(&[-1, 2, -2, 1, -3, 0, -4]),
+        (NeutralKeyAlterShape::Sharp, Soprano) => Some(&[1, 4, 0, 3, -1, 2, -2]),
+        (NeutralKeyAlterShape::Flat, Treble) => Some(&[0, -3, 1, -2, 2, -1, 3]),
+        (NeutralKeyAlterShape::Flat, Bass) => Some(&[2, -1, 3, 0, 4, 1, 5]),
+        (NeutralKeyAlterShape::Flat, Baritone) => Some(&[-3, 1, -2, 2, -1, 3, 0]),
+        (NeutralKeyAlterShape::Flat, Tenor) => Some(&[-1, -4, 0, -3, 1, -2, 2]),
+        (NeutralKeyAlterShape::Flat, Alto) => Some(&[1, -2, 2, -1, 3, 0, 4]),
+        (NeutralKeyAlterShape::Flat, MezzoSoprano) => Some(&[-4, 0, -3, 1, -2, 2, -1]),
+        (NeutralKeyAlterShape::Flat, Soprano) => Some(&[-2, 2, -1, 3, 0, 4, 1]),
+        _ => None,
+    }
+}
 
 const EM_EPSILON: f64 = 1e-10;
 const EM_MAX_ITERATIONS: usize = 10;
@@ -639,6 +921,35 @@ mod tests {
         replicated: Vec<(usize, i8, Vec<i32>)>,
     }
 
+    #[derive(Default)]
+    struct FakeProposalVisual {
+        proposals: BTreeMap<usize, Vec<KeyShapeClassifierProposal>>,
+    }
+
+    impl VisualKeyProposalRecognizer for FakeProposalVisual {
+        type Error = &'static str;
+
+        fn classify_key_shapes(
+            &mut self,
+            input: KeyRecognitionInput,
+        ) -> Result<Vec<KeyShapeClassifierProposal>, Self::Error> {
+            Ok(self.proposals.remove(&input.staff_id).unwrap_or_default())
+        }
+
+        fn replicate_key(
+            &mut self,
+            _system_id: usize,
+            _target_staff_id: usize,
+            _source: &NeutralKeyCandidate,
+            _global_offsets: &[i32],
+        ) -> Result<KeyReplication, Self::Error> {
+            Ok(KeyReplication {
+                status: KeyReplicationStatus::NoReplicate,
+                replacement: None,
+            })
+        }
+    }
+
     impl VisualKeyRecognizer for FakeVisual {
         type Error = &'static str;
 
@@ -878,5 +1189,162 @@ mod tests {
         assert_eq!(column.global_index(12), Some(0));
         column.max_slice_distance = 5;
         assert_eq!(column.global_index(15), Some(0));
+    }
+
+    fn shape_proposal(
+        id: usize,
+        shape: NeutralKeyAlterShape,
+        pitches: &[f64],
+    ) -> KeyShapeClassifierProposal {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 12;
+        range.browse_stop = 50;
+        range.set_start(15);
+        range.set_stop(44);
+        KeyShapeClassifierProposal {
+            id,
+            shape,
+            range,
+            alters: pitches
+                .iter()
+                .enumerate()
+                .rev()
+                .map(|(index, pitch)| KeyAlterClassifierProposal {
+                    id: id + index + 1,
+                    start: 15 + index as i32 * 8,
+                    width: 5,
+                    bounds: bounds(15 + index as i32 * 8, 5),
+                    classifier_grade: 0.8,
+                    measured_pitch: *pitch,
+                })
+                .collect(),
+        }
+    }
+
+    fn lifecycle_context(clefs: Vec<KeyClefSupport>) -> KeyLifecycleContext {
+        KeyLifecycleContext {
+            clefs,
+            maximum_delta_pitch_one: 0.5,
+            maximum_delta_pitch_four: 0.8,
+            clef_key_source_ratio: 2.0,
+            key_alters_source_ratio: 2.0,
+        }
+    }
+
+    #[test]
+    fn key_lifecycle_orders_alters_applies_pitch_impact_and_selects_compatible_clef() {
+        let mut visual = FakeProposalVisual::default();
+        visual.proposals.insert(
+            1,
+            vec![shape_proposal(
+                100,
+                NeutralKeyAlterShape::Sharp,
+                &[-4.0, -0.9],
+            )],
+        );
+        let contexts = BTreeMap::from([(
+            1,
+            lifecycle_context(vec![
+                KeyClefSupport {
+                    id: 10,
+                    kind: NeutralClefKind::Treble,
+                    grade: 0.7,
+                },
+                KeyClefSupport {
+                    id: 11,
+                    kind: NeutralClefKind::Bass,
+                    grade: 0.6,
+                },
+            ]),
+        )]);
+        let mut lifecycle = KeyLifecycleRecognizer::new(visual, contexts);
+        let candidates = lifecycle
+            .recognize_keys(KeyRecognitionInput {
+                system_id: 7,
+                staff_id: 1,
+                projection_width: 80,
+                measure_start: 10,
+                browse_start: 12,
+            })
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].fifths, 2);
+        assert_eq!(
+            candidates[0]
+                .slices
+                .iter()
+                .map(|slice| slice.start)
+                .collect::<Vec<_>>(),
+            vec![15, 23]
+        );
+        assert_eq!(lifecycle.selected_clefs()[&1], 10);
+        assert!(candidates[0].contextual_grade.unwrap() > candidates[0].grade);
+    }
+
+    #[test]
+    fn key_lifecycle_rejects_pitch_outside_java_count_scaled_window() {
+        let mut visual = FakeProposalVisual::default();
+        visual.proposals.insert(
+            1,
+            vec![shape_proposal(100, NeutralKeyAlterShape::Flat, &[2.0, 0.0])],
+        );
+        let contexts = BTreeMap::from([(
+            1,
+            lifecycle_context(vec![KeyClefSupport {
+                id: 10,
+                kind: NeutralClefKind::Treble,
+                grade: 0.7,
+            }]),
+        )]);
+        let mut lifecycle = KeyLifecycleRecognizer::new(visual, contexts);
+        assert!(
+            lifecycle
+                .recognize_keys(KeyRecognitionInput {
+                    system_id: 7,
+                    staff_id: 1,
+                    projection_width: 80,
+                    measure_start: 10,
+                    browse_start: 12,
+                })
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn stronger_incompatible_clef_defeats_key_supported_clef_with_strict_java_comparison() {
+        let mut visual = FakeProposalVisual::default();
+        visual.proposals.insert(
+            1,
+            vec![shape_proposal(100, NeutralKeyAlterShape::Sharp, &[-4.0])],
+        );
+        let contexts = BTreeMap::from([(
+            1,
+            lifecycle_context(vec![
+                KeyClefSupport {
+                    id: 10,
+                    kind: NeutralClefKind::Treble,
+                    grade: 0.2,
+                },
+                KeyClefSupport {
+                    id: 11,
+                    kind: NeutralClefKind::Bass,
+                    grade: 0.99,
+                },
+            ]),
+        )]);
+        let mut lifecycle = KeyLifecycleRecognizer::new(visual, contexts);
+        assert!(
+            lifecycle
+                .recognize_keys(KeyRecognitionInput {
+                    system_id: 7,
+                    staff_id: 1,
+                    projection_width: 80,
+                    measure_start: 10,
+                    browse_start: 12,
+                })
+                .unwrap()
+                .is_empty()
+        );
     }
 }
