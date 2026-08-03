@@ -282,17 +282,25 @@ denied, and passed `git diff --check` before commit.
 198. `4788c1db` — concrete headless GRID sheet/page/reference/score executor state.
 199. `6b62cba8` — promoted barline grouping with exact gap and partial-failure behavior.
 200. `4c9c2985` — glyph-backed persistent lines and ordered GRID SIG ownership attachment.
+201. `a72a910c` — concrete GRID raster lag creation and short-section stages.
+202. `a61466e3` — partial raster-lag handoff after swallowed and step failures.
+203. `4bcc75b2` — sheet-owned installation of completed and partial raster prefixes.
+204. `ac5f0c94` — production-backed prepared line-cluster retrieval and staff materialization.
+205. `39392d64` — production-backed prepared bar-system processing and global edge remapping.
+206. `8c51f6b2` — production-backed prepared line completion state and lifecycle.
+207. `d37b227e` — exact composed Java/Rust GRID output-boundary vector.
+208. `a44e2a77` — concrete staff bar ownership and system group/part tail.
 
-At the two-hundredth checkpoint the Rust workspace executes 517 tests:
+At the two-hundred-and-eighth checkpoint the Rust workspace executes 539 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 360
-- `audiveris-omr`: 104
+- `audiveris-image`: 376
+- `audiveris-omr`: 110
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 62 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 63 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -363,8 +371,10 @@ without recreating Java object cycles. Concrete sheet-owned SIG state now regist
 bar/bracket glyph and inter identities, peak backlinks, connector nodes and relations,
 connection freezing, and grouped-barline edges. It preserves Java's system-major
 vertical/group passes, global connection-edge order, per-connection catches, and
-ordinary-error prefix mutation. The post-group `recordBars`, staff-group/part creation,
-and contextualization tail remains outside this boundary.
+ordinary-error prefix mutation. The post-group tail now records barline IDs on concrete
+staff state and stores group/part plans on concrete system state in Java order. SIG
+contextual grading remains outside this boundary, as does the separately held
+`StaffProjector.getBracePeak()` candidate when it is absent from the projector peak list.
 
 The neutral LinesRetriever coordinator now executes the main cluster pass, the
 conditional small-interline pass over ID-sorted primary discards, and Java's
@@ -388,17 +398,28 @@ lines and glyphs remain while the current and later originals are detached. `Sys
 preserves fresh-reference replacement, shared backlinks, physical part/staff order, exact
 `StaffConfig` defaults, separate PageRef append, and Java partial mutation on collaborator
 failure, and those references are now wired into page allocation, sheet state, and score
-regrouping. The next major seam is a concrete low-level raster `GridBuildExecutor`, not an
-assertion that GRID is already fully behaviorally equivalent.
+regrouping. A stage-owned raster builder now concretely creates both initial lags, adds
+short sections, and installs every completed prefix into the sheet on success, swallowed
+failure, or step failure. Prepared cluster, bar-system, and completion adapters then call
+the production-backed Rust coordinators and preserve their outputs across the sheet-aware
+driver. They still require prepared cluster/projector inputs, and several coordinator
+exceptional paths remain transactional, so this is not yet a claim that raw-page GRID is
+fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
 validation, multi-rest serif rejection, six-impact grading, brace discovery, and
 neutral peak output. Result-list, lines-root, and right-end decisions are also ported,
 and the BarsRetriever registry preserves retained-staff/projector order and unique
-graph-vertex intents. Downstream SIG promotion is now concrete, but the low-level raster
-builder still needs to feed production projector and graph state directly; deskew mutation
-and the post-group BarsRetriever tail remain queued.
+graph-vertex intents. Downstream SIG promotion is now concrete. The remaining upstream
+gap is constructing cluster/projector/system inputs directly from the live lag and raster;
+deskew mutation, detached brace-candidate ownership, and SIG contextualization remain queued.
+
+The newest composed differential constructs the same two-system synthetic sheet in live
+Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
+and their geometry digest, five bar glyphs, semantic SIG nodes/relations/freezing/grades,
+two physical pages and reference backlinks, and two score movements. This closes the
+newly attached ownership boundary exactly, but is not a raw-image recognition fixture.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
@@ -455,10 +476,12 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete the remaining concrete `GRID` seams: implement the low-level raster
-   `GridBuildExecutor`, attach the post-group `recordBars`/group/part/contextualize tail,
-   and freeze a stable full-stage GRID differential fixture. Keep UI integration behind
-   explicit neutral boundaries until the headless output matches that fixture.
+1. Complete the remaining concrete `GRID` seams: construct cluster/projector/system inputs
+   directly from the live raster lags, attach detached brace candidates and SIG
+   contextualization, eliminate the documented transactional exceptional-path mismatches,
+   and freeze a raw-image full-stage GRID differential.
+   Keep UI integration behind explicit neutral boundaries until the headless output
+   matches that fixture.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
