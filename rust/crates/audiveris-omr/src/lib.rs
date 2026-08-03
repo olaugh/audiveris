@@ -34,6 +34,7 @@ pub mod key_column;
 pub mod ledgers_step;
 pub mod raw_ledger_filter;
 pub mod raw_projector_adapter;
+pub mod reduction_step;
 pub mod score_update;
 pub mod sheet_xml;
 pub mod staff_header;
