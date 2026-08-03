@@ -245,6 +245,7 @@ pub enum ProductionCompleteLinesError<UpstreamError, CompletionError> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PreparedCompletionOwnershipError {
     MissingPreparedBarsHandoff,
+    MissingRawBarsOwnership,
     DuplicatePreparedStaff(usize),
     InvalidSystemId(usize),
     DuplicateSystem(usize),
@@ -266,6 +267,15 @@ pub enum PreparedCompletionOwnershipError {
     },
 }
 
+/// One-shot exact system/staff ownership emitted by a completed raw bars
+/// producer. Unlike [`PreparedBarsStage`], this seam does not ask downstream
+/// completion to reconstruct or replay bar/SIG collaborators.
+pub trait PreparedCompletionOwnershipStage {
+    fn take_prepared_completion_ownership(&mut self) -> Option<Vec<PreparedCompletionSystem>>;
+}
+
+type DirectOwnershipSource<Upstream> = fn(&mut Upstream) -> Option<Vec<PreparedCompletionSystem>>;
+
 pub struct ProductionCompleteLines<Upstream, Completion> {
     upstream: Upstream,
     completion: Completion,
@@ -277,6 +287,10 @@ pub struct ProductionCompleteLines<Upstream, Completion> {
     /// Runtime topology derived from the successful ProcessBars handoff.
     automatic_completion_systems: Option<Vec<PreparedCompletionSystem>>,
     prepared_bars_source: Option<fn(&mut Upstream) -> Option<PreparedBarsHandoff>>,
+    direct_ownership_source: Option<DirectOwnershipSource<Upstream>>,
+    /// One-shot direct ownership retained even when a later ProcessBars join
+    /// fails, matching the prepared-bars failure-prefix contract.
+    direct_ownership_handoff: Option<Vec<PreparedCompletionSystem>>,
     /// One-shot handoff captured before ownership validation and forwarded to
     /// the sheet even when a later join check rejects the attempt.
     prepared_bars_handoff: Option<PreparedBarsHandoff>,
@@ -305,6 +319,8 @@ impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
             completion_systems: None,
             automatic_completion_systems: None,
             prepared_bars_source: None,
+            direct_ownership_source: None,
+            direct_ownership_handoff: None,
             prepared_bars_handoff: None,
             state: None,
             raw_metadata: None,
@@ -334,6 +350,17 @@ impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
         Upstream: PreparedBarsStage,
     {
         self.prepared_bars_source = Some(Upstream::take_prepared_bars_handoff);
+        self
+    }
+
+    /// Consume exact ownership directly from a completed raw-bars adapter.
+    /// No prepared bar plans or tail collaborators are injected or replayed.
+    #[must_use]
+    pub fn with_completion_systems_from_raw_bars(mut self) -> Self
+    where
+        Upstream: PreparedCompletionOwnershipStage,
+    {
+        self.direct_ownership_source = Some(Upstream::take_prepared_completion_ownership);
         self
     }
 
@@ -410,6 +437,7 @@ where
         self.raw_metadata_handoff = None;
         self.automatic_completion_systems = None;
         self.prepared_bars_handoff = None;
+        self.direct_ownership_handoff = None;
         self.state = None;
         let result = self
             .upstream
@@ -430,6 +458,7 @@ where
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
         self.automatic_completion_systems = None;
         self.prepared_bars_handoff = None;
+        self.direct_ownership_handoff = None;
         let result = self
             .upstream
             .process_bars(state)
@@ -437,24 +466,37 @@ where
         if let Some(extract) = self.prepared_bars_source {
             self.prepared_bars_handoff = extract(&mut self.upstream);
         }
+        if let Some(extract) = self.direct_ownership_source {
+            self.direct_ownership_handoff = extract(&mut self.upstream);
+        }
         // Preserve an upstream failure and its exact bar prefix. Ownership
         // validation must never mask the producer's earlier error.
         result?;
-        if self.prepared_bars_source.is_none() {
+        if self.prepared_bars_source.is_none() && self.direct_ownership_source.is_none() {
             return Ok(());
         }
-        let handoff = self.prepared_bars_handoff.as_ref().ok_or_else(|| {
-            GridStageFailure::Other(ProductionCompleteLinesError::CompletionOwnership(
-                PreparedCompletionOwnershipError::MissingPreparedBarsHandoff,
-            ))
-        })?;
         let staffs = self.upstream.prepared_staff_handoff().ok_or_else(|| {
             GridStageFailure::Other(ProductionCompleteLinesError::MissingPreparedStaffs)
         })?;
-        let automatic =
+        let automatic = if self.direct_ownership_source.is_some() {
+            let direct = self.direct_ownership_handoff.as_ref().ok_or_else(|| {
+                GridStageFailure::Other(ProductionCompleteLinesError::CompletionOwnership(
+                    PreparedCompletionOwnershipError::MissingRawBarsOwnership,
+                ))
+            })?;
+            validate_direct_completion_ownership(staffs, direct).map_err(|error| {
+                GridStageFailure::Other(ProductionCompleteLinesError::CompletionOwnership(error))
+            })?
+        } else {
+            let handoff = self.prepared_bars_handoff.as_ref().ok_or_else(|| {
+                GridStageFailure::Other(ProductionCompleteLinesError::CompletionOwnership(
+                    PreparedCompletionOwnershipError::MissingPreparedBarsHandoff,
+                ))
+            })?;
             validate_prepared_completion_ownership(staffs, handoff).map_err(|error| {
                 GridStageFailure::Other(ProductionCompleteLinesError::CompletionOwnership(error))
-            })?;
+            })?
+        };
         if let Some(explicit) = &self.completion_systems
             && explicit != &automatic
         {
@@ -663,6 +705,23 @@ pub fn validate_prepared_completion_ownership(
     prepared: &PreparedStaffHandoff,
     bars: &PreparedBarsHandoff,
 ) -> Result<Vec<PreparedCompletionSystem>, PreparedCompletionOwnershipError> {
+    let systems = bars
+        .systems
+        .iter()
+        .map(|system| PreparedCompletionSystem {
+            system_id: system.system_id,
+            staff_ids: system.staff_ids.clone(),
+        })
+        .collect::<Vec<_>>();
+    validate_direct_completion_ownership(prepared, &systems)
+}
+
+/// Validate exact ownership emitted directly by a completed raw-bars stage.
+/// Input order and identities are returned unchanged.
+pub fn validate_direct_completion_ownership(
+    prepared: &PreparedStaffHandoff,
+    direct: &[PreparedCompletionSystem],
+) -> Result<Vec<PreparedCompletionSystem>, PreparedCompletionOwnershipError> {
     let prepared_ids = prepared
         .staffs
         .iter()
@@ -677,11 +736,11 @@ pub fn validate_prepared_completion_ownership(
         }
     }
 
-    let mut system_ids = HashSet::with_capacity(bars.systems.len());
+    let mut system_ids = HashSet::with_capacity(direct.len());
     let mut assigned = HashSet::with_capacity(prepared_ids.len());
     let mut flattened = Vec::with_capacity(prepared_ids.len());
-    let mut systems = Vec::with_capacity(bars.systems.len());
-    for system in &bars.systems {
+    let mut systems = Vec::with_capacity(direct.len());
+    for system in direct {
         if system.system_id == 0 {
             return Err(PreparedCompletionOwnershipError::InvalidSystemId(0));
         }
@@ -758,6 +817,7 @@ mod tests {
         handoff: Option<PreparedStaffHandoff>,
         raw_metadata: Option<RawLineMetadataHandoff>,
         bars_handoff: Option<PreparedBarsHandoff>,
+        direct_ownership: Option<Vec<PreparedCompletionSystem>>,
         process_bars_error: Option<&'static str>,
         finish_count: usize,
     }
@@ -765,6 +825,12 @@ mod tests {
     impl PreparedBarsStage for Upstream {
         fn take_prepared_bars_handoff(&mut self) -> Option<PreparedBarsHandoff> {
             self.bars_handoff.take()
+        }
+    }
+
+    impl PreparedCompletionOwnershipStage for Upstream {
+        fn take_prepared_completion_ownership(&mut self) -> Option<Vec<PreparedCompletionSystem>> {
+            self.direct_ownership.take()
         }
     }
 
@@ -997,6 +1063,25 @@ mod tests {
         )
     }
 
+    fn direct_builder(
+        staff_ids: &[usize],
+        ownership: Option<Vec<PreparedCompletionSystem>>,
+        process_bars_error: Option<&'static str>,
+    ) -> HeadlessRasterGridBuilder<ProductionCompleteLines<Upstream, Completion>> {
+        let upstream = Upstream {
+            handoff: Some(prepared_staffs_with_ids(staff_ids)),
+            direct_ownership: ownership,
+            process_bars_error,
+            ..Upstream::default()
+        };
+        HeadlessRasterGridBuilder::new(
+            source(),
+            raster_parameters(),
+            ProductionCompleteLines::new(upstream, Completion::default(), Some(source()), 20, true)
+                .with_completion_systems_from_raw_bars(),
+        )
+    }
+
     #[test]
     fn success_loads_binary_dispatches_sections_and_finishes_inner_boundary() {
         let mut builder = builder(Completion::default(), Some(source()));
@@ -1062,6 +1147,62 @@ mod tests {
                 .map(|system| (system.system_id, system.staff_ids.clone()))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn direct_raw_ownership_runs_all_completion_stages_without_bar_handoff() {
+        let expected = vec![PreparedCompletionSystem {
+            system_id: 3,
+            staff_ids: vec![1],
+        }];
+        let mut builder = direct_builder(&[1], Some(expected.clone()), None);
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        let stages = builder.stages();
+        assert_eq!(stages.state().unwrap().completion_systems, Some(expected));
+        assert_eq!(stages.state().unwrap().completed_stages.len(), 11);
+        assert_eq!(stages.completion().finish_count, 1);
+        assert!(stages.prepared_bars_handoff.is_none());
+    }
+
+    #[test]
+    fn direct_raw_ownership_validates_before_completion_and_retains_upstream_failure() {
+        let mut missing = direct_builder(&[1], None, None);
+        assert!(matches!(
+            build_grid_info(&mut missing).unwrap(),
+            GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::ProcessBars,
+                error: RasterGridOtherError::Collaborator(
+                    ProductionCompleteLinesError::CompletionOwnership(
+                        PreparedCompletionOwnershipError::MissingRawBarsOwnership
+                    )
+                ),
+            }
+        ));
+        assert!(missing.stages().state().is_none());
+
+        let ownership = vec![PreparedCompletionSystem {
+            system_id: 1,
+            staff_ids: vec![1],
+        }];
+        let mut upstream_failure = direct_builder(&[1], Some(ownership.clone()), Some("late bars"));
+        assert!(matches!(
+            build_grid_info(&mut upstream_failure).unwrap(),
+            GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::ProcessBars,
+                error: RasterGridOtherError::Collaborator(ProductionCompleteLinesError::Upstream(
+                    "late bars"
+                )),
+            }
+        ));
+        assert_eq!(
+            upstream_failure.stages().direct_ownership_handoff.as_ref(),
+            Some(&ownership)
+        );
+        assert!(upstream_failure.stages().state().is_none());
     }
 
     #[test]

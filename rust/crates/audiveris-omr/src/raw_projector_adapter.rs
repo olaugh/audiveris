@@ -49,10 +49,15 @@ use audiveris_image::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
     },
     filament::{FilamentError, FilamentGeometry},
+    grid_lifecycle::{GridBuildStage, GridStageFailure},
     grid_sig::{BarTailParameters, BarTailResult, GridSig},
     lines_coordinator::StaffCandidateKind,
     peak_graph::PeakGraph,
-    prepared_lines::{PreparedStaff, PreparedStaffHandoff},
+    prepared_completion::PreparedCompletionOwnershipStage,
+    prepared_lines::{
+        PreparedStaff, PreparedStaffHandoff, PreparedStaffStage, RawLineMetadataHandoff,
+        RawLineMetadataStage,
+    },
     projection::{
         BarlineHeightSpec, BarsProjectorRegistry, BraceSearchRequest, PeakCoreGeometry,
         ProjectionError, ProjectorRegistration, StaffProjectorProcessRequest,
@@ -62,6 +67,9 @@ use audiveris_image::{
     section::Section,
     staff_peak::{PeakBounds, PeakPoint, StaffPeak, StaffPeakError, StaffPeakKey},
 };
+
+use audiveris_image::discarded_completion::PreparedCompletionSystem;
+use audiveris_image::raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages};
 
 use crate::grid_executor::HeadlessSkew;
 use crate::system_grouping::{
@@ -327,6 +335,174 @@ pub struct RawBarsPrefixBridge {
     pub bars: Vec<RawBarsPrefixSystem>,
 }
 
+#[derive(Clone, Debug)]
+pub struct RawCompletedBarsSystem {
+    pub system_id: usize,
+    pub staff_ids: Vec<usize>,
+    pub sig: GridSig,
+    pub bar_tail: BarTailResult,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawBarsCompletionHandoff {
+    systems: Vec<RawCompletedBarsSystem>,
+}
+
+impl RawBarsCompletionHandoff {
+    pub fn from_completed_systems(
+        systems: Vec<RawCompletedBarsSystem>,
+    ) -> Result<Self, RawProjectorAdapterError> {
+        for system in &systems {
+            if !system.bar_tail.contextualized {
+                return Err(RawProjectorAdapterError::UncontextualizedBars(
+                    system.system_id,
+                ));
+            }
+            if system
+                .bar_tail
+                .staff_barlines
+                .keys()
+                .copied()
+                .ne(system.staff_ids.iter().copied())
+            {
+                return Err(RawProjectorAdapterError::CompletedBarsStaffOrder);
+            }
+        }
+        Ok(Self { systems })
+    }
+
+    #[must_use]
+    pub fn systems(&self) -> &[RawCompletedBarsSystem] {
+        &self.systems
+    }
+
+    #[must_use]
+    pub fn ownership(&self) -> Vec<PreparedCompletionSystem> {
+        self.systems
+            .iter()
+            .map(|system| PreparedCompletionSystem {
+                system_id: system.system_id,
+                staff_ids: system.staff_ids.clone(),
+            })
+            .collect()
+    }
+}
+
+/// Production lifecycle adapter for a completed raw BarsRetriever result.
+/// It forwards the final SIG/tail intact while exposing only exact ownership
+/// to `ProductionCompleteLines`; no bar plans or tail collaborators replay.
+pub struct ProductionRawBarsCompletion<Upstream> {
+    upstream: Upstream,
+    completed: RawBarsCompletionHandoff,
+    ownership_handoff: Option<Vec<PreparedCompletionSystem>>,
+}
+
+impl<Upstream> ProductionRawBarsCompletion<Upstream> {
+    pub fn new(
+        upstream: Upstream,
+        bridge: &RawBarsPrefixBridge,
+    ) -> Result<Self, RawProjectorAdapterError> {
+        Self::from_handoff(upstream, raw_bars_completion_handoff(bridge)?)
+    }
+
+    pub fn from_handoff(
+        upstream: Upstream,
+        completed: RawBarsCompletionHandoff,
+    ) -> Result<Self, RawProjectorAdapterError> {
+        for system in completed.systems() {
+            if !system.bar_tail.contextualized {
+                return Err(RawProjectorAdapterError::UncontextualizedBars(
+                    system.system_id,
+                ));
+            }
+        }
+        Ok(Self {
+            upstream,
+            completed,
+            ownership_handoff: None,
+        })
+    }
+
+    #[must_use]
+    pub const fn upstream(&self) -> &Upstream {
+        &self.upstream
+    }
+
+    #[must_use]
+    pub const fn completed(&self) -> &RawBarsCompletionHandoff {
+        &self.completed
+    }
+}
+
+impl<Upstream> PreparedStaffStage for ProductionRawBarsCompletion<Upstream>
+where
+    Upstream: PreparedStaffStage,
+{
+    fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff> {
+        self.upstream.prepared_staff_handoff()
+    }
+
+    fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
+        self.upstream.take_prepared_staff_handoff()
+    }
+}
+
+impl<Upstream> RawLineMetadataStage for ProductionRawBarsCompletion<Upstream>
+where
+    Upstream: RawLineMetadataStage,
+{
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+        self.upstream.take_raw_line_metadata_handoff()
+    }
+}
+
+impl<Upstream> PreparedCompletionOwnershipStage for ProductionRawBarsCompletion<Upstream> {
+    fn take_prepared_completion_ownership(&mut self) -> Option<Vec<PreparedCompletionSystem>> {
+        self.ownership_handoff.take()
+    }
+}
+
+impl<Upstream> RemainingRasterGridStages for ProductionRawBarsCompletion<Upstream>
+where
+    Upstream: RemainingRasterGridStages,
+{
+    type StepError = Upstream::StepError;
+    type OtherError = Upstream::OtherError;
+
+    fn retrieve_lines(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.ownership_handoff = None;
+        self.upstream.retrieve_lines(state)
+    }
+
+    fn process_bars(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        // The completed raw result is the ProcessBars mutation prefix and is
+        // made available even when a later delegated callback fails.
+        self.ownership_handoff = Some(self.completed.ownership());
+        self.upstream.process_bars(state)
+    }
+
+    fn complete_lines(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.upstream.complete_lines(state)
+    }
+
+    fn log_swallowed_error(&mut self, stage: GridBuildStage, error: &Self::OtherError) {
+        self.upstream.log_swallowed_error(stage, error);
+    }
+
+    fn finish(&mut self) {
+        self.upstream.finish();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RawBraceStageParameters {
     pub portions: BracePortionParameters,
@@ -458,6 +634,13 @@ pub struct RawPartContextStageReport {
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     InvalidRasterShape,
+    BarsNotComplete,
+    CompletedBarsSystemCount {
+        expected: usize,
+        actual: usize,
+    },
+    CompletedBarsStaffOrder,
+    UncontextualizedBars(usize),
     DuplicateStaffSettings(usize),
     UnknownStaffSettings(usize),
     MissingStaffSettings(usize),
@@ -502,6 +685,17 @@ impl fmt::Display for RawProjectorAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidRasterShape => formatter.write_str("invalid raw raster shape"),
+            Self::BarsNotComplete => formatter.write_str("raw bars are not complete"),
+            Self::CompletedBarsSystemCount { expected, actual } => write!(
+                formatter,
+                "completed raw bars contain {actual} systems, expected {expected}"
+            ),
+            Self::CompletedBarsStaffOrder => {
+                formatter.write_str("completed raw bar staff ownership order does not match")
+            }
+            Self::UncontextualizedBars(system) => {
+                write!(formatter, "raw bar system {system} is not contextualized")
+            }
             Self::DuplicateStaffSettings(id) => {
                 write!(formatter, "staff {id} has duplicate projector settings")
             }
@@ -1616,6 +1810,72 @@ pub fn finish_raw_bars_through_parts_and_context(
         system_count: bridge.bars.len(),
     };
     Ok(report)
+}
+
+/// Freeze the completed raw bar state for production completion handoff.
+pub fn raw_bars_completion_handoff(
+    bridge: &RawBarsPrefixBridge,
+) -> Result<RawBarsCompletionHandoff, RawProjectorAdapterError> {
+    let RawSystemGroupingBoundary::CompleteBars {
+        staff_ids,
+        system_count,
+    } = &bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping
+    else {
+        return Err(RawProjectorAdapterError::BarsNotComplete);
+    };
+    if *system_count != bridge.bars.len() {
+        return Err(RawProjectorAdapterError::CompletedBarsSystemCount {
+            expected: *system_count,
+            actual: bridge.bars.len(),
+        });
+    }
+    let actual_staffs = bridge
+        .bars
+        .iter()
+        .flat_map(|system| system.state.staffs())
+        .map(|staff| staff.staff_id())
+        .collect::<Vec<_>>();
+    if actual_staffs != *staff_ids {
+        return Err(RawProjectorAdapterError::CompletedBarsStaffOrder);
+    }
+
+    let mut systems = Vec::with_capacity(bridge.bars.len());
+    for system in &bridge.bars {
+        if !system.bar_tail.contextualized {
+            return Err(RawProjectorAdapterError::UncontextualizedBars(
+                system.state.system_id(),
+            ));
+        }
+        let state_staff_ids = system
+            .state
+            .staffs()
+            .iter()
+            .map(|staff| staff.staff_id().value())
+            .collect::<Vec<_>>();
+        let tail_staff_ids = system
+            .bar_tail
+            .staff_barlines
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        if tail_staff_ids != state_staff_ids {
+            return Err(RawProjectorAdapterError::CompletedBarsStaffOrder);
+        }
+        systems.push(RawCompletedBarsSystem {
+            system_id: system.state.system_id(),
+            staff_ids: tail_staff_ids,
+            sig: system.sig.clone(),
+            bar_tail: system.bar_tail.clone(),
+        });
+    }
+    Ok(RawBarsCompletionHandoff { systems })
 }
 
 fn reconcile_graph_peak_attributes(
@@ -3174,6 +3434,41 @@ mod tests {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let completion = raw_bars_completion_handoff(&prefix).unwrap();
+        assert_eq!(
+            completion.ownership(),
+            [PreparedCompletionSystem {
+                system_id: 1,
+                staff_ids: vec![1, 2],
+            }]
+        );
+        assert!(completion.systems()[0].bar_tail.contextualized);
+        assert_eq!(completion.systems()[0].sig.nodes_in_order().count(), 3);
+
+        let mut incomplete = prefix.clone();
+        incomplete
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .grouping = RawSystemGroupingBoundary::NeedsPartCreation {
+            staff_ids: vec![StaffId::new(1), StaffId::new(2)],
+            system_count: 1,
+        };
+        assert!(matches!(
+            raw_bars_completion_handoff(&incomplete),
+            Err(RawProjectorAdapterError::BarsNotComplete)
+        ));
+
+        let mut uncontextualized = prefix.clone();
+        uncontextualized.bars[0].bar_tail.contextualized = false;
+        assert!(matches!(
+            raw_bars_completion_handoff(&uncontextualized),
+            Err(RawProjectorAdapterError::UncontextualizedBars(1))
         ));
     }
 }

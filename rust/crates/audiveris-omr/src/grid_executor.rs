@@ -64,6 +64,10 @@ use audiveris_image::{
     },
 };
 
+use crate::raw_projector_adapter::{
+    ProductionRawBarsCompletion, RawBarsCompletionHandoff, RawProjectorAdapterError,
+};
+
 use crate::score_update::{
     PageInput, PageKey, ScoreTopology, ScoreUpdateError, StubPages, update_scores,
 };
@@ -750,6 +754,59 @@ where
     }
 }
 
+impl<Downstream>
+    HeadlessGridExecutor<
+        HeadlessRasterGridBuilder<
+            ProductionCompleteLines<
+                ProductionRawBarsCompletion<RawProductionRetrieveLines<Downstream>>,
+                ProductionLineCompletion<Downstream::StepError>,
+            >,
+        >,
+    >
+where
+    Downstream: RemainingRasterGridStages,
+{
+    /// Continue a source-complete raw BarsRetriever result directly into the
+    /// concrete 11-stage `CompleteLines` path. Exact system/staff ownership
+    /// comes from the final bar tail; no bar systems, plans, or tail
+    /// collaborators are injected or replayed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_completed_raw_bars_complete_lines(
+        source: RunTable,
+        raster_parameters: RasterGridParameters,
+        raw_parameters: RawPrimaryPassParameters,
+        lines_parameters: LinesCoordinatorParameters,
+        downstream: Downstream,
+        completed_bars: RawBarsCompletionHandoff,
+        completion_parameters: ProductionLineCompletionParameters,
+        maximum_thin_weight: usize,
+        inspect_crossing_chunks: bool,
+        sheet: HeadlessGridSheet,
+        book: HeadlessGridBook,
+    ) -> Result<Self, RawProjectorAdapterError> {
+        let prepared_binary = source.clone();
+        let raw = RawProductionRetrieveLines::new(raw_parameters, lines_parameters, downstream);
+        let bars = ProductionRawBarsCompletion::from_handoff(raw, completed_bars)?;
+        let completion = production_line_completion(completion_parameters);
+        let stages = ProductionCompleteLines::new(
+            bars,
+            completion,
+            Some(prepared_binary),
+            maximum_thin_weight,
+            inspect_crossing_chunks,
+        )
+        .with_completion_systems_from_raw_bars();
+        Ok(Self::new(
+            HeadlessRasterGridBuilder::new(source, raster_parameters, stages),
+            sheet,
+            book,
+        )
+        .with_raster_grid_handoff()
+        .with_raw_line_metadata_handoff()
+        .with_prepared_staff_handoff())
+    }
+}
+
 impl<Builder> GridStepExecutor for HeadlessGridExecutor<Builder>
 where
     Builder: GridBuildExecutor,
@@ -1262,11 +1319,15 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
+    use crate::raw_projector_adapter::RawCompletedBarsSystem;
     use audiveris_image::{
         bar_alignment::{AlignmentPeak, BarImpacts},
         bar_column::{PeakId, StaffId},
         bars_coordinator::{BarsCoordinatorParameters, BarsStaffState, BarsSystemState},
-        bars_logic::{PeakWidthClass, VerticalInterKind, VerticalMedian, plan_connection_inters},
+        bars_logic::{
+            PeakWidthClass, PlannedPart, VerticalInterKind, VerticalMedian, plan_connection_inters,
+            plan_vertical_inters,
+        },
         cluster_expand::ClusterExpansionParameters,
         cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
         cluster_ownership::ClusterOwnership,
@@ -1279,7 +1340,7 @@ mod tests {
         filament::{FilamentError, StaffFilament},
         filament_factory::{FilamentFactoryParams, OverlapParams},
         grid_lifecycle::{GridBuildStage, GridStageFailure},
-        grid_sig::{GridSigNode, GridSigRelation},
+        grid_sig::{BarTailResult, GridSig, GridSigNode, GridSigRelation},
         line_cluster::FilamentId,
         line_completion::LineCompletionStage,
         line_endpoints::{DefineEndPointsCompletionError, DefineEndPointsParameters},
@@ -1640,6 +1701,32 @@ mod tests {
             ],
             graph,
         )
+        .unwrap()
+    }
+
+    fn completed_raw_bars_handoff() -> RawBarsCompletionHandoff {
+        let state = raw_completion_bar_system(1);
+        let staff_peaks = state
+            .staffs()
+            .iter()
+            .map(|staff| staff.peaks().to_vec())
+            .collect::<Vec<_>>();
+        let mut sig = GridSig::default();
+        let inters = sig.promote_vertical_inters(&plan_vertical_inters(&staff_peaks, 1));
+        sig.contextualize();
+        let mut bar_tail = BarTailResult::default();
+        bar_tail.staff_barlines.insert(1, inters);
+        bar_tail.parts.push(PlannedPart {
+            first_staff_id: 1,
+            last_staff_id: 1,
+        });
+        bar_tail.contextualized = true;
+        RawBarsCompletionHandoff::from_completed_systems(vec![RawCompletedBarsSystem {
+            system_id: 1,
+            staff_ids: vec![1],
+            sig,
+            bar_tail,
+        }])
         .unwrap()
     }
 
@@ -2672,6 +2759,44 @@ mod tests {
         assert_eq!(executor.sheet.sig.systems[0].system_id, 1);
         assert_eq!(executor.sheet.staffs.len(), 1);
         assert_eq!(executor.sheet.skew.expect("raw slope installed").slope, 0.0);
+    }
+
+    #[test]
+    fn completed_raw_bar_tail_runs_directly_through_all_line_completion_stages() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_completed_raw_bars_complete_lines(
+            split_middle_with_discarded_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            placeholder_slope_lines_parameters(),
+            RasterStages::default(),
+            completed_raw_bars_handoff(),
+            raw_completion_parameters(120),
+            1_000,
+            true,
+            base.sheet,
+            base.book,
+        )
+        .unwrap();
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Completed)
+        ));
+        let stages = executor.builder.stages();
+        let state = stages.state().expect("direct raw completion state");
+        assert_eq!(state.completion_systems, Some(raw_completion_systems()));
+        assert_eq!(state.completed_stages.len(), 11);
+        assert_eq!(stages.completion().finish_count(), 1);
+        let completed = stages.upstream().completed();
+        assert_eq!(completed.systems().len(), 1);
+        assert!(completed.systems()[0].bar_tail.contextualized);
+        assert_eq!(completed.systems()[0].bar_tail.staff_barlines.len(), 1);
+        assert_eq!(completed.systems()[0].sig.nodes_in_order().count(), 1);
     }
 
     #[test]
