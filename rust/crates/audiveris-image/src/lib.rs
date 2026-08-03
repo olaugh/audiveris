@@ -4,6 +4,7 @@
 
 pub mod adaptive;
 pub mod chamfer;
+pub mod comb_builder;
 pub mod filament;
 pub mod filament_comb;
 pub mod filament_factory;
