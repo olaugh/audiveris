@@ -7,7 +7,12 @@
 //! index); the adapter transactionally merges `one` into `two` through the
 //! neutral ownership coordinator.
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use crate::{
     cluster_coordinator::{RecursiveIncludeError, merge_cluster_values},
@@ -49,6 +54,40 @@ impl ClusterMergeParameters {
             maximum_extrapolation,
             probe_width,
             maximum_foreground,
+        })
+    }
+
+    #[must_use]
+    pub const fn global_slope(self) -> f64 {
+        self.global_slope
+    }
+
+    #[must_use]
+    pub const fn maximum_coordinate_gap(self) -> i64 {
+        self.maximum_coordinate_gap
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClusterMergePassParameters {
+    compatibility: ClusterMergeParameters,
+    single_candidate_margin: i64,
+    candidate_vertical_margin: i64,
+}
+
+impl ClusterMergePassParameters {
+    pub fn new(
+        compatibility: ClusterMergeParameters,
+        single_candidate_margin: i64,
+        candidate_vertical_margin: i64,
+    ) -> Result<Self, ClusterMergeError> {
+        if single_candidate_margin < 0 || candidate_vertical_margin < 0 {
+            return Err(ClusterMergeError::InvalidPassParameters);
+        }
+        Ok(Self {
+            compatibility,
+            single_candidate_margin,
+            candidate_vertical_margin,
         })
     }
 }
@@ -229,6 +268,138 @@ pub fn merge_cluster_pair_if_compatible(
     Ok(Some(decision))
 }
 
+/// Java `mergeClusters`: sort once, then let each candidate repeatedly absorb
+/// compatible earlier heads until a complete rescan finds no merge.
+///
+/// `cluster_order` is the caller's current list order and therefore controls
+/// stable ordinate ties. This pass deliberately does not require equal cluster
+/// sizes; Java applies that restriction only in the later `mergeClusterPairs`.
+/// The full pass commits atomically.
+pub fn merge_clusters_in_order(
+    ownership: &mut ClusterOwnership,
+    clusters: &mut BTreeMap<ClusterId, LineCluster>,
+    cluster_order: &[ClusterId],
+    parameters: ClusterMergePassParameters,
+) -> Result<Vec<ClusterId>, ClusterMergeError> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = cluster_order
+        .iter()
+        .copied()
+        .map(|id| {
+            if !seen.insert(id) {
+                return Err(ClusterMergeError::DuplicateClusterOrder(id));
+            }
+            let cluster = clusters
+                .get(&id)
+                .ok_or(ClusterMergeError::MissingClusterValue(id))?;
+            Ok((
+                id,
+                cluster_deskewed_ordinate(cluster, parameters.compatibility.global_slope)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ClusterMergeError>>()?;
+    // Stable sort exactly preserves caller order when Java's comparator returns
+    // zero. A non-finite ordinate would compare equal in the source comparator.
+    ordered.sort_by(|one, two| one.1.partial_cmp(&two.1).unwrap_or(Ordering::Equal));
+
+    let mut next_ownership = ownership.clone();
+    let mut next_clusters = clusters.clone();
+    for current_index in 0..ordered.len() {
+        let current = ordered[current_index].0;
+        let Some(initial) = next_clusters.get(&current) else {
+            continue;
+        };
+        let horizontal_margin = if initial.is_one_line() {
+            parameters.single_candidate_margin
+        } else {
+            parameters.compatibility.maximum_coordinate_gap
+        };
+
+        loop {
+            let candidate = next_clusters
+                .get(&current)
+                .ok_or(ClusterMergeError::MissingClusterValue(current))?;
+            let candidate_bounds = candidate.bounds()?;
+            let mut merged = false;
+            for &(head, _) in &ordered[..current_index] {
+                if !next_clusters.contains_key(&head)
+                    || next_ownership.cluster_parent(head)?.is_some()
+                {
+                    continue;
+                }
+                let head_bounds = next_clusters[&head].bounds()?;
+                if !intersects_grown(
+                    candidate_bounds,
+                    head_bounds,
+                    horizontal_margin,
+                    parameters.candidate_vertical_margin,
+                ) {
+                    continue;
+                }
+                if merge_cluster_pair_if_compatible(
+                    &mut next_ownership,
+                    &mut next_clusters,
+                    head,
+                    current,
+                    parameters.compatibility,
+                )?
+                .is_some()
+                {
+                    merged = true;
+                    break;
+                }
+            }
+            if !merged {
+                break;
+            }
+        }
+    }
+
+    let mut survivors = Vec::new();
+    for (id, _) in ordered {
+        if next_clusters.contains_key(&id) && next_ownership.cluster_parent(id)?.is_none() {
+            survivors.push(id);
+        }
+    }
+    *ownership = next_ownership;
+    *clusters = next_clusters;
+    Ok(survivors)
+}
+
+pub fn cluster_deskewed_ordinate(
+    cluster: &LineCluster,
+    global_slope: f64,
+) -> Result<f64, ClusterMergeError> {
+    if !global_slope.is_finite() {
+        return Err(ClusterMergeError::InvalidParameters);
+    }
+    let bounds = cluster.bounds()?;
+    // Java LineCluster.getCenter uses integer division before deskewing.
+    let x = bounds.x + (bounds.width / 2);
+    let y = bounds.y + (bounds.height / 2);
+    Ok(deskew_ordinate(x as f64, y as f64, global_slope))
+}
+
+fn intersects_grown(
+    candidate: crate::section::Bounds,
+    head: crate::section::Bounds,
+    horizontal_margin: i64,
+    vertical_margin: i64,
+) -> bool {
+    let candidate_left = candidate.x as i64 - horizontal_margin;
+    let candidate_right = (candidate.x + candidate.width) as i64 + horizontal_margin;
+    let candidate_top = candidate.y as i64 - vertical_margin;
+    let candidate_bottom = (candidate.y + candidate.height) as i64 + vertical_margin;
+    let head_left = head.x as i64;
+    let head_right = (head.x + head.width) as i64;
+    let head_top = head.y as i64;
+    let head_bottom = (head.y + head.height) as i64;
+    candidate_left < head_right
+        && head_left < candidate_right
+        && candidate_top < head_bottom
+        && head_top < candidate_bottom
+}
+
 fn deskew_points(points: Vec<Option<(f64, f64)>>, slope: f64) -> Vec<Option<f64>> {
     points
         .into_iter()
@@ -286,8 +457,10 @@ fn collision_is_clear(
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClusterMergeError {
     InvalidParameters,
+    InvalidPassParameters,
     PositionOverflow,
     MissingClusterValue(ClusterId),
+    DuplicateClusterOrder(ClusterId),
     Cluster(LineClusterError),
     Filament(FilamentError),
     Ownership(ClusterOwnershipError),
@@ -322,9 +495,15 @@ impl fmt::Display for ClusterMergeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidParameters => formatter.write_str("cluster merge parameters are invalid"),
+            Self::InvalidPassParameters => {
+                formatter.write_str("cluster merge pass parameters are invalid")
+            }
             Self::PositionOverflow => formatter.write_str("cluster merge position overflow"),
             Self::MissingClusterValue(id) => {
                 write!(formatter, "missing cluster value {}", id.value())
+            }
+            Self::DuplicateClusterOrder(id) => {
+                write!(formatter, "duplicate cluster {} in merge order", id.value())
             }
             Self::Cluster(error) => write!(formatter, "cluster merge geometry error: {error}"),
             Self::Filament(error) => write!(formatter, "cluster merge filament error: {error}"),
@@ -365,6 +544,64 @@ mod tests {
     ) -> ClusterMergeParameters {
         ClusterMergeParameters::new(0.0, maximum_gap, maximum_distance, 3, 4, maximum_foreground)
             .unwrap()
+    }
+
+    fn cluster_state(
+        specs: &[(u64, usize, usize)],
+    ) -> (
+        ClusterOwnership,
+        BTreeMap<ClusterId, LineCluster>,
+        Vec<ClusterId>,
+    ) {
+        let width = specs
+            .iter()
+            .map(|(_, x, _)| x + 61)
+            .max()
+            .unwrap_or(1);
+        let height = specs.iter().map(|(_, _, y)| y + 2).max().unwrap_or(1);
+        let mut table = RunTable::new(Orientation::Horizontal, width, height).unwrap();
+        for &(_, x, y) in specs {
+            table.add_run(y, Run::new(x, 60)).unwrap();
+        }
+        let mut sections = build_sections(&table, JunctionPolicy::All);
+        let mut ownership = ClusterOwnership::new();
+        let mut clusters = BTreeMap::new();
+        let mut order = Vec::new();
+        for &(value, x, y) in specs {
+            let section_index = sections
+                .iter()
+                .position(|section| {
+                    let bounds = section.bounds();
+                    bounds.x == x && bounds.y == y
+                })
+                .unwrap();
+            let mut filament = StaffFilament::new(10).unwrap();
+            filament.add_section(sections.remove(section_index)).unwrap();
+            let filament_id = FilamentId::new(value);
+            ownership
+                .register_filament(filament_id, &filament)
+                .unwrap();
+            let cluster_id = ownership.register_cluster(filament_id).unwrap();
+            clusters.insert(
+                cluster_id,
+                LineCluster::new(10, filament_id, filament).unwrap(),
+            );
+            order.push(cluster_id);
+        }
+        (ownership, clusters, order)
+    }
+
+    fn pass_parameters(
+        regular_margin: i64,
+        single_margin: i64,
+        maximum_distance: f64,
+    ) -> ClusterMergePassParameters {
+        ClusterMergePassParameters::new(
+            parameters(regular_margin, maximum_distance, 1),
+            single_margin,
+            0,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -473,5 +710,82 @@ mod tests {
         assert_eq!(ownership.filament_parent(one_id).unwrap(), Some(two_id));
         assert_eq!(ownership.section_owner(swallowed_section), Some(two_id));
         assert_eq!(clusters[&two].line_at(0).unwrap().absorbed_ids(), &[one_id]);
+    }
+
+    #[test]
+    fn merge_pass_restarts_after_growth_and_preserves_stable_tie_order() {
+        let (mut ownership, mut clusters, order) =
+            cluster_state(&[(1, 0, 10), (2, 150, 10), (3, 75, 10)]);
+        let survivor = ClusterId::from_seed(FilamentId::new(3));
+
+        let survivors = merge_clusters_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pass_parameters(0, 20, 0.0),
+        )
+        .unwrap();
+
+        assert_eq!(survivors, [survivor]);
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(
+            clusters[&survivor].line_at(0).unwrap().absorbed_ids(),
+            &[FilamentId::new(1), FilamentId::new(2)]
+        );
+        assert_eq!(ownership.cluster_parent(order[0]).unwrap(), Some(survivor));
+        assert_eq!(ownership.cluster_parent(order[1]).unwrap(), Some(survivor));
+    }
+
+    #[test]
+    fn merge_pass_candidate_growth_requires_positive_rectangle_intersection() {
+        let (mut ownership, mut clusters, order) = cluster_state(&[(1, 0, 10), (2, 80, 10)]);
+        let survivors = merge_clusters_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pass_parameters(0, 20, 0.0),
+        )
+        .unwrap();
+        assert_eq!(survivors, order);
+        assert_eq!(clusters.len(), 2);
+
+        let (mut ownership, mut clusters, order) = cluster_state(&[(1, 0, 10), (2, 80, 10)]);
+        let survivors = merge_clusters_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pass_parameters(0, 21, 0.0),
+        )
+        .unwrap();
+        assert_eq!(survivors, [order[1]]);
+        assert_eq!(clusters.len(), 1);
+    }
+
+    #[test]
+    fn merge_pass_allows_different_sizes_and_sorts_by_deskewed_ordinate() {
+        let (mut ownership, mut clusters, mut order) =
+            cluster_state(&[(2, 80, 10), (1, 0, 10), (3, 80, 20)]);
+        let large = ClusterId::from_seed(FilamentId::new(2));
+        let extra = ClusterId::from_seed(FilamentId::new(3));
+        let extra_value = clusters.remove(&extra).unwrap();
+        clusters
+            .get_mut(&large)
+            .unwrap()
+            .merge_with_shift(extra_value, 1)
+            .unwrap();
+        ownership.merge_clusters(large, extra, 1).unwrap();
+        order.retain(|id| *id != extra);
+
+        let survivors = merge_clusters_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pass_parameters(30, 0, 0.0),
+        )
+        .unwrap();
+
+        assert_eq!(survivors, [large]);
+        assert_eq!(clusters[&large].size(), 2);
+        assert_eq!(ownership.cluster_parent(order[1]).unwrap(), Some(large));
     }
 }
