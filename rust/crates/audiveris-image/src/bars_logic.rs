@@ -883,6 +883,38 @@ pub struct PartsPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaffBoundaryLine {
+    First,
+    Last,
+}
+
+/// Java `BarsRetriever.createPart` merged-eleven-line-staff decision.
+/// The safer probe abscissa is the larger staff-left coordinate; gutter
+/// subtraction retains Java `int` wrapping and the threshold is strict.
+pub fn is_merged_two_staff_part(
+    system_staff_count: usize,
+    part: PlannedPart,
+    first_staff_left: i32,
+    last_staff_left: i32,
+    minimum_separate_staff_gutter: i32,
+    mut line_y_at: impl FnMut(i32, StaffBoundaryLine, i32) -> i32,
+) -> bool {
+    if system_staff_count != 2
+        || part
+            .last_staff_id
+            .wrapping_sub(part.first_staff_id)
+            .wrapping_add(1)
+            != 2
+    {
+        return false;
+    }
+    let x = first_staff_left.max(last_staff_left);
+    let upper_bottom = line_y_at(part.first_staff_id, StaffBoundaryLine::Last, x);
+    let lower_top = line_y_at(part.last_staff_id, StaffBoundaryLine::First, x);
+    lower_top.wrapping_sub(upper_bottom) < minimum_separate_staff_gutter
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GroupPeakFacts {
     pub brace: bool,
     pub bracket: bool,
@@ -2804,6 +2836,60 @@ mod tests {
         let brace_wins = plan_parts(10, 11, &groups, false, true).unwrap();
         assert_eq!(brace_wins.parts, forced_single.parts);
         assert_eq!(brace_wins.removed_group_indices, [0]);
+    }
+
+    #[test]
+    fn merged_part_decision_uses_safer_abscissa_strict_gutter_and_wrapping() {
+        use std::cell::RefCell;
+
+        let part = PlannedPart {
+            first_staff_id: 10,
+            last_staff_id: 11,
+        };
+        let calls = RefCell::new(Vec::new());
+        assert!(is_merged_two_staff_part(
+            2,
+            part,
+            7,
+            9,
+            11,
+            |staff, line, x| {
+                calls.borrow_mut().push((staff, line, x));
+                match line {
+                    StaffBoundaryLine::Last => 30,
+                    StaffBoundaryLine::First => 40,
+                }
+            }
+        ));
+        assert_eq!(
+            calls.into_inner(),
+            [
+                (10, StaffBoundaryLine::Last, 9),
+                (11, StaffBoundaryLine::First, 9),
+            ]
+        );
+        assert!(!is_merged_two_staff_part(
+            2,
+            part,
+            7,
+            9,
+            10,
+            |_, line, _| {
+                match line {
+                    StaffBoundaryLine::Last => 30,
+                    StaffBoundaryLine::First => 40,
+                }
+            }
+        ));
+        assert!(!is_merged_two_staff_part(3, part, 7, 9, 99, |_, _, _| {
+            panic!("non-two-staff systems must bypass line sampling")
+        }));
+        assert!(is_merged_two_staff_part(2, part, 0, 0, 2, |_, line, _| {
+            match line {
+                StaffBoundaryLine::Last => i32::MAX,
+                StaffBoundaryLine::First => i32::MIN,
+            }
+        }));
     }
 
     #[test]
