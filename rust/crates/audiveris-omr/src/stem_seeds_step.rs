@@ -40,11 +40,16 @@ pub struct NeutralStemStaff {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NeutralStemCandidate {
-    pub glyph_id: usize,
+pub struct NeutralStraightFilament {
+    pub filament_id: usize,
     pub center_x: f64,
     /// Result of Java `getClosestStaff`, or `None` when outside every staff.
     pub closest_staff_id: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NeutralCheckedStem {
+    pub glyph_id: usize,
     /// Java `StemChecker.checkStem(...).getGrade()`.
     pub grade: f64,
 }
@@ -61,6 +66,8 @@ pub struct NeutralStemSystem {
     pub left: i32,
     pub right: i32,
     pub profile: i32,
+    /// Resolved Java profile-dependent `minCoreSectionLength`, in pixels.
+    pub minimum_core_section_length: i32,
     pub staves: Vec<NeutralStemStaff>,
     pub sections: Vec<NeutralStemSection>,
     /// Java system free-glyph collection, in accepted candidate order.
@@ -89,19 +96,28 @@ pub enum StemSeedsMutation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct StemSeedRetrievalInput<'a> {
+pub struct VerticalFilamentInput<'a> {
     pub sheet_id: usize,
     pub system_id: usize,
     pub profile: i32,
     pub stem_scale: NeutralStemScale,
+    pub minimum_core_section_length: i32,
+    pub minimum_side_ratio: f64,
     /// Strictly in-bound vertical sections, source order preserved.
     pub vertical_sections: &'a [NeutralStemSection],
     /// Strictly in-bound one-pixel horizontal sections, source order preserved.
     pub horizontal_sections: &'a [NeutralStemSection],
 }
 
-/// First visual boundary: global stem-width measurement and StickFactory /
-/// StemChecker candidate production. Neither output is fabricated by Rust.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StemCheckInput<'a> {
+    pub sheet_id: usize,
+    pub system_id: usize,
+    pub filament: &'a NeutralStraightFilament,
+}
+
+/// Visual boundaries that begin at the first not-yet-ported geometric
+/// collaborator: Java's vertical `StickFactory`, followed by `StemChecker`.
 pub trait VisualStemSeeds {
     type Error;
 
@@ -112,10 +128,15 @@ pub trait VisualStemSeeds {
         sheet: &NeutralStemSheet,
     ) -> Result<Vec<i32>, Self::Error>;
 
-    fn retrieve_candidates(
+    fn build_vertical_filaments(
         &mut self,
-        input: StemSeedRetrievalInput<'_>,
-    ) -> Result<Vec<NeutralStemCandidate>, Self::Error>;
+        input: VerticalFilamentInput<'_>,
+    ) -> Result<Vec<NeutralStraightFilament>, Self::Error>;
+
+    fn materialize_and_check_stem(
+        &mut self,
+        input: StemCheckInput<'_>,
+    ) -> Result<NeutralCheckedStem, Self::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -148,6 +169,7 @@ pub struct StemSeedsReport<VisualError> {
 pub struct HeadlessStemSeedsStep<Visual> {
     visual: Visual,
     minimum_seed_grade: f64,
+    minimum_side_ratio: f64,
 }
 
 impl<Visual> HeadlessStemSeedsStep<Visual> {
@@ -156,6 +178,7 @@ impl<Visual> HeadlessStemSeedsStep<Visual> {
         Self {
             visual,
             minimum_seed_grade,
+            minimum_side_ratio: 0.4,
         }
     }
 
@@ -208,16 +231,18 @@ where
             let vertical_sections = filter_sections(system, NeutralSectionOrientation::Vertical);
             let horizontal_sections =
                 filter_sections(system, NeutralSectionOrientation::Horizontal);
-            let input = StemSeedRetrievalInput {
+            let input = VerticalFilamentInput {
                 sheet_id: sheet.id,
                 system_id: system.id,
                 profile: system.profile,
                 stem_scale,
+                minimum_core_section_length: system.minimum_core_section_length,
+                minimum_side_ratio: self.minimum_side_ratio,
                 vertical_sections: &vertical_sections,
                 horizontal_sections: &horizontal_sections,
             };
-            let candidates = match self.visual.retrieve_candidates(input) {
-                Ok(candidates) => candidates,
+            let filaments = match self.visual.build_vertical_filaments(input) {
+                Ok(filaments) => filaments,
                 Err(source) => {
                     let system_id = sheet.systems[system_index].id;
                     sheet
@@ -227,38 +252,53 @@ where
                     continue;
                 }
             };
-            // Java registers every checked candidate glyph before the grade
-            // threshold, but only accepted seeds become system free glyphs.
-            for candidate in candidates {
+            // Java rejects candidates outside a usable staff/header before
+            // converting the stick to a glyph. Registration then precedes the
+            // grade threshold, and only accepted seeds become free glyphs.
+            for filament in filaments {
                 let system_id = sheet.systems[system_index].id;
-                sheet.registered_glyph_ids.push(candidate.glyph_id);
-                sheet.mutations.push(StemSeedsMutation::GlyphRegistered {
-                    system_id,
-                    glyph_id: candidate.glyph_id,
-                });
                 let system = &sheet.systems[system_index];
-                let Some(staff_id) = candidate.closest_staff_id else {
+                let Some(staff_id) = filament.closest_staff_id else {
                     continue;
                 };
                 let Some(staff) = system.staves.iter().find(|staff| staff.id == staff_id) else {
                     continue;
                 };
-                if staff.tablature
-                    || candidate.center_x < f64::from(staff.header_stop)
-                    || candidate.grade < self.minimum_seed_grade
-                {
+                if staff.tablature || filament.center_x < f64::from(staff.header_stop) {
+                    continue;
+                }
+                let checked = match self.visual.materialize_and_check_stem(StemCheckInput {
+                    sheet_id: sheet.id,
+                    system_id,
+                    filament: &filament,
+                }) {
+                    Ok(checked) => checked,
+                    Err(source) => {
+                        sheet
+                            .mutations
+                            .push(StemSeedsMutation::SystemFailed { system_id });
+                        system_errors.push((system_id, source));
+                        break;
+                    }
+                };
+                sheet.registered_glyph_ids.push(checked.glyph_id);
+                sheet.mutations.push(StemSeedsMutation::GlyphRegistered {
+                    system_id,
+                    glyph_id: checked.glyph_id,
+                });
+                if checked.grade < self.minimum_seed_grade {
                     continue;
                 }
                 let system_id = system.id;
                 sheet.systems[system_index]
                     .free_glyphs
                     .push(NeutralStemSeed {
-                        glyph_id: candidate.glyph_id,
+                        glyph_id: checked.glyph_id,
                         vertical_seed_group: true,
                     });
                 sheet.mutations.push(StemSeedsMutation::SeedAdded {
                     system_id,
-                    glyph_id: candidate.glyph_id,
+                    glyph_id: checked.glyph_id,
                 });
             }
         }
@@ -342,12 +382,23 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[derive(Debug, PartialEq)]
+    struct FactoryCall {
+        system_id: usize,
+        minimum_core_section_length: i32,
+        minimum_side_ratio: f64,
+        vertical_section_ids: Vec<usize>,
+        horizontal_section_ids: Vec<usize>,
+    }
+
     #[derive(Default)]
     struct FakeVisual {
         runs: Option<Result<Vec<i32>, &'static str>>,
-        by_system: BTreeMap<usize, Result<Vec<NeutralStemCandidate>, &'static str>>,
+        by_system: BTreeMap<usize, Result<Vec<NeutralStraightFilament>, &'static str>>,
+        checked: BTreeMap<usize, Result<NeutralCheckedStem, &'static str>>,
         scale_calls: usize,
-        section_calls: Vec<(usize, Vec<usize>, Vec<usize>)>,
+        section_calls: Vec<FactoryCall>,
+        check_calls: Vec<usize>,
     }
 
     impl VisualStemSeeds for FakeVisual {
@@ -361,26 +412,41 @@ mod tests {
             self.runs.take().unwrap()
         }
 
-        fn retrieve_candidates(
+        fn build_vertical_filaments(
             &mut self,
-            input: StemSeedRetrievalInput<'_>,
-        ) -> Result<Vec<NeutralStemCandidate>, Self::Error> {
-            self.section_calls.push((
-                input.system_id,
-                input
+            input: VerticalFilamentInput<'_>,
+        ) -> Result<Vec<NeutralStraightFilament>, Self::Error> {
+            self.section_calls.push(FactoryCall {
+                system_id: input.system_id,
+                minimum_core_section_length: input.minimum_core_section_length,
+                minimum_side_ratio: input.minimum_side_ratio,
+                vertical_section_ids: input
                     .vertical_sections
                     .iter()
                     .map(|section| section.id)
                     .collect(),
-                input
+                horizontal_section_ids: input
                     .horizontal_sections
                     .iter()
                     .map(|section| section.id)
                     .collect(),
-            ));
+            });
             self.by_system
                 .remove(&input.system_id)
                 .unwrap_or(Ok(Vec::new()))
+        }
+
+        fn materialize_and_check_stem(
+            &mut self,
+            input: StemCheckInput<'_>,
+        ) -> Result<NeutralCheckedStem, Self::Error> {
+            self.check_calls.push(input.filament.filament_id);
+            self.checked
+                .remove(&input.filament.filament_id)
+                .unwrap_or(Ok(NeutralCheckedStem {
+                    glyph_id: input.filament.filament_id,
+                    grade: 1.0,
+                }))
         }
     }
 
@@ -404,6 +470,7 @@ mod tests {
             left: 10,
             right: 90,
             profile: id as i32,
+            minimum_core_section_length: 15 + id as i32,
             staves: vec![
                 NeutralStemStaff {
                     id: 1,
@@ -440,17 +507,15 @@ mod tests {
         }
     }
 
-    fn candidate(
-        glyph_id: usize,
+    fn filament(
+        filament_id: usize,
         center_x: f64,
         staff: Option<usize>,
-        grade: f64,
-    ) -> NeutralStemCandidate {
-        NeutralStemCandidate {
-            glyph_id,
+    ) -> NeutralStraightFilament {
+        NeutralStraightFilament {
+            filament_id,
             center_x,
             closest_staff_id: staff,
-            grade,
         }
     }
 
@@ -470,7 +535,22 @@ mod tests {
         assert_eq!(step.visual().scale_calls, 0);
         assert_eq!(
             step.visual().section_calls,
-            vec![(2, vec![1], vec![3]), (1, vec![1], vec![3])]
+            vec![
+                FactoryCall {
+                    system_id: 2,
+                    minimum_core_section_length: 17,
+                    minimum_side_ratio: 0.4,
+                    vertical_section_ids: vec![1],
+                    horizontal_section_ids: vec![3],
+                },
+                FactoryCall {
+                    system_id: 1,
+                    minimum_core_section_length: 16,
+                    minimum_side_ratio: 0.4,
+                    vertical_section_ids: vec![1],
+                    horizontal_section_ids: vec![3],
+                }
+            ]
         );
         assert!(sheet.mutations.is_empty());
     }
@@ -491,7 +571,7 @@ mod tests {
         visual.by_system.insert(2, Err("stick factory failed"));
         visual
             .by_system
-            .insert(1, Ok(vec![candidate(10, 40.0, Some(1), 0.9)]));
+            .insert(1, Ok(vec![filament(10, 40.0, Some(1))]));
         let mut step = HeadlessStemSeedsStep::new(visual, 0.5);
         let mut sheet = sheet(None);
 
@@ -543,12 +623,26 @@ mod tests {
         visual.by_system.insert(
             2,
             Ok(vec![
-                candidate(1, 40.0, None, 1.0),
-                candidate(2, 40.0, Some(2), 1.0),
-                candidate(3, 29.9, Some(1), 1.0),
-                candidate(4, 30.0, Some(1), 0.49),
-                candidate(5, 30.0, Some(1), 0.5),
+                filament(1, 40.0, None),
+                filament(2, 40.0, Some(2)),
+                filament(3, 29.9, Some(1)),
+                filament(4, 30.0, Some(1)),
+                filament(5, 30.0, Some(1)),
             ]),
+        );
+        visual.checked.insert(
+            4,
+            Ok(NeutralCheckedStem {
+                glyph_id: 40,
+                grade: 0.49,
+            }),
+        );
+        visual.checked.insert(
+            5,
+            Ok(NeutralCheckedStem {
+                glyph_id: 50,
+                grade: 0.5,
+            }),
         );
         let mut step = HeadlessStemSeedsStep::new(visual, 0.5);
         let mut sheet = NeutralStemSheet {
@@ -568,10 +662,62 @@ mod tests {
                 .iter()
                 .map(|seed| seed.glyph_id)
                 .collect::<Vec<_>>(),
-            vec![5]
+            vec![50]
         );
         assert!(sheet.systems[0].free_glyphs[0].vertical_seed_group);
-        assert_eq!(sheet.registered_glyph_ids, vec![1, 2, 3, 4, 5]);
+        assert_eq!(sheet.registered_glyph_ids, vec![40, 50]);
+        assert_eq!(step.visual().check_calls, vec![4, 5]);
+    }
+
+    #[test]
+    fn check_failure_keeps_prefix_mutations_stops_system_and_continues_later_system() {
+        let user = NeutralStemScale {
+            main: 2,
+            maximum: 4,
+        };
+        let mut visual = FakeVisual::default();
+        visual.by_system.insert(
+            2,
+            Ok(vec![
+                filament(10, 40.0, Some(1)),
+                filament(11, 40.0, Some(1)),
+                filament(12, 40.0, Some(1)),
+            ]),
+        );
+        visual
+            .by_system
+            .insert(1, Ok(vec![filament(20, 40.0, Some(1))]));
+        visual.checked.insert(11, Err("stem checker failed"));
+        let mut step = HeadlessStemSeedsStep::new(visual, 0.5);
+        let mut sheet = sheet(Some(user));
+
+        let report = step.process(&mut sheet).unwrap();
+
+        assert_eq!(report.system_errors, vec![(2, "stem checker failed")]);
+        assert_eq!(step.visual().check_calls, vec![10, 11, 20]);
+        assert_eq!(sheet.registered_glyph_ids, vec![10, 20]);
+        assert_eq!(
+            sheet.mutations,
+            vec![
+                StemSeedsMutation::GlyphRegistered {
+                    system_id: 2,
+                    glyph_id: 10,
+                },
+                StemSeedsMutation::SeedAdded {
+                    system_id: 2,
+                    glyph_id: 10,
+                },
+                StemSeedsMutation::SystemFailed { system_id: 2 },
+                StemSeedsMutation::GlyphRegistered {
+                    system_id: 1,
+                    glyph_id: 20,
+                },
+                StemSeedsMutation::SeedAdded {
+                    system_id: 1,
+                    glyph_id: 20,
+                },
+            ]
+        );
     }
 
     fn scale_parameters() -> StemScaleComputation {
