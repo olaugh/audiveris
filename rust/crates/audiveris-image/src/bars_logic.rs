@@ -1145,6 +1145,57 @@ pub fn serif_lookup_bounds(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SerifCompoundCandidate {
+    pub id: usize,
+    pub centroid_x: f64,
+    pub centroid_y: f64,
+    pub weight: i32,
+}
+
+/// Java `BarsRetriever.buildSerifFilament` selection after connected section
+/// compounds have been built. Multiple compounds are stably ordered by distance
+/// from the ROI/bar vertex and retained through the first cumulative minimum.
+#[must_use]
+pub fn select_serif_compounds(
+    compounds: &[SerifCompoundCandidate],
+    roi: PeakBounds,
+    side: VerticalSide,
+    minimum_weight: i32,
+) -> Vec<SerifCompoundCandidate> {
+    if compounds.len() <= 1 {
+        return compounds.to_vec();
+    }
+    let vertex_x = f64::from(roi.x);
+    let vertex_y = f64::from(match side {
+        VerticalSide::Top => roi.y.wrapping_add(roi.height).wrapping_sub(1),
+        VerticalSide::Bottom => roi.y,
+    });
+    let mut ordered = compounds.to_vec();
+    ordered.sort_by(|one, two| {
+        let one_distance = (one.centroid_x - vertex_x).hypot(one.centroid_y - vertex_y);
+        let two_distance = (two.centroid_x - vertex_x).hypot(two.centroid_y - vertex_y);
+        one_distance.partial_cmp(&two_distance).unwrap_or_else(|| {
+            if one_distance.is_nan() == two_distance.is_nan() {
+                std::cmp::Ordering::Equal
+            } else if one_distance.is_nan() {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Less
+            }
+        })
+    });
+    let mut total_weight = 0_i32;
+    for (index, compound) in ordered.iter().enumerate() {
+        total_weight = total_weight.wrapping_add(compound.weight);
+        if total_weight >= minimum_weight {
+            ordered.truncate(index + 1);
+            break;
+        }
+    }
+    ordered
+}
+
 /// Peak keys selected by Java `purgeExtendingPeaks` for one boundary staff.
 /// A missing start marker makes every peak eligible, matching `iStart == -1`.
 #[must_use]
@@ -1565,6 +1616,58 @@ mod tests {
                 width: 1,
                 height: 1,
             }
+        );
+    }
+
+    #[test]
+    fn serif_compound_selection_is_stable_and_stops_at_cumulative_weight() {
+        let roi = PeakBounds {
+            x: 10,
+            y: 20,
+            width: 8,
+            height: 5,
+        };
+        let candidates = [
+            SerifCompoundCandidate {
+                id: 1,
+                centroid_x: 13.0,
+                centroid_y: 24.0,
+                weight: 2,
+            },
+            SerifCompoundCandidate {
+                id: 2,
+                centroid_x: 11.0,
+                centroid_y: 24.0,
+                weight: 3,
+            },
+            SerifCompoundCandidate {
+                id: 3,
+                centroid_x: 9.0,
+                centroid_y: 24.0,
+                weight: 4,
+            },
+            SerifCompoundCandidate {
+                id: 4,
+                centroid_x: 20.0,
+                centroid_y: 24.0,
+                weight: 100,
+            },
+        ];
+
+        // Top vertex is (10,24); IDs 2 and 3 tie at distance one and retain
+        // input order. Their cumulative weight reaches the threshold exactly.
+        assert_eq!(
+            select_serif_compounds(&candidates, roi, VerticalSide::Top, 7)
+                .iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+
+        // A singleton bypasses sorting and weight truncation in Java.
+        assert_eq!(
+            select_serif_compounds(&candidates[..1], roi, VerticalSide::Bottom, 1_000),
+            candidates[..1]
         );
     }
 
