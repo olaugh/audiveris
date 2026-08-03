@@ -16,8 +16,9 @@ use audiveris_image::{
     line_cluster::{FilamentId, LineCluster},
     median,
     projection::{
-        PeakConstructionParams, PeakConstructionRequest, PeakRefinementParams,
-        PeakRefinementRequest, ShortProjection, select_blank,
+        PeakConstructionParams, PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams,
+        PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest, ShortProjection,
+        select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -206,7 +207,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 51] = [
+const VECTOR_KEYS: [&str; 52] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -223,6 +224,7 @@ const VECTOR_KEYS: [&str; 51] = [
     "grid.staff-projector-blanks.synthetic=",
     "grid.staff-projector-peak-side.synthetic=",
     "grid.staff-projector-peak-candidate.synthetic=",
+    "grid.staff-projector-core.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -650,6 +652,76 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         candidate_name(accepted_peak),
         candidate_name(wide_peak),
         candidate_name(missing_peak)
+    ));
+
+    let accepted_candidate = accepted_peak.ok_or("accepted core fixture has no candidate")?;
+    let geometry = PeakCoreGeometry::new(0, 40, 20);
+    let core_params = PeakCoreParams::new(6, 0.3)?;
+    let mut accepted_core_pixels = vec![255; 13 * 41];
+    for y in 0..40 {
+        for x in 4..=7 {
+            accepted_core_pixels[(y * 13) + x] = 0;
+        }
+    }
+    let accepted_core = accepted_candidate.validate_core(
+        13,
+        41,
+        &accepted_core_pixels,
+        geometry,
+        0,
+        core_params,
+    )?;
+    if !accepted_core.is_accepted() {
+        return Err("accepted core fixture was rejected".into());
+    }
+
+    let mut gap_projection = ShortProjection::new(0, 12)?;
+    gap_projection.increment(3, 10);
+    for position in 4..=7 {
+        gap_projection.increment(position, 30);
+    }
+    gap_projection.increment(8, 10);
+    let gap_candidate = gap_projection
+        .construct_peak_candidate(
+            PeakConstructionRequest::new(4, 7, false, 10, 10, 0),
+            peak_candidate_params,
+        )?
+        .ok_or("gap core fixture has no candidate")?;
+    let mut gap_core_pixels = vec![255; 13 * 41];
+    for x in 4..=7 {
+        for y in 0..10 {
+            gap_core_pixels[(y * 13) + x] = 0;
+        }
+        for y in 20..40 {
+            gap_core_pixels[(y * 13) + x] = 0;
+        }
+    }
+    let gap_core =
+        gap_candidate.validate_core(13, 41, &gap_core_pixels, geometry, 0, core_params)?;
+    if gap_core.rejection != Some(PeakCoreRejection::GapTooLarge) {
+        return Err("gap core fixture took the wrong rejection branch".into());
+    }
+
+    let serif_candidate = accepted_peak_projection
+        .construct_peak_candidate(
+            PeakConstructionRequest::new(4, 7, false, 10, 10, 4),
+            peak_candidate_params,
+        )?
+        .ok_or("serif core fixture has no candidate")?;
+    let serif_core =
+        serif_candidate.validate_core(13, 41, &accepted_core_pixels, geometry, 4, core_params)?;
+    if serif_core.rejection != Some(PeakCoreRejection::InsufficientWhiteBeyondSerif) {
+        return Err("serif core fixture took the wrong rejection branch".into());
+    }
+    lines.push(format!(
+        "grid.staff-projector-core.synthetic=accepted:{}:gap{};gap:null:gap{};serif:null:white{:.12}",
+        candidate_name(Some(accepted_candidate)),
+        accepted_core.core.gap,
+        gap_core.core.gap,
+        serif_core
+            .full_height_core
+            .ok_or("serif fixture has no full-height core")?
+            .white_ratio
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

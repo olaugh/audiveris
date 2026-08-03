@@ -2,6 +2,7 @@
 
 package org.audiveris.omr.rustport;
 
+import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
@@ -31,7 +32,9 @@ import org.audiveris.omr.lag.Lag;
 import org.audiveris.omr.lag.Lags;
 import org.audiveris.omr.lag.Section;
 import org.audiveris.omr.lag.SectionFactory;
+import org.audiveris.omr.math.AreaUtil;
 import org.audiveris.omr.math.BasicLine;
+import org.audiveris.omr.math.GeoPath;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
@@ -258,6 +261,44 @@ public final class RustParityProbe
                         + staffPeakRange(acceptedPeak)
                         + ";overWidth:" + staffPeakRange(widePeak)
                         + ";missing:" + staffPeakRange(missingPeak));
+
+        AreaUtil.CoreData acceptedCore = verticalCore(
+                acceptedPeakProjector,
+                4,
+                7,
+                0,
+                40);
+        RunTable gapCoreBinary = new RunTable(Orientation.VERTICAL, 13, 41);
+        gapCoreBinary.addRun(3, new Run(0, 10));
+        for (int x = 4; x <= 7; x++) {
+            gapCoreBinary.addRun(x, new Run(0, 10));
+            gapCoreBinary.addRun(x, new Run(20, 20));
+        }
+        gapCoreBinary.addRun(8, new Run(0, 10));
+        StaffProjector gapCoreProjector = staffProjector(
+                projectorScale,
+                gapCoreBinary,
+                new int[]{0, 10, 20, 30, 40});
+        configurePeakThresholds(gapCoreProjector, 2, 5);
+        StaffPeak gapCorePeak = createPeak(gapCoreProjector, 4, 7, false, 10, 10, 0);
+        AreaUtil.CoreData gapCore = verticalCore(gapCoreProjector, 4, 7, 0, 40);
+        StaffPeak serifCorePeak = createPeak(
+                acceptedPeakProjector,
+                4,
+                7,
+                false,
+                10,
+                10,
+                4);
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.staff-projector-core.synthetic=accepted:%s:gap%d;gap:%s:gap%d;serif:%s:white%.12f%n",
+                staffPeakRange(acceptedPeak),
+                acceptedCore.gap,
+                staffPeakRange(gapCorePeak),
+                gapCore.gap,
+                staffPeakRange(serifCorePeak),
+                acceptedCore.whiteRatio);
 
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
@@ -1202,7 +1243,14 @@ public final class RustParityProbe
                 binary.addRun(x, new Run(0, counts[x]));
             }
         }
+        return staffProjector(scale, binary, lineOrdinates);
+    }
 
+    private static StaffProjector staffProjector (Scale scale,
+                                                  RunTable binary,
+                                                  int[] lineOrdinates)
+        throws Exception
+    {
         Book book = new Book(Path.of("staff-projector-threshold.synthetic"));
         SheetStub stub = new SheetStub(book, 1);
         book.addStub(stub);
@@ -1214,13 +1262,13 @@ public final class RustParityProbe
             staffLines.add(staffFilament(
                     0,
                     ordinate,
-                    counts.length,
+                    binary.getWidth(),
                     scale.getInterline()));
         }
         Staff staff = new Staff(
                 1,
                 0.0,
-                counts.length - 1.0,
+                binary.getWidth() - 1.0,
                 scale.getInterline(),
                 staffLines);
         StaffProjector projector = new StaffProjector(sheet, staff, null);
@@ -1228,6 +1276,20 @@ public final class RustParityProbe
         computeProjection.setAccessible(true);
         computeProjection.invoke(projector);
         return projector;
+    }
+
+    private static AreaUtil.CoreData verticalCore (StaffProjector projector,
+                                                   int start,
+                                                   int stop,
+                                                   int top,
+                                                   int bottom)
+        throws ReflectiveOperationException
+    {
+        ByteProcessor filter = (ByteProcessor) field(projector, "pixelFilter");
+        return AreaUtil.verticalCore(
+                filter,
+                new GeoPath(new Line2D.Double(start, top, start, bottom)),
+                new GeoPath(new Line2D.Double(stop, top, stop, bottom)));
     }
 
     private static StaffPeak createPeak (StaffProjector projector,
