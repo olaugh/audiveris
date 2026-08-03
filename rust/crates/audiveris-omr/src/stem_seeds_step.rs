@@ -10,6 +10,7 @@ use audiveris_core::{
     integer_function::IntegerFunction,
     peak_finder::{HiLoPeakFinder, Quorum},
 };
+use audiveris_image::run_table::RunTable;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NeutralStemScale {
@@ -45,6 +46,22 @@ pub struct NeutralStraightFilament {
     pub center_x: f64,
     /// Result of Java `getClosestStaff`, or `None` when outside every staff.
     pub closest_staff_id: Option<usize>,
+    /// Concrete `NearLine` evidence. Legacy/injected builders may leave it
+    /// absent; the native checker fails explicitly rather than inventing it.
+    pub geometry: Option<NeutralStemGeometry>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NeutralStemGeometry {
+    pub start_x: f64,
+    pub start_y: f64,
+    pub stop_x: f64,
+    pub stop_y: f64,
+    pub mean_distance: f64,
+    pub bounds_x: i32,
+    pub bounds_y: i32,
+    pub bounds_width: i32,
+    pub bounds_height: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,6 +130,7 @@ pub struct VerticalFilamentInput<'a> {
 pub struct StemCheckInput<'a> {
     pub sheet_id: usize,
     pub system_id: usize,
+    pub profile: i32,
     pub filament: &'a NeutralStraightFilament,
 }
 
@@ -137,6 +155,396 @@ pub trait VisualStemSeeds {
         &mut self,
         input: StemCheckInput<'_>,
     ) -> Result<NeutralCheckedStem, Self::Error>;
+}
+
+/// Earlier visual seam retained by the native checker: staff-core raster
+/// preparation and straight-filament construction.
+pub trait VisualStemFilamentSource {
+    type Error;
+
+    fn retrieve_horizontal_run_lengths(
+        &mut self,
+        sheet: &NeutralStemSheet,
+    ) -> Result<Vec<i32>, Self::Error>;
+
+    fn build_vertical_filaments(
+        &mut self,
+        input: VerticalFilamentInput<'_>,
+    ) -> Result<Vec<NeutralStraightFilament>, Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemCheckerParameters {
+    pub interline: i32,
+    pub maximum_stem_width: i32,
+    pub belt_margin_dx: i32,
+    pub sheet_skew_slope: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemImpacts {
+    pub slope: f64,
+    pub straight: f64,
+    pub length: f64,
+    pub clean: f64,
+    pub black: f64,
+    pub black_ratio: f64,
+    pub gap: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeStemCounts {
+    pub largest_gap: i32,
+    pub white: i32,
+    pub black: i32,
+    pub left: i32,
+    pub right: i32,
+    pub both: i32,
+    pub clean: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemCheckResult {
+    pub values: NativeStemImpacts,
+    pub impacts: NativeStemImpacts,
+    pub counts: NativeStemCounts,
+    pub grade: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeStemCheckerError<VisualError> {
+    Visual(VisualError),
+    Geometry(NativeStemGeometryError),
+    MissingGeometry { filament_id: usize },
+    GlyphIdExhausted,
+}
+
+impl<VisualError: fmt::Display> fmt::Display for NativeStemCheckerError<VisualError> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Visual(source) => write!(formatter, "stem visual source failed: {source}"),
+            Self::Geometry(source) => write!(formatter, "stem geometry check failed: {source}"),
+            Self::MissingGeometry { filament_id } => {
+                write!(
+                    formatter,
+                    "stem filament {filament_id} has no NearLine geometry"
+                )
+            }
+            Self::GlyphIdExhausted => formatter.write_str("stem glyph ID exhausted"),
+        }
+    }
+}
+
+/// Adapter that replaces injected `StemChecker` grades with the concrete Java
+/// suite. Candidate registration remains in `HeadlessStemSeedsStep`, after
+/// staff/header gates and before the minimum-grade gate.
+pub struct NativeCheckedStemSeeds<Visual> {
+    visual: Visual,
+    no_staff: RunTable,
+    parameters: NativeStemCheckerParameters,
+    next_glyph_id: usize,
+    checks: Vec<(usize, NativeStemCheckResult)>,
+}
+
+impl<Visual> NativeCheckedStemSeeds<Visual> {
+    #[must_use]
+    pub fn new(
+        visual: Visual,
+        no_staff: RunTable,
+        parameters: NativeStemCheckerParameters,
+        next_glyph_id: usize,
+    ) -> Self {
+        Self {
+            visual,
+            no_staff,
+            parameters,
+            next_glyph_id,
+            checks: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn checks(&self) -> &[(usize, NativeStemCheckResult)] {
+        &self.checks
+    }
+
+    #[must_use]
+    pub const fn visual(&self) -> &Visual {
+        &self.visual
+    }
+}
+
+impl<Visual: VisualStemFilamentSource> VisualStemSeeds for NativeCheckedStemSeeds<Visual> {
+    type Error = NativeStemCheckerError<Visual::Error>;
+
+    fn retrieve_horizontal_run_lengths(
+        &mut self,
+        sheet: &NeutralStemSheet,
+    ) -> Result<Vec<i32>, Self::Error> {
+        self.visual
+            .retrieve_horizontal_run_lengths(sheet)
+            .map_err(NativeStemCheckerError::Visual)
+    }
+
+    fn build_vertical_filaments(
+        &mut self,
+        input: VerticalFilamentInput<'_>,
+    ) -> Result<Vec<NeutralStraightFilament>, Self::Error> {
+        self.visual
+            .build_vertical_filaments(input)
+            .map_err(NativeStemCheckerError::Visual)
+    }
+
+    fn materialize_and_check_stem(
+        &mut self,
+        input: StemCheckInput<'_>,
+    ) -> Result<NeutralCheckedStem, Self::Error> {
+        let geometry = input
+            .filament
+            .geometry
+            .ok_or(NativeStemCheckerError::MissingGeometry {
+                filament_id: input.filament.filament_id,
+            })?;
+        let result = check_native_stem(
+            &self.no_staff,
+            geometry,
+            input.filament.filament_id,
+            self.parameters,
+            input.profile,
+        )
+        .map_err(NativeStemCheckerError::Geometry)?;
+        self.next_glyph_id = self
+            .next_glyph_id
+            .checked_add(1)
+            .ok_or(NativeStemCheckerError::GlyphIdExhausted)?;
+        self.checks.push((input.filament.filament_id, result));
+        Ok(NeutralCheckedStem {
+            glyph_id: self.next_glyph_id,
+            grade: result.grade,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeStemGeometryError {
+    InvalidInterline(i32),
+    InvalidBounds,
+}
+
+impl fmt::Display for NativeStemGeometryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl Error for NativeStemGeometryError {}
+
+/// Concrete Java `StemChecker.SeedCheckSuite`, including the Clean check's
+/// row scan and its black/white/gap side effects. Impacts remain in Java's
+/// Slope, Straight, Length, Clean, Black, BlackRatio, Gap order.
+pub fn check_native_stem(
+    no_staff: &RunTable,
+    geometry: NeutralStemGeometry,
+    _filament_id: usize,
+    parameters: NativeStemCheckerParameters,
+    profile: i32,
+) -> Result<NativeStemCheckResult, NativeStemGeometryError> {
+    if parameters.interline <= 0 {
+        return Err(NativeStemGeometryError::InvalidInterline(
+            parameters.interline,
+        ));
+    }
+    if geometry.bounds_width <= 0 || geometry.bounds_height <= 0 {
+        return Err(NativeStemGeometryError::InvalidBounds);
+    }
+    let interline = f64::from(parameters.interline);
+    let dx = geometry.stop_x - geometry.start_x;
+    let dy = geometry.stop_y - geometry.start_y;
+    let inverted_slope = dx / dy;
+    let slope_value = (-inverted_slope - parameters.sheet_skew_slope).abs();
+    let straight_value = geometry.mean_distance / interline;
+    let length_value = dy / interline;
+    let (counts, clean_value) = clean_stem_rows(no_staff, geometry, parameters);
+    let black_value = f64::from(counts.black) / interline;
+    let black_ratio_value = f64::from(counts.black) / f64::from(counts.black + counts.white);
+    let gap_value = f64::from(counts.largest_gap) / interline;
+
+    let black_low = if profile >= 1 { 0.625 } else { 1.25 };
+    let black_high = if profile >= 1 { 1.25 } else { 2.5 };
+    let black_ratio_low = match profile {
+        i32::MIN..=0 => 0.5,
+        1 => 0.3,
+        2 => 0.2,
+        _ => 0.1,
+    };
+    let clean_low = match profile {
+        i32::MIN..=0 => 0.5,
+        1 => 0.3,
+        2 => 0.2,
+        _ => 0.0,
+    };
+    let gap_high = match profile {
+        i32::MIN..=0 => 0.0,
+        1 => 0.3,
+        2 => 0.6,
+        3 => 2.0,
+        _ => 4.0,
+    };
+    let values = NativeStemImpacts {
+        slope: slope_value,
+        straight: straight_value,
+        length: length_value,
+        clean: clean_value,
+        black: black_value,
+        black_ratio: black_ratio_value,
+        gap: gap_value,
+    };
+    let impacts = NativeStemImpacts {
+        slope: check_impact(slope_value, 0.0, 0.08, false),
+        straight: check_impact(straight_value, 0.0, 0.2, false),
+        length: check_impact(length_value, 1.25, 3.5, true),
+        clean: check_impact(clean_value, clean_low, 2.0, true),
+        black: check_impact(black_value, black_low, black_high, true),
+        black_ratio: check_impact(black_ratio_value, black_ratio_low, 1.0, true),
+        gap: check_impact(gap_value, 0.0, gap_high, false),
+    };
+    let clean_weight = if profile >= 4 { -1.0 } else { 2.0 };
+    let weights = [1.0, 1.0, 2.0, clean_weight, 1.0, 1.0, 5.0];
+    let impact_values = [
+        impacts.slope,
+        impacts.straight,
+        impacts.length,
+        impacts.clean,
+        impacts.black,
+        impacts.black_ratio,
+        impacts.gap,
+    ];
+    let mut product = 1.0_f64;
+    let mut total_weight = 0.0_f64;
+    for (impact, weight) in impact_values.into_iter().zip(weights) {
+        if weight >= 0.0 {
+            total_weight += weight;
+            if impact == 0.0 {
+                product = 0.0;
+            } else if weight != 0.0 {
+                product *= impact.powf(weight);
+            }
+        }
+    }
+    let grade = 0.8 * product.powf(1.0 / total_weight);
+    Ok(NativeStemCheckResult {
+        values,
+        impacts,
+        counts,
+        grade,
+    })
+}
+
+fn clean_stem_rows(
+    no_staff: &RunTable,
+    geometry: NeutralStemGeometry,
+    parameters: NativeStemCheckerParameters,
+) -> (NativeStemCounts, f64) {
+    let mut counts = NativeStemCounts {
+        largest_gap: 0,
+        white: 0,
+        black: 0,
+        left: 0,
+        right: 0,
+        both: 0,
+        clean: 0,
+    };
+    let inverted_slope =
+        (geometry.stop_x - geometry.start_x) / (geometry.stop_y - geometry.start_y);
+    if !inverted_slope.is_finite() || inverted_slope.abs() > 0.5 {
+        return (counts, 0.0);
+    }
+    let half_width = f64::from(parameters.maximum_stem_width - 1) / 2.0;
+    let y_min = geometry.bounds_y;
+    let y_max = geometry.bounds_y + geometry.bounds_height - 1;
+    let mut last_black_y = -1;
+    let mut last_white_y = -1;
+    for y in y_min..=y_max {
+        let center_x = x_at_y(geometry, f64::from(y));
+        let left_limit = clamp_x((center_x - half_width).ceil() as i32, no_staff.width());
+        let right_limit = clamp_x((center_x + half_width).floor() as i32, no_staff.width());
+        if y != y_min && y != y_max {
+            let empty = (left_limit..=right_limit).all(|x| raster_pixel(no_staff, x, y) != 0);
+            if empty {
+                counts.white += 1;
+                last_white_y = y;
+                continue;
+            }
+        }
+        if last_white_y != -1 && last_black_y != -1 {
+            counts.largest_gap = counts.largest_gap.max(last_white_y - last_black_y);
+            last_white_y = -1;
+        }
+        last_black_y = y;
+        let on_left = (left_limit - parameters.belt_margin_dx..=left_limit)
+            .all(|x| raster_pixel(no_staff, x, y) == 0);
+        let on_right = (right_limit..=right_limit + parameters.belt_margin_dx)
+            .all(|x| raster_pixel(no_staff, x, y) == 0);
+        match (on_left, on_right) {
+            (true, true) => counts.both += 1,
+            (true, false) => counts.left += 1,
+            (false, true) => counts.right += 1,
+            (false, false) => counts.clean += 1,
+        }
+    }
+    counts.black = counts.both + counts.left + counts.right + counts.clean;
+    (
+        counts,
+        f64::from(counts.clean) / f64::from(parameters.interline),
+    )
+}
+
+fn x_at_y(geometry: NeutralStemGeometry, y: f64) -> f64 {
+    geometry.start_x
+        + ((y - geometry.start_y) * (geometry.stop_x - geometry.start_x)
+            / (geometry.stop_y - geometry.start_y))
+}
+
+fn clamp_x(x: i32, width: usize) -> i32 {
+    x.clamp(0, i32::try_from(width).unwrap_or(i32::MAX) - 1)
+}
+
+fn raster_pixel(raster: &RunTable, x: i32, y: i32) -> u8 {
+    let Ok(x) = usize::try_from(x) else {
+        return 255;
+    };
+    let Ok(y) = usize::try_from(y) else {
+        return 255;
+    };
+    if x >= raster.width() || y >= raster.height() {
+        255
+    } else {
+        raster.get(x, y)
+    }
+}
+
+fn check_impact(value: f64, low: f64, high: f64, covariant: bool) -> f64 {
+    if covariant {
+        if value < low {
+            0.0
+        } else if value >= high {
+            1.0
+        } else {
+            clamp_grade((value - low) / (high - low))
+        }
+    } else if value > high {
+        0.0
+    } else if value <= low {
+        1.0
+    } else {
+        clamp_grade((high - value) / (high - low))
+    }
+}
+
+fn clamp_grade(value: f64) -> f64 {
+    // This also preserves NaN, as Java's two comparisons in GradeUtil.clamp
+    // both do. `f64::clamp` is therefore the exact concise equivalent here.
+    value.clamp(0.0, 1.0)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -270,6 +678,7 @@ where
                 let checked = match self.visual.materialize_and_check_stem(StemCheckInput {
                     sheet_id: sheet.id,
                     system_id,
+                    profile: system.profile,
                     filament: &filament,
                 }) {
                     Ok(checked) => checked,
@@ -516,6 +925,7 @@ mod tests {
             filament_id,
             center_x,
             closest_staff_id: staff,
+            geometry: None,
         }
     }
 
@@ -760,5 +1170,89 @@ mod tests {
         );
         assert_eq!(java_rint(2.5), 2);
         assert_eq!(java_rint(3.5), 4);
+    }
+
+    fn stem_raster(height: usize, white_rows: &[usize]) -> RunTable {
+        let mut pixels = vec![255; 9 * height];
+        for y in 0..height {
+            if !white_rows.contains(&y) {
+                pixels[y * 9 + 4] = 0;
+            }
+        }
+        RunTable::from_pixels(
+            audiveris_image::run_table::Orientation::Horizontal,
+            9,
+            height,
+            &pixels,
+        )
+        .unwrap()
+    }
+
+    fn stem_geometry(height: i32) -> NeutralStemGeometry {
+        NeutralStemGeometry {
+            start_x: 4.0,
+            start_y: 0.0,
+            stop_x: 4.0,
+            stop_y: f64::from(height - 1),
+            mean_distance: 0.0,
+            bounds_x: 4,
+            bounds_y: 0,
+            bounds_width: 1,
+            bounds_height: height,
+        }
+    }
+
+    fn checker_parameters() -> NativeStemCheckerParameters {
+        NativeStemCheckerParameters {
+            interline: 10,
+            maximum_stem_width: 1,
+            belt_margin_dx: 1,
+            sheet_skew_slope: 0.0,
+        }
+    }
+
+    #[test]
+    fn concrete_stem_checker_preserves_clean_side_effects_and_profile_weights() {
+        let raster = stem_raster(21, &[7, 8]);
+        let geometry = stem_geometry(21);
+
+        let normal = check_native_stem(&raster, geometry, 90, checker_parameters(), 0).unwrap();
+        assert_eq!(
+            normal.counts,
+            NativeStemCounts {
+                largest_gap: 2,
+                white: 2,
+                black: 19,
+                left: 0,
+                right: 0,
+                both: 0,
+                clean: 19,
+            }
+        );
+        assert_eq!(normal.values.clean, 1.9);
+        assert_eq!(normal.values.black, 1.9);
+        assert_eq!(normal.values.black_ratio, 19.0 / 21.0);
+        assert_eq!(normal.values.gap, 0.2);
+        assert_eq!(normal.impacts.gap, 0.0);
+        assert_eq!(normal.grade, 0.0);
+
+        let beam_side = check_native_stem(&raster, geometry, 90, checker_parameters(), 4).unwrap();
+        // At BEAM_SIDE and above Clean is still run for Black/Gap side effects,
+        // but has Java's -1 weight and cannot lower the aggregate grade.
+        assert_eq!(beam_side.counts, normal.counts);
+        assert_eq!(beam_side.impacts.clean, 0.95);
+        assert_eq!(beam_side.impacts.gap, 0.95);
+        assert!(beam_side.grade > 0.0);
+    }
+
+    #[test]
+    fn concrete_stem_checker_rejects_invalid_geometry_before_raster_access() {
+        let raster = stem_raster(3, &[]);
+        let mut geometry = stem_geometry(3);
+        geometry.bounds_height = 0;
+        assert_eq!(
+            check_native_stem(&raster, geometry, 1, checker_parameters(), 0),
+            Err(NativeStemGeometryError::InvalidBounds)
+        );
     }
 }
