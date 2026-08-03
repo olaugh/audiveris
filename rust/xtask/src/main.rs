@@ -16,9 +16,9 @@ use audiveris_image::{
     line_cluster::{FilamentId, LineCluster},
     median,
     projection::{
-        PeakConstructionParams, PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams,
-        PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest, PeakScanRequest,
-        ProjectionPeakMode, ShortProjection, select_blank,
+        BraceSearchRequest, PeakConstructionParams, PeakConstructionRequest, PeakCoreGeometry,
+        PeakCoreParams, PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest,
+        PeakScanRequest, ProjectionPeakMode, ShortProjection, select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -207,7 +207,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 53] = [
+const VECTOR_KEYS: [&str; 54] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -226,6 +226,7 @@ const VECTOR_KEYS: [&str; 53] = [
     "grid.staff-projector-peak-candidate.synthetic=",
     "grid.staff-projector-core.synthetic=",
     "grid.staff-projector-ranges.synthetic=",
+    "grid.staff-projector-brace.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -771,6 +772,35 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         candidate_ranges(&after_rejected),
         candidate_ranges(&initial_half_edge),
         candidate_ranges(&full_edge)
+    ));
+
+    let mut brace_projection = ShortProjection::new(0, 20)?;
+    for (position, value) in [(0, 1), (1, 1), (2, 1), (6, 6), (7, 7), (9, 8)] {
+        brace_projection.increment(position, value);
+    }
+    for position in 13..=20 {
+        brace_projection.increment(position, 1);
+    }
+    let brace_blanks = brace_projection.blank_regions(0);
+    let left_ending_brace_blank = select_blank(&brace_blanks, HorizontalSide::Left, 15, 3);
+    let brace_candidate = brace_projection
+        .find_brace_candidate(&brace_blanks, BraceSearchRequest::new(15, 0, 14, 3, 5))?
+        .ok_or("brace fixture produced no candidate")?;
+    let brace_peak =
+        brace_candidate.into_staff_peak(StaffId::new(1), |_| (0, 40), |point| point)?;
+    let brace_blanks_name = brace_blanks
+        .iter()
+        .map(|blank| blank_name(Some(*blank)))
+        .collect::<Vec<_>>()
+        .join(",");
+    lines.push(format!(
+        "grid.staff-projector-brace.synthetic=blanks:{brace_blanks_name};leftEnding:{};peak:{}-{}:{}-{}:brace{}",
+        blank_name(left_ending_brace_blank),
+        brace_peak.start(),
+        brace_peak.stop(),
+        brace_peak.top(),
+        brace_peak.bottom(),
+        brace_peak.is_brace()
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

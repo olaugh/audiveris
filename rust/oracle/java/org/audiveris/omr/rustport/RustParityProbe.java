@@ -363,6 +363,45 @@ public final class RustParityProbe
                         + ";initialHalfEdge:" + staffPeakRanges(initialHalfEdge)
                         + ";fullEdge:" + staffPeakRanges(fullEdge));
 
+        int[] braceCounts = new int[21];
+        braceCounts[0] = braceCounts[1] = braceCounts[2] = 1;
+        braceCounts[6] = 6;
+        braceCounts[7] = 7;
+        braceCounts[9] = 8;
+        Arrays.fill(braceCounts, 13, braceCounts.length, 1);
+        StaffProjector braceProjector = staffProjector(
+                projectorScale,
+                braceCounts,
+                new int[]{0, 10, 20, 30, 40});
+        Object braceParams = field(braceProjector, "params");
+        setIntField(braceParams, "blankThreshold", 0);
+        setIntField(braceParams, "minWideBlankWidth", 3);
+        setIntField(braceParams, "braceThreshold", 5);
+        Staff braceStaff = (Staff) field(braceProjector, "staff");
+        braceStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT, 15);
+        findAllBlanks.invoke(braceProjector);
+        Method selectEndingBlanks = StaffProjector.class.getDeclaredMethod("selectEndingBlanks");
+        selectEndingBlanks.setAccessible(true);
+        selectEndingBlanks.invoke(braceProjector);
+        @SuppressWarnings("unchecked")
+        Map<org.audiveris.omr.util.HorizontalSide, Object> braceEndingBlanks =
+                (Map<org.audiveris.omr.util.HorizontalSide, Object>) field(
+                        braceProjector,
+                        "endingBlanks");
+        List<String> braceBlanks = new ArrayList<>();
+        for (Object blank : (List<?>) field(braceProjector, "allBlanks")) {
+            braceBlanks.add(blank(blank));
+        }
+        StaffPeak brace = braceProjector.findBracePeak(0, 14);
+        System.out.println(
+                "grid.staff-projector-brace.synthetic=blanks:"
+                        + String.join(",", braceBlanks)
+                        + ";leftEnding:"
+                        + blank(braceEndingBlanks.get(org.audiveris.omr.util.HorizontalSide.LEFT))
+                        + ";peak:" + staffPeakRange(brace)
+                        + ":" + brace.getTop() + "-" + brace.getBottom()
+                        + ":brace" + brace.isBrace());
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
