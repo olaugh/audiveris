@@ -96,17 +96,30 @@ denied, and passed `git diff --check` before commit.
     factory lifecycle: initial merge, leftover expansion, and final merge.
 43. `61cea1f2` — corrected the original synthetic Rust factory fixture to use the
     production Java scale-derived thresholds exposed by the new bounds prefilter.
+44. `4fa4cac0` — source-guided staff-line sticker filtering with owned-member
+    exclusion, stable full-position ordering, cumulative adjacent contact, and the
+    Java strict connection threshold.
+45. `e2a76e54` — lossless typed sheet version and invalidity attributes, preserving
+    absent and explicitly persisted states with JAXB boolean spellings.
+46. `2d8e2f9c` — live Java/Rust `StaffPattern` vector covering fractional interlines,
+    ties-even placement, inclusive line thickness, empty foreground, and bounds.
+47. `a18681c7` — direct page-reference metadata in persisted order, including page
+    IDs, movement starts, measure-ID deltas, and fail-closed typed validation.
+48. `cb2fc1d9` — neutral stable-ID `FilamentComb` state, ancestor lookup, append
+    ordering, ordinates, and processed-state behavior without Java object cycles.
+49. `d205596a` — early `LineCluster` membership, absorption lineage, bounds, mean
+    true length, and Java-style vertical/horizontal point extrapolation.
 
-At the forty-third checkpoint the Rust workspace executes 157 tests:
+At the forty-ninth checkpoint the Rust workspace executes 177 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 67
-- `audiveris-omr`: 37
+- `audiveris-image`: 78
+- `audiveris-omr`: 46
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 39 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 40 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -130,6 +143,11 @@ the latest completed stage while preserving all original bytes and rejecting unk
 or duplicate step tokens.
 Direct sheet input path and positive image rank are also typed atomically; an absent
 input remains distinct because Java then falls back to the book-level source.
+The same lossless view now exposes sheet compatibility attributes and direct page
+references while leaving nested page/system/SIG content opaque. GRID additionally
+has the dependency-light sticker filter, comb state, and early ordered line-cluster
+core; recursive comb discovery, cluster merging, trimming, SIG, and UI behavior remain
+outside the ported surface.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545

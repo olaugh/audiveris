@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 39 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 40 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Rust workspace | building |
@@ -61,9 +61,11 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID staff-filament geometry | section compounds, probe centroids, true length, thickness, endpoints, positions, slopes; exact live synthetic vector |
 | GRID filament factory | core and local-fatness filtering, stable reverse-length traversal, real-gap/overlap merge gates, leftover expansion, and final merge; exact merge/rejection plus bounded real-page vectors; glyph/index and vertical behavior queued |
 | GRID section tally | stable first-position indexing with explicit sorted/range validation for staff-line sticker retrieval |
+| GRID line stickers | owned-member exclusion, stable full-position order, cumulative above/below contact, and one-run retention |
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
+| GRID comb and cluster core | neutral stable-ID comb state plus ordered line-cluster membership, absorption, bounds, mean length, and point extrapolation; recursive discovery/merge queued |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline completion status, and atomic sheet input path/image-rank provenance |
+| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline completion status, atomic sheet input provenance, compatibility attributes, and direct page references |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
