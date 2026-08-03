@@ -2,6 +2,8 @@
 
 //! Dependency-light decisions from Java `BarsRetriever`.
 
+use std::{error::Error, fmt};
+
 use crate::{
     bar_alignment::VerticalSide,
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
@@ -670,6 +672,33 @@ pub enum BarsLogicError {
 impl From<BarColumnError> for BarsLogicError {
     fn from(value: BarColumnError) -> Self {
         Self::Column(value)
+    }
+}
+
+impl fmt::Display for BarsLogicError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidStartIndex(index) => write!(formatter, "invalid start peak index {index}"),
+            Self::EmptyChain => formatter.write_str("bar peak chain must not be empty"),
+            Self::Column(error) => write!(formatter, "bar column error: {error}"),
+            Self::MissingDeskewedCenter(key) => write!(
+                formatter,
+                "peak on staff {} at {}-{} has no deskewed center",
+                key.staff_id().value(),
+                key.start(),
+                key.stop()
+            ),
+            Self::PeakIdExhausted => formatter.write_str("bar peak insertion ID exhausted"),
+        }
+    }
+}
+
+impl Error for BarsLogicError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Column(error) => Some(error),
+            _ => None,
+        }
     }
 }
 
