@@ -34,6 +34,10 @@ use audiveris_image::{
     bar_sticks::{
         BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks, build_sub_stick,
     },
+    bars_coordinator::{
+        BarsCoordinatorError, BarsCoordinatorParameters, BarsPrefixResult, BarsStaffState,
+        BarsSystemState, process_bars_through_too_far_left,
+    },
     bars_logic::{BarsLogicError, build_bar_columns_from_graph},
     filament::{FilamentError, FilamentGeometry},
     lines_coordinator::StaffCandidateKind,
@@ -43,7 +47,7 @@ use audiveris_image::{
         BarlineHeightSpec, BarsProjectorRegistry, BraceSearchRequest, PeakCoreGeometry,
         ProjectionError, ProjectorRegistration, StaffProjectorProcessRequest,
         StaffProjectorProcessTuning, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
-        barline_height, process_staff_projection,
+        barline_height, has_blank_between, process_staff_projection,
     },
     section::Section,
     staff_peak::{StaffPeak, StaffPeakError, StaffPeakKey},
@@ -144,6 +148,12 @@ pub enum RawSystemGroupingBoundary {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
+    /// Start-column selection and the two following column/left purges are
+    /// complete. Java next requires brace-portion section/glyph evidence.
+    NeedsBracePortionDetection {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
 }
 
 /// Ordered peak graph plus the system-grouping boundary reached from it.
@@ -225,6 +235,24 @@ pub struct RawSystemGraphBridge {
     pub systems: SystemGroupingReport,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawBarsPrefixParameters {
+    pub systems: RawSystemGroupingParameters,
+    pub bars: BarsCoordinatorParameters,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawBarsPrefixSystem {
+    pub state: BarsSystemState,
+    pub result: BarsPrefixResult,
+}
+
+#[derive(Clone, Debug)]
+pub struct RawBarsPrefixBridge {
+    pub systems: RawSystemGraphBridge,
+    pub bars: Vec<RawBarsPrefixSystem>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -256,6 +284,7 @@ pub enum RawProjectorAdapterError {
     Connections(ConnectionBuildError),
     Splits(SplitBuildError),
     Systems(SystemGroupingError),
+    Bars(BarsCoordinatorError),
     BarColumns(BarsLogicError),
 }
 
@@ -323,6 +352,7 @@ impl fmt::Display for RawProjectorAdapterError {
             }
             Self::Splits(source) => write!(formatter, "merged bar-peak splitting failed: {source}"),
             Self::Systems(source) => write!(formatter, "system grouping failed: {source}"),
+            Self::Bars(source) => write!(formatter, "bars prefix failed: {source}"),
             Self::BarColumns(source) => {
                 write!(formatter, "bar-column construction failed: {source}")
             }
@@ -341,6 +371,7 @@ impl Error for RawProjectorAdapterError {
             Self::Connections(source) => Some(source),
             Self::Splits(source) => Some(source),
             Self::Systems(source) => Some(source),
+            Self::Bars(source) => Some(source),
             Self::BarColumns(source) => Some(source),
             _ => None,
         }
@@ -712,6 +743,148 @@ pub fn bridge_raw_projectors_through_systems(
             system_count: systems.systems.len(),
         };
     Ok(RawSystemGraphBridge { split, systems })
+}
+
+/// Continue through `detectStartColumns`, `purgePartialColumns`, and
+/// `purgeTooLeft`, then stop before Java's section/glyph-backed brace pass.
+#[allow(clippy::too_many_arguments)]
+pub fn bridge_raw_projectors_through_bars_prefix(
+    handoff: &PreparedStaffHandoff,
+    preparation: &RawProjectorPreparation,
+    raster: RawProjectorRaster<'_>,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    skew: &HeadlessSkew,
+    parameters: RawBarsPrefixParameters,
+) -> Result<RawBarsPrefixBridge, RawProjectorAdapterError> {
+    let mut systems = bridge_raw_projectors_through_systems(
+        handoff,
+        preparation,
+        raster,
+        vertical_sections,
+        horizontal_sections,
+        skew,
+        parameters.systems,
+    )?;
+    let source_graph = &systems.split.connections.alignments.bars.projectors.graph;
+    let mut bars = Vec::with_capacity(systems.systems.systems.len());
+    for system in &systems.systems.systems {
+        let graph = induced_system_graph(source_graph, &system.staff_ids)?;
+        let mut states = Vec::with_capacity(system.staff_ids.len());
+        for &staff_id in &system.staff_ids {
+            let geometry = systems
+                .split
+                .staffs
+                .iter()
+                .find(|staff| staff.staff_id == staff_id)
+                .expect("system staff originates in retained split staff order");
+            let prepared = handoff
+                .staffs
+                .iter()
+                .find(|staff| staff.id == staff_id.value())
+                .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                    staff_id.value(),
+                ))?;
+            let projector = preparation
+                .registry
+                .projectors()
+                .iter()
+                .find(|projector| projector.staff_id == staff_id)
+                .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                    staff_id.value(),
+                ))?;
+            let peaks = geometry
+                .peaks
+                .iter()
+                .filter_map(|&key| graph.vertex(key).cloned())
+                .collect::<Vec<_>>();
+            let staff_left = prepared.left.round_ties_even() as i32;
+            let blanks = peaks
+                .iter()
+                .map(|peak| {
+                    (
+                        peak.key(),
+                        has_blank_between(
+                            &projector.result.all_blanks,
+                            peak.stop(),
+                            staff_left,
+                            projector.scale_parameters.minimum_standard_blank_width,
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let mut state = BarsStaffState::new(
+                staff_id,
+                staff_left,
+                prepared.kind == StaffCandidateKind::OneLine,
+                peaks,
+                blanks,
+            )
+            .map_err(RawProjectorAdapterError::Bars)?;
+            if let Some(brace) = systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .brace_peaks
+                .iter()
+                .find(|brace| brace.staff_id == staff_id)
+            {
+                state = state
+                    .with_brace_peak(brace.peak.clone())
+                    .map_err(RawProjectorAdapterError::Bars)?;
+            }
+            states.push(state);
+        }
+        let mut state = BarsSystemState::new(system.id, states, graph)
+            .map_err(RawProjectorAdapterError::Bars)?;
+        let result = process_bars_through_too_far_left(&mut state, parameters.bars)
+            .map_err(RawProjectorAdapterError::Bars)?;
+        bars.push(RawBarsPrefixSystem { state, result });
+    }
+    systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsBracePortionDetection {
+        staff_ids: systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bars.len(),
+    };
+    Ok(RawBarsPrefixBridge { systems, bars })
+}
+
+fn induced_system_graph(
+    source: &PeakGraph<BarAlignment>,
+    staff_ids: &[StaffId],
+) -> Result<PeakGraph<BarAlignment>, RawProjectorAdapterError> {
+    let mut graph = PeakGraph::new();
+    for peak in source
+        .vertices()
+        .iter()
+        .filter(|peak| staff_ids.contains(&peak.staff_id()))
+    {
+        graph.add_vertex(peak.clone());
+    }
+    for edge in source.edges().iter().filter(|edge| {
+        staff_ids.contains(&edge.source().staff_id())
+            && staff_ids.contains(&edge.target().staff_id())
+    }) {
+        graph
+            .add_edge(edge.source(), edge.target(), *edge.relation())
+            .map_err(BarsCoordinatorError::from)
+            .map_err(RawProjectorAdapterError::Bars)?;
+    }
+    Ok(graph)
 }
 
 fn alignment_staffs(
@@ -1275,6 +1448,9 @@ mod tests {
             RawSystemGroupingBoundary::CompleteSystems { .. } => {
                 panic!("one retained staff uses its earlier direct completion")
             }
+            RawSystemGroupingBoundary::NeedsBracePortionDetection { .. } => {
+                panic!("one retained staff does not require brace-portion grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -1608,6 +1784,61 @@ mod tests {
         assert!(matches!(
             systems.split.connections.alignments.bars.projectors.grouping,
             RawSystemGroupingBoundary::CompleteSystems {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let prefix = bridge_raw_projectors_through_bars_prefix(
+            &handoff,
+            &prepared,
+            raster,
+            &vertical_sections,
+            &[],
+            &skew,
+            RawBarsPrefixParameters {
+                systems: RawSystemGroupingParameters {
+                    splits: RawSplitBridgeParameters {
+                        connections: RawConnectionBridgeParameters {
+                            alignments: RawAlignmentBridgeParameters {
+                                sticks: BarStickParameters {
+                                    vertical_extension: 0,
+                                    minimum_core_section_length: 3,
+                                    probe_width: 1,
+                                    minimum_probe_weight: 1,
+                                    segment_length: 3,
+                                    minimum_mean_curvature: 0.0,
+                                    first_filament_id: 1,
+                                },
+                                maximum_alignment_slope: 0.06,
+                                maximum_alignment_delta_width: 1,
+                                maximum_column_dx: 2,
+                            },
+                            maximum_connection_gap: 1,
+                            maximum_connection_white_ratio: 0.25,
+                        },
+                        maximum_close_gap: 2,
+                        maximum_width_ratio: 0.5,
+                    },
+                    maximum_first_connection_x_offset: 20,
+                },
+                bars: BarsCoordinatorParameters::new(2, 10, 2, 20, 2, 1, 0.2, None).unwrap(),
+            },
+        )
+        .unwrap();
+        assert_eq!(prefix.bars.len(), 1);
+        assert_eq!(prefix.bars[0].state.staffs().len(), 2);
+        assert_eq!(prefix.bars[0].state.columns().len(), 1);
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsBracePortionDetection {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
