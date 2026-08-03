@@ -227,11 +227,13 @@ denied, and passed `git diff --check` before commit.
 143. `8825ca43` — ordered two-sided cluster expansion with isolated filaments.
 144. `6aeaf78c` — rustfmt normalization of cluster-pair fixtures.
 145. `4a43e358` — live Java/Rust bar-column construction and start selection vector.
+146. `37f88ecb` — ordered within-part connection-edge selection.
+147. `9bd76cd9` — desired-size cluster destruction, acceptable length, and filament partition.
 
-At the one-hundred-and-forty-fifth checkpoint the Rust workspace executes 375 tests:
+At the one-hundred-and-forty-seventh checkpoint the Rust workspace executes 379 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 231
+- `audiveris-image`: 235
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -276,7 +278,8 @@ line-cluster core. Cluster merge, absorption, trimming, geometry, and the combin
 lifecycle now have exact live Java parity. Recursive cluster construction, general
 merge orchestration, and the same-size pair pass are now ported with transactional
 stable-ID ownership. Cluster consistency destruction and two-sided isolated-filament
-expansion are also ported. Glyph creation, SIG integration, and UI behavior remain outside.
+expansion are also ported, followed by desired-size destruction and unclustered-filament
+partitioning. Glyph creation, SIG integration, and UI behavior remain outside.
 Target-line deskew mapping begins the neutral destination geometry used later in GRID
 cleanup.
 Target-line mapping now has exact live parity on a sloped source, and the surrounding
