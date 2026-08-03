@@ -625,6 +625,85 @@ impl GridSig {
         Ok(())
     }
 
+    /// Java `createParts` using explicit ordered staff ownership, so a staff
+    /// with no remaining bar peak is still assigned to a part.
+    pub fn create_parts_for_staffs(
+        &self,
+        result: &mut BarTailResult,
+        staff_ids: &[StaffId],
+        staff_peaks: &[Vec<StaffPeak>],
+        peak_graph: &PeakGraph<BarAlignment>,
+        parameters: BarTailParameters,
+    ) -> Result<(), BarTailError> {
+        if staff_ids.len() != staff_peaks.len() {
+            return Err(BarTailError::StaffPeakCount {
+                staffs: staff_ids.len(),
+                peak_sets: staff_peaks.len(),
+            });
+        }
+        let Some(&first_staff) = staff_ids.first() else {
+            return Err(BarTailError::MissingStaffRange);
+        };
+        let last_staff = *staff_ids.last().expect("nonempty staff IDs were checked");
+        let first_staff = i32::try_from(first_staff.value())
+            .map_err(|_| BarTailError::StaffIdOverflow(first_staff.value()))?;
+        let last_staff = i32::try_from(last_staff.value())
+            .map_err(|_| BarTailError::StaffIdOverflow(last_staff.value()))?;
+        let decisions = result
+            .part_groups
+            .iter()
+            .enumerate()
+            .map(|(group_index, group)| {
+                let first = StaffId::new(group.first_staff_id() as usize);
+                let last = StaffId::new(group.last_staff_id() as usize);
+                let first_start = staff_start_peak(staff_peaks, first);
+                let last_start = staff_start_peak(staff_peaks, last);
+                BraceGroupDecision {
+                    group_index,
+                    group,
+                    is_true_brace: is_true_brace_group(
+                        group,
+                        !part_connection_edge_ids(
+                            peak_graph,
+                            first,
+                            VerticalSide::Top,
+                            first_start,
+                        )
+                        .is_empty(),
+                        !part_connection_edge_ids(
+                            peak_graph,
+                            last,
+                            VerticalSide::Bottom,
+                            last_start,
+                        )
+                        .is_empty(),
+                        !part_connection_edge_ids(
+                            peak_graph,
+                            first,
+                            VerticalSide::Bottom,
+                            first_start,
+                        )
+                        .is_empty(),
+                        parameters.allow_disconnected_braced_parts,
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+        let plan = plan_parts(
+            first_staff,
+            last_staff,
+            &decisions,
+            parameters.force_separate_parts,
+            parameters.force_single_part,
+        )?;
+        for &index in plan.removed_group_indices.iter().rev() {
+            result.part_groups.remove(index);
+        }
+        result.parts = plan.parts;
+        result.contextualized = false;
+        Ok(())
+    }
+
     fn record_bars(
         &self,
         result: &mut BarTailResult,

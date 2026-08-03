@@ -36,19 +36,20 @@ use audiveris_image::{
     },
     bars_coordinator::{
         BarsConnectionGroupParameters, BarsConnectionGroupResult, BarsCoordinatorError,
-        BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult, BarsPurgeParameters,
-        BarsPurgeResult, BarsRecordGroupResult, BarsRightCClefParameters, BarsRightCClefResult,
-        BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
-        BarsWidthInterParameters, BarsWidthInterResult, process_bars_after_braces,
-        process_bars_connections_and_groups, process_bars_peak_purges,
-        process_bars_record_and_groups, process_bars_right_ends_and_c_clefs,
-        process_bars_through_too_far_left, process_bars_widths_and_inters,
+        BarsCoordinatorParameters, BarsPartResult, BarsPostBraceResult, BarsPrefixResult,
+        BarsPurgeParameters, BarsPurgeResult, BarsRecordGroupResult, BarsRightCClefParameters,
+        BarsRightCClefResult, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
+        BarsWidthInterParameters, BarsWidthInterResult, contextualize_bars,
+        process_bars_after_braces, process_bars_connections_and_groups, process_bars_create_parts,
+        process_bars_peak_purges, process_bars_record_and_groups,
+        process_bars_right_ends_and_c_clefs, process_bars_through_too_far_left,
+        process_bars_widths_and_inters,
     },
     bars_logic::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
     },
     filament::{FilamentError, FilamentGeometry},
-    grid_sig::{BarTailResult, GridSig},
+    grid_sig::{BarTailParameters, BarTailResult, GridSig},
     lines_coordinator::StaffCandidateKind,
     peak_graph::PeakGraph,
     prepared_lines::{PreparedStaff, PreparedStaffHandoff},
@@ -217,6 +218,11 @@ pub enum RawSystemGroupingBoundary {
     /// Staff barline ownership and structural groups are recorded. Java next
     /// creates logical parts from these groups.
     NeedsPartCreation {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Bar retrieval completed through part creation and contextual grading.
+    CompleteBars {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -431,6 +437,22 @@ pub struct RawRecordGroupSystemReport {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RawRecordGroupStageReport {
     pub systems: Vec<RawRecordGroupSystemReport>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RawPartContextStageParameters {
+    pub bars: BarTailParameters,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawPartContextSystemReport {
+    pub system_id: usize,
+    pub result: BarsPartResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawPartContextStageReport {
+    pub systems: Vec<RawPartContextSystemReport>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1549,6 +1571,53 @@ pub fn continue_raw_bars_through_recording_and_groups(
     Ok(report)
 }
 
+/// Finish Java `BarsRetriever.process`: create parts for every system first,
+/// then contextualize every system SIG. A later part failure therefore keeps
+/// earlier completed parts but contextualizes none, matching the two source
+/// traversals.
+pub fn finish_raw_bars_through_parts_and_context(
+    bridge: &mut RawBarsPrefixBridge,
+    parameters: RawPartContextStageParameters,
+) -> Result<RawPartContextStageReport, RawProjectorAdapterError> {
+    let mut report = RawPartContextStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let result = process_bars_create_parts(
+            &raw_system.state,
+            &raw_system.sig,
+            &mut raw_system.bar_tail,
+            parameters.bars,
+        )
+        .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawPartContextSystemReport { system_id, result });
+    }
+    for raw_system in &mut bridge.bars {
+        contextualize_bars(&mut raw_system.sig, &mut raw_system.bar_tail);
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::CompleteBars {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
 fn reconcile_graph_peak_attributes(
     state: &mut BarsSystemState,
 ) -> Result<(), RawProjectorAdapterError> {
@@ -2356,6 +2425,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsPartCreation { .. } => {
                 panic!("one retained staff does not require part-creation grouping")
             }
+            RawSystemGroupingBoundary::CompleteBars { .. } => {
+                panic!("one retained staff does not use grouped bar completion")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -3074,6 +3146,31 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsPartCreation {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let part_report = finish_raw_bars_through_parts_and_context(
+            &mut prefix,
+            RawPartContextStageParameters {
+                bars: BarTailParameters::default(),
+            },
+        )
+        .unwrap();
+        assert_eq!(part_report.systems.len(), 1);
+        assert_eq!(part_report.systems[0].result.parts().len(), 2);
+        assert!(prefix.bars[0].bar_tail.contextualized);
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::CompleteBars {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]

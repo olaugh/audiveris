@@ -14,7 +14,7 @@ use crate::{
     bar_column::{BarColumn, PeakId, PeakRelation, StaffId},
     bars_logic::{
         BarsLogicError, CClefDetection, ConnectionInterPlan, PeakWidthAssignment, PeakWidthClass,
-        StartColumnStaffFacts, VerticalInterPlan, build_bar_columns_from_graph,
+        PlannedPart, StartColumnStaffFacts, VerticalInterPlan, build_bar_columns_from_graph,
         classify_bar_peak_widths, extending_peak_keys, peaks_before_staff_start,
         peaks_too_far_left, plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks,
         start_column_candidate, unaligned_peak_keys, validate_start_column,
@@ -415,6 +415,24 @@ pub struct BarsConnectionGroupResult {
 pub struct BarsRecordGroupResult {
     staff_barlines: BTreeMap<usize, Vec<GridInterId>>,
     part_groups: Vec<PartGroup>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BarsPartResult {
+    retained_groups: Vec<PartGroup>,
+    parts: Vec<PlannedPart>,
+}
+
+impl BarsPartResult {
+    #[must_use]
+    pub fn retained_groups(&self) -> &[PartGroup] {
+        &self.retained_groups
+    }
+
+    #[must_use]
+    pub fn parts(&self) -> &[PlannedPart] {
+        &self.parts
+    }
 }
 
 impl BarsRecordGroupResult {
@@ -1108,6 +1126,37 @@ pub fn process_bars_record_and_groups(
         staff_barlines: tail.staff_barlines.clone(),
         part_groups: tail.part_groups.clone(),
     })
+}
+
+/// Java `createParts` for one system, preserving explicit empty-staff
+/// ownership and true-brace removal semantics.
+pub fn process_bars_create_parts(
+    state: &BarsSystemState,
+    sig: &GridSig,
+    tail: &mut BarTailResult,
+    parameters: crate::grid_sig::BarTailParameters,
+) -> Result<BarsPartResult, BarsCoordinatorError> {
+    let staff_ids = state
+        .staffs
+        .iter()
+        .map(|staff| staff.staff_id)
+        .collect::<Vec<_>>();
+    let staff_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.peaks.clone())
+        .collect::<Vec<_>>();
+    sig.create_parts_for_staffs(tail, &staff_ids, &staff_peaks, &state.graph, parameters)?;
+    Ok(BarsPartResult {
+        retained_groups: tail.part_groups.clone(),
+        parts: tail.parts.clone(),
+    })
+}
+
+/// Java's final per-system `SIGraph.contextualize()` mutation.
+pub fn contextualize_bars(sig: &mut GridSig, tail: &mut BarTailResult) {
+    sig.contextualize();
+    tail.contextualized = true;
 }
 
 fn process_prefix(
@@ -2561,5 +2610,53 @@ mod tests {
         assert_eq!(tail.staff_barlines[&1], [inters[0]]);
         assert_eq!(tail.staff_barlines[&2], [inters[1]]);
         assert!(tail.part_groups.is_empty());
+    }
+
+    #[test]
+    fn create_parts_keeps_empty_staff_and_contextualizes_only_afterward() {
+        let top_bar = peak(1, 10, 10);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top_bar.clone());
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![top_bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let bottom =
+            BarsStaffState::new(StaffId::new(2), 0, false, Vec::new(), BTreeMap::new()).unwrap();
+        let state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let mut sig = GridSig::default();
+        let inter =
+            sig.promote_vertical_inters(&plan_vertical_inters(&[vec![top_bar], Vec::new()], 2))[0];
+        let mut tail = BarTailResult::default();
+
+        let result = process_bars_create_parts(
+            &state,
+            &sig,
+            &mut tail,
+            crate::grid_sig::BarTailParameters {
+                allow_disconnected_braced_parts: false,
+                force_separate_parts: false,
+                force_single_part: true,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.parts(),
+            [PlannedPart {
+                first_staff_id: 1,
+                last_staff_id: 2,
+            }]
+        );
+        assert!(!tail.contextualized);
+        assert_eq!(sig.node(inter).unwrap().contextual_grade(), None);
+
+        contextualize_bars(&mut sig, &mut tail);
+        assert!(tail.contextualized);
+        assert!(sig.node(inter).unwrap().contextual_grade().is_some());
     }
 }
