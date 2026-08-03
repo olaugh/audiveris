@@ -21,6 +21,7 @@ const SCORE_ELEMENT: &[u8] = b"score";
 const LOGICAL_PART_ELEMENT: &[u8] = b"logical-part";
 const SHEETS_SELECTION_ELEMENT: &[u8] = b"sheets-selection";
 const DEPRECATED_BEAM_SPECIFICATION_ELEMENT: &[u8] = b"beam-specification";
+const DEPRECATED_OCR_LANGUAGES_ELEMENT: &[u8] = b"ocr-languages";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -68,6 +69,7 @@ pub struct BookXml {
     dirty: Option<bool>,
     sheets_selection: Option<String>,
     deprecated_beam_specification: Option<i32>,
+    deprecated_ocr_languages: Option<String>,
     sheet_stubs: Vec<SheetStub>,
     score_refs: Vec<ScoreRef>,
 }
@@ -89,6 +91,7 @@ impl BookXml {
         let mut dirty = None;
         let mut sheets_selection = None;
         let mut deprecated_beam_specification = None;
+        let mut deprecated_ocr_languages = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
@@ -107,6 +110,7 @@ impl BookXml {
         let mut active_score_page: Option<(u32, ScorePageRef)> = None;
         let mut active_sheets_selection: Option<String> = None;
         let mut active_deprecated_beam_specification: Option<String> = None;
+        let mut active_deprecated_ocr_languages: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -116,6 +120,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_deprecated_ocr_languages.is_some() {
+                        return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
+                    }
                     if active_deprecated_beam_specification.is_some() {
                         return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
                     }
@@ -178,6 +185,11 @@ impl BookXml {
                     {
                         begin_deprecated_beam_specification(&deprecated_beam_specification)?;
                         active_deprecated_beam_specification = Some(String::new());
+                    } else if depth == 1
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                    {
+                        begin_deprecated_ocr_languages(&deprecated_ocr_languages)?;
+                        active_deprecated_ocr_languages = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -285,6 +297,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_deprecated_ocr_languages.is_some() {
+                        return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
+                    }
                     if active_deprecated_beam_specification.is_some() {
                         return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
                     }
@@ -347,6 +362,11 @@ impl BookXml {
                         begin_deprecated_beam_specification(&deprecated_beam_specification)?;
                         deprecated_beam_specification =
                             Some(parse_deprecated_beam_specification("")?);
+                    } else if depth == 1
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                    {
+                        begin_deprecated_ocr_languages(&deprecated_ocr_languages)?;
+                        deprecated_ocr_languages = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -444,6 +464,12 @@ impl BookXml {
                 }
                 Event::End(element) => {
                     if depth == 2
+                        && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
+                        && let Some(text) = active_deprecated_ocr_languages.take()
+                    {
+                        deprecated_ocr_languages = Some(text);
+                    }
+                    if depth == 2
                         && element.name().as_ref() == DEPRECATED_BEAM_SPECIFICATION_ELEMENT
                         && let Some(text) = active_deprecated_beam_specification.take()
                     {
@@ -536,6 +562,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_deprecated_ocr_languages.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_deprecated_ocr_languages
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::Text(text) if active_deprecated_beam_specification.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -621,6 +656,15 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_deprecated_ocr_languages.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_deprecated_ocr_languages
+                        .as_mut()
+                        .unwrap()
+                        .push_str(&decoded);
+                }
                 Event::CData(text) if active_deprecated_beam_specification.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -682,6 +726,9 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_deprecated_ocr_languages.is_some() => {
+                    return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
+                }
                 Event::GeneralRef(_) if active_deprecated_beam_specification.is_some() => {
                     return Err(BookXmlError::UnexpectedDeprecatedBeamSpecificationContent);
                 }
@@ -737,6 +784,11 @@ impl BookXml {
                         sheet_number: page.sheet_number,
                         sheet_page_id: page.sheet_page_id,
                     });
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_deprecated_ocr_languages.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_deprecated_beam_specification.is_some() =>
@@ -797,6 +849,7 @@ impl BookXml {
             dirty,
             sheets_selection,
             deprecated_beam_specification,
+            deprecated_ocr_languages,
             sheet_stubs,
             score_refs,
         })
@@ -854,6 +907,12 @@ impl BookXml {
     #[must_use]
     pub const fn deprecated_beam_specification(&self) -> Option<i32> {
         self.deprecated_beam_specification
+    }
+
+    /// Legacy OCR language specification before migration into parameters.
+    #[must_use]
+    pub fn deprecated_ocr_languages(&self) -> Option<&str> {
+        self.deprecated_ocr_languages.as_deref()
     }
 
     /// Direct child sheet stubs in document order.
@@ -1372,6 +1431,10 @@ pub enum BookXmlError {
     InvalidDeprecatedBeamSpecification(String),
     /// The deprecated beam scalar contains markup or an entity reference.
     UnexpectedDeprecatedBeamSpecificationContent,
+    /// A book repeats the deprecated direct OCR-language scalar.
+    DuplicateDeprecatedOcrLanguages,
+    /// The deprecated OCR-language scalar contains markup or an entity reference.
+    UnexpectedDeprecatedOcrLanguagesContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1655,6 +1718,12 @@ impl fmt::Display for BookXmlError {
                     formatter,
                     "book beam-specification contains non-text content"
                 )
+            }
+            Self::DuplicateDeprecatedOcrLanguages => {
+                write!(formatter, "book has duplicate ocr-languages elements")
+            }
+            Self::UnexpectedDeprecatedOcrLanguagesContent => {
+                write!(formatter, "book ocr-languages contains non-text content")
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -1977,6 +2046,13 @@ fn parse_deprecated_beam_specification(text: &str) -> Result<i32, BookXmlError> 
     text.trim()
         .parse::<i32>()
         .map_err(|_| BookXmlError::InvalidDeprecatedBeamSpecification(text.to_owned()))
+}
+
+fn begin_deprecated_ocr_languages(current: &Option<String>) -> Result<(), BookXmlError> {
+    if current.is_some() {
+        return Err(BookXmlError::DuplicateDeprecatedOcrLanguages);
+    }
+    Ok(())
 }
 
 fn parse_book_root(
@@ -3837,6 +3913,55 @@ mod tests {
             assert_eq!(
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::UnexpectedDeprecatedBeamSpecificationContent
+            );
+        }
+    }
+
+    #[test]
+    fn reads_deprecated_book_ocr_languages_preserving_raw_text_and_empty() {
+        let xml = br#"<book><ocr-languages> eng+<![CDATA[ita]]> </ocr-languages><parameters><ocr-languages>deu</ocr-languages></parameters></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+
+        assert_eq!(book.deprecated_ocr_languages(), Some(" eng+ita "));
+        assert_eq!(book.original_bytes(), xml);
+        assert_eq!(
+            BookXml::parse(br#"<book><ocr-languages/></book>"#)
+                .unwrap()
+                .deprecated_ocr_languages(),
+            Some("")
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book/>"#)
+                .unwrap()
+                .deprecated_ocr_languages(),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_non_direct_deprecated_ocr_language_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><future><ocr-languages>eng</ocr-languages></future><f:ocr-languages>ita</f:ocr-languages><sheet number="1"><ocr-languages>deu</ocr-languages></sheet><ocr-languages>fra</ocr-languages></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.deprecated_ocr_languages(), Some("fra"));
+    }
+
+    #[test]
+    fn rejects_duplicate_or_non_text_deprecated_ocr_languages() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><ocr-languages>eng</ocr-languages><ocr-languages>ita</ocr-languages></book>"#,
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateDeprecatedOcrLanguages
+        );
+        for content in ["<future/>", "&#101;ng", "<!--eng-->", "<?pick eng?>"] {
+            let xml = format!("<book><ocr-languages>{content}</ocr-languages></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedDeprecatedOcrLanguagesContent
             );
         }
     }
