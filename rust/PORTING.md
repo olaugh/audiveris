@@ -37,7 +37,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 38 canonical cross-runtime fixtures matching |
+| Live Java/Rust vectors | 39 canonical cross-runtime fixtures matching |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
 | Rust workspace | building |
@@ -59,10 +59,11 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | SCALE line, interline, and beam estimate | exact match on 4 pages and key branch cases |
 | GRID section construction | neutral horizontal/vertical sections, four junction policies, exact synthetic and full-page Chula lag topology/statistics |
 | GRID staff-filament geometry | section compounds, probe centroids, true length, thickness, endpoints, positions, slopes; exact live synthetic vector |
-| GRID initial filament grouping | long/slim core filtering, stable reverse-length traversal, real-gap and overlap compatibility/merge behavior; exact synthetic plus bounded real-page Chula vectors; leftover expansion still queued |
+| GRID filament factory | core and local-fatness filtering, stable reverse-length traversal, real-gap/overlap merge gates, leftover expansion, and final merge; exact merge/rejection plus bounded real-page vectors; glyph/index and vertical behavior queued |
+| GRID section tally | stable first-position indexing with explicit sorted/range validation for staff-line sticker retrieval |
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
 | Remaining filters and PDF ingest | queued |
-| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member resolution states, and typed persisted pipeline completion status |
+| `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline completion status, and atomic sheet input path/image-rank provenance |
 | Recognition stages | queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |

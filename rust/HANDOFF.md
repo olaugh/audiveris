@@ -86,17 +86,27 @@ denied, and passed `git diff --check` before commit.
     sharing the recognition pipeline's single `OmrStep` type.
 38. `1fa21844` — bounded real-page Chula filament-factory digest with exact live
     Java/Rust parity.
+39. `db964fb9` — position-indexed section tally used by later staff-line sticker
+    retrieval, with explicit sorted/range validation.
+40. `cb27da40` — live production-Java overlap vector proving one filament merge and
+    one displaced-overlap rejection.
+41. `3e256a16` — lossless typed sheet input path and image-rank provenance with an
+    atomic fail-closed view and preserved book-level fallback state.
+42. `2377ab99` — local section-fatness probes and the complete neutral horizontal
+    factory lifecycle: initial merge, leftover expansion, and final merge.
+43. `61cea1f2` — corrected the original synthetic Rust factory fixture to use the
+    production Java scale-derived thresholds exposed by the new bounds prefilter.
 
-At the thirty-eighth checkpoint the Rust workspace executes 145 tests:
+At the forty-third checkpoint the Rust workspace executes 157 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 61
-- `audiveris-omr`: 31
+- `audiveris-image`: 67
+- `audiveris-omr`: 37
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 38 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 39 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -108,15 +118,18 @@ The next GRID boundary also matches Java for compound bounds, weight, its histor
 true-length hole arithmetic, thickness, endpoint probes, five spline positions/slopes,
 and range checks. Floating spline output is explicitly canonicalized at `1e-14` because
 HotSpot and Rust differ by one ULP in one quadratic expression.
-The factory slice now also matches Java's core-section filtering, stable reverse-length
-traversal, successful/rejected real-gap merges, and every horizontal overlap gate:
+The factory slice now also matches Java's core/local-fatness filtering, stable
+reverse-length traversal, successful/rejected real-gap merges, and every horizontal overlap gate:
 sample placement, ordinate delta, combined/individual probe thickness, consistency,
-internal space, slope, and expansion contact. A bounded digest covers real Chula page
-sections without turning the oracle into an unbounded production run. Short-section
-expansion orchestration, glyph ownership, and index integration remain outside this slice.
+internal space, slope, and expansion contact. Its full neutral lifecycle now includes
+leftover selection, fixed grown-box filtering, repeated attachment, and the final merge.
+A bounded digest covers real Chula page sections without turning the oracle into an
+unbounded production run. Glyph/index ownership and vertical filaments remain outside.
 The lossless `book.xml` view now exposes absent-versus-empty persisted step lists and
 the latest completed stage while preserving all original bytes and rejecting unknown
 or duplicate step tokens.
+Direct sheet input path and positive image rank are also typed atomically; an absent
+input remains distinct because Java then falls back to the book-level source.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
@@ -166,9 +179,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` with leftover short-section expansion, then source-guided staff-line
-   grouping around the now-ported pattern and filament primitives; keep glyph ownership
-   and UI/SIG integration out until the neutral behavior has stronger live vectors.
+1. Continue `GRID` with source-guided staff-line comb/cluster formation around the
+   now-ported pattern, tally, and filament-factory primitives; keep glyph ownership and
+   UI/SIG integration out until the neutral behavior has stronger live vectors.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
