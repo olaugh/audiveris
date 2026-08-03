@@ -191,6 +191,68 @@ pub struct PeakScanRequest {
     pub added_chunk: i32,
 }
 
+/// Inputs to Java `StaffProjector.findBracePeak` after scale resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BraceSearchRequest {
+    pub staff_left: i32,
+    pub minimum_left: i32,
+    pub maximum_right: i32,
+    pub minimum_wide_blank_width: i32,
+    pub minimum_value: i32,
+}
+
+impl BraceSearchRequest {
+    #[must_use]
+    pub const fn new(
+        staff_left: i32,
+        minimum_left: i32,
+        maximum_right: i32,
+        minimum_wide_blank_width: i32,
+        minimum_value: i32,
+    ) -> Self {
+        Self {
+            staff_left,
+            minimum_left,
+            maximum_right,
+            minimum_wide_blank_width,
+            minimum_value,
+        }
+    }
+}
+
+/// Projection-only result of Java `findBracePeak`/`createBracePeak`, before
+/// staff-line ordinates and sheet deskew are consulted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProjectionBraceCandidate {
+    pub raw_start: i32,
+    pub raw_stop: i32,
+    pub start: i32,
+    pub stop: i32,
+    pub search_right: i32,
+}
+
+impl ProjectionBraceCandidate {
+    /// Resolve the remaining source-owned geometry and create Java's neutral
+    /// `StaffPeak` with only its `BRACE` attribute set.
+    pub fn into_staff_peak(
+        self,
+        staff_id: StaffId,
+        ordinates_at: impl FnOnce(i32) -> (i32, i32),
+        deskew: impl FnOnce(crate::staff_peak::PeakPoint) -> crate::staff_peak::PeakPoint,
+    ) -> Result<StaffPeak, ProjectionError> {
+        // Java uses an integer midpoint for line ordinates, then StaffPeak uses
+        // a precise half-pixel midpoint for deskewing.
+        let ordinate_x = self.start.wrapping_add(self.stop) / 2;
+        let (top, bottom) = ordinates_at(ordinate_x);
+        let mut peak = StaffPeak::new(staff_id, top, bottom, self.start, self.stop)
+            .map_err(ProjectionError::StaffPeak)?;
+        peak.set(crate::staff_peak::StaffPeakAttribute::Brace);
+        peak.compute_deskewed_center(deskew)
+            .map_err(ProjectionError::StaffPeak)?;
+        Ok(peak)
+    }
+}
+
 impl PeakScanRequest {
     #[must_use]
     pub const fn new(
@@ -786,6 +848,144 @@ impl ShortProjection {
         }
     }
 
+    /// Projection-only portion of Java `StaffProjector.findBracePeak` and
+    /// `createBracePeak`.
+    ///
+    /// The scan moves right-to-left, requires a below-threshold valley before
+    /// accepting brace ink, and then refines the candidate against neighboring
+    /// blanks and the first minimum toward the bar. Staff-line geometry,
+    /// attributes, and deskewing remain in [`ProjectionBraceCandidate`].
+    pub fn find_brace_candidate(
+        &self,
+        blanks: &[ProjectionBlank],
+        request: BraceSearchRequest,
+    ) -> Result<Option<ProjectionBraceCandidate>, ProjectionError> {
+        let left_ending_blank = select_blank(
+            blanks,
+            HorizontalSide::Left,
+            request.staff_left,
+            request.minimum_wide_blank_width,
+        );
+        let mut maximum_right = request.maximum_right;
+        let x_min = if let Some(left_blank) = left_ending_blank {
+            if left_blank.stop.wrapping_add(2) >= maximum_right {
+                maximum_right = left_blank.start.wrapping_sub(1);
+                select_blank(
+                    blanks,
+                    HorizontalSide::Left,
+                    maximum_right,
+                    request.minimum_wide_blank_width,
+                )
+                .map_or(request.minimum_left, ProjectionBlank::stop)
+            } else {
+                request.minimum_left.max(left_blank.stop)
+            }
+        } else {
+            request.minimum_left.max(self.start)
+        };
+
+        if x_min > maximum_right {
+            return Ok(None);
+        }
+        if x_min < self.start || maximum_right > self.stop {
+            return Err(ProjectionError::InvalidBraceSearchRange {
+                x_min,
+                x_max: maximum_right,
+            });
+        }
+
+        let mut brace_stop = None;
+        let mut brace_start = None;
+        let mut valley_hit = false;
+        let mut x = maximum_right;
+        loop {
+            let value = self.value(x);
+            if value >= request.minimum_value {
+                if valley_hit {
+                    brace_stop.get_or_insert(x);
+                    brace_start = Some(x);
+                }
+            } else if !valley_hit {
+                valley_hit = true;
+            } else if let (Some(raw_start), Some(raw_stop)) = (brace_start, brace_stop) {
+                return self.refine_brace_candidate(blanks, raw_start, raw_stop, maximum_right);
+            }
+
+            if x == x_min {
+                break;
+            }
+            x = x.wrapping_sub(1);
+        }
+
+        if let (Some(raw_start), Some(raw_stop)) = (brace_start, brace_stop)
+            && raw_start >= 0
+        {
+            self.refine_brace_candidate(blanks, raw_start, raw_stop, maximum_right)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn refine_brace_candidate(
+        &self,
+        blanks: &[ProjectionBlank],
+        raw_start: i32,
+        raw_stop: i32,
+        maximum_right: i32,
+    ) -> Result<Option<ProjectionBraceCandidate>, ProjectionError> {
+        let mut left_blank = None;
+        for &blank in blanks {
+            if blank.stop >= raw_start {
+                break;
+            }
+            left_blank = Some(blank);
+        }
+
+        let mut start = left_blank.map_or(raw_start, ProjectionBlank::stop);
+        if start < self.start
+            || start > self.stop
+            || raw_stop < self.start
+            || maximum_right > self.stop
+        {
+            return Err(ProjectionError::InvalidBraceRefinementRange {
+                start,
+                raw_stop,
+                maximum_right,
+            });
+        }
+        let mut value = self.value(start);
+        while start > self.start {
+            let x = start.wrapping_sub(1);
+            let next_value = self.value(x);
+            if next_value < value {
+                value = next_value;
+                start = x;
+            } else {
+                break;
+            }
+        }
+
+        let mut best_value = i32::MAX;
+        let mut stop = None;
+        if raw_stop <= maximum_right {
+            for x in raw_stop..=maximum_right {
+                let value = self.value(x);
+                if value < best_value {
+                    best_value = value;
+                    stop = Some(x);
+                }
+            }
+        }
+
+        Ok(stop.map(|stop| ProjectionBraceCandidate {
+            raw_start,
+            raw_stop,
+            start,
+            stop,
+            search_right: maximum_right,
+        }))
+    }
+
     /// Pure numeric kernel from Java `StaffProjector.refinePeakSide`.
     pub fn refine_peak_side(
         &self,
@@ -1222,6 +1422,15 @@ pub enum ProjectionError {
     },
     MismatchedCoreValidation,
     StaffPeak(StaffPeakError),
+    InvalidBraceSearchRange {
+        x_min: i32,
+        x_max: i32,
+    },
+    InvalidBraceRefinementRange {
+        start: i32,
+        raw_stop: i32,
+        maximum_right: i32,
+    },
 }
 
 impl fmt::Display for ProjectionError {
@@ -1282,6 +1491,17 @@ impl fmt::Display for ProjectionError {
                 formatter.write_str("core validation belongs to a different peak")
             }
             Self::StaffPeak(error) => error.fmt(formatter),
+            Self::InvalidBraceSearchRange { x_min, x_max } => {
+                write!(formatter, "invalid brace search range {x_min}..={x_max}")
+            }
+            Self::InvalidBraceRefinementRange {
+                start,
+                raw_stop,
+                maximum_right,
+            } => write!(
+                formatter,
+                "invalid brace refinement start:{start} stop:{raw_stop} right:{maximum_right}",
+            ),
         }
     }
 }
@@ -1860,6 +2080,126 @@ mod tests {
         assert_eq!(tentative_ranges, [(2, 4), (4, 4)]);
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].raw_start, 4);
+    }
+
+    #[test]
+    fn brace_search_requires_valley_and_refines_to_neighboring_minima() {
+        let mut projection = ShortProjection::new(0, 15).unwrap();
+        for (position, value) in [(9, 6), (10, 7), (12, 8)] {
+            projection.increment(position, value);
+        }
+        let blanks = projection.blank_regions(0);
+        let candidate = projection
+            .find_brace_candidate(&blanks, BraceSearchRequest::new(0, 0, 12, 2, 5))
+            .unwrap()
+            .unwrap();
+
+        // x=12 is bar-side ink, x=11 establishes the valley, and x=10..9 is
+        // the brace threshold run. Refinement begins at the preceding blank's
+        // stop and retains the first strict minimum toward the bar.
+        assert_eq!(
+            candidate,
+            ProjectionBraceCandidate {
+                raw_start: 9,
+                raw_stop: 10,
+                start: 8,
+                stop: 11,
+                search_right: 12,
+            }
+        );
+
+        let peak = candidate
+            .into_staff_peak(
+                StaffId::new(3),
+                |x| {
+                    assert_eq!(x, 9); // Java integer (8+11)/2.
+                    (20, 40)
+                },
+                |point| {
+                    assert_eq!(point, crate::staff_peak::PeakPoint::new(9.5, 30.0));
+                    crate::staff_peak::PeakPoint::new(point.x + 1.0, point.y - 2.0)
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            (peak.top(), peak.bottom(), peak.start(), peak.stop()),
+            (20, 40, 8, 11)
+        );
+        assert_eq!(peak.impacts(), None);
+        assert_eq!(
+            peak.attributes().collect::<Vec<_>>(),
+            [crate::staff_peak::StaffPeakAttribute::Brace]
+        );
+        assert_eq!(
+            peak.deskewed_center(),
+            Some(crate::staff_peak::PeakPoint::new(10.5, 28.0))
+        );
+    }
+
+    #[test]
+    fn brace_search_looks_left_of_large_ending_blank() {
+        let mut projection = ShortProjection::new(0, 20).unwrap();
+        for (position, value) in [(6, 6), (7, 7), (9, 8)] {
+            projection.increment(position, value);
+        }
+        let blanks = [
+            ProjectionBlank { start: 3, stop: 5 },
+            ProjectionBlank { start: 8, stop: 8 },
+            ProjectionBlank {
+                start: 10,
+                stop: 12,
+            },
+        ];
+        let candidate = projection
+            .find_brace_candidate(&blanks, BraceSearchRequest::new(15, 0, 14, 3, 5))
+            .unwrap()
+            .unwrap();
+
+        // The 10..12 ending blank reaches maximum_right once Java's +2
+        // tolerance is applied. Search therefore moves left of it to x=9 and
+        // uses 3..5 as the previous significant blank.
+        assert_eq!(
+            candidate,
+            ProjectionBraceCandidate {
+                raw_start: 6,
+                raw_stop: 7,
+                start: 5,
+                stop: 8,
+                search_right: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn brace_refinement_uses_strict_left_descent_and_first_right_minimum() {
+        let mut projection = ShortProjection::new(0, 12).unwrap();
+        for (position, value) in [(3, 2), (4, 2), (5, 3), (9, 5), (10, 1), (11, 1)] {
+            projection.increment(position, value);
+        }
+        let candidate = projection
+            .refine_brace_candidate(&[ProjectionBlank { start: 5, stop: 5 }], 8, 9, 11)
+            .unwrap()
+            .unwrap();
+        assert_eq!(candidate.start, 4);
+        assert_eq!(candidate.stop, 10);
+    }
+
+    #[test]
+    fn brace_search_abstains_without_valley_and_validates_effective_range() {
+        let mut projection = ShortProjection::new(0, 5).unwrap();
+        for x in 0..=5 {
+            projection.increment(x, 6);
+        }
+        assert_eq!(
+            projection
+                .find_brace_candidate(&[], BraceSearchRequest::new(0, 0, 5, 2, 5))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            projection.find_brace_candidate(&[], BraceSearchRequest::new(0, 0, 6, 2, 5),),
+            Err(ProjectionError::InvalidBraceSearchRange { x_min: 0, x_max: 6 })
+        );
     }
 
     #[test]
