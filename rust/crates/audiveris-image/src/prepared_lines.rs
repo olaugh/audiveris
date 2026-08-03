@@ -22,6 +22,7 @@ use crate::{
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridBuildState, RemainingRasterGridStages,
     },
+    raw_line_adapter::{RawLineAdapterError, RawPrimaryPassParameters, build_primary_cluster_pass},
     section::Section,
 };
 
@@ -60,6 +61,7 @@ pub trait PreparedStaffStage {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProductionRetrieveLinesError<DownstreamError> {
     MissingHorizontalLag,
+    Raw(RawLineAdapterError),
     DuplicateLagSection(usize),
     Lines(LinesCoordinatorError),
     CandidateIdMismatch {
@@ -87,6 +89,45 @@ pub enum ProductionRetrieveLinesError<DownstreamError> {
         filament: FilamentId,
     },
     Downstream(DownstreamError),
+}
+
+/// `RetrieveLines` adapter which constructs its primary pass from the live lag.
+///
+/// This is additive to [`ProductionRetrieveLines`], whose prepared-state API is
+/// retained for callers that own a prebuilt primary or secondary pass.
+pub struct RawProductionRetrieveLines<Downstream> {
+    raw_parameters: RawPrimaryPassParameters,
+    lines_parameters: LinesCoordinatorParameters,
+    downstream: Downstream,
+    primary: Option<ClusterPassState>,
+    handoff: Option<PreparedStaffHandoff>,
+}
+
+impl<Downstream> RawProductionRetrieveLines<Downstream> {
+    #[must_use]
+    pub fn new(
+        raw_parameters: RawPrimaryPassParameters,
+        lines_parameters: LinesCoordinatorParameters,
+        downstream: Downstream,
+    ) -> Self {
+        Self {
+            raw_parameters,
+            lines_parameters,
+            downstream,
+            primary: None,
+            handoff: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn primary(&self) -> Option<&ClusterPassState> {
+        self.primary.as_ref()
+    }
+
+    #[must_use]
+    pub const fn downstream(&self) -> &Downstream {
+        &self.downstream
+    }
 }
 
 /// Replace only the supplied `RetrieveLines` stage. Bars and completion remain
@@ -145,6 +186,16 @@ impl<Downstream> PreparedStaffStage for ProductionRetrieveLines<Downstream> {
     }
 }
 
+impl<Downstream> PreparedStaffStage for RawProductionRetrieveLines<Downstream> {
+    fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff> {
+        self.handoff.as_ref()
+    }
+
+    fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
+        self.handoff.take()
+    }
+}
+
 impl<Downstream> RemainingRasterGridStages for ProductionRetrieveLines<Downstream>
 where
     Downstream: RemainingRasterGridStages,
@@ -175,6 +226,65 @@ where
                 &lag_sections,
             )
             .map_err(GridStageFailure::Other)?,
+        );
+        Ok(())
+    }
+
+    fn process_bars(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.downstream
+            .process_bars(state)
+            .map_err(map_downstream_failure)
+    }
+
+    fn complete_lines(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.downstream
+            .complete_lines(state)
+            .map_err(map_downstream_failure)
+    }
+
+    fn log_swallowed_error(&mut self, stage: GridBuildStage, error: &Self::OtherError) {
+        if let ProductionRetrieveLinesError::Downstream(error) = error {
+            self.downstream.log_swallowed_error(stage, error);
+        }
+    }
+
+    fn finish(&mut self) {
+        self.downstream.finish();
+    }
+}
+
+impl<Downstream> RemainingRasterGridStages for RawProductionRetrieveLines<Downstream>
+where
+    Downstream: RemainingRasterGridStages,
+{
+    type StepError = Downstream::StepError;
+    type OtherError = ProductionRetrieveLinesError<Downstream::OtherError>;
+
+    fn retrieve_lines(
+        &mut self,
+        state: &mut RasterGridBuildState,
+    ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+        self.handoff = None;
+        self.primary = None;
+        let lag = state.horizontal_lag().ok_or_else(|| {
+            GridStageFailure::Other(ProductionRetrieveLinesError::MissingHorizontalLag)
+        })?;
+        let lag_sections = index_lag_sections(lag.sections()).map_err(GridStageFailure::Other)?;
+        let built = build_primary_cluster_pass(lag, self.raw_parameters.clone())
+            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
+        self.primary = Some(built.into_state());
+        let primary = self.primary.as_mut().expect("raw pass was just installed");
+        let result = retrieve_staff_candidates(primary, None, self.lines_parameters)
+            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        self.handoff = Some(
+            materialize_staffs(result.staffs(), primary, None, &lag_sections)
+                .map_err(GridStageFailure::Other)?,
         );
         Ok(())
     }
@@ -315,4 +425,201 @@ fn materialize_staffs<DownstreamError>(
         });
     }
     Ok(PreparedStaffHandoff { staffs })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use crate::{
+        cluster_expand::ClusterExpansionParameters,
+        cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
+        cluster_pipeline::ClusterRetrievalParameters,
+        filament_factory::{FilamentFactoryParams, OverlapParams},
+        grid_lifecycle::{GridBuildOutcome, build_grid_info},
+        raster_grid_builder::{RasterGridOtherError, RasterGridParameters},
+        run_table::{Orientation, Run, RunTable},
+    };
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Call {
+        Bars,
+        Complete,
+    }
+
+    #[derive(Default)]
+    struct Downstream {
+        calls: Vec<Call>,
+        finish_count: usize,
+    }
+
+    impl RemainingRasterGridStages for Downstream {
+        type StepError = &'static str;
+        type OtherError = &'static str;
+
+        fn retrieve_lines(
+            &mut self,
+            _state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            panic!("raw adapter owns RetrieveLines")
+        }
+
+        fn process_bars(
+            &mut self,
+            state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            assert!(state.short_sections_added());
+            self.calls.push(Call::Bars);
+            Ok(())
+        }
+
+        fn complete_lines(
+            &mut self,
+            state: &mut RasterGridBuildState,
+        ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
+            assert!(state.short_sections_added());
+            self.calls.push(Call::Complete);
+            Ok(())
+        }
+
+        fn log_swallowed_error(&mut self, _stage: GridBuildStage, _error: &Self::OtherError) {}
+
+        fn finish(&mut self) {
+            self.finish_count += 1;
+        }
+    }
+
+    fn source() -> RunTable {
+        let mut source = RunTable::new(Orientation::Vertical, 100, 61).unwrap();
+        for x in 0..100 {
+            source.add_run(x, Run::new(10, 1)).unwrap();
+            source.add_run(x, Run::new(20, 1)).unwrap();
+            if x <= 20 || x >= 40 {
+                source.add_run(x, Run::new(30, 1)).unwrap();
+            }
+            source.add_run(x, Run::new(40, 1)).unwrap();
+            source.add_run(x, Run::new(50, 1)).unwrap();
+        }
+        source
+    }
+
+    fn raw_parameters() -> RawPrimaryPassParameters {
+        let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
+        let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
+        let merge = ClusterMergePassParameters::new(compatibility, 0, 1).unwrap();
+        let retrieval = ClusterRetrievalParameters::new(
+            10,
+            BTreeSet::from([5]),
+            expansion,
+            merge,
+            0.0,
+            0.0,
+            0.0,
+            1,
+            0,
+            None,
+            1,
+        )
+        .unwrap();
+        RawPrimaryPassParameters {
+            factory: FilamentFactoryParams {
+                interline: 10,
+                min_core_section_length: 1,
+                min_section_aspect: 1.0,
+                max_coord_gap: 5.0,
+                max_pos_gap: 1.0,
+                max_pos_gap_for_slope: 1.0,
+                max_gap_slope: 0.1,
+                min_length_for_delta_slope: 10.0,
+                max_delta_slope: 0.1,
+            },
+            overlap: OverlapParams {
+                probe_width: 2,
+                max_overlap_delta_pos: 1.0,
+                max_thickness: 2.0,
+                max_overlap_space: 0.0,
+                max_expansion_space: 0.0,
+                max_involving_length: 10.0,
+                max_consistent_ratio: 2.0,
+            },
+            sampling_dx: 20,
+            minimum_delta_y: 9,
+            maximum_delta_y: 11,
+            retrieval,
+        }
+    }
+
+    fn raster_parameters() -> RasterGridParameters {
+        RasterGridParameters {
+            max_fore: 2,
+            ledger_thickness: 1.0,
+            minimum_horizontal_run_length: 10,
+            maximum_vertical_run_shift: 1,
+        }
+    }
+
+    fn lines_parameters() -> LinesCoordinatorParameters {
+        LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap()
+    }
+
+    #[test]
+    fn raster_lag_retrieve_lines_materializes_split_middle_staff_in_stage_order() {
+        let stages = RawProductionRetrieveLines::new(
+            raw_parameters(),
+            lines_parameters(),
+            Downstream::default(),
+        );
+        let mut builder = HeadlessRasterGridBuilder::new(source(), raster_parameters(), stages);
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        let handoff = builder
+            .stages()
+            .prepared_staff_handoff()
+            .expect("prepared staff handoff");
+        assert_eq!(handoff.staffs.len(), 1);
+        assert_eq!(handoff.staffs[0].lines.len(), 5);
+        assert_eq!(
+            handoff.staffs[0]
+                .lines
+                .iter()
+                .filter(|line| line.filament.sections().len() == 2)
+                .count(),
+            1
+        );
+        assert_eq!(
+            builder.stages().downstream().calls,
+            [Call::Bars, Call::Complete]
+        );
+        assert_eq!(builder.stages().downstream().finish_count, 1);
+    }
+
+    #[test]
+    fn malformed_raw_parameters_keep_create_lag_prefix_and_stop_at_retrieve_lines() {
+        let mut invalid = raw_parameters();
+        invalid.sampling_dx = 0;
+        let stages =
+            RawProductionRetrieveLines::new(invalid, lines_parameters(), Downstream::default());
+        let mut builder = HeadlessRasterGridBuilder::new(source(), raster_parameters(), stages);
+
+        let outcome = build_grid_info(&mut builder).unwrap();
+        assert!(matches!(
+            outcome,
+            GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::RetrieveLines,
+                error: RasterGridOtherError::Collaborator(ProductionRetrieveLinesError::Raw(_)),
+            }
+        ));
+        assert!(builder.state().run_tables().is_some());
+        assert!(builder.state().initial_lags().is_some());
+        assert!(builder.state().horizontal_lag().is_some());
+        assert!(!builder.state().short_sections_added());
+        assert!(builder.stages().primary().is_none());
+        assert!(builder.stages().prepared_staff_handoff().is_none());
+        assert!(builder.stages().downstream().calls.is_empty());
+        assert_eq!(builder.stages().downstream().finish_count, 1);
+    }
 }
