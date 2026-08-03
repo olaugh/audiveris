@@ -26,7 +26,7 @@ use audiveris_image::{
         ShortProjection, StaffProjectionRequest, check_lines_root_transition,
         refine_right_end_transition, select_blank,
     },
-    run_table::{Orientation, Run, RunTable},
+    run_table::{Orientation, Run, RunTable, dispatch_grid_runs},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
@@ -213,7 +213,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 59] = [
+const VECTOR_KEYS: [&str; 60] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -237,6 +237,7 @@ const VECTOR_KEYS: [&str; 59] = [
     "grid.staff-projector-lines-root.synthetic=",
     "grid.staff-projector-result-ops.synthetic=",
     "runs=",
+    "grid.run-dispatch.synthetic=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
     "grid.filament-factory.synthetic=",
@@ -1039,6 +1040,28 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         runs.total_run_count(),
         runs.weight(),
         runs.run_at(6, 0).ok_or("fixture run not found")?
+    ));
+
+    let mut dispatch_source = RunTable::new(Orientation::Vertical, 5, 8)?;
+    for (position, run) in [
+        (0, Run::new(0, 2)),
+        (0, Run::new(4, 3)),
+        (1, Run::new(1, 4)),
+        (3, Run::new(0, 1)),
+        (3, Run::new(3, 2)),
+        (4, Run::new(2, 5)),
+    ] {
+        dispatch_source.add_run(position, run)?;
+    }
+    let (dispatch_horizontal, dispatch_long) = dispatch_grid_runs(&dispatch_source, 2, 1.2)?;
+    lines.push(format!(
+        "grid.run-dispatch.synthetic=source:{}/{};long:{}/{};horizontal:{}/{}",
+        dispatch_source.total_run_count(),
+        dispatch_source.weight(),
+        dispatch_long.total_run_count(),
+        dispatch_long.weight(),
+        dispatch_horizontal.total_run_count(),
+        dispatch_horizontal.weight()
     ));
 
     let mut section_runs = RunTable::new(Orientation::Horizontal, 9, 6)?;

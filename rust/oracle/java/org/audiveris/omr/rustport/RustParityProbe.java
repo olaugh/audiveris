@@ -30,6 +30,7 @@ import org.audiveris.omr.lag.BasicLag;
 import org.audiveris.omr.lag.JunctionRatioPolicy;
 import org.audiveris.omr.lag.Lag;
 import org.audiveris.omr.lag.Lags;
+import org.audiveris.omr.lag.LagManager;
 import org.audiveris.omr.lag.Section;
 import org.audiveris.omr.lag.SectionFactory;
 import org.audiveris.omr.math.AreaUtil;
@@ -610,6 +611,33 @@ public final class RustParityProbe
         runs.addRun(1, new Run(0, 1));
         runs.addRun(1, new Run(4, 2));
         System.out.println("runs=" + runs.getTotalRunCount() + "/" + runs.getWeight() + "/" + runs.getRunAt(6, 0));
+
+        RunTable dispatchSource = new RunTable(Orientation.VERTICAL, 5, 8);
+        dispatchSource.addRun(0, new Run(0, 2));
+        dispatchSource.addRun(0, new Run(4, 3));
+        dispatchSource.addRun(1, new Run(1, 4));
+        dispatchSource.addRun(3, new Run(0, 1));
+        dispatchSource.addRun(3, new Run(3, 2));
+        dispatchSource.addRun(4, new Run(2, 5));
+        Book dispatchBook = new Book(Path.of("grid-run-dispatch.synthetic"));
+        SheetStub dispatchStub = new SheetStub(dispatchBook, 1);
+        dispatchBook.addStub(dispatchStub);
+        Sheet dispatchSheet = new Sheet(dispatchStub, dispatchSource);
+        dispatchSheet.setScale(new Scale(
+                new Scale.InterlineScale(10, 10, 10),
+                new Scale.LineScale(1, 2, 2),
+                null,
+                null,
+                null));
+        LagManager dispatchManager = dispatchSheet.getLagManager();
+        RunTable dispatchLong = new RunTable(Orientation.VERTICAL, 5, 8);
+        RunTable dispatchHorizontal = dispatchManager.dispatchRuns(dispatchSource, dispatchLong);
+        System.out.println(
+                "grid.run-dispatch.synthetic=source:"
+                        + dispatchSource.getTotalRunCount() + "/" + dispatchSource.getWeight()
+                        + ";long:" + dispatchLong.getTotalRunCount() + "/" + dispatchLong.getWeight()
+                        + ";horizontal:" + dispatchHorizontal.getTotalRunCount() + "/"
+                        + dispatchHorizontal.getWeight());
 
         RunTable sectionRuns = new RunTable(Orientation.HORIZONTAL, 9, 6);
         sectionRuns.addRun(0, new Run(1, 3));
