@@ -13,6 +13,7 @@ use crate::{
     line_completion::{
         LineCompletionExecutor, LineCompletionStage, complete_lines as run_line_completion,
     },
+    line_endpoints::PreparedStaffEndPoints,
     line_section_dispatch::dispatch_horizontal_sections,
     prepared_bars::{PreparedBarsHandoff, PreparedBarsStage},
     prepared_lines::{
@@ -34,6 +35,9 @@ pub struct PreparedCompletionState {
     pub binary_buffer: Option<RunTable>,
     pub thick_section_ids: Vec<usize>,
     pub thin_section_ids: Vec<usize>,
+    /// Java `defineEndPoints` results in completed-staff order. A failure
+    /// retains only the fully applied staff prefix.
+    pub defined_endpoints: Vec<PreparedStaffEndPoints>,
     pub completed_stages: Vec<LineCompletionStage>,
 }
 
@@ -207,6 +211,7 @@ where
             binary_buffer: None,
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
+            defined_endpoints: Vec::new(),
             completed_stages: Vec::new(),
         });
         let mut executor = CompletionAdapter {
