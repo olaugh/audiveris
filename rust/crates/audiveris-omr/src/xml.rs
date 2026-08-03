@@ -22,6 +22,8 @@ const LOGICAL_PART_ELEMENT: &[u8] = b"logical-part";
 const SHEETS_SELECTION_ELEMENT: &[u8] = b"sheets-selection";
 const DEPRECATED_BEAM_SPECIFICATION_ELEMENT: &[u8] = b"beam-specification";
 const DEPRECATED_OCR_LANGUAGES_ELEMENT: &[u8] = b"ocr-languages";
+const PARAMETERS_ELEMENT: &[u8] = b"parameters";
+const INTERLINE_ELEMENT: &[u8] = b"interline";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -70,6 +72,7 @@ pub struct BookXml {
     sheets_selection: Option<String>,
     deprecated_beam_specification: Option<i32>,
     deprecated_ocr_languages: Option<String>,
+    book_parameters: Option<BookParameterScalars>,
     sheet_stubs: Vec<SheetStub>,
     score_refs: Vec<ScoreRef>,
 }
@@ -92,6 +95,7 @@ impl BookXml {
         let mut sheets_selection = None;
         let mut deprecated_beam_specification = None;
         let mut deprecated_ocr_languages = None;
+        let mut book_parameters = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
@@ -111,6 +115,8 @@ impl BookXml {
         let mut active_sheets_selection: Option<String> = None;
         let mut active_deprecated_beam_specification: Option<String> = None;
         let mut active_deprecated_ocr_languages: Option<String> = None;
+        let mut active_book_parameters = false;
+        let mut active_book_interline: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -120,6 +126,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_book_interline.is_some() {
+                        return Err(BookXmlError::UnexpectedBookInterlineContent);
+                    }
                     if active_deprecated_ocr_languages.is_some() {
                         return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
                     }
@@ -190,6 +199,16 @@ impl BookXml {
                     {
                         begin_deprecated_ocr_languages(&deprecated_ocr_languages)?;
                         active_deprecated_ocr_languages = Some(String::new());
+                    } else if depth == 1 && element.name().as_ref() == PARAMETERS_ELEMENT {
+                        begin_book_parameters(&book_parameters)?;
+                        book_parameters = Some(BookParameterScalars::default());
+                        active_book_parameters = true;
+                    } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == INTERLINE_ELEMENT
+                    {
+                        begin_book_interline(&book_parameters)?;
+                        active_book_interline = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -297,6 +316,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_book_interline.is_some() {
+                        return Err(BookXmlError::UnexpectedBookInterlineContent);
+                    }
                     if active_deprecated_ocr_languages.is_some() {
                         return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
                     }
@@ -367,6 +389,15 @@ impl BookXml {
                     {
                         begin_deprecated_ocr_languages(&deprecated_ocr_languages)?;
                         deprecated_ocr_languages = Some(String::new());
+                    } else if depth == 1 && element.name().as_ref() == PARAMETERS_ELEMENT {
+                        begin_book_parameters(&book_parameters)?;
+                        book_parameters = Some(BookParameterScalars::default());
+                    } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == INTERLINE_ELEMENT
+                    {
+                        begin_book_interline(&book_parameters)?;
+                        set_book_interline(&mut book_parameters, "")?;
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -463,6 +494,18 @@ impl BookXml {
                     }
                 }
                 Event::End(element) => {
+                    if depth == 3
+                        && element.name().as_ref() == INTERLINE_ELEMENT
+                        && let Some(text) = active_book_interline.take()
+                    {
+                        set_book_interline(&mut book_parameters, &text)?;
+                    }
+                    if depth == 2
+                        && element.name().as_ref() == PARAMETERS_ELEMENT
+                        && active_book_parameters
+                    {
+                        active_book_parameters = false;
+                    }
                     if depth == 2
                         && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
                         && let Some(text) = active_deprecated_ocr_languages.take()
@@ -562,6 +605,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_book_interline.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_interline.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::Text(text) if active_deprecated_ocr_languages.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -656,6 +705,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_book_interline.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_interline.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::CData(text) if active_deprecated_ocr_languages.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -726,6 +781,9 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_book_interline.is_some() => {
+                    return Err(BookXmlError::UnexpectedBookInterlineContent);
+                }
                 Event::GeneralRef(_) if active_deprecated_ocr_languages.is_some() => {
                     return Err(BookXmlError::UnexpectedDeprecatedOcrLanguagesContent);
                 }
@@ -784,6 +842,11 @@ impl BookXml {
                         sheet_number: page.sheet_number,
                         sheet_page_id: page.sheet_page_id,
                     });
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_book_interline.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedBookInterlineContent);
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_deprecated_ocr_languages.is_some() =>
@@ -850,6 +913,7 @@ impl BookXml {
             sheets_selection,
             deprecated_beam_specification,
             deprecated_ocr_languages,
+            book_parameters,
             sheet_stubs,
             score_refs,
         })
@@ -915,6 +979,12 @@ impl BookXml {
         self.deprecated_ocr_languages.as_deref()
     }
 
+    /// Present modern Book parameter container, if explicitly persisted.
+    #[must_use]
+    pub const fn book_parameters(&self) -> Option<&BookParameterScalars> {
+        self.book_parameters.as_ref()
+    }
+
     /// Direct child sheet stubs in document order.
     #[must_use]
     pub fn sheet_stubs(&self) -> &[SheetStub] {
@@ -931,6 +1001,20 @@ impl BookXml {
     #[must_use]
     pub fn original_bytes(&self) -> &[u8] {
         &self.original
+    }
+}
+
+/// Narrow modern Book parameter view without resolving inherited defaults.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BookParameterScalars {
+    interline: Option<i32>,
+}
+
+impl BookParameterScalars {
+    /// Explicit Book-scope interline override; absent means inherit from global scope.
+    #[must_use]
+    pub const fn interline_specific(&self) -> Option<i32> {
+        self.interline
     }
 }
 
@@ -1435,6 +1519,14 @@ pub enum BookXmlError {
     DuplicateDeprecatedOcrLanguages,
     /// The deprecated OCR-language scalar contains markup or an entity reference.
     UnexpectedDeprecatedOcrLanguagesContent,
+    /// A book repeats its direct modern parameter container.
+    DuplicateBookParameters,
+    /// The Book parameter container repeats its interline override.
+    DuplicateBookInterline,
+    /// A specific Book interline override is not a Java `int`.
+    InvalidBookInterline(String),
+    /// The typed Book interline scalar contains markup or an entity reference.
+    UnexpectedBookInterlineContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1724,6 +1816,24 @@ impl fmt::Display for BookXmlError {
             }
             Self::UnexpectedDeprecatedOcrLanguagesContent => {
                 write!(formatter, "book ocr-languages contains non-text content")
+            }
+            Self::DuplicateBookParameters => {
+                write!(formatter, "book has duplicate parameter containers")
+            }
+            Self::DuplicateBookInterline => {
+                write!(formatter, "book parameters repeat interline")
+            }
+            Self::InvalidBookInterline(value) => {
+                write!(
+                    formatter,
+                    "book parameters have invalid interline {value:?}"
+                )
+            }
+            Self::UnexpectedBookInterlineContent => {
+                write!(
+                    formatter,
+                    "book parameter interline contains non-text content"
+                )
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -2052,6 +2162,36 @@ fn begin_deprecated_ocr_languages(current: &Option<String>) -> Result<(), BookXm
     if current.is_some() {
         return Err(BookXmlError::DuplicateDeprecatedOcrLanguages);
     }
+    Ok(())
+}
+
+fn begin_book_parameters(current: &Option<BookParameterScalars>) -> Result<(), BookXmlError> {
+    if current.is_some() {
+        return Err(BookXmlError::DuplicateBookParameters);
+    }
+    Ok(())
+}
+
+fn begin_book_interline(current: &Option<BookParameterScalars>) -> Result<(), BookXmlError> {
+    if current
+        .as_ref()
+        .and_then(BookParameterScalars::interline_specific)
+        .is_some()
+    {
+        return Err(BookXmlError::DuplicateBookInterline);
+    }
+    Ok(())
+}
+
+fn set_book_interline(
+    parameters: &mut Option<BookParameterScalars>,
+    text: &str,
+) -> Result<(), BookXmlError> {
+    let value = text
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| BookXmlError::InvalidBookInterline(text.to_owned()))?;
+    parameters.as_mut().unwrap().interline = Some(value);
     Ok(())
 }
 
@@ -3962,6 +4102,70 @@ mod tests {
             assert_eq!(
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::UnexpectedDeprecatedOcrLanguagesContent
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_absent_inherited_and_specific_book_interline_states() {
+        let absent = BookXml::parse(br#"<book/>"#).unwrap();
+        assert_eq!(absent.book_parameters(), None);
+
+        let inherited_xml = br#"<book><parameters/></book>"#;
+        let inherited = BookXml::parse(inherited_xml).unwrap();
+        assert_eq!(
+            inherited.book_parameters().unwrap().interline_specific(),
+            None
+        );
+        assert_eq!(inherited.original_bytes(), inherited_xml);
+
+        let specific_xml = br#"<book><parameters><interline> -2147483648 </interline><future/></parameters><beam-specification>7</beam-specification></book>"#;
+        let specific = BookXml::parse(specific_xml).unwrap();
+        assert_eq!(
+            specific.book_parameters().unwrap().interline_specific(),
+            Some(i32::MIN)
+        );
+        assert_eq!(specific.deprecated_beam_specification(), Some(7));
+        assert_eq!(specific.original_bytes(), specific_xml);
+    }
+
+    #[test]
+    fn reads_cdata_and_ignores_non_direct_book_interline_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><f:parameters><interline>99</interline></f:parameters><sheet number="1"><parameters><interline>88</interline></parameters></sheet><parameters><future><interline>77</interline></future><f:interline>66</f:interline><interline>1<![CDATA[2]]></interline></parameters></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            book.book_parameters().unwrap().interline_specific(),
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_duplicate_or_non_text_book_interline() {
+        for invalid in ["", "not-a-number", "2147483648", "-2147483649"] {
+            let xml =
+                format!("<book><parameters><interline>{invalid}</interline></parameters></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidBookInterline(invalid.to_owned())
+            );
+        }
+        assert_eq!(
+            BookXml::parse(br#"<book><parameters/><parameters/></book>"#).unwrap_err(),
+            BookXmlError::DuplicateBookParameters
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book><parameters><interline>1</interline><interline>2</interline></parameters></book>"#).unwrap_err(),
+            BookXmlError::DuplicateBookInterline
+        );
+        for content in ["<future/>", "&#49;", "<!--1-->", "<?pick 1?>"] {
+            let xml =
+                format!("<book><parameters><interline>{content}</interline></parameters></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedBookInterlineContent
             );
         }
     }
