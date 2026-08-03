@@ -240,6 +240,76 @@ pub fn plan_vertical_inters(
     plans
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectorInterKind {
+    Bracket,
+    Barline(PeakWidthClass),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConnectionInterPlan {
+    pub edge: PeakEdgeId,
+    pub top: StaffPeakKey,
+    pub bottom: StaffPeakKey,
+    pub kind: ConnectorInterKind,
+    pub grade: f64,
+    pub endpoints_complete: bool,
+    pub add_endpoint_support: bool,
+    pub freeze_and_extend_bar_column: bool,
+}
+
+/// Dependency-light decision half of Java
+/// `BarsRetriever.createConnectionInters`.
+///
+/// Only concrete connections produce connectors, brace connections are skipped,
+/// and a good ordinary bar connector freezes/extends its sibling column at the
+/// production threshold of `0.65`. SIG vertex/edge insertion stays with the caller.
+#[must_use]
+pub fn plan_connection_inters(
+    graph: &PeakGraph<BarAlignment>,
+    mut has_inter: impl FnMut(StaffPeakKey) -> bool,
+) -> Vec<ConnectionInterPlan> {
+    const GOOD_BAR_CONNECTOR_GRADE: f64 = 0.65;
+
+    graph
+        .edges()
+        .iter()
+        .filter(|edge| edge.relation().kind() == BarAlignmentKind::Connection)
+        .filter_map(|edge| {
+            let top_peak = graph
+                .vertex(edge.source())
+                .expect("peak graph edges reference present vertices");
+            if top_peak.is_brace() {
+                return None;
+            }
+            let kind = if top_peak.is_bracket() {
+                ConnectorInterKind::Bracket
+            } else {
+                ConnectorInterKind::Barline(if top_peak.is_set(StaffPeakAttribute::Thick) {
+                    PeakWidthClass::Thick
+                } else {
+                    PeakWidthClass::Thin
+                })
+            };
+            let endpoints_complete = has_inter(edge.source()) && has_inter(edge.target());
+            let is_bar = matches!(kind, ConnectorInterKind::Barline(_));
+            let grade = edge.relation().grade();
+            Some(ConnectionInterPlan {
+                edge: edge.id(),
+                top: edge.source(),
+                bottom: edge.target(),
+                kind,
+                grade,
+                endpoints_complete,
+                add_endpoint_support: endpoints_complete,
+                freeze_and_extend_bar_column: endpoints_complete
+                    && is_bar
+                    && grade >= GOOD_BAR_CONNECTOR_GRADE,
+            })
+        })
+        .collect()
+}
+
 /// Java `getGroups`: collect maximal adjacent peak runs separated by at most
 /// `maximum_double_bar_gap`, omitting singleton runs.
 ///
@@ -1327,25 +1397,37 @@ mod tests {
         bottom: StaffPeakKey,
         kind: BarAlignmentKind,
     ) -> BarAlignment {
+        graded_graph_relation(id, top, bottom, kind, 0.9)
+    }
+
+    fn graded_graph_relation(
+        id: usize,
+        top: StaffPeakKey,
+        bottom: StaffPeakKey,
+        kind: BarAlignmentKind,
+        grade: f64,
+    ) -> BarAlignment {
         use crate::bar_alignment::{AlignmentPeak, BarImpacts};
 
         let alignment = BarAlignment::new(
-            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), 0.9).unwrap(),
+            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), grade).unwrap(),
             AlignmentPeak::new(
                 PeakId::new(id + 100),
                 bottom.staff_id(),
                 bottom.start(),
-                0.9,
+                grade,
             )
             .unwrap(),
             0.0,
             0.0,
-            BarImpacts::alignment(0.9, 0.9).unwrap(),
+            BarImpacts::alignment(grade, grade).unwrap(),
         )
         .unwrap();
         match kind {
             BarAlignmentKind::Alignment => alignment,
-            BarAlignmentKind::Connection => BarAlignment::connection(&alignment, 0.9, 0.9).unwrap(),
+            BarAlignmentKind::Connection => {
+                BarAlignment::connection(&alignment, grade, grade).unwrap()
+            }
         }
     }
 
@@ -1634,6 +1716,114 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn connection_inter_plans_filter_structure_and_gate_bar_extension_at_java_grade() {
+        let ordinary_alignment_top = peak(1, 1, 1);
+        let ordinary_alignment_bottom = peak(2, 1, 1);
+        let mut brace_top = peak(1, 5, 5);
+        brace_top.set(StaffPeakAttribute::Brace);
+        let brace_bottom = peak(2, 5, 5);
+        let mut bracket_top = peak(1, 10, 12);
+        bracket_top.set(StaffPeakAttribute::BracketTop);
+        let bracket_bottom = peak(2, 10, 12);
+        let mut thick_top = peak(1, 20, 23);
+        thick_top.set(StaffPeakAttribute::Thick);
+        let thick_bottom = peak(2, 20, 23);
+        let thin_top = peak(1, 30, 30);
+        let thin_bottom = peak(2, 30, 30);
+        let missing_top = peak(1, 40, 40);
+        let missing_bottom = peak(2, 40, 40);
+        let values = [
+            ordinary_alignment_top,
+            ordinary_alignment_bottom,
+            brace_top,
+            brace_bottom,
+            bracket_top,
+            bracket_bottom,
+            thick_top,
+            thick_bottom,
+            thin_top,
+            thin_bottom,
+            missing_top,
+            missing_bottom,
+        ];
+        let keys = values.each_ref().map(StaffPeak::key);
+        let mut graph = PeakGraph::new();
+        for value in values {
+            graph.add_vertex(value);
+        }
+        graph
+            .add_edge(
+                keys[0],
+                keys[1],
+                graded_graph_relation(1, keys[0], keys[1], BarAlignmentKind::Alignment, 0.9),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[2],
+                keys[3],
+                graded_graph_relation(2, keys[2], keys[3], BarAlignmentKind::Connection, 0.9),
+            )
+            .unwrap();
+        let bracket_edge = graph
+            .add_edge(
+                keys[4],
+                keys[5],
+                graded_graph_relation(3, keys[4], keys[5], BarAlignmentKind::Connection, 0.9),
+            )
+            .unwrap();
+        let thick_edge = graph
+            .add_edge(
+                keys[6],
+                keys[7],
+                graded_graph_relation(4, keys[6], keys[7], BarAlignmentKind::Connection, 0.8125),
+            )
+            .unwrap();
+        let thin_edge = graph
+            .add_edge(
+                keys[8],
+                keys[9],
+                graded_graph_relation(5, keys[8], keys[9], BarAlignmentKind::Connection, 0.8),
+            )
+            .unwrap();
+        let missing_edge = graph
+            .add_edge(
+                keys[10],
+                keys[11],
+                graded_graph_relation(6, keys[10], keys[11], BarAlignmentKind::Connection, 0.9),
+            )
+            .unwrap();
+
+        let plans = plan_connection_inters(&graph, |key| key != keys[11]);
+        assert_eq!(plans.len(), 4);
+        assert_eq!(plans[0].edge, bracket_edge);
+        assert_eq!(plans[0].kind, ConnectorInterKind::Bracket);
+        assert!(plans[0].endpoints_complete);
+        assert!(plans[0].add_endpoint_support);
+        assert!(!plans[0].freeze_and_extend_bar_column);
+
+        assert_eq!(plans[1].edge, thick_edge);
+        assert_eq!(
+            plans[1].kind,
+            ConnectorInterKind::Barline(PeakWidthClass::Thick)
+        );
+        assert_eq!(plans[1].grade, 0.65);
+        assert!(plans[1].freeze_and_extend_bar_column);
+
+        assert_eq!(plans[2].edge, thin_edge);
+        assert_eq!(
+            plans[2].kind,
+            ConnectorInterKind::Barline(PeakWidthClass::Thin)
+        );
+        assert!(!plans[2].freeze_and_extend_bar_column);
+
+        assert_eq!(plans[3].edge, missing_edge);
+        assert!(!plans[3].endpoints_complete);
+        assert!(!plans[3].add_endpoint_support);
+        assert!(!plans[3].freeze_and_extend_bar_column);
     }
 
     #[test]
