@@ -25,6 +25,7 @@ use audiveris_image::{
 };
 use audiveris_testkit::CanonicalVectors;
 use std::{
+    collections::BTreeSet,
     env,
     error::Error,
     ffi::OsStr,
@@ -200,7 +201,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 45] = [
+const VECTOR_KEYS: [&str; 46] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -219,6 +220,7 @@ const VECTOR_KEYS: [&str; 45] = [
     "grid.filament-factory.overlap=",
     "grid.line-cluster.synthetic=",
     "grid.line-cluster-index.synthetic=",
+    "grid.line-cluster-lifecycle.synthetic=",
     "grid.bar-column.synthetic=",
     "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
@@ -781,6 +783,84 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .map(|(x, y)| format!("{x:.6},{y:.6}"))
             .collect::<Vec<_>>()
             .join(";")
+    ));
+    let mut merge_destination =
+        LineCluster::new(10, FilamentId::new(10), staff_filament(0, 10, 20, 10)?)?;
+    let merge_destination_bottom =
+        LineCluster::new(10, FilamentId::new(30), staff_filament(0, 30, 20, 10)?)?;
+    merge_destination.merge_with(merge_destination_bottom, 2)?;
+    let mut merge_source =
+        LineCluster::new(10, FilamentId::new(40), staff_filament(25, 20, 20, 10)?)?;
+    let merge_source_absorbed =
+        LineCluster::new(10, FilamentId::new(41), staff_filament(50, 20, 20, 10)?)?;
+    merge_source.merge_with(merge_source_absorbed, 0)?;
+    let merge_source_bottom =
+        LineCluster::new(10, FilamentId::new(50), staff_filament(25, 30, 20, 10)?)?;
+    merge_source.merge_with(merge_source_bottom, 1)?;
+    merge_destination.merge_with(merge_source, 1)?;
+    let merged_lifecycle_lines = merge_destination
+        .lines()
+        .map(|(position, line)| {
+            Ok(format!(
+                "{position}:{}:{}",
+                line.filament().sections().len(),
+                line.filament().true_length()?
+            ))
+        })
+        .collect::<Result<Vec<_>, FilamentError>>()?
+        .join(",");
+
+    let mut renumber_cluster =
+        LineCluster::new(10, FilamentId::new(10), staff_filament(0, 20, 20, 10)?)?;
+    renumber_cluster.merge_with(
+        LineCluster::new(10, FilamentId::new(1), staff_filament(0, 0, 20, 10)?)?,
+        -2,
+    )?;
+    renumber_cluster.merge_with(
+        LineCluster::new(10, FilamentId::new(40), staff_filament(0, 50, 20, 10)?)?,
+        5,
+    )?;
+    renumber_cluster.renumber_lines();
+    let renumbered_positions = renumber_cluster
+        .lines()
+        .map(|(position, _)| position.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let trim_specs = [
+        (1, 0, 10),
+        (2, 10, 20),
+        (3, 20, 30),
+        (4, 30, 40),
+        (5, 40, 20),
+        (6, 50, 20),
+        (7, 60, 20),
+    ];
+    let trim_filament = |index: usize| -> Result<StaffFilament, FilamentError> {
+        let (_, y, length) = trim_specs[index];
+        staff_filament(0, y, length, 10)
+    };
+    let mut trim_cluster = LineCluster::new(10, FilamentId::new(3), trim_filament(2)?)?;
+    for (index, delta) in [(0, -2), (1, 1), (3, 3), (4, 4), (5, 5), (6, 6)] {
+        let (id, _, _) = trim_specs[index];
+        trim_cluster.merge_with(
+            LineCluster::new(10, FilamentId::new(id), trim_filament(index)?)?,
+            delta,
+        )?;
+    }
+    let trimmed = trim_cluster.trim(&BTreeSet::from([5]), 0.5)?;
+    let trimmed_ids = trimmed
+        .iter()
+        .map(|line| line.primary_id().value().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let kept_trim_lines = trim_cluster
+        .lines()
+        .map(|(position, line)| format!("{position}:{}", line.primary_id().value()))
+        .collect::<Vec<_>>()
+        .join(",");
+    lines.push(format!(
+        "grid.line-cluster-lifecycle.synthetic=merge:{merged_lifecycle_lines};renumber:{renumbered_positions};trimRemoved:{trimmed_ids};trimKept:{kept_trim_lines}"
     ));
     let staff_ids = [4, 5, 6].map(StaffId::new);
     let top_peak = BarPeak::new(PeakId::new(1), staff_ids[0], 2.0, 10.5, false, true)?;

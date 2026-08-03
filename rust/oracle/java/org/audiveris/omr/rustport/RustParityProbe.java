@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 import ij.process.ByteProcessor;
 
@@ -390,6 +391,102 @@ public final class RustParityProbe
                         + ";lines:" + String.join(",", indexedLines)
                         + ";starts:" + points(indexedCluster.getStarts())
                         + ";stops:" + points(indexedCluster.getStops()));
+
+        LineCluster mergeDestination = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(0, 10, 20, 10));
+        mergeDestination.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(0, 30, 20, 10)), 2);
+        LineCluster mergeSource = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(25, 20, 20, 10));
+        mergeSource.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(50, 20, 20, 10)), 0);
+        mergeSource.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(25, 30, 20, 10)), 1);
+        mergeDestination.mergeWith(mergeSource, 1);
+        List<String> mergedLifecycleLines = new ArrayList<>();
+        for (StaffFilament lifecycleLine : mergeDestination.getLines()) {
+            mergedLifecycleLines.add(lifecycleLine.getClusterPos() + ":"
+                    + lifecycleLine.getMembers().size()
+                    + ":" + lifecycleLine.getTrueLength());
+        }
+
+        LineCluster renumberCluster = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(0, 20, 20, 10));
+        renumberCluster.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(0, 0, 20, 10)), -2);
+        renumberCluster.mergeWith(new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                staffFilament(0, 50, 20, 10)), 5);
+        renumberCluster.renumberLines();
+        List<String> renumberedPositions = new ArrayList<>();
+        for (StaffFilament lifecycleLine : renumberCluster.getLines()) {
+            renumberedPositions.add(Integer.toString(lifecycleLine.getClusterPos()));
+        }
+
+        List<StaffFilament> trimLogical = List.of(
+                staffFilament(0, 0, 10, 10),
+                staffFilament(0, 10, 20, 10),
+                staffFilament(0, 20, 30, 10),
+                staffFilament(0, 30, 40, 10),
+                staffFilament(0, 40, 20, 10),
+                staffFilament(0, 50, 20, 10),
+                staffFilament(0, 60, 20, 10));
+        LineCluster trimCluster = new LineCluster(
+                factoryScale,
+                factoryScale.getInterlineScale(),
+                trimLogical.get(2));
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(0)), -2);
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(1)), 1);
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(3)), 3);
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(4)), 4);
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(5)), 5);
+        trimCluster.mergeWith(new LineCluster(
+                factoryScale, factoryScale.getInterlineScale(), trimLogical.get(6)), 6);
+        List<StaffFilament> trimmed = trimCluster.trim(new TreeSet<>(List.of(5)), 0.5);
+        List<String> trimmedIds = new ArrayList<>();
+        for (StaffFilament lifecycleLine : trimmed) {
+            for (int i = 0; i < trimLogical.size(); i++) {
+                if (lifecycleLine == trimLogical.get(i)) {
+                    trimmedIds.add(Integer.toString(i + 1));
+                    break;
+                }
+            }
+        }
+        List<String> keptTrimLines = new ArrayList<>();
+        for (StaffFilament lifecycleLine : trimCluster.getLines()) {
+            for (int i = 0; i < trimLogical.size(); i++) {
+                if (lifecycleLine == trimLogical.get(i)) {
+                    keptTrimLines.add(lifecycleLine.getClusterPos() + ":" + (i + 1));
+                    break;
+                }
+            }
+        }
+        System.out.println(
+                "grid.line-cluster-lifecycle.synthetic=merge:"
+                        + String.join(",", mergedLifecycleLines)
+                        + ";renumber:" + String.join(",", renumberedPositions)
+                        + ";trimRemoved:" + String.join(",", trimmedIds)
+                        + ";trimKept:" + String.join(",", keptTrimLines));
 
         Book columnBook = new Book(Path.of("bar-column.synthetic"));
         SheetStub columnStub = new SheetStub(columnBook, 1);
