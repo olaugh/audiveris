@@ -130,6 +130,90 @@ pub struct PeakConstructionRequest {
     pub added_chunk: i32,
 }
 
+/// Java `StaffProjector.PeakMode` controls whether the numeric scan uses
+/// full-height or half-height peak evidence. `InitialHalf` currently has the
+/// same behavior as `Half`, matching the disabled mode-reset block in Java.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionPeakMode {
+    Full,
+    InitialHalf,
+    Half,
+}
+
+impl ProjectionPeakMode {
+    const fn is_half(self) -> bool {
+        matches!(self, Self::InitialHalf | Self::Half)
+    }
+}
+
+/// Controls Java `StaffProjector.browseRange` without transferring ownership
+/// of its sheet or staff.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakRangeRequest {
+    pub range_start: i32,
+    pub range_stop: i32,
+    pub half_mode: bool,
+    pub minimum_derivative_up: i32,
+    pub minimum_derivative_down: i32,
+    pub added_chunk: i32,
+}
+
+impl PeakRangeRequest {
+    #[must_use]
+    pub const fn new(
+        range_start: i32,
+        range_stop: i32,
+        half_mode: bool,
+        minimum_derivative_up: i32,
+        minimum_derivative_down: i32,
+        added_chunk: i32,
+    ) -> Self {
+        Self {
+            range_start,
+            range_stop,
+            half_mode,
+            minimum_derivative_up,
+            minimum_derivative_down,
+            added_chunk,
+        }
+    }
+}
+
+/// Controls the pure portion of Java `StaffProjector.findPeaksInRange`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakScanRequest {
+    pub x_min: i32,
+    pub x_max: i32,
+    pub mode: ProjectionPeakMode,
+    pub minimum_count: i32,
+    pub minimum_derivative_up: i32,
+    pub minimum_derivative_down: i32,
+    pub added_chunk: i32,
+}
+
+impl PeakScanRequest {
+    #[must_use]
+    pub const fn new(
+        x_min: i32,
+        x_max: i32,
+        mode: ProjectionPeakMode,
+        minimum_count: i32,
+        minimum_derivative_up: i32,
+        minimum_derivative_down: i32,
+        added_chunk: i32,
+    ) -> Self {
+        Self {
+            x_min,
+            x_max,
+            mode,
+            minimum_count,
+            minimum_derivative_up,
+            minimum_derivative_down,
+            added_chunk,
+        }
+    }
+}
+
 impl PeakConstructionRequest {
     #[must_use]
     pub const fn new(
@@ -848,6 +932,189 @@ impl ShortProjection {
         }))
     }
 
+    /// Pure numeric composition of Java `StaffProjector.browseRange`.
+    ///
+    /// Derivative rises and falls can split a broad count range into multiple
+    /// candidates. Candidate construction can abstain independently for each
+    /// subrange; core pixels, staff ordinates, grade acceptance, graph mutation,
+    /// and deskew ownership deliberately remain with later stages.
+    pub fn browse_peak_range(
+        &self,
+        request: PeakRangeRequest,
+        params: PeakConstructionParams,
+    ) -> Result<Vec<ProjectionPeakCandidate>, ProjectionError> {
+        if request.range_start < self.start
+            || request.range_stop > self.stop
+            || request.range_start > request.range_stop
+        {
+            return Err(ProjectionError::InvalidPeakRange {
+                x_start: request.range_start,
+                x_stop: request.range_stop,
+            });
+        }
+
+        let mut candidates = Vec::new();
+        let mut start = Some(request.range_start);
+        let mut x = request.range_start;
+
+        while x <= request.range_stop {
+            let derivative = self.derivative(x);
+            if derivative >= request.minimum_derivative_up {
+                // Retain the last strictly improving rising derivative.
+                let mut maximum_derivative = derivative;
+                let mut xx = x.wrapping_add(1);
+                while xx <= request.range_stop {
+                    let next_derivative = self.derivative(xx);
+                    if next_derivative > maximum_derivative {
+                        maximum_derivative = next_derivative;
+                        x = xx;
+                    } else {
+                        break;
+                    }
+                    xx = xx.wrapping_add(1);
+                }
+                start = Some(x);
+            } else if derivative <= request.minimum_derivative_down.wrapping_neg() {
+                // Java advances across equal falling derivatives (`<=`). Its
+                // sheet clamp makes range_stop+1 observable only inside the
+                // projection domain.
+                let mut minimum_derivative = derivative;
+                let ending_limit = request
+                    .range_stop
+                    .wrapping_add(1)
+                    .clamp(self.start, self.stop);
+                let mut xx = x.wrapping_add(1);
+                while xx <= ending_limit {
+                    let next_derivative = self.derivative(xx);
+                    if next_derivative <= minimum_derivative {
+                        minimum_derivative = next_derivative;
+                        x = xx;
+                    } else {
+                        break;
+                    }
+                    xx = xx.wrapping_add(1);
+                }
+
+                if x == request.range_stop {
+                    x = request.range_stop.wrapping_add(1);
+                }
+                let stop = x;
+                if let Some(peak_start) = start
+                    && peak_start < stop
+                {
+                    let construction = PeakConstructionRequest::new(
+                        peak_start,
+                        stop.wrapping_sub(1),
+                        request.half_mode,
+                        request.minimum_derivative_up,
+                        request.minimum_derivative_down,
+                        request.added_chunk,
+                    );
+                    if let Some(candidate) = self.construct_peak_candidate(construction, params)? {
+                        candidates.push(candidate);
+                    }
+                    start = None;
+                }
+            }
+            x = x.wrapping_add(1);
+        }
+
+        // Java sends a still-open range directly to createPeak.
+        if let Some(peak_start) = start {
+            let construction = PeakConstructionRequest::new(
+                peak_start,
+                request.range_stop,
+                request.half_mode,
+                request.minimum_derivative_up,
+                request.minimum_derivative_down,
+                request.added_chunk,
+            );
+            if let Some(candidate) = self.construct_peak_candidate(construction, params)? {
+                candidates.push(candidate);
+            }
+        }
+
+        Ok(candidates)
+    }
+
+    /// Pure range-scanning composition of Java
+    /// `StaffProjector.findPeaksInRange`.
+    ///
+    /// Contiguous values at or above `minimum_count` are delegated to
+    /// [`Self::browse_peak_range`]. The right-edge case goes straight through
+    /// candidate construction, exactly as in Java. `accept` is the dependency
+    /// boundary where the caller supplies staff ordinates and runs core/grade
+    /// acceptance. It returns `None` for a rejected tentative candidate or an
+    /// accepted value of its choosing. Only accepted candidates advance the
+    /// scan cursor to their refined stop, which preserves Java's non-overlap
+    /// rule without moving sheet, staff, graph, or deskew ownership here.
+    pub fn find_peaks_in_range<T, F>(
+        &self,
+        request: PeakScanRequest,
+        params: PeakConstructionParams,
+        mut accept: F,
+    ) -> Result<Vec<T>, ProjectionError>
+    where
+        F: FnMut(ProjectionPeakCandidate) -> Result<Option<T>, ProjectionError>,
+    {
+        if request.x_min < self.start || request.x_max > self.stop || request.x_min > request.x_max
+        {
+            return Err(ProjectionError::InvalidPeakRange {
+                x_start: request.x_min,
+                x_stop: request.x_max,
+            });
+        }
+
+        let mut candidates = Vec::new();
+        let half_mode = request.mode.is_half();
+        let mut start = None;
+        let mut stop = None;
+        let mut x = request.x_min;
+
+        while x <= request.x_max {
+            if self.value(x) >= request.minimum_count {
+                start.get_or_insert(x);
+                stop = Some(x);
+            } else if let (Some(range_start), Some(range_stop)) = (start, stop) {
+                let range = PeakRangeRequest::new(
+                    range_start,
+                    range_stop,
+                    half_mode,
+                    request.minimum_derivative_up,
+                    request.minimum_derivative_down,
+                    request.added_chunk,
+                );
+                for candidate in self.browse_peak_range(range, params)? {
+                    if let Some(accepted) = accept(candidate)? {
+                        x = x.max(candidate.stop);
+                        candidates.push(accepted);
+                    }
+                }
+                start = None;
+                stop = None;
+            }
+            x = x.wrapping_add(1);
+        }
+
+        if let (Some(range_start), Some(range_stop)) = (start, stop) {
+            let construction = PeakConstructionRequest::new(
+                range_start,
+                range_stop,
+                half_mode,
+                request.minimum_derivative_up,
+                request.minimum_derivative_down,
+                request.added_chunk,
+            );
+            if let Some(candidate) = self.construct_peak_candidate(construction, params)?
+                && let Some(accepted) = accept(candidate)?
+            {
+                candidates.push(accepted);
+            }
+        }
+
+        Ok(candidates)
+    }
+
     /// Java `StaffProjector.getChunk`: minimum projection immediately outside
     /// a refined peak side, or zero when the full probe leaves the image.
     fn chunk_minimum(&self, x0: i32, direction: i32, chunk_width: i32) -> i32 {
@@ -1460,6 +1727,139 @@ mod tests {
             PeakConstructionParams::new(refinement, 0),
             Err(ProjectionError::InvalidMaximumBarWidth(0))
         );
+    }
+
+    #[test]
+    fn peak_range_browse_splits_derivative_peaks_and_keeps_right_edge() {
+        let mut projection = ShortProjection::new(0, 12).unwrap();
+        for (position, value) in [
+            (2, 8),
+            (3, 10),
+            (4, 10),
+            (5, 3),
+            (8, 8),
+            (9, 10),
+            (10, 10),
+            (11, 3),
+        ] {
+            projection.increment(position, value);
+        }
+        let refinement = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        let candidates = projection
+            .browse_peak_range(PeakRangeRequest::new(2, 10, false, 4, 4, 0), params)
+            .unwrap();
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|peak| (peak.raw_start, peak.raw_stop, peak.start, peak.stop))
+                .collect::<Vec<_>>(),
+            [(2, 4, 2, 4), (8, 10, 8, 10)]
+        );
+    }
+
+    #[test]
+    fn peak_range_browse_preserves_derivative_ties_and_mutated_cursor() {
+        let mut projection = ShortProjection::new(0, 8).unwrap();
+        for (position, value) in [(2, 4), (3, 10), (4, 10), (5, 5)] {
+            projection.increment(position, value);
+        }
+        let refinement = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        let candidates = projection
+            .browse_peak_range(PeakRangeRequest::new(2, 6, false, 4, 4, 0), params)
+            .unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        let peak = candidates[0];
+        // The rising scan moves from +4 at x=2 to the strictly better +6 at
+        // x=3. Equal -5 derivatives at x=5 and x=6 both advance the falling
+        // cursor, then x==rangeStop becomes stop=rangeStop+1.
+        assert_eq!((peak.raw_start, peak.raw_stop), (3, 6));
+        assert_eq!((peak.start, peak.stop), (3, 4));
+    }
+
+    #[test]
+    fn count_range_scan_composes_closed_and_ongoing_peak_paths() {
+        let mut projection = ShortProjection::new(0, 12).unwrap();
+        for (position, value) in [
+            (2, 8),
+            (3, 10),
+            (4, 10),
+            (5, 3),
+            (8, 8),
+            (9, 10),
+            (10, 10),
+            (11, 3),
+        ] {
+            projection.increment(position, value);
+        }
+        let refinement = PeakRefinementParams::new(10, 2, 5, 2, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        let request = PeakScanRequest::new(0, 10, ProjectionPeakMode::Full, 8, 4, 4, 0);
+        let candidates = projection
+            .find_peaks_in_range(request, params, |candidate| Ok(Some(candidate)))
+            .unwrap();
+
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|peak| (peak.raw_start, peak.raw_stop, peak.start, peak.stop))
+                .collect::<Vec<_>>(),
+            [(2, 4, 2, 4), (8, 10, 8, 10)]
+        );
+
+        let half = projection
+            .find_peaks_in_range(
+                PeakScanRequest::new(0, 4, ProjectionPeakMode::InitialHalf, 8, 4, 4, 0),
+                params,
+                |candidate| Ok(Some(candidate)),
+            )
+            .unwrap();
+        assert_eq!(half.len(), 1);
+        assert!(half[0].left.derivative_grade > candidates[0].left.derivative_grade);
+
+        assert_eq!(
+            projection.find_peaks_in_range(
+                PeakScanRequest::new(-1, 4, ProjectionPeakMode::Half, 8, 4, 4, 0),
+                params,
+                |candidate| Ok(Some(candidate)),
+            ),
+            Err(ProjectionError::InvalidPeakRange {
+                x_start: -1,
+                x_stop: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn rejected_tentative_peak_does_not_skip_the_next_count_range() {
+        let mut projection = ShortProjection::new(0, 6).unwrap();
+        for (position, value) in [(2, 10), (3, 7), (4, 10)] {
+            projection.increment(position, value);
+        }
+        let refinement = PeakRefinementParams::new(10, 2, 5, 3, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 4).unwrap();
+        let mut tentative_ranges = Vec::new();
+        let accepted = projection
+            .find_peaks_in_range(
+                PeakScanRequest::new(0, 5, ProjectionPeakMode::Full, 8, 3, 3, 0),
+                params,
+                |candidate| {
+                    tentative_ranges.push((candidate.raw_start, candidate.stop));
+                    Ok((candidate.raw_start == 4).then_some(candidate))
+                },
+            )
+            .unwrap();
+
+        // The first tentative candidate refines through x=4, beyond the x=3
+        // count-threshold break. Since core/grade acceptance rejects it, Java
+        // does not advance x and the high-count run at x=4 is still visited.
+        assert_eq!(tentative_ranges, [(2, 4), (4, 4)]);
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].raw_start, 4);
     }
 
     #[test]
