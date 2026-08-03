@@ -38,13 +38,15 @@ use audiveris_image::{
         BarsCoordinatorError, BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult,
         BarsPurgeParameters, BarsPurgeResult, BarsRightCClefParameters, BarsRightCClefResult,
         BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
-        process_bars_after_braces, process_bars_peak_purges, process_bars_right_ends_and_c_clefs,
-        process_bars_through_too_far_left,
+        BarsWidthInterParameters, BarsWidthInterResult, process_bars_after_braces,
+        process_bars_peak_purges, process_bars_right_ends_and_c_clefs,
+        process_bars_through_too_far_left, process_bars_widths_and_inters,
     },
     bars_logic::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
     },
     filament::{FilamentError, FilamentGeometry},
+    grid_sig::GridSig,
     lines_coordinator::StaffCandidateKind,
     peak_graph::PeakGraph,
     prepared_lines::{PreparedStaff, PreparedStaffHandoff},
@@ -198,6 +200,12 @@ pub enum RawSystemGroupingBoundary {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
+    /// Width classes and vertical bar/bracket interpretations now exist.
+    /// Java next promotes cross-staff connection interpretations.
+    NeedsConnectionInters {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
 }
 
 /// Ordered peak graph plus the system-grouping boundary reached from it.
@@ -289,6 +297,7 @@ pub struct RawBarsPrefixParameters {
 pub struct RawBarsPrefixSystem {
     pub state: BarsSystemState,
     pub result: BarsPrefixResult,
+    pub sig: GridSig,
 }
 
 #[derive(Clone, Debug)]
@@ -364,6 +373,22 @@ pub struct RawRightCClefSystemReport {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RawRightCClefStageReport {
     pub systems: Vec<RawRightCClefSystemReport>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawWidthInterStageParameters {
+    pub bars: BarsWidthInterParameters,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawWidthInterSystemReport {
+    pub system_id: usize,
+    pub result: BarsWidthInterResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RawWidthInterStageReport {
+    pub systems: Vec<RawWidthInterSystemReport>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -980,7 +1005,11 @@ pub fn bridge_raw_projectors_through_bars_prefix(
             .map_err(RawProjectorAdapterError::Bars)?;
         let result = process_bars_through_too_far_left(&mut state, parameters.bars)
             .map_err(RawProjectorAdapterError::Bars)?;
-        bars.push(RawBarsPrefixSystem { state, result });
+        bars.push(RawBarsPrefixSystem {
+            state,
+            result,
+            sig: GridSig::default(),
+        });
     }
     systems
         .split
@@ -1338,6 +1367,48 @@ pub fn continue_raw_bars_through_right_ends_and_c_clefs(
         .bars
         .projectors
         .grouping = RawSystemGroupingBoundary::NeedsWidthPartition {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+/// Continue through Java `partitionWidths` and `createInters` for every
+/// system, retaining glyph/inter identities and peak backlinks in each
+/// system-owned SIG.
+pub fn continue_raw_bars_through_widths_and_inters(
+    bridge: &mut RawBarsPrefixBridge,
+    parameters: RawWidthInterStageParameters,
+) -> Result<RawWidthInterStageReport, RawProjectorAdapterError> {
+    let mut report = RawWidthInterStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let result = process_bars_widths_and_inters(
+            &mut raw_system.state,
+            &mut raw_system.sig,
+            parameters.bars,
+        )
+        .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawWidthInterSystemReport { system_id, result });
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsConnectionInters {
         staff_ids: bridge
             .systems
             .split
@@ -2150,6 +2221,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsWidthPartition { .. } => {
                 panic!("one retained staff does not require width partition grouping")
             }
+            RawSystemGroupingBoundary::NeedsConnectionInters { .. } => {
+                panic!("one retained staff does not require connection-inter grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2746,6 +2820,70 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsWidthPartition {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let expected_inter_peaks = prefix.bars[0]
+            .state
+            .staffs()
+            .iter()
+            .flat_map(|staff| staff.peaks())
+            .filter(|peak| !peak.is_brace())
+            .map(StaffPeak::key)
+            .collect::<Vec<_>>();
+        let width_report = continue_raw_bars_through_widths_and_inters(
+            &mut prefix,
+            RawWidthInterStageParameters {
+                bars: BarsWidthInterParameters {
+                    maximum_double_bar_gap: 2,
+                    interline: 10,
+                    minimum_normalized_width_delta: 0.2,
+                    foreground_thickness: 2,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(width_report.systems.len(), 1);
+        assert_eq!(
+            width_report.systems[0]
+                .result
+                .vertical_inters()
+                .iter()
+                .map(|plan| plan.peak)
+                .collect::<Vec<_>>(),
+            expected_inter_peaks
+        );
+        assert_eq!(
+            width_report.systems[0].result.promoted_inters().len(),
+            expected_inter_peaks.len()
+        );
+        for peak in expected_inter_peaks {
+            assert!(prefix.bars[0].sig.inter_of(peak).is_some());
+            let projector = prefix.bars[0]
+                .state
+                .staffs()
+                .iter()
+                .flat_map(|staff| staff.peaks())
+                .find(|candidate| candidate.key() == peak)
+                .unwrap();
+            let graph = prefix.bars[0].state.graph().vertex(peak).unwrap();
+            assert_eq!(
+                projector.attributes().collect::<Vec<_>>(),
+                graph.attributes().collect::<Vec<_>>()
+            );
+        }
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsConnectionInters {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]

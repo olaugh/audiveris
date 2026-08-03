@@ -19,6 +19,7 @@ use crate::{
         peaks_too_far_left, plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks,
         start_column_candidate, unaligned_peak_keys, validate_start_column,
     },
+    grid_sig::{GridInterId, GridSig},
     peak_graph::{PeakGraph, PeakGraphError},
     projection::{ProjectionBlank, check_lines_root_transition, refine_right_end_transition},
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -376,6 +377,38 @@ pub struct BarsRightCClefResult {
     right_updates: Vec<RightEndUpdate>,
     c_clef_detections: Vec<(StaffId, CClefDetection)>,
     removed_peaks: Vec<RemovedPeak>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarsWidthInterParameters {
+    pub maximum_double_bar_gap: i32,
+    pub interline: i32,
+    pub minimum_normalized_width_delta: f64,
+    pub foreground_thickness: i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarsWidthInterResult {
+    width_assignments: Vec<PeakWidthAssignment>,
+    vertical_inters: Vec<VerticalInterPlan>,
+    promoted_inters: Vec<GridInterId>,
+}
+
+impl BarsWidthInterResult {
+    #[must_use]
+    pub fn width_assignments(&self) -> &[PeakWidthAssignment] {
+        &self.width_assignments
+    }
+
+    #[must_use]
+    pub fn vertical_inters(&self) -> &[VerticalInterPlan] {
+        &self.vertical_inters
+    }
+
+    #[must_use]
+    pub fn promoted_inters(&self) -> &[GridInterId] {
+        &self.promoted_inters
+    }
 }
 
 impl BarsRightCClefResult {
@@ -904,6 +937,54 @@ pub fn process_bars_right_ends_and_c_clefs(
     Ok(result)
 }
 
+/// Continue Java `BarsRetriever.process` through `partitionWidths` and
+/// `createInters`.
+///
+/// Width attributes are mirrored into projector and graph peaks before the
+/// exact system/staff/peak traversal registers one glyph and one SIG inter per
+/// non-brace peak. The peak-to-inter backlink is retained by `GridSig`.
+pub fn process_bars_widths_and_inters(
+    state: &mut BarsSystemState,
+    sig: &mut GridSig,
+    parameters: BarsWidthInterParameters,
+) -> Result<BarsWidthInterResult, BarsCoordinatorError> {
+    if parameters.maximum_double_bar_gap < 0
+        || parameters.interline <= 0
+        || !parameters.minimum_normalized_width_delta.is_finite()
+        || parameters.minimum_normalized_width_delta < 0.0
+        || parameters.foreground_thickness < 0
+    {
+        return Err(BarsCoordinatorError::InvalidWidthInterParameters);
+    }
+
+    let staff_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.peaks.clone())
+        .collect::<Vec<_>>();
+    let width_assignments = classify_bar_peak_widths(
+        &staff_peaks,
+        parameters.maximum_double_bar_gap,
+        parameters.interline,
+        parameters.minimum_normalized_width_delta,
+    );
+    apply_width_assignments(state, &width_assignments);
+
+    let staff_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.peaks.clone())
+        .collect::<Vec<_>>();
+    let vertical_inters = plan_vertical_inters(&staff_peaks, parameters.foreground_thickness);
+    let promoted_inters = sig.promote_vertical_inters(&vertical_inters);
+
+    Ok(BarsWidthInterResult {
+        width_assignments,
+        vertical_inters,
+        promoted_inters,
+    })
+}
+
 fn process_prefix(
     next: &mut BarsSystemState,
     parameters: BarsCoordinatorParameters,
@@ -1246,6 +1327,7 @@ pub enum BarsCoordinatorError {
     InvalidRightCClefParameters,
     MissingRightEvidence(StaffId),
     InvalidRightEvidence(StaffId),
+    InvalidWidthInterParameters,
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
     Graph(PeakGraphError),
@@ -1332,6 +1414,9 @@ impl fmt::Display for BarsCoordinatorError {
                     "invalid right-end evidence for staff {}",
                     staff.value()
                 )
+            }
+            Self::InvalidWidthInterParameters => {
+                formatter.write_str("invalid width-partition/inter parameters")
             }
             Self::InvalidColumnIndex(index) => {
                 write!(formatter, "invalid bar column index {index}")
@@ -1964,5 +2049,120 @@ mod tests {
         );
         assert!(state.graph().contains_vertex(top_first.key()));
         assert!(state.graph().contains_vertex(top_second.key()));
+    }
+
+    #[test]
+    fn width_partition_precedes_stable_glyph_and_inter_registration() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(0.9, 0.8, 1.0, 1.0, 0.7, 0.6);
+        let mut thin = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 10, 10, impacts).unwrap();
+        thin.compute_deskewed_center(|point| point).unwrap();
+        let thick = peak(1, 12, 14);
+        let isolated = peak(1, 30, 31);
+        let mut graph = PeakGraph::new();
+        for value in [&thin, &thick, &isolated] {
+            graph.add_vertex(value.clone());
+        }
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![thin.clone(), thick.clone(), isolated.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut state = BarsSystemState::new(1, vec![staff], graph).unwrap();
+        let mut sig = GridSig::default();
+
+        let result = process_bars_widths_and_inters(
+            &mut state,
+            &mut sig,
+            BarsWidthInterParameters {
+                maximum_double_bar_gap: 2,
+                interline: 10,
+                minimum_normalized_width_delta: 0.2,
+                foreground_thickness: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.width_assignments().len(), 3);
+        assert!(state.staffs()[0].peaks()[0].is_set(StaffPeakAttribute::Thin));
+        assert!(state.staffs()[0].peaks()[1].is_set(StaffPeakAttribute::Thick));
+        assert!(state.staffs()[0].peaks()[2].is_set(StaffPeakAttribute::Thin));
+        for peak in [&thin, &thick, &isolated] {
+            assert_eq!(
+                state
+                    .graph()
+                    .vertex(peak.key())
+                    .unwrap()
+                    .attributes()
+                    .collect::<Vec<_>>(),
+                state.staffs()[0]
+                    .peaks()
+                    .iter()
+                    .find(|candidate| candidate.key() == peak.key())
+                    .unwrap()
+                    .attributes()
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(
+            result
+                .vertical_inters()
+                .iter()
+                .map(|plan| plan.peak)
+                .collect::<Vec<_>>(),
+            vec![thin.key(), thick.key(), isolated.key()]
+        );
+        assert_eq!(
+            result
+                .promoted_inters()
+                .iter()
+                .map(|id| id.value())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(sig.inter_of(thin.key()), Some(result.promoted_inters()[0]));
+        assert_eq!(
+            sig.node(result.promoted_inters()[0])
+                .unwrap()
+                .intrinsic_grade(),
+            impacts.grade()
+        );
+    }
+
+    #[test]
+    fn invalid_width_parameters_do_not_mutate_peaks_or_sig() {
+        let bar = peak(1, 10, 11);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(bar.clone());
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![bar.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut state = BarsSystemState::new(1, vec![staff], graph).unwrap();
+        let mut sig = GridSig::default();
+
+        assert_eq!(
+            process_bars_widths_and_inters(
+                &mut state,
+                &mut sig,
+                BarsWidthInterParameters {
+                    maximum_double_bar_gap: 2,
+                    interline: 0,
+                    minimum_normalized_width_delta: 0.2,
+                    foreground_thickness: 2,
+                },
+            ),
+            Err(BarsCoordinatorError::InvalidWidthInterParameters)
+        );
+        assert!(!state.staffs()[0].peaks()[0].is_set(StaffPeakAttribute::Thin));
+        assert!(!state.staffs()[0].peaks()[0].is_set(StaffPeakAttribute::Thick));
+        assert!(sig.nodes_in_order().next().is_none());
+        assert_eq!(sig.inter_of(bar.key()), None);
     }
 }
