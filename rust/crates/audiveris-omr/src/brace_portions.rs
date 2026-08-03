@@ -10,8 +10,9 @@
 use std::{error::Error, fmt};
 
 use audiveris_image::{
-    bar_alignment::VerticalSide,
-    bar_column::StaffId,
+    bar_alignment::{BarAlignment, VerticalSide},
+    bar_column::{BarColumn, BarColumnError, BarPeak, PeakId, StaffId},
+    peak_graph::{PeakGraph, PeakGraphError},
     staff_peak::{StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
@@ -68,6 +69,12 @@ pub struct BracePortionReport {
     pub replacements: Vec<BraceReplacement>,
 }
 
+#[derive(Clone, Debug)]
+pub struct BraceColumnSet {
+    pub system_id: usize,
+    pub columns: Vec<BarColumn>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BracePortionError {
     InvalidParameters,
@@ -75,6 +82,10 @@ pub enum BracePortionError {
     InvalidStaff(StaffId),
     MissingStartPeak { staff: StaffId, index: usize },
     Probe(String),
+    MissingReplacementPeak(StaffPeakKey),
+    MissingProjectorPeak(StaffPeakKey),
+    Column(BarColumnError),
+    Graph(PeakGraphError),
 }
 
 impl fmt::Display for BracePortionError {
@@ -89,11 +100,142 @@ impl fmt::Display for BracePortionError {
                 staff.value()
             ),
             Self::Probe(message) => write!(formatter, "brace probe failed: {message}"),
+            Self::MissingReplacementPeak(peak) => {
+                write!(formatter, "brace replacement peak is absent: {peak:?}")
+            }
+            Self::MissingProjectorPeak(peak) => {
+                write!(formatter, "brace projector peak is absent: {peak:?}")
+            }
+            Self::Column(source) => write!(formatter, "brace column replacement failed: {source}"),
+            Self::Graph(source) => write!(formatter, "brace graph replacement failed: {source}"),
         }
     }
 }
 
-impl Error for BracePortionError {}
+impl Error for BracePortionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Column(source) => Some(source),
+            Self::Graph(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// Apply Java `replacePeak` for each mistaken-first-bar intent. Column
+/// replacement happens first, followed by projector insertion, graph vertex
+/// insertion, incoming copies, outgoing copies, and finally old removal.
+/// Errors retain the exact successful mutation prefix.
+pub fn apply_brace_replacements(
+    graph: &mut PeakGraph<BarAlignment>,
+    systems: &mut [BracePortionSystem],
+    columns: &mut [BraceColumnSet],
+    replacements: &[BraceReplacement],
+) -> Result<(), BracePortionError> {
+    for replacement in replacements {
+        let system = systems
+            .iter_mut()
+            .find(|system| system.system_id == replacement.system_id)
+            .ok_or(BracePortionError::InvalidSystem(replacement.system_id))?;
+        let staff = system
+            .staffs
+            .iter_mut()
+            .find(|staff| staff.staff_id == replacement.staff_id)
+            .ok_or(BracePortionError::InvalidStaff(replacement.staff_id))?;
+        let new_peak = staff
+            .brace_peak
+            .as_ref()
+            .filter(|peak| peak.key() == replacement.new_peak)
+            .cloned()
+            .ok_or(BracePortionError::MissingReplacementPeak(
+                replacement.new_peak,
+            ))?;
+        let old_vertex_index = graph
+            .vertices()
+            .iter()
+            .position(|peak| peak.key() == replacement.old_peak)
+            .ok_or(BracePortionError::MissingProjectorPeak(
+                replacement.old_peak,
+            ))?;
+        let old_id = PeakId::new(old_vertex_index + 1);
+        let new_id = graph
+            .vertices()
+            .iter()
+            .position(|peak| peak.key() == replacement.new_peak)
+            .map_or_else(
+                || PeakId::new(graph.vertices().len() + 1),
+                |index| PeakId::new(index + 1),
+            );
+
+        if let Some(column_set) = columns
+            .iter_mut()
+            .find(|set| set.system_id == replacement.system_id)
+            && let Some(column) = column_set.columns.iter_mut().find(|column| {
+                column
+                    .peaks()
+                    .iter()
+                    .flatten()
+                    .any(|peak| peak.id() == old_id)
+            })
+        {
+            let deskewed =
+                new_peak
+                    .deskewed_center()
+                    .ok_or(BracePortionError::MissingReplacementPeak(
+                        replacement.new_peak,
+                    ))?;
+            let scalar = BarPeak::new(
+                new_id,
+                new_peak.staff_id(),
+                f64::from(new_peak.width()),
+                deskewed.x,
+                new_peak.is_brace(),
+                new_peak.is_staff_end(audiveris_image::staff_peak::HorizontalSide::Left),
+            )
+            .map_err(BracePortionError::Column)?;
+            column.add_peak(scalar).map_err(BracePortionError::Column)?;
+        }
+
+        let projector_index = staff
+            .peaks
+            .iter()
+            .position(|&peak| peak == replacement.old_peak)
+            .ok_or(BracePortionError::MissingProjectorPeak(
+                replacement.old_peak,
+            ))?;
+        staff.peaks.insert(projector_index, replacement.new_peak);
+        graph.add_vertex(new_peak);
+
+        let incoming = graph
+            .incoming_edges(replacement.old_peak)
+            .map_err(BracePortionError::Graph)?
+            .map(|edge| (edge.source(), *edge.relation()))
+            .collect::<Vec<_>>();
+        for (source, relation) in incoming {
+            graph
+                .add_edge(source, replacement.new_peak, relation)
+                .map_err(BracePortionError::Graph)?;
+        }
+        let outgoing = graph
+            .outgoing_edges(replacement.old_peak)
+            .map_err(BracePortionError::Graph)?
+            .map(|edge| (edge.target(), *edge.relation()))
+            .collect::<Vec<_>>();
+        for (target, relation) in outgoing {
+            graph
+                .add_edge(replacement.new_peak, target, relation)
+                .map_err(BracePortionError::Graph)?;
+        }
+        let old_index = staff
+            .peaks
+            .iter()
+            .position(|&peak| peak == replacement.old_peak)
+            .expect("old projector peak remains until final removal");
+        staff.peaks.remove(old_index);
+        graph.remove_vertex(replacement.old_peak);
+    }
+    Ok(())
+}
 
 /// Detect brace portions in system then staff order. A rejected first probe
 /// still triggers Java's fallback window when the start index is at least one.
@@ -247,12 +389,58 @@ fn classify(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audiveris_image::{
+        bar_alignment::{AlignmentPeak, BarImpacts},
+        staff_peak::StaffVerticalImpacts,
+    };
 
     fn peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
         let mut peak = StaffPeak::new(StaffId::new(staff), 10, 20, start, stop).unwrap();
         peak.set(StaffPeakAttribute::Brace);
         peak.compute_deskewed_center(|point| point).unwrap();
         peak
+    }
+
+    fn graded_peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
+        let mut peak = StaffPeak::with_impacts(
+            StaffId::new(staff),
+            staff as i32 * 10,
+            staff as i32 * 10 + 4,
+            start,
+            stop,
+            StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        peak.compute_deskewed_center(|point| point).unwrap();
+        peak
+    }
+
+    fn relation(
+        top: &StaffPeak,
+        bottom: &StaffPeak,
+        top_id: usize,
+        bottom_id: usize,
+    ) -> BarAlignment {
+        let value = |peak: &StaffPeak, id| {
+            AlignmentPeak::with_geometry(
+                PeakId::new(id),
+                peak.staff_id(),
+                peak.start(),
+                peak.width() as usize,
+                peak.top(),
+                peak.bottom(),
+                peak.impacts().unwrap().grade(),
+            )
+            .unwrap()
+        };
+        BarAlignment::new(
+            value(top, top_id),
+            value(bottom, bottom_id),
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0).unwrap(),
+        )
+        .unwrap()
     }
 
     fn parameters() -> BracePortionParameters {
@@ -369,5 +557,133 @@ mod tests {
                 .is_set(StaffPeakAttribute::BraceBottom)
         );
         assert!(systems[0].staffs[2].brace_peak.is_none());
+    }
+
+    #[test]
+    fn replacement_updates_column_then_copies_incoming_and_outgoing_edges() {
+        let top = graded_peak(1, 10, 11);
+        let old = graded_peak(2, 20, 21);
+        let bottom = graded_peak(3, 30, 31);
+        let mut replacement = graded_peak(2, 16, 18);
+        replacement.set(StaffPeakAttribute::Brace);
+        let mut graph = PeakGraph::new();
+        for peak in [&top, &old, &bottom] {
+            graph.add_vertex(peak.clone());
+        }
+        let incoming_relation = relation(&top, &old, 1, 2);
+        let outgoing_relation = relation(&old, &bottom, 2, 3);
+        graph
+            .add_edge(top.key(), old.key(), incoming_relation)
+            .unwrap();
+        graph
+            .add_edge(old.key(), bottom.key(), outgoing_relation)
+            .unwrap();
+        let mut column =
+            BarColumn::new(vec![StaffId::new(1), StaffId::new(2), StaffId::new(3)]).unwrap();
+        column
+            .add_peak(
+                BarPeak::new(PeakId::new(2), StaffId::new(2), 2.0, 20.5, false, false).unwrap(),
+            )
+            .unwrap();
+        let mut columns = [BraceColumnSet {
+            system_id: 1,
+            columns: vec![column],
+        }];
+        let mut systems = [BracePortionSystem {
+            system_id: 1,
+            staffs: vec![BracePortionStaff {
+                staff_id: StaffId::new(2),
+                peaks: vec![old.key()],
+                start_peak_index: Some(0),
+                brace_peak: Some(replacement.clone()),
+            }],
+        }];
+        let intent = BraceReplacement {
+            system_id: 1,
+            staff_id: StaffId::new(2),
+            old_peak: old.key(),
+            new_peak: replacement.key(),
+        };
+        apply_brace_replacements(&mut graph, &mut systems, &mut columns, &[intent]).unwrap();
+
+        assert_eq!(systems[0].staffs[0].peaks, vec![replacement.key()]);
+        assert!(!graph.contains_vertex(old.key()));
+        assert_eq!(graph.vertices().last().unwrap().key(), replacement.key());
+        assert_eq!(graph.edges().len(), 2);
+        assert_eq!(
+            (graph.edges()[0].source(), graph.edges()[0].target()),
+            (top.key(), replacement.key())
+        );
+        assert_eq!(
+            (graph.edges()[1].source(), graph.edges()[1].target()),
+            (replacement.key(), bottom.key())
+        );
+        assert_eq!(*graph.edges()[0].relation(), incoming_relation);
+        assert_eq!(
+            columns[0].columns[0].peaks()[1].unwrap().id(),
+            PeakId::new(4)
+        );
+    }
+
+    #[test]
+    fn duplicate_edge_failure_keeps_column_projector_and_vertex_prefix() {
+        let top = graded_peak(1, 10, 11);
+        let old = graded_peak(2, 20, 21);
+        let mut replacement = graded_peak(2, 16, 18);
+        replacement.set(StaffPeakAttribute::Brace);
+        let mut graph = PeakGraph::new();
+        for peak in [&top, &old, &replacement] {
+            graph.add_vertex(peak.clone());
+        }
+        graph
+            .add_edge(top.key(), old.key(), relation(&top, &old, 1, 2))
+            .unwrap();
+        graph
+            .add_edge(
+                top.key(),
+                replacement.key(),
+                relation(&top, &replacement, 1, 3),
+            )
+            .unwrap();
+        let mut column = BarColumn::new(vec![StaffId::new(1), StaffId::new(2)]).unwrap();
+        column
+            .add_peak(
+                BarPeak::new(PeakId::new(2), StaffId::new(2), 2.0, 20.5, false, false).unwrap(),
+            )
+            .unwrap();
+        let mut columns = [BraceColumnSet {
+            system_id: 1,
+            columns: vec![column],
+        }];
+        let mut systems = [BracePortionSystem {
+            system_id: 1,
+            staffs: vec![BracePortionStaff {
+                staff_id: StaffId::new(2),
+                peaks: vec![old.key()],
+                start_peak_index: Some(0),
+                brace_peak: Some(replacement.clone()),
+            }],
+        }];
+        let intent = BraceReplacement {
+            system_id: 1,
+            staff_id: StaffId::new(2),
+            old_peak: old.key(),
+            new_peak: replacement.key(),
+        };
+        assert!(matches!(
+            apply_brace_replacements(&mut graph, &mut systems, &mut columns, &[intent]),
+            Err(BracePortionError::Graph(
+                PeakGraphError::DuplicateEdge { .. }
+            ))
+        ));
+        assert_eq!(
+            systems[0].staffs[0].peaks,
+            vec![replacement.key(), old.key()]
+        );
+        assert!(graph.contains_vertex(old.key()));
+        assert_eq!(
+            columns[0].columns[0].peaks()[1].unwrap().id(),
+            PeakId::new(3)
+        );
     }
 }
