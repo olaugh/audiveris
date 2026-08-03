@@ -354,6 +354,8 @@ mod tests {
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),
+            sticker_section_ids: Vec::new(),
+            sticker_inclusion_batches: Vec::new(),
             curvature_removals: Vec::new(),
             curvature_recomputations: Vec::new(),
             completed_stages: Vec::new(),

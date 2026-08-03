@@ -29,6 +29,7 @@ use crate::{
     run_table::RunTable,
     section::Section,
     section_completion::PreparedSectionInclusionBatch,
+    sticker_completion::PreparedStickerInclusionBatch,
 };
 
 #[derive(Clone, Debug)]
@@ -52,6 +53,9 @@ pub struct PreparedCompletionState {
     pub discarded_filament_steals: Vec<PreparedDiscardedFilamentSteal>,
     pub discarded_filament_recomputations: Vec<PreparedFilamentRecomputation>,
     pub section_inclusion_batches: Vec<PreparedSectionInclusionBatch>,
+    /// Ordered fixed candidate tally produced by Java `getAllStickers`.
+    pub sticker_section_ids: Vec<usize>,
+    pub sticker_inclusion_batches: Vec<PreparedStickerInclusionBatch>,
     pub curvature_removals: Vec<PreparedCurvatureRemoval>,
     pub curvature_recomputations: Vec<PreparedCurvatureRecomputation>,
     pub completed_stages: Vec<LineCompletionStage>,
@@ -233,6 +237,8 @@ where
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),
+            sticker_section_ids: Vec::new(),
+            sticker_inclusion_batches: Vec::new(),
             curvature_removals: Vec::new(),
             curvature_recomputations: Vec::new(),
             completed_stages: Vec::new(),
