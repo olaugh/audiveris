@@ -36,8 +36,8 @@ use audiveris_image::{
     },
     bars_coordinator::{
         BarsCoordinatorError, BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult,
-        BarsRootEvidence, BarsStaffState, BarsSystemState, process_bars_after_braces,
-        process_bars_through_too_far_left,
+        BarsPurgeParameters, BarsPurgeResult, BarsRootEvidence, BarsStaffState, BarsSystemState,
+        process_bars_after_braces, process_bars_peak_purges, process_bars_through_too_far_left,
     },
     bars_logic::{
         BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
@@ -53,7 +53,7 @@ use audiveris_image::{
         barline_height, has_blank_between, process_staff_projection,
     },
     section::Section,
-    staff_peak::{PeakPoint, StaffPeak, StaffPeakError, StaffPeakKey},
+    staff_peak::{PeakBounds, PeakPoint, StaffPeak, StaffPeakError, StaffPeakKey},
 };
 
 use crate::grid_executor::HeadlessSkew;
@@ -181,6 +181,12 @@ pub enum RawSystemGroupingBoundary {
     /// Bracket ends and connection-backed middle portions are complete. Java
     /// next purges ordinary peaks left of each staff root.
     NeedsLeftPeakPurge {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Left, isolated, and vertically extending peak purges are complete.
+    /// Java next refines every staff's right endpoint.
+    NeedsRightEndRefinement {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -320,6 +326,22 @@ pub struct RawBracketStageReport {
     pub systems: Vec<RawBracketSystemReport>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawPeakPurgeStageParameters {
+    pub purges: BarsPurgeParameters,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawPeakPurgeSystemReport {
+    pub system_id: usize,
+    pub purges: BarsPurgeResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawPeakPurgeStageReport {
+    pub systems: Vec<RawPeakPurgeSystemReport>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -359,6 +381,7 @@ pub enum RawProjectorAdapterError {
     BraceMembers(String),
     BracketSerif(BracketSerifError),
     BracketMiddles(BarsLogicError),
+    FilamentBoundsOverflow(StaffPeakKey),
 }
 
 impl fmt::Display for RawProjectorAdapterError {
@@ -436,6 +459,9 @@ impl fmt::Display for RawProjectorAdapterError {
             Self::BracketSerif(source) => write!(formatter, "bracket serif failed: {source}"),
             Self::BracketMiddles(source) => {
                 write!(formatter, "bracket middle detection failed: {source}")
+            }
+            Self::FilamentBoundsOverflow(peak) => {
+                write!(formatter, "bar filament bounds overflow for {peak:?}")
             }
         }
     }
@@ -1152,6 +1178,73 @@ pub fn continue_raw_bars_through_bracket_middles(
         .bars
         .projectors
         .grouping = RawSystemGroupingBoundary::NeedsLeftPeakPurge {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
+/// Continue through Java `purgeLeftPeaks`, `purgeUnalignedBars`, and
+/// `purgeExtendingPeaks` using the registered bar-stick bounds.
+pub fn continue_raw_bars_through_peak_purges(
+    bridge: &mut RawBarsPrefixBridge,
+    parameters: RawPeakPurgeStageParameters,
+) -> Result<RawPeakPurgeStageReport, RawProjectorAdapterError> {
+    let filament_bounds = bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .sticks
+        .sticks()
+        .iter()
+        .map(|stick| {
+            Ok((
+                stick.peak,
+                PeakBounds {
+                    x: i32::try_from(stick.bounds.x).map_err(|_| {
+                        RawProjectorAdapterError::FilamentBoundsOverflow(stick.peak)
+                    })?,
+                    y: i32::try_from(stick.bounds.y).map_err(|_| {
+                        RawProjectorAdapterError::FilamentBoundsOverflow(stick.peak)
+                    })?,
+                    width: i32::try_from(stick.bounds.width).map_err(|_| {
+                        RawProjectorAdapterError::FilamentBoundsOverflow(stick.peak)
+                    })?,
+                    height: i32::try_from(stick.bounds.height).map_err(|_| {
+                        RawProjectorAdapterError::FilamentBoundsOverflow(stick.peak)
+                    })?,
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+    let mut report = RawPeakPurgeStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let purges =
+            process_bars_peak_purges(&mut raw_system.state, &filament_bounds, parameters.purges)
+                .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawPeakPurgeSystemReport { system_id, purges });
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsRightEndRefinement {
         staff_ids: bridge
             .systems
             .split
@@ -1958,6 +2051,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsLeftPeakPurge { .. } => {
                 panic!("one retained staff does not require left-peak purge grouping")
             }
+            RawSystemGroupingBoundary::NeedsRightEndRefinement { .. } => {
+                panic!("one retained staff does not require right-end refinement grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2485,6 +2581,34 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsLeftPeakPurge {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let purge_report = continue_raw_bars_through_peak_purges(
+            &mut prefix,
+            RawPeakPurgeStageParameters {
+                purges: BarsPurgeParameters {
+                    large_system_staff_count: 10,
+                    maximum_foreground_thickness: 1,
+                    maximum_bar_extension: 5.0,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(purge_report.systems.len(), 1);
+        assert!(purge_report.systems[0].purges.removed_peaks().is_empty());
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsRightEndRefinement {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]

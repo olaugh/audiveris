@@ -10,18 +10,18 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{
-    bar_alignment::{BarAlignment, BarAlignmentKind},
+    bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
     bar_column::{BarColumn, PeakId, PeakRelation, StaffId},
     bars_logic::{
         BarsLogicError, ConnectionInterPlan, PeakWidthAssignment, PeakWidthClass,
         StartColumnStaffFacts, VerticalInterPlan, build_bar_columns_from_graph,
-        classify_bar_peak_widths, peaks_before_staff_start, peaks_too_far_left,
-        plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks, start_column_candidate,
-        unaligned_peak_keys, validate_start_column,
+        classify_bar_peak_widths, extending_peak_keys, peaks_before_staff_start,
+        peaks_too_far_left, plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks,
+        start_column_candidate, unaligned_peak_keys, validate_start_column,
     },
     peak_graph::{PeakGraph, PeakGraphError},
     projection::{ProjectionBlank, check_lines_root_transition},
-    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
+    staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
 #[derive(Clone, Debug)]
@@ -318,7 +318,28 @@ pub enum PeakRemovalStage {
     LeftOfBrace,
     LeftOfStaff,
     Unaligned,
+    ExtendingTop,
+    ExtendingBottom,
     CClef,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarsPurgeParameters {
+    pub large_system_staff_count: usize,
+    pub maximum_foreground_thickness: i32,
+    pub maximum_bar_extension: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BarsPurgeResult {
+    removed_peaks: Vec<RemovedPeak>,
+}
+
+impl BarsPurgeResult {
+    #[must_use]
+    pub fn removed_peaks(&self) -> &[RemovedPeak] {
+        &self.removed_peaks
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -623,6 +644,101 @@ pub fn process_bars_after_braces(
         });
     }
 
+    Ok(result)
+}
+
+/// Continue Java `BarsRetriever.process` through `purgeLeftPeaks`,
+/// `purgeUnalignedBars`, and `purgeExtendingPeaks`.
+///
+/// Registered bar-filament bounds are supplied by stable peak key. Mutations
+/// are non-transactional: a later missing bound preserves every earlier
+/// source-ordered projector, graph, and column removal.
+pub fn process_bars_peak_purges(
+    state: &mut BarsSystemState,
+    filament_bounds: &[(StaffPeakKey, PeakBounds)],
+    parameters: BarsPurgeParameters,
+) -> Result<BarsPurgeResult, BarsCoordinatorError> {
+    if parameters.large_system_staff_count == 0
+        || parameters.maximum_foreground_thickness < 0
+        || !parameters.maximum_bar_extension.is_finite()
+        || parameters.maximum_bar_extension < 0.0
+    {
+        return Err(BarsCoordinatorError::InvalidPurgeParameters);
+    }
+    let id_to_key = state.peak_ids.clone();
+    let mut result = BarsPurgeResult::default();
+
+    for staff_index in 0..state.staffs.len() {
+        let keys = peaks_before_staff_start(
+            &state.staffs[staff_index].peaks,
+            state.staffs[staff_index].left,
+        );
+        remove_keys_and_related_columns_java_order(
+            state,
+            &keys,
+            &id_to_key,
+            PeakRemovalStage::LeftOfStaff,
+            &mut result.removed_peaks,
+        );
+    }
+
+    // The source removes each isolated projector/graph peak directly and does
+    // not call deleteRelatedColumns. Valid post-prefix isolated peaks cannot
+    // belong to a surviving full column.
+    if state.staffs.len() > 1 {
+        for staff_index in 0..state.staffs.len() {
+            let keys = unaligned_peak_keys(&state.staffs[staff_index].peaks, &state.graph, true);
+            remove_keys_without_columns(
+                state,
+                &keys,
+                PeakRemovalStage::Unaligned,
+                &mut result.removed_peaks,
+            );
+        }
+    }
+
+    if state.staffs.len() < parameters.large_system_staff_count && !state.staffs.is_empty() {
+        for (side, staff_index, stage) in [
+            (VerticalSide::Top, 0, PeakRemovalStage::ExtendingTop),
+            (
+                VerticalSide::Bottom,
+                state.staffs.len() - 1,
+                PeakRemovalStage::ExtendingBottom,
+            ),
+        ] {
+            let start_index = state.staffs[staff_index]
+                .peaks
+                .iter()
+                .position(|peak| peak.is_staff_end(HorizontalSide::Left));
+            let first_eligible = start_index.map_or(0, |index| index.saturating_add(1));
+            let mut facts = Vec::with_capacity(state.staffs[staff_index].peaks.len());
+            for (index, peak) in state.staffs[staff_index].peaks.iter().enumerate() {
+                let bounds = if index < first_eligible {
+                    peak.bounds()
+                } else {
+                    filament_bounds
+                        .iter()
+                        .find_map(|(key, bounds)| (*key == peak.key()).then_some(*bounds))
+                        .ok_or(BarsCoordinatorError::MissingFilamentBounds(peak.key()))?
+                };
+                facts.push((peak.clone(), bounds));
+            }
+            let keys = extending_peak_keys(
+                &facts,
+                start_index,
+                parameters.maximum_foreground_thickness,
+                parameters.maximum_bar_extension,
+                side,
+            );
+            remove_keys_and_related_columns_java_order(
+                state,
+                &keys,
+                &id_to_key,
+                stage,
+                &mut result.removed_peaks,
+            );
+        }
+    }
     Ok(result)
 }
 
@@ -963,6 +1079,8 @@ pub enum BarsCoordinatorError {
     MissingBlankEvidence(StaffPeakKey),
     MissingRootEvidence(StaffId),
     InvalidRootEvidence(StaffId),
+    InvalidPurgeParameters,
+    MissingFilamentBounds(StaffPeakKey),
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
     Graph(PeakGraphError),
@@ -1028,6 +1146,10 @@ impl fmt::Display for BarsCoordinatorError {
                     "invalid lines-root evidence for staff {}",
                     staff.value()
                 )
+            }
+            Self::InvalidPurgeParameters => formatter.write_str("invalid bar purge parameters"),
+            Self::MissingFilamentBounds(peak) => {
+                write!(formatter, "missing bar filament bounds for {peak:?}")
             }
             Self::InvalidColumnIndex(index) => {
                 write!(formatter, "invalid bar column index {index}")
@@ -1297,5 +1419,187 @@ mod tests {
                 .unwrap()
                 .is_staff_end(HorizontalSide::Left)
         );
+    }
+
+    #[test]
+    fn peak_purge_slice_preserves_source_stage_and_side_order() {
+        let left = peak(1, 0, 1);
+        let mut top_start = peak(1, 5, 6);
+        top_start.set_staff_end(HorizontalSide::Left);
+        let top_bar = peak(1, 10, 11);
+        let top_unaligned = peak(1, 20, 21);
+        let top_long = peak(1, 30, 31);
+        let mut bottom_start = peak(2, 5, 6);
+        bottom_start.set_staff_end(HorizontalSide::Left);
+        let bottom_bar = peak(2, 10, 11);
+        let bottom_long = peak(2, 30, 31);
+        let mut graph = PeakGraph::new();
+        for value in [
+            &left,
+            &top_start,
+            &top_bar,
+            &top_unaligned,
+            &top_long,
+            &bottom_start,
+            &bottom_bar,
+            &bottom_long,
+        ] {
+            graph.add_vertex(value.clone());
+        }
+        for (top, bottom) in [
+            (top_start.key(), bottom_start.key()),
+            (top_bar.key(), bottom_bar.key()),
+            (top_long.key(), bottom_long.key()),
+        ] {
+            graph
+                .add_edge(top, bottom, connection(top, bottom))
+                .unwrap();
+        }
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    5,
+                    false,
+                    vec![
+                        left.clone(),
+                        top_start,
+                        top_bar.clone(),
+                        top_unaligned.clone(),
+                        top_long.clone(),
+                    ],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    5,
+                    false,
+                    vec![bottom_start, bottom_bar.clone(), bottom_long.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+        let bounds = [
+            (
+                top_bar.key(),
+                PeakBounds {
+                    x: 10,
+                    y: 10,
+                    width: 2,
+                    height: 11,
+                },
+            ),
+            (
+                top_long.key(),
+                PeakBounds {
+                    x: 30,
+                    y: 0,
+                    width: 2,
+                    height: 21,
+                },
+            ),
+            (
+                bottom_bar.key(),
+                PeakBounds {
+                    x: 10,
+                    y: 10,
+                    width: 2,
+                    height: 11,
+                },
+            ),
+            (
+                bottom_long.key(),
+                PeakBounds {
+                    x: 30,
+                    y: 10,
+                    width: 2,
+                    height: 31,
+                },
+            ),
+        ];
+
+        let result = process_bars_peak_purges(
+            &mut state,
+            &bounds,
+            BarsPurgeParameters {
+                large_system_staff_count: 10,
+                maximum_foreground_thickness: 2,
+                maximum_bar_extension: 5.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.removed_peaks(),
+            [
+                RemovedPeak {
+                    peak: left.key(),
+                    stage: PeakRemovalStage::LeftOfStaff
+                },
+                RemovedPeak {
+                    peak: top_unaligned.key(),
+                    stage: PeakRemovalStage::Unaligned,
+                },
+                RemovedPeak {
+                    peak: top_long.key(),
+                    stage: PeakRemovalStage::ExtendingTop,
+                },
+                RemovedPeak {
+                    peak: bottom_long.key(),
+                    stage: PeakRemovalStage::ExtendingBottom,
+                },
+            ]
+        );
+        assert_eq!(state.graph().vertices().len(), 4);
+        assert_eq!(state.staffs()[0].peaks().len(), 2);
+        assert_eq!(state.staffs()[1].peaks().len(), 2);
+    }
+
+    #[test]
+    fn missing_extension_evidence_retains_earlier_left_purge() {
+        let left = peak(1, 0, 1);
+        let mut start = peak(1, 5, 6);
+        start.set_staff_end(HorizontalSide::Left);
+        let bar = peak(1, 10, 11);
+        let mut graph = PeakGraph::new();
+        for value in [&left, &start, &bar] {
+            graph.add_vertex(value.clone());
+        }
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    5,
+                    false,
+                    vec![left.clone(), start, bar.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        assert_eq!(
+            process_bars_peak_purges(
+                &mut state,
+                &[],
+                BarsPurgeParameters {
+                    large_system_staff_count: 10,
+                    maximum_foreground_thickness: 2,
+                    maximum_bar_extension: 5.0,
+                },
+            ),
+            Err(BarsCoordinatorError::MissingFilamentBounds(bar.key()))
+        );
+        assert!(!state.graph().contains_vertex(left.key()));
+        assert_eq!(state.staffs()[0].peaks().len(), 2);
+        assert!(state.graph().contains_vertex(bar.key()));
     }
 }
