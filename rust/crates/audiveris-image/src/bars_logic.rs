@@ -301,6 +301,49 @@ pub fn partial_column_indices_after_start(columns: &[BarColumn]) -> Vec<usize> {
         .collect()
 }
 
+/// Java `extensionOf`: signed filament extension beyond a staff limit.
+#[must_use]
+pub fn peak_extension(
+    peak: &StaffPeak,
+    filament_bounds: PeakBounds,
+    maximum_foreground_thickness: i32,
+    side: VerticalSide,
+) -> f64 {
+    let half_line = f64::from(maximum_foreground_thickness) / 2.0;
+    match side {
+        VerticalSide::Top => f64::from(peak.top()) - half_line - f64::from(filament_bounds.y),
+        VerticalSide::Bottom => {
+            let last_y = filament_bounds
+                .y
+                .wrapping_add(filament_bounds.height)
+                .wrapping_sub(1);
+            f64::from(last_y) - half_line - f64::from(peak.bottom())
+        }
+    }
+}
+
+/// Peak keys selected by Java `purgeExtendingPeaks` for one boundary staff.
+/// A missing start marker makes every peak eligible, matching `iStart == -1`.
+#[must_use]
+pub fn extending_peak_keys(
+    peaks_and_filaments: &[(StaffPeak, PeakBounds)],
+    start_index: Option<usize>,
+    maximum_foreground_thickness: i32,
+    maximum_bar_extension: f64,
+    side: VerticalSide,
+) -> Vec<StaffPeakKey> {
+    let first_eligible = start_index.map_or(0, |index| index.saturating_add(1));
+    peaks_and_filaments
+        .iter()
+        .skip(first_eligible)
+        .filter_map(|(peak, bounds)| {
+            (peak_extension(peak, *bounds, maximum_foreground_thickness, side)
+                > maximum_bar_extension)
+                .then_some(peak.key())
+        })
+        .collect()
+}
+
 /// Java `BarFilamentBuilder.buildFilament` section preselection.
 ///
 /// The caller supplies sections in nondecreasing x order. Intersection uses
@@ -586,6 +629,65 @@ mod tests {
             column(Some(bar(7, 1, false)), Some(bar(8, 2, false))),
         ];
         assert_eq!(partial_column_indices_after_start(&no_start), [0]);
+    }
+
+    #[test]
+    fn extending_peak_purge_is_side_specific_and_strictly_after_start() {
+        let first = peak(1, 0, 1);
+        let start = peak(1, 3, 4);
+        let top_long = peak(1, 6, 7);
+        let bottom_long = peak(1, 9, 10);
+        let facts = vec![
+            (
+                first,
+                PeakBounds {
+                    x: 0,
+                    y: -20,
+                    width: 2,
+                    height: 61,
+                },
+            ),
+            (
+                start,
+                PeakBounds {
+                    x: 3,
+                    y: -20,
+                    width: 2,
+                    height: 61,
+                },
+            ),
+            (
+                top_long.clone(),
+                PeakBounds {
+                    x: 6,
+                    y: -7,
+                    width: 2,
+                    height: 48,
+                },
+            ),
+            (
+                bottom_long.clone(),
+                PeakBounds {
+                    x: 9,
+                    y: 0,
+                    width: 2,
+                    height: 48,
+                },
+            ),
+        ];
+
+        assert_eq!(
+            extending_peak_keys(&facts, Some(1), 2, 5.0, VerticalSide::Top),
+            [top_long.key()]
+        );
+        assert_eq!(
+            extending_peak_keys(&facts, Some(1), 2, 5.0, VerticalSide::Bottom),
+            [bottom_long.key()]
+        );
+        assert_eq!(
+            extending_peak_keys(&facts, None, 2, 5.0, VerticalSide::Top),
+            [facts[0].0.key(), facts[1].0.key(), top_long.key()]
+        );
     }
 
     #[test]
