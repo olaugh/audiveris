@@ -357,9 +357,92 @@ pub struct StaffProjectorProcessRequest<'a> {
 /// downstream diagnostics and orchestration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StaffProjectorProcessOutput {
+    pub staff_id: StaffId,
     pub result: NeutralStaffProjectorResult,
     pub scale_parameters: StaffProjectorScaleParameters,
     pub line_thresholds: StaffLineThresholds,
+}
+
+/// Neutral `PeakGraph.findBarPeaks` registration state. Accepted projectors
+/// remain parallel to retained staves, while graph vertex intents retain first
+/// insertion order and Java `StaffPeak.equals` uniqueness.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarsProjectorRegistry {
+    projectors: Vec<StaffProjectorProcessOutput>,
+    discarded_one_line_staves: Vec<StaffId>,
+    graph_vertex_order: Vec<StaffPeakKey>,
+}
+
+/// Per-staff decision from Java `PeakGraph.findBarPeaks`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectorRegistration {
+    Retained {
+        projector_index: usize,
+        added_graph_vertices: Vec<StaffPeakKey>,
+    },
+    DiscardedOneLine {
+        staff_id: StaffId,
+        peak_count: usize,
+    },
+}
+
+impl BarsProjectorRegistry {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            projectors: Vec::new(),
+            discarded_one_line_staves: Vec::new(),
+            graph_vertex_order: Vec::new(),
+        }
+    }
+
+    /// Adapter for Java `PeakGraph.findBarPeaks` after one staff projector has
+    /// completed. A one-line staff with at most one peak is removed before its
+    /// projector or vertices are registered.
+    pub fn register(
+        &mut self,
+        output: StaffProjectorProcessOutput,
+        is_one_line_staff: bool,
+    ) -> ProjectorRegistration {
+        let peak_count = output.result.peaks.len();
+        if is_one_line_staff && peak_count <= 1 {
+            self.discarded_one_line_staves.push(output.staff_id);
+            return ProjectorRegistration::DiscardedOneLine {
+                staff_id: output.staff_id,
+                peak_count,
+            };
+        }
+
+        let projector_index = self.projectors.len();
+        let mut added_graph_vertices = Vec::new();
+        for peak in &output.result.peaks {
+            let key = peak.key();
+            if !self.graph_vertex_order.contains(&key) {
+                self.graph_vertex_order.push(key);
+                added_graph_vertices.push(key);
+            }
+        }
+        self.projectors.push(output);
+        ProjectorRegistration::Retained {
+            projector_index,
+            added_graph_vertices,
+        }
+    }
+
+    #[must_use]
+    pub fn projectors(&self) -> &[StaffProjectorProcessOutput] {
+        &self.projectors
+    }
+
+    #[must_use]
+    pub fn discarded_one_line_staves(&self) -> &[StaffId] {
+        &self.discarded_one_line_staves
+    }
+
+    #[must_use]
+    pub fn graph_vertex_order(&self) -> &[StaffPeakKey] {
+        &self.graph_vertex_order
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2082,6 +2165,7 @@ where
     )?;
 
     Ok(StaffProjectorProcessOutput {
+        staff_id: request.staff_id,
         result,
         scale_parameters,
         line_thresholds,
@@ -3044,6 +3128,80 @@ mod tests {
             ),
             (5, 6, 0, 4)
         );
+    }
+
+    #[test]
+    fn bars_projector_registry_preserves_staff_filter_and_vertex_order() {
+        let output = |staff_id: StaffId, peaks: Vec<StaffPeak>| StaffProjectorProcessOutput {
+            staff_id,
+            result: NeutralStaffProjectorResult {
+                projection: ShortProjection::new(0, 30).unwrap(),
+                derivative_threshold: 2,
+                all_blanks: Vec::new(),
+                peak_search_bounds: PeakSearchBounds {
+                    x_min: 0,
+                    x_max: 30,
+                },
+                peaks,
+                brace_candidate: None,
+            },
+            scale_parameters: staff_projector_scale_parameters(StaffProjectorScaleRequest {
+                large_interline: 10,
+                staff_specific_interline: 10,
+                is_one_line_staff: false,
+                barline_height: BarlineHeightSpec::Four,
+                ratios: StaffProjectorScaleRatios::java_defaults(),
+            }),
+            line_thresholds: staff_line_thresholds(StaffLineThresholdRequest {
+                line_thicknesses: &[1.0; 5],
+                staff_line_count: 5,
+                foreground_thickness: 1,
+                specific_interline: 10,
+                blank_threshold_ratio: 0.5,
+                chunk_threshold_ratio: 1.2,
+            }),
+        };
+        let staff_1 = StaffId::new(1);
+        let staff_2 = StaffId::new(2);
+        let staff_3 = StaffId::new(3);
+        let lone = StaffPeak::new(staff_2, 0, 4, 5, 5).unwrap();
+        let first = StaffPeak::new(staff_3, 0, 4, 10, 10).unwrap();
+        let second = StaffPeak::new(staff_3, 0, 4, 20, 20).unwrap();
+        let expected_keys = [first.key(), second.key()];
+        let mut registry = BarsProjectorRegistry::new();
+
+        assert_eq!(
+            registry.register(output(staff_1, Vec::new()), false),
+            ProjectorRegistration::Retained {
+                projector_index: 0,
+                added_graph_vertices: Vec::new(),
+            }
+        );
+        assert_eq!(
+            registry.register(output(staff_2, vec![lone]), true),
+            ProjectorRegistration::DiscardedOneLine {
+                staff_id: staff_2,
+                peak_count: 1,
+            }
+        );
+        assert_eq!(
+            registry.register(output(staff_3, vec![first, second]), true),
+            ProjectorRegistration::Retained {
+                projector_index: 1,
+                added_graph_vertices: expected_keys.to_vec(),
+            }
+        );
+
+        assert_eq!(
+            registry
+                .projectors()
+                .iter()
+                .map(|projector| projector.staff_id.value())
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
+        assert_eq!(registry.discarded_one_line_staves(), [staff_2]);
+        assert_eq!(registry.graph_vertex_order(), expected_keys);
     }
 
     #[test]
