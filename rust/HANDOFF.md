@@ -237,11 +237,13 @@ denied, and passed `git diff --check` before commit.
 153. `38e11f34` — transactional, stage-ordered neutral cluster retrieval pipeline.
 154. `88038a1e` — bracket-end detection with injected extension and serif evidence.
 155. `0f391920` — neutral vertical bar/bracket interpretation geometry and kinds.
+156. `78b32c79` — neutral bar/bracket connector plans and good-grade extension gate.
+157. `52559a4b` — stage-ordered cluster passes into typed staff candidates.
 
-At the one-hundred-and-fifty-fifth checkpoint the Rust workspace executes 397 tests:
+At the one-hundred-and-fifty-seventh checkpoint the Rust workspace executes 400 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 253
+- `audiveris-image`: 256
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -307,6 +309,12 @@ and bar/bracket inter geometry/type plans. Neutral `StaffPeak`,
 connection queries, alignment purge, median connection geometry, and brace checks
 without recreating Java object cycles. Promotion into the production SIG and the full
 GRID orchestration remain deliberately unported coupling boundaries.
+
+The neutral LinesRetriever coordinator now executes the main cluster pass, the
+conditional small-interline pass over ID-sorted primary discards, and Java's
+buildStaves purge/layout/right-indentation sequence. It returns typed standard,
+one-line, and tablature staff candidates with median sides and small/short flags while
+leaving sheet ownership and glyph/SIG mutation outside the boundary.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
