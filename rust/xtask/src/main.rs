@@ -19,9 +19,10 @@ use audiveris_image::{
     line_cluster::{FilamentId, LineCluster},
     median,
     projection::{
-        BraceSearchRequest, PeakConstructionParams, PeakConstructionRequest, PeakCoreGeometry,
-        PeakCoreParams, PeakCoreRejection, PeakRefinementParams, PeakRefinementRequest,
-        PeakScanRequest, ProjectionPeakMode, ShortProjection, select_blank,
+        BraceSearchRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
+        PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams, PeakCoreRejection,
+        PeakRefinementParams, PeakRefinementRequest, PeakScanRequest, ProjectionPeakMode,
+        ShortProjection, StaffProjectionRequest, select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
@@ -210,7 +211,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 55] = [
+const VECTOR_KEYS: [&str; 56] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -230,6 +231,7 @@ const VECTOR_KEYS: [&str; 55] = [
     "grid.staff-projector-core.synthetic=",
     "grid.staff-projector-ranges.synthetic=",
     "grid.staff-projector-brace.synthetic=",
+    "grid.staff-projector-composed.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -805,6 +807,94 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         brace_peak.top(),
         brace_peak.bottom(),
         brace_peak.is_brace()
+    ));
+
+    let composed_width = 20;
+    let composed_height = 6;
+    let mut composed_pixels = vec![255; composed_width * composed_height];
+    for x in 0..composed_width {
+        composed_pixels[x] = 0;
+        composed_pixels[((composed_height - 1) * composed_width) + x] = 0;
+    }
+    for x in 5..=6 {
+        for y in 0..composed_height {
+            composed_pixels[(y * composed_width) + x] = 0;
+        }
+    }
+    let composed_accumulation = ShortProjection::from_staff_raster(
+        composed_width,
+        composed_height,
+        &composed_pixels,
+        StaffProjectionRequest::new(5, 6, 20),
+        |_| 0,
+        |_| 5,
+    )?;
+    let composed_result = composed_accumulation.finish_neutral(
+        composed_width,
+        composed_height,
+        &composed_pixels,
+        NeutralStaffProjectorRequest {
+            staff_id: StaffId::new(1),
+            staff_left: 5,
+            staff_right: 6,
+            blank_threshold: 2,
+            minimum_wide_blank_width: 2,
+            top_derivative_count: 5,
+            minimum_derivative_ratio: 0.3,
+            use_one_line_half_mode: false,
+            is_one_line_staff: false,
+            bar_threshold: 4,
+            total_height: 10,
+            peak_construction: PeakConstructionParams::new(
+                PeakRefinementParams::new(4, 2, 4, 2, 1)?,
+                4,
+            )?,
+            peak_core: PeakCoreParams::new(1, 0.3)?,
+            brace_search: Some(BraceSearchRequest::new(5, 0, 7, 2, 4)),
+        },
+        |_| PeakCoreGeometry::new(0, 5, 2),
+    )?;
+    let mut composed_counts_digest = 0xcbf2_9ce4_8422_2325;
+    for x in composed_result.projection.start()..=composed_result.projection.stop() {
+        composed_counts_digest = hash_u32(
+            composed_counts_digest,
+            usize::try_from(composed_result.projection.value(x))?,
+        );
+    }
+    let composed_blanks = composed_result
+        .all_blanks
+        .iter()
+        .map(|blank| blank_name(Some(*blank)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let composed_peaks = if composed_result.peaks.is_empty() {
+        "none".to_owned()
+    } else {
+        composed_result
+            .peaks
+            .iter()
+            .map(|peak| {
+                format!(
+                    "{}-{}:{:.12}",
+                    peak.start(),
+                    peak.stop(),
+                    peak.impacts().expect("graded composed peak").grade()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let composed_brace = composed_result.brace_candidate.map_or_else(
+        || "null".to_owned(),
+        |brace| format!("{}-{}", brace.start, brace.stop),
+    );
+    lines.push(format!(
+        "grid.staff-projector-composed.synthetic=bounds:{}-{};counts:{composed_counts_digest:016x};derivative:{};blanks:{composed_blanks};search:{}-{};peaks:{composed_peaks};brace:{composed_brace}",
+        composed_result.projection.start(),
+        composed_result.projection.stop(),
+        composed_result.derivative_threshold,
+        composed_result.peak_search_bounds.x_min,
+        composed_result.peak_search_bounds.x_max
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

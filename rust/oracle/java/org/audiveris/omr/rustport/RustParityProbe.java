@@ -402,6 +402,71 @@ public final class RustParityProbe
                         + ":" + brace.getTop() + "-" + brace.getBottom()
                         + ":brace" + brace.isBrace());
 
+        RunTable composedBinary = new RunTable(Orientation.VERTICAL, 20, 6);
+        for (int x = 0; x < 20; x++) {
+            if ((x == 5) || (x == 6)) {
+                composedBinary.addRun(x, new Run(0, 6));
+            } else {
+                composedBinary.addRun(x, new Run(0, 1));
+                composedBinary.addRun(x, new Run(5, 1));
+            }
+        }
+        StaffProjector composedProjector = staffProjector(
+                projectorScale,
+                composedBinary,
+                new int[]{0, 5});
+        Object composedParams = field(composedProjector, "params");
+        setIntField(composedParams, "staffAbscissaMargin", 20);
+        setIntField(composedParams, "blankThreshold", 2);
+        setIntField(composedParams, "minWideBlankWidth", 2);
+        setIntField(composedParams, "barThreshold", 4);
+        setIntField(composedParams, "linesThreshold", 2);
+        setIntField(composedParams, "chunkThreshold", 4);
+        setIntField(composedParams, "barRefineDx", 2);
+        setIntField(composedParams, "chunkWidth", 1);
+        setIntField(composedParams, "maxBarWidth", 4);
+        setIntField(composedParams, "gapThreshold", 1);
+        setIntField(composedParams, "braceThreshold", 4);
+        Method computeProjection = StaffProjector.class.getDeclaredMethod("computeProjection");
+        computeProjection.setAccessible(true);
+        computeProjection.invoke(composedProjector);
+        findAllBlanks.invoke(composedProjector);
+        selectEndingBlanks.invoke(composedProjector);
+        Method findPeaks = StaffProjector.class.getDeclaredMethod("findPeaks");
+        findPeaks.setAccessible(true);
+        findPeaks.invoke(composedProjector);
+        Projection.Short composedProjection = (Projection.Short) field(
+                composedProjector,
+                "projection");
+        long composedCountsDigest = 0xcbf29ce484222325L;
+        for (int x = composedProjection.getStart(); x <= composedProjection.getStop(); x++) {
+            composedCountsDigest = hashInt(composedCountsDigest, composedProjection.getValue(x));
+        }
+        List<String> composedBlanks = new ArrayList<>();
+        for (Object blank : (List<?>) field(composedProjector, "allBlanks")) {
+            composedBlanks.add(blank(blank));
+        }
+        List<String> composedPeaks = new ArrayList<>();
+        for (StaffPeak peak : composedProjector.getPeaks()) {
+            composedPeaks.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%d-%d:%.12f",
+                    peak.getStart(),
+                    peak.getStop(),
+                    peak.getImpacts().getGrade()));
+        }
+        StaffPeak composedBrace = composedProjector.findBracePeak(0, 7);
+        System.out.printf(
+                java.util.Locale.ROOT,
+                "grid.staff-projector-composed.synthetic=bounds:%d-%d;counts:%016x;derivative:%d;blanks:%s;search:4-7;peaks:%s;brace:%s%n",
+                composedProjection.getStart(),
+                composedProjection.getStop(),
+                composedCountsDigest,
+                field(composedProjector, "derivativeThreshold"),
+                String.join(",", composedBlanks),
+                composedPeaks.isEmpty() ? "none" : String.join(",", composedPeaks),
+                staffPeakRange(composedBrace));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
