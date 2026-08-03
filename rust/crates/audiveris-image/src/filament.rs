@@ -319,6 +319,53 @@ pub fn can_include_filament(
     FilamentInclusionDecision::Include
 }
 
+/// Artificial abscissae inserted before one existing defining point by Java
+/// `StaffFilament.fillHoles`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoleFillPlan {
+    pub before_point_index: usize,
+    pub abscissae: Vec<i32>,
+}
+
+/// Plan the x coordinates of virtual points used to fill long filament holes.
+///
+/// Only gaps strictly longer than `max_hole_length` qualify. The insertion
+/// count and each coordinate use Java `Math.rint` (nearest, ties even). This is
+/// the geometry-independent prefix of `StaffFilament.fillHoles`; neighboring
+/// line interpolation and virtual y fallback are applied later.
+pub fn plan_hole_fills(
+    point_abscissae: &[f64],
+    max_hole_length: i32,
+    virtual_segment_length: i32,
+) -> Result<Vec<HoleFillPlan>, FilamentError> {
+    if virtual_segment_length <= 0 {
+        return Err(FilamentError::InvalidVirtualSegmentLength);
+    }
+
+    let mut plans = Vec::new();
+    for (index, pair) in point_abscissae.windows(2).enumerate() {
+        let hole_start = pair[0];
+        let hole_length = pair[1] - hole_start;
+        if hole_length <= f64::from(max_hole_length) {
+            continue;
+        }
+
+        let insert = (hole_length / f64::from(virtual_segment_length)).round_ties_even() as i32 - 1;
+        if insert <= 0 {
+            continue;
+        }
+        let dx = hole_length / f64::from(insert + 1);
+        let abscissae = (1..=insert)
+            .map(|offset| (hole_start + (f64::from(offset) * dx)).round_ties_even() as i32)
+            .collect();
+        plans.push(HoleFillPlan {
+            before_point_index: index + 1,
+            abscissae,
+        });
+    }
+    Ok(plans)
+}
+
 /// Failure in the supported neutral staff-filament surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilamentError {
@@ -327,6 +374,7 @@ pub enum FilamentError {
     UnsupportedOrientation,
     EmptyProbe,
     DegenerateGeometry,
+    InvalidVirtualSegmentLength,
     Spline(SplineError),
 }
 
@@ -346,6 +394,9 @@ impl fmt::Display for FilamentError {
             }
             Self::EmptyProbe => formatter.write_str("filament endpoint probe has no pixels"),
             Self::DegenerateGeometry => formatter.write_str("filament geometry is degenerate"),
+            Self::InvalidVirtualSegmentLength => {
+                formatter.write_str("virtual segment length must be positive")
+            }
             Self::Spline(error) => write!(formatter, "filament spline error: {error}"),
         }
     }
@@ -443,6 +494,39 @@ mod tests {
                 observed: 3.1,
                 maximum: 3.0,
             })
+        );
+    }
+
+    #[test]
+    fn hole_fill_plan_uses_strict_gap_and_ties_even_rounding() {
+        assert_eq!(
+            plan_hole_fills(&[0.0, 10.0, 35.0], 10, 10).unwrap(),
+            [HoleFillPlan {
+                before_point_index: 2,
+                // rint(25 / 10) - 1 = rint(2.5) - 1 = 1; x=rint(22.5)=22.
+                abscissae: vec![22],
+            }]
+        );
+    }
+
+    #[test]
+    fn hole_fill_plan_places_multiple_points_without_rewindowing_insertions() {
+        assert_eq!(
+            plan_hole_fills(&[2.0, 42.0, 82.0], 12, 10).unwrap(),
+            [
+                HoleFillPlan {
+                    before_point_index: 1,
+                    abscissae: vec![12, 22, 32],
+                },
+                HoleFillPlan {
+                    before_point_index: 2,
+                    abscissae: vec![52, 62, 72],
+                },
+            ]
+        );
+        assert_eq!(
+            plan_hole_fills(&[0.0, 20.0], 10, 0),
+            Err(FilamentError::InvalidVirtualSegmentLength)
         );
     }
 
