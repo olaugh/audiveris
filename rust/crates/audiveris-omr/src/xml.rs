@@ -17,6 +17,7 @@ use quick_xml::events::{BytesStart, Event};
 
 const BOOK_ELEMENT: &[u8] = b"book";
 const SHEET_ELEMENT: &[u8] = b"sheet";
+const SCORE_ELEMENT: &[u8] = b"score";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -41,6 +42,9 @@ const LOGICAL_ID_ATTRIBUTE: &[u8] = b"logical-id";
 const MANUAL_ATTRIBUTE: &[u8] = b"manual";
 const LINE_COUNT_ATTRIBUTE: &[u8] = b"line-count";
 const SMALL_ATTRIBUTE: &[u8] = b"small";
+const LOGICALS_LOCKED_ATTRIBUTE: &[u8] = b"logicals-locked";
+const SHEET_NUMBER_ATTRIBUTE: &[u8] = b"sheet-number";
+const SHEET_PAGE_ID_ATTRIBUTE: &[u8] = b"sheet-page-id";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +53,7 @@ pub struct BookXml {
     root_element: String,
     software_version: Option<String>,
     sheet_stubs: Vec<SheetStub>,
+    score_refs: Vec<ScoreRef>,
 }
 
 impl BookXml {
@@ -63,6 +68,7 @@ impl BookXml {
         let mut root_element = None;
         let mut software_version = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
+        let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
         let mut active_sheet = None;
         let mut active_input: Option<(usize, SheetInputBuilder)> = None;
@@ -73,6 +79,8 @@ impl BookXml {
         let mut active_system = None;
         let mut active_part = None;
         let mut active_staff_leaf: Option<StaffLeafCapture> = None;
+        let mut active_score = None;
+        let mut active_score_page: Option<(u32, ScorePageRef)> = None;
         let mut root_closed = false;
 
         loop {
@@ -82,6 +90,13 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if let Some((score_index, page)) = active_score_page {
+                        return Err(BookXmlError::UnexpectedScorePageContent {
+                            score_index,
+                            sheet_number: page.sheet_number,
+                            sheet_page_id: page.sheet_page_id,
+                        });
+                    }
                     if let Some(capture) = active_staff_leaf.as_ref() {
                         return Err(unexpected_staff_config_content(&sheet_stubs, capture));
                     }
@@ -113,6 +128,9 @@ impl BookXml {
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                         active_sheet = Some(sheet_stubs.len() - 1);
+                    } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
+                        let score_index = push_score_ref(&reader, &element, &mut score_refs)?;
+                        active_score = Some(score_index);
                     } else if depth == 2
                         && element.local_name().as_ref() == INPUT_ELEMENT
                         && let Some(sheet_index) = active_sheet
@@ -187,12 +205,28 @@ impl BookXml {
                             part_index,
                             kind,
                         )?);
+                    } else if depth == 2
+                        && element.name().as_ref() == PAGE_ELEMENT
+                        && let Some(score_index) = active_score
+                    {
+                        push_score_page(&reader, &element, &mut score_refs[score_index])?;
+                        active_score_page = Some((
+                            score_refs[score_index].index,
+                            *score_refs[score_index].pages.last().unwrap(),
+                        ));
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
                     })?;
                 }
                 Event::Empty(element) => {
+                    if let Some((score_index, page)) = active_score_page {
+                        return Err(BookXmlError::UnexpectedScorePageContent {
+                            score_index,
+                            sheet_number: page.sheet_number,
+                            sheet_page_id: page.sheet_page_id,
+                        });
+                    }
                     if let Some(capture) = active_staff_leaf.as_ref() {
                         return Err(unexpected_staff_config_content(&sheet_stubs, capture));
                     }
@@ -224,6 +258,8 @@ impl BookXml {
                         root_closed = true;
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
+                    } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
+                        push_score_ref(&reader, &element, &mut score_refs)?;
                     } else if depth == 2
                         && element.local_name().as_ref() == INPUT_ELEMENT
                         && let Some(sheet_index) = active_sheet
@@ -296,9 +332,17 @@ impl BookXml {
                             part_index,
                             kind,
                         )?;
+                    } else if depth == 2
+                        && element.name().as_ref() == PAGE_ELEMENT
+                        && let Some(score_index) = active_score
+                    {
+                        push_score_page(&reader, &element, &mut score_refs[score_index])?;
                     }
                 }
                 Event::End(element) => {
+                    if element.name().as_ref() == PAGE_ELEMENT && depth == 3 {
+                        active_score_page = None;
+                    }
                     if depth == 6
                         && let Some(capture) = active_staff_leaf.take()
                     {
@@ -341,6 +385,9 @@ impl BookXml {
                     if depth == 2 && active_sheet.is_some() {
                         active_sheet = None;
                     }
+                    if depth == 2 && active_score.is_some() {
+                        active_score = None;
+                    }
                     if depth == 3 && active_page.is_some() {
                         active_page = None;
                     }
@@ -363,6 +410,19 @@ impl BookXml {
                     })?;
                     if !text.trim().is_empty() {
                         return Err(BookXmlError::ContentOutsideRoot);
+                    }
+                }
+                Event::Text(text) if active_score_page.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    if !decoded.trim().is_empty() {
+                        let (score_index, page) = active_score_page.unwrap();
+                        return Err(BookXmlError::UnexpectedScorePageContent {
+                            score_index,
+                            sheet_number: page.sheet_number,
+                            sheet_page_id: page.sheet_page_id,
+                        });
                     }
                 }
                 Event::Text(text) if active_staff_leaf.is_some() => {
@@ -412,6 +472,14 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(_) if active_score_page.is_some() => {
+                    let (score_index, page) = active_score_page.unwrap();
+                    return Err(BookXmlError::UnexpectedScorePageContent {
+                        score_index,
+                        sheet_number: page.sheet_number,
+                        sheet_page_id: page.sheet_page_id,
+                    });
+                }
                 Event::CData(_) if active_staff_leaf.is_some() => {
                     return Err(unexpected_staff_config_content(
                         &sheet_stubs,
@@ -445,6 +513,14 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_score_page.is_some() => {
+                    let (score_index, page) = active_score_page.unwrap();
+                    return Err(BookXmlError::UnexpectedScorePageContent {
+                        score_index,
+                        sheet_number: page.sheet_number,
+                        sheet_page_id: page.sheet_page_id,
+                    });
+                }
                 Event::GeneralRef(_) if active_staff_leaf.is_some() => {
                     return Err(unexpected_staff_config_content(
                         &sheet_stubs,
@@ -471,6 +547,16 @@ impl BookXml {
                         sheet_index,
                         page_index,
                     ));
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_score_page.is_some() =>
+                {
+                    let (score_index, page) = active_score_page.unwrap();
+                    return Err(BookXmlError::UnexpectedScorePageContent {
+                        score_index,
+                        sheet_number: page.sheet_number,
+                        sheet_page_id: page.sheet_page_id,
+                    });
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_staff_leaf.is_some() =>
@@ -509,6 +595,7 @@ impl BookXml {
             root_element,
             software_version,
             sheet_stubs,
+            score_refs,
         })
     }
 
@@ -530,10 +617,71 @@ impl BookXml {
         &self.sheet_stubs
     }
 
+    /// Direct book scores (movements) in persisted document order.
+    #[must_use]
+    pub fn score_refs(&self) -> &[ScoreRef] {
+        &self.score_refs
+    }
+
     /// The exact input bytes, without XML normalization or reserialization.
     #[must_use]
     pub fn original_bytes(&self) -> &[u8] {
         &self.original
+    }
+}
+
+/// Lightweight book-level movement metadata from one direct `score` child.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScoreRef {
+    index: u32,
+    logicals_locked: Option<bool>,
+    pages: Vec<ScorePageRef>,
+}
+
+impl ScoreRef {
+    /// Zero-based position in Java Book's persisted score list.
+    #[must_use]
+    pub const fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// Explicit state of the optional JAXB boolean-positive lock attribute.
+    #[must_use]
+    pub const fn logicals_locked_attribute(&self) -> Option<bool> {
+        self.logicals_locked
+    }
+
+    /// Effective Java lock state; absent defaults to false.
+    #[must_use]
+    pub fn logicals_locked(&self) -> bool {
+        self.logicals_locked.unwrap_or(false)
+    }
+
+    /// Soft page references in persisted document order.
+    #[must_use]
+    pub fn pages(&self) -> &[ScorePageRef] {
+        &self.pages
+    }
+}
+
+/// Stable sheet/page coordinates persisted by Java `PageNumber`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ScorePageRef {
+    sheet_number: u32,
+    sheet_page_id: u32,
+}
+
+impl ScorePageRef {
+    /// One-based containing-sheet rank in the book.
+    #[must_use]
+    pub const fn sheet_number(self) -> u32 {
+        self.sheet_number
+    }
+
+    /// One-based page rank in the containing sheet.
+    #[must_use]
+    pub const fn sheet_page_id(self) -> u32 {
+        self.sheet_page_id
     }
 }
 
@@ -894,6 +1042,37 @@ pub enum BookXmlError {
     InvalidSheetNumber(String),
     /// Two direct child sheet stubs declare the same number.
     DuplicateSheetNumber(u32),
+    /// The book contains too many scores to expose a Java `int` list index.
+    TooManyScores,
+    /// A score lock flag has an invalid XML Schema boolean spelling.
+    InvalidScoreBoolean {
+        score_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A score page link lacks one of its required coordinate attributes.
+    MissingScorePageField {
+        score_index: u32,
+        field: &'static str,
+    },
+    /// A score page coordinate is malformed or outside positive Java `int` range.
+    InvalidScorePageInteger {
+        score_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A score repeats the same physical sheet/page coordinate.
+    DuplicateScorePage {
+        score_index: u32,
+        sheet_number: u32,
+        sheet_page_id: u32,
+    },
+    /// An attribute-only score page link contains nested or scalar content.
+    UnexpectedScorePageContent {
+        score_index: u32,
+        sheet_number: u32,
+        sheet_page_id: u32,
+    },
     /// A direct sheet stub contains more than one `input` element.
     DuplicateSheetInput(u32),
     /// A required scalar is absent from a present `input` element.
@@ -1085,6 +1264,45 @@ impl fmt::Display for BookXmlError {
             Self::DuplicateSheetNumber(number) => {
                 write!(formatter, "duplicate sheet stub number {number}")
             }
+            Self::TooManyScores => write!(formatter, "book has too many score references"),
+            Self::InvalidScoreBoolean {
+                score_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "score index {score_index} has invalid boolean {field}: {value:?}"
+            ),
+            Self::MissingScorePageField { score_index, field } => {
+                write!(
+                    formatter,
+                    "score index {score_index} page is missing {field}"
+                )
+            }
+            Self::InvalidScorePageInteger {
+                score_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "score index {score_index} has invalid page integer {field}: {value:?}"
+            ),
+            Self::DuplicateScorePage {
+                score_index,
+                sheet_number,
+                sheet_page_id,
+            } => write!(
+                formatter,
+                "score index {score_index} repeats sheet {sheet_number} page {sheet_page_id}"
+            ),
+            Self::UnexpectedScorePageContent {
+                score_index,
+                sheet_number,
+                sheet_page_id,
+            } => write!(
+                formatter,
+                "score index {score_index} sheet {sheet_number} page {sheet_page_id} link contains content"
+            ),
             Self::DuplicateSheetInput(number) => {
                 write!(
                     formatter,
@@ -1308,6 +1526,105 @@ fn parse_book_root(
     }
 
     Ok((qualified_name, software_version))
+}
+
+fn push_score_ref(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_refs: &mut Vec<ScoreRef>,
+) -> Result<usize, BookXmlError> {
+    let index = u32::try_from(score_refs.len())
+        .ok()
+        .filter(|index| *index <= i32::MAX as u32)
+        .ok_or(BookXmlError::TooManyScores)?;
+    let mut logicals_locked = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        if attribute.key.as_ref() == LOGICALS_LOCKED_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            logicals_locked = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidScoreBoolean {
+                    score_index: index,
+                    field: "book/score/@logicals-locked",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+    score_refs.push(ScoreRef {
+        index,
+        logicals_locked,
+        pages: Vec::new(),
+    });
+    Ok(score_refs.len() - 1)
+}
+
+fn push_score_page(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    score_ref: &mut ScoreRef,
+) -> Result<(), BookXmlError> {
+    let mut sheet_number = None;
+    let mut sheet_page_id = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == SHEET_NUMBER_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            sheet_number = Some(parse_score_page_integer(
+                &value,
+                score_ref.index,
+                "book/score/page/@sheet-number",
+            )?);
+        } else if key == SHEET_PAGE_ID_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            sheet_page_id = Some(parse_score_page_integer(
+                &value,
+                score_ref.index,
+                "book/score/page/@sheet-page-id",
+            )?);
+        }
+    }
+    let sheet_number = sheet_number.ok_or(BookXmlError::MissingScorePageField {
+        score_index: score_ref.index,
+        field: "book/score/page/@sheet-number",
+    })?;
+    let sheet_page_id = sheet_page_id.ok_or(BookXmlError::MissingScorePageField {
+        score_index: score_ref.index,
+        field: "book/score/page/@sheet-page-id",
+    })?;
+    let page = ScorePageRef {
+        sheet_number,
+        sheet_page_id,
+    };
+    if score_ref.pages.contains(&page) {
+        return Err(BookXmlError::DuplicateScorePage {
+            score_index: score_ref.index,
+            sheet_number,
+            sheet_page_id,
+        });
+    }
+    score_ref.pages.push(page);
+    Ok(())
+}
+
+fn parse_score_page_integer(
+    value: &str,
+    score_index: u32,
+    field: &'static str,
+) -> Result<u32, BookXmlError> {
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|number| *number > 0 && *number <= i32::MAX as u32)
+        .ok_or_else(|| BookXmlError::InvalidScorePageInteger {
+            score_index,
+            field,
+            value: value.to_owned(),
+        })
 }
 
 fn push_sheet_stub(
@@ -2150,7 +2467,55 @@ mod tests {
         assert_eq!(staff.line_count(), 5);
         assert_eq!(staff.small_attribute(), None);
         assert!(!staff.is_small());
+        let scores = book.score_refs();
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores[0].index(), 0);
+        assert_eq!(scores[0].logicals_locked_attribute(), None);
+        assert!(!scores[0].logicals_locked());
+        assert_eq!(scores[0].pages().len(), 1);
+        assert_eq!(scores[0].pages()[0].sheet_number(), 1);
+        assert_eq!(scores[0].pages()[0].sheet_page_id(), 1);
         assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn reads_ordered_score_page_links_and_lock_states() {
+        let xml = br#"<book><score/><score logicals-locked="false"><logical-part id="1"/><page sheet-number="2" sheet-page-id="1"/><page sheet-number="1" sheet-page-id="2"> </page></score><score logicals-locked="1"><page sheet-number="3" sheet-page-id="1"/></score></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let scores = book.score_refs();
+
+        assert_eq!(
+            scores.iter().map(|score| score.index()).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert!(scores[0].pages().is_empty());
+        assert_eq!(scores[0].logicals_locked_attribute(), None);
+        assert_eq!(scores[1].logicals_locked_attribute(), Some(false));
+        assert!(!scores[1].logicals_locked());
+        assert_eq!(
+            scores[1]
+                .pages()
+                .iter()
+                .map(|page| (page.sheet_number(), page.sheet_page_id()))
+                .collect::<Vec<_>>(),
+            [(2, 1), (1, 2)]
+        );
+        assert_eq!(scores[2].logicals_locked_attribute(), Some(true));
+        assert!(scores[2].logicals_locked());
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
+    fn ignores_nested_and_namespaced_score_page_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><f:score><page sheet-number="9" sheet-page-id="9"/></f:score><score><future><page sheet-number="8" sheet-page-id="8"/></future><f:page sheet-number="7" sheet-page-id="7"/><page f:sheet-number="6" sheet-number="1" sheet-page-id="2"/></score></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.score_refs().len(), 1);
+        assert_eq!(book.score_refs()[0].pages().len(), 1);
+        assert_eq!(book.score_refs()[0].pages()[0].sheet_number(), 1);
+        assert_eq!(book.score_refs()[0].pages()[0].sheet_page_id(), 2);
     }
 
     #[test]
@@ -2329,7 +2694,7 @@ mod tests {
         let xml = br#"<book software-version="5&amp;11" future="yes">
             <future><sheet number="99"/></future>
             <sheet number="2" alien="preserve-me"><anything/></sheet>
-            <score><page sheet-number="2"/></score>
+            <score><page sheet-number="2" sheet-page-id="1"/></score>
         </book>"#;
 
         let book = BookXml::parse(xml).unwrap();
@@ -2385,6 +2750,98 @@ mod tests {
                     value: invalid.to_owned(),
                 }
             );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_score_lock_and_page_coordinates() {
+        assert_eq!(
+            BookXml::parse(br#"<book><score logicals-locked="yes"/></book>"#).unwrap_err(),
+            BookXmlError::InvalidScoreBoolean {
+                score_index: 0,
+                field: "book/score/@logicals-locked",
+                value: "yes".to_owned(),
+            }
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book><score><page sheet-page-id="1"/></score></book>"#)
+                .unwrap_err(),
+            BookXmlError::MissingScorePageField {
+                score_index: 0,
+                field: "book/score/page/@sheet-number",
+            }
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book><score><page sheet-number="1"/></score></book>"#).unwrap_err(),
+            BookXmlError::MissingScorePageField {
+                score_index: 0,
+                field: "book/score/page/@sheet-page-id",
+            }
+        );
+
+        for (field, attrs, value) in [
+            (
+                "book/score/page/@sheet-number",
+                "sheet-number=\"0\" sheet-page-id=\"1\"",
+                "0",
+            ),
+            (
+                "book/score/page/@sheet-page-id",
+                "sheet-number=\"1\" sheet-page-id=\"2147483648\"",
+                "2147483648",
+            ),
+        ] {
+            let xml = format!("<book><score><page {attrs}/></score></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidScorePageInteger {
+                    score_index: 0,
+                    field,
+                    value: value.to_owned(),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_or_nonempty_score_page_links() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><score><page sheet-number="1" sheet-page-id="2"/><page sheet-number="1" sheet-page-id="2"/></score></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::DuplicateScorePage {
+                score_index: 0,
+                sheet_number: 1,
+                sheet_page_id: 2,
+            }
+        );
+
+        for content in ["text", "<![CDATA[]]>", "&#32;", "<future/>"] {
+            let xml = format!(
+                "<book><score><page sheet-number=\"1\" sheet-page-id=\"2\">{content}</page></score></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedScorePageContent {
+                    score_index: 0,
+                    sheet_number: 1,
+                    sheet_page_id: 2,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_score_attributes_as_malformed_xml() {
+        for xml in [
+            br#"<book><score logicals-locked="true" logicals-locked="false"/></book>"#.as_slice(),
+            br#"<book><score><page sheet-number="1" sheet-number="2" sheet-page-id="1"/></score></book>"#.as_slice(),
+        ] {
+            assert!(matches!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::Malformed { .. }
+            ));
         }
     }
 
