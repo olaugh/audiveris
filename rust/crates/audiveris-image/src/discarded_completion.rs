@@ -552,7 +552,11 @@ mod tests {
         let section = build_sections_from_id(&table, JunctionPolicy::All, id).remove(0);
         let mut filament = StaffFilament::new(10).unwrap();
         filament.add_section(section).unwrap();
-        PreparedStaffLine { id, filament }
+        PreparedStaffLine {
+            id,
+            cluster_position: 0,
+            filament,
+        }
     }
 
     fn target_staff(id: usize, line_id: usize, start: usize, stop: usize) -> PreparedStaff {
@@ -608,6 +612,7 @@ mod tests {
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::<PreparedStaffEndPoints>::new(),
+            fill_hole_insertions: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             completed_stages: Vec::new(),

@@ -491,6 +491,7 @@ mod tests {
                 filament.add_section(section).unwrap();
                 PreparedStaffLine {
                     id: (id * 10) + index,
+                    cluster_position: index as i32,
                     filament,
                 }
             })
@@ -525,6 +526,7 @@ mod tests {
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
+            fill_hole_insertions: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             completed_stages: Vec::new(),
@@ -594,6 +596,7 @@ mod tests {
             short: false,
             lines: vec![PreparedStaffLine {
                 id: 99,
+                cluster_position: 0,
                 filament: StaffFilament::new(10).unwrap(),
             }],
         };

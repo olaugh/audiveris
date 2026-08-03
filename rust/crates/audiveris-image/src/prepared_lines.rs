@@ -33,6 +33,8 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct PreparedStaffLine {
     pub id: usize,
+    /// Java `StaffFilament.clusterPos`; detached discarded filaments use 0.
+    pub cluster_position: i32,
     pub filament: StaffFilament,
 }
 
@@ -506,6 +508,7 @@ fn materialize_final_discarded_filaments<DownstreamError>(
             provenance,
             line: PreparedStaffLine {
                 id: raw_id,
+                cluster_position: 0,
                 filament,
             },
         });
@@ -606,7 +609,7 @@ fn materialize_staffs<DownstreamError>(
             });
         }
         let mut lines = Vec::with_capacity(cluster_ids.len());
-        for (_, line) in cluster.lines() {
+        for (cluster_position, line) in cluster.lines() {
             let id = line.primary_id();
             if !seen_filaments.insert(id) {
                 return Err(ProductionRetrieveLinesError::DuplicateFilamentId(id));
@@ -636,6 +639,7 @@ fn materialize_staffs<DownstreamError>(
             lines.push(PreparedStaffLine {
                 id: usize::try_from(id.value())
                     .map_err(|_| ProductionRetrieveLinesError::FilamentIdOverflow(id))?,
+                cluster_position,
                 filament: line.filament().clone(),
             });
         }

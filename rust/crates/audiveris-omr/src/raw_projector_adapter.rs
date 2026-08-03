@@ -789,6 +789,7 @@ mod tests {
                 filament.add_section(section).unwrap();
                 PreparedStaffLine {
                     id: index + 1,
+                    cluster_position: index as i32,
                     filament,
                 }
             })
@@ -829,6 +830,7 @@ mod tests {
                     filament.add_section(section).unwrap();
                     PreparedStaffLine {
                         id: index + 1,
+                        cluster_position: index as i32,
                         filament,
                     }
                 })

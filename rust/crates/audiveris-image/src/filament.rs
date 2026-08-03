@@ -68,6 +68,9 @@ pub struct StaffFilament {
     sections: Vec<Section>,
     ending_points: Option<((f64, f64), (f64, f64))>,
     geometry_cache: RefCell<Option<FilamentGeometry>>,
+    /// Defining points already mutated when spline regeneration failed.
+    /// Java mutates `points` before assigning the newly interpolated spline.
+    pending_points: Option<Vec<(f64, f64)>>,
     expanded_bounds: Option<Bounds>,
     part_of: Option<FilamentPartOf>,
 }
@@ -89,6 +92,7 @@ impl StaffFilament {
             sections: Vec::new(),
             ending_points: None,
             geometry_cache: RefCell::new(None),
+            pending_points: None,
             expanded_bounds: None,
             part_of: None,
         })
@@ -107,6 +111,7 @@ impl StaffFilament {
         // including explicitly installed ending points.
         self.ending_points = None;
         self.geometry_cache.get_mut().take();
+        self.pending_points = None;
         self.expanded_bounds = None;
         Ok(())
     }
@@ -180,6 +185,72 @@ impl StaffFilament {
         }
         let geometry = self.compute_geometry()?;
         self.geometry_cache.replace(Some(geometry.clone()));
+        Ok(geometry)
+    }
+
+    /// Current Java `CurvedFilament.points`, including mutations retained
+    /// after a failed spline regeneration.
+    pub fn defining_points(&self) -> Result<Vec<(f64, f64)>, FilamentError> {
+        self.pending_points
+            .clone()
+            .map_or_else(|| self.geometry().map(|geometry| geometry.points), Ok)
+    }
+
+    /// Return the closest defining point whose horizontal delta is at most
+    /// `margin`, preserving Java's first-point tie break.
+    pub fn find_defining_point(
+        &self,
+        coordinate: i32,
+        margin: i32,
+    ) -> Result<Option<(f64, f64)>, FilamentError> {
+        let mut best = None;
+        let mut best_delta = f64::from(i32::MAX);
+        for point in self.defining_points()? {
+            let delta = (f64::from(coordinate) - point.0).abs();
+            if delta <= f64::from(margin) && delta < best_delta {
+                best_delta = delta;
+                best = Some(point);
+            }
+        }
+        Ok(best)
+    }
+
+    /// Install already ordered defining points, then regenerate the spline.
+    ///
+    /// The points become observable before interpolation. If interpolation
+    /// fails, Java retains those points and its previous spline; the split
+    /// cache here represents that same partial mutation.
+    pub fn replace_defining_points(
+        &mut self,
+        points: Vec<(f64, f64)>,
+    ) -> Result<FilamentGeometry, FilamentError> {
+        self.mutate_defining_points(points)?;
+        self.regenerate_defining_spline()
+    }
+
+    /// Mutate Java's defining-point list without changing its current spline.
+    pub fn mutate_defining_points(&mut self, points: Vec<(f64, f64)>) -> Result<(), FilamentError> {
+        self.geometry()?;
+        self.pending_points = Some(points);
+        Ok(())
+    }
+
+    /// Regenerate Java's spline after one or more defining-point mutations.
+    pub fn regenerate_defining_spline(&mut self) -> Result<FilamentGeometry, FilamentError> {
+        let previous = self.geometry()?;
+        let points = self
+            .pending_points
+            .clone()
+            .unwrap_or_else(|| previous.points.clone());
+        let spline = NaturalSpline::interpolate(&points)?;
+        let geometry = FilamentGeometry {
+            start: previous.start,
+            stop: previous.stop,
+            points,
+            spline,
+        };
+        self.geometry_cache.get_mut().replace(geometry.clone());
+        self.pending_points = None;
         Ok(geometry)
     }
 
@@ -271,6 +342,7 @@ impl StaffFilament {
         stop: (f64, f64),
     ) -> Result<FilamentGeometry, FilamentError> {
         self.geometry_cache.get_mut().take();
+        self.pending_points = None;
         self.expanded_bounds = None;
         self.ending_points = Some((start, stop));
 
@@ -777,6 +849,20 @@ mod tests {
         });
         assert_eq!(interpolate_hole_point(1, &[neighbor], &[]), None);
         assert_eq!(interpolate_hole_point(1, &[], &[neighbor]), None);
+    }
+
+    #[test]
+    fn failed_defining_spline_regeneration_retains_mutated_points_and_old_spline() {
+        let mut filament = fixture();
+        let old_geometry = filament.geometry().unwrap();
+        filament.mutate_defining_points(vec![(17.0, 9.0)]).unwrap();
+
+        assert!(matches!(
+            filament.regenerate_defining_spline(),
+            Err(FilamentError::Spline(SplineError::NotEnoughPoints))
+        ));
+        assert_eq!(filament.defining_points().unwrap(), vec![(17.0, 9.0)]);
+        assert_eq!(filament.geometry().unwrap(), old_geometry);
     }
 
     fn near(actual: f64, expected: f64) {
