@@ -14,9 +14,9 @@ use std::fmt;
 
 use audiveris_core::natural_spline::{NaturalSpline, SplineError};
 use audiveris_image::{
-    chamfer::{ChamferDistance, CHAMFER_3, VALUE_UNKNOWN},
-    glyph_factory::{build_glyph_components, GlyphComponent},
-    run_table::{RunTable, BACKGROUND, FOREGROUND},
+    chamfer::{CHAMFER_3, ChamferDistance, VALUE_UNKNOWN},
+    glyph_factory::{GlyphComponent, build_glyph_components},
+    run_table::{BACKGROUND, FOREGROUND, RunTable},
     staff_line_conversion::{PersistentStaffLine, StaffGlyph},
     system_population::PopulationSystemArea,
 };
@@ -434,7 +434,10 @@ impl<ClassifierError: fmt::Display> fmt::Display for NativeHeadsError<Classifier
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SystemOrder { expected, actual } => {
-                write!(formatter, "heads raster system order {actual:?}, expected {expected:?}")
+                write!(
+                    formatter,
+                    "heads raster system order {actual:?}, expected {expected:?}"
+                )
             }
             Self::HeadSpotDimensions {
                 binary_width,
@@ -1655,9 +1658,11 @@ mod tests {
         );
         assert_eq!(sheet.live_inter_ids, [1, 2]);
         assert!(sheet.head_spots_discarded);
-        assert!(sheet
-            .mutations
-            .contains(&HeadsMutation::SystemFailed { system_id: 2 }));
+        assert!(
+            sheet
+                .mutations
+                .contains(&HeadsMutation::SystemFailed { system_id: 2 })
+        );
     }
 
     #[test]
@@ -1900,8 +1905,8 @@ mod tests {
     #[test]
     fn native_spots_keep_component_order_and_curved_area_multi_ownership() {
         use audiveris_image::system_population::{
-            build_population_system_areas, BoundarySegment, PopulationSystemGeometry,
-            StaffBoundary, SystemStaffBoundaries,
+            BoundarySegment, PopulationSystemGeometry, StaffBoundary, SystemStaffBoundaries,
+            build_population_system_areas,
         };
 
         let systems = [
