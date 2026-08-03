@@ -18,7 +18,10 @@ use audiveris_image::{
         GridBuildExecutor, GridBuildOutcome, GridStepExecutor, GridStepStage, build_grid_info,
         run_grid_step,
     },
-    grid_sig::{BarGroupPromotionError, ConnectionPromotionWarning, GridSig},
+    grid_sig::{
+        BarGroupPromotionError, BarTailError, BarTailParameters, BarTailResult,
+        ConnectionPromotionWarning, GridInterId, GridSig,
+    },
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
     lines_coordinator::StaffCandidateKind,
@@ -69,6 +72,7 @@ pub struct HeadlessStaff {
     pub interline: usize,
     pub small: bool,
     pub short: bool,
+    pub barlines: Vec<GridInterId>,
     pub lines: Vec<HeadlessStaffLine>,
 }
 
@@ -94,6 +98,7 @@ pub struct HeadlessSystemSigState {
     pub staff_peaks: Vec<Vec<StaffPeak>>,
     pub maximum_group_gap: i32,
     pub interline: f64,
+    pub bar_tail: BarTailResult,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -124,6 +129,7 @@ impl HeadlessGridSigState {
                 staff_peaks: system.staff_peaks,
                 maximum_group_gap: system.maximum_group_gap,
                 interline: system.interline,
+                bar_tail: BarTailResult::default(),
             })
             .collect();
         self.peak_graph = handoff.peak_graph;
@@ -158,6 +164,10 @@ pub enum HeadlessGridPromotionError {
     BarGroup {
         system_id: usize,
         source: BarGroupPromotionError,
+    },
+    BarTail {
+        system_id: usize,
+        source: BarTailError,
     },
 }
 
@@ -227,6 +237,7 @@ impl HeadlessGridSheet {
                 interline: staff.interline,
                 small: staff.small,
                 short: staff.short,
+                barlines: Vec::new(),
                 lines: staff
                     .lines
                     .into_iter()
@@ -301,6 +312,7 @@ where
     raster_handoff: Option<fn(&mut Builder) -> Option<RasterGridHandoff>>,
     staff_handoff: Option<fn(&mut Builder) -> Option<PreparedStaffHandoff>>,
     bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
+    bar_tail_parameters: BarTailParameters,
     pub cleaner_finished: bool,
     pub step_finished: bool,
 }
@@ -319,6 +331,7 @@ where
             raster_handoff: None,
             staff_handoff: None,
             bars_handoff: None,
+            bar_tail_parameters: BarTailParameters::default(),
             cleaner_finished: false,
             step_finished: false,
         }
@@ -354,6 +367,12 @@ where
         Builder: PreparedBarsHandoffSource,
     {
         self.bars_handoff = Some(Builder::take_prepared_bars_handoff);
+        self
+    }
+
+    #[must_use]
+    pub fn with_bar_tail_parameters(mut self, parameters: BarTailParameters) -> Self {
+        self.bar_tail_parameters = parameters;
         self
     }
 
@@ -405,8 +424,10 @@ where
                     let mut builder = SigPromotingBuilder {
                         builder: &mut self.builder,
                         sig: &mut self.sheet.sig,
+                        staffs: &mut self.sheet.staffs,
                         promotion_failure: &mut self.sheet.promotion_failure,
                         bars_handoff: self.bars_handoff,
+                        bar_tail_parameters: self.bar_tail_parameters,
                     };
                     build_grid_info(&mut builder)
                 };
@@ -419,6 +440,9 @@ where
                     && let Some(handoff) = extract(&mut self.builder)
                 {
                     self.sheet.install_prepared_staff_handoff(handoff);
+                    // Prepared staffs arrive after buildInfo, so restore the
+                    // recordBars ownership already produced during ProcessBars.
+                    install_staff_barlines(&self.sheet.sig, &mut self.sheet.staffs);
                 }
                 match result {
                     Ok(outcome) => {
@@ -441,8 +465,10 @@ where
 struct SigPromotingBuilder<'a, Builder> {
     builder: &'a mut Builder,
     sig: &'a mut HeadlessGridSigState,
+    staffs: &'a mut [HeadlessStaff],
     promotion_failure: &'a mut Option<HeadlessGridPromotionError>,
     bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
+    bar_tail_parameters: BarTailParameters,
 }
 
 impl<Builder> GridBuildExecutor for SigPromotingBuilder<'_, Builder>
@@ -479,11 +505,12 @@ where
                 self.sig.install_prepared_bars_handoff(handoff);
             }
             result?;
-            promote_grid_sigs(self.sig).map_err(|error| {
+            promote_grid_sigs(self.sig, self.bar_tail_parameters).map_err(|error| {
                 audiveris_image::grid_lifecycle::GridStageFailure::Other(
                     HeadlessBuildOtherError::Promotion(error),
                 )
             })?;
+            install_staff_barlines(self.sig, self.staffs);
         } else {
             result?;
         }
@@ -510,7 +537,10 @@ where
     }
 }
 
-fn promote_grid_sigs(state: &mut HeadlessGridSigState) -> Result<(), HeadlessGridPromotionError> {
+fn promote_grid_sigs(
+    state: &mut HeadlessGridSigState,
+    bar_tail_parameters: BarTailParameters,
+) -> Result<(), HeadlessGridPromotionError> {
     // Java createInters traverses every system before connection promotion.
     for system in &mut state.systems {
         system.sig.promote_vertical_inters(&system.vertical_plans);
@@ -564,7 +594,36 @@ fn promote_grid_sigs(state: &mut HeadlessGridSigState) -> Result<(), HeadlessGri
                 source,
             })?;
     }
+
+    // Java continues in exact order with recordBars, createGroups,
+    // createParts, then contextualize. The concrete tail currently stops
+    // before contextualize and records that explicitly in GridSig state.
+    for system in &mut state.systems {
+        system
+            .sig
+            .build_bar_tail(
+                &mut system.bar_tail,
+                &system.staff_peaks,
+                &state.peak_graph,
+                bar_tail_parameters,
+            )
+            .map_err(|source| HeadlessGridPromotionError::BarTail {
+                system_id: system.system_id,
+                source,
+            })?;
+    }
     Ok(())
+}
+
+fn install_staff_barlines(state: &HeadlessGridSigState, staffs: &mut [HeadlessStaff]) {
+    for staff in staffs {
+        staff.barlines.clear();
+        for system in &state.systems {
+            if let Some(barlines) = system.bar_tail.staff_barlines.get(&staff.id) {
+                staff.barlines.extend_from_slice(barlines);
+            }
+        }
+    }
 }
 
 impl<Builder> StaffLineCleanerExecutor for HeadlessGridExecutor<Builder>
@@ -827,6 +886,7 @@ mod tests {
     use audiveris_image::{
         bar_alignment::{AlignmentPeak, BarImpacts},
         bar_column::{PeakId, StaffId},
+        bars_coordinator::{BarsCoordinatorParameters, BarsStaffState, BarsSystemState},
         bars_logic::{PeakWidthClass, VerticalInterKind, VerticalMedian, plan_connection_inters},
         cluster_expand::ClusterExpansionParameters,
         cluster_merge::{ClusterMergeParameters, ClusterMergePassParameters},
@@ -838,6 +898,7 @@ mod tests {
         line_cluster::FilamentId,
         line_short_sections::HorizontalSectionLag,
         lines_coordinator::{ClusterPassState, LinesCoordinatorParameters},
+        prepared_bars::ProductionProcessBars,
         prepared_lines::ProductionRetrieveLines,
         raster_grid_builder::{
             HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridParameters,
@@ -1039,6 +1100,51 @@ mod tests {
         .with_prepared_staff_handoff()
     }
 
+    fn production_bars_executor() -> HeadlessGridExecutor<
+        HeadlessRasterGridBuilder<ProductionProcessBars<ProductionRetrieveLines<RasterStages>>>,
+    > {
+        let base = executor();
+        let line_parameters =
+            LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap();
+        let lines = ProductionRetrieveLines::new(
+            prepared_primary(production_section()),
+            None,
+            line_parameters,
+            RasterStages::default(),
+        );
+        let mut bar = peak(1, 10);
+        bar.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(bar.clone());
+        let system = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(StaffId::new(1), 0, true, vec![bar], BTreeMap::new()).unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+        let bars = ProductionProcessBars::new(
+            lines,
+            vec![system],
+            BarsCoordinatorParameters::new(2, 12, 6, 20, 2, 10, 0.2, None).unwrap(),
+            3,
+        )
+        .unwrap();
+        HeadlessGridExecutor::new(
+            HeadlessRasterGridBuilder::new(
+                production_source(),
+                production_raster_parameters(),
+                bars,
+            ),
+            base.sheet,
+            base.book,
+        )
+        .with_raster_grid_handoff()
+        .with_prepared_staff_handoff()
+        .with_prepared_bars_handoff()
+    }
+
     fn boundary(y: f64) -> StaffBoundary {
         StaffBoundary {
             segments: vec![BoundarySegment::Line {
@@ -1114,6 +1220,7 @@ mod tests {
             staff_peaks: peaks,
             maximum_group_gap: 3,
             interline: 10.0,
+            bar_tail: BarTailResult::default(),
         }
     }
 
@@ -1201,6 +1308,7 @@ mod tests {
                     interline: 10,
                     small: false,
                     short: false,
+                    barlines: Vec::new(),
                     lines: vec![HeadlessStaffLine::Filament {
                         line_id: 10,
                         filament,
@@ -1408,6 +1516,11 @@ mod tests {
             Some(GridSigNode::Vertical { frozen: true, .. })
         ));
         assert_eq!(state.sig.edges().len(), 3);
+        assert_eq!(state.bar_tail.staff_barlines[&1], [top_inter]);
+        assert_eq!(state.bar_tail.staff_barlines[&2], [bottom_inter]);
+        assert_eq!(state.bar_tail.parts.len(), 2);
+        assert!(!state.bar_tail.contextualized);
+        assert_eq!(executor.sheet.staffs[0].barlines, [top_inter]);
         assert!(executor.sheet.sig.connection_warnings.is_empty());
         assert!(executor.cleaner_finished);
     }
@@ -1428,7 +1541,7 @@ mod tests {
             plans,
         );
 
-        promote_grid_sigs(&mut state).unwrap();
+        promote_grid_sigs(&mut state, BarTailParameters::default()).unwrap();
 
         assert!(matches!(
             state.connection_warnings.as_slice(),
@@ -1570,7 +1683,7 @@ mod tests {
             connection_warnings: Vec::new(),
         };
 
-        promote_grid_sigs(&mut state).unwrap();
+        promote_grid_sigs(&mut state, BarTailParameters::default()).unwrap();
 
         assert_eq!(
             state
@@ -1676,6 +1789,12 @@ mod tests {
 
         executor.run().unwrap();
 
+        assert!(
+            matches!(executor.build_outcome, Some(GridBuildOutcome::Completed)),
+            "unexpected build outcome: {:?}",
+            executor.build_outcome
+        );
+
         let [staff] = executor.sheet.staffs.as_slice() else {
             panic!("one prepared staff expected");
         };
@@ -1717,5 +1836,34 @@ mod tests {
         ));
         assert!(executor.cleaner_finished);
         assert!(executor.step_finished);
+    }
+
+    #[test]
+    fn prepared_staff_replacement_restores_process_bars_recorded_ownership() {
+        let mut executor = production_bars_executor();
+
+        executor.run().unwrap();
+
+        assert!(
+            matches!(executor.build_outcome, Some(GridBuildOutcome::Completed)),
+            "unexpected build outcome: {:?}",
+            executor.build_outcome
+        );
+
+        let [staff] = executor.sheet.staffs.as_slice() else {
+            panic!("one retrieved staff expected");
+        };
+        assert_eq!(staff.id, 1);
+        let system = &executor.sheet.sig.systems[0];
+        assert_eq!(
+            (
+                staff.barlines.len(),
+                system.bar_tail.staff_barlines[&1].len()
+            ),
+            (1, 1)
+        );
+        assert_eq!(system.bar_tail.staff_barlines[&1], staff.barlines);
+        assert_eq!(system.bar_tail.parts.len(), 1);
+        assert!(!system.bar_tail.contextualized);
     }
 }

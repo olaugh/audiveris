@@ -28,7 +28,7 @@ use audiveris_image::{
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
     global_filter,
     grid_lifecycle::{GridBuildExecutor, GridBuildStage, GridStageFailure},
-    grid_sig::{BarGroupPromotionError, GridSig, GridSigNode, GridSigRelation},
+    grid_sig::{BarGroupPromotionError, BarTailResult, GridSig, GridSigNode, GridSigRelation},
     ingest,
     lag_rebuild::RegisteredHorizontalLag,
     line_cluster::{FilamentId, LineCluster},
@@ -451,6 +451,7 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
             interline: INTERLINE,
             small: false,
             short: false,
+            barlines: Vec::new(),
             lines,
         });
     }
@@ -596,6 +597,7 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
                         ],
                         maximum_group_gap: 3,
                         interline: INTERLINE as f64,
+                        bar_tail: BarTailResult::default(),
                     },
                     HeadlessSystemSigState {
                         system_id: 2,
@@ -604,6 +606,7 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
                         staff_peaks: vec![vec![s3a.clone()]],
                         maximum_group_gap: 3,
                         interline: INTERLINE as f64,
+                        bar_tail: BarTailResult::default(),
                     },
                 ],
                 peak_graph,
