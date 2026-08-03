@@ -23,6 +23,7 @@ pub mod grid_coordinator;
 pub mod grid_lifecycle;
 pub mod ingest;
 pub mod line_cluster;
+pub mod line_completion;
 pub mod line_section_dispatch;
 pub mod line_sections;
 pub mod line_short_sections;
