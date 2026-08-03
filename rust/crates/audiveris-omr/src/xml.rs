@@ -30,6 +30,10 @@ const PART_ELEMENT: &[u8] = b"part";
 const STAFF_CONFIGURATION_ELEMENT: &[u8] = b"staff-configuration";
 const DEPRECATED_LINE_COUNT_ELEMENT: &[u8] = b"line-count";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
+const SOFTWARE_BUILD_ATTRIBUTE: &[u8] = b"software-build";
+const ALIAS_ATTRIBUTE: &[u8] = b"alias";
+const BOOK_PATH_ATTRIBUTE: &[u8] = b"path";
+const DIRTY_ATTRIBUTE: &[u8] = b"dirty";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
 const INVALID_ATTRIBUTE: &[u8] = b"invalid";
@@ -56,6 +60,10 @@ pub struct BookXml {
     original: Vec<u8>,
     root_element: String,
     software_version: Option<String>,
+    software_build: Option<String>,
+    alias: Option<String>,
+    input_path: Option<String>,
+    dirty: Option<bool>,
     sheet_stubs: Vec<SheetStub>,
     score_refs: Vec<ScoreRef>,
 }
@@ -71,6 +79,10 @@ impl BookXml {
         let mut depth = 0_usize;
         let mut root_element = None;
         let mut software_version = None;
+        let mut software_build = None;
+        let mut alias = None;
+        let mut input_path = None;
+        let mut dirty = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
@@ -131,9 +143,13 @@ impl BookXml {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
                         }
-                        let (name, version) = parse_book_root(&reader, &element)?;
-                        root_element = Some(name);
-                        software_version = version;
+                        let root = parse_book_root(&reader, &element)?;
+                        root_element = Some(root.qualified_name);
+                        software_version = root.software_version;
+                        software_build = root.software_build;
+                        alias = root.alias;
+                        input_path = root.input_path;
+                        dirty = root.dirty;
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                         active_sheet = Some(sheet_stubs.len() - 1);
@@ -282,9 +298,13 @@ impl BookXml {
                         if root_element.is_some() || root_closed {
                             return Err(BookXmlError::MultipleRootElements);
                         }
-                        let (name, version) = parse_book_root(&reader, &element)?;
-                        root_element = Some(name);
-                        software_version = version;
+                        let root = parse_book_root(&reader, &element)?;
+                        root_element = Some(root.qualified_name);
+                        software_version = root.software_version;
+                        software_build = root.software_build;
+                        alias = root.alias;
+                        input_path = root.input_path;
+                        dirty = root.dirty;
                         root_closed = true;
                     } else if depth == 1 && element.local_name().as_ref() == SHEET_ELEMENT {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
@@ -675,6 +695,10 @@ impl BookXml {
             original,
             root_element,
             software_version,
+            software_build,
+            alias,
+            input_path,
+            dirty,
             sheet_stubs,
             score_refs,
         })
@@ -690,6 +714,36 @@ impl BookXml {
     #[must_use]
     pub fn software_version(&self) -> Option<&str> {
         self.software_version.as_deref()
+    }
+
+    /// The root `software-build` attribute, when present.
+    #[must_use]
+    pub fn software_build(&self) -> Option<&str> {
+        self.software_build.as_deref()
+    }
+
+    /// Optional decoded book alias; explicit empty remains distinct from absent.
+    #[must_use]
+    pub fn alias(&self) -> Option<&str> {
+        self.alias.as_deref()
+    }
+
+    /// Original input-image path persisted through Java's path adapter.
+    #[must_use]
+    pub fn input_path(&self) -> Option<&str> {
+        self.input_path.as_deref()
+    }
+
+    /// Explicit state of the optional JAXB boolean-positive `dirty` attribute.
+    #[must_use]
+    pub const fn dirty_attribute(&self) -> Option<bool> {
+        self.dirty
+    }
+
+    /// Effective Java dirty state; absent defaults to false.
+    #[must_use]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.unwrap_or(false)
     }
 
     /// Direct child sheet stubs in document order.
@@ -1168,6 +1222,16 @@ struct LogicalStaffLeafCapture {
     text: String,
 }
 
+#[derive(Debug)]
+struct ParsedBookRoot {
+    qualified_name: String,
+    software_version: Option<String>,
+    software_build: Option<String>,
+    alias: Option<String>,
+    input_path: Option<String>,
+    dirty: Option<bool>,
+}
+
 /// Failure to construct the conservative `book.xml` metadata view.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BookXmlError {
@@ -1186,6 +1250,8 @@ pub enum BookXmlError {
     ContentOutsideRoot,
     /// The document root is not an Audiveris `book` element.
     UnexpectedRootElement(String),
+    /// A root book boolean has an invalid XML Schema spelling.
+    InvalidBookBoolean { field: &'static str, value: String },
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1448,6 +1514,9 @@ impl fmt::Display for BookXmlError {
             }
             Self::UnexpectedRootElement(name) => {
                 write!(formatter, "expected book XML root, found {name:?}")
+            }
+            Self::InvalidBookBoolean { field, value } => {
+                write!(formatter, "invalid book boolean {field}: {value:?}")
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -1755,29 +1824,48 @@ impl Error for BookXmlError {}
 fn parse_book_root(
     reader: &Reader<Cursor<&[u8]>>,
     element: &BytesStart<'_>,
-) -> Result<(String, Option<String>), BookXmlError> {
+) -> Result<ParsedBookRoot, BookXmlError> {
     let qualified_name = decode_name(element.name().as_ref(), reader.buffer_position())?;
     if element.local_name().as_ref() != BOOK_ELEMENT {
         return Err(BookXmlError::UnexpectedRootElement(qualified_name));
     }
 
     let mut software_version = None;
+    let mut software_build = None;
+    let mut alias = None;
+    let mut input_path = None;
+    let mut dirty = None;
     for attribute in element.attributes() {
         let attribute = attribute
             .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
-        if attribute.key.as_ref() == SOFTWARE_VERSION_ATTRIBUTE {
-            software_version = Some(
-                attribute
-                    .decode_and_unescape_value(reader.decoder())
-                    .map_err(|error| {
-                        BookXmlError::malformed(reader.error_position(), error.to_string())
-                    })?
-                    .into_owned(),
-            );
+        let key = attribute.key.as_ref();
+        if key == SOFTWARE_VERSION_ATTRIBUTE {
+            software_version = Some(decode_attribute(reader, &attribute)?);
+        } else if key == SOFTWARE_BUILD_ATTRIBUTE {
+            software_build = Some(decode_attribute(reader, &attribute)?);
+        } else if key == ALIAS_ATTRIBUTE {
+            alias = Some(decode_attribute(reader, &attribute)?);
+        } else if key == BOOK_PATH_ATTRIBUTE {
+            input_path = Some(decode_attribute(reader, &attribute)?);
+        } else if key == DIRTY_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            dirty = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidBookBoolean {
+                    field: "book/@dirty",
+                    value: value.clone(),
+                }
+            })?);
         }
     }
 
-    Ok((qualified_name, software_version))
+    Ok(ParsedBookRoot {
+        qualified_name,
+        software_version,
+        software_build,
+        alias,
+        input_path,
+        dirty,
+    })
 }
 
 fn push_score_ref(
@@ -3411,6 +3499,74 @@ mod tests {
         assert_eq!(book.software_version(), Some("5&11"));
         assert_eq!(book.sheet_stubs().len(), 1);
         assert_eq!(book.sheet_stubs()[0].number(), 2);
+    }
+
+    #[test]
+    fn reads_book_root_scalars_and_preserves_absent_and_empty_states() {
+        let xml = br#"<book software-version="" software-build="5.11.0:abc" alias="" path="P&amp;1/score.pdf" dirty="false"/>"#;
+        let book = BookXml::parse(xml).unwrap();
+
+        assert_eq!(book.software_version(), Some(""));
+        assert_eq!(book.software_build(), Some("5.11.0:abc"));
+        assert_eq!(book.alias(), Some(""));
+        assert_eq!(book.input_path(), Some("P&1/score.pdf"));
+        assert_eq!(book.dirty_attribute(), Some(false));
+        assert!(!book.is_dirty());
+        assert_eq!(book.original_bytes(), xml);
+
+        let absent = BookXml::parse(br#"<book/>"#).unwrap();
+        assert_eq!(absent.software_version(), None);
+        assert_eq!(absent.software_build(), None);
+        assert_eq!(absent.alias(), None);
+        assert_eq!(absent.input_path(), None);
+        assert_eq!(absent.dirty_attribute(), None);
+        assert!(!absent.is_dirty());
+    }
+
+    #[test]
+    fn accepts_jaxb_book_dirty_spellings_and_ignores_namespaced_lookalikes() {
+        for (spelling, expected) in [("true", true), ("1", true), ("false", false), ("0", false)] {
+            let xml = format!("<book dirty=\"{spelling}\"/>");
+            let book = BookXml::parse(xml).unwrap();
+            assert_eq!(book.dirty_attribute(), Some(expected));
+            assert_eq!(book.is_dirty(), expected);
+        }
+
+        let book = BookXml::parse(
+            br#"<f:book xmlns:f="urn:audiveris" f:software-build="ignored" f:alias="ignored" f:path="ignored" f:dirty="true"/>"#,
+        )
+        .unwrap();
+        assert_eq!(book.root_element(), "f:book");
+        assert_eq!(book.software_build(), None);
+        assert_eq!(book.alias(), None);
+        assert_eq!(book.input_path(), None);
+        assert_eq!(book.dirty_attribute(), None);
+    }
+
+    #[test]
+    fn rejects_invalid_or_duplicate_book_root_scalars() {
+        for invalid in ["", "TRUE", "False", "yes", "2"] {
+            let xml = format!("<book dirty=\"{invalid}\"/>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidBookBoolean {
+                    field: "book/@dirty",
+                    value: invalid.to_owned(),
+                }
+            );
+        }
+
+        for xml in [
+            br#"<book software-build="a" software-build="b"/>"#.as_slice(),
+            br#"<book alias="a" alias="b"/>"#.as_slice(),
+            br#"<book path="a" path="b"/>"#.as_slice(),
+            br#"<book dirty="true" dirty="false"/>"#.as_slice(),
+        ] {
+            assert!(matches!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::Malformed { .. }
+            ));
+        }
     }
 
     #[test]
