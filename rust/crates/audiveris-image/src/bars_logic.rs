@@ -928,6 +928,119 @@ pub fn sections_by_width(
         .collect()
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CClefDetection {
+    pub first: StaffPeakKey,
+    pub second: StaffPeakKey,
+    pub tails: Vec<StaffPeakKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CClefPurgeResult {
+    pub survivors: Vec<StaffPeakKey>,
+    pub detections: Vec<CClefDetection>,
+}
+
+/// Java `BarsRetriever.purgeCClefs` over one staff's mutable peak sequence.
+/// Connection state is supplied by the caller to keep graph ownership outside.
+/// The unusual post-removal jump and selective measure-start updates are exact.
+#[allow(clippy::too_many_arguments)]
+pub fn purge_c_clef_peaks(
+    peaks: &[StaffPeak],
+    staff_start: i32,
+    minimum_first_peak_width: i32,
+    maximum_second_peak_width: i32,
+    maximum_double_bar_gap: i32,
+    minimum_measure_width: i32,
+    c_clef_tail: i32,
+    mut is_connected: impl FnMut(StaffPeakKey, VerticalSide) -> bool,
+) -> CClefPurgeResult {
+    let mut remaining = peaks.to_vec();
+    let mut detections = Vec::new();
+    let mut measure_start = staff_start;
+    let mut index = 0_usize;
+
+    while index < remaining.len() {
+        let first = &remaining[index];
+        if first.start() <= measure_start {
+            index += 1;
+            continue;
+        }
+        let first_shape = !first.is_staff_end(HorizontalSide::Left)
+            && !first.is_staff_end(HorizontalSide::Right)
+            && !first.is_brace()
+            && !first.is_bracket()
+            && first.width() >= minimum_first_peak_width;
+        if first_shape {
+            let gap = first.start().wrapping_sub(measure_start);
+            let minimum_gap = if measure_start == staff_start {
+                0
+            } else {
+                maximum_double_bar_gap
+            };
+            let first_key = first.key();
+            let first_location = gap > minimum_gap
+                && gap < minimum_measure_width
+                && !is_connected(first_key, VerticalSide::Top)
+                && !is_connected(first_key, VerticalSide::Bottom);
+            if first_location && index + 1 < remaining.len() {
+                let second = &remaining[index + 1];
+                let second_key = second.key();
+                let second_gap = second.start().wrapping_sub(first.stop()).wrapping_sub(1);
+                if second.width() <= maximum_second_peak_width
+                    && second_gap <= maximum_double_bar_gap
+                    && !is_connected(second_key, VerticalSide::Top)
+                    && !is_connected(second_key, VerticalSide::Bottom)
+                {
+                    let second_midpoint = second.start().wrapping_add(second.stop()) / 2;
+                    let x_break = second_midpoint.wrapping_add(c_clef_tail);
+                    let mut cancelled = false;
+                    let mut tail_count = 0_usize;
+                    for tail in remaining.iter().skip(index + 2) {
+                        let midpoint = tail.start().wrapping_add(tail.stop()) / 2;
+                        if midpoint >= x_break {
+                            break;
+                        }
+                        if is_connected(tail.key(), VerticalSide::Top)
+                            || is_connected(tail.key(), VerticalSide::Bottom)
+                        {
+                            cancelled = true;
+                            break;
+                        }
+                        tail_count += 1;
+                    }
+                    if !cancelled {
+                        let tails = remaining[index + 2..index + 2 + tail_count]
+                            .iter()
+                            .map(StaffPeak::key)
+                            .collect::<Vec<_>>();
+                        detections.push(CClefDetection {
+                            first: first_key,
+                            second: second_key,
+                            tails,
+                        });
+                        remaining.drain(index..index + 2 + tail_count);
+                        // Java then executes `i += 1 + tails.size()` and the
+                        // for-loop increment, on the already shortened list.
+                        index = index.saturating_add(2 + tail_count);
+                        continue;
+                    }
+                }
+            }
+            if !first_location {
+                measure_start = first.stop().wrapping_add(1);
+            }
+        } else {
+            measure_start = first.stop().wrapping_add(1);
+        }
+        index += 1;
+    }
+    CClefPurgeResult {
+        survivors: remaining.iter().map(StaffPeak::key).collect(),
+        detections,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarsLogicError {
     InvalidStartIndex(usize),
@@ -1990,5 +2103,97 @@ mod tests {
                         .id())
         }));
         assert!(sections_by_width(&vertical, &horizontal, -1).is_empty());
+    }
+
+    #[test]
+    fn c_clef_purge_detects_pair_and_unconnected_tails_with_java_index_jump() {
+        let leading = peak(1, 0, 0);
+        let first = peak(1, 5, 8);
+        let second = peak(1, 10, 10);
+        let tail = peak(1, 12, 12);
+        let skipped_after_removal = peak(1, 30, 30);
+        let final_peak = peak(1, 40, 40);
+
+        let result = purge_c_clef_peaks(
+            &[
+                leading.clone(),
+                first.clone(),
+                second.clone(),
+                tail.clone(),
+                skipped_after_removal.clone(),
+                final_peak.clone(),
+            ],
+            0,
+            3,
+            2,
+            2,
+            20,
+            5,
+            |_, _| false,
+        );
+
+        assert_eq!(
+            result.detections,
+            [CClefDetection {
+                first: first.key(),
+                second: second.key(),
+                tails: vec![tail.key()],
+            }]
+        );
+        assert_eq!(
+            result.survivors,
+            [leading.key(), skipped_after_removal.key(), final_peak.key(),]
+        );
+    }
+
+    #[test]
+    fn c_clef_purge_keeps_candidate_when_a_tail_is_connected() {
+        let first = peak(1, 5, 8);
+        let second = peak(1, 10, 10);
+        let tail = peak(1, 12, 12);
+        let values = [first.clone(), second.clone(), tail.clone()];
+
+        let result = purge_c_clef_peaks(&values, 0, 3, 2, 2, 20, 5, |key, side| {
+            key == tail.key() && side == VerticalSide::Bottom
+        });
+
+        assert!(result.detections.is_empty());
+        assert_eq!(
+            result.survivors,
+            values.iter().map(StaffPeak::key).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn failed_second_peak_does_not_advance_c_clef_measure_start() {
+        let candidate = peak(1, 5, 8);
+        let too_wide_second = peak(1, 10, 14);
+        let next_first = peak(1, 16, 19);
+        let next_second = peak(1, 21, 21);
+
+        let result = purge_c_clef_peaks(
+            &[
+                candidate,
+                too_wide_second,
+                next_first.clone(),
+                next_second.clone(),
+            ],
+            0,
+            3,
+            2,
+            2,
+            20,
+            0,
+            |_, _| false,
+        );
+
+        assert_eq!(
+            result.detections,
+            [CClefDetection {
+                first: next_first.key(),
+                second: next_second.key(),
+                tails: Vec::new(),
+            }]
+        );
     }
 }
