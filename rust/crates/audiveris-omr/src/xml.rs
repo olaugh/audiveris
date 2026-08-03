@@ -19,6 +19,7 @@ const BOOK_ELEMENT: &[u8] = b"book";
 const SHEET_ELEMENT: &[u8] = b"sheet";
 const SCORE_ELEMENT: &[u8] = b"score";
 const LOGICAL_PART_ELEMENT: &[u8] = b"logical-part";
+const SHEETS_SELECTION_ELEMENT: &[u8] = b"sheets-selection";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -64,6 +65,7 @@ pub struct BookXml {
     alias: Option<String>,
     input_path: Option<String>,
     dirty: Option<bool>,
+    sheets_selection: Option<String>,
     sheet_stubs: Vec<SheetStub>,
     score_refs: Vec<ScoreRef>,
 }
@@ -83,6 +85,7 @@ impl BookXml {
         let mut alias = None;
         let mut input_path = None;
         let mut dirty = None;
+        let mut sheets_selection = None;
         let mut sheet_stubs: Vec<SheetStub> = Vec::new();
         let mut score_refs = Vec::new();
         let mut sheet_numbers = HashSet::new();
@@ -99,6 +102,7 @@ impl BookXml {
         let mut active_logical_part = None;
         let mut active_logical_staff_leaf: Option<LogicalStaffLeafCapture> = None;
         let mut active_score_page: Option<(u32, ScorePageRef)> = None;
+        let mut active_sheets_selection: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -108,6 +112,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_sheets_selection.is_some() {
+                        return Err(BookXmlError::UnexpectedSheetsSelectionContent);
+                    }
                     if let Some((score_index, page)) = active_score_page {
                         return Err(BookXmlError::UnexpectedScorePageContent {
                             score_index,
@@ -156,6 +163,9 @@ impl BookXml {
                     } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
                         let score_index = push_score_ref(&reader, &element, &mut score_refs)?;
                         active_score = Some(score_index);
+                    } else if depth == 1 && element.name().as_ref() == SHEETS_SELECTION_ELEMENT {
+                        begin_sheets_selection(&sheets_selection)?;
+                        active_sheets_selection = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -263,6 +273,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_sheets_selection.is_some() {
+                        return Err(BookXmlError::UnexpectedSheetsSelectionContent);
+                    }
                     if let Some((score_index, page)) = active_score_page {
                         return Err(BookXmlError::UnexpectedScorePageContent {
                             score_index,
@@ -310,6 +323,9 @@ impl BookXml {
                         push_sheet_stub(&reader, &element, &mut sheet_numbers, &mut sheet_stubs)?;
                     } else if depth == 1 && element.name().as_ref() == SCORE_ELEMENT {
                         push_score_ref(&reader, &element, &mut score_refs)?;
+                    } else if depth == 1 && element.name().as_ref() == SHEETS_SELECTION_ELEMENT {
+                        begin_sheets_selection(&sheets_selection)?;
+                        sheets_selection = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -406,6 +422,12 @@ impl BookXml {
                     }
                 }
                 Event::End(element) => {
+                    if depth == 2
+                        && element.name().as_ref() == SHEETS_SELECTION_ELEMENT
+                        && let Some(text) = active_sheets_selection.take()
+                    {
+                        sheets_selection = Some(text);
+                    }
                     if element.name().as_ref() == PAGE_ELEMENT && depth == 3 {
                         active_score_page = None;
                     }
@@ -486,6 +508,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_sheets_selection.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_sheets_selection.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::Text(text) if active_score_page.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -556,6 +584,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_sheets_selection.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_sheets_selection.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::CData(_) if active_score_page.is_some() => {
                     let (score_index, page) = active_score_page.unwrap();
                     return Err(BookXmlError::UnexpectedScorePageContent {
@@ -601,6 +635,9 @@ impl BookXml {
                 }
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
+                }
+                Event::GeneralRef(_) if active_sheets_selection.is_some() => {
+                    return Err(BookXmlError::UnexpectedSheetsSelectionContent);
                 }
                 Event::GeneralRef(_) if active_score_page.is_some() => {
                     let (score_index, page) = active_score_page.unwrap();
@@ -653,6 +690,11 @@ impl BookXml {
                     });
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_sheets_selection.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedSheetsSelectionContent);
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_logical_staff_leaf.is_some() =>
                 {
                     return Err(unexpected_logical_staff_config_content(
@@ -699,6 +741,7 @@ impl BookXml {
             alias,
             input_path,
             dirty,
+            sheets_selection,
             sheet_stubs,
             score_refs,
         })
@@ -744,6 +787,12 @@ impl BookXml {
     #[must_use]
     pub fn is_dirty(&self) -> bool {
         self.dirty.unwrap_or(false)
+    }
+
+    /// Raw direct `sheets-selection` text, preserving explicit empty content.
+    #[must_use]
+    pub fn sheets_selection(&self) -> Option<&str> {
+        self.sheets_selection.as_deref()
     }
 
     /// Direct child sheet stubs in document order.
@@ -1252,6 +1301,10 @@ pub enum BookXmlError {
     UnexpectedRootElement(String),
     /// A root book boolean has an invalid XML Schema spelling.
     InvalidBookBoolean { field: &'static str, value: String },
+    /// A book contains more than one direct `sheets-selection` scalar.
+    DuplicateSheetsSelection,
+    /// The typed sheet-selection scalar contains markup or an entity reference.
+    UnexpectedSheetsSelectionContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1517,6 +1570,12 @@ impl fmt::Display for BookXmlError {
             }
             Self::InvalidBookBoolean { field, value } => {
                 write!(formatter, "invalid book boolean {field}: {value:?}")
+            }
+            Self::DuplicateSheetsSelection => {
+                write!(formatter, "book has duplicate sheets-selection elements")
+            }
+            Self::UnexpectedSheetsSelectionContent => {
+                write!(formatter, "book sheets-selection contains non-text content")
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -1820,6 +1879,13 @@ impl fmt::Display for BookXmlError {
 }
 
 impl Error for BookXmlError {}
+
+fn begin_sheets_selection(current: &Option<String>) -> Result<(), BookXmlError> {
+    if current.is_some() {
+        return Err(BookXmlError::DuplicateSheetsSelection);
+    }
+    Ok(())
+}
 
 fn parse_book_root(
     reader: &Reader<Cursor<&[u8]>>,
@@ -3566,6 +3632,62 @@ mod tests {
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::Malformed { .. }
             ));
+        }
+    }
+
+    #[test]
+    fn reads_raw_sheets_selection_and_distinguishes_absent_from_empty() {
+        let xml = br#"<book><sheets-selection> 1-3,5,10- </sheets-selection></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        assert_eq!(book.sheets_selection(), Some(" 1-3,5,10- "));
+        assert_eq!(book.original_bytes(), xml);
+
+        assert_eq!(
+            BookXml::parse(br#"<book><sheets-selection/></book>"#)
+                .unwrap()
+                .sheets_selection(),
+            Some("")
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book><sheets-selection></sheets-selection></book>"#)
+                .unwrap()
+                .sheets_selection(),
+            Some("")
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book/>"#).unwrap().sheets_selection(),
+            None
+        );
+    }
+
+    #[test]
+    fn accepts_cdata_but_ignores_non_direct_sheet_selection_lookalikes() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><future><sheets-selection>nested</sheets-selection></future><f:sheets-selection>namespaced</f:sheets-selection><sheets-selection>1<![CDATA[-3]]>,5</sheets-selection></book>"#,
+        )
+        .unwrap();
+
+        assert_eq!(book.sheets_selection(), Some("1-3,5"));
+    }
+
+    #[test]
+    fn rejects_duplicate_or_non_text_sheets_selection() {
+        for xml in [
+            br#"<book><sheets-selection/><sheets-selection/></book>"#.as_slice(),
+            br#"<book><sheets-selection>1</sheets-selection><sheets-selection>2</sheets-selection></book>"#.as_slice(),
+        ] {
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::DuplicateSheetsSelection
+            );
+        }
+
+        for content in ["<future/>", "&#49;", "<!--1-->", "<?pick 1?>"] {
+            let xml = format!("<book><sheets-selection>{content}</sheets-selection></book>");
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedSheetsSelectionContent
+            );
         }
     }
 
