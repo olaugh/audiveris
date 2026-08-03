@@ -297,6 +297,12 @@ impl LineCluster {
         self.lines.get(&position)
     }
 
+    /// Member at a zero-based top-to-bottom index.
+    #[must_use]
+    pub fn line_by_index(&self, index: usize) -> Option<&ClusterLine> {
+        self.lines.values().nth(index)
+    }
+
     #[must_use]
     pub fn first_line(&self) -> &ClusterLine {
         self.lines.first_key_value().expect("seeded cluster").1
