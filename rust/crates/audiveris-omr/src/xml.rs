@@ -25,6 +25,8 @@ const DEPRECATED_OCR_LANGUAGES_ELEMENT: &[u8] = b"ocr-languages";
 const PARAMETERS_ELEMENT: &[u8] = b"parameters";
 const INTERLINE_ELEMENT: &[u8] = b"interline";
 const BEAM_THICKNESS_ELEMENT: &[u8] = b"beam-thickness";
+const PROCESSING_ELEMENT: &[u8] = b"processing";
+const SWITCH_ELEMENT: &[u8] = b"switch";
 const INPUT_ELEMENT: &[u8] = b"input";
 const PATH_ELEMENT: &[u8] = b"path";
 const INPUT_NUMBER_ELEMENT: &[u8] = b"number";
@@ -59,6 +61,7 @@ const SMALL_ATTRIBUTE: &[u8] = b"small";
 const LOGICALS_LOCKED_ATTRIBUTE: &[u8] = b"logicals-locked";
 const SHEET_NUMBER_ATTRIBUTE: &[u8] = b"sheet-number";
 const SHEET_PAGE_ID_ATTRIBUTE: &[u8] = b"sheet-page-id";
+const KEY_ATTRIBUTE: &[u8] = b"key";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +123,8 @@ impl BookXml {
         let mut active_book_interline: Option<String> = None;
         let mut active_book_beam_thickness: Option<String> = None;
         let mut active_book_ocr_languages: Option<String> = None;
+        let mut active_book_processing = false;
+        let mut active_book_lyrics: Option<String> = None;
         let mut root_closed = false;
 
         loop {
@@ -129,6 +134,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if active_book_lyrics.is_some() {
+                        return Err(BookXmlError::UnexpectedBookLyricsContent);
+                    }
                     if active_book_ocr_languages.is_some() {
                         return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
                     }
@@ -230,6 +238,20 @@ impl BookXml {
                     {
                         begin_book_ocr_languages(&book_parameters)?;
                         active_book_ocr_languages = Some(String::new());
+                    } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == PROCESSING_ELEMENT
+                    {
+                        begin_book_processing(&book_parameters)?;
+                        set_book_processing_present(&mut book_parameters);
+                        active_book_processing = true;
+                    } else if depth == 3
+                        && active_book_processing
+                        && element.name().as_ref() == SWITCH_ELEMENT
+                        && is_lyrics_switch(&reader, &element)?
+                    {
+                        begin_book_lyrics(&book_parameters)?;
+                        active_book_lyrics = Some(String::new());
                     } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
@@ -337,6 +359,9 @@ impl BookXml {
                     })?;
                 }
                 Event::Empty(element) => {
+                    if active_book_lyrics.is_some() {
+                        return Err(BookXmlError::UnexpectedBookLyricsContent);
+                    }
                     if active_book_ocr_languages.is_some() {
                         return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
                     }
@@ -438,6 +463,19 @@ impl BookXml {
                         begin_book_ocr_languages(&book_parameters)?;
                         set_book_ocr_languages(&mut book_parameters, String::new());
                     } else if depth == 2
+                        && active_book_parameters
+                        && element.name().as_ref() == PROCESSING_ELEMENT
+                    {
+                        begin_book_processing(&book_parameters)?;
+                        set_book_processing_present(&mut book_parameters);
+                    } else if depth == 3
+                        && active_book_processing
+                        && element.name().as_ref() == SWITCH_ELEMENT
+                        && is_lyrics_switch(&reader, &element)?
+                    {
+                        begin_book_lyrics(&book_parameters)?;
+                        set_book_lyrics(&mut book_parameters, "")?;
+                    } else if depth == 2
                         && element.name().as_ref() == LOGICAL_PART_ELEMENT
                         && let Some(score_index) = active_score
                     {
@@ -533,6 +571,18 @@ impl BookXml {
                     }
                 }
                 Event::End(element) => {
+                    if depth == 4
+                        && element.name().as_ref() == SWITCH_ELEMENT
+                        && let Some(text) = active_book_lyrics.take()
+                    {
+                        set_book_lyrics(&mut book_parameters, &text)?;
+                    }
+                    if depth == 3
+                        && element.name().as_ref() == PROCESSING_ELEMENT
+                        && active_book_processing
+                    {
+                        active_book_processing = false;
+                    }
                     if depth == 3
                         && element.name().as_ref() == DEPRECATED_OCR_LANGUAGES_ELEMENT
                         && let Some(text) = active_book_ocr_languages.take()
@@ -656,6 +706,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::Text(text) if active_book_lyrics.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_lyrics.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::Text(text) if active_book_ocr_languages.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -774,6 +830,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(text) if active_book_lyrics.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    active_book_lyrics.as_mut().unwrap().push_str(&decoded);
+                }
                 Event::CData(text) if active_book_ocr_languages.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -868,6 +930,9 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_book_lyrics.is_some() => {
+                    return Err(BookXmlError::UnexpectedBookLyricsContent);
+                }
                 Event::GeneralRef(_) if active_book_ocr_languages.is_some() => {
                     return Err(BookXmlError::UnexpectedBookOcrLanguagesContent);
                 }
@@ -935,6 +1000,11 @@ impl BookXml {
                         sheet_number: page.sheet_number,
                         sheet_page_id: page.sheet_page_id,
                     });
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_book_lyrics.is_some() =>
+                {
+                    return Err(BookXmlError::UnexpectedBookLyricsContent);
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
                     if active_book_ocr_languages.is_some() =>
@@ -1113,6 +1183,8 @@ pub struct BookParameterScalars {
     interline: Option<i32>,
     beam_thickness: Option<i32>,
     ocr_languages: Option<String>,
+    processing_present: bool,
+    lyrics: Option<bool>,
 }
 
 impl BookParameterScalars {
@@ -1132,6 +1204,18 @@ impl BookParameterScalars {
     #[must_use]
     pub fn ocr_languages_specific(&self) -> Option<&str> {
         self.ocr_languages.as_deref()
+    }
+
+    /// Whether the ProcessingSwitches adapter container was explicitly persisted.
+    #[must_use]
+    pub const fn processing_is_persisted(&self) -> bool {
+        self.processing_present
+    }
+
+    /// Explicit Book-scope `lyrics` switch; absent means inherit globally.
+    #[must_use]
+    pub const fn lyrics_specific(&self) -> Option<bool> {
+        self.lyrics
     }
 }
 
@@ -1654,6 +1738,14 @@ pub enum BookXmlError {
     DuplicateBookOcrLanguages,
     /// The typed Book OCR-language scalar contains unsupported content.
     UnexpectedBookOcrLanguagesContent,
+    /// The Book parameter container repeats its processing-switch container.
+    DuplicateBookProcessing,
+    /// The Book processing adapter repeats the typed lyrics switch.
+    DuplicateBookLyrics,
+    /// A persisted lyrics switch has an invalid XML Schema boolean spelling.
+    InvalidBookLyricsBoolean(String),
+    /// The typed lyrics switch contains unsupported content.
+    UnexpectedBookLyricsContent,
     /// A direct child `sheet` has no unqualified `number` attribute.
     MissingSheetNumber,
     /// A sheet number is not a positive decimal integer representable as `u32`.
@@ -1985,6 +2077,21 @@ impl fmt::Display for BookXmlError {
                     formatter,
                     "book parameter ocr-languages contains non-text content"
                 )
+            }
+            Self::DuplicateBookProcessing => {
+                write!(formatter, "book parameters repeat processing")
+            }
+            Self::DuplicateBookLyrics => {
+                write!(formatter, "book processing repeats lyrics switch")
+            }
+            Self::InvalidBookLyricsBoolean(value) => {
+                write!(
+                    formatter,
+                    "book lyrics switch has invalid boolean {value:?}"
+                )
+            }
+            Self::UnexpectedBookLyricsContent => {
+                write!(formatter, "book lyrics switch contains non-text content")
             }
             Self::MissingSheetNumber => write!(formatter, "sheet stub has no number attribute"),
             Self::InvalidSheetNumber(number) => {
@@ -2382,6 +2489,56 @@ fn begin_book_ocr_languages(current: &Option<BookParameterScalars>) -> Result<()
 
 fn set_book_ocr_languages(parameters: &mut Option<BookParameterScalars>, text: String) {
     parameters.as_mut().unwrap().ocr_languages = Some(text);
+}
+
+fn begin_book_processing(current: &Option<BookParameterScalars>) -> Result<(), BookXmlError> {
+    if current
+        .as_ref()
+        .is_some_and(BookParameterScalars::processing_is_persisted)
+    {
+        return Err(BookXmlError::DuplicateBookProcessing);
+    }
+    Ok(())
+}
+
+fn set_book_processing_present(parameters: &mut Option<BookParameterScalars>) {
+    parameters.as_mut().unwrap().processing_present = true;
+}
+
+fn is_lyrics_switch(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+) -> Result<bool, BookXmlError> {
+    let mut key = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        if attribute.key.as_ref() == KEY_ATTRIBUTE {
+            key = Some(decode_attribute(reader, &attribute)?);
+        }
+    }
+    Ok(key.as_deref() == Some("lyrics"))
+}
+
+fn begin_book_lyrics(current: &Option<BookParameterScalars>) -> Result<(), BookXmlError> {
+    if current
+        .as_ref()
+        .and_then(BookParameterScalars::lyrics_specific)
+        .is_some()
+    {
+        return Err(BookXmlError::DuplicateBookLyrics);
+    }
+    Ok(())
+}
+
+fn set_book_lyrics(
+    parameters: &mut Option<BookParameterScalars>,
+    text: &str,
+) -> Result<(), BookXmlError> {
+    let value = parse_jaxb_boolean(text)
+        .ok_or_else(|| BookXmlError::InvalidBookLyricsBoolean(text.to_owned()))?;
+    parameters.as_mut().unwrap().lyrics = Some(value);
+    Ok(())
 }
 
 fn parse_book_root(
@@ -4472,6 +4629,74 @@ mod tests {
             assert_eq!(
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::UnexpectedBookOcrLanguagesContent
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_inherited_explicit_false_and_true_book_lyrics() {
+        let inherited = BookXml::parse(br#"<book><parameters/></book>"#).unwrap();
+        let inherited_parameters = inherited.book_parameters().unwrap();
+        assert!(!inherited_parameters.processing_is_persisted());
+        assert_eq!(inherited_parameters.lyrics_specific(), None);
+
+        let processing_only =
+            BookXml::parse(br#"<book><parameters><processing/></parameters></book>"#).unwrap();
+        let processing_parameters = processing_only.book_parameters().unwrap();
+        assert!(processing_parameters.processing_is_persisted());
+        assert_eq!(processing_parameters.lyrics_specific(), None);
+
+        for (spelling, expected) in [("false", false), ("0", false), ("true", true), ("1", true)] {
+            let xml = format!(
+                "<book><parameters><processing><switch key=\"lyrics\">{spelling}</switch></processing></parameters></book>"
+            );
+            let book = BookXml::parse(xml.as_bytes()).unwrap();
+            let parameters = book.book_parameters().unwrap();
+            assert!(parameters.processing_is_persisted());
+            assert_eq!(parameters.lyrics_specific(), Some(expected));
+            assert_eq!(book.original_bytes(), xml.as_bytes());
+        }
+    }
+
+    #[test]
+    fn reads_cdata_and_ignores_other_or_non_direct_processing_switches() {
+        let book = BookXml::parse(
+            br#"<book xmlns:f="urn:future"><f:parameters><processing><switch key="lyrics">false</switch></processing></f:parameters><sheet number="1"><parameters><processing><switch key="lyrics">false</switch></processing></parameters></sheet><parameters><future><processing><switch key="lyrics">false</switch></processing></future><processing><future><switch key="lyrics">false</switch></future><f:switch key="lyrics">false</f:switch><switch f:key="lyrics">false</switch><switch>unknown</switch><switch key="fingerings">true</switch><switch key="lyrics">tr<![CDATA[ue]]></switch></processing></parameters></book>"#,
+        )
+        .unwrap();
+
+        let parameters = book.book_parameters().unwrap();
+        assert!(parameters.processing_is_persisted());
+        assert_eq!(parameters.lyrics_specific(), Some(true));
+    }
+
+    #[test]
+    fn rejects_duplicate_invalid_or_non_text_book_lyrics_switches() {
+        assert_eq!(
+            BookXml::parse(br#"<book><parameters><processing/><processing/></parameters></book>"#)
+                .unwrap_err(),
+            BookXmlError::DuplicateBookProcessing
+        );
+        assert_eq!(
+            BookXml::parse(br#"<book><parameters><processing><switch key="lyrics">true</switch><switch key="lyrics">false</switch></processing></parameters></book>"#).unwrap_err(),
+            BookXmlError::DuplicateBookLyrics
+        );
+        for invalid in ["", "TRUE", "False", "yes", "2"] {
+            let xml = format!(
+                "<book><parameters><processing><switch key=\"lyrics\">{invalid}</switch></processing></parameters></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidBookLyricsBoolean(invalid.to_owned())
+            );
+        }
+        for content in ["<future/>", "&#49;", "<!--true-->", "<?pick true?>"] {
+            let xml = format!(
+                "<book><parameters><processing><switch key=\"lyrics\">{content}</switch></processing></parameters></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedBookLyricsContent
             );
         }
     }
