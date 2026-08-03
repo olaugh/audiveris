@@ -22,6 +22,7 @@ pub mod scale_runs;
 pub mod section;
 pub mod section_tally;
 pub mod staff_pattern;
+pub mod staff_peak;
 pub mod target_layout;
 pub mod target_line;
 pub mod watershed;
