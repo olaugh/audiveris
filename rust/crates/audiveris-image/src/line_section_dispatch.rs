@@ -8,6 +8,7 @@
 //! `getAllStickers`). Each output retains the lag's ID order.
 
 use crate::section::Section;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HorizontalSectionDispatch<'a> {
@@ -126,6 +127,129 @@ pub fn can_include_section(
     }
 
     SectionInclusionDecision::Include
+}
+
+/// Minimal section fields consumed by Java `includeSections` traversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionAssignmentCandidate {
+    pub id: usize,
+    pub first_pos: usize,
+    /// Integer centroid x from `Section.getCentroid()` (not `getCentroid2D()`).
+    pub centroid_x: isize,
+}
+
+/// One staff line in original system/staff/line traversal order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectionAssignmentLine {
+    pub staff_id: usize,
+    pub line_id: usize,
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_y: usize,
+    pub max_y: usize,
+    /// Original endpoint abscissae preserved across the deferred batch update.
+    pub start_endpoint_x: f64,
+    pub stop_endpoint_x: f64,
+}
+
+/// Lines belonging to one system; each system restarts its candidate scan.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionAssignmentSystem {
+    pub system_id: usize,
+    pub lines: Vec<SectionAssignmentLine>,
+}
+
+/// Intent corresponding to Java's post-batch `fil.setEndingPoints(...)` call.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EndpointRestorationIntent {
+    pub start_x: f64,
+    pub stop_x: f64,
+    /// Both endpoint ordinates must be recomputed from the mutated filament at
+    /// the preserved abscissae.
+    pub recompute_y_at_preserved_x: bool,
+}
+
+/// A deferred set of sections to add to one line, followed by endpoint repair.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LineSectionInclusionBatch {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub line_id: usize,
+    pub section_ids: Vec<usize>,
+    pub restore_endpoints: EndpointRestorationIntent,
+}
+
+/// Port the traversal and assignment contract around `canIncludeSection`.
+///
+/// `decide` is called only after the Java y-window and inclusive centroid-x
+/// gates pass. Returned sections are not marked included until the whole line
+/// has been scanned, matching Java's deferred `stickers` batch.
+#[must_use]
+pub fn plan_section_inclusions(
+    candidates: &[SectionAssignmentCandidate],
+    systems: &[SectionAssignmentSystem],
+    mut decide: impl FnMut(usize, usize, usize, usize) -> SectionInclusionDecision,
+) -> Vec<LineSectionInclusionBatch> {
+    // Collections.sort(List, Section.byPosition) is stable: equal firstPos
+    // candidates retain their source order.
+    let mut ordered = candidates.to_vec();
+    ordered.sort_by_key(|candidate| candidate.first_pos);
+
+    let mut included = HashSet::new();
+    let mut batches = Vec::new();
+
+    for system in systems {
+        // Java resets iMin for each system because systems can be side by side.
+        let mut i_min = 0;
+
+        for line in &system.lines {
+            let mut stickers = Vec::new();
+
+            for (index, candidate) in ordered.iter().enumerate().skip(i_min) {
+                // Java checks included IDs before updating iMin or y-windowing.
+                if included.contains(&candidate.id) {
+                    continue;
+                }
+
+                if candidate.first_pos < line.min_y {
+                    // Deliberately retain the last skipped index, rather than
+                    // index + 1, matching the original implementation.
+                    i_min = index;
+                    continue;
+                }
+                if candidate.first_pos > line.max_y {
+                    break;
+                }
+
+                let center_x = candidate.centroid_x as f64;
+                if center_x >= line.min_x
+                    && center_x <= line.max_x
+                    && decide(system.system_id, line.staff_id, line.line_id, candidate.id)
+                        == SectionInclusionDecision::Include
+                {
+                    stickers.push(candidate.id);
+                }
+            }
+
+            // Apply all additions only after the scan, then restore endpoint y
+            // values at the original x values. The batch record preserves that
+            // mutation boundary for a stateful filament implementation.
+            included.extend(stickers.iter().copied());
+            batches.push(LineSectionInclusionBatch {
+                system_id: system.system_id,
+                staff_id: line.staff_id,
+                line_id: line.line_id,
+                section_ids: stickers,
+                restore_endpoints: EndpointRestorationIntent {
+                    start_x: line.start_endpoint_x,
+                    stop_x: line.stop_endpoint_x,
+                    recompute_y_at_preserved_x: true,
+                },
+            });
+        }
+    }
+
+    batches
 }
 
 #[cfg(test)]
@@ -310,5 +434,133 @@ mod tests {
                 maximum: 3,
             })
         );
+    }
+
+    fn line(
+        staff_id: usize,
+        line_id: usize,
+        min_x: f64,
+        max_x: f64,
+        min_y: usize,
+        max_y: usize,
+    ) -> SectionAssignmentLine {
+        SectionAssignmentLine {
+            staff_id,
+            line_id,
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            start_endpoint_x: min_x + 0.25,
+            stop_endpoint_x: max_x - 0.25,
+        }
+    }
+
+    const fn candidate(
+        id: usize,
+        first_pos: usize,
+        centroid_x: isize,
+    ) -> SectionAssignmentCandidate {
+        SectionAssignmentCandidate {
+            id,
+            first_pos,
+            centroid_x,
+        }
+    }
+
+    #[test]
+    fn traversal_is_stable_by_position_with_strict_y_and_inclusive_x_windows() {
+        let candidates = [
+            candidate(4, 10, 100),
+            candidate(7, 21, 50),
+            candidate(1, 9, 50),
+            candidate(2, 10, 0),
+            candidate(3, 10, 101),
+            candidate(6, 20, 50),
+            candidate(5, 10, 50),
+        ];
+        let systems = [SectionAssignmentSystem {
+            system_id: 8,
+            lines: vec![line(9, 10, 0.0, 100.0, 10, 20)],
+        }];
+        let mut evaluated = Vec::new();
+
+        let batches = plan_section_inclusions(&candidates, &systems, |system, staff, line, id| {
+            evaluated.push((system, staff, line, id));
+            SectionInclusionDecision::Include
+        });
+
+        // Equal-position candidates retain source order (4, 2, 3, 5).
+        assert_eq!(
+            evaluated,
+            [(8, 9, 10, 4), (8, 9, 10, 2), (8, 9, 10, 5), (8, 9, 10, 6)]
+        );
+        assert_eq!(batches[0].section_ids, [4, 2, 5, 6]);
+        // x=0 and x=100 pass; x=101 is skipped. y=9 advances and y=21 breaks.
+    }
+
+    #[test]
+    fn each_system_restarts_scan_and_included_ids_are_globally_suppressed() {
+        let candidates = [candidate(1, 10, 50), candidate(2, 10, 75)];
+        let systems = [
+            SectionAssignmentSystem {
+                system_id: 1,
+                // This lower line advances iMin past the top candidates.
+                lines: vec![line(1, 1, 0.0, 50.0, 30, 40)],
+            },
+            SectionAssignmentSystem {
+                system_id: 2,
+                // Side-by-side system at the same y must restart from index zero.
+                lines: vec![line(2, 1, 50.0, 100.0, 10, 10)],
+            },
+            SectionAssignmentSystem {
+                system_id: 3,
+                // A duplicate side-by-side window must not claim IDs again.
+                lines: vec![line(3, 1, 50.0, 100.0, 10, 10)],
+            },
+        ];
+
+        let batches = plan_section_inclusions(&candidates, &systems, |_, _, _, _| {
+            SectionInclusionDecision::Include
+        });
+
+        assert!(batches[0].section_ids.is_empty());
+        assert_eq!(batches[1].section_ids, [1, 2]);
+        assert!(batches[2].section_ids.is_empty());
+    }
+
+    #[test]
+    fn rejected_candidates_remain_available_and_batches_restore_endpoints() {
+        let candidates = [candidate(11, 5, 10), candidate(12, 5, 20)];
+        let systems = [SectionAssignmentSystem {
+            system_id: 3,
+            lines: vec![line(4, 5, 0.0, 30.0, 5, 5), line(4, 6, 0.0, 30.0, 5, 5)],
+        }];
+
+        let batches =
+            plan_section_inclusions(&candidates, &systems, |_, _, line_id, section_id| {
+                if line_id == 5 && section_id == 11 {
+                    SectionInclusionDecision::Reject(SectionInclusionRejection::CenterGap {
+                        observed: 2.0,
+                        maximum: 1.0,
+                    })
+                } else {
+                    SectionInclusionDecision::Include
+                }
+            });
+
+        // Line 5 selects ID 12 as one deferred batch. Rejected ID 11 remains
+        // available to line 6, while included ID 12 is suppressed there.
+        assert_eq!(batches[0].section_ids, [12]);
+        assert_eq!(batches[1].section_ids, [11]);
+        assert_eq!(
+            batches[0].restore_endpoints,
+            EndpointRestorationIntent {
+                start_x: 0.25,
+                stop_x: 29.75,
+                recompute_y_at_preserved_x: true,
+            }
+        );
+        assert!(batches[1].restore_endpoints.recompute_y_at_preserved_x);
     }
 }
