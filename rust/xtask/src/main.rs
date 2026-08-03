@@ -43,6 +43,7 @@ use audiveris_image::{
     lag_rebuild::RegisteredHorizontalLag,
     line_cluster::{FilamentId, LineCluster},
     line_endpoints::{DefineEndPointsParameters, define_end_points},
+    line_holes::{HoleInsertionSource, fill_holes_initial},
     line_short_sections::HorizontalSectionLag,
     lines_coordinator::{
         LinesCoordinatorParameters, StaffCandidateKind, retrieve_staff_candidates,
@@ -283,7 +284,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 69] = [
+const VECTOR_KEYS: [&str; 70] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -325,6 +326,7 @@ const VECTOR_KEYS: [&str; 69] = [
     "grid.skew.synthetic=",
     "grid.raw-lines.synthetic=",
     "grid.line-endpoints.synthetic=",
+    "grid.line-holes.synthetic=",
     "grid.bar-alignments.synthetic=",
     "grid.bar-connections.synthetic=",
     "grid.output-boundary.synthetic=",
@@ -570,7 +572,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         defined_endpoints: Vec::new(),
         discarded_filament_steals: Vec::new(),
         discarded_filament_recomputations: Vec::new(),
-        fill_hole_insertions: Vec::new(),
+        fill_hole_invocations: Vec::new(),
         section_inclusion_batches: Vec::new(),
         curvature_removals: Vec::new(),
         curvature_recomputations: Vec::new(),
@@ -626,6 +628,109 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         geometry.stop().1,
         geometry.position_at(95.0)?,
         geometry.slope_at(95.0)?,
+    ))
+}
+
+fn grid_hole_line(
+    id: usize,
+    cluster_position: i32,
+    y: usize,
+    defining_points: Vec<(f64, f64)>,
+) -> Result<PreparedStaffLine, Box<dyn Error>> {
+    let mut table = RunTable::new(Orientation::Horizontal, 63, y + 2)?;
+    table.add_run(y, Run::new(0, 63))?;
+    let section = build_sections(&table, JunctionPolicy::All)
+        .into_iter()
+        .next()
+        .ok_or("hole fixture line produced no section")?;
+    let mut filament = StaffFilament::new(2)?;
+    filament.add_section(section)?;
+    filament.set_ending_points((0.0, y as f64), (62.0, y as f64))?;
+    filament.replace_defining_points(defining_points)?;
+    Ok(PreparedStaffLine {
+        id,
+        cluster_position,
+        filament,
+    })
+}
+
+fn grid_line_holes_vector() -> Result<String, Box<dyn Error>> {
+    let far_xs = [0.0, 12.0, 24.0, 36.0, 44.0, 56.0, 62.0];
+    let reference = |id, cluster_position, y: usize, xs: &[f64]| {
+        grid_hole_line(
+            id,
+            cluster_position,
+            y,
+            xs.iter().map(|x| (*x, y as f64)).collect(),
+        )
+    };
+    let initial = vec![(0.0, 20.0), (12.0, 20.0), (37.0, 20.0), (62.0, 20.0)];
+    let lines = vec![
+        reference(1, 0, 10, &far_xs)?,
+        reference(2, 1, 15, &[0.0, 6.0, 18.0, 30.0, 42.0, 50.0, 62.0])?,
+        grid_hole_line(3, 2, 20, initial.clone())?,
+        reference(4, 5, 60, &far_xs)?,
+        reference(5, 6, 70, &far_xs)?,
+    ];
+    let fallback50 = lines[2].filament.geometry()?.position_at(50.0)?;
+    let mut state = PreparedCompletionState {
+        staffs: vec![PreparedStaff {
+            id: 9,
+            kind: StaffCandidateKind::Standard,
+            left: 0.0,
+            right: 62.0,
+            interline: 2,
+            small: false,
+            short: false,
+            lines,
+        }],
+        completion_systems: None,
+        discarded_filaments: Vec::new(),
+        horizontal_sections: Vec::new(),
+        binary_buffer: None,
+        thick_section_ids: Vec::new(),
+        thin_section_ids: Vec::new(),
+        defined_endpoints: Vec::new(),
+        fill_hole_invocations: Vec::new(),
+        discarded_filament_steals: Vec::new(),
+        discarded_filament_recomputations: Vec::new(),
+        section_inclusion_batches: Vec::new(),
+        curvature_removals: Vec::new(),
+        curvature_recomputations: Vec::new(),
+        completed_stages: Vec::new(),
+    };
+    fill_holes_initial(&mut state)?;
+
+    let point12 = |point: (f64, f64)| format!("{:.12},{:.12}", point.0, point.1);
+    let points6 = |points: &[(f64, f64)]| {
+        points
+            .iter()
+            .map(|point| format!("{:.6},{:.6}", point.0, point.1))
+            .collect::<Vec<_>>()
+            .join(";")
+    };
+    let insertions = state
+        .fill_hole_invocations
+        .first()
+        .ok_or("hole fixture produced no invocation audit")?
+        .insertions
+        .iter()
+        .map(|insertion| {
+            let source = match insertion.source {
+                HoleInsertionSource::NeighborInterpolation => "neighbor",
+                HoleInsertionSource::CurrentSplineFallback => "fallback",
+            };
+            format!("{}@{source}", point12(insertion.point))
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let geometry = state.staffs[0].lines[2].filament.geometry()?;
+    Ok(format!(
+        "boundary:fillHoles;limits:12,10,5;initial:{};gaps:12->0,25@12->24,25@37->50;refs:24=A0/B5@r.4,50=N1/none;insert:{insertions};fallback50:{fallback50:.12};points:{};sample31:{:.12}/{:.12}",
+        points6(&initial),
+        points6(geometry.points()),
+        geometry.position_at(31.0)?,
+        geometry.slope_at(31.0)?,
     ))
 }
 
@@ -3114,6 +3219,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.line-endpoints.synthetic={}",
         grid_line_endpoints_vector()?
+    ));
+    lines.push(format!(
+        "grid.line-holes.synthetic={}",
+        grid_line_holes_vector()?
     ));
     lines.push(format!(
         "grid.bar-alignments.synthetic={}",

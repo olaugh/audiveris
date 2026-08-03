@@ -1399,6 +1399,7 @@ public final class RustParityProbe
         System.out.println("grid.skew.synthetic=" + gridSkew());
         System.out.println("grid.raw-lines.synthetic=" + gridRawLines());
         System.out.println("grid.line-endpoints.synthetic=" + gridLineEndPoints());
+        System.out.println("grid.line-holes.synthetic=" + gridLineHoles());
         System.out.println("grid.bar-alignments.synthetic=" + gridBarAlignments());
         System.out.println("grid.bar-connections.synthetic=" + gridBarConnections());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
@@ -2078,6 +2079,101 @@ public final class RustParityProbe
         StaffFilament filament = new StaffFilament(interline);
         filament.addSection(section);
         return filament;
+    }
+
+    private static StaffFilament holeFilament (int clusterPos,
+                                               int y,
+                                               double[] xs)
+        throws Exception
+    {
+        List<Point2D> definingPoints = new ArrayList<>();
+        for (double x : xs) {
+            definingPoints.add(new Point2D.Double(x, y));
+        }
+        return holeFilament(clusterPos, y, definingPoints);
+    }
+
+    private static StaffFilament holeFilament (int clusterPos,
+                                               int y,
+                                               List<Point2D> definingPoints)
+        throws Exception
+    {
+        StaffFilament filament = staffFilament(0, y, 63, 2);
+        filament.computeLine();
+        filament.setCluster(null, clusterPos);
+
+        Class<?> curvedFilament = StaffFilament.class.getSuperclass();
+        setDeclaredField(
+                filament,
+                curvedFilament,
+                "points",
+                new ArrayList<>(definingPoints));
+        setDeclaredField(
+                filament,
+                curvedFilament,
+                "spline",
+                NaturalSpline.interpolate(definingPoints));
+        return filament;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String gridLineHoles ()
+        throws Exception
+    {
+        double[] farXs = {0, 12, 24, 36, 44, 56, 62};
+        List<Point2D> initial = List.of(
+                new Point2D.Double(0, 20),
+                new Point2D.Double(12, 20),
+                new Point2D.Double(37, 20),
+                new Point2D.Double(62, 20));
+        StaffFilament current = holeFilament(2, 20, initial);
+        List<StaffFilament> filaments = List.of(
+                holeFilament(0, 10, farXs),
+                holeFilament(1, 15, new double[]{0, 6, 18, 30, 42, 50, 62}),
+                current,
+                holeFilament(5, 60, farXs),
+                holeFilament(6, 70, farXs));
+
+        double fallback50 = current.getPositionAt(50, Orientation.HORIZONTAL);
+        for (int pos = 0; pos < filaments.size(); pos++) {
+            filaments.get(pos).fillHoles(pos, filaments);
+        }
+
+        List<Point2D> finalPoints = (List<Point2D>) declaredField(
+                current,
+                StaffFilament.class.getSuperclass(),
+                "points");
+        return String.format(
+                java.util.Locale.ROOT,
+                "boundary:fillHoles;limits:12,10,5;initial:%s;gaps:12->0,25@12->24,25@37->50;refs:24=A0/B5@r.4,50=N1/none;insert:%s@neighbor|%s@fallback;fallback50:%.12f;points:%s;sample31:%.12f/%.12f",
+                points(initial),
+                point(finalPoints.get(2)),
+                point(finalPoints.get(4)),
+                fallback50,
+                points(finalPoints),
+                current.getPositionAt(31, Orientation.HORIZONTAL),
+                current.getSlopeAt(31, Orientation.HORIZONTAL));
+    }
+
+    private static Object declaredField (Object instance,
+                                         Class<?> owner,
+                                         String name)
+        throws ReflectiveOperationException
+    {
+        Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(instance);
+    }
+
+    private static void setDeclaredField (Object instance,
+                                          Class<?> owner,
+                                          String name,
+                                          Object value)
+        throws ReflectiveOperationException
+    {
+        Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(instance, value);
     }
 
     private static String rectangle (java.awt.Rectangle rectangle)
