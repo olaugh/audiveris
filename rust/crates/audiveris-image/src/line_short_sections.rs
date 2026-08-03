@@ -64,6 +64,31 @@ impl HorizontalSectionLag {
         self.last_registered_id
     }
 
+    /// Mirror `BasicLag.removeSections` for original staff-line members.
+    ///
+    /// IDs are visited in caller order. An ID already absent from the lag is
+    /// ignored, while each present section has its runs removed before its
+    /// entity is detached. Earlier removals remain visible on a run-table
+    /// failure, matching Java's non-transactional loop.
+    pub fn remove_sections(&mut self, section_ids: &[usize]) -> Result<(), RunTableError> {
+        for section_id in section_ids {
+            let Some(index) = self
+                .sections
+                .iter()
+                .position(|section| section.id() == *section_id)
+            else {
+                continue;
+            };
+            let section = self.sections[index].clone();
+            for (offset, run) in section.runs().iter().copied().enumerate() {
+                self.run_table
+                    .remove_run(section.first_pos() + offset, run)?;
+            }
+            self.sections.remove(index);
+        }
+        Ok(())
+    }
+
     /// Mirror `LinesRetriever.addShortSections` in its observable order.
     pub fn add_short_sections(
         &mut self,
@@ -175,6 +200,30 @@ mod tests {
         assert_eq!(lag.run_table(), &expected_runs);
         assert_eq!(hook.calls, [vec![1, 2, 3]]);
         assert_eq!(hook.run_counts, [4]);
+    }
+
+    #[test]
+    fn removal_deletes_runs_in_requested_order_and_ignores_absent_ids() {
+        let source = table(&[
+            (0, Run::new(1, 4)),
+            (1, Run::new(1, 4)),
+            (3, Run::new(10, 3)),
+        ]);
+        let mut lag = HorizontalSectionLag::from_long_runs(source).unwrap();
+        assert_eq!(
+            lag.sections().iter().map(Section::id).collect::<Vec<_>>(),
+            [1, 2]
+        );
+
+        lag.remove_sections(&[99, 1]).unwrap();
+
+        assert_eq!(
+            lag.sections().iter().map(Section::id).collect::<Vec<_>>(),
+            [2]
+        );
+        assert_eq!(lag.run_table().total_run_count(), 1);
+        assert_eq!(lag.run_table().get(2, 0), crate::run_table::BACKGROUND);
+        assert_eq!(lag.run_table().get(11, 3), crate::run_table::FOREGROUND);
     }
 
     #[test]
