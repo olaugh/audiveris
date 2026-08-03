@@ -13,6 +13,9 @@ use audiveris_image::{
         BeamExtensionEvidence, BeamExtensionInput as RasterBeamExtensionInput,
         BeamExtensionParameters, ExtensionBeam, ExtensionGlyph, beam_extension_evidence,
     },
+    beam_hooks::{
+        HookEvidence, HookGlyph, HookParameters, HookSearchInput, HookSide, hook_search_evidence,
+    },
     beam_structure::{
         BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster,
         BeamStructureParameters, analyze_beam_structure, compute_beam_impacts,
@@ -214,6 +217,7 @@ pub struct NativeBeamKernelConfig {
     pub standard: NativeBeamClassParameters,
     pub small: Option<NativeBeamClassParameters>,
     pub extension_systems: Vec<NativeBeamExtensionSystem>,
+    pub hook_systems: Vec<NativeBeamHookSystem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,6 +226,13 @@ pub struct NativeBeamExtensionSystem {
     pub beams: Vec<ExtensionBeam>,
     pub seeds: Vec<ExtensionGlyph>,
     pub parameters: BeamExtensionParameters,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeBeamHookSystem {
+    pub system_id: usize,
+    pub beams: Vec<ExtensionBeam>,
+    pub parameters: HookParameters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -248,7 +259,7 @@ pub struct BeamExtensionInput {
     pub native_evidence: Vec<BeamExtensionEvidence>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamHookInput {
     pub sheet_id: usize,
     pub system_id: usize,
@@ -257,6 +268,7 @@ pub struct BeamHookInput {
     /// Snapshot after initial assignment removal; Java does not remove newly
     /// assigned hook spots between beam/side probes.
     pub remaining_spot_ids: Vec<usize>,
+    pub native_evidence: Vec<HookEvidence>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -779,12 +791,19 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             .collect::<Vec<_>>();
         for beam_id in base_beam_ids {
             for side in [BeamHookSide::Top, BeamHookSide::Bottom] {
+                let native_evidence = self.native_hook_evidence(
+                    &sheet.systems[system_index],
+                    beam_id,
+                    side,
+                    &remaining_spot_ids,
+                );
                 let hooks = self.visual.build_hooks(BeamHookInput {
                     sheet_id: sheet.id,
                     system_id,
                     beam_id,
                     side,
                     remaining_spot_ids: remaining_spot_ids.clone(),
+                    native_evidence,
                 });
                 apply_delta(sheet, system_index, hooks.delta)?;
                 if let Some(error) = hooks.error {
@@ -918,6 +937,62 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                         .area
                         .contains(point.0, point.1 + (direction * height / 2.0))
                 })
+            },
+        )
+    }
+
+    fn native_hook_evidence(
+        &self,
+        system: &NeutralBeamSystem,
+        beam_id: usize,
+        side: BeamHookSide,
+        remaining_spot_ids: &[usize],
+    ) -> Vec<HookEvidence> {
+        let Some(config) = self.native_kernel.as_ref() else {
+            return Vec::new();
+        };
+        let Some(scene) = config
+            .hook_systems
+            .iter()
+            .find(|scene| scene.system_id == system.id)
+        else {
+            return Vec::new();
+        };
+        let Some(base) = scene.beams.iter().find(|beam| beam.id == beam_id).copied() else {
+            return Vec::new();
+        };
+        let spots = remaining_spot_ids
+            .iter()
+            .filter_map(|id| {
+                let glyph = system.free_glyphs.iter().find(|glyph| glyph.id == *id)?;
+                let geometry = glyph.geometry?;
+                Some(HookGlyph {
+                    id: glyph.id,
+                    left: glyph.left,
+                    top: glyph.top,
+                    width: geometry.width,
+                    height: geometry.height,
+                    weight: geometry.weight,
+                    centroid_x: geometry.centroid_x,
+                    centroid_y: geometry.centroid_y,
+                })
+            })
+            .collect::<Vec<_>>();
+        hook_search_evidence(
+            HookSearchInput {
+                base,
+                spots: &spots,
+                raw_beams: &scene.beams,
+                raster: BeamRaster {
+                    table: &config.pixel_filter,
+                    offset_x: config.pixel_filter_offset_x,
+                    offset_y: config.pixel_filter_offset_y,
+                },
+                parameters: scene.parameters,
+            },
+            match side {
+                BeamHookSide::Top => HookSide::Top,
+                BeamHookSide::Bottom => HookSide::Bottom,
             },
         )
     }
@@ -1585,6 +1660,7 @@ mod tests {
                 ..class
             }),
             extension_systems: Vec::new(),
+            hook_systems: Vec::new(),
         }
     }
 
@@ -2109,6 +2185,72 @@ mod tests {
                 kind: NeutralBeamInterKind::Beam,
             }]
         );
+    }
+
+    #[test]
+    fn native_hook_evidence_reaches_top_then_bottom_injected_seams() {
+        let visual = visual_with_spots(Vec::new());
+        let mut config = native_kernel_config(0.08);
+        config.hook_systems.push(NativeBeamHookSystem {
+            system_id: 2,
+            beams: vec![ExtensionBeam {
+                id: 100,
+                median: audiveris_image::beam_structure::Segment {
+                    x1: 10.0,
+                    y1: 22.0,
+                    x2: 15.0,
+                    y2: 22.0,
+                },
+                height: 4.0,
+                distance_impact: 1.0,
+                class: audiveris_image::beam_extension::BeamExtensionClass::Standard,
+                glyph_id: Some(10),
+                removed: false,
+            }],
+            parameters: HookParameters {
+                min_hook_width_low: 3.0,
+                minimum_grade: 0.08,
+                impacts: BeamImpactParameters {
+                    min_width_low: 3.0,
+                    min_width_high: 8.0,
+                    ..config.standard.impacts
+                },
+            },
+        });
+        let mut step = HeadlessBeamsStep::new(visual).with_native_beam_kernel(config);
+        let mut sheet = sheet();
+        sheet.systems[0].inters.push(NeutralBeamInter {
+            id: 100,
+            kind: NeutralBeamInterKind::Beam,
+        });
+        sheet.systems[0].free_glyphs.push(NeutralBeamGlyph {
+            id: 60,
+            top: 14,
+            left: 11,
+            geometry: Some(NeutralGlyphGeometry {
+                width: 4,
+                height: 4,
+                weight: 16,
+                centroid_x: 12.5,
+                centroid_y: 15.5,
+                rounded_centroid_x: 12,
+                rounded_centroid_y: 16,
+            }),
+            raster: Some(
+                RunTable::from_pixels(Orientation::Vertical, 4, 4, &[FOREGROUND; 16]).unwrap(),
+            ),
+            groups: vec![NeutralBeamGlyphGroup::BeamSpot],
+        });
+
+        assert_eq!(step.build_system_beams(&mut sheet, 0).unwrap(), None);
+
+        assert_eq!(step.visual().hook_inputs.len(), 2);
+        assert_eq!(step.visual().hook_inputs[0].side, BeamHookSide::Top);
+        assert_eq!(step.visual().hook_inputs[0].native_evidence.len(), 1);
+        assert_eq!(step.visual().hook_inputs[0].native_evidence[0].glyph_id, 60);
+        assert!(step.visual().hook_inputs[1].native_evidence.is_empty());
+        // Empty injected deltas leave the source beam untouched.
+        assert_eq!(sheet.systems[0].inters[0].id, 100);
     }
 
     #[test]
