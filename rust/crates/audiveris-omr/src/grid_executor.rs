@@ -24,11 +24,17 @@ use audiveris_image::{
     },
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
-    lines_coordinator::StaffCandidateKind,
+    lines_coordinator::{LinesCoordinatorParameters, StaffCandidateKind},
     peak_graph::{PeakEdgeId, PeakGraph},
     prepared_bars::{PreparedBarsHandoff, PreparedBarsHandoffSource},
-    prepared_lines::{PreparedStaffHandoff, PreparedStaffHandoffSource},
-    raster_grid_builder::{RasterGridHandoff, RasterGridHandoffSource},
+    prepared_lines::{
+        PreparedStaffHandoff, PreparedStaffHandoffSource, RawProductionRetrieveLines,
+    },
+    raster_grid_builder::{
+        HeadlessRasterGridBuilder, RasterGridHandoff, RasterGridHandoffSource,
+        RasterGridParameters, RemainingRasterGridStages,
+    },
+    raw_line_adapter::RawPrimaryPassParameters,
     run_table::{RunTable, RunTableError},
     section::Section,
     staff_line_cleaner::{OriginalStaffLine, StaffLineCleanerExecutor, clean_staff_lines},
@@ -410,6 +416,43 @@ where
             &mut self.book.scores,
         )
         .map_err(HeadlessGridError::ScoreUpdate)
+    }
+}
+
+impl<Downstream>
+    HeadlessGridExecutor<HeadlessRasterGridBuilder<RawProductionRetrieveLines<Downstream>>>
+where
+    Downstream: RemainingRasterGridStages,
+{
+    /// Construct the sheet-aware executor directly from a raster and the
+    /// production raw/line parameters.
+    ///
+    /// `RetrieveLines` is owned by the raw production adapter. Bars and line
+    /// completion remain explicit downstream collaborators until their raw
+    /// production adapters are joined. Both raster-prefix and prepared-staff
+    /// handoffs are enabled so successful and swallowed build prefixes retain
+    /// the same installation semantics as the generic executor.
+    #[must_use]
+    pub fn from_raw_raster_lines(
+        source: RunTable,
+        raster_parameters: RasterGridParameters,
+        raw_parameters: RawPrimaryPassParameters,
+        lines_parameters: LinesCoordinatorParameters,
+        downstream: Downstream,
+        sheet: HeadlessGridSheet,
+        book: HeadlessGridBook,
+    ) -> Self {
+        Self::new(
+            HeadlessRasterGridBuilder::new(
+                source,
+                raster_parameters,
+                RawProductionRetrieveLines::new(raw_parameters, lines_parameters, downstream),
+            ),
+            sheet,
+            book,
+        )
+        .with_raster_grid_handoff()
+        .with_prepared_staff_handoff()
     }
 }
 
@@ -902,6 +945,7 @@ mod tests {
         cluster_ownership::ClusterOwnership,
         cluster_pipeline::ClusterRetrievalParameters,
         filament::{FilamentError, StaffFilament},
+        filament_factory::{FilamentFactoryParams, OverlapParams},
         grid_lifecycle::{GridBuildStage, GridStageFailure},
         grid_sig::{GridSigNode, GridSigRelation},
         line_cluster::FilamentId,
@@ -1044,6 +1088,78 @@ mod tests {
             minimum_horizontal_run_length: 4,
             maximum_vertical_run_shift: 1,
         }
+    }
+
+    fn split_middle_source() -> RunTable {
+        let mut source = RunTable::new(Orientation::Vertical, 100, 61).unwrap();
+        for x in 0..100 {
+            source.add_run(x, Run::new(10, 1)).unwrap();
+            source.add_run(x, Run::new(20, 1)).unwrap();
+            if x <= 20 || x >= 40 {
+                source.add_run(x, Run::new(30, 1)).unwrap();
+            }
+            source.add_run(x, Run::new(40, 1)).unwrap();
+            source.add_run(x, Run::new(50, 1)).unwrap();
+        }
+        source
+    }
+
+    fn raw_primary_parameters() -> RawPrimaryPassParameters {
+        let expansion = ClusterExpansionParameters::new(0.0, 0, 1, 0, 0.1, 1, 10).unwrap();
+        let compatibility = ClusterMergeParameters::new(0.0, 0, 0.1, 0, 1, 10).unwrap();
+        let retrieval = ClusterRetrievalParameters::new(
+            10,
+            BTreeSet::from([5]),
+            expansion,
+            ClusterMergePassParameters::new(compatibility, 0, 1).unwrap(),
+            0.0,
+            0.0,
+            0.0,
+            1,
+            0,
+            None,
+            1,
+        )
+        .unwrap();
+        RawPrimaryPassParameters {
+            factory: FilamentFactoryParams {
+                interline: 10,
+                min_core_section_length: 1,
+                min_section_aspect: 1.0,
+                max_coord_gap: 5.0,
+                max_pos_gap: 1.0,
+                max_pos_gap_for_slope: 1.0,
+                max_gap_slope: 0.1,
+                min_length_for_delta_slope: 10.0,
+                max_delta_slope: 0.1,
+            },
+            overlap: OverlapParams {
+                probe_width: 2,
+                max_overlap_delta_pos: 1.0,
+                max_thickness: 2.0,
+                max_overlap_space: 0.0,
+                max_expansion_space: 0.0,
+                max_involving_length: 10.0,
+                max_consistent_ratio: 2.0,
+            },
+            sampling_dx: 20,
+            minimum_delta_y: 9,
+            maximum_delta_y: 11,
+            retrieval,
+        }
+    }
+
+    fn raw_raster_parameters() -> RasterGridParameters {
+        RasterGridParameters {
+            max_fore: 2,
+            ledger_thickness: 1.0,
+            minimum_horizontal_run_length: 10,
+            maximum_vertical_run_shift: 1,
+        }
+    }
+
+    fn raw_lines_parameters() -> LinesCoordinatorParameters {
+        LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap()
     }
 
     fn cluster_parameters() -> ClusterRetrievalParameters {
@@ -1828,6 +1944,93 @@ mod tests {
         ));
         assert!(executor.cleaner_finished);
         assert!(executor.step_finished);
+    }
+
+    #[test]
+    fn raw_raster_constructor_installs_split_middle_staff_and_raster_prefix() {
+        let base = executor();
+        let mut executor = HeadlessGridExecutor::from_raw_raster_lines(
+            split_middle_source(),
+            raw_raster_parameters(),
+            raw_primary_parameters(),
+            raw_lines_parameters(),
+            RasterStages::default(),
+            base.sheet,
+            base.book,
+        );
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Completed)
+        ));
+        assert_eq!(
+            executor.sheet.installed_raster_prefix,
+            Some(InstalledRasterGridPrefix {
+                short_sections_added: true,
+                horizontal_lag_present: true,
+            })
+        );
+        let [staff] = executor.sheet.staffs.as_slice() else {
+            panic!("one raw-retrieved staff expected");
+        };
+        assert_eq!(staff.kind, StaffCandidateKind::Standard);
+        assert_eq!(staff.lines.len(), 5);
+        assert_eq!(
+            staff
+                .lines
+                .iter()
+                .filter(|line| matches!(
+                    line,
+                    HeadlessStaffLine::Filament { filament, .. }
+                        if filament.sections().len() == 2
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(executor.builder.stages().downstream().finish_count, 1);
+    }
+
+    #[test]
+    fn raw_raster_constructor_installs_failure_prefix_without_staff_handoff() {
+        let base = executor();
+        let mut sheet = base.sheet;
+        sheet.staffs.clear();
+        let mut invalid = raw_primary_parameters();
+        invalid.sampling_dx = 0;
+        let mut executor = HeadlessGridExecutor::from_raw_raster_lines(
+            split_middle_source(),
+            raw_raster_parameters(),
+            invalid,
+            raw_lines_parameters(),
+            RasterStages::default(),
+            sheet,
+            base.book,
+        );
+
+        executor
+            .run_grid_step_stage(GridStepStage::BuildGrid)
+            .unwrap();
+
+        assert!(matches!(
+            executor.build_outcome,
+            Some(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::RetrieveLines,
+                ..
+            })
+        ));
+        assert_eq!(
+            executor.sheet.installed_raster_prefix,
+            Some(InstalledRasterGridPrefix {
+                short_sections_added: false,
+                horizontal_lag_present: true,
+            })
+        );
+        assert!(executor.sheet.staffs.is_empty());
+        assert_eq!(executor.builder.stages().downstream().finish_count, 1);
     }
 
     #[test]
