@@ -701,8 +701,22 @@ mod tests {
         assert_eq!(result.cluster_order(), [cluster]);
         assert_eq!(result.removed_filaments(), [FilamentId::new(1)]);
         assert_eq!(ownership.membership_of(FilamentId::new(1)).unwrap(), None);
-        assert_eq!(ownership.membership_of(FilamentId::new(2)).unwrap().unwrap().position(), 0);
-        assert_eq!(ownership.membership_of(FilamentId::new(3)).unwrap().unwrap().position(), 1);
+        assert_eq!(
+            ownership
+                .membership_of(FilamentId::new(2))
+                .unwrap()
+                .unwrap()
+                .position(),
+            0
+        );
+        assert_eq!(
+            ownership
+                .membership_of(FilamentId::new(3))
+                .unwrap()
+                .unwrap()
+                .position(),
+            1
+        );
         assert_eq!(clusters[&cluster].first_position(), 0);
     }
 
@@ -711,16 +725,8 @@ mod tests {
         let mut ownership = ClusterOwnership::new();
         let mut clusters = BTreeMap::new();
         let mut values = filaments(&[(1, 0, 10, 30), (2, 0, 30, 30)]).into_iter();
-        let upper = cluster_from_lines(
-            &mut ownership,
-            &mut clusters,
-            vec![values.next().unwrap()],
-        );
-        let lower = cluster_from_lines(
-            &mut ownership,
-            &mut clusters,
-            vec![values.next().unwrap()],
-        );
+        let upper = cluster_from_lines(&mut ownership, &mut clusters, vec![values.next().unwrap()]);
+        let lower = cluster_from_lines(&mut ownership, &mut clusters, vec![values.next().unwrap()]);
         let result = trim_clusters_in_ordinate_order(
             &mut ownership,
             &mut clusters,

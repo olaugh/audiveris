@@ -229,11 +229,19 @@ denied, and passed `git diff --check` before commit.
 145. `4a43e358` — live Java/Rust bar-column construction and start selection vector.
 146. `37f88ecb` — ordered within-part connection-edge selection.
 147. `9bd76cd9` — desired-size cluster destruction, acceptable length, and filament partition.
+148. `57be85fa` — brace-aware part creation planning with Java overlap truncation.
+149. `c1a2a947` — bracket, square, and brace group topology state machine.
+150. `2d0329c9` — ordinate-ordered cluster trimming and ownership cleanup.
+151. `cf6ecc40` — C-clef false-bar suppression with exact scan/index behavior.
+152. `b85252db` — bracket-middle propagation across concrete peak connections.
+153. `38e11f34` — transactional, stage-ordered neutral cluster retrieval pipeline.
+154. `88038a1e` — bracket-end detection with injected extension and serif evidence.
+155. `0f391920` — neutral vertical bar/bracket interpretation geometry and kinds.
 
-At the one-hundred-and-forty-seventh checkpoint the Rust workspace executes 379 tests:
+At the one-hundred-and-fifty-fifth checkpoint the Rust workspace executes 397 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 235
+- `audiveris-image`: 253
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
@@ -278,8 +286,11 @@ line-cluster core. Cluster merge, absorption, trimming, geometry, and the combin
 lifecycle now have exact live Java parity. Recursive cluster construction, general
 merge orchestration, and the same-size pair pass are now ported with transactional
 stable-ID ownership. Cluster consistency destruction and two-sided isolated-filament
-expansion are also ported, followed by desired-size destruction and unclustered-filament
-partitioning. Glyph creation, SIG integration, and UI behavior remain outside.
+expansion are also ported, followed by desired-size destruction, trimming, and
+unclustered-filament partitioning. The neutral cluster pipeline now composes the Java
+stage order transactionally through optional consistency, second expansion, one-line
+recovery, and false-ledger rejection. Glyph creation, SIG integration, and UI behavior
+remain outside.
 Target-line deskew mapping begins the neutral destination geometry used later in GRID
 cleanup.
 Target-line mapping now has exact live parity on a sloped source, and the surrounding
@@ -289,7 +300,9 @@ does rather than inventing persisted IDs.
 Regular vertical comb sampling feeds the neutral comb representation, and both comb
 discovery and the line-cluster lifecycle have exact production-Java vectors. Bar
 columns have exact parity across fixed slots, cached means, overwrite invalidation,
-full/start/brace status, and concrete graph connectivity. Neutral `StaffPeak`,
+full/start/brace status, and concrete graph connectivity. BarsRetriever now also has
+neutral C-clef purging, bracket-end and bracket-middle decisions, group/part topology,
+and bar/bracket inter geometry/type plans. Neutral `StaffPeak`,
 `PartGroup`, and stable-ID `PeakGraph` types now cover graph storage, incident and
 connection queries, alignment purge, median connection geometry, and brace checks
 without recreating Java object cycles. Promotion into the production SIG and the full

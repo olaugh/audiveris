@@ -40,7 +40,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 59 canonical fixtures, including composed StaffProjector, recursive clusters, result operations, and bar-column construction/start selection |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 379 tests green at checkpoint 147: core 38, image 235, OMR 91, testkit 6, CLI 4, xtask 5 |
+| Rust workspace | 397 tests green at checkpoint 155: core 38, image 253, OMR 91, testkit 6, CLI 4, xtask 5 |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -63,10 +63,10 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID section tally | stable first-position indexing with explicit sorted/range validation for staff-line sticker retrieval |
 | GRID line stickers | owned-member exclusion, stable full-position order, cumulative above/below contact, and one-run retention |
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
-| GRID comb and cluster core | ties-even comb discovery, weighted popular size, stable-ID ownership, recursive formation, transactional inclusion, general merges, same-size pair pass, short/inconsistent/undesired discard, upper-median acceptable length, two-sided expansion, filament partition, trim, geometry, and extrapolation; glyph finalization queued |
+| GRID comb and cluster core | ties-even comb discovery, weighted popular size, stable-ID ownership, recursive formation, transactional inclusion, general merges, same-size pair pass, short/inconsistent/undesired discard, upper-median acceptable length, two-sided expansion, filament partition, trim, geometry, extrapolation, and an executable stage-ordered retrieval pipeline with optional one-line recovery and ledger-like rejection; glyph finalization queued |
 | GRID peaks and peak graph | neutral `StaffPeak`, `PartGroup`, and stable-ID graph storage; incident/connection queries, alignment purge, connection median geometry, and brace checks; production SIG promotion/integration queued |
 | GRID StaffProjector | scale parameters, raster accumulation, adaptive thresholds, blanks, peak refinement, core validation, multi-rest serif rejection, six-impact grading, brace discovery, and composed neutral process; result, lines-root, and right-end decisions; ordered BarsRetriever registry; graph edges and sheet ownership queued |
-| GRID bars and columns | peak grouping/purges, width partition, section selection, group links, graph components and chain aggregation, column construction, partial/extension/unaligned purge, start-column selection and validation, cached geometry, ordered within-part connection selection, and brace-part decision; exact column/start vector; production SIG integration queued |
+| GRID bars and columns | peak grouping/purges including C-clef false bars, width partition, section selection, group links, graph components and chain aggregation, column construction, partial/extension/unaligned purge, start-column selection and validation, bracket-end/middle propagation, cached geometry, ordered within-part connection selection, group/part topology, and neutral bar/bracket inter plans; exact column/start vector; glyph and production SIG integration queued |
 | GRID target geometry | source-guided target-line deskew mapping with exact live sloped-line parity plus immutable cycle-free page/system/staff containers |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline status, sheet input provenance, compatibility attributes, page references and links, order-derived systems, part/staff configuration, logical parts, score-root metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics parameters; absent, inherited, and explicit values remain distinct |
