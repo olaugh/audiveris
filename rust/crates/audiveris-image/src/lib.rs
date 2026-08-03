@@ -26,6 +26,7 @@ pub mod filament;
 pub mod filament_comb;
 pub mod filament_factory;
 pub mod global_filter;
+pub mod glyph_factory;
 pub mod grid_coordinator;
 pub mod grid_lifecycle;
 pub mod grid_sig;

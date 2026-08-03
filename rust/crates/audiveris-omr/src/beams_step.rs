@@ -10,6 +10,7 @@ use std::{error::Error, fmt};
 
 use audiveris_image::{
     global_filter::global_filter,
+    glyph_factory::{GlyphComponent, build_glyph_components},
     run_table::{Orientation, RunTable, RunTableError},
     system_population::PopulationSystemArea,
 };
@@ -21,12 +22,24 @@ pub enum NeutralBeamGlyphGroup {
     Other,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NeutralBeamGlyph {
     pub id: usize,
     pub top: i32,
     pub left: i32,
+    pub geometry: Option<NeutralGlyphGeometry>,
     pub groups: Vec<NeutralBeamGlyphGroup>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NeutralGlyphGeometry {
+    pub width: usize,
+    pub height: usize,
+    pub weight: usize,
+    pub centroid_x: f64,
+    pub centroid_y: f64,
+    pub rounded_centroid_x: i32,
+    pub rounded_centroid_y: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,18 +93,10 @@ pub struct NeutralBeamSheet {
     pub systems: Vec<NeutralBeamSystem>,
     /// Java `Picture.SourceKey.HEAD_SPOTS`, saved before beam thresholding.
     pub head_spot_runs: Option<RunTable>,
+    pub next_glyph_id: usize,
     /// Sheet-global GlyphIndex ownership, in first-registration order.
     pub registered_glyph_ids: Vec<usize>,
     pub mutations: Vec<BeamsMutation>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DetectedBeamSpot {
-    pub glyph_id: usize,
-    pub top: i32,
-    pub left: i32,
-    pub center_x: i32,
-    pub center_y: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,11 +115,9 @@ pub struct BeamClosingInput {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct BeamGlyphBuildInput<'a> {
+pub struct BlackHeadSizingInput<'a> {
     pub sheet_id: usize,
-    pub spot_runs: &'a RunTable,
-    pub run_orientation: Orientation,
-    pub compute_black_head_sizing: bool,
+    pub components: &'a [GlyphComponent],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,13 +126,13 @@ pub enum BeamSpotWarning<VisualError> {
     Visual(VisualError),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BeamSystemDelta {
     /// Exact Java mutation order, including prefixes completed before failure.
     pub mutations: Vec<BeamSystemMutation>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BeamSystemMutation {
     RegisterGlyph(NeutralBeamGlyph),
     AddInter(NeutralBeamInter),
@@ -138,7 +141,7 @@ pub enum BeamSystemMutation {
     AddBeamGroup(usize),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamStageOutcome<VisualError> {
     /// Mutations completed before a checked failure are retained by Java.
     pub delta: BeamSystemDelta,
@@ -172,7 +175,7 @@ pub struct BeamSpotCandidateInput {
     pub class: BeamCandidateClass,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamCandidateOutcome<VisualError> {
     pub delta: BeamSystemDelta,
     /// Java `checkBeamGlyph` returned null and appended this spot to assignedSpots.
@@ -278,7 +281,7 @@ pub struct MultipleRestSerifInput {
     pub eligible_section_ids: Vec<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MultipleRestSerifOutcome<VisualError> {
     /// Ordered prefix: glyph registration, serif inter, then relation.
     pub delta: BeamSystemDelta,
@@ -297,8 +300,8 @@ pub struct NeutralMultipleRestRecord {
     pub right_relation_id: Option<usize>,
 }
 
-/// First unavailable dependencies in Java: ImageJ morphology, connected-glyph
-/// construction, `BeamsBuilder`, and `MultipleRestsBuilder` geometry.
+/// First unavailable dependencies in Java: ImageJ morphology, optional black
+/// head scale sizing, `BeamsBuilder`, and `MultipleRestsBuilder` geometry.
 pub trait VisualBeams {
     type Error;
 
@@ -307,10 +310,7 @@ pub trait VisualBeams {
         input: BeamClosingInput,
     ) -> Result<ClosedBeamRaster, Self::Error>;
 
-    fn build_spot_glyphs(
-        &mut self,
-        input: BeamGlyphBuildInput<'_>,
-    ) -> Result<Vec<DetectedBeamSpot>, Self::Error>;
+    fn size_black_heads(&mut self, input: BlackHeadSizingInput<'_>) -> Result<(), Self::Error>;
 
     fn classify_beam_spot(
         &mut self,
@@ -352,6 +352,7 @@ pub enum BeamsContractError {
     MultipleRestBeamMismatch { expected: usize, actual: usize },
     MissingRelationEndpoint { relation_id: usize, inter_id: usize },
     InvalidMultipleRestRelation(usize),
+    GlyphIdentityOverflow,
 }
 
 impl fmt::Display for BeamsContractError {
@@ -378,6 +379,7 @@ impl fmt::Display for BeamsContractError {
             Self::InvalidMultipleRestRelation(id) => {
                 write!(formatter, "invalid multiple-rest serif relation {id}")
             }
+            Self::GlyphIdentityOverflow => formatter.write_str("glyph identity overflow"),
         }
     }
 }
@@ -726,44 +728,61 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
     fn dispatch_spots(
         &self,
         sheet: &mut NeutralBeamSheet,
-        spots: Vec<DetectedBeamSpot>,
+        components: Vec<GlyphComponent>,
     ) -> Result<(), BeamsContractError> {
-        for spot in spots {
-            let mut registered = false;
-            for system_index in 0..sheet.systems.len() {
-                let system = &sheet.systems[system_index];
-                if !system
-                    .area
-                    .contains(f64::from(spot.center_x), f64::from(spot.center_y))
-                {
-                    continue;
-                }
-                if spot.center_x < system.left || spot.center_x > system.right {
-                    continue;
-                }
-                let system_id = system.id;
-                if !registered {
-                    if sheet.registered_glyph_ids.contains(&spot.glyph_id) {
-                        return Err(BeamsContractError::DuplicateGlyph(spot.glyph_id));
-                    }
-                    sheet.registered_glyph_ids.push(spot.glyph_id);
-                    registered = true;
-                }
+        for component in components {
+            let relevant = sheet
+                .systems
+                .iter()
+                .enumerate()
+                .filter_map(|(index, system)| {
+                    let x = component.rounded_centroid_x;
+                    let y = component.rounded_centroid_y;
+                    (system.area.contains(f64::from(x), f64::from(y))
+                        && x >= system.left
+                        && x <= system.right)
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>();
+            if relevant.is_empty() {
+                continue;
+            }
+            let glyph_id = sheet.next_glyph_id;
+            sheet.next_glyph_id = sheet
+                .next_glyph_id
+                .checked_add(1)
+                .ok_or(BeamsContractError::GlyphIdentityOverflow)?;
+            if sheet.registered_glyph_ids.contains(&glyph_id) {
+                return Err(BeamsContractError::DuplicateGlyph(glyph_id));
+            }
+            sheet.registered_glyph_ids.push(glyph_id);
+            let geometry = NeutralGlyphGeometry {
+                width: component.width,
+                height: component.height,
+                weight: component.weight,
+                centroid_x: component.centroid_x,
+                centroid_y: component.centroid_y,
+                rounded_centroid_x: component.rounded_centroid_x,
+                rounded_centroid_y: component.rounded_centroid_y,
+            };
+            for system_index in relevant {
+                let system_id = sheet.systems[system_index].id;
                 sheet.mutations.push(BeamsMutation::SpotRegistered {
                     system_id,
-                    glyph_id: spot.glyph_id,
+                    glyph_id,
                 });
                 sheet.systems[system_index]
                     .free_glyphs
                     .push(NeutralBeamGlyph {
-                        id: spot.glyph_id,
-                        top: spot.top,
-                        left: spot.left,
+                        id: glyph_id,
+                        top: component.top,
+                        left: component.left,
+                        geometry: Some(geometry),
                         groups: vec![NeutralBeamGlyphGroup::BeamSpot],
                     });
                 sheet.mutations.push(BeamsMutation::SpotAttached {
                     system_id,
-                    glyph_id: spot.glyph_id,
+                    glyph_id,
                 });
             }
         }
@@ -817,16 +836,17 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             &spot_pixels,
         )
         .map_err(BeamsContractError::InvalidSpotRaster)?;
-        let spots = match self.visual.build_spot_glyphs(BeamGlyphBuildInput {
-            sheet_id: sheet.id,
-            spot_runs: &spot_runs,
-            run_orientation: Orientation::Horizontal,
-            compute_black_head_sizing: !sheet.one_line_staves && !sheet.drum_notation,
-        }) {
-            Ok(spots) => spots,
-            Err(error) => return Ok(Some(BeamSpotWarning::Visual(error))),
-        };
-        self.dispatch_spots(sheet, spots)?;
+        let components = build_glyph_components(&spot_runs, 0, 0);
+        if !sheet.one_line_staves
+            && !sheet.drum_notation
+            && let Err(error) = self.visual.size_black_heads(BlackHeadSizingInput {
+                sheet_id: sheet.id,
+                components: &components,
+            })
+        {
+            return Ok(Some(BeamSpotWarning::Visual(error)));
+        }
+        self.dispatch_spots(sheet, components)?;
         Ok(None)
     }
 }
@@ -1005,7 +1025,7 @@ mod tests {
     #[derive(Default)]
     struct FakeVisual {
         closed: Option<Result<ClosedBeamRaster, &'static str>>,
-        spots: Option<Result<Vec<DetectedBeamSpot>, &'static str>>,
+        head_sizing: Option<Result<(), &'static str>>,
         candidates:
             BTreeMap<(usize, usize, BeamCandidateClass), BeamCandidateOutcome<&'static str>>,
         extensions: BTreeMap<usize, BeamStageOutcome<&'static str>>,
@@ -1015,8 +1035,7 @@ mod tests {
         serifs: BTreeMap<(usize, BeamHorizontalSide), MultipleRestSerifOutcome<&'static str>>,
         calls: Vec<(&'static str, usize)>,
         closing_inputs: Vec<BeamClosingInput>,
-        head_sizing_inputs: Vec<bool>,
-        spot_run_pixels: Vec<Vec<u8>>,
+        sized_components: Vec<Vec<(usize, i32, i32, usize)>>,
         candidate_inputs: Vec<BeamSpotCandidateInput>,
         extension_inputs: Vec<BeamExtensionInput>,
         hook_inputs: Vec<BeamHookInput>,
@@ -1036,16 +1055,23 @@ mod tests {
             self.closed.take().unwrap()
         }
 
-        fn build_spot_glyphs(
-            &mut self,
-            input: BeamGlyphBuildInput<'_>,
-        ) -> Result<Vec<DetectedBeamSpot>, Self::Error> {
-            self.calls.push(("glyphs", input.sheet_id));
-            assert_eq!(input.run_orientation, Orientation::Horizontal);
-            self.spot_run_pixels.push(input.spot_runs.to_pixels());
-            self.head_sizing_inputs
-                .push(input.compute_black_head_sizing);
-            self.spots.take().unwrap()
+        fn size_black_heads(&mut self, input: BlackHeadSizingInput<'_>) -> Result<(), Self::Error> {
+            self.calls.push(("heads", input.sheet_id));
+            self.sized_components.push(
+                input
+                    .components
+                    .iter()
+                    .map(|component| {
+                        (
+                            component.ancestor_mark,
+                            component.left,
+                            component.top,
+                            component.weight,
+                        )
+                    })
+                    .collect(),
+            );
+            self.head_sizing.take().unwrap_or(Ok(()))
         }
 
         fn classify_beam_spot(
@@ -1202,6 +1228,7 @@ mod tests {
                 system(1, 40, 90, areas[1].clone()),
             ],
             head_spot_runs: None,
+            next_glyph_id: 7,
             registered_glyph_ids: Vec::new(),
             mutations: Vec::new(),
         }
@@ -1215,23 +1242,49 @@ mod tests {
         }
     }
 
-    fn visual_with_spots(spots: Vec<DetectedBeamSpot>) -> FakeVisual {
+    #[derive(Clone, Copy)]
+    struct TestSpot {
+        x: usize,
+        y: usize,
+    }
+
+    fn visual_with_spots(spots: Vec<TestSpot>) -> FakeVisual {
+        let closed = if spots.is_empty() {
+            ClosedBeamRaster {
+                width: 3,
+                height: 2,
+                pixels: vec![255; 6],
+            }
+        } else {
+            let mut pixels = vec![255; 100 * 100];
+            for spot in spots {
+                pixels[(spot.y * 100) + spot.x] = 0;
+            }
+            ClosedBeamRaster {
+                width: 100,
+                height: 100,
+                pixels,
+            }
+        };
         FakeVisual {
-            closed: Some(Ok(raster())),
-            spots: Some(Ok(spots)),
+            closed: Some(Ok(closed)),
             ..FakeVisual::default()
+        }
+    }
+
+    fn beam_spot_glyph(id: usize, top: i32, left: i32) -> NeutralBeamGlyph {
+        NeutralBeamGlyph {
+            id,
+            top,
+            left,
+            geometry: None,
+            groups: vec![NeutralBeamGlyphGroup::BeamSpot],
         }
     }
 
     #[test]
     fn runs_prolog_system_stages_and_epilog_in_java_order() {
-        let visual = visual_with_spots(vec![DetectedBeamSpot {
-            glyph_id: 7,
-            top: 20,
-            left: 40,
-            center_x: 44,
-            center_y: 25,
-        }]);
+        let visual = visual_with_spots(vec![TestSpot { x: 44, y: 25 }]);
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
 
@@ -1242,7 +1295,7 @@ mod tests {
             step.visual().calls,
             vec![
                 ("close", 9),
-                ("glyphs", 9),
+                ("heads", 9),
                 ("standard", 7),
                 ("extend", 2),
                 ("group", 2),
@@ -1266,15 +1319,10 @@ mod tests {
                 circle_radius: 3.5,
             }]
         );
-        assert_eq!(step.visual().head_sizing_inputs, vec![true]);
-        assert_eq!(
-            step.visual().spot_run_pixels,
-            vec![vec![0, 0, 255, 255, 255, 255]]
-        );
-        assert_eq!(
-            sheet.head_spot_runs.as_ref().unwrap().to_pixels(),
-            vec![0, 0, 0, 0, 0, 255]
-        );
+        assert_eq!(step.visual().sized_components, vec![vec![(1, 44, 25, 1)]]);
+        let head_pixels = sheet.head_spot_runs.as_ref().unwrap().to_pixels();
+        assert_eq!(head_pixels[(25 * 100) + 44], 0);
+        assert_eq!(head_pixels[(25 * 100) + 45], 255);
         assert_eq!(
             sheet.mutations,
             vec![
@@ -1347,38 +1395,32 @@ mod tests {
     }
 
     #[test]
-    fn glyph_failure_retains_saved_head_runs_and_disables_sizing_for_one_line_staff() {
+    fn black_head_sizing_failure_retains_saved_head_runs_and_aborts_spot_dispatch() {
         let visual = FakeVisual {
             closed: Some(Ok(raster())),
-            spots: Some(Err("glyph factory failed")),
+            head_sizing: Some(Err("head sizing failed")),
             ..FakeVisual::default()
         };
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
-        sheet.one_line_staves = true;
 
         let report = step.process(&mut sheet).unwrap();
 
         assert_eq!(
             report.spot_warning,
-            Some(BeamSpotWarning::Visual("glyph factory failed"))
+            Some(BeamSpotWarning::Visual("head sizing failed"))
         );
-        assert_eq!(step.visual().head_sizing_inputs, vec![false]);
+        assert_eq!(step.visual().sized_components.len(), 1);
         assert!(sheet.head_spot_runs.is_some());
         assert_eq!(sheet.mutations, vec![BeamsMutation::HeadSpotsSaved]);
     }
 
     #[test]
     fn dispatch_keeps_spot_on_inclusive_system_left_boundary() {
-        let visual = visual_with_spots(vec![DetectedBeamSpot {
-            glyph_id: 8,
-            top: 20,
-            left: 8,
-            center_x: 10,
-            center_y: 25,
-        }]);
+        let visual = visual_with_spots(vec![TestSpot { x: 10, y: 25 }]);
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
+        sheet.next_glyph_id = 8;
 
         step.process(&mut sheet).unwrap();
 
@@ -1392,30 +1434,66 @@ mod tests {
     }
 
     #[test]
+    fn native_component_geometry_survives_registration_and_shared_glyph_ownership() {
+        let mut pixels = vec![255; 100 * 100];
+        for (x, y) in [(20, 24), (21, 24), (20, 25), (21, 25)] {
+            pixels[(y * 100) + x] = 0;
+        }
+        let runs = RunTable::from_pixels(Orientation::Horizontal, 100, 100, &pixels).unwrap();
+        let components = build_glyph_components(&runs, 0, 0);
+        let step = HeadlessBeamsStep::new(FakeVisual::default());
+        let mut sheet = sheet();
+        sheet.next_glyph_id = 40;
+
+        step.dispatch_spots(&mut sheet, components).unwrap();
+
+        assert_eq!(sheet.registered_glyph_ids, vec![40]);
+        assert_eq!(sheet.next_glyph_id, 41);
+        let glyph = &sheet.systems[0].free_glyphs[0];
+        assert_eq!((glyph.left, glyph.top), (20, 24));
+        assert_eq!(
+            glyph.geometry,
+            Some(NeutralGlyphGeometry {
+                width: 2,
+                height: 2,
+                weight: 4,
+                centroid_x: 20.5,
+                centroid_y: 24.5,
+                rounded_centroid_x: 20,
+                rounded_centroid_y: 24,
+            })
+        );
+    }
+
+    #[test]
+    fn one_line_staff_skips_optional_black_head_sizer_but_keeps_native_components() {
+        let visual = FakeVisual {
+            closed: Some(Ok(ClosedBeamRaster {
+                width: 100,
+                height: 100,
+                pixels: {
+                    let mut pixels = vec![255; 100 * 100];
+                    pixels[(25 * 100) + 20] = 0;
+                    pixels
+                },
+            })),
+            head_sizing: Some(Err("must not be called")),
+            ..FakeVisual::default()
+        };
+        let mut step = HeadlessBeamsStep::new(visual);
+        let mut sheet = sheet();
+        sheet.one_line_staves = true;
+
+        let report = step.process(&mut sheet).unwrap();
+
+        assert_eq!(report.spot_warning, None);
+        assert!(step.visual().sized_components.is_empty());
+        assert_eq!(sheet.registered_glyph_ids, vec![7]);
+    }
+
+    #[test]
     fn per_system_builder_sorts_spots_retries_small_tracks_assignment_and_hooks_beams_only() {
-        let mut visual = visual_with_spots(vec![
-            DetectedBeamSpot {
-                glyph_id: 10,
-                top: 10,
-                left: 5,
-                center_x: 20,
-                center_y: 25,
-            },
-            DetectedBeamSpot {
-                glyph_id: 30,
-                top: 5,
-                left: 20,
-                center_x: 30,
-                center_y: 25,
-            },
-            DetectedBeamSpot {
-                glyph_id: 20,
-                top: 5,
-                left: 10,
-                center_x: 25,
-                center_y: 25,
-            },
-        ]);
+        let mut visual = visual_with_spots(Vec::new());
         visual.candidates.insert(
             (2, 20, BeamCandidateClass::Standard),
             BeamCandidateOutcome {
@@ -1456,6 +1534,11 @@ mod tests {
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
         sheet.small_beams_enabled = true;
+        sheet.systems[0].free_glyphs = vec![
+            beam_spot_glyph(10, 10, 5),
+            beam_spot_glyph(30, 5, 20),
+            beam_spot_glyph(20, 5, 10),
+        ];
 
         step.process(&mut sheet).unwrap();
 
@@ -1497,13 +1580,7 @@ mod tests {
 
     #[test]
     fn classifier_failure_keeps_mutation_prefix_and_skips_remaining_system_stages() {
-        let mut visual = visual_with_spots(vec![DetectedBeamSpot {
-            glyph_id: 10,
-            top: 10,
-            left: 5,
-            center_x: 20,
-            center_y: 25,
-        }]);
+        let mut visual = visual_with_spots(Vec::new());
         visual.candidates.insert(
             (2, 10, BeamCandidateClass::Standard),
             BeamCandidateOutcome {
@@ -1519,6 +1596,9 @@ mod tests {
         );
         let mut step = HeadlessBeamsStep::new(visual);
         let mut sheet = sheet();
+        sheet.systems[0]
+            .free_glyphs
+            .push(beam_spot_glyph(10, 10, 5));
 
         let report = step.process(&mut sheet).unwrap();
 
@@ -1564,7 +1644,7 @@ mod tests {
             step.visual().calls,
             vec![
                 ("close", 9),
-                ("glyphs", 9),
+                ("heads", 9),
                 ("extend", 2),
                 ("extend", 1),
                 ("group", 1)
@@ -1625,6 +1705,7 @@ mod tests {
                                 id: glyph_id,
                                 top: 0,
                                 left: 0,
+                                geometry: None,
                                 groups: vec![NeutralBeamGlyphGroup::Other],
                             }),
                             BeamSystemMutation::AddInter(NeutralBeamInter {
@@ -1748,6 +1829,7 @@ mod tests {
                         id: 70,
                         top: 0,
                         left: 0,
+                        geometry: None,
                         groups: vec![NeutralBeamGlyphGroup::Other],
                     })],
                 },
@@ -1796,6 +1878,7 @@ mod tests {
             id: 5,
             top: 0,
             left: 0,
+            geometry: None,
             groups: vec![
                 NeutralBeamGlyphGroup::BeamSpot,
                 NeutralBeamGlyphGroup::Other,
