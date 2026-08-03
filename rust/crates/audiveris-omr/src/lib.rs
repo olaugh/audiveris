@@ -43,6 +43,7 @@ pub mod sheet_xml;
 pub mod staff_header;
 pub mod stem_seeds_step;
 pub mod stems_step;
+pub mod symbols_step;
 pub mod system_grouping;
 pub mod texts_step;
 pub mod xml;
