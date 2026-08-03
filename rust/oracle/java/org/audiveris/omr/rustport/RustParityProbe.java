@@ -6,11 +6,13 @@ import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import ij.process.ByteProcessor;
 
@@ -52,6 +54,8 @@ import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.grid.BarAlignment;
 import org.audiveris.omr.sheet.grid.BarColumn;
 import org.audiveris.omr.sheet.grid.BarConnection;
+import org.audiveris.omr.sheet.grid.ClustersRetriever;
+import org.audiveris.omr.sheet.grid.FilamentComb;
 import org.audiveris.omr.sheet.grid.GridBuilder;
 import org.audiveris.omr.sheet.grid.LineCluster;
 import org.audiveris.omr.sheet.grid.PeakGraph;
@@ -470,6 +474,52 @@ public final class RustParityProbe
                 replacementConnected,
                 braceReplacement.isBrace(),
                 barColumn.isFull());
+
+        Book combBook = new Book(Path.of("comb-discovery.synthetic"));
+        SheetStub combStub = new SheetStub(combBook, 1);
+        combBook.addStub(combStub);
+        Sheet combSheet = new Sheet(
+                combStub,
+                new RunTable(Orientation.VERTICAL, 110, 100));
+        combSheet.setScale(new Scale(
+                new Scale.InterlineScale(10, 10, 10),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+        combSheet.setSkew(new Skew(0.0, combSheet));
+        List<StaffFilament> combFilaments = List.of(
+                staffFilament(0, 2, 110, 10),
+                staffFilament(0, 12, 110, 10),
+                staffFilament(0, 22, 41, 10),
+                staffFilament(0, 45, 110, 10));
+        ClustersRetriever combRetriever = new ClustersRetriever(combSheet, 1, combFilaments);
+        Method retrieveCombs = ClustersRetriever.class.getDeclaredMethod("retrieveCombs");
+        retrieveCombs.setAccessible(true);
+        retrieveCombs.invoke(combRetriever);
+        @SuppressWarnings("unchecked")
+        Map<Integer, List<FilamentComb>> combColumns =
+                (Map<Integer, List<FilamentComb>>) field(combRetriever, "colCombs");
+        int[] combXs = (int[]) field(combRetriever, "colX");
+        List<String> combShapes = new ArrayList<>();
+        for (Map.Entry<Integer, List<FilamentComb>> entry : combColumns.entrySet()) {
+            List<String> columnShapes = new ArrayList<>();
+            for (FilamentComb comb : entry.getValue()) {
+                List<String> ids = new ArrayList<>();
+                for (StaffFilament combFilament : comb.getFilaments()) {
+                    ids.add(Integer.toString(combFilaments.indexOf(combFilament) + 1));
+                }
+                columnShapes.add("[" + String.join(",", ids) + "]");
+            }
+            combShapes.add(combXs[entry.getKey()] + String.join("+", columnShapes));
+        }
+        Method retrievePopularSize = ClustersRetriever.class.getDeclaredMethod(
+                "retrievePopularSize");
+        retrievePopularSize.setAccessible(true);
+        int popularCombSize = (Integer) retrievePopularSize.invoke(combRetriever);
+        System.out.println(
+                "grid.combs.synthetic=" + String.join(";", combShapes)
+                        + ";popular:" + popularCombSize);
 
         TargetSystem targetSystem = new TargetSystem(
                 new SystemInfo(7, null, new ArrayList<>()),

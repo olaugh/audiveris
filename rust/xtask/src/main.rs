@@ -9,6 +9,7 @@ use audiveris_image::{
     adaptive,
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
     chamfer::ChamferDistance,
+    comb_builder::{CombFilament, popular_comb_size, retrieve_combs},
     filament::{FilamentError, StaffFilament},
     filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
     global_filter, ingest,
@@ -199,7 +200,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 44] = [
+const VECTOR_KEYS: [&str; 45] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -219,6 +220,7 @@ const VECTOR_KEYS: [&str; 44] = [
     "grid.line-cluster.synthetic=",
     "grid.line-cluster-index.synthetic=",
     "grid.bar-column.synthetic=",
+    "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
@@ -818,6 +820,39 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         bar_column.is_start(),
         brace_replacement.is_brace(),
         bar_column.is_full()
+    ));
+    let comb_filaments = [
+        CombFilament::new(1, 1, staff_filament(0, 2, 110, 10)?.geometry()?)?,
+        CombFilament::new(2, 2, staff_filament(0, 12, 110, 10)?.geometry()?)?,
+        CombFilament::new(3, 3, staff_filament(0, 22, 41, 10)?.geometry()?)?,
+        CombFilament::new(4, 4, staff_filament(0, 45, 110, 10)?.geometry()?)?,
+    ];
+    let comb_columns = retrieve_combs(110, 10, 10, 10, &comb_filaments)?;
+    let comb_shapes = comb_columns
+        .iter()
+        .map(|column| {
+            let shapes = column
+                .combs()
+                .iter()
+                .map(|comb| {
+                    format!(
+                        "[{}]",
+                        comb.filament_ids()
+                            .iter()
+                            .map(usize::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("+");
+            format!("{}{shapes}", column.x())
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    lines.push(format!(
+        "grid.combs.synthetic={comb_shapes};popular:{}",
+        popular_comb_size(&comb_columns).expect("fixture has combs")
     ));
     let target_line = TargetLine::new(filament.geometry()?, 75.0, 100.0, 300.0)?;
     lines.push(format!(
