@@ -202,7 +202,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 47] = [
+const VECTOR_KEYS: [&str; 48] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -215,6 +215,7 @@ const VECTOR_KEYS: [&str; 47] = [
     "injection=",
     "integer.function=",
     "projection.short.synthetic=",
+    "grid.staff-projector-threshold.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -533,6 +534,21 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         short_projection.start(),
         short_projection.stop(),
         short_projection.len()
+    ));
+
+    let staff_threshold = |counts: &[i32], top_count| -> Result<i32, Box<dyn Error>> {
+        let stop = i32::try_from(counts.len() - 1)?;
+        let mut projection = ShortProjection::new(0, stop)?;
+        for (position, count) in counts.iter().copied().enumerate() {
+            projection.increment(i32::try_from(position)?, count);
+        }
+        Ok(projection.staff_derivative_threshold(0, stop, top_count, 0.3)?)
+    };
+    let round_up_threshold = staff_threshold(&[0, 5, 10, 15, 20, 25], 5)?;
+    let round_down_threshold = staff_threshold(&[0, 15, 30, 45, 60, 75], 5)?;
+    let zero_top_threshold = staff_threshold(&[0, 5, 10, 15, 20, 25], 0)?;
+    lines.push(format!(
+        "grid.staff-projector-threshold.synthetic=ties:{round_up_threshold},{round_down_threshold};top0:{zero_top_threshold}"
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

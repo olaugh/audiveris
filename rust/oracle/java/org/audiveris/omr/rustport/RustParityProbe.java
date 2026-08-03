@@ -64,6 +64,7 @@ import org.audiveris.omr.sheet.grid.PeakGraph;
 import org.audiveris.omr.sheet.grid.StaffFilament;
 import org.audiveris.omr.sheet.grid.StaffPattern;
 import org.audiveris.omr.sheet.grid.StaffPeak;
+import org.audiveris.omr.sheet.grid.StaffProjector;
 import org.audiveris.omr.sheet.grid.TargetLine;
 import org.audiveris.omr.sheet.grid.TargetStaff;
 import org.audiveris.omr.sheet.grid.TargetSystem;
@@ -143,6 +144,38 @@ public final class RustParityProbe
                 "projection.short.synthetic=" + shortProjection.getStart() + ":"
                         + shortProjection.getStop() + ":" + shortProjection.getLength()
                         + "/" + shortValues + "/" + shortDerivatives);
+
+        Scale projectorScale = new Scale(
+                new Scale.InterlineScale(10, 10, 10),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null);
+        int roundUpThreshold = staffDerivativeThreshold(
+                projectorScale,
+                new int[]{0, 5, 10, 15, 20, 25});
+        int roundDownThreshold = staffDerivativeThreshold(
+                projectorScale,
+                new int[]{0, 15, 30, 45, 60, 75});
+        Object staffProjectorConstants = staticField(StaffProjector.class, "constants");
+        org.audiveris.omr.constant.Constant.Integer topDerivativeNumber =
+                (org.audiveris.omr.constant.Constant.Integer) field(
+                        staffProjectorConstants,
+                        "topDerivativeNumber");
+        int savedTopDerivativeNumber = topDerivativeNumber.getValue();
+        int zeroTopThreshold;
+        try {
+            topDerivativeNumber.setValue(0);
+            zeroTopThreshold = staffDerivativeThreshold(
+                    projectorScale,
+                    new int[]{0, 5, 10, 15, 20, 25});
+        } finally {
+            topDerivativeNumber.setValue(savedTopDerivativeNumber);
+        }
+        System.out.println(
+                "grid.staff-projector-threshold.synthetic=ties:"
+                        + roundUpThreshold + "," + roundDownThreshold
+                        + ";top0:" + zeroTopThreshold);
 
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
@@ -954,6 +987,15 @@ public final class RustParityProbe
         return field.get(instance);
     }
 
+    private static Object staticField (Class<?> owner,
+                                       String name)
+        throws ReflectiveOperationException
+    {
+        Field field = owner.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(null);
+    }
+
     private static String range (Range range)
     {
         return range != null ? range.min + "," + range.main + "," + range.max : "null";
@@ -1044,6 +1086,38 @@ public final class RustParityProbe
         throws Exception
     {
         return staffFilament(x, y, length, 1, interline);
+    }
+
+    private static int staffDerivativeThreshold (Scale scale,
+                                                 int[] counts)
+        throws Exception
+    {
+        final int height = 101;
+        RunTable binary = new RunTable(Orientation.VERTICAL, counts.length, height);
+        for (int x = 0; x < counts.length; x++) {
+            if (counts[x] > 0) {
+                binary.addRun(x, new Run(0, counts[x]));
+            }
+        }
+
+        Book book = new Book(Path.of("staff-projector-threshold.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, binary);
+        sheet.setScale(scale);
+        Staff staff = new Staff(
+                1,
+                0.0,
+                counts.length - 1.0,
+                scale.getInterline(),
+                List.of(
+                        staffFilament(0, 0, counts.length, scale.getInterline()),
+                        staffFilament(0, 100, counts.length, scale.getInterline())));
+        StaffProjector projector = new StaffProjector(sheet, staff, null);
+        Method computeProjection = StaffProjector.class.getDeclaredMethod("computeProjection");
+        computeProjection.setAccessible(true);
+        computeProjection.invoke(projector);
+        return (Integer) field(projector, "derivativeThreshold");
     }
 
     private static StaffFilament staffFilament (int x,
