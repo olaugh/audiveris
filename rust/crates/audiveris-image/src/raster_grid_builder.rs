@@ -6,6 +6,9 @@
 //! `CreateBothLags` and `AddShortSections` are concrete. Line retrieval, bar
 //! processing, and line completion remain bounded collaborators, but operate
 //! on the same mutable state rather than on a transactional clone.
+//! Prepared coordinators used by those collaborators may still implement
+//! their own exceptional paths transactionally; they are not yet a claim of
+//! Java-compatible failure semantics for the three supplied stages.
 
 use crate::{
     grid_lifecycle::{GridBuildExecutor, GridBuildStage, GridStageFailure},
@@ -66,7 +69,11 @@ impl RasterGridBuildState {
 pub struct RasterGridHandoff {
     pub vertical_run_table: RunTable,
     pub vertical_sections: Vec<Section>,
-    pub horizontal_lag: HorizontalSectionLag,
+    /// Absent only if horizontal-lag construction failed after the vertical
+    /// prefix had already been installed.
+    pub horizontal_lag: Option<HorizontalSectionLag>,
+    /// Whether Java's later `addShortSections` stage completed.
+    pub short_sections_added: bool,
 }
 
 /// Supplied implementations for the three GRID stages whose complete raster
@@ -154,18 +161,19 @@ impl<Stages, Vip> HeadlessRasterGridBuilder<Stages, Vip> {
         &mut self.stages
     }
 
-    /// Move completed lag state into a concrete sheet after `buildInfo`.
-    /// Returns `None` until `AddShortSections` completed successfully.
+    /// Move every successfully created lag prefix out after `buildInfo`.
+    ///
+    /// `None` means `CreateBothLags` failed before vertical ownership existed.
+    /// A swallowed RetrieveLines or AddShortSections failure still returns the
+    /// initial lags, with [`RasterGridHandoff::short_sections_added`] false.
     pub fn take_handoff(&mut self) -> Option<RasterGridHandoff> {
-        if !self.state.short_sections_added {
-            return None;
-        }
         let tables = self.state.run_tables.as_ref()?;
         let initial = self.state.initial_lags.as_ref()?;
         Some(RasterGridHandoff {
             vertical_run_table: tables.long_vertical.clone(),
             vertical_sections: initial.vertical.clone(),
-            horizontal_lag: self.state.horizontal_lag.take()?,
+            horizontal_lag: self.state.horizontal_lag.take(),
+            short_sections_added: self.state.short_sections_added,
         })
     }
 }
@@ -389,7 +397,15 @@ mod tests {
             .clone();
         let output = builder.take_handoff().expect("completed handoff");
         assert_eq!(output.vertical_sections, expected_vertical);
-        assert!(!output.horizontal_lag.sections().is_empty());
+        assert!(
+            !output
+                .horizontal_lag
+                .as_ref()
+                .expect("horizontal lag")
+                .sections()
+                .is_empty()
+        );
+        assert!(output.short_sections_added);
         assert!(builder.state().horizontal_lag().is_none());
         assert_eq!(builder.stages().finish_count, 1);
     }
@@ -408,7 +424,9 @@ mod tests {
         assert!(builder.state().initial_lags().is_some());
         assert!(builder.state().horizontal_lag().is_some());
         assert!(!builder.state().short_sections_added());
-        assert!(builder.take_handoff().is_none());
+        let output = builder.take_handoff().expect("created lag prefix");
+        assert!(output.horizontal_lag.is_some());
+        assert!(!output.short_sections_added);
         assert_eq!(builder.stages().calls, [Call::Retrieve]);
         assert_eq!(builder.stages().finish_count, 1);
     }
@@ -433,6 +451,9 @@ mod tests {
 
         assert!(builder.state().horizontal_lag().is_some());
         assert!(!builder.state().short_sections_added());
+        let output = builder.take_handoff().expect("created lag prefix");
+        assert!(output.horizontal_lag.is_some());
+        assert!(!output.short_sections_added);
         assert_eq!(builder.stages().calls, [Call::Retrieve]);
         assert_eq!(builder.stages().finish_count, 1);
     }
@@ -459,6 +480,30 @@ mod tests {
             builder.stages().warnings,
             [(GridBuildStage::ProcessBars, "ordinary failure")]
         );
+        assert_eq!(builder.stages().finish_count, 1);
+    }
+
+    #[test]
+    fn swallowed_retrieve_failure_exports_initial_sheet_lag_prefix() {
+        let stages = Stages {
+            fail: Some((Call::Retrieve, false)),
+            ..Stages::default()
+        };
+        let mut builder = HeadlessRasterGridBuilder::new(source(), parameters(), stages);
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Swallowed {
+                stage: GridBuildStage::RetrieveLines,
+                error: RasterGridOtherError::Collaborator("ordinary failure"),
+            })
+        );
+
+        let output = builder.take_handoff().expect("created lag prefix");
+        assert!(!output.vertical_sections.is_empty());
+        assert!(output.horizontal_lag.is_some());
+        assert!(!output.short_sections_added);
+        assert_eq!(builder.stages().calls, [Call::Retrieve]);
         assert_eq!(builder.stages().finish_count, 1);
     }
 
