@@ -4,7 +4,7 @@
 
 use crate::{
     bar_alignment::VerticalSide,
-    bar_column::{BarColumn, PeakRelation},
+    bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
     run_table::Orientation,
     section::Section,
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -338,6 +338,42 @@ pub fn start_column_candidate(
     candidate
 }
 
+/// Java `BarsRetriever.buildColumns` aggregation after graph connectivity has
+/// produced peak chains for one system.
+///
+/// Chains must contain peaks in Java `StaffPeak` order. They are stably sorted
+/// by the first peak's deskewed abscissa, then merged only into the latest
+/// column when both the abscissa and empty-staff-slot tests pass.
+pub fn aggregate_bar_chains(
+    staff_ids: &[StaffId],
+    chains: &[Vec<BarPeak>],
+    maximum_column_dx: i32,
+) -> Result<Vec<BarColumn>, BarsLogicError> {
+    let mut ordered = chains.iter().collect::<Vec<_>>();
+    if ordered.iter().any(|chain| chain.is_empty()) {
+        return Err(BarsLogicError::EmptyChain);
+    }
+    ordered.sort_by(|one, two| one[0].deskewed_x().total_cmp(&two[0].deskewed_x()));
+
+    let mut columns: Vec<BarColumn> = Vec::new();
+    for chain in ordered {
+        let include_last = if let Some(last) = columns.last_mut() {
+            let dx = chain[0].deskewed_x() - last.deskewed_x();
+            dx.abs() <= f64::from(maximum_column_dx) && last.can_include(chain)?
+        } else {
+            false
+        };
+        if !include_last {
+            columns.push(BarColumn::new(staff_ids.to_vec())?);
+        }
+        columns
+            .last_mut()
+            .expect("column just created or present")
+            .add_chain(chain)?;
+    }
+    Ok(columns)
+}
+
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
 #[must_use]
 pub fn peak_extension(
@@ -472,6 +508,14 @@ pub fn sections_by_width(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarsLogicError {
     InvalidStartIndex(usize),
+    EmptyChain,
+    Column(BarColumnError),
+}
+
+impl From<BarColumnError> for BarsLogicError {
+    fn from(value: BarColumnError) -> Self {
+        Self::Column(value)
+    }
 }
 
 #[cfg(test)]
@@ -809,6 +853,59 @@ mod tests {
         assert_eq!(
             start_column_candidate(&mut columns, &relations, 10, 10),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn connected_chains_sort_and_aggregate_only_into_latest_compatible_column() {
+        fn bar(id: usize, staff: usize, x: f64) -> BarPeak {
+            BarPeak::new(PeakId::new(id), StaffId::new(staff), 2.0, x, false, false).unwrap()
+        }
+        let chains = vec![
+            vec![bar(3, 2, 10.5)],
+            vec![bar(4, 1, 20.0)],
+            vec![bar(1, 1, 10.0)],
+            vec![bar(5, 2, 20.5)],
+            vec![bar(6, 2, 21.0)], // occupied staff slot forces a third column
+        ];
+        let columns =
+            aggregate_bar_chains(&[StaffId::new(1), StaffId::new(2)], &chains, 2).unwrap();
+        assert_eq!(columns.len(), 3);
+        assert_eq!(
+            columns[0]
+                .peaks()
+                .iter()
+                .map(|peak| peak.map(BarPeak::id))
+                .collect::<Vec<_>>(),
+            [Some(PeakId::new(1)), Some(PeakId::new(3))]
+        );
+        assert_eq!(
+            columns[1]
+                .peaks()
+                .iter()
+                .map(|peak| peak.map(BarPeak::id))
+                .collect::<Vec<_>>(),
+            [Some(PeakId::new(4)), Some(PeakId::new(5))]
+        );
+        assert_eq!(columns[2].peaks()[1].map(BarPeak::id), Some(PeakId::new(6)));
+    }
+
+    #[test]
+    fn connected_chain_aggregation_rejects_empty_chain_and_exact_dx_is_inclusive() {
+        let empty = vec![Vec::new()];
+        assert_eq!(
+            aggregate_bar_chains(&[StaffId::new(1)], &empty, 2).unwrap_err(),
+            BarsLogicError::EmptyChain
+        );
+        let chains = vec![
+            vec![BarPeak::new(PeakId::new(1), StaffId::new(1), 1.0, 0.0, false, false).unwrap()],
+            vec![BarPeak::new(PeakId::new(2), StaffId::new(2), 1.0, 2.0, false, false).unwrap()],
+        ];
+        assert_eq!(
+            aggregate_bar_chains(&[StaffId::new(1), StaffId::new(2)], &chains, 2)
+                .unwrap()
+                .len(),
+            1
         );
     }
 
