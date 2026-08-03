@@ -159,6 +159,13 @@ pub struct NeutralStaffProjectorResult {
     pub brace_candidate: Option<ProjectionBraceCandidate>,
 }
 
+/// Mutation-free decision produced by Java `StaffProjector.checkLinesRoot`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinesRootTransition {
+    pub staff_left: i32,
+    pub clear_staff_left_end_at: Option<usize>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1606,6 +1613,55 @@ pub fn select_blank(
     }
 }
 
+/// Exact decision kernel of Java `StaffProjector.checkLinesRoot`.
+///
+/// The caller applies `clear_staff_left_end_at` to its graph-owned peak and
+/// writes `staff_left` back to its `Staff`. Returning the decision keeps both
+/// mutations outside this neutral module.
+#[must_use]
+pub fn check_lines_root_transition(
+    peaks: &[StaffPeak],
+    blanks: &[ProjectionBlank],
+    brace_present: bool,
+    start_peak_index: Option<usize>,
+    staff_left: i32,
+    minimum_small_blank_width: i32,
+    maximum_left_extremum: i32,
+) -> LinesRootTransition {
+    let unchanged = LinesRootTransition {
+        staff_left,
+        clear_staff_left_end_at: None,
+    };
+    if brace_present || peaks.is_empty() {
+        return unchanged;
+    }
+
+    let Some(start_peak_index) = start_peak_index.filter(|index| *index < peaks.len()) else {
+        return unchanged;
+    };
+    let first_peak = &peaks[0];
+    let Some(blank) = select_blank(
+        blanks,
+        HorizontalSide::Left,
+        first_peak.start(),
+        minimum_small_blank_width,
+    ) else {
+        return unchanged;
+    };
+    let gap = first_peak
+        .start()
+        .wrapping_sub(1)
+        .wrapping_sub(blank.stop());
+    if gap > maximum_left_extremum {
+        LinesRootTransition {
+            staff_left: blank.stop().wrapping_add(1),
+            clear_staff_left_end_at: Some(start_peak_index),
+        }
+    } else {
+        unchanged
+    }
+}
+
 /// Java `StaffProjector.hasStandardBlank`.
 #[must_use]
 pub fn has_blank_between(
@@ -2016,6 +2072,54 @@ mod tests {
             })
         );
         assert_eq!(result.projection.value(5), 5);
+    }
+
+    #[test]
+    fn lines_root_transition_uses_first_peak_blank_gap_and_start_index() {
+        let peaks = [
+            StaffPeak::new(StaffId::new(1), 0, 4, 20, 21).unwrap(),
+            StaffPeak::new(StaffId::new(1), 0, 4, 25, 26).unwrap(),
+        ];
+        let blanks = [
+            ProjectionBlank { start: 0, stop: 1 },
+            ProjectionBlank { start: 5, stop: 10 },
+            ProjectionBlank {
+                start: 12,
+                stop: 13,
+            },
+        ];
+
+        // Java measures from peaks[0], even when the marked start peak is at
+        // a later index: 20 - 1 - 10 = 9, strictly greater than 8.
+        assert_eq!(
+            check_lines_root_transition(&peaks, &blanks, false, Some(1), 3, 4, 8),
+            LinesRootTransition {
+                staff_left: 11,
+                clear_staff_left_end_at: Some(1),
+            }
+        );
+        // The extremum test is strict.
+        assert_eq!(
+            check_lines_root_transition(&peaks, &blanks, false, Some(1), 3, 4, 9),
+            LinesRootTransition {
+                staff_left: 3,
+                clear_staff_left_end_at: None,
+            }
+        );
+        // A brace, no start peak, or no qualifying blank leaves state intact.
+        for transition in [
+            check_lines_root_transition(&peaks, &blanks, true, Some(1), 3, 4, 8),
+            check_lines_root_transition(&peaks, &blanks, false, None, 3, 4, 8),
+            check_lines_root_transition(&peaks, &blanks, false, Some(1), 3, 7, 8),
+        ] {
+            assert_eq!(
+                transition,
+                LinesRootTransition {
+                    staff_left: 3,
+                    clear_staff_left_end_at: None,
+                }
+            );
+        }
     }
 
     #[test]
