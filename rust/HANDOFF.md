@@ -252,11 +252,19 @@ denied, and passed `git diff --check` before commit.
 168. `19035959` — initial vertical-shift and horizontal-ratio lag construction.
 169. `2f702ae9` — append-only short-section registration with lag-global IDs.
 170. `fce93241` — production Java/Rust GRID run-dispatch differential vector.
+171. `4f5ab233` — exact thick/thin horizontal section dispatch.
+172. `69bad0f0` — ordered adjacent one-run sticker discovery.
+173. `67162af1` — exact internal `completeLines` lifecycle and failure semantics.
+174. `e6c0df9c` — typed staff-line section inclusion decision.
+175. `d0c5636d` — typed discarded-filament inclusion decision.
+176. `0edbd7b1` — ties-even StaffFilament hole insertion planning.
+177. `133c1244` — two-sided neighboring-line hole-point interpolation.
+178. `5713195a` — Java-ordered section inclusion traversal and assignment plan.
 
-At the one-hundred-and-seventieth checkpoint the Rust workspace executes 421 tests:
+At the one-hundred-and-seventy-eighth checkpoint the Rust workspace executes 442 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 277
+- `audiveris-image`: 298
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
