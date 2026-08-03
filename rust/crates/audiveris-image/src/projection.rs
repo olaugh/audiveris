@@ -175,6 +175,22 @@ pub struct RightEndTransition {
     pub set_staff_right_end_at: Option<usize>,
 }
 
+/// Scale- and staff-resolved inputs to Java
+/// `StaffProjector.processMultiRestSide`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MultiRestSideRequest {
+    pub x: i32,
+    pub side: HorizontalSide,
+    pub added_chunk: i32,
+    pub vertical_serif_width: i32,
+    pub bar_threshold: i32,
+    pub lines_threshold: i32,
+    pub total_height: i32,
+    pub staff_id: StaffId,
+    pub peak_construction: PeakConstructionParams,
+    pub peak_core: PeakCoreParams,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1651,6 +1667,67 @@ impl NeutralStaffProjectorResult {
     pub fn set_brace_candidate(&mut self, candidate: Option<ProjectionBraceCandidate>) {
         self.brace_candidate = candidate;
     }
+
+    /// Dependency-light composition of Java
+    /// `StaffProjector.processMultiRestSide`.
+    ///
+    /// Returned serifs are graded neutral peaks. Graph insertion, deskewing,
+    /// and attachment to the multiple-rest interpretation remain with the
+    /// caller.
+    pub fn process_multi_rest_side<Geometry>(
+        &self,
+        raster_width: usize,
+        raster_height: usize,
+        pixels: &[u8],
+        request: MultiRestSideRequest,
+        mut core_geometry_at: Geometry,
+    ) -> Result<Vec<StaffPeak>, ProjectionError>
+    where
+        Geometry: FnMut(i32) -> PeakCoreGeometry,
+    {
+        let minimum_count = request.bar_threshold / 2;
+        let outside_derivative =
+            1.max(minimum_count.wrapping_sub(request.lines_threshold.wrapping_mul(3) / 4));
+        let inside_derivative = 1.max(outside_derivative.wrapping_sub(request.added_chunk));
+        let (minimum_derivative_up, minimum_derivative_down) = match request.side {
+            HorizontalSide::Left => (outside_derivative, inside_derivative),
+            HorizontalSide::Right => (inside_derivative, outside_derivative),
+        };
+
+        let half_width = (f64::from(request.vertical_serif_width) * 0.5).ceil() as i32;
+        let center_offset = half_width / 2;
+        let x = match request.side {
+            HorizontalSide::Left => request.x.wrapping_add(center_offset),
+            HorizontalSide::Right => request.x.wrapping_sub(center_offset),
+        };
+        let scan = PeakScanRequest::new(
+            x.wrapping_sub(request.vertical_serif_width),
+            x.wrapping_add(request.vertical_serif_width),
+            ProjectionPeakMode::Half,
+            minimum_count,
+            minimum_derivative_up,
+            minimum_derivative_down,
+            request.added_chunk,
+        );
+
+        self.projection
+            .find_peaks_in_range(scan, request.peak_construction, |candidate| {
+                let midpoint = candidate.start.wrapping_add(candidate.stop) / 2;
+                let validation = candidate.validate_core(
+                    raster_width,
+                    raster_height,
+                    pixels,
+                    core_geometry_at(midpoint),
+                    request.added_chunk,
+                    request.peak_core,
+                )?;
+                candidate.into_staff_peak(
+                    validation,
+                    request.staff_id,
+                    PeakGradeParams::new(request.bar_threshold, request.total_height, true),
+                )
+            })
+    }
 }
 
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
@@ -2319,6 +2396,96 @@ mod tests {
         };
         result.set_brace_candidate(Some(brace));
         assert_eq!(result.brace_candidate, Some(brace));
+    }
+
+    #[test]
+    fn multi_rest_side_composes_asymmetric_scan_core_and_grade() {
+        let width = 12;
+        let height = 9;
+        let mut pixels = vec![255; width * height];
+        for x in 0..width {
+            pixels[x] = FOREGROUND;
+            pixels[(height - 1) * width + x] = FOREGROUND;
+        }
+        for y in 2..=6 {
+            pixels[y * width + 5] = FOREGROUND;
+        }
+        let accumulation = ShortProjection::from_staff_raster(
+            width,
+            height,
+            &pixels,
+            StaffProjectionRequest::new(0, 11, 0),
+            |_| 0,
+            |_| 9,
+        )
+        .unwrap();
+        let result = NeutralStaffProjectorResult {
+            projection: accumulation.projection,
+            derivative_threshold: 5,
+            all_blanks: Vec::new(),
+            peak_search_bounds: PeakSearchBounds {
+                x_min: 0,
+                x_max: 11,
+            },
+            peaks: Vec::new(),
+            brace_candidate: None,
+        };
+        let refinement = PeakRefinementParams::new(6, 2, 4, 2, 1).unwrap();
+        let request = MultiRestSideRequest {
+            x: 4,
+            side: HorizontalSide::Left,
+            added_chunk: 1,
+            vertical_serif_width: 4,
+            bar_threshold: 6,
+            lines_threshold: 2,
+            total_height: 12,
+            staff_id: StaffId::new(1),
+            peak_construction: PeakConstructionParams::new(refinement, 4).unwrap(),
+            peak_core: PeakCoreParams::new(1, 0.2).unwrap(),
+        };
+
+        let left = result
+            .process_multi_rest_side(width, height, &pixels, request, |x| {
+                assert_eq!(x, 5);
+                PeakCoreGeometry::new(0, 8, 4)
+            })
+            .unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!((left[0].start(), left[0].stop()), (5, 5));
+        assert_eq!((left[0].top(), left[0].bottom()), (2, 6));
+
+        // The right side shifts in the opposite direction and swaps the
+        // outside/inside derivative thresholds, reaching the same serif.
+        let right = result
+            .process_multi_rest_side(
+                width,
+                height,
+                &pixels,
+                MultiRestSideRequest {
+                    x: 6,
+                    side: HorizontalSide::Right,
+                    ..request
+                },
+                |_| PeakCoreGeometry::new(0, 8, 4),
+            )
+            .unwrap();
+        assert_eq!(right.len(), 1);
+        assert_eq!((right[0].start(), right[0].stop()), (5, 5));
+
+        // Java rejects a serif occupying too much of the full staff height.
+        let rejected = result
+            .process_multi_rest_side(
+                width,
+                height,
+                &pixels,
+                MultiRestSideRequest {
+                    peak_core: PeakCoreParams::new(1, 0.3).unwrap(),
+                    ..request
+                },
+                |_| PeakCoreGeometry::new(0, 8, 4),
+            )
+            .unwrap();
+        assert!(rejected.is_empty());
     }
 
     #[test]
