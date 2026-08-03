@@ -69,6 +69,14 @@ pub struct StaffFilament {
     ending_points: Option<((f64, f64), (f64, f64))>,
     geometry_cache: RefCell<Option<FilamentGeometry>>,
     expanded_bounds: Option<Bounds>,
+    part_of: Option<FilamentPartOf>,
+}
+
+/// Completion-stage analogue of Java `SectionCompound.partOf`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FilamentPartOf {
+    pub staff_id: usize,
+    pub line_id: usize,
 }
 
 impl StaffFilament {
@@ -82,6 +90,7 @@ impl StaffFilament {
             ending_points: None,
             geometry_cache: RefCell::new(None),
             expanded_bounds: None,
+            part_of: None,
         })
     }
 
@@ -287,6 +296,25 @@ impl StaffFilament {
     #[must_use]
     pub const fn ending_points(&self) -> Option<((f64, f64), (f64, f64))> {
         self.ending_points
+    }
+
+    #[must_use]
+    pub const fn part_of(&self) -> Option<FilamentPartOf> {
+        self.part_of
+    }
+
+    /// Java `SectionCompound.stealSections`: sections are added immediately,
+    /// then the swallowed filament receives its direct `partOf` link.
+    pub fn steal_sections_from(
+        &mut self,
+        candidate: &mut Self,
+        owner: FilamentPartOf,
+    ) -> Result<(), FilamentError> {
+        for section in candidate.sections.clone() {
+            self.add_section(section)?;
+        }
+        candidate.part_of = Some(owner);
+        Ok(())
     }
 
     fn centroid(&self, roi: Bounds, minimum_weight: usize) -> Option<(f64, f64)> {

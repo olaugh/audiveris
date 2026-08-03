@@ -518,12 +518,15 @@ mod tests {
     fn state(staffs: Vec<PreparedStaff>) -> PreparedCompletionState {
         PreparedCompletionState {
             staffs,
+            completion_systems: None,
             discarded_filaments: Vec::<RawDiscardedFilament>::new(),
             horizontal_sections: Vec::new(),
             binary_buffer: Some(binary_pattern()),
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
+            discarded_filament_steals: Vec::new(),
+            discarded_filament_recomputations: Vec::new(),
             completed_stages: Vec::new(),
         }
     }

@@ -16,6 +16,7 @@ pub mod cluster_merge;
 pub mod cluster_ownership;
 pub mod cluster_pipeline;
 pub mod comb_builder;
+pub mod discarded_completion;
 pub mod filament;
 pub mod filament_comb;
 pub mod filament_factory;

@@ -9,6 +9,9 @@
 //! completion timer, while every later success or failure does.
 
 use crate::{
+    discarded_completion::{
+        PreparedCompletionSystem, PreparedDiscardedFilamentSteal, PreparedFilamentRecomputation,
+    },
     grid_lifecycle::{GridBuildStage, GridStageFailure},
     line_completion::{
         LineCompletionExecutor, LineCompletionStage, complete_lines as run_line_completion,
@@ -28,6 +31,9 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct PreparedCompletionState {
     pub staffs: Vec<PreparedStaff>,
+    /// Exact system/staff traversal. `None` is a bounded missing seam; flat
+    /// staff order must not be silently treated as one system.
+    pub completion_systems: Option<Vec<PreparedCompletionSystem>>,
     /// Exact final candidates consumed by Java's
     /// `includeDiscardedFilaments` stage, in their pre-top-sort source order.
     pub discarded_filaments: Vec<RawDiscardedFilament>,
@@ -38,6 +44,8 @@ pub struct PreparedCompletionState {
     /// Java `defineEndPoints` results in completed-staff order. A failure
     /// retains only the fully applied staff prefix.
     pub defined_endpoints: Vec<PreparedStaffEndPoints>,
+    pub discarded_filament_steals: Vec<PreparedDiscardedFilamentSteal>,
+    pub discarded_filament_recomputations: Vec<PreparedFilamentRecomputation>,
     pub completed_stages: Vec<LineCompletionStage>,
 }
 
@@ -206,12 +214,15 @@ where
             });
         self.state = Some(PreparedCompletionState {
             staffs,
+            completion_systems: None,
             discarded_filaments,
             horizontal_sections,
             binary_buffer: None,
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
+            discarded_filament_steals: Vec::new(),
+            discarded_filament_recomputations: Vec::new(),
             completed_stages: Vec::new(),
         });
         let mut executor = CompletionAdapter {
