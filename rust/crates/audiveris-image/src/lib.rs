@@ -39,6 +39,7 @@ pub mod prepared_completion;
 pub mod prepared_lines;
 pub mod projection;
 pub mod raster_grid_builder;
+pub mod raw_line_adapter;
 pub mod run_table;
 pub mod scale_estimate;
 pub mod scale_runs;
