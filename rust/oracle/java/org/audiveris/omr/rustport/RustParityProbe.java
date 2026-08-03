@@ -44,6 +44,7 @@ import org.audiveris.omr.math.GeoPath;
 import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
+import org.audiveris.omr.math.LineUtil;
 import org.audiveris.omr.math.NaturalSpline;
 import org.audiveris.omr.math.Projection;
 import org.audiveris.omr.math.Range;
@@ -88,6 +89,7 @@ import org.audiveris.omr.sheet.grid.TargetLine;
 import org.audiveris.omr.sheet.grid.TargetStaff;
 import org.audiveris.omr.sheet.grid.TargetSystem;
 import org.audiveris.omr.sig.SIGraph;
+import org.audiveris.omr.sig.inter.AbstractStaffVerticalInter;
 import org.audiveris.omr.sig.inter.AbstractVerticalConnectorInter;
 import org.audiveris.omr.sig.inter.BarConnectorInter;
 import org.audiveris.omr.sig.inter.BarlineInter;
@@ -1397,6 +1399,7 @@ public final class RustParityProbe
         System.out.println("grid.skew.synthetic=" + gridSkew());
         System.out.println("grid.raw-lines.synthetic=" + gridRawLines());
         System.out.println("grid.line-endpoints.synthetic=" + gridLineEndPoints());
+        System.out.println("grid.bar-alignments.synthetic=" + gridBarAlignments());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
         System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
@@ -2296,6 +2299,126 @@ public final class RustParityProbe
                 recovered.getSlopeAt(95, Orientation.HORIZONTAL));
     }
 
+    /** Freeze live {@code PeakGraph.findAllAlignments} before connection discovery or purging. */
+    @SuppressWarnings("unchecked")
+    private static String gridBarAlignments ()
+        throws Exception
+    {
+        final int interline = 10;
+        final double sheetSlope = -0.02;
+        Book book = new Book(Path.of("grid-bar-alignments.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, new RunTable(Orientation.VERTICAL, 120, 130));
+        sheet.setScale(new Scale(
+                new Scale.InterlineScale(interline, interline, interline),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+        Skew skew = new Skew(sheetSlope, sheet);
+        sheet.setSkew(skew);
+
+        // The two lower staves are horizontal neighbors at the same ordinate. The live
+        // StaffManager traversal must therefore report both, sorted by staff ID.
+        Staff topStaff = alignmentStaff(1, 0, 100, 10, interline);
+        Staff lowerLeft = alignmentStaff(2, 0, 45, 70, interline);
+        Staff lowerRight = alignmentStaff(3, 55, 100, 70, interline);
+        List<Staff> staves = List.of(topStaff, lowerLeft, lowerRight);
+        SystemInfo system = new SystemInfo(1, sheet, staves);
+        sheet.getSystemManager().setSystems(List.of(system));
+        for (Staff staff : staves) {
+            sheet.getStaffManager().addStaff(staff);
+        }
+
+        List<StaffProjector> projectors = new ArrayList<>();
+        PeakGraph graph = new PeakGraph(sheet, projectors);
+        StaffProjector topProjector = new StaffProjector(sheet, topStaff, graph);
+        StaffProjector lowerLeftProjector = new StaffProjector(sheet, lowerLeft, graph);
+        StaffProjector lowerRightProjector = new StaffProjector(sheet, lowerRight, graph);
+        projectors.add(topProjector);
+        projectors.add(lowerLeftProjector);
+        projectors.add(lowerRightProjector);
+
+        StaffPeak topLeft = alignmentPeak(topStaff, 10, 50, 20, 22, skew);
+        StaffPeak topRight = alignmentPeak(topStaff, 10, 50, 80, 81, skew);
+        // Both left candidates are acceptable for topLeft and must be retained in
+        // projector-list order, rather than collapsed to one "best" alignment.
+        StaffPeak leftFirst = alignmentPeak(lowerLeft, 70, 110, 21, 21, skew);
+        StaffPeak leftSecond = alignmentPeak(lowerLeft, 70, 110, 20, 21, skew);
+        StaffPeak right = alignmentPeak(lowerRight, 70, 110, 80, 83, skew);
+        ((List<StaffPeak>) field(topProjector, "peaks")).addAll(List.of(topLeft, topRight));
+        ((List<StaffPeak>) field(lowerLeftProjector, "peaks")).addAll(
+                List.of(leftFirst, leftSecond));
+        ((List<StaffPeak>) field(lowerRightProjector, "peaks")).add(right);
+        for (StaffPeak peak : List.of(topLeft, topRight, leftFirst, leftSecond, right)) {
+            graph.addVertex(peak);
+        }
+
+        List<String> neighbors = new ArrayList<>();
+        for (Staff staff : sheet.getStaffManager().vertNeighbors(
+                topStaff,
+                org.audiveris.omr.util.VerticalSide.BOTTOM)) {
+            neighbors.add(Integer.toString(staff.getId()));
+        }
+        invokePrivate(graph, "findAllAlignments");
+
+        IdentityHashMap<StaffPeak, String> names = new IdentityHashMap<>();
+        names.put(topLeft, "tl");
+        names.put(topRight, "tr");
+        names.put(leftFirst, "a");
+        names.put(leftSecond, "b");
+        names.put(right, "c");
+        List<String> relations = new ArrayList<>();
+        for (BarAlignment alignment : graph.edgeSet()) {
+            if (alignment instanceof BarConnection) {
+                throw new IllegalStateException("findAllAlignments promoted a connection");
+            }
+            StaffPeak source = graph.getEdgeSource(alignment);
+            StaffPeak target = graph.getEdgeTarget(alignment);
+            BarAlignment.Impacts impacts = (BarAlignment.Impacts) alignment.getImpacts();
+            relations.add(String.format(
+                    java.util.Locale.ROOT,
+                    "%s>%s@s%.12f/dw%.12f/i%.12f,%.12f/g%.12f",
+                    names.get(source),
+                    names.get(target),
+                    (Double) field(alignment, "slope"),
+                    (Double) field(alignment, "dWidth"),
+                    impacts.getAlignImpact(),
+                    impacts.getWidthImpact(),
+                    alignment.getGrade()));
+        }
+        if ((relations.size() != 3) || (graph.outDegreeOf(topLeft) != 2)) {
+            throw new IllegalStateException("unexpected findAllAlignments fixture cardinality");
+        }
+
+        Object params = field(graph, "params");
+        double yTop = topLeft.getOrdinate(org.audiveris.omr.util.VerticalSide.BOTTOM);
+        double yBottom = leftFirst.getOrdinate(org.audiveris.omr.util.VerticalSide.TOP);
+        double rawLeft = LineUtil.getInvertedSlope(
+                topLeft.getStart(),
+                yTop,
+                leftFirst.getStart(),
+                yBottom);
+        double rawRight = LineUtil.getInvertedSlope(
+                topLeft.getStop(),
+                yTop,
+                leftFirst.getStop(),
+                yBottom);
+        return String.format(
+                java.util.Locale.ROOT,
+                "boundary:findAllAlignments;neighbors:%s;sheet:%.12f/vert:%.12f;limits:%.12f,%s;raw:tl>a=%.12f,%.12f;relations:%s;competitors:tl=%d;next:findConnections,purgeAlignments:not-run",
+                String.join(",", neighbors),
+                sheet.getSkew().getSlope(),
+                -sheet.getSkew().getSlope(),
+                field(params, "maxAlignmentSlope"),
+                field(params, "maxAlignmentDeltaWidth"),
+                rawLeft,
+                rawRight,
+                String.join("|", relations),
+                graph.outDegreeOf(topLeft));
+    }
+
     @SuppressWarnings("unchecked")
     private static String gridOutputBoundary ()
         throws Exception
@@ -2493,6 +2616,44 @@ public final class RustParityProbe
             bits.append(node.isFrozen() ? '1' : '0');
         }
         return bits.toString();
+    }
+
+    private static Staff alignmentStaff (int id,
+                                         int left,
+                                         int right,
+                                         int firstY,
+                                         int interline)
+        throws Exception
+    {
+        List<org.audiveris.omr.sheet.grid.LineInfo> lines = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            StaffFilament filament = staffFilament(
+                    left,
+                    firstY + (index * interline),
+                    (right - left) + 1,
+                    interline);
+            filament.computeLine();
+            lines.add(filament);
+        }
+        return new Staff(id, left, right, interline, lines);
+    }
+
+    private static StaffPeak alignmentPeak (Staff staff,
+                                            int top,
+                                            int bottom,
+                                            int start,
+                                            int stop,
+                                            Skew skew)
+    {
+        StaffPeak peak = new StaffPeak(
+                staff,
+                top,
+                bottom,
+                start,
+                stop,
+                new AbstractStaffVerticalInter.Impacts(1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
+        peak.computeDeskewedCenter(skew);
+        return peak;
     }
 
     private static Staff outputBoundaryStaff (int id,

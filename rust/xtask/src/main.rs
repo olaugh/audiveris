@@ -13,7 +13,10 @@ use audiveris_image::system_population::{
 };
 use audiveris_image::{
     adaptive,
-    bar_alignment::{AlignmentPeak, BarAlignment, BarImpacts},
+    bar_alignment::{AlignmentPeak, BarAlignment, BarAlignmentKind, BarImpacts},
+    bar_alignments::{
+        AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
+    },
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
     bars_logic::{
         PeakWidthClass, VerticalInterKind, VerticalInterPlan, VerticalMedian, aggregate_bar_chains,
@@ -276,7 +279,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 67] = [
+const VECTOR_KEYS: [&str; 68] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -318,6 +321,7 @@ const VECTOR_KEYS: [&str; 67] = [
     "grid.skew.synthetic=",
     "grid.raw-lines.synthetic=",
     "grid.line-endpoints.synthetic=",
+    "grid.bar-alignments.synthetic=",
     "grid.output-boundary.synthetic=",
     "grid.contextualize.synthetic=",
     "spline.synthetic=",
@@ -536,6 +540,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
             filament.add_section(section)?;
             Ok(PreparedStaffLine {
                 id: index + 10,
+                cluster_position: index as i32,
                 filament,
             })
         })
@@ -560,6 +565,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         defined_endpoints: Vec::new(),
         discarded_filament_steals: Vec::new(),
         discarded_filament_recomputations: Vec::new(),
+        fill_hole_insertions: Vec::new(),
         completed_stages: Vec::new(),
     };
     define_end_points(
@@ -612,6 +618,137 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         geometry.stop().1,
         geometry.position_at(95.0)?,
         geometry.slope_at(95.0)?,
+    ))
+}
+
+fn grid_bar_alignments_vector() -> Result<String, Box<dyn Error>> {
+    const SHEET_SLOPE: f64 = -0.02;
+    const MAXIMUM_SLOPE: f64 = 0.06;
+    const MAXIMUM_DELTA_WIDTH: i32 = 6;
+
+    let make_peak = |staff_id, top, bottom, start, stop| -> Result<StaffPeak, Box<dyn Error>> {
+        let mut peak = StaffPeak::with_impacts(
+            StaffId::new(staff_id),
+            top,
+            bottom,
+            start,
+            stop,
+            StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        )?;
+        let skew = HeadlessSkew::new(SHEET_SLOPE, 120, 130);
+        peak.compute_deskewed_center(|point| skew.deskewed(point))?;
+        Ok(peak)
+    };
+    let top_left = make_peak(1, 10, 50, 20, 22)?;
+    let top_right = make_peak(1, 10, 50, 80, 81)?;
+    let left_first = make_peak(2, 70, 110, 21, 21)?;
+    let left_second = make_peak(2, 70, 110, 20, 21)?;
+    let right = make_peak(3, 70, 110, 80, 83)?;
+    let staffs = [
+        AlignmentStaff {
+            staff_id: StaffId::new(1),
+            left: 0.0,
+            right: 100.0,
+            top: 10.0,
+            bottom: 50.0,
+            short: false,
+            peaks: vec![top_left.key(), top_right.key()],
+        },
+        AlignmentStaff {
+            staff_id: StaffId::new(2),
+            left: 0.0,
+            right: 45.0,
+            top: 70.0,
+            bottom: 110.0,
+            short: false,
+            peaks: vec![left_first.key(), left_second.key()],
+        },
+        AlignmentStaff {
+            staff_id: StaffId::new(3),
+            left: 55.0,
+            right: 100.0,
+            top: 70.0,
+            bottom: 110.0,
+            short: false,
+            peaks: vec![right.key()],
+        },
+    ];
+    let parameters = AlignmentParameters {
+        sheet_slope: SHEET_SLOPE,
+        maximum_alignment_slope: MAXIMUM_SLOPE,
+        maximum_alignment_delta_width: MAXIMUM_DELTA_WIDTH,
+    };
+    let mut graph: PeakGraph<BarAlignment> = PeakGraph::new();
+    for peak in [
+        top_left.clone(),
+        top_right.clone(),
+        left_first.clone(),
+        left_second.clone(),
+        right.clone(),
+    ] {
+        if !graph.add_vertex(peak) {
+            return Err("alignment fixture peak collided".into());
+        }
+    }
+    let mut report = AlignmentBuildReport::default();
+    find_all_alignments(&mut graph, &staffs, parameters, &mut report)?;
+
+    let name = |key| -> Result<&'static str, Box<dyn Error>> {
+        if key == top_left.key() {
+            Ok("tl")
+        } else if key == top_right.key() {
+            Ok("tr")
+        } else if key == left_first.key() {
+            Ok("a")
+        } else if key == left_second.key() {
+            Ok("b")
+        } else if key == right.key() {
+            Ok("c")
+        } else {
+            Err("alignment relation has an unknown peak".into())
+        }
+    };
+    let relations = graph
+        .edges()
+        .iter()
+        .map(|edge| -> Result<String, Box<dyn Error>> {
+            let alignment = edge.relation();
+            if alignment.kind() != BarAlignmentKind::Alignment {
+                return Err("find_all_alignments promoted a connection".into());
+            }
+            Ok(format!(
+                "{}>{}@s{:.12}/dw{:.12}/i{:.12},{:.12}/g{:.12}",
+                name(edge.source())?,
+                name(edge.target())?,
+                alignment.slope(),
+                alignment.delta_width(),
+                alignment.impacts().align(),
+                alignment.impacts().width(),
+                alignment.grade(),
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let competitors = graph.outgoing_edges(top_left.key())?.count();
+    if relations.len() != 3 || competitors != 2 || report.edge_ids().len() != 3 {
+        return Err("unexpected find_all_alignments fixture cardinality".into());
+    }
+    if graph
+        .edges()
+        .iter()
+        .map(|edge| edge.id())
+        .ne(report.edge_ids().iter().copied())
+    {
+        return Err("alignment report lost relation insertion order".into());
+    }
+
+    let y_top = f64::from(top_left.bottom());
+    let y_bottom = f64::from(left_first.top());
+    let raw_left = f64::from(left_first.start() - top_left.start()) / (y_bottom - y_top);
+    let raw_right = f64::from(left_first.stop() - top_left.stop()) / (y_bottom - y_top);
+    Ok(format!(
+        "boundary:findAllAlignments;neighbors:2,3;sheet:{SHEET_SLOPE:.12}/vert:{:.12};limits:{MAXIMUM_SLOPE:.12},{MAXIMUM_DELTA_WIDTH};raw:tl>a={raw_left:.12},{raw_right:.12};relations:{};competitors:tl={competitors};next:findConnections,purgeAlignments:not-run",
+        -SHEET_SLOPE,
+        relations.join("|"),
     ))
 }
 
@@ -2727,6 +2864,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.line-endpoints.synthetic={}",
         grid_line_endpoints_vector()?
+    ));
+    lines.push(format!(
+        "grid.bar-alignments.synthetic={}",
+        grid_bar_alignments_vector()?
     ));
     lines.push(format!(
         "grid.output-boundary.synthetic={}",
