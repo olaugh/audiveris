@@ -43,7 +43,7 @@ use audiveris_image::{
         OriginalGlyphRegistrar, PersistentStaffLine, StaffGlyph, StaffLineConversionError,
         to_registered_staff_line,
     },
-    staff_peak::StaffPeak,
+    staff_peak::{PeakPoint, StaffPeak},
     system_population::{
         PopulationLag, PopulationPage, PopulationPageReport, PopulationReferencePage,
         PopulationReferenceRegistry, PopulationSection, PopulationSystem, PopulationSystemArea,
@@ -127,6 +127,40 @@ pub struct HeadlessGridSigState {
 
 impl HeadlessGridSigState {
     pub fn install_prepared_bars_handoff(&mut self, handoff: PreparedBarsHandoff) {
+        self.install_prepared_bars_handoff_with_skew(handoff, None);
+    }
+
+    fn install_prepared_bars_handoff_with_skew(
+        &mut self,
+        mut handoff: PreparedBarsHandoff,
+        skew: Option<&HeadlessSkew>,
+    ) {
+        if let Some(skew) = skew {
+            for system in &mut handoff.systems {
+                for peak in system.staff_peaks.iter_mut().flatten() {
+                    peak.compute_deskewed_center(|point| skew.deskewed(point))
+                        .expect("finite sheet skew produces finite peak coordinates");
+                }
+                for peak in system.brace_peaks.iter_mut().flatten() {
+                    peak.compute_deskewed_center(|point| skew.deskewed(point))
+                        .expect("finite sheet skew produces finite peak coordinates");
+                }
+            }
+            let keys = handoff
+                .peak_graph
+                .vertices()
+                .iter()
+                .map(StaffPeak::key)
+                .collect::<Vec<_>>();
+            for key in keys {
+                handoff
+                    .peak_graph
+                    .vertex_mut(key)
+                    .expect("key was collected from this peak graph")
+                    .compute_deskewed_center(|point| skew.deskewed(point))
+                    .expect("finite sheet skew produces finite peak coordinates");
+            }
+        }
         self.systems = handoff
             .systems
             .into_iter()
@@ -220,6 +254,69 @@ pub struct InstalledRasterGridPrefix {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HeadlessSkew {
     pub slope: f64,
+    cosine: f64,
+    sine: f64,
+    translate_x: f64,
+    translate_y: f64,
+    deskewed_width: f64,
+    deskewed_height: f64,
+}
+
+impl HeadlessSkew {
+    /// Reproduce Java `Skew.initTransients`, including `AffineTransform`'s
+    /// post-concatenated origin translation.
+    #[must_use]
+    pub fn new(slope: f64, sheet_width: i32, sheet_height: i32) -> Self {
+        let deskew_angle = -slope.atan();
+        let cosine = deskew_angle.cos();
+        let sine = deskew_angle.sin();
+        let width = f64::from(sheet_width);
+        let height = f64::from(sheet_height);
+        let rotate = |x: f64, y: f64| ((cosine * x) - (sine * y), (sine * x) + (cosine * y));
+        let top_right = rotate(width, 0.0);
+        let bottom_left = rotate(0.0, height);
+        let bottom_right = rotate(width, height);
+        let (dx, dy, deskewed_width, deskewed_height) = if deskew_angle <= 0.0 {
+            let dy = -top_right.1;
+            (0.0, dy, bottom_right.0, bottom_left.1 + dy)
+        } else {
+            let dx = -bottom_left.0;
+            (dx, 0.0, top_right.0 + dx, bottom_right.1)
+        };
+        let (translate_x, translate_y) = rotate(dx, dy);
+        Self {
+            slope,
+            cosine,
+            sine,
+            translate_x,
+            translate_y,
+            deskewed_width,
+            deskewed_height,
+        }
+    }
+
+    #[must_use]
+    pub fn deskewed(&self, point: PeakPoint) -> PeakPoint {
+        PeakPoint::new(
+            (self.cosine * point.x) - (self.sine * point.y) + self.translate_x,
+            (self.sine * point.x) + (self.cosine * point.y) + self.translate_y,
+        )
+    }
+
+    #[must_use]
+    pub fn deskewed_x(&self, x: f64, y: f64) -> f64 {
+        self.deskewed(PeakPoint::new(x, y)).x
+    }
+
+    #[must_use]
+    pub const fn deskewed_width(&self) -> f64 {
+        self.deskewed_width
+    }
+
+    #[must_use]
+    pub const fn deskewed_height(&self) -> f64 {
+        self.deskewed_height
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -242,10 +339,14 @@ pub struct HeadlessGridSheet {
 
 impl HeadlessGridSheet {
     pub fn install_raw_line_metadata_handoff(&mut self, handoff: RawLineMetadataHandoff) {
-        self.skew = Some(HeadlessSkew {
-            slope: handoff.global_slope,
-        });
-        self.sloped_line_fallbacks = handoff.sloped_filaments;
+        install_raw_line_metadata(
+            handoff,
+            &mut self.skew,
+            &mut self.sloped_line_fallbacks,
+            &mut self.population.geometries,
+            self.population.sheet_width,
+            self.population.sheet_height,
+        );
     }
 
     pub fn install_prepared_staff_handoff(&mut self, handoff: PreparedStaffHandoff) {
@@ -302,6 +403,30 @@ impl HeadlessGridSheet {
             short_sections_added: handoff.short_sections_added,
             horizontal_lag_present,
         });
+    }
+}
+
+fn install_raw_line_metadata(
+    handoff: RawLineMetadataHandoff,
+    skew_state: &mut Option<HeadlessSkew>,
+    sloped_line_fallbacks: &mut Vec<PreparedStaffLine>,
+    geometries: &mut [PopulationSystemGeometry],
+    sheet_width: i32,
+    sheet_height: i32,
+) {
+    let skew = HeadlessSkew::new(handoff.global_slope, sheet_width, sheet_height);
+    apply_skew_to_population_geometries(&skew, geometries);
+    *skew_state = Some(skew);
+    *sloped_line_fallbacks = handoff.sloped_filaments;
+}
+
+fn apply_skew_to_population_geometries(
+    skew: &HeadlessSkew,
+    geometries: &mut [PopulationSystemGeometry],
+) {
+    for geometry in geometries {
+        geometry.deskewed_upper_left_x =
+            skew.deskewed_x(f64::from(geometry.left), f64::from(geometry.top));
     }
 }
 
@@ -501,6 +626,12 @@ where
                         staffs: &mut self.sheet.staffs,
                         promotion_failure: &mut self.sheet.promotion_failure,
                         bars_handoff: self.bars_handoff,
+                        raw_line_metadata_handoff: self.raw_line_metadata_handoff,
+                        skew: &mut self.sheet.skew,
+                        sloped_line_fallbacks: &mut self.sheet.sloped_line_fallbacks,
+                        population_geometries: &mut self.sheet.population.geometries,
+                        sheet_width: self.sheet.population.sheet_width,
+                        sheet_height: self.sheet.population.sheet_height,
                         bar_tail_parameters: self.bar_tail_parameters,
                     };
                     build_grid_info(&mut builder)
@@ -547,6 +678,12 @@ struct SigPromotingBuilder<'a, Builder> {
     staffs: &'a mut [HeadlessStaff],
     promotion_failure: &'a mut Option<HeadlessGridPromotionError>,
     bars_handoff: Option<fn(&mut Builder) -> Option<PreparedBarsHandoff>>,
+    raw_line_metadata_handoff: Option<fn(&mut Builder) -> Option<RawLineMetadataHandoff>>,
+    skew: &'a mut Option<HeadlessSkew>,
+    sloped_line_fallbacks: &'a mut Vec<PreparedStaffLine>,
+    population_geometries: &'a mut [PopulationSystemGeometry],
+    sheet_width: i32,
+    sheet_height: i32,
     bar_tail_parameters: BarTailParameters,
 }
 
@@ -578,10 +715,23 @@ where
                 }
             });
         if stage == audiveris_image::grid_lifecycle::GridBuildStage::ProcessBars {
+            if let Some(extract) = self.raw_line_metadata_handoff
+                && let Some(handoff) = extract(self.builder)
+            {
+                install_raw_line_metadata(
+                    handoff,
+                    self.skew,
+                    self.sloped_line_fallbacks,
+                    self.population_geometries,
+                    self.sheet_width,
+                    self.sheet_height,
+                );
+            }
             if let Some(extract) = self.bars_handoff
                 && let Some(handoff) = extract(self.builder)
             {
-                self.sig.install_prepared_bars_handoff(handoff);
+                self.sig
+                    .install_prepared_bars_handoff_with_skew(handoff, self.skew.as_ref());
             }
             result?;
             promote_grid_sigs(self.sig, self.bar_tail_parameters).map_err(|error| {
@@ -785,6 +935,9 @@ where
     }
 
     fn populate_systems(&mut self) -> Result<(), Self::Error> {
+        if let Some(skew) = &self.sheet.skew {
+            apply_skew_to_population_geometries(skew, &mut self.sheet.population.geometries);
+        }
         let horizontal_sections = match &self.sheet.horizontal_lag {
             Some(RegisteredHorizontalLag::Populated(lag)) => lag
                 .sections()
@@ -985,7 +1138,7 @@ mod tests {
         line_cluster::FilamentId,
         line_short_sections::HorizontalSectionLag,
         lines_coordinator::{ClusterPassState, LinesCoordinatorParameters},
-        prepared_bars::ProductionProcessBars,
+        prepared_bars::{PreparedBarsSystem, ProductionProcessBars},
         prepared_lines::ProductionRetrieveLines,
         raster_grid_builder::{
             HeadlessRasterGridBuilder, RasterGridBuildState, RasterGridParameters,
@@ -999,6 +1152,39 @@ mod tests {
             PopulationStaffConfig, PopulationSystemRefState, StaffBoundary,
         },
     };
+
+    fn near(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= 1.0e-12,
+            "{actual} != {expected}"
+        );
+    }
+
+    #[test]
+    fn headless_skew_matches_java_positive_negative_and_zero_coordinates() {
+        let point = PeakPoint::new(10.0, 20.0);
+
+        let positive = HeadlessSkew::new(0.5, 100, 50);
+        let transformed = positive.deskewed(point);
+        near(transformed.x, 37.888_543_819_998_32);
+        near(transformed.y, 53.416_407_864_998_74);
+        near(positive.deskewed_width(), 111.803_398_874_989_48);
+        near(positive.deskewed_height(), 89.442_719_099_991_59);
+
+        let negative = HeadlessSkew::new(-0.5, 100, 50);
+        let transformed = negative.deskewed(point);
+        near(transformed.x, 20.0);
+        near(transformed.y, 32.360_679_774_997_9);
+        near(negative.deskewed_width(), 111.803_398_874_989_48);
+        near(negative.deskewed_height(), 89.442_719_099_991_59);
+
+        let zero = HeadlessSkew::new(0.0, 100, 50);
+        assert_eq!(zero.deskewed(point), point);
+        assert_eq!(
+            (zero.deskewed_width(), zero.deskewed_height()),
+            (100.0, 50.0)
+        );
+    }
 
     #[derive(Default)]
     struct SuccessfulBuilder {
@@ -1885,6 +2071,45 @@ mod tests {
     }
 
     #[test]
+    fn prepared_bar_peaks_are_reprojected_through_sheet_skew() {
+        let bar = peak(1, 10);
+        let key = bar.key();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(bar.clone());
+        let handoff = PreparedBarsHandoff {
+            systems: vec![PreparedBarsSystem {
+                system_id: 1,
+                staff_peaks: vec![vec![bar]],
+                brace_peaks: vec![None],
+                vertical_plans: Vec::new(),
+                maximum_group_gap: 3,
+                interline: 10.0,
+            }],
+            peak_graph: graph,
+            connections: Vec::new(),
+        };
+        let skew = HeadlessSkew::new(0.5, 100, 50);
+        let mut state = HeadlessGridSigState {
+            systems: Vec::new(),
+            peak_graph: PeakGraph::new(),
+            connections: Vec::new(),
+            connection_warnings: Vec::new(),
+        };
+
+        state.install_prepared_bars_handoff_with_skew(handoff, Some(&skew));
+
+        let expected = skew.deskewed(PeakPoint::new(10.0, 9.5));
+        assert_eq!(
+            state.systems[0].staff_peaks[0][0].deskewed_center(),
+            Some(expected)
+        );
+        assert_eq!(
+            state.peak_graph.vertex(key).unwrap().deskewed_center(),
+            Some(expected)
+        );
+    }
+
+    #[test]
     fn raster_builder_installs_completed_lags_before_cleaner() {
         let mut executor = raster_executor(RasterStages::default());
         executor.sheet.horizontal_lag = None;
@@ -2083,6 +2308,20 @@ mod tests {
         let (start_x, start_y) = fallback_geometry.start();
         let (stop_x, stop_y) = fallback_geometry.stop();
         assert!((stop_y - start_y) / (stop_x - start_x) > 0.08);
+
+        // A system geometry can be attached or refreshed after RetrieveLines.
+        // The population entry point must derive its deskewed abscissa from
+        // the stored sheet transform at point of use.
+        executor.sheet.population.geometries[0].deskewed_upper_left_x = -999.0;
+        StaffLineCleanerExecutor::populate_systems(&mut executor).unwrap();
+        let skew = executor.sheet.skew.expect("stored sheet skew");
+        near(
+            executor.sheet.population.geometries[0].deskewed_upper_left_x,
+            skew.deskewed_x(
+                f64::from(executor.sheet.population.geometries[0].left),
+                f64::from(executor.sheet.population.geometries[0].top),
+            ),
+        );
     }
 
     #[test]

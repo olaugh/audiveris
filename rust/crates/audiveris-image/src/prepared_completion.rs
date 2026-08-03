@@ -15,7 +15,10 @@ use crate::{
     },
     line_section_dispatch::dispatch_horizontal_sections,
     prepared_bars::{PreparedBarsHandoff, PreparedBarsStage},
-    prepared_lines::{PreparedStaff, PreparedStaffHandoff, PreparedStaffStage},
+    prepared_lines::{
+        PreparedStaff, PreparedStaffHandoff, PreparedStaffStage, RawLineMetadataHandoff,
+        RawLineMetadataStage,
+    },
     raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages},
     run_table::RunTable,
     section::Section,
@@ -114,6 +117,15 @@ where
             });
         }
         self.upstream.take_prepared_staff_handoff()
+    }
+}
+
+impl<Upstream, Completion> RawLineMetadataStage for ProductionCompleteLines<Upstream, Completion>
+where
+    Upstream: RawLineMetadataStage,
+{
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+        self.upstream.take_raw_line_metadata_handoff()
     }
 }
 

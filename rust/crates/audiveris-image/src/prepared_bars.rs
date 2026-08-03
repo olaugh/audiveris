@@ -18,7 +18,9 @@ use crate::{
     grid_lifecycle::{GridBuildStage, GridStageFailure},
     lines_coordinator::StaffCandidateKind,
     peak_graph::{PeakGraph, PeakGraphError},
-    prepared_lines::{PreparedStaffHandoff, PreparedStaffStage},
+    prepared_lines::{
+        PreparedStaffHandoff, PreparedStaffStage, RawLineMetadataHandoff, RawLineMetadataStage,
+    },
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridBuildState, RemainingRasterGridStages,
     },
@@ -140,6 +142,15 @@ where
 
     fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
         self.upstream.take_prepared_staff_handoff()
+    }
+}
+
+impl<Upstream> RawLineMetadataStage for ProductionProcessBars<Upstream>
+where
+    Upstream: RawLineMetadataStage,
+{
+    fn take_raw_line_metadata_handoff(&mut self) -> Option<RawLineMetadataHandoff> {
+        self.upstream.take_raw_line_metadata_handoff()
     }
 }
 
