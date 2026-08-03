@@ -237,6 +237,88 @@ impl StaffFilament {
     }
 }
 
+/// Geometry already sampled for Java `LinesRetriever.canIncludeFilament`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilamentInclusionEvidence {
+    pub entity_mean_thickness: f64,
+    pub line_y_at_mid: f64,
+    pub candidate_y_at_mid: f64,
+    pub staff_foreground_thickness: f64,
+    /// Signed candidate-minus-line ordinate delta at the candidate start.
+    pub start_delta_y: f64,
+    /// Signed candidate-minus-line ordinate delta at the candidate stop.
+    pub stop_delta_y: f64,
+    pub resulting_compound_thickness: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilamentInclusionThresholds {
+    pub max_sticker_thickness: f64,
+    pub max_sticker_gap: f64,
+    pub max_sticker_extension: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilamentInclusionRejection {
+    EntityThickness { observed: f64, maximum: f64 },
+    CenterGap { observed: f64, maximum: f64 },
+    Extension { observed: i32, maximum: i32 },
+    CompoundThickness { observed: f64, maximum: f64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FilamentInclusionDecision {
+    Include,
+    Reject(FilamentInclusionRejection),
+}
+
+/// Pure decision equivalent of Java `LinesRetriever.canIncludeFilament`.
+///
+/// Checks stay in production source order, all limits are inclusive, and the
+/// extension uses `Math.rint` ties-to-even behavior before integer comparison.
+#[must_use]
+pub fn can_include_filament(
+    evidence: FilamentInclusionEvidence,
+    thresholds: FilamentInclusionThresholds,
+) -> FilamentInclusionDecision {
+    if evidence.entity_mean_thickness > thresholds.max_sticker_thickness {
+        return FilamentInclusionDecision::Reject(FilamentInclusionRejection::EntityThickness {
+            observed: evidence.entity_mean_thickness,
+            maximum: thresholds.max_sticker_thickness,
+        });
+    }
+
+    let center_gap = (evidence.line_y_at_mid - evidence.candidate_y_at_mid).abs()
+        - (evidence.staff_foreground_thickness / 2.0);
+    if center_gap > thresholds.max_sticker_gap {
+        return FilamentInclusionDecision::Reject(FilamentInclusionRejection::CenterGap {
+            observed: center_gap,
+            maximum: thresholds.max_sticker_gap,
+        });
+    }
+
+    let extension = evidence
+        .start_delta_y
+        .abs()
+        .max(evidence.stop_delta_y.abs())
+        .round_ties_even() as i32;
+    if extension > thresholds.max_sticker_extension {
+        return FilamentInclusionDecision::Reject(FilamentInclusionRejection::Extension {
+            observed: extension,
+            maximum: thresholds.max_sticker_extension,
+        });
+    }
+
+    if evidence.resulting_compound_thickness > thresholds.max_sticker_thickness {
+        return FilamentInclusionDecision::Reject(FilamentInclusionRejection::CompoundThickness {
+            observed: evidence.resulting_compound_thickness,
+            maximum: thresholds.max_sticker_thickness,
+        });
+    }
+
+    FilamentInclusionDecision::Include
+}
+
 /// Failure in the supported neutral staff-filament surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FilamentError {
@@ -288,6 +370,80 @@ mod tests {
             filament.add_section(section).unwrap();
         }
         filament
+    }
+
+    fn inclusion_evidence() -> FilamentInclusionEvidence {
+        FilamentInclusionEvidence {
+            entity_mean_thickness: 3.0,
+            line_y_at_mid: 10.0,
+            candidate_y_at_mid: 11.0,
+            staff_foreground_thickness: 2.0,
+            start_delta_y: 2.5,
+            stop_delta_y: -2.0,
+            resulting_compound_thickness: 3.0,
+        }
+    }
+
+    fn inclusion_thresholds() -> FilamentInclusionThresholds {
+        FilamentInclusionThresholds {
+            max_sticker_thickness: 3.0,
+            max_sticker_gap: 0.0,
+            max_sticker_extension: 2,
+        }
+    }
+
+    #[test]
+    fn filament_inclusion_accepts_exact_limits_and_ties_even_extension() {
+        assert_eq!(
+            can_include_filament(inclusion_evidence(), inclusion_thresholds()),
+            FilamentInclusionDecision::Include
+        );
+
+        let above_half = FilamentInclusionEvidence {
+            start_delta_y: 3.5,
+            ..inclusion_evidence()
+        };
+        assert_eq!(
+            can_include_filament(above_half, inclusion_thresholds()),
+            FilamentInclusionDecision::Reject(FilamentInclusionRejection::Extension {
+                observed: 4,
+                maximum: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn filament_inclusion_reports_first_failure_in_java_order() {
+        let evidence = FilamentInclusionEvidence {
+            entity_mean_thickness: 4.0,
+            candidate_y_at_mid: 30.0,
+            start_delta_y: 20.0,
+            stop_delta_y: 20.0,
+            resulting_compound_thickness: 9.0,
+            ..inclusion_evidence()
+        };
+        assert_eq!(
+            can_include_filament(evidence, inclusion_thresholds()),
+            FilamentInclusionDecision::Reject(FilamentInclusionRejection::EntityThickness {
+                observed: 4.0,
+                maximum: 3.0,
+            })
+        );
+    }
+
+    #[test]
+    fn filament_inclusion_reaches_compound_thickness_after_other_checks() {
+        let evidence = FilamentInclusionEvidence {
+            resulting_compound_thickness: 3.1,
+            ..inclusion_evidence()
+        };
+        assert_eq!(
+            can_include_filament(evidence, inclusion_thresholds()),
+            FilamentInclusionDecision::Reject(FilamentInclusionRejection::CompoundThickness {
+                observed: 3.1,
+                maximum: 3.0,
+            })
+        );
     }
 
     fn near(actual: f64, expected: f64) {
