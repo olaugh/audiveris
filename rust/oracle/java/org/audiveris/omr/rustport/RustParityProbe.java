@@ -1400,6 +1400,7 @@ public final class RustParityProbe
         System.out.println("grid.raw-lines.synthetic=" + gridRawLines());
         System.out.println("grid.line-endpoints.synthetic=" + gridLineEndPoints());
         System.out.println("grid.bar-alignments.synthetic=" + gridBarAlignments());
+        System.out.println("grid.bar-connections.synthetic=" + gridBarConnections());
         System.out.println("grid.output-boundary.synthetic=" + gridOutputBoundary());
         System.out.println("grid.contextualize.synthetic=" + gridContextualize());
 
@@ -2419,6 +2420,153 @@ public final class RustParityProbe
                 graph.outDegreeOf(topLeft));
     }
 
+    /** Freeze live {@code PeakGraph.findConnections} before splitting or relation purging. */
+    private static String gridBarConnections ()
+        throws Exception
+    {
+        final int width = 60;
+        final int height = 70;
+        final int interline = 10;
+        boolean[][] foreground = new boolean[height][width];
+
+        // Rejected vertical corridor: eleven enclosed white rows in a sixteen-row core.
+        for (int y : new int[]{10, 22, 23, 24, 25}) {
+            foreground[y][5] = true;
+        }
+
+        // Ordinary sloped corridor. Alternating ink lies exactly on the floor(left) and
+        // ceil(right) boundary so both rasterization rules affect the measurement.
+        List<String> corridorSamples = new ArrayList<>();
+        for (int y = 10; y <= 19; y++) {
+            double ratio = (y - 10) / 9.0;
+            int left = (int) Math.floor(20 + (4 * ratio));
+            int right = (int) Math.ceil(21 + (5 * ratio));
+            int ink = (((y - 10) % 2) == 0) ? left : right;
+            foreground[y][ink] = true;
+            if ((y == 11) || (y == 14) || (y == 18)) {
+                corridorSamples.add(y + "=" + left + ".." + right + "@" + ink);
+            }
+        }
+
+        // Exact threshold: ten enclosed white rows among forty total rows.
+        for (int y = 10; y <= 49; y++) {
+            if ((y < 11) || (y > 20)) {
+                foreground[y][40] = true;
+            }
+        }
+
+        RunTable binary = new RunTable(Orientation.VERTICAL, width, height);
+        for (int x = 0; x < width; x++) {
+            int runStart = -1;
+            for (int y = 0; y <= height; y++) {
+                boolean black = (y < height) && foreground[y][x];
+                if (black && (runStart == -1)) {
+                    runStart = y;
+                } else if (!black && (runStart != -1)) {
+                    binary.addRun(x, new Run(runStart, y - runStart));
+                    runStart = -1;
+                }
+            }
+        }
+
+        Book book = new Book(Path.of("grid-bar-connections.synthetic"));
+        SheetStub stub = new SheetStub(book, 1);
+        book.addStub(stub);
+        Sheet sheet = new Sheet(stub, binary);
+        sheet.setScale(new Scale(
+                new Scale.InterlineScale(interline, interline, interline),
+                new Scale.LineScale(1, 1, 1),
+                null,
+                null,
+                null));
+        Skew skew = new Skew(0.0, sheet);
+        sheet.setSkew(skew);
+
+        List<Staff> staves = new ArrayList<>();
+        for (int id = 1; id <= 6; id++) {
+            staves.add(new Staff(id, 0.0, width - 1.0, interline, new ArrayList<>()));
+        }
+        StaffPeak rejectedTop = alignmentPeak(staves.get(0), 1, 10, 5, 6, skew);
+        StaffPeak rejectedBottom = alignmentPeak(staves.get(1), 25, 34, 5, 6, skew);
+        StaffPeak ordinaryTop = alignmentPeak(staves.get(2), 1, 10, 20, 21, skew);
+        StaffPeak ordinaryBottom = alignmentPeak(staves.get(3), 19, 28, 24, 26, skew);
+        StaffPeak thresholdTop = alignmentPeak(staves.get(4), 1, 10, 40, 41, skew);
+        StaffPeak thresholdBottom = alignmentPeak(staves.get(5), 49, 58, 40, 41, skew);
+
+        PeakGraph graph = new PeakGraph(sheet, new ArrayList<>());
+        for (StaffPeak peak : List.of(
+                rejectedTop,
+                rejectedBottom,
+                ordinaryTop,
+                ordinaryBottom,
+                thresholdTop,
+                thresholdBottom)) {
+            graph.addVertex(peak);
+        }
+        BarAlignment rejected = new BarAlignment(
+                rejectedTop,
+                rejectedBottom,
+                0.0,
+                0.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        BarAlignment ordinary = new BarAlignment(
+                ordinaryTop,
+                ordinaryBottom,
+                0.0,
+                0.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        BarAlignment threshold = new BarAlignment(
+                thresholdTop,
+                thresholdBottom,
+                0.0,
+                0.0,
+                new BarAlignment.Impacts(1.0, 1.0));
+        graph.addEdge(rejectedTop, rejectedBottom, rejected); // Synthetic relation #1.
+        graph.addEdge(ordinaryTop, ordinaryBottom, ordinary); // Synthetic relation #2.
+        graph.addEdge(thresholdTop, thresholdBottom, threshold); // Synthetic relation #3.
+
+        ByteProcessor pixels = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        AreaUtil.CoreData rejectedCore = connectionCore(pixels, rejectedTop, rejectedBottom);
+        AreaUtil.CoreData ordinaryCore = connectionCore(pixels, ordinaryTop, ordinaryBottom);
+        AreaUtil.CoreData thresholdCore = connectionCore(pixels, thresholdTop, thresholdBottom);
+        Object params = field(graph, "params");
+        invokePrivate(graph, "findConnections");
+
+        BarAlignment rejectedFinal = graph.getEdge(rejectedTop, rejectedBottom);
+        BarAlignment ordinaryFinal = graph.getEdge(ordinaryTop, ordinaryBottom);
+        BarAlignment thresholdFinal = graph.getEdge(thresholdTop, thresholdBottom);
+        List<BarAlignment> finalOrder = new ArrayList<>(graph.edgeSet());
+        if ((rejectedFinal != rejected)
+                || (ordinaryFinal == ordinary)
+                || !(ordinaryFinal instanceof BarConnection)
+                || (thresholdFinal == threshold)
+                || !(thresholdFinal instanceof BarConnection)
+                || !finalOrder.equals(List.of(rejectedFinal, ordinaryFinal, thresholdFinal))) {
+            throw new IllegalStateException("unexpected findConnections replacement order");
+        }
+        double minGrade = (Double) field(params, "minConnectionGrade");
+        return String.format(
+                java.util.Locale.ROOT,
+                "boundary:findConnections;limits:gap%s,white%.12f,minGrade%.12f;corridor:%s;core:r=%d/%d/%.12f,o=%d/%d/%.12f,t=%d/%d/%.12f;initial:r#1,o#2,t#3;decisions:r#1->reject,o#2->#4,t#3->#5;final:r#1:A@g%.12f,o#4:C@g%.12f,t#5:C@g%.12f;promoted:2;zeroBelowMin:%s;next:splitMergedGroups,purgeAlignments:not-run",
+                field(params, "maxConnectionGap"),
+                field(params, "maxConnectionWhiteRatio"),
+                minGrade,
+                String.join(",", corridorSamples),
+                rejectedCore.length,
+                rejectedCore.gap,
+                rejectedCore.whiteRatio,
+                ordinaryCore.length,
+                ordinaryCore.gap,
+                ordinaryCore.whiteRatio,
+                thresholdCore.length,
+                thresholdCore.gap,
+                thresholdCore.whiteRatio,
+                rejectedFinal.getGrade(),
+                ordinaryFinal.getGrade(),
+                thresholdFinal.getGrade(),
+                thresholdFinal.getGrade() < minGrade);
+    }
+
     @SuppressWarnings("unchecked")
     private static String gridOutputBoundary ()
         throws Exception
@@ -2654,6 +2802,23 @@ public final class RustParityProbe
                 new AbstractStaffVerticalInter.Impacts(1.0, 1.0, 1.0, 1.0, 1.0, 1.0));
         peak.computeDeskewedCenter(skew);
         return peak;
+    }
+
+    private static AreaUtil.CoreData connectionCore (ByteProcessor pixels,
+                                                     StaffPeak top,
+                                                     StaffPeak bottom)
+    {
+        GeoPath left = new GeoPath(new Line2D.Double(
+                top.getStart(),
+                top.getBottom(),
+                bottom.getStart(),
+                bottom.getTop()));
+        GeoPath right = new GeoPath(new Line2D.Double(
+                top.getStop(),
+                top.getBottom(),
+                bottom.getStop(),
+                bottom.getTop()));
+        return AreaUtil.verticalCore(pixels, left, right);
     }
 
     private static Staff outputBoundaryStaff (int id,

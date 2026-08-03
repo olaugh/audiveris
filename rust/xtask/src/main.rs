@@ -18,9 +18,13 @@ use audiveris_image::{
         AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
     },
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
+    bar_connections::{
+        ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
+    },
+    bar_sticks::BarStick,
     bars_logic::{
-        PeakWidthClass, VerticalInterKind, VerticalInterPlan, VerticalMedian, aggregate_bar_chains,
-        plan_connection_inters, start_column_candidate,
+        LocatedSectionId, PeakWidthClass, SectionLag, VerticalInterKind, VerticalInterPlan,
+        VerticalMedian, aggregate_bar_chains, plan_connection_inters, start_column_candidate,
     },
     chamfer::ChamferDistance,
     cluster_coordinator::{RecursiveCombSnapshot, include_from_combs},
@@ -58,7 +62,7 @@ use audiveris_image::{
     run_table::{Orientation, Run, RunTable, create_grid_run_tables, dispatch_grid_runs},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
-    section::{JunctionPolicy, Section, build_sections},
+    section::{Bounds, JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
     staff_peak::{HorizontalSide, PeakPoint, StaffPeak, StaffPeakAttribute, StaffVerticalImpacts},
     target_line::TargetLine,
@@ -279,7 +283,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 68] = [
+const VECTOR_KEYS: [&str; 69] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -322,6 +326,7 @@ const VECTOR_KEYS: [&str; 68] = [
     "grid.raw-lines.synthetic=",
     "grid.line-endpoints.synthetic=",
     "grid.bar-alignments.synthetic=",
+    "grid.bar-connections.synthetic=",
     "grid.output-boundary.synthetic=",
     "grid.contextualize.synthetic=",
     "spline.synthetic=",
@@ -566,6 +571,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
         discarded_filament_steals: Vec::new(),
         discarded_filament_recomputations: Vec::new(),
         fill_hole_insertions: Vec::new(),
+        section_inclusion_batches: Vec::new(),
         completed_stages: Vec::new(),
     };
     define_end_points(
@@ -749,6 +755,248 @@ fn grid_bar_alignments_vector() -> Result<String, Box<dyn Error>> {
         "boundary:findAllAlignments;neighbors:2,3;sheet:{SHEET_SLOPE:.12}/vert:{:.12};limits:{MAXIMUM_SLOPE:.12},{MAXIMUM_DELTA_WIDTH};raw:tl>a={raw_left:.12},{raw_right:.12};relations:{};competitors:tl={competitors};next:findConnections,purgeAlignments:not-run",
         -SHEET_SLOPE,
         relations.join("|"),
+    ))
+}
+
+fn grid_bar_connections_vector() -> Result<String, Box<dyn Error>> {
+    const WIDTH: usize = 60;
+    const HEIGHT: usize = 70;
+    const MAXIMUM_GAP: i32 = 10;
+    const MAXIMUM_WHITE_RATIO: f64 = 0.25;
+    const UNUSED_MINIMUM_GRADE: f64 = 0.5;
+
+    let mut pixels = vec![255_u8; WIDTH * HEIGHT];
+    let mut set_foreground = |x: usize, y: usize| {
+        pixels[(y * WIDTH) + x] = 0;
+    };
+    for y in [10, 22, 23, 24, 25] {
+        set_foreground(5, y);
+    }
+    let mut corridor_samples = Vec::new();
+    for y in 10..=19 {
+        let ratio = (y - 10) as f64 / 9.0;
+        let left = (20.0 + (4.0 * ratio)).floor() as usize;
+        let right = (21.0 + (5.0 * ratio)).ceil() as usize;
+        let ink = if (y - 10) % 2 == 0 { left } else { right };
+        set_foreground(ink, y);
+        if [11, 14, 18].contains(&y) {
+            corridor_samples.push(format!("{y}={left}..{right}@{ink}"));
+        }
+    }
+    for y in 10..=49 {
+        if !(11..=20).contains(&y) {
+            set_foreground(40, y);
+        }
+    }
+
+    let make_peak = |staff_id, top, bottom, start, stop| -> Result<StaffPeak, Box<dyn Error>> {
+        let mut peak = StaffPeak::with_impacts(
+            StaffId::new(staff_id),
+            top,
+            bottom,
+            start,
+            stop,
+            StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        )?;
+        peak.compute_deskewed_center(|point| point)?;
+        Ok(peak)
+    };
+    let rejected_top = make_peak(1, 1, 10, 5, 6)?;
+    let rejected_bottom = make_peak(2, 25, 34, 5, 6)?;
+    let ordinary_top = make_peak(3, 1, 10, 20, 21)?;
+    let ordinary_bottom = make_peak(4, 19, 28, 24, 26)?;
+    let threshold_top = make_peak(5, 1, 10, 40, 41)?;
+    let threshold_bottom = make_peak(6, 49, 58, 40, 41)?;
+
+    let relation = |top: &StaffPeak,
+                    bottom: &StaffPeak,
+                    top_id: usize,
+                    bottom_id: usize|
+     -> Result<BarAlignment, Box<dyn Error>> {
+        let alignment_peak = |peak: &StaffPeak, id| {
+            AlignmentPeak::with_geometry(
+                PeakId::new(id),
+                peak.staff_id(),
+                peak.start(),
+                usize::try_from(peak.width()).expect("fixture peak width is positive"),
+                peak.top(),
+                peak.bottom(),
+                peak.impacts().expect("fixture peak has impacts").grade(),
+            )
+        };
+        Ok(BarAlignment::new(
+            alignment_peak(top, top_id)?,
+            alignment_peak(bottom, bottom_id)?,
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0)?,
+        )?)
+    };
+    let mut graph: PeakGraph<BarAlignment> = PeakGraph::new();
+    for peak in [
+        rejected_top.clone(),
+        rejected_bottom.clone(),
+        ordinary_top.clone(),
+        ordinary_bottom.clone(),
+        threshold_top.clone(),
+        threshold_bottom.clone(),
+    ] {
+        if !graph.add_vertex(peak) {
+            return Err("connection fixture peak collided".into());
+        }
+    }
+    let rejected_id = graph.add_edge(
+        rejected_top.key(),
+        rejected_bottom.key(),
+        relation(&rejected_top, &rejected_bottom, 1, 2)?,
+    )?;
+    let ordinary_id = graph.add_edge(
+        ordinary_top.key(),
+        ordinary_bottom.key(),
+        relation(&ordinary_top, &ordinary_bottom, 3, 4)?,
+    )?;
+    let threshold_id = graph.add_edge(
+        threshold_top.key(),
+        threshold_bottom.key(),
+        relation(&threshold_top, &threshold_bottom, 5, 6)?,
+    )?;
+
+    let make_stick = |id: usize, peak: &StaffPeak| BarStick {
+        id,
+        peak: peak.key(),
+        members: vec![LocatedSectionId {
+            lag: SectionLag::Vertical,
+            id,
+        }],
+        bounds: Bounds {
+            x: usize::try_from(peak.start()).expect("fixture peak x is nonnegative"),
+            y: usize::try_from(peak.top()).expect("fixture peak y is nonnegative"),
+            width: usize::try_from(peak.width()).expect("fixture peak width is positive"),
+            height: usize::try_from(peak.bottom() - peak.top() + 1)
+                .expect("fixture peak height is positive"),
+        },
+        points: vec![
+            PeakPoint::new(f64::from(peak.start()), f64::from(peak.top())),
+            PeakPoint::new(f64::from(peak.stop()), f64::from(peak.bottom())),
+        ],
+        mean_curvature: f64::INFINITY,
+        marked_brace: false,
+    };
+    let sticks = [
+        make_stick(101, &rejected_top),
+        make_stick(102, &rejected_bottom),
+        make_stick(103, &ordinary_top),
+        make_stick(104, &ordinary_bottom),
+        make_stick(105, &threshold_top),
+        make_stick(106, &threshold_bottom),
+    ];
+    let mut report = ConnectionBuildReport::default();
+    find_connections(
+        &mut graph,
+        ConnectionRaster {
+            width: WIDTH,
+            height: HEIGHT,
+            pixels: &pixels,
+        },
+        &sticks,
+        ConnectionParameters {
+            maximum_gap: MAXIMUM_GAP,
+            maximum_white_ratio: MAXIMUM_WHITE_RATIO,
+        },
+        &mut report,
+    )?;
+
+    if [
+        rejected_id.value(),
+        ordinary_id.value(),
+        threshold_id.value(),
+    ] != [1, 2, 3]
+        || report.decisions().len() != 3
+        || report.promoted_count() != 2
+    {
+        return Err("unexpected find_connections initial identity or cardinality".into());
+    }
+    let label = |key| -> Result<&'static str, Box<dyn Error>> {
+        if key == rejected_top.key() {
+            Ok("r")
+        } else if key == ordinary_top.key() {
+            Ok("o")
+        } else if key == threshold_top.key() {
+            Ok("t")
+        } else {
+            Err("connection edge has an unknown source".into())
+        }
+    };
+    let decisions = report
+        .decisions()
+        .iter()
+        .map(|decision| -> Result<String, Box<dyn Error>> {
+            Ok(match decision.promoted_edge {
+                Some(promoted) => format!(
+                    "{}#{}->#{}",
+                    label(decision.source)?,
+                    decision.alignment_edge.value(),
+                    promoted.value()
+                ),
+                None => format!(
+                    "{}#{}->reject",
+                    label(decision.source)?,
+                    decision.alignment_edge.value()
+                ),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let core = report
+        .decisions()
+        .iter()
+        .map(|decision| -> Result<String, Box<dyn Error>> {
+            Ok(format!(
+                "{}={}/{}/{:.12}",
+                label(decision.source)?,
+                decision.core.length,
+                decision.core.gap,
+                decision.core.white_ratio,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let final_relations = graph
+        .edges()
+        .iter()
+        .map(|edge| -> Result<String, Box<dyn Error>> {
+            let kind = match edge.relation().kind() {
+                BarAlignmentKind::Alignment => "A",
+                BarAlignmentKind::Connection => "C",
+            };
+            Ok(format!(
+                "{}#{}:{kind}@g{:.12}",
+                label(edge.source())?,
+                edge.id().value(),
+                edge.relation().grade(),
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let threshold_final = graph
+        .edge_between(threshold_top.key(), threshold_bottom.key())
+        .ok_or("threshold connection is absent")?
+        .relation();
+    if decisions != ["r#1->reject", "o#2->#4", "t#3->#5"]
+        || final_relations
+            != [
+                "r#1:A@g0.800000000000",
+                "o#4:C@g0.800000000000",
+                "t#5:C@g0.000000000000",
+            ]
+    {
+        return Err("find_connections replacement order or identity drifted".into());
+    }
+    Ok(format!(
+        "boundary:findConnections;limits:gap{MAXIMUM_GAP},white{MAXIMUM_WHITE_RATIO:.12},minGrade{UNUSED_MINIMUM_GRADE:.12};corridor:{};core:{};initial:r#1,o#2,t#3;decisions:{};final:{};promoted:{};zeroBelowMin:{};next:splitMergedGroups,purgeAlignments:not-run",
+        corridor_samples.join(","),
+        core.join(","),
+        decisions.join(","),
+        final_relations.join(","),
+        report.promoted_count(),
+        threshold_final.grade() < UNUSED_MINIMUM_GRADE,
     ))
 }
 
@@ -2868,6 +3116,10 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.bar-alignments.synthetic={}",
         grid_bar_alignments_vector()?
+    ));
+    lines.push(format!(
+        "grid.bar-connections.synthetic={}",
+        grid_bar_connections_vector()?
     ));
     lines.push(format!(
         "grid.output-boundary.synthetic={}",
