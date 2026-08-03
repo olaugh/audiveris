@@ -9,6 +9,7 @@ pub mod filament_comb;
 pub mod filament_factory;
 pub mod global_filter;
 pub mod ingest;
+pub mod line_cluster;
 pub mod line_sections;
 pub mod mask;
 pub mod median;
