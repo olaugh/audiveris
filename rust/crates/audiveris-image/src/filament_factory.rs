@@ -4,12 +4,13 @@
 //!
 //! This ports the deterministic core filtering, reverse-length ordering, and
 //! real-gap and overlapping-filament compatibility branches of Java
-//! `FilamentFactory`. Expansion orchestration, glyph ownership, and indexes
-//! remain outside this dependency-light slice.
+//! `FilamentFactory`, including the horizontal leftover-section expansion
+//! phase. Glyph ownership, indexes, and vertical filaments remain outside this
+//! dependency-light slice.
 
 use crate::filament::{FilamentError, StaffFilament};
 use crate::run_table::Orientation;
-use crate::section::Section;
+use crate::section::{Bounds, Section};
 
 /// Pixel-domain parameters needed by the neutral grouping subset.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,6 +83,61 @@ impl FilamentFactory {
         mean_thickness <= 1.0
             || (section.length(Orientation::Horizontal) as f64 / mean_thickness)
                 >= self.params.min_section_aspect
+    }
+
+    /// Java `isSectionFat` for a horizontal section.
+    ///
+    /// `overlap.probe_width` and `overlap.max_thickness` must be the resolved
+    /// integer pixel values used by Java's scale-dependent parameters.
+    #[must_use]
+    pub fn is_section_fat(&self, section: &Section, overlap: OverlapParams) -> bool {
+        if section.orientation() != Orientation::Horizontal {
+            return true;
+        }
+        let mean_thickness = section.mean_thickness(Orientation::Horizontal);
+        if mean_thickness <= 1.0 {
+            return false;
+        }
+        let mean_aspect = section.length(Orientation::Horizontal) as f64 / mean_thickness;
+        if mean_aspect < self.params.min_section_aspect {
+            return true;
+        }
+
+        self.local_section_fatness(section, overlap).unwrap_or(true)
+    }
+
+    fn local_section_fatness(&self, section: &Section, overlap: OverlapParams) -> Option<bool> {
+        let bounds = section.bounds();
+        let line = fitted_section_line(section)?;
+        if line.slope().abs() >= std::f64::consts::FRAC_PI_4 {
+            return Some(bounds.height as f64 > overlap.max_thickness);
+        }
+
+        let start_coordinate = bounds.x + (bounds.width / 4);
+        let stop_coordinate = bounds.x + ((3 * bounds.width) / 4);
+        let start_position = line.y_at_x(start_coordinate as f64)?.round_ties_even() as isize;
+        let stop_position = line.y_at_x(stop_coordinate as f64)?.round_ties_even() as isize;
+        let half_width = (overlap.probe_width / 2).min(bounds.width / 4) as isize;
+        let max_thickness = overlap.max_thickness as isize;
+        let probe_width = 2 * half_width;
+
+        let estimate = |coordinate: usize, position: isize| {
+            if probe_width == 0 {
+                return 0.0;
+            }
+            let count = section_pixel_count_in_signed(
+                section,
+                coordinate as isize - half_width,
+                coordinate as isize + half_width,
+                position - max_thickness,
+                position + max_thickness,
+            );
+            (count as f64 / probe_width as f64).round_ties_even()
+        };
+        Some(
+            estimate(start_coordinate, start_position) > overlap.max_thickness
+                || estimate(stop_coordinate, stop_position) > overlap.max_thickness,
+        )
     }
 
     /// Check the source-compatible, non-overlapping (`coordGap >= 0`) merge branch.
@@ -248,6 +304,104 @@ impl FilamentFactory {
         self.retrieve_core_filaments_internal(sections, Some(overlap))
     }
 
+    /// Run Java's two merge passes around horizontal leftover-section expansion.
+    pub fn retrieve_filaments(
+        &self,
+        sections: &[Section],
+        overlap: OverlapParams,
+    ) -> Result<Vec<StaffFilament>, FilamentError> {
+        let mut filaments = Vec::new();
+        for section in sections.iter().filter(|section| {
+            section.orientation() == Orientation::Horizontal
+                && section.length(Orientation::Horizontal) >= self.params.min_core_section_length
+                && !self.is_section_fat(section, overlap)
+        }) {
+            let mut filament = StaffFilament::new(self.params.interline)?;
+            filament.add_section(section.clone())?;
+            filaments.push(filament);
+        }
+        self.merge_filaments(&mut filaments, Some(overlap))?;
+        self.expand_filaments(&mut filaments, sections, overlap)?;
+        self.merge_filaments(&mut filaments, Some(overlap))?;
+        Ok(filaments)
+    }
+
+    /// Attach unprocessed, non-fat horizontal source sections to existing filaments.
+    ///
+    /// The returned count is the number of attached leftovers. This ports
+    /// Java's stable `Section.byPosition` ordering, stable reverse-length
+    /// filament ordering, fixed grown-box prefilter, and repeated first-match
+    /// scan. The grown box intentionally is not recomputed after attachment.
+    /// "Processed" means present in the supplied filaments; unlike Java's
+    /// stateful factory, this value type does not retain processed/fat caches
+    /// across separate calls.
+    pub fn expand_filaments(
+        &self,
+        filaments: &mut [StaffFilament],
+        source: &[Section],
+        overlap: OverlapParams,
+    ) -> Result<usize, FilamentError> {
+        let mut leftovers: Vec<Section> = source
+            .iter()
+            .filter(|section| {
+                section.orientation() == Orientation::Horizontal
+                    && !filaments
+                        .iter()
+                        .any(|filament| filament.sections().contains(section))
+                    && !self.is_section_fat(section, overlap)
+            })
+            .cloned()
+            .collect();
+        // Stable, and deliberately no coordinate tie-breaker: Java's
+        // Section.byPosition returns equality for equal first positions.
+        leftovers.sort_by_key(Section::first_pos);
+
+        let mut section_filaments = Vec::with_capacity(leftovers.len());
+        for section in leftovers {
+            let mut filament = StaffFilament::new(self.params.interline)?;
+            filament.add_section(section)?;
+            section_filaments.push(filament);
+        }
+
+        filaments.sort_by(|one, two| {
+            let one_length = one.bounds().map_or(0, |bounds| bounds.width);
+            let two_length = two.bounds().map_or(0, |bounds| bounds.width);
+            two_length.cmp(&one_length)
+        });
+
+        let mut attached = 0;
+        for filament in filaments {
+            // Java computes this once, before the repeated attachment loop.
+            let fixed_bounds = filament.bounds()?;
+            loop {
+                let mut compatible_index = None;
+                for (index, candidate) in section_filaments.iter().enumerate() {
+                    if grown_bounds_intersect(
+                        fixed_bounds,
+                        candidate.bounds()?,
+                        self.params.max_coord_gap,
+                        self.params.max_pos_gap,
+                    ) && self
+                        .compatibility(filament, candidate, Some(overlap), true)
+                        .is_ok()
+                    {
+                        compatible_index = Some(index);
+                        break;
+                    }
+                }
+                let Some(index) = compatible_index else {
+                    break;
+                };
+                let candidate = section_filaments.remove(index);
+                for section in candidate.sections().iter().cloned() {
+                    filament.add_section(section)?;
+                }
+                attached += 1;
+            }
+        }
+        Ok(attached)
+    }
+
     fn retrieve_core_filaments_internal(
         &self,
         sections: &[Section],
@@ -263,6 +417,15 @@ impl FilamentFactory {
             filaments.push(filament);
         }
 
+        self.merge_filaments(&mut filaments, overlap)?;
+        Ok(filaments)
+    }
+
+    fn merge_filaments(
+        &self,
+        filaments: &mut Vec<StaffFilament>,
+        overlap: Option<OverlapParams>,
+    ) -> Result<(), FilamentError> {
         // Rust's slice sort is stable, as is Collections.sort used by Java.
         filaments.sort_by(|one, two| {
             let one_length = one.bounds().map_or(0, |bounds| bounds.width);
@@ -270,7 +433,7 @@ impl FilamentFactory {
             two_length.cmp(&one_length)
         });
 
-        let mut live: Vec<Option<StaffFilament>> = filaments.into_iter().map(Some).collect();
+        let mut live: Vec<Option<StaffFilament>> = filaments.drain(..).map(Some).collect();
         for current in 0..live.len() {
             if live[current].is_none() {
                 continue;
@@ -280,6 +443,17 @@ impl FilamentFactory {
                 let mut merged_into = None;
                 for head in 0..current {
                     if head == candidate || live[head].is_none() {
+                        continue;
+                    }
+                    let head_bounds = live[head].as_ref().expect("live head").bounds()?;
+                    let candidate_bounds =
+                        live[candidate].as_ref().expect("live candidate").bounds()?;
+                    if !grown_bounds_intersect(
+                        candidate_bounds,
+                        head_bounds,
+                        self.params.max_coord_gap,
+                        self.params.max_pos_gap,
+                    ) {
                         continue;
                     }
                     let compatible = self
@@ -312,8 +486,121 @@ impl FilamentFactory {
             }
         }
 
-        Ok(live.into_iter().flatten().collect())
+        filaments.extend(live.into_iter().flatten());
+        Ok(())
     }
+}
+
+#[derive(Clone, Copy)]
+struct FittedLine {
+    slope: f64,
+    intercept: Option<f64>,
+    vertical_b: Option<(f64, f64)>,
+}
+
+impl FittedLine {
+    fn slope(self) -> f64 {
+        self.slope
+    }
+
+    fn y_at_x(self, x: f64) -> Option<f64> {
+        if let Some(intercept) = self.intercept {
+            Some((self.slope * x) + intercept)
+        } else {
+            let (b, c) = self.vertical_b?;
+            (b != 0.0).then(|| (x - c) / b)
+        }
+    }
+}
+
+/// Pixel regression used by Java `BasicSection.getAbsoluteLine`.
+fn fitted_section_line(section: &Section) -> Option<FittedLine> {
+    let mut count = 0.0;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_x2 = 0.0;
+    let mut sum_y2 = 0.0;
+    let mut sum_xy = 0.0;
+    for (offset, run) in section.runs().iter().enumerate() {
+        let y = (section.first_pos() + offset) as f64;
+        for x in run.start..=run.stop() {
+            let x = x as f64;
+            count += 1.0;
+            sum_x += x;
+            sum_y += y;
+            sum_x2 += x * x;
+            sum_y2 += y * y;
+            sum_xy += x * y;
+        }
+    }
+    if count < 2.0 {
+        return None;
+    }
+    let horizontal_denominator = (count * sum_x2) - (sum_x * sum_x);
+    let vertical_denominator = (count * sum_y2) - (sum_y * sum_y);
+    let numerator = (count * sum_xy) - (sum_x * sum_y);
+    if horizontal_denominator.abs() >= vertical_denominator.abs() {
+        if horizontal_denominator == 0.0 {
+            return None;
+        }
+        let slope = numerator / horizontal_denominator;
+        let intercept = ((sum_y * sum_x2) - (sum_x * sum_xy)) / horizontal_denominator;
+        Some(FittedLine {
+            slope,
+            intercept: Some(intercept),
+            vertical_b: None,
+        })
+    } else {
+        if vertical_denominator == 0.0 {
+            return None;
+        }
+        // Java's vertical fit is -x + b*y + c = 0.
+        let b = numerator / vertical_denominator;
+        let c = ((sum_x * sum_y2) - (sum_y * sum_xy)) / vertical_denominator;
+        Some(FittedLine {
+            slope: 1.0 / b,
+            intercept: None,
+            vertical_b: Some((b, c)),
+        })
+    }
+}
+
+fn section_pixel_count_in_signed(
+    section: &Section,
+    x_start: isize,
+    x_stop: isize,
+    y_start: isize,
+    y_stop: isize,
+) -> usize {
+    let mut count = 0;
+    for (offset, run) in section.runs().iter().enumerate() {
+        let y = (section.first_pos() + offset) as isize;
+        if y < y_start || y >= y_stop {
+            continue;
+        }
+        let start = (run.start as isize).max(x_start);
+        let stop = (run.stop() as isize + 1).min(x_stop);
+        if start < stop {
+            count += (stop - start) as usize;
+        }
+    }
+    count
+}
+
+/// Java `Rectangle.grow(...); Rectangle.intersects(...)` in half-open form.
+fn grown_bounds_intersect(
+    grown: Bounds,
+    other: Bounds,
+    coordinate_margin: f64,
+    position_margin: f64,
+) -> bool {
+    let left = grown.x as f64 - coordinate_margin;
+    let right = (grown.x + grown.width) as f64 + coordinate_margin;
+    let top = grown.y as f64 - position_margin;
+    let bottom = (grown.y + grown.height) as f64 + position_margin;
+    let other_right = (other.x + other.width) as f64;
+    let other_bottom = (other.y + other.height) as f64;
+    right > other.x as f64 && other_right > left && bottom > other.y as f64 && other_bottom > top
 }
 
 /// Java `Compounds.getThicknessAt` for horizontal staff filaments.
@@ -585,5 +872,81 @@ mod tests {
             .unwrap();
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].sections().len(), 2);
+    }
+
+    #[test]
+    fn local_half_probes_reject_a_uniformly_thick_section() {
+        let factory = FilamentFactory::new(params());
+        let thick = section(0, 2, 12, 3);
+        let mut overlap = overlap_params();
+        overlap.max_thickness = 1.0;
+        assert!(factory.is_section_fat(&thick, overlap));
+
+        overlap.max_thickness = 3.0;
+        assert!(!factory.is_section_fat(&thick, overlap));
+        assert!(!factory.is_section_fat(&section(0, 2, 8, 1), overlap));
+    }
+
+    #[test]
+    fn expansion_prefers_longer_filament_and_repeats_first_match() {
+        let factory = FilamentFactory::new(params());
+        let long = section(0, 2, 10, 1);
+        let short = section(0, 2, 8, 1);
+        let first = section(10, 2, 5, 1);
+        let second = section(11, 2, 5, 1);
+        let source = [long.clone(), short.clone(), first, second];
+        let mut filaments = vec![filament([short]), filament([long])];
+
+        assert_eq!(
+            factory
+                .expand_filaments(&mut filaments, &source, overlap_params())
+                .unwrap(),
+            2
+        );
+        assert_eq!(filaments[0].sections().len(), 3);
+        assert_eq!(filaments[1].sections().len(), 1);
+    }
+
+    #[test]
+    fn expansion_keeps_the_original_grown_box_after_attachment() {
+        let factory = FilamentFactory::new(params());
+        let core = section(10, 2, 8, 1);
+        let reachable = section(5, 2, 5, 1);
+        let chained_only = section(0, 2, 5, 1);
+        let source = [core.clone(), chained_only, reachable];
+        let mut filaments = vec![filament([core])];
+
+        assert_eq!(
+            factory
+                .expand_filaments(&mut filaments, &source, overlap_params())
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            filaments[0]
+                .sections()
+                .iter()
+                .map(|section| section.bounds().x)
+                .collect::<Vec<_>>(),
+            [5, 10]
+        );
+    }
+
+    #[test]
+    fn complete_retrieval_merges_again_after_expansion() {
+        let factory = FilamentFactory::new(params());
+        let source = [
+            section(0, 2, 8, 1),
+            section(18, 2, 8, 1),
+            section(8, 2, 5, 1),
+            section(13, 2, 5, 1),
+        ];
+        let filaments = factory
+            .retrieve_filaments(&source, overlap_params())
+            .unwrap();
+
+        assert_eq!(filaments.len(), 1);
+        assert_eq!(filaments[0].sections().len(), 4);
+        assert_eq!(filaments[0].bounds().unwrap().width, 26);
     }
 }
