@@ -5,6 +5,7 @@
 use crate::{
     bar_alignment::VerticalSide,
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
+    part_group::PartGroup,
     peak_graph::PeakGraph,
     run_table::Orientation,
     section::Section,
@@ -503,6 +504,27 @@ pub fn unaligned_peak_keys<R>(
         })
         .map(StaffPeak::key)
         .collect()
+}
+
+/// Java `BarsRetriever.isTrueBraceGroup` once directional part-connection
+/// queries have been resolved by the caller.
+#[must_use]
+pub fn is_true_brace_group(
+    group: &PartGroup,
+    first_connected_above: bool,
+    last_connected_below: bool,
+    first_connected_below: bool,
+    allow_disconnected_braced_parts: bool,
+) -> bool {
+    group.is_brace()
+        && group
+            .last_staff_id()
+            .wrapping_sub(group.first_staff_id())
+            .wrapping_add(1)
+            == 2
+        && !first_connected_above
+        && !last_connected_below
+        && (first_connected_below || allow_disconnected_braced_parts)
 }
 
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
@@ -1194,6 +1216,24 @@ mod tests {
         let peaks = [connected, isolated.clone(), absent];
         assert!(unaligned_peak_keys(&peaks, &graph, false).is_empty());
         assert_eq!(unaligned_peak_keys(&peaks, &graph, true), [isolated.key()]);
+    }
+
+    #[test]
+    fn true_brace_group_requires_exact_pair_and_no_external_connections() {
+        use crate::part_group::PartGroupingSymbol;
+
+        let mut pair = PartGroup::new(1, PartGroupingSymbol::Brace, true, 3);
+        pair.set_last_staff_id(4);
+        assert!(is_true_brace_group(&pair, false, false, true, false));
+        assert!(is_true_brace_group(&pair, false, false, false, true));
+        assert!(!is_true_brace_group(&pair, true, false, true, true));
+        assert!(!is_true_brace_group(&pair, false, true, true, true));
+
+        pair.set_last_staff_id(5);
+        assert!(!is_true_brace_group(&pair, false, false, true, true));
+        let mut bracket = PartGroup::new(1, PartGroupingSymbol::Bracket, true, 3);
+        bracket.set_last_staff_id(4);
+        assert!(!is_true_brace_group(&bracket, false, false, true, true));
     }
 
     #[test]
