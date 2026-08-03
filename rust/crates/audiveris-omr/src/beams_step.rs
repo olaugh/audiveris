@@ -13,6 +13,7 @@ use audiveris_image::{
         BeamExtensionEvidence, BeamExtensionInput as RasterBeamExtensionInput,
         BeamExtensionParameters, ExtensionBeam, ExtensionGlyph, beam_extension_evidence,
     },
+    beam_groups::{BeamGroupEvidence, BeamGroupParameters, GroupingBeam, group_beam_evidence},
     beam_hooks::{
         HookEvidence, HookGlyph, HookParameters, HookSearchInput, HookSide, hook_search_evidence,
     },
@@ -218,6 +219,7 @@ pub struct NativeBeamKernelConfig {
     pub small: Option<NativeBeamClassParameters>,
     pub extension_systems: Vec<NativeBeamExtensionSystem>,
     pub hook_systems: Vec<NativeBeamHookSystem>,
+    pub grouping_systems: Vec<NativeBeamGroupingSystem>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -233,6 +235,15 @@ pub struct NativeBeamHookSystem {
     pub system_id: usize,
     pub beams: Vec<ExtensionBeam>,
     pub parameters: HookParameters,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeBeamGroupingSystem {
+    pub system_id: usize,
+    /// Geometry in live SIG source order. The kernel applies Java's stable
+    /// ordinate sort after filtering this list to current raw beam inters.
+    pub beams: Vec<GroupingBeam>,
+    pub parameters: BeamGroupParameters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -271,11 +282,15 @@ pub struct BeamHookInput {
     pub native_evidence: Vec<HookEvidence>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamGroupingInput {
     pub sheet_id: usize,
     pub system_id: usize,
     pub raw_beam_ids: Vec<usize>,
+    /// Current graph relations are exposed to the injected mutation seam;
+    /// native provisional group relations are recorded in `native_evidence`.
+    pub relations: Vec<NeutralBeamRelation>,
+    pub native_evidence: Option<BeamGroupEvidence>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -812,10 +827,15 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             }
         }
 
+        let grouping_raw_beam_ids = raw_beam_ids(&sheet.systems[system_index]);
+        let native_evidence =
+            self.native_grouping_evidence(&sheet.systems[system_index], &grouping_raw_beam_ids);
         let grouping = self.visual.group_beams(BeamGroupingInput {
             sheet_id: sheet.id,
             system_id,
-            raw_beam_ids: raw_beam_ids(&sheet.systems[system_index]),
+            raw_beam_ids: grouping_raw_beam_ids,
+            relations: sheet.systems[system_index].relations.clone(),
+            native_evidence,
         });
         apply_delta(sheet, system_index, grouping.delta)?;
         Ok(grouping.error)
@@ -995,6 +1015,23 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                 BeamHookSide::Bottom => HookSide::Bottom,
             },
         )
+    }
+
+    fn native_grouping_evidence(
+        &self,
+        system: &NeutralBeamSystem,
+        raw_beam_ids: &[usize],
+    ) -> Option<BeamGroupEvidence> {
+        let config = self.native_kernel.as_ref()?;
+        let scene = config
+            .grouping_systems
+            .iter()
+            .find(|scene| scene.system_id == system.id)?;
+        let beams = raw_beam_ids
+            .iter()
+            .filter_map(|id| scene.beams.iter().find(|beam| beam.id == *id).copied())
+            .collect::<Vec<_>>();
+        Some(group_beam_evidence(&beams, scene.parameters))
     }
 
     fn dispatch_spots(
@@ -1661,6 +1698,7 @@ mod tests {
             }),
             extension_systems: Vec::new(),
             hook_systems: Vec::new(),
+            grouping_systems: Vec::new(),
         }
     }
 
@@ -2251,6 +2289,76 @@ mod tests {
         assert!(step.visual().hook_inputs[1].native_evidence.is_empty());
         // Empty injected deltas leave the source beam untouched.
         assert_eq!(sheet.systems[0].inters[0].id, 100);
+    }
+
+    #[test]
+    fn native_grouping_evidence_uses_live_beam_and_relation_snapshot() {
+        use audiveris_image::beam_groups::{BeamBounds, BeamGroupEvent};
+
+        let visual = visual_with_spots(Vec::new());
+        let mut config = native_kernel_config(0.08);
+        let grouping_beam = |id, y, x1: f64, x2: f64| GroupingBeam {
+            id,
+            median: audiveris_image::beam_structure::Segment {
+                x1,
+                y1: f64::from(y) + 2.0,
+                x2,
+                y2: f64::from(y) + 2.0,
+            },
+            height: 4.0,
+            bounds: BeamBounds {
+                x: x1 as i32,
+                y,
+                width: (x2 - x1) as i32,
+                height: 4,
+            },
+        };
+        config.grouping_systems.push(NativeBeamGroupingSystem {
+            system_id: 2,
+            // Deliberately not in ordinate order: current inter source order
+            // below is authoritative for Java's stable-tie behavior.
+            beams: vec![
+                grouping_beam(30, 10, 10.0, 40.0),
+                grouping_beam(10, 0, 0.0, 20.0),
+                grouping_beam(20, 5, 30.0, 50.0),
+                grouping_beam(999, 2, 0.0, 50.0),
+            ],
+            parameters: BeamGroupParameters {
+                min_x_overlap: 7.0,
+                max_y_distance: 12.0,
+                max_slope_diff: 0.065,
+            },
+        });
+        let mut step = HeadlessBeamsStep::new(visual).with_native_beam_kernel(config);
+        let mut sheet = sheet();
+        sheet.systems[0].inters = [10, 20, 30]
+            .into_iter()
+            .map(|id| NeutralBeamInter {
+                id,
+                kind: NeutralBeamInterKind::SmallBeam,
+            })
+            .collect();
+        sheet.systems[0].relations.push(NeutralBeamRelation {
+            id: 700,
+            source_inter_id: 10,
+            target_inter_id: 30,
+        });
+
+        assert_eq!(step.build_system_beams(&mut sheet, 0).unwrap(), None);
+
+        let input = &step.visual().grouping_inputs[0];
+        assert_eq!(input.raw_beam_ids, vec![10, 20, 30]);
+        assert_eq!(input.relations, sheet.systems[0].relations);
+        let evidence = input.native_evidence.as_ref().unwrap();
+        assert_eq!(evidence.ordered_beam_ids, vec![10, 20, 30]);
+        assert_eq!(evidence.groups, vec![vec![10, 30, 20]]);
+        assert!(evidence.events.contains(&BeamGroupEvent::Merged {
+            survivor_index: 0,
+            removed_index: 1,
+            witness_beam_id: 30,
+        }));
+        // Evidence never allocates or mutates group identities itself.
+        assert!(sheet.systems[0].beam_group_ids.is_empty());
     }
 
     #[test]
