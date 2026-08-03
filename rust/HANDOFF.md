@@ -260,17 +260,29 @@ denied, and passed `git diff --check` before commit.
 176. `0edbd7b1` — ties-even StaffFilament hole insertion planning.
 177. `133c1244` — two-sided neighboring-line hole-point interpolation.
 178. `5713195a` — Java-ordered section inclusion traversal and assignment plan.
+179. `70977909` — Java endpoint jitter-search sequence and boundary handling.
+180. `dbc9a099` — discarded-filament traversal and ownership mutation.
+181. `f2c9928d` — complete staff-line endpoint retrieval.
+182. `2b582d74` — exact curved-filament curvature polishing.
+183. `aa4d05b8` — production `GridStep.doit` lifecycle and failure order.
+184. `cd419f76` — `StaffLineCleaner` simplify/remove/rebuild/populate lifecycle.
+185. `81c2213e` — `Book.createScores` and `Book.updateScores` topology.
+186. `50bb6423` — real-pixel crossing-chunk inspection and removal.
+187. `1a145861` — `Staff.simplifyLines` lifecycle and partial-failure mutation.
+188. `f5f85dae` — live Java/Rust score-regrouping differential fixture.
+189. `428e722d` — no-staff horizontal-lag rebuild and reset semantics.
+190. `9a8fc090` — system/page population and section ownership.
 
-At the one-hundred-and-seventy-eighth checkpoint the Rust workspace executes 442 tests:
+At the one-hundred-and-ninetieth checkpoint the Rust workspace executes 488 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 298
-- `audiveris-omr`: 91
+- `audiveris-image`: 341
+- `audiveris-omr`: 94
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 60 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 61 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -281,6 +293,9 @@ bar-chain aggregation, column geometry/connectivity, and initial start selection
 The newest vector invokes production Java `LagManager.dispatchRuns` and matches Rust
 on preservation of the source table, the long-vertical partition, and the reoriented
 short-vertical pixels used for horizontal staff processing.
+The latest vector additionally executes production Java `Book.updateScores` and the
+Rust topology port across a movement-boundary removal, reinsertion, and following-score
+merge, matching both the initial two-score grouping and final one-score result exactly.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -344,11 +359,14 @@ one-line, and tablature staff candidates with median sides and small/short flags
 leaving sheet ownership and glyph/SIG mutation outside the boundary.
 
 The headless GRID coordinator now joins that staff-candidate output to the transactional
-BarsRetriever coordinator in production order. It validates sequential staff identity
-and kind, allows only Java's omitted one-line-staff case, processes systems in source
-order, and restores both line and bar state if any downstream system fails. The next
-boundary remains actual raster/section-to-filament ownership plus production sheet,
-glyph, and SIG mutation—not an assertion that GRID is fully behaviorally equivalent.
+BarsRetriever coordinator in production order. The production outer lifecycle continues
+through staff-line simplification, lag-section removal, no-staff horizontal-lag rebuild,
+system population, and movement-aware score regrouping. System population now preserves
+Java's clear-first/non-transactional failure behavior, horizontal and vertical section
+ownership order, indentation traversal, physical page/PageRef allocation, and report
+maxima. Remaining boundaries include concrete curved staff areas, `StaffFilament.toStaffLine`
+glyph creation, `SystemInfo.buildRef` details, and production sheet/SIG attachment—not an
+assertion that GRID is fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -414,10 +432,10 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete `GRID` orchestration around the composed StaffProjector, cluster
-   finalization, BarsRetriever column validation, and peak-graph integration. Keep
-   glyph ownership and UI/SIG integration behind explicit neutral boundaries until
-   their inputs have stable differential vectors.
+1. Complete the remaining concrete `GRID` seams: curved staff-area construction,
+   `StaffFilament.toStaffLine`, `SystemInfo.buildRef`, glyph/index ownership, and
+   peak-graph/SIG attachment. Keep UI integration behind explicit neutral boundaries
+   until the headless output has stable full-stage differential fixtures.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
