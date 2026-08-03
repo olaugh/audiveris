@@ -4,7 +4,7 @@
 
 use crate::{
     bar_alignment::VerticalSide,
-    bar_column::BarColumn,
+    bar_column::{BarColumn, PeakRelation},
     run_table::Orientation,
     section::Section,
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -299,6 +299,43 @@ pub fn partial_column_indices_after_start(columns: &[BarColumn]) -> Vec<usize> {
         .skip(first_eligible)
         .filter_map(|(index, column)| (!column.is_full()).then_some(index))
         .collect()
+}
+
+/// Java `detectStartColumns` first-phase candidate selection.
+///
+/// This covers the column scan before staff-line and blank validation. The
+/// right-most fully connected column in the initial close group wins. Java's
+/// wider brace-to-bar gap applies only when the current absolute column index
+/// is one, not to the second full column encountered.
+pub fn start_column_candidate(
+    columns: &mut [BarColumn],
+    relations: &[PeakRelation],
+    maximum_brace_bar_gap: i32,
+    maximum_double_bar_gap: i32,
+) -> Option<usize> {
+    let mut candidate: Option<usize> = None;
+    for index in 0..columns.len() {
+        if !columns[index].is_full() {
+            continue;
+        }
+        if let Some(previous_index) = candidate {
+            let current_left = columns[index].deskewed_x() - columns[index].mean_width() / 2.0;
+            let previous_right =
+                columns[previous_index].deskewed_x() + columns[previous_index].mean_width() / 2.0;
+            let maximum_gap = if index == 1 {
+                maximum_brace_bar_gap
+            } else {
+                maximum_double_bar_gap
+            };
+            if current_left - previous_right > f64::from(maximum_gap) {
+                break;
+            }
+        }
+        if columns[index].is_fully_connected(relations) {
+            candidate = Some(index);
+        }
+    }
+    candidate
 }
 
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
@@ -687,6 +724,91 @@ mod tests {
         assert_eq!(
             extending_peak_keys(&facts, None, 2, 5.0, VerticalSide::Top),
             [facts[0].0.key(), facts[1].0.key(), top_long.key()]
+        );
+    }
+
+    #[test]
+    fn start_column_candidate_uses_absolute_second_column_brace_gap() {
+        fn full_column(base_id: usize, x: f64) -> BarColumn {
+            let mut column = BarColumn::new(vec![StaffId::new(1), StaffId::new(2)]).unwrap();
+            column
+                .add_peak(
+                    BarPeak::new(PeakId::new(base_id), StaffId::new(1), 2.0, x, false, false)
+                        .unwrap(),
+                )
+                .unwrap();
+            column
+                .add_peak(
+                    BarPeak::new(
+                        PeakId::new(base_id + 1),
+                        StaffId::new(2),
+                        2.0,
+                        x,
+                        false,
+                        false,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            column
+        }
+        let mut columns = vec![
+            full_column(1, 10.0),
+            full_column(3, 20.0),
+            full_column(5, 30.0),
+        ];
+        let relations = [
+            crate::bar_column::PeakRelation::connection(PeakId::new(1), PeakId::new(2)),
+            crate::bar_column::PeakRelation::connection(PeakId::new(3), PeakId::new(4)),
+            crate::bar_column::PeakRelation::connection(PeakId::new(5), PeakId::new(6)),
+        ];
+        // Edge gaps are 8. Column index 1 uses the wider brace gap; index 2
+        // then exceeds the ordinary double-bar gap and stops the scan.
+        assert_eq!(
+            start_column_candidate(&mut columns, &relations, 8, 7),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn start_column_candidate_ignores_partial_and_tracks_last_connected_full() {
+        fn column(base_id: usize, x: f64, second: bool) -> BarColumn {
+            let mut column = BarColumn::new(vec![StaffId::new(1), StaffId::new(2)]).unwrap();
+            column
+                .add_peak(
+                    BarPeak::new(PeakId::new(base_id), StaffId::new(1), 2.0, x, false, false)
+                        .unwrap(),
+                )
+                .unwrap();
+            if second {
+                column
+                    .add_peak(
+                        BarPeak::new(
+                            PeakId::new(base_id + 1),
+                            StaffId::new(2),
+                            2.0,
+                            x,
+                            false,
+                            false,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+            column
+        }
+        let mut columns = vec![
+            column(1, 2.0, false),
+            column(3, 10.0, true),
+            column(5, 14.0, true),
+        ];
+        let relations = [crate::bar_column::PeakRelation::connection(
+            PeakId::new(5),
+            PeakId::new(6),
+        )];
+        assert_eq!(
+            start_column_candidate(&mut columns, &relations, 10, 10),
+            Some(2)
         );
     }
 
