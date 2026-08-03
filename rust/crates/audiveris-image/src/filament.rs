@@ -91,6 +91,11 @@ impl StaffFilament {
     }
 
     #[must_use]
+    pub const fn interline(&self) -> usize {
+        self.interline
+    }
+
+    #[must_use]
     pub fn sections(&self) -> &[Section] {
         &self.sections
     }
