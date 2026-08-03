@@ -564,6 +564,118 @@ pub fn part_connection_edge_ids(
     selected
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct BraceGroupDecision<'a> {
+    pub group_index: usize,
+    pub group: &'a PartGroup,
+    pub is_true_brace: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlannedPart {
+    pub first_staff_id: i32,
+    pub last_staff_id: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartsPlan {
+    pub parts: Vec<PlannedPart>,
+    pub removed_group_indices: Vec<usize>,
+}
+
+/// Dependency-light plan for Java `BarsRetriever.createParts`.
+///
+/// True brace groups use Java's `TreeSet(PartGroup.byFirstId)`: ordering and
+/// uniqueness depend only on first staff ID, so the first input with a shared
+/// first ID survives. `createPart`'s overlap guard is preserved by truncating a
+/// later range after the latest assigned staff or dropping it entirely.
+pub fn plan_parts(
+    system_first_staff_id: i32,
+    system_last_staff_id: i32,
+    groups: &[BraceGroupDecision<'_>],
+    force_separate_parts: bool,
+    force_single_part: bool,
+) -> Result<PartsPlan, BarsLogicError> {
+    if system_first_staff_id > system_last_staff_id {
+        return Err(BarsLogicError::InvalidStaffRange {
+            first: system_first_staff_id,
+            last: system_last_staff_id,
+        });
+    }
+
+    let mut braces = if force_separate_parts {
+        Vec::new()
+    } else {
+        groups
+            .iter()
+            .copied()
+            .filter(|decision| decision.is_true_brace)
+            .collect::<Vec<_>>()
+    };
+    braces.sort_by_key(|decision| decision.group.first_staff_id());
+    braces.dedup_by_key(|decision| decision.group.first_staff_id());
+
+    let mut plan = PartsPlan {
+        parts: Vec::new(),
+        removed_group_indices: braces.iter().map(|decision| decision.group_index).collect(),
+    };
+    let mut latest_last = None;
+    let add_part =
+        |first: i32, last: i32, parts: &mut Vec<PlannedPart>, latest_last: &mut Option<i32>| {
+            if latest_last.is_some_and(|latest| last <= latest) {
+                return;
+            }
+            let first = latest_last.map_or(first, |latest| latest.saturating_add(1).max(first));
+            if first <= last {
+                parts.push(PlannedPart {
+                    first_staff_id: first,
+                    last_staff_id: last,
+                });
+                *latest_last = Some(last);
+            }
+        };
+
+    let mut next_id = system_first_staff_id;
+    for decision in &braces {
+        let first = decision.group.first_staff_id();
+        let last = decision.group.last_staff_id();
+        while next_id < first {
+            add_part(next_id, next_id, &mut plan.parts, &mut latest_last);
+            next_id = next_id
+                .checked_add(1)
+                .ok_or(BarsLogicError::StaffIdExhausted)?;
+        }
+        add_part(first, last, &mut plan.parts, &mut latest_last);
+        next_id = last
+            .checked_add(1)
+            .ok_or(BarsLogicError::StaffIdExhausted)?;
+    }
+
+    let staff_count = system_last_staff_id
+        .checked_sub(system_first_staff_id)
+        .and_then(|delta| delta.checked_add(1))
+        .ok_or(BarsLogicError::StaffIdExhausted)?;
+    if force_single_part && staff_count == 2 && braces.is_empty() {
+        add_part(
+            system_first_staff_id,
+            system_last_staff_id,
+            &mut plan.parts,
+            &mut latest_last,
+        );
+    } else {
+        while next_id <= system_last_staff_id {
+            add_part(next_id, next_id, &mut plan.parts, &mut latest_last);
+            if next_id == system_last_staff_id {
+                break;
+            }
+            next_id = next_id
+                .checked_add(1)
+                .ok_or(BarsLogicError::StaffIdExhausted)?;
+        }
+    }
+    Ok(plan)
+}
+
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
 #[must_use]
 pub fn peak_extension(
@@ -702,6 +814,8 @@ pub enum BarsLogicError {
     Column(BarColumnError),
     MissingDeskewedCenter(StaffPeakKey),
     PeakIdExhausted,
+    InvalidStaffRange { first: i32, last: i32 },
+    StaffIdExhausted,
 }
 
 impl From<BarColumnError> for BarsLogicError {
@@ -724,6 +838,10 @@ impl fmt::Display for BarsLogicError {
                 key.stop()
             ),
             Self::PeakIdExhausted => formatter.write_str("bar peak insertion ID exhausted"),
+            Self::InvalidStaffRange { first, last } => {
+                write!(formatter, "invalid staff range {first}..={last}")
+            }
+            Self::StaffIdExhausted => formatter.write_str("staff ID arithmetic exhausted"),
         }
     }
 }
@@ -1382,6 +1500,98 @@ mod tests {
         assert!(
             part_connection_edge_ids(&graph, StaffId::new(2), VerticalSide::Top, None,).is_empty()
         );
+    }
+
+    #[test]
+    fn parts_plan_deduplicates_braces_and_truncates_overlapping_ranges() {
+        use crate::part_group::PartGroupingSymbol;
+
+        let mut first = PartGroup::new(1, PartGroupingSymbol::Brace, true, 2);
+        first.set_last_staff_id(4);
+        let mut duplicate_first = PartGroup::new(2, PartGroupingSymbol::Brace, true, 2);
+        duplicate_first.set_last_staff_id(3);
+        let mut overlap = PartGroup::new(3, PartGroupingSymbol::Brace, true, 4);
+        overlap.set_last_staff_id(6);
+        let groups = [
+            BraceGroupDecision {
+                group_index: 7,
+                group: &first,
+                is_true_brace: true,
+            },
+            BraceGroupDecision {
+                group_index: 8,
+                group: &duplicate_first,
+                is_true_brace: true,
+            },
+            BraceGroupDecision {
+                group_index: 9,
+                group: &overlap,
+                is_true_brace: true,
+            },
+        ];
+        let plan = plan_parts(1, 7, &groups, false, false).unwrap();
+        assert_eq!(
+            plan.parts,
+            [
+                PlannedPart {
+                    first_staff_id: 1,
+                    last_staff_id: 1
+                },
+                PlannedPart {
+                    first_staff_id: 2,
+                    last_staff_id: 4
+                },
+                PlannedPart {
+                    first_staff_id: 5,
+                    last_staff_id: 6
+                },
+                PlannedPart {
+                    first_staff_id: 7,
+                    last_staff_id: 7
+                },
+            ]
+        );
+        assert_eq!(plan.removed_group_indices, [7, 9]);
+    }
+
+    #[test]
+    fn parts_plan_preserves_force_switch_interaction() {
+        use crate::part_group::PartGroupingSymbol;
+
+        let mut brace = PartGroup::new(1, PartGroupingSymbol::Brace, true, 10);
+        brace.set_last_staff_id(11);
+        let groups = [BraceGroupDecision {
+            group_index: 0,
+            group: &brace,
+            is_true_brace: true,
+        }];
+        let forced_separate = plan_parts(10, 11, &groups, true, false).unwrap();
+        assert_eq!(
+            forced_separate.parts,
+            [
+                PlannedPart {
+                    first_staff_id: 10,
+                    last_staff_id: 10
+                },
+                PlannedPart {
+                    first_staff_id: 11,
+                    last_staff_id: 11
+                },
+            ]
+        );
+        assert!(forced_separate.removed_group_indices.is_empty());
+
+        let forced_single = plan_parts(10, 11, &groups, true, true).unwrap();
+        assert_eq!(
+            forced_single.parts,
+            [PlannedPart {
+                first_staff_id: 10,
+                last_staff_id: 11
+            }]
+        );
+        let brace_wins = plan_parts(10, 11, &groups, false, true).unwrap();
+        assert_eq!(brace_wins.parts, forced_single.parts);
+        assert_eq!(brace_wins.removed_group_indices, [0]);
     }
 
     #[test]
