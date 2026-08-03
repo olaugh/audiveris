@@ -5,10 +5,10 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    bar_alignment::VerticalSide,
+    bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakRelation, StaffId},
     part_group::PartGroup,
-    peak_graph::PeakGraph,
+    peak_graph::{PeakEdgeId, PeakGraph},
     run_table::Orientation,
     section::Section,
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -527,6 +527,41 @@ pub fn is_true_brace_group(
         && !first_connected_above
         && !last_connected_below
         && (first_connected_below || allow_disconnected_braced_parts)
+}
+
+/// Java `BarsRetriever.getConnections` edge selection for one staff side.
+/// The first bar is excluded, leaving only within-part connections. Edge order
+/// is significant: Java stops once the opposite-side peak belongs to a later
+/// staff, relying on `PeakGraph`'s established staff/abscissa order.
+#[must_use]
+pub fn part_connection_edge_ids(
+    graph: &PeakGraph<BarAlignment>,
+    staff_id: StaffId,
+    side: VerticalSide,
+    start_peak: Option<&StaffPeak>,
+) -> Vec<PeakEdgeId> {
+    let Some(start_peak) = start_peak else {
+        return Vec::new();
+    };
+    let opposite = match side {
+        VerticalSide::Top => VerticalSide::Bottom,
+        VerticalSide::Bottom => VerticalSide::Top,
+    };
+    let mut selected = Vec::new();
+    for edge in graph.edges() {
+        if edge.relation().kind() != BarAlignmentKind::Connection {
+            continue;
+        }
+        let peak = edge.relation().peak(opposite);
+        if peak.staff_id() == staff_id {
+            if peak.start() > start_peak.start() {
+                selected.push(edge.id());
+            }
+        } else if peak.staff_id().value() > staff_id.value() {
+            break;
+        }
+    }
+    selected
 }
 
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
@@ -1263,6 +1298,90 @@ mod tests {
         let mut bracket = PartGroup::new(1, PartGroupingSymbol::Bracket, true, 3);
         bracket.set_last_staff_id(4);
         assert!(!is_true_brace_group(&bracket, false, false, true, true));
+    }
+
+    #[test]
+    fn part_connections_exclude_start_and_stop_at_later_opposite_staff() {
+        use crate::bar_alignment::{AlignmentPeak, BarImpacts};
+
+        fn connection(
+            top_id: usize,
+            top_staff: usize,
+            bottom_id: usize,
+            bottom_staff: usize,
+            start: i32,
+        ) -> BarAlignment {
+            let top = AlignmentPeak::new(PeakId::new(top_id), StaffId::new(top_staff), start, 0.8)
+                .unwrap();
+            let bottom = AlignmentPeak::new(
+                PeakId::new(bottom_id),
+                StaffId::new(bottom_staff),
+                start,
+                0.8,
+            )
+            .unwrap();
+            let alignment = BarAlignment::new(
+                top,
+                bottom,
+                0.0,
+                0.0,
+                BarImpacts::alignment(0.9, 0.9).unwrap(),
+            )
+            .unwrap();
+            BarAlignment::connection(&alignment, 0.9, 0.9).unwrap()
+        }
+
+        let start = peak(2, 10, 11);
+        let upper_start = peak(1, 10, 11);
+        let part = peak(2, 20, 21);
+        let upper_part = peak(1, 20, 21);
+        let later = peak(3, 30, 31);
+        let later_top = peak(2, 30, 31);
+        let ignored = peak(2, 40, 41);
+        let ignored_top = peak(1, 40, 41);
+        let keys = [
+            upper_start.key(),
+            start.key(),
+            upper_part.key(),
+            part.key(),
+            later_top.key(),
+            later.key(),
+            ignored_top.key(),
+            ignored.key(),
+        ];
+        let mut graph = PeakGraph::new();
+        for value in [
+            upper_start,
+            start.clone(),
+            upper_part,
+            part,
+            later_top,
+            later,
+            ignored_top,
+            ignored,
+        ] {
+            graph.add_vertex(value);
+        }
+        graph
+            .add_edge(keys[0], keys[1], connection(1, 1, 2, 2, 10))
+            .unwrap();
+        let expected = graph
+            .add_edge(keys[2], keys[3], connection(3, 1, 4, 2, 20))
+            .unwrap();
+        graph
+            .add_edge(keys[4], keys[5], connection(5, 2, 6, 3, 30))
+            .unwrap();
+        graph
+            .add_edge(keys[6], keys[7], connection(7, 1, 8, 2, 40))
+            .unwrap();
+
+        assert_eq!(
+            part_connection_edge_ids(&graph, StaffId::new(2), VerticalSide::Top, Some(&start),),
+            [expected]
+        );
+        assert!(
+            part_connection_edge_ids(&graph, StaffId::new(2), VerticalSide::Top, None,).is_empty()
+        );
     }
 
     #[test]
