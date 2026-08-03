@@ -467,6 +467,67 @@ public final class RustParityProbe
                 composedPeaks.isEmpty() ? "none" : String.join(",", composedPeaks),
                 staffPeakRange(composedBrace));
 
+        int[] linesRootCounts = new int[30];
+        Arrays.fill(linesRootCounts, 1);
+        Arrays.fill(linesRootCounts, 0, 2, 0);
+        Arrays.fill(linesRootCounts, 5, 11, 0);
+        Arrays.fill(linesRootCounts, 12, 14, 0);
+        StaffProjector linesRootProjector = staffProjector(
+                projectorScale,
+                linesRootCounts,
+                new int[]{0, 4});
+        Object linesRootParams = field(linesRootProjector, "params");
+        setIntField(linesRootParams, "blankThreshold", 0);
+        setIntField(linesRootParams, "minSmallBlankWidth", 4);
+        setIntField(linesRootParams, "maxLeftExtremum", 8);
+        findAllBlanks.invoke(linesRootProjector);
+        Staff linesRootStaff = (Staff) field(linesRootProjector, "staff");
+        linesRootStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT, 3);
+        StaffPeak unmarkedFirstPeak = new StaffPeak(linesRootStaff, 0, 4, 20, 21, null);
+        StaffPeak markedLaterPeak = new StaffPeak(linesRootStaff, 0, 4, 25, 26, null);
+        markedLaterPeak.setStaffEnd(org.audiveris.omr.util.HorizontalSide.LEFT);
+        @SuppressWarnings("unchecked")
+        List<StaffPeak> linesRootPeaks = (List<StaffPeak>) field(linesRootProjector, "peaks");
+        linesRootPeaks.add(unmarkedFirstPeak);
+        linesRootPeaks.add(markedLaterPeak);
+        Object selectedLinesRootBlank = selectBlank.invoke(
+                linesRootProjector,
+                org.audiveris.omr.util.HorizontalSide.LEFT,
+                unmarkedFirstPeak.getStart(),
+                4);
+        linesRootProjector.checkLinesRoot();
+        int changedStaffLeft = linesRootStaff.getAbscissa(
+                org.audiveris.omr.util.HorizontalSide.LEFT);
+        boolean changedStartMarked = markedLaterPeak.isStaffEnd(
+                org.audiveris.omr.util.HorizontalSide.LEFT);
+
+        linesRootStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT, 3);
+        markedLaterPeak.setStaffEnd(org.audiveris.omr.util.HorizontalSide.LEFT);
+        setIntField(linesRootParams, "maxLeftExtremum", 9);
+        linesRootProjector.checkLinesRoot();
+        int boundaryStaffLeft = linesRootStaff.getAbscissa(
+                org.audiveris.omr.util.HorizontalSide.LEFT);
+        boolean boundaryStartMarked = markedLaterPeak.isStaffEnd(
+                org.audiveris.omr.util.HorizontalSide.LEFT);
+
+        linesRootStaff.setAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT, 3);
+        markedLaterPeak.setStaffEnd(org.audiveris.omr.util.HorizontalSide.LEFT);
+        setIntField(linesRootParams, "maxLeftExtremum", 8);
+        linesRootProjector.setBracePeak(new StaffPeak(linesRootStaff, 0, 4, 2, 3, null));
+        linesRootProjector.checkLinesRoot();
+        System.out.println(
+                "grid.staff-projector-lines-root.synthetic=selected:"
+                        + blank(selectedLinesRootBlank)
+                        + ";changed:left" + changedStaffLeft + ":start" + changedStartMarked
+                        + ":first" + unmarkedFirstPeak.isStaffEnd(
+                                org.audiveris.omr.util.HorizontalSide.LEFT)
+                        + ";boundary:left" + boundaryStaffLeft + ":start"
+                        + boundaryStartMarked
+                        + ";brace:left" + linesRootStaff.getAbscissa(
+                                org.audiveris.omr.util.HorizontalSide.LEFT)
+                        + ":start" + markedLaterPeak.isStaffEnd(
+                                org.audiveris.omr.util.HorizontalSide.LEFT));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));

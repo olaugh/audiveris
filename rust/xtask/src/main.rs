@@ -22,14 +22,14 @@ use audiveris_image::{
         BraceSearchRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
         PeakConstructionRequest, PeakCoreGeometry, PeakCoreParams, PeakCoreRejection,
         PeakRefinementParams, PeakRefinementRequest, PeakScanRequest, ProjectionPeakMode,
-        ShortProjection, StaffProjectionRequest, select_blank,
+        ShortProjection, StaffProjectionRequest, check_lines_root_transition, select_blank,
     },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
-    staff_peak::HorizontalSide,
+    staff_peak::{HorizontalSide, StaffPeakAttribute},
     target_line::TargetLine,
     watershed,
 };
@@ -211,7 +211,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 56] = [
+const VECTOR_KEYS: [&str; 57] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -232,6 +232,7 @@ const VECTOR_KEYS: [&str; 56] = [
     "grid.staff-projector-ranges.synthetic=",
     "grid.staff-projector-brace.synthetic=",
     "grid.staff-projector-composed.synthetic=",
+    "grid.staff-projector-lines-root.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -895,6 +896,59 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         composed_result.derivative_threshold,
         composed_result.peak_search_bounds.x_min,
         composed_result.peak_search_bounds.x_max
+    ));
+
+    let mut lines_root_projection = ShortProjection::new(0, 29)?;
+    for position in 0..=29 {
+        if !matches!(position, 0..=1 | 5..=10 | 12..=13) {
+            lines_root_projection.increment_one(position);
+        }
+    }
+    let lines_root_blanks = lines_root_projection.blank_regions(0);
+    let selected_lines_root_blank = select_blank(&lines_root_blanks, HorizontalSide::Left, 20, 4);
+    let mut lines_root_peaks = [
+        audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 0, 4, 20, 21)?,
+        audiveris_image::staff_peak::StaffPeak::new(StaffId::new(1), 0, 4, 25, 26)?,
+    ];
+    lines_root_peaks[1].set(StaffPeakAttribute::StaffLeftEnd);
+    let changed = check_lines_root_transition(
+        &lines_root_peaks,
+        &lines_root_blanks,
+        false,
+        Some(1),
+        3,
+        4,
+        8,
+    );
+    let changed_start_marked = changed.clear_staff_left_end_at != Some(1);
+    let boundary = check_lines_root_transition(
+        &lines_root_peaks,
+        &lines_root_blanks,
+        false,
+        Some(1),
+        3,
+        4,
+        9,
+    );
+    let brace_noop = check_lines_root_transition(
+        &lines_root_peaks,
+        &lines_root_blanks,
+        true,
+        Some(1),
+        3,
+        4,
+        8,
+    );
+    lines.push(format!(
+        "grid.staff-projector-lines-root.synthetic=selected:{};changed:left{}:start{}:first{};boundary:left{}:start{};brace:left{}:start{}",
+        blank_name(selected_lines_root_blank),
+        changed.staff_left,
+        changed_start_marked,
+        lines_root_peaks[0].is_staff_end(HorizontalSide::Left),
+        boundary.staff_left,
+        boundary.clear_staff_left_end_at != Some(1),
+        brace_noop.staff_left,
+        brace_noop.clear_staff_left_end_at != Some(1)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
