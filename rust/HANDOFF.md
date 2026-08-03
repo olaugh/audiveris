@@ -382,8 +382,9 @@ denied, and passed `git diff --check` before commit.
 298. `26382f6b` and `3d265640` — native multiple-rest serif evidence and seam exposure.
 299. `be184be8`, `602c23c7`, and `a685b5cf` — native header clef, key, and time candidate sourcing.
 300. `ade15e54` — immutable bundled `BasicClassifier` model parser and 110→149→149 sigmoid inference core.
+301. `f7bdcbd1` — live Java oracle for all 149 raw grades of a fixed 110-value classifier input; the isolated probe loads the frozen bundled artifact explicitly.
 
-At checkpoint 300 the Rust workspace executes 871 tests:
+At checkpoint 301 the Rust workspace executes 872 tests:
 
 - `audiveris-core`: 38
 - `audiveris-image`: 505
@@ -391,9 +392,9 @@ At checkpoint 300 the Rust workspace executes 871 tests:
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
-- `audiveris-classifier`: 3
+- `audiveris-classifier`: 4
 
-The live Java/Rust oracle compares 70 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 71 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -416,8 +417,8 @@ model XML, normalization vectors, labels, and the two bias-first sigmoid layers 
 validated and held immutable. This is deliberately only the inference core. Raw glyph
 feature extraction (`BasicARTMoments` and geometric moments), Java candidate sorting/
 minimum-grade policy, user overrides, and MusicFont metrics remain separate seams. A
-Java-backed fixed-feature oracle is the immediate next checkpoint; do not represent the
-current core as a complete visual classifier.
+Java-backed fixed-feature oracle now verifies every raw output grade; do not represent
+the current core as a complete visual classifier.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam

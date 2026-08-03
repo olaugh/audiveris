@@ -37,10 +37,10 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 70 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, and exact `StaffFilament.fillHoles` mutation; a fixed-feature classifier oracle is next |
+| Live Java/Rust vectors | 71 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, exact `StaffFilament.fillHoles` mutation, and all 149 raw grades for a fixed classifier feature vector |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 871 tests green at checkpoint 300: core 38, image 505, OMR 310, testkit 6, CLI 4, xtask 5, classifier 3 |
+| Rust workspace | 872 tests green at checkpoint 301: core 38, image 505, OMR 310, testkit 6, CLI 4, xtask 5, classifier 4 |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
