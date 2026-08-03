@@ -92,6 +92,63 @@ impl ClusterMergePassParameters {
     }
 }
 
+/// Resolved, sheet-independent inputs to Java `mergeClusterPairs`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClusterPairPassParameters {
+    global_slope: f64,
+    maximum_center_distance: i64,
+    maximum_horizontal_gap: i64,
+    minimum_length: f64,
+}
+
+impl ClusterPairPassParameters {
+    pub fn new(
+        global_slope: f64,
+        maximum_center_distance: i64,
+        maximum_horizontal_gap: i64,
+        minimum_length: f64,
+    ) -> Result<Self, ClusterMergeError> {
+        if !global_slope.is_finite()
+            || maximum_center_distance < 0
+            || maximum_horizontal_gap < 0
+            || !minimum_length.is_finite()
+            || minimum_length < 0.0
+        {
+            return Err(ClusterMergeError::InvalidPairPassParameters);
+        }
+        Ok(Self {
+            global_slope,
+            maximum_center_distance,
+            maximum_horizontal_gap,
+            minimum_length,
+        })
+    }
+}
+
+/// Active and short-isolated cluster IDs after `mergeClusterPairs`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClusterPairPassResult {
+    survivors: Vec<ClusterId>,
+    discarded: Vec<ClusterId>,
+}
+
+impl ClusterPairPassResult {
+    #[must_use]
+    pub fn survivors(&self) -> &[ClusterId] {
+        &self.survivors
+    }
+
+    #[must_use]
+    pub fn discarded(&self) -> &[ClusterId] {
+        &self.discarded
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (Vec<ClusterId>, Vec<ClusterId>) {
+        (self.survivors, self.discarded)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MergeMeasurement {
     Overlap,
@@ -366,6 +423,119 @@ pub fn merge_clusters_in_order(
     Ok(survivors)
 }
 
+/// Java `mergeClusterPairs`: merge nearby clusters of exactly the same size,
+/// then remove short isolated clusters from the active value set.
+///
+/// The list is stably sorted once by deskewed ordinate. A successful merge
+/// restarts at the same index with fresh bounds and center limits, allowing a
+/// horizontal chain to become reachable as the destination grows. As in Java,
+/// unequal-size entries are skipped before the vertical-limit check. The first
+/// cluster absorbs the later cluster with line-index delta zero.
+///
+/// Java removes a short cluster from the active list without calling
+/// `LineCluster.destroy`; correspondingly, its neutral ownership records remain
+/// registered while its value is removed from `clusters`. The whole pass is
+/// transactional if validation or a merge fails.
+pub fn merge_cluster_pairs_in_order(
+    ownership: &mut ClusterOwnership,
+    clusters: &mut BTreeMap<ClusterId, LineCluster>,
+    cluster_order: &[ClusterId],
+    parameters: ClusterPairPassParameters,
+) -> Result<ClusterPairPassResult, ClusterMergeError> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = cluster_order
+        .iter()
+        .copied()
+        .map(|id| {
+            if !seen.insert(id) {
+                return Err(ClusterMergeError::DuplicateClusterOrder(id));
+            }
+            let cluster = clusters
+                .get(&id)
+                .ok_or(ClusterMergeError::MissingClusterValue(id))?;
+            Ok((
+                id,
+                cluster_deskewed_ordinate(cluster, parameters.global_slope)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ClusterMergeError>>()?;
+    ordered.sort_by(|one, two| one.1.partial_cmp(&two.1).unwrap_or(Ordering::Equal));
+
+    let mut next_ownership = ownership.clone();
+    let mut next_clusters = clusters.clone();
+    let mut discarded = Vec::new();
+    let mut index = 0;
+    while index < ordered.len() {
+        let current = ordered[index].0;
+        let cluster = next_clusters
+            .get(&current)
+            .ok_or(ClusterMergeError::MissingClusterValue(current))?;
+        let cluster_bounds = cluster.bounds()?;
+        let maximum_ordinate = cluster_deskewed_ordinate(cluster, parameters.global_slope)?
+            + parameters.maximum_center_distance as f64;
+        let cluster_size = cluster.size();
+
+        let mut merged = false;
+        let mut candidate_index = index + 1;
+        while candidate_index < ordered.len() {
+            let candidate_id = ordered[candidate_index].0;
+            let candidate = next_clusters
+                .get(&candidate_id)
+                .ok_or(ClusterMergeError::MissingClusterValue(candidate_id))?;
+            if candidate.size() != cluster_size {
+                candidate_index += 1;
+                continue;
+            }
+            if cluster_deskewed_ordinate(candidate, parameters.global_slope)? > maximum_ordinate {
+                break;
+            }
+            if horizontal_gap(cluster_bounds, candidate.bounds()?)
+                > parameters.maximum_horizontal_gap
+            {
+                candidate_index += 1;
+                continue;
+            }
+
+            let raw_shift = cluster
+                .first_position()
+                .checked_sub(candidate.first_position())
+                .ok_or(ClusterMergeError::PositionOverflow)?;
+            merge_cluster_values(
+                &mut next_ownership,
+                &mut next_clusters,
+                current,
+                candidate_id,
+                raw_shift,
+            )?;
+            ordered.remove(candidate_index);
+            merged = true;
+            break;
+        }
+        if merged {
+            continue;
+        }
+
+        let cluster = next_clusters
+            .get(&current)
+            .ok_or(ClusterMergeError::MissingClusterValue(current))?;
+        if (cluster.true_length()? as f64) < parameters.minimum_length {
+            next_clusters.remove(&current);
+            ordered.remove(index);
+            discarded.push(current);
+        } else {
+            index += 1;
+        }
+    }
+
+    let survivors = ordered.into_iter().map(|(id, _)| id).collect();
+    *ownership = next_ownership;
+    *clusters = next_clusters;
+    Ok(ClusterPairPassResult {
+        survivors,
+        discarded,
+    })
+}
+
 pub fn cluster_deskewed_ordinate(
     cluster: &LineCluster,
     global_slope: f64,
@@ -398,6 +568,12 @@ fn intersects_grown(
         && head_left < candidate_right
         && candidate_top < head_bottom
         && head_top < candidate_bottom
+}
+
+fn horizontal_gap(one: crate::section::Bounds, two: crate::section::Bounds) -> i64 {
+    let common_left = one.x.max(two.x) as i64;
+    let common_right = (one.x + one.width).min(two.x + two.width) as i64;
+    common_left - common_right
 }
 
 fn deskew_points(points: Vec<Option<(f64, f64)>>, slope: f64) -> Vec<Option<f64>> {
@@ -458,6 +634,7 @@ fn collision_is_clear(
 pub enum ClusterMergeError {
     InvalidParameters,
     InvalidPassParameters,
+    InvalidPairPassParameters,
     PositionOverflow,
     MissingClusterValue(ClusterId),
     DuplicateClusterOrder(ClusterId),
@@ -497,6 +674,9 @@ impl fmt::Display for ClusterMergeError {
             Self::InvalidParameters => formatter.write_str("cluster merge parameters are invalid"),
             Self::InvalidPassParameters => {
                 formatter.write_str("cluster merge pass parameters are invalid")
+            }
+            Self::InvalidPairPassParameters => {
+                formatter.write_str("cluster pair pass parameters are invalid")
             }
             Self::PositionOverflow => formatter.write_str("cluster merge position overflow"),
             Self::MissingClusterValue(id) => {
@@ -553,34 +733,48 @@ mod tests {
         BTreeMap<ClusterId, LineCluster>,
         Vec<ClusterId>,
     ) {
+        let specs = specs
+            .iter()
+            .map(|&(id, x, y)| (id, x, y, 60))
+            .collect::<Vec<_>>();
+        cluster_state_with_lengths(&specs)
+    }
+
+    fn cluster_state_with_lengths(
+        specs: &[(u64, usize, usize, usize)],
+    ) -> (
+        ClusterOwnership,
+        BTreeMap<ClusterId, LineCluster>,
+        Vec<ClusterId>,
+    ) {
         let width = specs
             .iter()
-            .map(|(_, x, _)| x + 61)
+            .map(|(_, x, _, length)| x + length + 1)
             .max()
             .unwrap_or(1);
-        let height = specs.iter().map(|(_, _, y)| y + 2).max().unwrap_or(1);
+        let height = specs.iter().map(|(_, _, y, _)| y + 2).max().unwrap_or(1);
         let mut table = RunTable::new(Orientation::Horizontal, width, height).unwrap();
-        for &(_, x, y) in specs {
-            table.add_run(y, Run::new(x, 60)).unwrap();
+        for &(_, x, y, length) in specs {
+            table.add_run(y, Run::new(x, length)).unwrap();
         }
         let mut sections = build_sections(&table, JunctionPolicy::All);
         let mut ownership = ClusterOwnership::new();
         let mut clusters = BTreeMap::new();
         let mut order = Vec::new();
-        for &(value, x, y) in specs {
+        for &(value, x, y, length) in specs {
             let section_index = sections
                 .iter()
                 .position(|section| {
                     let bounds = section.bounds();
-                    bounds.x == x && bounds.y == y
+                    bounds.x == x && bounds.y == y && bounds.width == length
                 })
                 .unwrap();
             let mut filament = StaffFilament::new(10).unwrap();
-            filament.add_section(sections.remove(section_index)).unwrap();
-            let filament_id = FilamentId::new(value);
-            ownership
-                .register_filament(filament_id, &filament)
+            filament
+                .add_section(sections.remove(section_index))
                 .unwrap();
+            let filament_id = FilamentId::new(value);
+            ownership.register_filament(filament_id, &filament).unwrap();
             let cluster_id = ownership.register_cluster(filament_id).unwrap();
             clusters.insert(
                 cluster_id,
@@ -600,6 +794,20 @@ mod tests {
             parameters(regular_margin, maximum_distance, 1),
             single_margin,
             0,
+        )
+        .unwrap()
+    }
+
+    fn pair_parameters(
+        maximum_center_distance: i64,
+        maximum_horizontal_gap: i64,
+        minimum_length: f64,
+    ) -> ClusterPairPassParameters {
+        ClusterPairPassParameters::new(
+            0.0,
+            maximum_center_distance,
+            maximum_horizontal_gap,
+            minimum_length,
         )
         .unwrap()
     }
@@ -787,5 +995,115 @@ mod tests {
         assert_eq!(survivors, [large]);
         assert_eq!(clusters[&large].size(), 2);
         assert_eq!(ownership.cluster_parent(order[1]).unwrap(), Some(large));
+    }
+
+    #[test]
+    fn pair_pass_restarts_after_growth_and_keeps_first_stable_tie() {
+        let (mut ownership, mut clusters, order) =
+            cluster_state(&[(1, 0, 10), (2, 150, 10), (3, 75, 10)]);
+
+        let result = merge_cluster_pairs_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pair_parameters(0, 20, 0.0),
+        )
+        .unwrap();
+
+        assert_eq!(result.survivors(), [order[0]]);
+        assert!(result.discarded().is_empty());
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(
+            clusters[&order[0]].line_at(0).unwrap().absorbed_ids(),
+            &[FilamentId::new(3), FilamentId::new(2)]
+        );
+        assert_eq!(ownership.cluster_parent(order[1]).unwrap(), Some(order[0]));
+        assert_eq!(ownership.cluster_parent(order[2]).unwrap(), Some(order[0]));
+    }
+
+    #[test]
+    fn pair_pass_uses_inclusive_gap_and_center_limits() {
+        let (mut ownership, mut clusters, order) =
+            cluster_state(&[(1, 0, 10), (2, 80, 12)]);
+        let result = merge_cluster_pairs_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pair_parameters(2, 20, 0.0),
+        )
+        .unwrap();
+        assert_eq!(result.survivors(), [order[0]]);
+
+        let (mut ownership, mut clusters, order) =
+            cluster_state(&[(1, 0, 10), (2, 80, 13)]);
+        let result = merge_cluster_pairs_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pair_parameters(2, 20, 0.0),
+        )
+        .unwrap();
+        assert_eq!(result.survivors(), order);
+    }
+
+    #[test]
+    fn pair_pass_skips_other_sizes_and_breaks_at_first_far_equal_size() {
+        let (mut ownership, mut clusters, mut order) =
+            cluster_state(&[(1, 0, 10), (2, 0, 12), (3, 0, 20), (4, 0, 14)]);
+        let different = order[1];
+        let extra = order[3];
+        let extra_value = clusters.remove(&extra).unwrap();
+        clusters
+            .get_mut(&different)
+            .unwrap()
+            .merge_with_shift(extra_value, 1)
+            .unwrap();
+        ownership.merge_clusters(different, extra, 1).unwrap();
+        order.retain(|id| *id != extra);
+
+        let result = merge_cluster_pairs_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pair_parameters(5, 100, 0.0),
+        )
+        .unwrap();
+
+        // C1 first sees the far, equal-size C3 and breaks. The two-line C2 is
+        // skipped by the size test even though its box overlaps horizontally.
+        assert_eq!(result.survivors().len(), 3);
+        assert_eq!(clusters.len(), 3);
+        assert_eq!(clusters[&different].size(), 2);
+    }
+
+    #[test]
+    fn pair_pass_discards_only_unmerged_clusters_strictly_below_length() {
+        let (mut ownership, mut clusters, order) = cluster_state_with_lengths(&[
+            (1, 0, 10, 19),
+            (2, 100, 20, 20),
+            (3, 121, 20, 10),
+        ]);
+
+        let result = merge_cluster_pairs_in_order(
+            &mut ownership,
+            &mut clusters,
+            &order,
+            pair_parameters(0, 1, 20.0),
+        )
+        .unwrap();
+
+        assert_eq!(result.discarded(), [order[0]]);
+        assert_eq!(result.survivors(), [order[1]]);
+        assert!(!clusters.contains_key(&order[0]));
+        assert_eq!(clusters[&order[1]].true_length().unwrap(), 29);
+        // Java's list-only short-cluster removal leaves its ownership backlink.
+        assert_eq!(
+            ownership
+                .membership_of(FilamentId::new(1))
+                .unwrap()
+                .unwrap()
+                .cluster(),
+            order[0]
+        );
     }
 }
