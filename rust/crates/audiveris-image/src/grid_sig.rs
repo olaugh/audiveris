@@ -9,6 +9,8 @@
 
 use std::collections::BTreeMap;
 
+use audiveris_core::grade::contextual_from_partners;
+
 use crate::{
     bar_alignment::BarAlignment,
     bar_alignment::{BarAlignmentKind, VerticalSide},
@@ -49,11 +51,48 @@ pub enum GridSigNode {
         plan: VerticalInterPlan,
         glyph: GridGlyphId,
         frozen: bool,
+        contextual_grade: Option<f64>,
     },
     Connector {
         plan: ConnectionInterPlan,
         frozen: bool,
+        contextual_grade: Option<f64>,
     },
+}
+
+impl GridSigNode {
+    /// Java `Inter.getGrade()`: the immutable intrinsic grade supplied by the
+    /// recognition plan, never a previously computed contextual value.
+    #[must_use]
+    pub fn intrinsic_grade(&self) -> f64 {
+        match self {
+            Self::Vertical { plan, .. } => plan.impacts.map_or(0.0, |impacts| impacts.grade()),
+            Self::Connector { plan, .. } => plan.grade,
+        }
+    }
+
+    #[must_use]
+    pub const fn contextual_grade(&self) -> Option<f64> {
+        match self {
+            Self::Vertical {
+                contextual_grade, ..
+            }
+            | Self::Connector {
+                contextual_grade, ..
+            } => *contextual_grade,
+        }
+    }
+
+    fn set_contextual_grade(&mut self, grade: Option<f64>) {
+        match self {
+            Self::Vertical {
+                contextual_grade, ..
+            }
+            | Self::Connector {
+                contextual_grade, ..
+            } => *contextual_grade = grade,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,6 +169,7 @@ impl GridSig {
                     plan,
                     glyph,
                     frozen: false,
+                    contextual_grade: None,
                 },
             );
             self.peak_inters.insert(plan.peak, inter);
@@ -157,6 +197,7 @@ impl GridSig {
                 GridSigNode::Connector {
                     plan,
                     frozen: false,
+                    contextual_grade: None,
                 },
             );
 
@@ -251,6 +292,63 @@ impl GridSig {
             }
         }
         Ok(())
+    }
+
+    /// Recompute the bounded GRID contextual grades produced by Java
+    /// `SIGraph.contextualize()` at the end of `BarsRetriever.process()`.
+    ///
+    /// At this seam only `BarConnectionRelation` is a support relation. Its
+    /// source and target ratio is `1 + 5 * relation_grade`. Partner grades are
+    /// always intrinsic snapshots, so repeated calls are idempotent. Stable
+    /// decreasing partner-grade order fixes floating-point accumulation order.
+    pub fn contextualize(&mut self) {
+        let intrinsic = self
+            .nodes
+            .iter()
+            .map(|(&id, node)| (id, node.intrinsic_grade()))
+            .collect::<BTreeMap<_, _>>();
+        let mut computed = BTreeMap::new();
+
+        for (&id, node) in &self.nodes {
+            let grade = node.intrinsic_grade();
+            let contextual = {
+                let mut supports = self
+                    .edges
+                    .iter()
+                    .filter_map(|edge| {
+                        let GridSigRelation::BarConnectionSupport {
+                            grade: relation_grade,
+                        } = edge.relation
+                        else {
+                            return None;
+                        };
+                        let partner = if edge.source == id {
+                            edge.target
+                        } else if edge.target == id {
+                            edge.source
+                        } else {
+                            return None;
+                        };
+                        intrinsic
+                            .get(&partner)
+                            .copied()
+                            .map(|partner_grade| (partner_grade, 1.0 + (5.0 * relation_grade)))
+                    })
+                    .collect::<Vec<_>>();
+                supports.sort_by(|left, right| right.0.total_cmp(&left.0));
+                let (partners, ratios): (Vec<_>, Vec<_>) = supports.into_iter().unzip();
+                contextual_from_partners(grade, &partners, &ratios)
+                    .expect("partner grades and support ratios are built together")
+            };
+            computed.insert(id, Some(contextual));
+        }
+
+        for (id, grade) in computed {
+            self.nodes
+                .get_mut(&id)
+                .expect("contextual snapshot contains existing nodes")
+                .set_contextual_grade(grade);
+        }
     }
 
     /// Execute the concrete post-`groupBarlines` tail currently available in
@@ -438,7 +536,7 @@ pub struct BarTailResult {
     pub staff_barlines: BTreeMap<usize, Vec<GridInterId>>,
     pub part_groups: Vec<PartGroup>,
     pub parts: Vec<PlannedPart>,
-    /// False until the production SIG contextualizer is ported.
+    /// Set after the separate final system contextualization traversal.
     pub contextualized: bool,
 }
 
@@ -503,7 +601,7 @@ mod tests {
             ConnectorInterKind, PeakWidthClass, VerticalInterKind, VerticalMedian,
             plan_connection_inters,
         },
-        staff_peak::StaffPeak,
+        staff_peak::{StaffPeak, StaffVerticalImpacts},
     };
 
     fn peak(staff: usize, x: i32) -> StaffPeak {
@@ -526,6 +624,19 @@ mod tests {
                 right_staff_end: false,
             },
         }
+    }
+
+    fn graded_vertical_plan(peak: &StaffPeak, normalized_impact: f64) -> VerticalInterPlan {
+        let mut plan = vertical_plan(peak);
+        plan.impacts = Some(StaffVerticalImpacts::new(
+            normalized_impact,
+            normalized_impact,
+            normalized_impact,
+            normalized_impact,
+            normalized_impact,
+            normalized_impact,
+        ));
+        plan
     }
 
     fn connection_graph(top: StaffPeak, bottom: StaffPeak, grade: f64) -> PeakGraph<BarAlignment> {
@@ -828,5 +939,166 @@ mod tests {
         assert_eq!(tail.staff_barlines[&1], [ids[0]]);
         assert!(tail.staff_barlines[&2].is_empty());
         assert_eq!(tail.parts.len(), 2);
+    }
+
+    #[test]
+    fn contextualize_sets_isolated_and_missing_impact_grades() {
+        let missing = peak(1, 10);
+        let graded = peak(2, 20);
+        let mut sig = GridSig::default();
+        let ids = sig.promote_vertical_inters(&[
+            vertical_plan(&missing),
+            graded_vertical_plan(&graded, 0.5),
+        ]);
+        let graded_intrinsic = sig.node(ids[1]).unwrap().intrinsic_grade();
+
+        sig.contextualize();
+
+        assert_eq!(sig.node(ids[0]).unwrap().intrinsic_grade(), 0.0);
+        assert_eq!(sig.node(ids[0]).unwrap().contextual_grade(), Some(0.0));
+        assert_eq!(
+            sig.node(ids[1]).unwrap().contextual_grade(),
+            Some(graded_intrinsic)
+        );
+    }
+
+    #[test]
+    fn contextualize_uses_only_bar_support_with_unequal_intrinsic_grades() {
+        let low = peak(1, 10);
+        let high = peak(2, 20);
+        let mut sig = GridSig::default();
+        let ids = sig.promote_vertical_inters(&[
+            graded_vertical_plan(&low, 0.25),
+            graded_vertical_plan(&high, 0.75),
+        ]);
+        sig.edges.push(GridSigEdge {
+            source: ids[0],
+            target: ids[1],
+            relation: GridSigRelation::NoExclusion,
+        });
+        sig.edges.push(GridSigEdge {
+            source: ids[0],
+            target: ids[1],
+            relation: GridSigRelation::BarGroup { gap_fraction: 0.1 },
+        });
+        sig.edges.push(GridSigEdge {
+            source: ids[0],
+            target: ids[1],
+            relation: GridSigRelation::BarConnectionSupport { grade: 0.4 },
+        });
+        let low_grade = sig.node(ids[0]).unwrap().intrinsic_grade();
+        let high_grade = sig.node(ids[1]).unwrap().intrinsic_grade();
+
+        sig.contextualize();
+
+        assert_eq!(
+            sig.node(ids[0]).unwrap().contextual_grade(),
+            Some(contextual_from_partners(low_grade, &[high_grade], &[3.0]).unwrap())
+        );
+        assert_eq!(
+            sig.node(ids[1]).unwrap().contextual_grade(),
+            Some(contextual_from_partners(high_grade, &[low_grade], &[3.0]).unwrap())
+        );
+    }
+
+    #[test]
+    fn contextualize_three_chain_sorts_partners_by_decreasing_intrinsic_grade() {
+        let low = peak(1, 10);
+        let center = peak(2, 20);
+        let high = peak(3, 30);
+        let mut sig = GridSig::default();
+        let ids = sig.promote_vertical_inters(&[
+            graded_vertical_plan(&low, 0.2),
+            graded_vertical_plan(&center, 0.5),
+            graded_vertical_plan(&high, 0.8),
+        ]);
+        // Deliberately insert the lower-grade partner first.
+        sig.edges.push(GridSigEdge {
+            source: ids[0],
+            target: ids[1],
+            relation: GridSigRelation::BarConnectionSupport { grade: 0.2 },
+        });
+        sig.edges.push(GridSigEdge {
+            source: ids[1],
+            target: ids[2],
+            relation: GridSigRelation::BarConnectionSupport { grade: 0.7 },
+        });
+        let grades = ids
+            .iter()
+            .map(|&id| sig.node(id).unwrap().intrinsic_grade())
+            .collect::<Vec<_>>();
+
+        sig.contextualize();
+
+        let expected =
+            contextual_from_partners(grades[1], &[grades[2], grades[0]], &[4.5, 2.0]).unwrap();
+        assert_eq!(sig.node(ids[1]).unwrap().contextual_grade(), Some(expected));
+    }
+
+    #[test]
+    fn contextualize_preserves_connectors_orphans_frozen_state_and_is_idempotent() {
+        let top = peak(1, 10);
+        let bottom = peak(2, 10);
+        let graph = connection_graph(top.clone(), bottom.clone(), 1.0);
+        let plans = plan_connection_inters(&graph, |_| true);
+        let mut sig = GridSig::default();
+        let verticals = sig.promote_vertical_inters(&[
+            graded_vertical_plan(&top, 0.5),
+            graded_vertical_plan(&bottom, 0.6),
+        ]);
+        sig.promote_connection_inters(&graph, &plans).unwrap();
+        let connector = sig.nodes_in_order().last().unwrap().0;
+        let edges_before = sig.edges.clone();
+        let intrinsic_before = sig
+            .nodes_in_order()
+            .map(|(id, node)| (id, node.intrinsic_grade()))
+            .collect::<Vec<_>>();
+
+        sig.contextualize();
+        let first = sig
+            .nodes_in_order()
+            .map(|(id, node)| (id, node.contextual_grade()))
+            .collect::<Vec<_>>();
+        sig.contextualize();
+
+        assert_eq!(sig.edges, edges_before);
+        assert_eq!(
+            sig.nodes_in_order()
+                .map(|(id, node)| (id, node.intrinsic_grade()))
+                .collect::<Vec<_>>(),
+            intrinsic_before
+        );
+        assert_eq!(
+            sig.nodes_in_order()
+                .map(|(id, node)| (id, node.contextual_grade()))
+                .collect::<Vec<_>>(),
+            first
+        );
+        assert!(matches!(
+            sig.node(connector),
+            Some(GridSigNode::Connector {
+                frozen: true,
+                contextual_grade: Some(_),
+                ..
+            })
+        ));
+        assert!(verticals.iter().all(|id| matches!(
+            sig.node(*id),
+            Some(GridSigNode::Vertical { frozen: true, .. })
+        )));
+
+        let mut orphan = GridSig::default();
+        orphan.promote_vertical_inters(&[graded_vertical_plan(&bottom, 0.6)]);
+        let warnings = orphan.promote_connection_inters(&graph, &plans).unwrap();
+        assert_eq!(
+            warnings[0].failure,
+            ConnectionPromotionFailure::MissingTopInter
+        );
+        let orphan_connector = orphan.nodes_in_order().last().unwrap().0;
+        orphan.contextualize();
+        assert_eq!(
+            orphan.node(orphan_connector).unwrap().contextual_grade(),
+            Some(plans[0].grade)
+        );
     }
 }

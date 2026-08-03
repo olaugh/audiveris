@@ -597,9 +597,8 @@ fn promote_grid_sigs(
             })?;
     }
 
-    // Java continues in exact order with recordBars, createGroups,
-    // createParts, then contextualize. The concrete tail currently stops
-    // before contextualize and records that explicitly in GridSig state.
+    // Java continues in exact order with recordBars, createGroups, then
+    // createParts for every system.
     for system in &mut state.systems {
         system
             .sig
@@ -614,6 +613,13 @@ fn promote_grid_sigs(
                 system_id: system.system_id,
                 source,
             })?;
+    }
+
+    // BarsRetriever.contextualize is a separate final system traversal after
+    // all systems have completed their ownership/group/part tail.
+    for system in &mut state.systems {
+        system.sig.contextualize();
+        system.bar_tail.contextualized = true;
     }
     Ok(())
 }
@@ -1524,7 +1530,11 @@ mod tests {
         assert_eq!(state.bar_tail.staff_barlines[&1], [top_inter]);
         assert_eq!(state.bar_tail.staff_barlines[&2], [bottom_inter]);
         assert_eq!(state.bar_tail.parts.len(), 2);
-        assert!(!state.bar_tail.contextualized);
+        assert!(state.bar_tail.contextualized);
+        assert_eq!(
+            state.sig.node(top_inter).unwrap().contextual_grade(),
+            Some(0.0)
+        );
         assert_eq!(executor.sheet.staffs[0].barlines, [top_inter]);
         assert!(executor.sheet.sig.connection_warnings.is_empty());
         assert!(executor.cleaner_finished);
@@ -1869,6 +1879,6 @@ mod tests {
         );
         assert_eq!(system.bar_tail.staff_barlines[&1], staff.barlines);
         assert_eq!(system.bar_tail.parts.len(), 1);
-        assert!(!system.bar_tail.contextualized);
+        assert!(system.bar_tail.contextualized);
     }
 }
