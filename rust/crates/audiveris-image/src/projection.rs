@@ -191,6 +191,57 @@ pub struct MultiRestSideRequest {
     pub peak_core: PeakCoreParams,
 }
 
+/// Java `BarlineHeight` values needed by `StaffProjector.getBarlineHeight`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarlineHeightSpec {
+    Four,
+    TwoThenFour,
+    Two,
+    OneThenTwo,
+}
+
+impl BarlineHeightSpec {
+    /// Java `BarlineHeight.count`.
+    #[must_use]
+    pub const fn count(self) -> i32 {
+        match self {
+            Self::Four | Self::TwoThenFour => 4,
+            Self::Two | Self::OneThenTwo => 2,
+        }
+    }
+
+    /// Java `BarlineHeight.initialCount`.
+    #[must_use]
+    pub const fn initial_count(self) -> i32 {
+        match self {
+            Self::Four => 4,
+            Self::TwoThenFour | Self::Two => 2,
+            Self::OneThenTwo => 1,
+        }
+    }
+}
+
+/// Neutral staff/scale facts consumed by Java
+/// `StaffProjector.computeLineThresholds`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffLineThresholdRequest<'a> {
+    pub line_thicknesses: &'a [f64],
+    pub staff_line_count: i32,
+    pub foreground_thickness: i32,
+    pub specific_interline: i32,
+    pub blank_threshold_ratio: f64,
+    pub chunk_threshold_ratio: f64,
+}
+
+/// Three staff-dependent projection thresholds and their shared measurement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StaffLineThresholds {
+    pub core_lines_thickness: f64,
+    pub blank_threshold: i32,
+    pub lines_threshold: i32,
+    pub chunk_threshold: i32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeakConstructionParams {
     refinement: PeakRefinementParams,
@@ -1730,6 +1781,52 @@ impl NeutralStaffProjectorResult {
     }
 }
 
+/// Java `StaffProjector.getBarlineHeight` from neutral stub/staff facts.
+#[must_use]
+pub const fn barline_height(specification: BarlineHeightSpec, specific_interline: i32) -> i32 {
+    specification.count().wrapping_mul(specific_interline)
+}
+
+/// Java `StaffProjector.computeCoreLinesThickness`.
+#[must_use]
+pub fn core_lines_thickness(line_thicknesses: &[f64], staff_line_count: i32) -> f64 {
+    let mut cumulative = 0.0;
+    for thickness in line_thicknesses {
+        cumulative += thickness;
+    }
+    if staff_line_count > 1 {
+        cumulative *= f64::from(staff_line_count.wrapping_sub(1)) / f64::from(staff_line_count);
+    }
+    cumulative
+}
+
+/// Java `StaffProjector.computeLineThresholds`.
+///
+/// Blank detection uses `floor`, line accumulation uses Java `Math.rint`, and
+/// the interline fraction in the chunk threshold uses the same ties-to-even
+/// conversion as `InterlineScale.toPixels`.
+#[must_use]
+pub fn staff_line_thresholds(request: StaffLineThresholdRequest<'_>) -> StaffLineThresholds {
+    let core_lines_thickness =
+        core_lines_thickness(request.line_thicknesses, request.staff_line_count);
+    let blank_threshold = (request.blank_threshold_ratio * core_lines_thickness).floor() as i32;
+    let lines_threshold = core_lines_thickness.round_ties_even() as i32;
+    let stored_line_count = request.line_thicknesses.len() as i32;
+    let line_ink = stored_line_count
+        .wrapping_sub(1)
+        .wrapping_mul(request.foreground_thickness);
+    let extra_chunk = (f64::from(request.specific_interline) * request.chunk_threshold_ratio)
+        .round_ties_even() as i32;
+    let chunk_threshold = line_ink.wrapping_add(extra_chunk);
+
+    StaffLineThresholds {
+        core_lines_thickness,
+        blank_threshold,
+        lines_threshold,
+        chunk_threshold,
+    }
+}
+
 /// Java `StaffProjector.selectBlank` over its start-ordered blank list.
 #[must_use]
 pub fn select_blank(
@@ -2486,6 +2583,63 @@ mod tests {
             )
             .unwrap();
         assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn staff_line_thresholds_preserve_java_measurement_and_rounding() {
+        let thresholds = staff_line_thresholds(StaffLineThresholdRequest {
+            line_thicknesses: &[1.0, 1.5, 0.5, 1.0, 1.0],
+            staff_line_count: 5,
+            foreground_thickness: 2,
+            specific_interline: 10,
+            blank_threshold_ratio: 0.5,
+            chunk_threshold_ratio: 1.2,
+        });
+        assert_eq!(
+            thresholds,
+            StaffLineThresholds {
+                core_lines_thickness: 4.0,
+                blank_threshold: 2,
+                lines_threshold: 4,
+                chunk_threshold: 20,
+            }
+        );
+
+        // Java uses floor for blanks but ties-to-even for both rint paths.
+        assert_eq!(
+            staff_line_thresholds(StaffLineThresholdRequest {
+                line_thicknesses: &[2.5],
+                staff_line_count: 1,
+                foreground_thickness: 3,
+                specific_interline: 10,
+                blank_threshold_ratio: 1.0,
+                chunk_threshold_ratio: 0.25,
+            }),
+            StaffLineThresholds {
+                core_lines_thickness: 2.5,
+                blank_threshold: 2,
+                lines_threshold: 2,
+                chunk_threshold: 2,
+            }
+        );
+
+        // The source scales the thickness sum by Staff.getLineCount, while
+        // chunk ink uses Staff.getLines().size(). Keep those facts distinct.
+        assert_eq!(core_lines_thickness(&[2.0, 2.0, 2.0], 2), 3.0);
+    }
+
+    #[test]
+    fn barline_height_spec_preserves_counts_initial_modes_and_wrapping() {
+        assert_eq!(BarlineHeightSpec::Four.count(), 4);
+        assert_eq!(BarlineHeightSpec::TwoThenFour.count(), 4);
+        assert_eq!(BarlineHeightSpec::Two.count(), 2);
+        assert_eq!(BarlineHeightSpec::OneThenTwo.count(), 2);
+        assert_eq!(BarlineHeightSpec::Four.initial_count(), 4);
+        assert_eq!(BarlineHeightSpec::TwoThenFour.initial_count(), 2);
+        assert_eq!(BarlineHeightSpec::Two.initial_count(), 2);
+        assert_eq!(BarlineHeightSpec::OneThenTwo.initial_count(), 1);
+        assert_eq!(barline_height(BarlineHeightSpec::TwoThenFour, 12), 48);
+        assert_eq!(barline_height(BarlineHeightSpec::Four, i32::MAX), -4);
     }
 
     #[test]
