@@ -261,6 +261,24 @@ pub struct BarsCoordinatorResult {
     connection_inters: Vec<ConnectionInterPlan>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarsPrefixResult {
+    start_column_index: Option<usize>,
+    removed_peaks: Vec<RemovedPeak>,
+}
+
+impl BarsPrefixResult {
+    #[must_use]
+    pub const fn start_column_index(&self) -> Option<usize> {
+        self.start_column_index
+    }
+
+    #[must_use]
+    pub fn removed_peaks(&self) -> &[RemovedPeak] {
+        &self.removed_peaks
+    }
+}
+
 impl BarsCoordinatorResult {
     #[must_use]
     pub const fn start_column_index(&self) -> Option<usize> {
@@ -295,13 +313,8 @@ pub fn process_bars_system(
     parameters: BarsCoordinatorParameters,
 ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
     let mut next = state.clone();
-    let staff_ids = next
-        .staffs
-        .iter()
-        .map(|staff| staff.staff_id)
-        .collect::<Vec<_>>();
-    next.columns =
-        build_bar_columns_from_graph(&next.graph, &staff_ids, parameters.maximum_column_dx)?;
+    let prefix = process_prefix(&mut next, parameters)?;
+
     let id_to_key = next
         .graph
         .vertices()
@@ -309,52 +322,8 @@ pub fn process_bars_system(
         .enumerate()
         .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
         .collect::<Vec<_>>();
-    let relations = graph_relations(&next.graph, &id_to_key)?;
-
-    let candidate = start_column_candidate(
-        &mut next.columns,
-        &relations,
-        parameters.maximum_brace_bar_gap,
-        parameters.maximum_double_bar_gap,
-    );
-    let start_column_index = if let Some(index) = candidate {
-        validate_and_apply_start(
-            &mut next,
-            index,
-            &id_to_key,
-            parameters.maximum_lines_left_to_start_bar,
-        )?
-    } else {
-        None
-    };
-
-    let mut removed_peaks = Vec::new();
-    purge_partial_columns(
-        &mut next,
-        start_column_index,
-        &id_to_key,
-        &mut removed_peaks,
-    )?;
-    for staff_index in 0..next.staffs.len() {
-        let start = next.staffs[staff_index]
-            .peaks
-            .iter()
-            .position(|peak| peak.is_staff_end(HorizontalSide::Left));
-        if let Some(start) = start {
-            let keys = peaks_too_far_left(
-                &next.staffs[staff_index].peaks,
-                start,
-                parameters.maximum_brace_bar_gap,
-            )?;
-            remove_keys(
-                &mut next,
-                &keys,
-                &id_to_key,
-                PeakRemovalStage::TooFarLeft,
-                &mut removed_peaks,
-            );
-        }
-    }
+    let mut removed_peaks = prefix.removed_peaks;
+    let start_column_index = prefix.start_column_index;
 
     for staff_index in 0..next.staffs.len() {
         let keys = peaks_before_staff_start(
@@ -446,6 +415,89 @@ pub fn process_bars_system(
         width_assignments,
         vertical_inters,
         connection_inters,
+    })
+}
+
+/// Run the exact dependency-complete prefix through Java `purgeTooLeft` and
+/// stop before `detectBracePortions`, which requires brace section/glyph state.
+pub fn process_bars_through_too_far_left(
+    state: &mut BarsSystemState,
+    parameters: BarsCoordinatorParameters,
+) -> Result<BarsPrefixResult, BarsCoordinatorError> {
+    let mut next = state.clone();
+    let result = process_prefix(&mut next, parameters)?;
+    *state = next;
+    Ok(result)
+}
+
+fn process_prefix(
+    next: &mut BarsSystemState,
+    parameters: BarsCoordinatorParameters,
+) -> Result<BarsPrefixResult, BarsCoordinatorError> {
+    let staff_ids = next
+        .staffs
+        .iter()
+        .map(|staff| staff.staff_id)
+        .collect::<Vec<_>>();
+    next.columns =
+        build_bar_columns_from_graph(&next.graph, &staff_ids, parameters.maximum_column_dx)?;
+    let id_to_key = next
+        .graph
+        .vertices()
+        .iter()
+        .enumerate()
+        .map(|(index, peak)| (PeakId::new(index + 1), peak.key()))
+        .collect::<Vec<_>>();
+    let relations = graph_relations(&next.graph, &id_to_key)?;
+
+    let candidate = start_column_candidate(
+        &mut next.columns,
+        &relations,
+        parameters.maximum_brace_bar_gap,
+        parameters.maximum_double_bar_gap,
+    );
+    let start_column_index = if let Some(index) = candidate {
+        validate_and_apply_start(
+            &mut *next,
+            index,
+            &id_to_key,
+            parameters.maximum_lines_left_to_start_bar,
+        )?
+    } else {
+        None
+    };
+
+    let mut removed_peaks = Vec::new();
+    purge_partial_columns(
+        &mut *next,
+        start_column_index,
+        &id_to_key,
+        &mut removed_peaks,
+    )?;
+    for staff_index in 0..next.staffs.len() {
+        let start = next.staffs[staff_index]
+            .peaks
+            .iter()
+            .position(|peak| peak.is_staff_end(HorizontalSide::Left));
+        if let Some(start) = start {
+            let keys = peaks_too_far_left(
+                &next.staffs[staff_index].peaks,
+                start,
+                parameters.maximum_brace_bar_gap,
+            )?;
+            remove_keys(
+                &mut *next,
+                &keys,
+                &id_to_key,
+                PeakRemovalStage::TooFarLeft,
+                &mut removed_peaks,
+            );
+        }
+    }
+
+    Ok(BarsPrefixResult {
+        start_column_index,
+        removed_peaks,
     })
 }
 
