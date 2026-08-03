@@ -368,15 +368,30 @@ denied, and passed `git diff --check` before commit.
 284. `b5a7e36c` — headless `HEADS` step lifecycle and ownership order.
 285. `807095ac` — beam-structure borders, splitting, and core/belt raster impacts.
 286. `192c628a` — ledger glyph/SIG materialization, exclusions, and staff ownership.
+287. `ee2aab98` — headless `STEMS` lifecycle.
+288. `a812f1b0` — native beam impacts at the classifier seam.
+289. `c82eb969` — native heads prolog.
+290. `538c804a` and `fc42ae52` — beam-extension evidence and seam exposure.
+291. `5401e360` — headless `REDUCTION` lifecycle.
+292. `e56b11a6` and `b276c0ce` — native stem retrieval orchestration and concrete stem checker.
+293. `7e9b7a90`, `be7313d0`, and `a45c54de` — hook evidence, Java-compatible positive-area intersections, and seam exposure.
+294. `9203e13c` — headless `CUE_BEAMS` lifecycle.
+295. `3715c8a2` — native stem-link geometry kernel.
+296. `979d7791` and `8d7a83d4` — native beam-group geometry and seam exposure.
+297. `bbb51002`, `5832be3c`, `517c0d49`, `bca50fbb`, `7b8a942a`, `81e201bf`, `9cba2956`, and `bd24daf2` — dependency-light headless lifecycles for `MEASURES` through `PAGE` in pipeline order.
+298. `26382f6b` and `3d265640` — native multiple-rest serif evidence and seam exposure.
+299. `be184be8`, `602c23c7`, and `a685b5cf` — native header clef, key, and time candidate sourcing.
+300. `ade15e54` — immutable bundled `BasicClassifier` model parser and 110→149→149 sigmoid inference core.
 
-At the two-hundred-and-eighty-sixth checkpoint the Rust workspace executes 774 tests:
+At checkpoint 300 the Rust workspace executes 871 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 492
-- `audiveris-omr`: 229
+- `audiveris-image`: 505
+- `audiveris-omr`: 310
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
+- `audiveris-classifier`: 3
 
 The live Java/Rust oracle compares 70 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
@@ -395,6 +410,14 @@ merge, matching both the initial two-score grouping and final one-score result e
 The newest vector freezes production `StaffFilament.fillHoles`, including ties-to-even
 insertion, neighbor interpolation and fallback, defining-point order, and regenerated
 spline position/slope.
+
+The bundled classifier is now parsed and evaluated natively without a Java runtime:
+model XML, normalization vectors, labels, and the two bias-first sigmoid layers are
+validated and held immutable. This is deliberately only the inference core. Raw glyph
+feature extraction (`BasicARTMoments` and geometric moments), Java candidate sorting/
+minimum-grade policy, user overrides, and MusicFont metrics remain separate seams. A
+Java-backed fixed-feature oracle is the immediate next checkpoint; do not represent the
+current core as a complete visual classifier.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -586,24 +609,22 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete the remaining concrete `GRID` seams: construct cluster/projector/system inputs
-   directly from the live raster lags, integrate raw slope/curvature rejection and deskew,
-   eliminate the documented transactional exceptional-path mismatches, and freeze a
-   raw-image full-stage GRID differential.
-   Keep UI integration behind explicit neutral boundaries until the headless output
-   matches that fixture.
-2. Extend `.omr` typing only through bounded read-only views that preserve every
+1. Freeze a Java/Rust vector for a fixed 110-value `BasicClassifier` feature input, then
+   port ART/geometric feature extraction and Java candidate ranking independently. Do not
+   couple this work to MusicFont sizing or a recognition-stage behavior change.
+2. Complete the remaining concrete visual seams in `HEADERS`, `STEM_SEEDS`, `BEAMS`,
+   `LEDGERS`, and `HEADS`, stopping at the first new raw-image differential boundary.
+3. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
-3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
+4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
    current vector ordering stable while its key-aware diagnostics catch schema drift.
-4. Add Tesseract data to the oracle manifest when its resolved runtime location is
+5. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
-5. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
+6. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
    to work in a standalone Audiveris clone; today those vectors deliberately resolve
    `../../data/synth/...` from this parent OMR checkout.
-6. Port the remaining `GRID` contracts, then subsequent stages strictly in `OmrStep`
-   order. Stop comparison at
-   the first differing stage so later agreement cannot hide an upstream mismatch.
+7. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
+   differing stage so later agreement cannot hide an upstream mismatch.
 
 ## Differential fixture plan
 

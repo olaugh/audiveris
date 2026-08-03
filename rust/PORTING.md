@@ -37,10 +37,10 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Area | State |
 | --- | --- |
 | Java oracle | frozen, executable verifier green |
-| Live Java/Rust vectors | 70 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, and exact `StaffFilament.fillHoles` mutation |
+| Live Java/Rust vectors | 70 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, and exact `StaffFilament.fillHoles` mutation; a fixed-feature classifier oracle is next |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 774 tests green at checkpoint 286: core 38, image 492, OMR 229, testkit 6, CLI 4, xtask 5 |
+| Rust workspace | 871 tests green at checkpoint 300: core 38, image 505, OMR 310, testkit 6, CLI 4, xtask 5, classifier 3 |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
@@ -72,11 +72,12 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID target geometry | source-guided target-line deskew mapping with exact live sloped-line parity plus immutable cycle-free page/system/staff containers |
 | Remaining filters and PDF ingest | queued |
 | `.omr` persistence | opaque round trip plus lossless typed `book.xml`/per-sheet views, explicit stub/member states, pipeline status, sheet input provenance, compatibility attributes, page references and links, order-derived systems, part/staff configuration, logical parts, score-root metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics parameters; absent, inherited, and explicit values remain distinct |
-| HEADERS recognition stage | headless `StaffHeader`, step lifecycle, and `HeaderBuilder` shell plus clef/key/time column and per-staff candidate lifecycles; exact ranges, proposal ordering, pitch maps, grade/context selection, exclusions, stop propagation, cleanup, ownership, and failure prefixes are native around honest injected visual classifier seams |
-| STEM_SEEDS recognition stage | headless lifecycle, concrete stem-scale histogram/peak/fallback, and vertical factory/checker orchestration implemented; raw vertical StickFactory/checker geometry remains an explicit visual seam |
-| BEAMS recognition stage | headless lifecycle, concrete morphology/threshold/run evidence, native connected-component glyphs, system dispatch, candidate ordering/retry/extensions/group orchestration, multiple-rest replacement, and BeamStructure border/core/belt impacts; remaining seams are beam/hook classifier/materialization and the listed raster-geometric extension/group/serif internals |
+| Visual classifier core | native immutable parser/inference for the frozen bundled 110→149→149 `BasicClassifier` model, including Java normalization and bias-first sigmoid layers; ART/geometric glyph features, rank/minimum-grade policy, overrides, and MusicFont metrics remain unported |
+| HEADERS recognition stage | headless `StaffHeader`, step lifecycle, `HeaderBuilder`, and native clef/key/time candidate sourcing plus per-staff candidate lifecycles; exact ranges, proposal ordering, pitch maps, grade/context selection, exclusions, stop propagation, cleanup, ownership, and failure prefixes are native around remaining visual classifier seams |
+| STEM_SEEDS recognition stage | headless lifecycle, concrete stem-scale histogram/peak/fallback, vertical factory/checker orchestration, and concrete stem checker implemented; raw vertical StickFactory geometry remains an explicit visual seam |
+| BEAMS recognition stage | headless lifecycle, concrete morphology/threshold/run evidence, native connected-component glyphs, system dispatch, candidate ordering/retry/extensions/group orchestration, multiple-rest replacement, BeamStructure border/core/belt impacts, hook/group/extension/serif evidence; remaining seams are classifier/materialization and listed raster-geometric internals |
 | LEDGERS recognition stage | lifecycle, raw zones/runs/sections, concrete horizontal StickFactory filaments, all gates/seven impacts, overlap reduction, glyph/SIG materialization, exclusions, and staff ownership implemented; visual filter input remains explicit |
-| HEADS recognition stage | dependency-light lifecycle, transient spot dispatch contract, ordered classifier mutations, glyph/inter/SIG/staff ownership, checked/fatal prefixes, cleanup, and quorum scale implemented; visual spot/classifier internals remain queued |
-| Later recognition stages | queued in pipeline order after HEADS |
+| HEADS recognition stage | dependency-light lifecycle, native prolog, transient spot dispatch contract, ordered classifier mutations, glyph/inter/SIG/staff ownership, checked/fatal prefixes, cleanup, and quorum scale implemented; visual spot/classifier internals remain queued |
+| Later recognition stages | dependency-light lifecycles are native for `STEMS`, `REDUCTION`, `CUE_BEAMS`, `TEXTS`, `MEASURES`, `CHORDS`, `CURVES`, `SYMBOLS`, `LINKS`, `RHYTHMS`, and `PAGE`; their semantic/visual algorithms remain queued in pipeline order |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
