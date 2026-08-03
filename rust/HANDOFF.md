@@ -117,17 +117,23 @@ denied, and passed `git diff --check` before commit.
     absorption, bounds, mean true length, and both extrapolation branches.
 53. `5beb9bb5` — optional direct page time-rational metadata with raw JAXB integer
     semantics and lossless opaque retention of nested page content.
+54. `cdb0c4dc` — live Java/Rust target-line vector across a sloped filament,
+    endpoint/midpoint mapping, orthogonal offsets, and extrapolation.
+55. `c7dbcd18` — immutable, cycle-free target page/system/staff containers with
+    stable IDs, append-order preservation, ownership, and geometry validation.
+56. `ee562e3e` — direct page systems in persisted order with Java's derived
+    one-based `SystemRef` identity; part/staff content remains opaque.
 
-At the fifty-third checkpoint the Rust workspace executes 187 tests:
+At the fifty-sixth checkpoint the Rust workspace executes 191 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 84
-- `audiveris-omr`: 50
+- `audiveris-image`: 87
+- `audiveris-omr`: 51
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 41 canonical vectors at this checkpoint. SCALE
+The live Java/Rust oracle compares 42 canonical vectors at this checkpoint. SCALE
 matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
 exactly at the two-pixel distance threshold. Commit `27dbfeb6` briefly encoded the wrong
@@ -158,6 +164,10 @@ core; recursive comb discovery, cluster merging, trimming, SIG, and UI behavior 
 outside the ported surface. The line-cluster core now also has direct live Java parity,
 ordered endpoints, and indexed inclusion, while target-line deskew mapping begins the
 neutral destination geometry used later in GRID cleanup.
+Target-line mapping now has exact live parity on a sloped source, and the surrounding
+page/system/staff target containers preserve source order without recreating Java's
+object cycles. The `.omr` view derives order-only system references exactly as Java
+does rather than inventing persisted IDs.
 
 A one-off read-only audit also opened, parsed, re-encoded, and byte-compared every member
 of three real Audiveris 5.11.0 archives: Essen (115,350 uncompressed bytes), K545
