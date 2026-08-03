@@ -583,6 +583,127 @@ pub struct PartsPlan {
     pub removed_group_indices: Vec<usize>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupPeakFacts {
+    pub brace: bool,
+    pub bracket: bool,
+    pub bracket_top: bool,
+    pub bracket_bottom: bool,
+    pub brace_top: bool,
+    pub brace_bottom: bool,
+    pub connected_top: bool,
+    pub connected_bottom: bool,
+}
+
+impl GroupPeakFacts {
+    #[must_use]
+    pub const fn plain(connected_top: bool, connected_bottom: bool) -> Self {
+        Self {
+            brace: false,
+            bracket: false,
+            bracket_top: false,
+            bracket_bottom: false,
+            brace_top: false,
+            brace_bottom: false,
+            connected_top,
+            connected_bottom,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GroupStaffFacts<'a> {
+    pub staff_id: i32,
+    pub peaks: &'a [GroupPeakFacts],
+    pub start_peak_index: Option<usize>,
+    pub brace_peak: Option<GroupPeakFacts>,
+    pub part_connected_below: bool,
+}
+
+/// Java `BarsRetriever.createGroups` state machine without Sheet/SIG cycles.
+/// Active group levels are shared across successive staves; overwritten
+/// unfinished groups deliberately remain in the output list.
+pub fn create_part_groups(
+    staves: &[GroupStaffFacts<'_>],
+) -> Result<Vec<PartGroup>, BarsLogicError> {
+    use std::collections::BTreeMap;
+
+    let mut groups = Vec::new();
+    let mut active: BTreeMap<i32, usize> = BTreeMap::new();
+    for staff in staves {
+        let Some(start_index) = staff.start_peak_index else {
+            continue;
+        };
+        if start_index >= staff.peaks.len() {
+            return Err(BarsLogicError::InvalidGroupStartIndex {
+                staff_id: staff.staff_id,
+                index: start_index,
+            });
+        }
+
+        let mut level = 0_i32;
+        for peak in staff.peaks[..start_index].iter().rev() {
+            if peak.brace {
+                break;
+            }
+            level = level.wrapping_add(1);
+            if peak.bracket {
+                if peak.bracket_top {
+                    let index = groups.len();
+                    groups.push(PartGroup::new(
+                        level,
+                        crate::part_group::PartGroupingSymbol::Bracket,
+                        staff.part_connected_below,
+                        staff.staff_id,
+                    ));
+                    active.insert(level, index);
+                } else if let Some(&index) = active.get(&level) {
+                    groups[index].set_last_staff_id(staff.staff_id);
+                    if peak.bracket_bottom {
+                        active.remove(&level);
+                    }
+                }
+            } else if !peak.connected_top && peak.connected_bottom {
+                let index = groups.len();
+                groups.push(PartGroup::new(
+                    level,
+                    crate::part_group::PartGroupingSymbol::Square,
+                    staff.part_connected_below,
+                    staff.staff_id,
+                ));
+                active.insert(level, index);
+            } else if peak.connected_top {
+                if let Some(&index) = active.get(&level) {
+                    groups[index].set_last_staff_id(staff.staff_id);
+                    if !peak.connected_bottom {
+                        active.remove(&level);
+                    }
+                }
+            }
+        }
+
+        if let Some(brace) = staff.brace_peak {
+            level = level.wrapping_add(1);
+            if brace.brace_top {
+                let index = groups.len();
+                groups.push(PartGroup::new(
+                    level,
+                    crate::part_group::PartGroupingSymbol::Brace,
+                    staff.part_connected_below,
+                    staff.staff_id,
+                ));
+                active.insert(level, index);
+            } else if let Some(&index) = active.get(&level) {
+                groups[index].set_last_staff_id(staff.staff_id);
+                if brace.brace_bottom {
+                    active.remove(&level);
+                }
+            }
+        }
+    }
+    Ok(groups)
+}
+
 /// Dependency-light plan for Java `BarsRetriever.createParts`.
 ///
 /// True brace groups use Java's `TreeSet(PartGroup.byFirstId)`: ordering and
@@ -816,6 +937,7 @@ pub enum BarsLogicError {
     PeakIdExhausted,
     InvalidStaffRange { first: i32, last: i32 },
     StaffIdExhausted,
+    InvalidGroupStartIndex { staff_id: i32, index: usize },
 }
 
 impl From<BarColumnError> for BarsLogicError {
@@ -842,6 +964,12 @@ impl fmt::Display for BarsLogicError {
                 write!(formatter, "invalid staff range {first}..={last}")
             }
             Self::StaffIdExhausted => formatter.write_str("staff ID arithmetic exhausted"),
+            Self::InvalidGroupStartIndex { staff_id, index } => {
+                write!(
+                    formatter,
+                    "invalid group start index {index} for staff {staff_id}"
+                )
+            }
         }
     }
 }
@@ -1592,6 +1720,121 @@ mod tests {
         let brace_wins = plan_parts(10, 11, &groups, false, true).unwrap();
         assert_eq!(brace_wins.parts, forced_single.parts);
         assert_eq!(brace_wins.removed_group_indices, [0]);
+    }
+
+    #[test]
+    fn group_state_machine_builds_bracket_square_and_brace_ranges() {
+        let start = GroupPeakFacts::plain(false, false);
+        let bracket_top = GroupPeakFacts {
+            bracket: true,
+            bracket_top: true,
+            ..GroupPeakFacts::plain(false, false)
+        };
+        let square_top = GroupPeakFacts::plain(false, true);
+        let brace_top = GroupPeakFacts {
+            brace: true,
+            brace_top: true,
+            ..GroupPeakFacts::plain(false, false)
+        };
+        let bracket_bottom = GroupPeakFacts {
+            bracket: true,
+            bracket_bottom: true,
+            ..GroupPeakFacts::plain(false, false)
+        };
+        let square_bottom = GroupPeakFacts::plain(true, false);
+        let brace_bottom = GroupPeakFacts {
+            brace: true,
+            brace_bottom: true,
+            ..GroupPeakFacts::plain(false, false)
+        };
+        // Reverse scan sees square at level 1, bracket at level 2.
+        let first_peaks = [bracket_top, square_top, start];
+        let second_peaks = [bracket_bottom, square_bottom, start];
+        let groups = create_part_groups(&[
+            GroupStaffFacts {
+                staff_id: 1,
+                peaks: &first_peaks,
+                start_peak_index: Some(2),
+                brace_peak: Some(brace_top),
+                part_connected_below: true,
+            },
+            GroupStaffFacts {
+                staff_id: 2,
+                peaks: &second_peaks,
+                start_peak_index: Some(2),
+                brace_peak: Some(brace_bottom),
+                part_connected_below: false,
+            },
+        ])
+        .unwrap();
+        assert_eq!(groups.len(), 3);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| (
+                    group.symbol(),
+                    group.number(),
+                    group.first_staff_id(),
+                    group.last_staff_id(),
+                    group.is_barline(),
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (crate::part_group::PartGroupingSymbol::Square, 1, 1, 2, true),
+                (
+                    crate::part_group::PartGroupingSymbol::Bracket,
+                    2,
+                    1,
+                    2,
+                    true
+                ),
+                (crate::part_group::PartGroupingSymbol::Brace, 3, 1, 2, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_state_machine_skips_staff_without_start_and_keeps_overwritten_group() {
+        let start = GroupPeakFacts::plain(false, false);
+        let brace_top = GroupPeakFacts {
+            brace: true,
+            brace_top: true,
+            ..GroupPeakFacts::plain(false, false)
+        };
+        let peaks = [start];
+        let groups = create_part_groups(&[
+            GroupStaffFacts {
+                staff_id: 1,
+                peaks: &peaks,
+                start_peak_index: Some(0),
+                brace_peak: Some(brace_top),
+                part_connected_below: false,
+            },
+            GroupStaffFacts {
+                staff_id: 2,
+                peaks: &peaks,
+                start_peak_index: None,
+                brace_peak: Some(brace_top),
+                part_connected_below: false,
+            },
+            GroupStaffFacts {
+                staff_id: 3,
+                peaks: &peaks,
+                start_peak_index: Some(0),
+                brace_peak: Some(brace_top),
+                part_connected_below: false,
+            },
+        ])
+        .unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(
+            (groups[0].first_staff_id(), groups[0].last_staff_id()),
+            (1, 1)
+        );
+        assert_eq!(
+            (groups[1].first_staff_id(), groups[1].last_staff_id()),
+            (3, 3)
+        );
     }
 
     #[test]
