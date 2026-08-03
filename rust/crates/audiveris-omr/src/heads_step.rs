@@ -12,6 +12,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
+use audiveris_core::natural_spline::{NaturalSpline, SplineError};
+use audiveris_image::{
+    chamfer::{ChamferDistance, CHAMFER_3, VALUE_UNKNOWN},
+    glyph_factory::{build_glyph_components, GlyphComponent},
+    run_table::{RunTable, BACKGROUND, FOREGROUND},
+    staff_line_conversion::{PersistentStaffLine, StaffGlyph},
+    system_population::PopulationSystemArea,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NeutralHeadShape(pub u16);
 
@@ -26,6 +35,19 @@ pub struct NeutralDistanceTable {
     pub id: usize,
     pub width: usize,
     pub height: usize,
+    /// Java `DistanceTable` mask normalizer (`3` for `ChamferDistance.Short`).
+    pub normalizer: i32,
+    /// Row-major chamfer values after staff/ledger/seed neutralization.
+    pub values: Vec<i32>,
+}
+
+impl NeutralDistanceTable {
+    #[must_use]
+    pub fn value(&self, x: usize, y: usize) -> Option<i32> {
+        (x < self.width && y < self.height)
+            .then(|| (y * self.width) + x)
+            .and_then(|index| self.values.get(index).copied())
+    }
 }
 
 /// One transient glyph produced from the HEAD_SPOTS run table.
@@ -33,11 +55,18 @@ pub struct NeutralDistanceTable {
 /// `relevant_system_ids` is the visual `SystemManager.getSystemsOf` result.
 /// The neutral layer still owns Java's inclusive horizontal-system test and
 /// the possibility that one transient object is dispatched to two systems.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NeutralHeadSpot {
+    /// Transient object identity, never a sheet `GlyphIndex` registration.
     pub id: usize,
     pub center_x: i32,
     pub center_y: i32,
+    /// Transient `GlyphGroup.HEAD_SPOT`; dispatch sets it even when the
+    /// injected producer omitted the group.
+    pub head_spot_group: bool,
+    /// Native glyph component, including source runs and exact centroid.
+    /// Dependency-injected implementations may omit it.
+    pub component: Option<GlyphComponent>,
     pub relevant_system_ids: Vec<usize>,
 }
 
@@ -286,6 +315,485 @@ pub trait VisualHeads {
     fn classify_system(&mut self, input: HeadSystemInput<'_>) -> HeadSystemOutcome<Self::Error>;
 }
 
+/// Positioned glyph erased by Java `DistancesBuilder.paintLines`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeHeadRasterGlyph {
+    pub left: i32,
+    pub top: i32,
+    pub runs: RunTable,
+}
+
+impl From<&StaffGlyph> for NativeHeadRasterGlyph {
+    fn from(glyph: &StaffGlyph) -> Self {
+        Self {
+            left: i32::try_from(glyph.x).expect("Java sheet coordinates fit in int"),
+            top: i32::try_from(glyph.y).expect("Java sheet coordinates fit in int"),
+            runs: glyph.runs.clone(),
+        }
+    }
+}
+
+/// Raster inputs owned by one Java staff during distance preparation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeadStaffRaster {
+    pub tablature: bool,
+    pub lines: Vec<PersistentStaffLine>,
+    pub ledger_glyphs: Vec<NativeHeadRasterGlyph>,
+}
+
+/// Raster inputs owned by one Java system during distance preparation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeadSystemRaster {
+    pub system_id: usize,
+    pub staves: Vec<NativeHeadStaffRaster>,
+    pub vertical_seed_glyphs: Vec<NativeHeadRasterGlyph>,
+}
+
+/// Concrete native inputs for `DistancesBuilder` and `HeadSpotsBuilder`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeadsPrologRaster {
+    /// Java `Picture.SourceKey.BINARY` at HEADS entry.
+    pub binary: RunTable,
+    /// Java `Picture.TableKey.HEAD_SPOTS`, normally vertical.
+    pub head_spots: RunTable,
+    /// Sheet/system/staff source order is significant for failure prefixes.
+    pub systems: Vec<NativeHeadSystemRaster>,
+    /// Exact curved `SystemInfo.area` objects used by `getSystemsOf(centroid)`.
+    pub system_areas: Vec<PopulationSystemArea>,
+}
+
+/// Classifier seam left after native distance and spot retrieval are available.
+pub trait VisualHeadClassifier {
+    type Error;
+
+    fn classify_system(
+        &mut self,
+        input: NativeHeadClassifierInput<'_>,
+    ) -> HeadSystemOutcome<Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeHeadClassifierInput<'a> {
+    pub sheet: &'a NeutralHeadSheet,
+    pub system_id: usize,
+    pub distance_table: &'a NeutralDistanceTable,
+    pub binary_without_lines: &'a [u8],
+    pub spots: &'a [NeutralHeadSpot],
+}
+
+/// Concrete `VisualHeads` implementation that leaves only template matching
+/// and head interpretation behind an injected collaborator.
+pub struct NativeVisualHeads<Classifier> {
+    raster: NativeHeadsPrologRaster,
+    classifier: Classifier,
+    binary_without_lines: Option<Vec<u8>>,
+}
+
+impl<Classifier> NativeVisualHeads<Classifier> {
+    #[must_use]
+    pub const fn new(raster: NativeHeadsPrologRaster, classifier: Classifier) -> Self {
+        Self {
+            raster,
+            classifier,
+            binary_without_lines: None,
+        }
+    }
+
+    /// Shared binary buffer after the exact successful erasure prefix.
+    #[must_use]
+    pub fn binary_without_lines(&self) -> Option<&[u8]> {
+        self.binary_without_lines.as_deref()
+    }
+
+    #[must_use]
+    pub const fn classifier(&self) -> &Classifier {
+        &self.classifier
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeHeadsError<ClassifierError> {
+    SystemOrder {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    HeadSpotDimensions {
+        binary_width: usize,
+        binary_height: usize,
+        spot_width: usize,
+        spot_height: usize,
+    },
+    DistanceSpline {
+        system_id: usize,
+        source: SplineError,
+    },
+    Classifier(ClassifierError),
+}
+
+impl<ClassifierError: fmt::Display> fmt::Display for NativeHeadsError<ClassifierError> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SystemOrder { expected, actual } => {
+                write!(formatter, "heads raster system order {actual:?}, expected {expected:?}")
+            }
+            Self::HeadSpotDimensions {
+                binary_width,
+                binary_height,
+                spot_width,
+                spot_height,
+            } => write!(
+                formatter,
+                "HEAD_SPOTS raster is {spot_width}x{spot_height}, expected {binary_width}x{binary_height}"
+            ),
+            Self::DistanceSpline { system_id, source } => {
+                write!(
+                    formatter,
+                    "heads distance spline failed in system {system_id}: {source}"
+                )
+            }
+            Self::Classifier(source) => write!(formatter, "heads classifier failed: {source}"),
+        }
+    }
+}
+
+impl<ClassifierError: Error + 'static> Error for NativeHeadsError<ClassifierError> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::DistanceSpline { source, .. } => Some(source),
+            Self::Classifier(source) => Some(source),
+            Self::SystemOrder { .. } | Self::HeadSpotDimensions { .. } => None,
+        }
+    }
+}
+
+impl<Classifier> VisualHeads for NativeVisualHeads<Classifier>
+where
+    Classifier: VisualHeadClassifier,
+{
+    type Error = NativeHeadsError<Classifier::Error>;
+
+    fn build_distance_table(
+        &mut self,
+        input: HeadDistanceInput<'_>,
+    ) -> Result<NeutralDistanceTable, Self::Error> {
+        let expected = input
+            .sheet
+            .systems
+            .iter()
+            .map(|system| system.id)
+            .collect::<Vec<_>>();
+        let actual = self
+            .raster
+            .systems
+            .iter()
+            .map(|system| system.system_id)
+            .collect::<Vec<_>>();
+        if actual != expected {
+            return Err(NativeHeadsError::SystemOrder { expected, actual });
+        }
+        let (pixels, table) = build_native_distance_table(&self.raster, |prefix| {
+            self.binary_without_lines = Some(prefix.to_vec());
+        })?;
+        self.binary_without_lines = Some(pixels);
+        Ok(table)
+    }
+
+    fn retrieve_head_spots(
+        &mut self,
+        _input: HeadSpotInput<'_>,
+    ) -> Result<Vec<NeutralHeadSpot>, Self::Error> {
+        if self.raster.head_spots.width() != self.raster.binary.width()
+            || self.raster.head_spots.height() != self.raster.binary.height()
+        {
+            return Err(NativeHeadsError::HeadSpotDimensions {
+                binary_width: self.raster.binary.width(),
+                binary_height: self.raster.binary.height(),
+                spot_width: self.raster.head_spots.width(),
+                spot_height: self.raster.head_spots.height(),
+            });
+        }
+        Ok(retrieve_native_head_spots(&self.raster))
+    }
+
+    fn classify_system(&mut self, input: HeadSystemInput<'_>) -> HeadSystemOutcome<Self::Error> {
+        let binary_without_lines = self
+            .binary_without_lines
+            .as_deref()
+            .expect("successful distance prolog installs the shared binary");
+        let outcome = self.classifier.classify_system(NativeHeadClassifierInput {
+            sheet: input.sheet,
+            system_id: input.system_id,
+            distance_table: input.distance_table,
+            binary_without_lines,
+            spots: input.spots,
+        });
+        HeadSystemOutcome {
+            delta: outcome.delta,
+            failure: outcome.failure.map(|failure| match failure {
+                HeadSystemFailure::Checked(source) => {
+                    HeadSystemFailure::Checked(NativeHeadsError::Classifier(source))
+                }
+                HeadSystemFailure::Fatal(source) => {
+                    HeadSystemFailure::Fatal(NativeHeadsError::Classifier(source))
+                }
+            }),
+        }
+    }
+}
+
+fn build_native_distance_table<ClassifierError>(
+    raster: &NativeHeadsPrologRaster,
+    mut record_prefix: impl FnMut(&[u8]),
+) -> Result<(Vec<u8>, NeutralDistanceTable), NativeHeadsError<ClassifierError>> {
+    let width = raster.binary.width();
+    let height = raster.binary.height();
+    let mut pixels = raster.binary.to_pixels();
+
+    for system in &raster.systems {
+        for staff in &system.staves {
+            if staff.tablature {
+                continue;
+            }
+            for line in &staff.lines {
+                let glyph = NativeHeadRasterGlyph::from(&line.glyph);
+                paint_glyph_pixels(&mut pixels, width, height, &glyph, BACKGROUND);
+                record_prefix(&pixels);
+                if let Err(source) =
+                    paint_staff_line_pixels(&mut pixels, width, height, line, BACKGROUND)
+                {
+                    record_prefix(&pixels);
+                    return Err(NativeHeadsError::DistanceSpline {
+                        system_id: system.system_id,
+                        source,
+                    });
+                }
+                record_prefix(&pixels);
+            }
+            for glyph in &staff.ledger_glyphs {
+                paint_glyph_pixels(&mut pixels, width, height, glyph, BACKGROUND);
+                record_prefix(&pixels);
+            }
+        }
+        for glyph in &system.vertical_seed_glyphs {
+            paint_glyph_pixels(&mut pixels, width, height, glyph, BACKGROUND);
+            record_prefix(&pixels);
+        }
+    }
+
+    let chamfer = ChamferDistance::new(CHAMFER_3);
+    let native = chamfer.compute_to_fore(width, height, &pixels);
+    let mut values = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            values.push(native.get(x, y));
+        }
+    }
+
+    // Java repeats the exact same paint traversal on the completed table,
+    // replacing all line/ledger/seed pixels with VALUE_UNKNOWN.
+    for system in &raster.systems {
+        for staff in &system.staves {
+            if staff.tablature {
+                continue;
+            }
+            for line in &staff.lines {
+                paint_glyph_values(
+                    &mut values,
+                    width,
+                    height,
+                    &NativeHeadRasterGlyph::from(&line.glyph),
+                    VALUE_UNKNOWN,
+                );
+                paint_staff_line_values(&mut values, width, height, line, VALUE_UNKNOWN)
+                    .expect("the spline succeeded during the image paint pass");
+            }
+            for glyph in &staff.ledger_glyphs {
+                paint_glyph_values(&mut values, width, height, glyph, VALUE_UNKNOWN);
+            }
+        }
+        for glyph in &system.vertical_seed_glyphs {
+            paint_glyph_values(&mut values, width, height, glyph, VALUE_UNKNOWN);
+        }
+    }
+
+    Ok((
+        pixels,
+        NeutralDistanceTable {
+            id: 0,
+            width,
+            height,
+            normalizer: native.normalizer(),
+            values,
+        },
+    ))
+}
+
+fn retrieve_native_head_spots(raster: &NativeHeadsPrologRaster) -> Vec<NeutralHeadSpot> {
+    build_glyph_components(&raster.head_spots, 0, 0)
+        .into_iter()
+        .map(|component| {
+            let relevant_system_ids = raster
+                .system_areas
+                .iter()
+                .filter(|area| {
+                    area.contains(
+                        f64::from(component.rounded_centroid_x),
+                        f64::from(component.rounded_centroid_y),
+                    )
+                })
+                .map(|area| area.system_id)
+                .collect();
+            NeutralHeadSpot {
+                id: component.ancestor_mark,
+                center_x: component.rounded_centroid_x,
+                center_y: component.rounded_centroid_y,
+                head_spot_group: true,
+                component: Some(component),
+                relevant_system_ids,
+            }
+        })
+        .collect()
+}
+
+fn paint_glyph_pixels(
+    target: &mut [u8],
+    width: usize,
+    height: usize,
+    glyph: &NativeHeadRasterGlyph,
+    value: u8,
+) {
+    for (offset, pixel) in glyph.runs.to_pixels().into_iter().enumerate() {
+        if pixel != FOREGROUND {
+            continue;
+        }
+        let local_x = offset % glyph.runs.width();
+        let local_y = offset / glyph.runs.width();
+        paint_offset(
+            target,
+            width,
+            height,
+            (glyph.left, glyph.top),
+            (local_x, local_y),
+            value,
+        );
+    }
+}
+
+fn paint_glyph_values(
+    target: &mut [i32],
+    width: usize,
+    height: usize,
+    glyph: &NativeHeadRasterGlyph,
+    value: i32,
+) {
+    for (offset, pixel) in glyph.runs.to_pixels().into_iter().enumerate() {
+        if pixel != FOREGROUND {
+            continue;
+        }
+        let local_x = offset % glyph.runs.width();
+        let local_y = offset / glyph.runs.width();
+        paint_offset(
+            target,
+            width,
+            height,
+            (glyph.left, glyph.top),
+            (local_x, local_y),
+            value,
+        );
+    }
+}
+
+fn paint_staff_line_pixels(
+    target: &mut [u8],
+    width: usize,
+    height: usize,
+    line: &PersistentStaffLine,
+    value: u8,
+) -> Result<(), SplineError> {
+    paint_staff_line(target, width, height, line, value)
+}
+
+fn paint_staff_line_values(
+    target: &mut [i32],
+    width: usize,
+    height: usize,
+    line: &PersistentStaffLine,
+    value: i32,
+) -> Result<(), SplineError> {
+    paint_staff_line(target, width, height, line, value)
+}
+
+fn paint_staff_line<Value: Copy>(
+    target: &mut [Value],
+    width: usize,
+    height: usize,
+    line: &PersistentStaffLine,
+    value: Value,
+) -> Result<(), SplineError> {
+    let spline = NaturalSpline::interpolate(&line.points)?;
+    let start = line.points[0];
+    let stop = line.points[line.points.len() - 1];
+    let x_min = start.0.floor() as i32;
+    let x_max = stop.0.ceil() as i32;
+    let half_line = 0.5 * (line.glyph.runs.weight() as f64 / line.glyph.runs.width() as f64);
+    for x in x_min..=x_max {
+        let x_as_float = f64::from(x);
+        let y = if x_as_float < start.0 || x_as_float > stop.0 {
+            let slope = (stop.1 - start.1) / (stop.0 - start.0);
+            start.1 + (slope * (x_as_float - start.0))
+        } else {
+            spline.y_at_x(x_as_float)?
+        };
+        let y_min = (y - half_line).round_ties_even() as i32;
+        let y_max = (y + half_line).round_ties_even() as i32;
+        for ordinate in y_min..=y_max {
+            paint_absolute(target, width, height, x, ordinate, value);
+        }
+    }
+    Ok(())
+}
+
+fn paint_offset<Value: Copy>(
+    target: &mut [Value],
+    width: usize,
+    height: usize,
+    origin: (i32, i32),
+    local: (usize, usize),
+    value: Value,
+) {
+    let (left, top) = origin;
+    let (local_x, local_y) = local;
+    let Ok(local_x) = i32::try_from(local_x) else {
+        return;
+    };
+    let Ok(local_y) = i32::try_from(local_y) else {
+        return;
+    };
+    let Some(x) = left.checked_add(local_x) else {
+        return;
+    };
+    let Some(y) = top.checked_add(local_y) else {
+        return;
+    };
+    paint_absolute(target, width, height, x, y, value);
+}
+
+fn paint_absolute<Value: Copy>(
+    target: &mut [Value],
+    width: usize,
+    height: usize,
+    x: i32,
+    y: i32,
+    value: Value,
+) {
+    let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+        return;
+    };
+    if x < width && y < height {
+        target[(y * width) + x] = value;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadsPrologStage {
     DistanceTable,
@@ -522,7 +1030,7 @@ fn dispatch_head_spots(
         .map(|system| (system.id, Vec::new()))
         .collect::<BTreeMap<_, _>>();
     let mut spot_ids = BTreeSet::new();
-    for spot in spots {
+    for mut spot in spots {
         if !spot_ids.insert(spot.id) {
             return Err(HeadsContractError::DuplicateSpot(spot.id));
         }
@@ -544,6 +1052,7 @@ fn dispatch_head_spots(
             previous_position = Some(position);
             let system = &sheet.systems[position];
             if spot.center_x >= system.left && spot.center_x <= system.right {
+                spot.head_spot_group = true;
                 result
                     .get_mut(&system_id)
                     .expect("validated system bucket")
@@ -992,6 +1501,8 @@ mod tests {
                 id: 7,
                 width: 100,
                 height: 80,
+                normalizer: 3,
+                values: vec![VALUE_UNKNOWN; 8_000],
             }))
         }
 
@@ -1081,6 +1592,8 @@ mod tests {
                 id: 9,
                 center_x: 50,
                 center_y: 20,
+                head_spot_group: false,
+                component: None,
                 relevant_system_ids: vec![2, 1],
             }])),
             ..FakeVisual::default()
@@ -1262,5 +1775,242 @@ mod tests {
                 }),
             Some(&5.5)
         );
+    }
+
+    #[derive(Default)]
+    struct NativeClassifier {
+        calls: Vec<(usize, Vec<usize>, Vec<u8>)>,
+    }
+
+    impl VisualHeadClassifier for NativeClassifier {
+        type Error = &'static str;
+
+        fn classify_system(
+            &mut self,
+            input: NativeHeadClassifierInput<'_>,
+        ) -> HeadSystemOutcome<Self::Error> {
+            self.calls.push((
+                input.system_id,
+                input.spots.iter().map(|spot| spot.id).collect(),
+                input.binary_without_lines.to_vec(),
+            ));
+            HeadSystemOutcome::success(HeadDelta::default())
+        }
+    }
+
+    fn run_table(width: usize, height: usize, black: &[(usize, usize)]) -> RunTable {
+        let mut pixels = vec![BACKGROUND; width * height];
+        for &(x, y) in black {
+            pixels[(y * width) + x] = FOREGROUND;
+        }
+        RunTable::from_pixels(
+            audiveris_image::run_table::Orientation::Vertical,
+            width,
+            height,
+            &pixels,
+        )
+        .unwrap()
+    }
+
+    fn horizontal_staff_line(y: usize, start: usize, stop: usize) -> PersistentStaffLine {
+        PersistentStaffLine {
+            points: vec![
+                (start as f64, y as f64 + 0.5),
+                (stop as f64, y as f64 + 0.5),
+            ],
+            thickness: 1.0,
+            glyph: StaffGlyph {
+                x: start,
+                y,
+                runs: run_table(
+                    stop - start + 1,
+                    1,
+                    &(start..=stop).map(|x| (x - start, 0)).collect::<Vec<_>>(),
+                ),
+            },
+        }
+    }
+
+    #[test]
+    fn native_distance_erases_staff_ledger_and_seed_but_skips_tablature() {
+        let width = 10;
+        let height = 8;
+        let line = horizontal_staff_line(3, 2, 6);
+        let tablature_line = horizontal_staff_line(1, 2, 6);
+        let ledger = NativeHeadRasterGlyph {
+            left: 8,
+            top: 6,
+            runs: run_table(1, 1, &[(0, 0)]),
+        };
+        let seed = NativeHeadRasterGlyph {
+            left: 9,
+            top: 5,
+            runs: run_table(1, 2, &[(0, 0), (0, 1)]),
+        };
+        let mut black = vec![(0, 0), (8, 6), (9, 5), (9, 6)];
+        black.extend((2..=6).flat_map(|x| [(x, 1), (x, 3)]));
+        let raster = NativeHeadsPrologRaster {
+            binary: run_table(width, height, &black),
+            head_spots: run_table(width, height, &[]),
+            systems: vec![
+                NativeHeadSystemRaster {
+                    system_id: 2,
+                    staves: vec![
+                        NativeHeadStaffRaster {
+                            tablature: false,
+                            lines: vec![line],
+                            ledger_glyphs: vec![ledger],
+                        },
+                        NativeHeadStaffRaster {
+                            tablature: true,
+                            lines: vec![tablature_line],
+                            ledger_glyphs: Vec::new(),
+                        },
+                    ],
+                    vertical_seed_glyphs: vec![seed],
+                },
+                NativeHeadSystemRaster {
+                    system_id: 1,
+                    staves: Vec::new(),
+                    vertical_seed_glyphs: Vec::new(),
+                },
+            ],
+            system_areas: Vec::new(),
+        };
+        let mut step =
+            HeadlessHeadsStep::new(NativeVisualHeads::new(raster, NativeClassifier::default()));
+        let mut sheet = sheet();
+
+        let report = step.process(&mut sheet).unwrap();
+
+        assert_eq!(report.distance_table.normalizer, 3);
+        assert_eq!(report.distance_table.value(0, 0), Some(0));
+        assert_eq!(report.distance_table.value(1, 0), Some(3));
+        assert_eq!(report.distance_table.value(4, 1), Some(0));
+        for &(x, y) in &[(2, 3), (4, 4), (8, 6), (9, 5)] {
+            assert_eq!(report.distance_table.value(x, y), Some(VALUE_UNKNOWN));
+        }
+        let prepared = step.visual().binary_without_lines().unwrap();
+        assert_eq!(prepared[width + 4], FOREGROUND);
+        assert_eq!(prepared[(3 * width) + 4], BACKGROUND);
+        assert_eq!(prepared[(6 * width) + 8], BACKGROUND);
+        assert_eq!(step.visual().classifier().calls.len(), 2);
+    }
+
+    #[test]
+    fn native_spots_keep_component_order_and_curved_area_multi_ownership() {
+        use audiveris_image::system_population::{
+            build_population_system_areas, BoundarySegment, PopulationSystemGeometry,
+            StaffBoundary, SystemStaffBoundaries,
+        };
+
+        let systems = [
+            PopulationSystemGeometry {
+                system_id: 2,
+                left: 0,
+                width: 20,
+                top: 2,
+                bottom: 6,
+                area_left: 0,
+                deskewed_upper_left_x: 0.0,
+            },
+            PopulationSystemGeometry {
+                system_id: 1,
+                left: 0,
+                width: 20,
+                top: 10,
+                bottom: 14,
+                area_left: 0,
+                deskewed_upper_left_x: 0.0,
+            },
+        ];
+        let boundary = |y| StaffBoundary {
+            segments: vec![BoundarySegment::Line {
+                start: (0.0, y),
+                end: (20.0, y),
+            }],
+        };
+        let lines = [
+            SystemStaffBoundaries {
+                first_line: boundary(2.0),
+                last_line: boundary(6.0),
+            },
+            SystemStaffBoundaries {
+                first_line: boundary(10.0),
+                last_line: boundary(14.0),
+            },
+        ];
+        let areas = build_population_system_areas(&systems, &lines, 20, 20, 0);
+        let spots = run_table(20, 20, &[(5, 4), (10, 8), (15, 12)]);
+        let raster = NativeHeadsPrologRaster {
+            binary: run_table(20, 20, &[(0, 0)]),
+            head_spots: spots,
+            systems: Vec::new(),
+            system_areas: areas,
+        };
+
+        let spots = retrieve_native_head_spots(&raster);
+
+        assert_eq!(
+            spots.iter().map(|spot| spot.id).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert_eq!(spots[0].relevant_system_ids, [2]);
+        assert_eq!(spots[1].relevant_system_ids, [2, 1]);
+        assert_eq!(spots[2].relevant_system_ids, [1]);
+        assert!(spots.iter().all(|spot| spot.component.is_some()));
+    }
+
+    #[test]
+    fn native_distance_failure_retains_glyph_erase_prefix() {
+        let broken = PersistentStaffLine {
+            points: vec![(2.0, 3.0)],
+            thickness: 1.0,
+            glyph: StaffGlyph {
+                x: 2,
+                y: 3,
+                runs: run_table(1, 1, &[(0, 0)]),
+            },
+        };
+        let raster = NativeHeadsPrologRaster {
+            binary: run_table(6, 6, &[(2, 3)]),
+            head_spots: run_table(6, 6, &[]),
+            systems: vec![
+                NativeHeadSystemRaster {
+                    system_id: 2,
+                    staves: vec![NativeHeadStaffRaster {
+                        tablature: false,
+                        lines: vec![broken],
+                        ledger_glyphs: Vec::new(),
+                    }],
+                    vertical_seed_glyphs: Vec::new(),
+                },
+                NativeHeadSystemRaster {
+                    system_id: 1,
+                    staves: Vec::new(),
+                    vertical_seed_glyphs: Vec::new(),
+                },
+            ],
+            system_areas: Vec::new(),
+        };
+        let mut step =
+            HeadlessHeadsStep::new(NativeVisualHeads::new(raster, NativeClassifier::default()));
+        let mut sheet = sheet();
+
+        assert!(matches!(
+            step.process(&mut sheet),
+            Err(HeadsStepError::Prolog {
+                stage: HeadsPrologStage::DistanceTable,
+                source: NativeHeadsError::DistanceSpline {
+                    system_id: 2,
+                    source: SplineError::NotEnoughPoints,
+                },
+            })
+        ));
+        assert_eq!(
+            step.visual().binary_without_lines().unwrap()[(3 * 6) + 2],
+            BACKGROUND
+        );
+        assert!(sheet.mutations.is_empty());
     }
 }
