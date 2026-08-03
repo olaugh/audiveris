@@ -15,7 +15,10 @@ use audiveris_image::{
     global_filter, ingest,
     line_cluster::{FilamentId, LineCluster},
     median,
-    projection::{PeakRefinementParams, PeakRefinementRequest, ShortProjection, select_blank},
+    projection::{
+        PeakConstructionParams, PeakConstructionRequest, PeakRefinementParams,
+        PeakRefinementRequest, ShortProjection, select_blank,
+    },
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
@@ -203,7 +206,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 50] = [
+const VECTOR_KEYS: [&str; 51] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -219,6 +222,7 @@ const VECTOR_KEYS: [&str; 50] = [
     "grid.staff-projector-threshold.synthetic=",
     "grid.staff-projector-blanks.synthetic=",
     "grid.staff-projector-peak-side.synthetic=",
+    "grid.staff-projector-peak-candidate.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -609,6 +613,43 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         "grid.staff-projector-peak-side.synthetic=tie:{};border:{}",
         peak_side_name(tied_peak_side),
         peak_side_name(border_peak_side)
+    ));
+
+    let peak_candidate_params = PeakConstructionParams::new(peak_params, 15)?;
+    let mut accepted_peak_projection = ShortProjection::new(0, 12)?;
+    for (position, value) in [(3, 10), (4, 40), (5, 40), (6, 40), (7, 40), (8, 10)] {
+        accepted_peak_projection.increment(position, value);
+    }
+    let accepted_peak = accepted_peak_projection.construct_peak_candidate(
+        PeakConstructionRequest::new(4, 7, false, 10, 10, 0),
+        peak_candidate_params,
+    )?;
+    let mut wide_peak_projection = ShortProjection::new(0, 25)?;
+    wide_peak_projection.increment(3, 10);
+    for position in 4..=20 {
+        wide_peak_projection.increment(position, 40);
+    }
+    wide_peak_projection.increment(21, 10);
+    let wide_peak = wide_peak_projection.construct_peak_candidate(
+        PeakConstructionRequest::new(4, 20, false, 10, 10, 0),
+        peak_candidate_params,
+    )?;
+    let missing_peak = ShortProjection::new(0, 9)?.construct_peak_candidate(
+        PeakConstructionRequest::new(2, 3, false, 10, 10, 0),
+        peak_candidate_params,
+    )?;
+    let candidate_name =
+        |candidate: Option<audiveris_image::projection::ProjectionPeakCandidate>| {
+            candidate.map_or_else(
+                || "null".to_owned(),
+                |candidate| format!("{}-{}", candidate.start, candidate.stop),
+            )
+        };
+    lines.push(format!(
+        "grid.staff-projector-peak-candidate.synthetic=accepted:{};overWidth:{};missing:{}",
+        candidate_name(accepted_peak),
+        candidate_name(wide_peak),
+        candidate_name(missing_peak)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;

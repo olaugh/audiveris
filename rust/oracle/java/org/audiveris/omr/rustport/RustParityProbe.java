@@ -230,6 +230,35 @@ public final class RustParityProbe
                         + peakSide(tiedPeakSide)
                         + ";border:" + peakSide(borderPeakSide));
 
+        int[] acceptedPeakCounts = {0, 0, 0, 10, 40, 40, 40, 40, 10, 0, 0, 0, 0};
+        StaffProjector acceptedPeakProjector = staffProjector(
+                projectorScale,
+                acceptedPeakCounts,
+                new int[]{0, 10, 20, 30, 40});
+        configurePeakThresholds(acceptedPeakProjector, 2, 5);
+        StaffPeak acceptedPeak = createPeak(acceptedPeakProjector, 4, 7, false, 10, 10, 0);
+        int[] widePeakCounts = {
+            0, 0, 0, 10, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+            40, 40, 40, 40, 40, 40, 40, 40, 10, 0, 0, 0, 0
+        };
+        StaffProjector widePeakProjector = staffProjector(
+                projectorScale,
+                widePeakCounts,
+                new int[]{0, 10, 20, 30, 40});
+        configurePeakThresholds(widePeakProjector, 2, 5);
+        StaffPeak widePeak = createPeak(widePeakProjector, 4, 20, false, 10, 10, 0);
+        StaffProjector missingPeakProjector = staffProjector(
+                projectorScale,
+                new int[10],
+                new int[]{0, 10, 20, 30, 40});
+        configurePeakThresholds(missingPeakProjector, 2, 5);
+        StaffPeak missingPeak = createPeak(missingPeakProjector, 2, 3, false, 10, 10, 0);
+        System.out.println(
+                "grid.staff-projector-peak-candidate.synthetic=accepted:"
+                        + staffPeakRange(acceptedPeak)
+                        + ";overWidth:" + staffPeakRange(widePeak)
+                        + ";missing:" + staffPeakRange(missingPeak));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
@@ -1152,7 +1181,21 @@ public final class RustParityProbe
                                                   int[] counts)
         throws Exception
     {
-        final int height = 101;
+        return staffProjector(scale, counts, new int[]{0, 100});
+    }
+
+    private static StaffProjector staffProjector (Scale scale,
+                                                  int[] counts,
+                                                  int[] lineOrdinates)
+        throws Exception
+    {
+        int maximumCount = 0;
+        for (int count : counts) {
+            maximumCount = Math.max(maximumCount, count);
+        }
+        final int height = Math.max(
+                maximumCount,
+                lineOrdinates[lineOrdinates.length - 1]) + 1;
         RunTable binary = new RunTable(Orientation.VERTICAL, counts.length, height);
         for (int x = 0; x < counts.length; x++) {
             if (counts[x] > 0) {
@@ -1165,19 +1208,59 @@ public final class RustParityProbe
         book.addStub(stub);
         Sheet sheet = new Sheet(stub, binary);
         sheet.setScale(scale);
+        sheet.setSkew(new Skew(0.0, sheet));
+        List<org.audiveris.omr.sheet.grid.LineInfo> staffLines = new ArrayList<>();
+        for (int ordinate : lineOrdinates) {
+            staffLines.add(staffFilament(
+                    0,
+                    ordinate,
+                    counts.length,
+                    scale.getInterline()));
+        }
         Staff staff = new Staff(
                 1,
                 0.0,
                 counts.length - 1.0,
                 scale.getInterline(),
-                List.of(
-                        staffFilament(0, 0, counts.length, scale.getInterline()),
-                        staffFilament(0, 100, counts.length, scale.getInterline())));
+                staffLines);
         StaffProjector projector = new StaffProjector(sheet, staff, null);
         Method computeProjection = StaffProjector.class.getDeclaredMethod("computeProjection");
         computeProjection.setAccessible(true);
         computeProjection.invoke(projector);
         return projector;
+    }
+
+    private static StaffPeak createPeak (StaffProjector projector,
+                                         int rawStart,
+                                         int rawStop,
+                                         boolean halfMode,
+                                         int minimumDerivativeUp,
+                                         int minimumDerivativeDown,
+                                         int addedChunk)
+        throws ReflectiveOperationException
+    {
+        Method method = StaffProjector.class.getDeclaredMethod(
+                "createPeak",
+                int.class,
+                int.class,
+                boolean.class,
+                int.class,
+                int.class,
+                int.class);
+        method.setAccessible(true);
+        return (StaffPeak) method.invoke(
+                projector,
+                rawStart,
+                rawStop,
+                halfMode,
+                minimumDerivativeUp,
+                minimumDerivativeDown,
+                addedChunk);
+    }
+
+    private static String staffPeakRange (StaffPeak peak)
+    {
+        return peak != null ? peak.getStart() + "-" + peak.getStop() : "null";
     }
 
     private static String blank (Object blank)
