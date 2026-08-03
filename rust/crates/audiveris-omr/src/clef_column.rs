@@ -9,6 +9,11 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
+use audiveris_image::{
+    glyph_factory::{GlyphComponent, build_glyph_components},
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
+};
+
 use crate::{
     header_builder::HeaderSigExclusion,
     headers_step::HeadlessHeaderSystem,
@@ -167,6 +172,564 @@ pub trait VisualClefProposalRecognizer {
         pass: ClefRecognitionPass,
         lookup: ClefLookupRect,
     ) -> Result<Vec<ClefClassifierProposal>, Self::Error>;
+}
+
+/// Scale-dependent Java `ClefBuilder.Parameters` needed before the neural
+/// classifier. Pixel values are supplied after the same large/specific
+/// interline conversions used by Java.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeClefParameters {
+    pub staff_interline: i32,
+    pub first_line_y: f64,
+    pub last_line_y: f64,
+    pub min_part_weight: usize,
+    pub max_part_count: usize,
+    pub max_part_gap: f64,
+    pub max_glyph_height: f64,
+    pub min_glyph_weight: usize,
+    pub max_eval_rank: usize,
+    pub minimum_classifier_grade: f64,
+    pub f_area_pitch_offset: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeClefGlyph {
+    pub id: usize,
+    pub part_ids: Vec<usize>,
+    pub bounds: HeaderBounds,
+    pub weight: usize,
+    pub centroid_x: f64,
+    pub centroid_y: f64,
+    pub raster: RunTable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClefShapeEvaluation {
+    pub shape: NeutralClefShape,
+    pub grade: f64,
+    /// Font-derived theoretical bounds, before Java's x-centroid correction.
+    pub symbol_bounds: HeaderBounds,
+}
+
+/// The sole remaining production dependency: Audiveris `ShapeClassifier`.
+pub trait ClefShapeClassifier {
+    type Error;
+
+    fn evaluate(
+        &mut self,
+        glyph: &NativeClefGlyph,
+        staff_interline: i32,
+        maximum_rank: usize,
+        minimum_grade: f64,
+    ) -> Result<Vec<ClefShapeEvaluation>, Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeClefMutation {
+    PartRegistered { staff_id: usize, glyph_id: usize },
+    CompoundRegistered { staff_id: usize, glyph_id: usize },
+    GlyphEvaluated { staff_id: usize, glyph_id: usize },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeClefError<ClassifierError> {
+    MissingSource(usize),
+    MissingParameters(usize),
+    MissingContext(usize),
+    InvalidLookup(ClefLookupRect),
+    GlyphIdExhausted,
+    InterIdExhausted,
+    RunTable(RunTableError),
+    Classifier(ClassifierError),
+}
+
+impl<ClassifierError: fmt::Display> fmt::Display for NativeClefError<ClassifierError> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSource(id) => write!(formatter, "missing no-staff raster for system {id}"),
+            Self::MissingParameters(id) => {
+                write!(formatter, "missing clef parameters for staff {id}")
+            }
+            Self::MissingContext(id) => write!(formatter, "missing clef context for staff {id}"),
+            Self::InvalidLookup(rect) => {
+                write!(formatter, "invalid clef lookup rectangle {rect:?}")
+            }
+            Self::GlyphIdExhausted => formatter.write_str("clef glyph ID exhausted"),
+            Self::InterIdExhausted => formatter.write_str("clef inter ID exhausted"),
+            Self::RunTable(source) => write!(formatter, "clef run table failed: {source}"),
+            Self::Classifier(source) => write!(formatter, "clef classifier failed: {source}"),
+        }
+    }
+}
+
+/// Concrete Java lookup → vertical runs → parts → near-graph → connected
+/// subset decomposition. The classifier sees registered glyphs in Java trial
+/// order; all filtering around it remains native.
+pub struct NativeClefProposalRecognizer<Classifier> {
+    classifier: Classifier,
+    sources: BTreeMap<usize, RunTable>,
+    contexts: BTreeMap<usize, ClefLookupContext>,
+    parameters: BTreeMap<usize, NativeClefParameters>,
+    next_glyph_id: usize,
+    next_inter_id: usize,
+    mutations: Vec<NativeClefMutation>,
+}
+
+impl<Classifier> NativeClefProposalRecognizer<Classifier> {
+    #[must_use]
+    pub fn new(
+        classifier: Classifier,
+        sources: BTreeMap<usize, RunTable>,
+        contexts: BTreeMap<usize, ClefLookupContext>,
+        parameters: BTreeMap<usize, NativeClefParameters>,
+        next_glyph_id: usize,
+        next_inter_id: usize,
+    ) -> Self {
+        Self {
+            classifier,
+            sources,
+            contexts,
+            parameters,
+            next_glyph_id,
+            next_inter_id,
+            mutations: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn mutations(&self) -> &[NativeClefMutation] {
+        &self.mutations
+    }
+
+    #[must_use]
+    pub const fn classifier(&self) -> &Classifier {
+        &self.classifier
+    }
+}
+
+#[derive(Clone)]
+struct RegisteredPart {
+    id: usize,
+    component: GlyphComponent,
+    pixels: Vec<(i32, i32)>,
+}
+
+#[derive(Clone, Copy)]
+struct SubsetContext<'a> {
+    staff_id: usize,
+    parts: &'a [RegisteredPart],
+    graph: &'a [Vec<usize>],
+    parameters: NativeClefParameters,
+}
+
+impl<Classifier: ClefShapeClassifier> VisualClefProposalRecognizer
+    for NativeClefProposalRecognizer<Classifier>
+{
+    type Error = NativeClefError<Classifier::Error>;
+
+    fn existing_clef(
+        &mut self,
+        _system_id: usize,
+        _staff_id: usize,
+        _outer: ClefLookupRect,
+    ) -> Result<Option<NeutralClefCandidate>, Self::Error> {
+        // Existing artificial clefs are owned by the SIG-facing column and
+        // should be supplied by a wrapper. Raster recognition creates none.
+        Ok(None)
+    }
+
+    fn classify_clefs(
+        &mut self,
+        system_id: usize,
+        staff_id: usize,
+        pass: ClefRecognitionPass,
+        lookup: ClefLookupRect,
+    ) -> Result<Vec<ClefClassifierProposal>, Self::Error> {
+        let source = self
+            .sources
+            .get(&system_id)
+            .ok_or(NativeClefError::MissingSource(system_id))?;
+        let parameters = *self
+            .parameters
+            .get(&staff_id)
+            .ok_or(NativeClefError::MissingParameters(staff_id))?;
+        let context = *self
+            .contexts
+            .get(&staff_id)
+            .ok_or(NativeClefError::MissingContext(staff_id))?;
+        let table = crop_vertical(source, lookup).map_err(NativeClefError::RunTable)?;
+        let mut components = build_glyph_components(&table, lookup.x, lookup.y)
+            .into_iter()
+            .filter(|part| {
+                part.weight >= parameters.min_part_weight
+                    && (pass == ClefRecognitionPass::InnerOnly
+                        || bounds_intersect(component_bounds(part), context.inner))
+            })
+            .collect::<Vec<_>>();
+        if components.len() > parameters.max_part_count {
+            components.sort_by_key(|component| std::cmp::Reverse(component.weight));
+            components.truncate(parameters.max_part_count);
+        }
+
+        let mut parts = Vec::with_capacity(components.len());
+        for component in components {
+            let id = self.allocate_glyph_id()?;
+            self.mutations.push(NativeClefMutation::PartRegistered {
+                staff_id,
+                glyph_id: id,
+            });
+            parts.push(RegisteredPart {
+                id,
+                pixels: component_pixels(&component),
+                component,
+            });
+        }
+        let graph = near_graph(&parts, parameters.max_part_gap);
+        let subset_context = SubsetContext {
+            staff_id,
+            parts: &parts,
+            graph: &graph,
+            parameters,
+        };
+        let sets = connected_sets(&graph, &parts);
+        let mut proposals = Vec::new();
+        for set in sets {
+            let mut seeds = set.clone();
+            seeds.sort_by(|&one, &two| {
+                parts[two]
+                    .component
+                    .weight
+                    .cmp(&parts[one].component.weight)
+            });
+            let mut considered = Vec::new();
+            for seed in seeds {
+                push_unique(&mut considered, seed);
+                self.process_subset(
+                    subset_context,
+                    vec![seed],
+                    considered.clone(),
+                    &mut proposals,
+                )?;
+            }
+        }
+        Ok(proposals)
+    }
+}
+
+impl<Classifier: ClefShapeClassifier> NativeClefProposalRecognizer<Classifier> {
+    fn allocate_glyph_id(&mut self) -> Result<usize, NativeClefError<Classifier::Error>> {
+        self.next_glyph_id = self
+            .next_glyph_id
+            .checked_add(1)
+            .ok_or(NativeClefError::GlyphIdExhausted)?;
+        Ok(self.next_glyph_id)
+    }
+
+    fn process_subset(
+        &mut self,
+        context: SubsetContext<'_>,
+        subset: Vec<usize>,
+        seen: Vec<usize>,
+        proposals: &mut Vec<ClefClassifierProposal>,
+    ) -> Result<(), NativeClefError<Classifier::Error>> {
+        let weight = subset
+            .iter()
+            .map(|&index| context.parts[index].component.weight)
+            .sum::<usize>();
+        let bounds = union_bounds(context.parts, &subset);
+        if f64::from(bounds.height) > context.parameters.max_glyph_height {
+            return Ok(());
+        }
+        if weight >= context.parameters.min_glyph_weight {
+            let glyph_id = if subset.len() == 1 {
+                context.parts[subset[0]].id
+            } else {
+                let id = self.allocate_glyph_id()?;
+                self.mutations.push(NativeClefMutation::CompoundRegistered {
+                    staff_id: context.staff_id,
+                    glyph_id: id,
+                });
+                id
+            };
+            let glyph = compound_glyph(glyph_id, context.parts, &subset, bounds)
+                .map_err(NativeClefError::RunTable)?;
+            self.mutations.push(NativeClefMutation::GlyphEvaluated {
+                staff_id: context.staff_id,
+                glyph_id,
+            });
+            let evaluations = self
+                .classifier
+                .evaluate(
+                    &glyph,
+                    context.parameters.staff_interline,
+                    context.parameters.max_eval_rank,
+                    context.parameters.minimum_classifier_grade,
+                )
+                .map_err(NativeClefError::Classifier)?;
+            for evaluation in evaluations
+                .into_iter()
+                .take(context.parameters.max_eval_rank)
+            {
+                if evaluation.grade < context.parameters.minimum_classifier_grade {
+                    continue;
+                }
+                self.next_inter_id = self
+                    .next_inter_id
+                    .checked_add(1)
+                    .ok_or(NativeClefError::InterIdExhausted)?;
+                proposals.push(ClefClassifierProposal {
+                    id: self.next_inter_id,
+                    glyph_id,
+                    shape: evaluation.shape,
+                    classifier_grade: evaluation.grade,
+                    reference_pitch: target_pitch(evaluation.shape, &glyph, context.parameters),
+                    symbol_bounds: evaluation.symbol_bounds,
+                    glyph_bounds: bounds,
+                });
+            }
+        }
+
+        let mut outliers = Vec::new();
+        for &part in &subset {
+            for &neighbor in &context.graph[part] {
+                if !subset.contains(&neighbor) {
+                    push_unique(&mut outliers, neighbor);
+                }
+            }
+        }
+        outliers.retain(|part| !seen.contains(part));
+        let mut newly_seen = seen;
+        for outlier in outliers {
+            push_unique(&mut newly_seen, outlier);
+            let mut larger = subset.clone();
+            larger.push(outlier);
+            if f64::from(union_bounds(context.parts, &larger).height)
+                <= context.parameters.max_glyph_height
+            {
+                self.process_subset(context, larger, newly_seen.clone(), proposals)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn crop_vertical(source: &RunTable, rect: ClefLookupRect) -> Result<RunTable, RunTableError> {
+    let x = usize::try_from(rect.x).map_err(|_| RunTableError::OutOfBounds)?;
+    let y = usize::try_from(rect.y).map_err(|_| RunTableError::OutOfBounds)?;
+    let width = usize::try_from(rect.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(rect.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    if width == 0
+        || height == 0
+        || x.checked_add(width)
+            .is_none_or(|right| right > source.width())
+        || y.checked_add(height)
+            .is_none_or(|bottom| bottom > source.height())
+    {
+        return Err(RunTableError::OutOfBounds);
+    }
+    let mut pixels = vec![BACKGROUND; width * height];
+    for row in 0..height {
+        for column in 0..width {
+            pixels[(row * width) + column] = source.get(x + column, y + row);
+        }
+    }
+    RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)
+}
+
+fn component_bounds(component: &GlyphComponent) -> HeaderBounds {
+    HeaderBounds {
+        x: component.left,
+        y: component.top,
+        width: i32::try_from(component.width).unwrap_or(i32::MAX),
+        height: i32::try_from(component.height).unwrap_or(i32::MAX),
+    }
+}
+
+fn bounds_intersect(one: HeaderBounds, two: ClefLookupRect) -> bool {
+    one.x < two.x + two.width
+        && two.x < one.x + one.width
+        && one.y < two.y + two.height
+        && two.y < one.y + one.height
+}
+
+fn component_pixels(component: &GlyphComponent) -> Vec<(i32, i32)> {
+    let mut pixels = Vec::with_capacity(component.weight);
+    let min_sequence = component
+        .runs
+        .iter()
+        .map(|entry| entry.sequence)
+        .min()
+        .unwrap_or(0);
+    let min_coordinate = component
+        .runs
+        .iter()
+        .map(|entry| entry.run.start)
+        .min()
+        .unwrap_or(0);
+    for entry in &component.runs {
+        match component.orientation {
+            Orientation::Horizontal => {
+                let y = component.top + i32::try_from(entry.sequence - min_sequence).unwrap();
+                for coordinate in entry.run.start..=entry.run.stop() {
+                    pixels.push((
+                        component.left + i32::try_from(coordinate - min_coordinate).unwrap(),
+                        y,
+                    ));
+                }
+            }
+            Orientation::Vertical => {
+                let x = component.left + i32::try_from(entry.sequence - min_sequence).unwrap();
+                for coordinate in entry.run.start..=entry.run.stop() {
+                    pixels.push((
+                        x,
+                        component.top + i32::try_from(coordinate - min_coordinate).unwrap(),
+                    ));
+                }
+            }
+        }
+    }
+    pixels
+}
+
+fn near_graph(parts: &[RegisteredPart], maximum_gap: f64) -> Vec<Vec<usize>> {
+    let mut order = (0..parts.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&index| parts[index].component.left);
+    let mut graph = vec![Vec::new(); parts.len()];
+    for (position, &one) in order.iter().enumerate() {
+        for &two in &order[position + 1..] {
+            if chamfer_gap(&parts[one].pixels, &parts[two].pixels) <= maximum_gap {
+                graph[one].push(two);
+                graph[two].push(one);
+            }
+        }
+    }
+    graph
+}
+
+fn chamfer_gap(one: &[(i32, i32)], two: &[(i32, i32)]) -> f64 {
+    one.iter()
+        .flat_map(|&(one_x, one_y)| {
+            two.iter().map(move |&(two_x, two_y)| {
+                let dx = (one_x - two_x).unsigned_abs();
+                let dy = (one_y - two_y).unsigned_abs();
+                let diagonal = dx.min(dy);
+                ((4 * diagonal) + (3 * (dx.max(dy) - diagonal))) as f64 / 3.0
+            })
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+fn connected_sets(graph: &[Vec<usize>], parts: &[RegisteredPart]) -> Vec<Vec<usize>> {
+    let mut seen = vec![false; graph.len()];
+    let mut sets = Vec::new();
+    // `Glyphs.buildLinks` inserts vertices after stable left-abscissa sort;
+    // ConnectivityInspector consequently discovers components in this order.
+    let mut roots = (0..graph.len()).collect::<Vec<_>>();
+    roots.sort_by_key(|&index| parts[index].component.left);
+    for root in roots {
+        if seen[root] {
+            continue;
+        }
+        let mut stack = vec![root];
+        let mut set = Vec::new();
+        seen[root] = true;
+        while let Some(current) = stack.pop() {
+            set.push(current);
+            for &neighbor in graph[current].iter().rev() {
+                if !seen[neighbor] {
+                    seen[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+        sets.push(set);
+    }
+    sets
+}
+
+fn push_unique(items: &mut Vec<usize>, item: usize) {
+    if !items.contains(&item) {
+        items.push(item);
+    }
+}
+
+fn union_bounds(parts: &[RegisteredPart], subset: &[usize]) -> HeaderBounds {
+    let first = component_bounds(&parts[subset[0]].component);
+    subset[1..].iter().fold(first, |bounds, &index| {
+        let other = component_bounds(&parts[index].component);
+        let right = bounds.right().max(other.right());
+        let bottom = (bounds.y + bounds.height).max(other.y + other.height);
+        HeaderBounds {
+            x: bounds.x.min(other.x),
+            y: bounds.y.min(other.y),
+            width: right - bounds.x.min(other.x) + 1,
+            height: bottom - bounds.y.min(other.y),
+        }
+    })
+}
+
+fn compound_glyph(
+    id: usize,
+    parts: &[RegisteredPart],
+    subset: &[usize],
+    bounds: HeaderBounds,
+) -> Result<NativeClefGlyph, RunTableError> {
+    let width = usize::try_from(bounds.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(bounds.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    let mut pixels = vec![BACKGROUND; width * height];
+    let mut weight = 0_usize;
+    let mut sum_x = 0_f64;
+    let mut sum_y = 0_f64;
+    for &index in subset {
+        for &(x, y) in &parts[index].pixels {
+            let local_x = usize::try_from(x - bounds.x).map_err(|_| RunTableError::OutOfBounds)?;
+            let local_y = usize::try_from(y - bounds.y).map_err(|_| RunTableError::OutOfBounds)?;
+            if pixels[(local_y * width) + local_x] != FOREGROUND {
+                pixels[(local_y * width) + local_x] = FOREGROUND;
+                weight += 1;
+                sum_x += f64::from(x);
+                sum_y += f64::from(y);
+            }
+        }
+    }
+    Ok(NativeClefGlyph {
+        id,
+        part_ids: subset.iter().map(|&index| parts[index].id).collect(),
+        bounds,
+        weight,
+        centroid_x: sum_x / weight as f64,
+        centroid_y: sum_y / weight as f64,
+        raster: RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)?,
+    })
+}
+
+fn target_pitch(
+    shape: NeutralClefShape,
+    glyph: &NativeClefGlyph,
+    parameters: NativeClefParameters,
+) -> i32 {
+    match shape {
+        NeutralClefShape::Treble
+        | NeutralClefShape::TrebleOttavaAlta
+        | NeutralClefShape::TrebleOttavaBassa => 2,
+        NeutralClefShape::Percussion => 0,
+        NeutralClefShape::Bass | NeutralClefShape::C => {
+            let center_pitch = 4.0
+                * ((2.0 * glyph.centroid_y) - parameters.last_line_y - parameters.first_line_y)
+                / (parameters.last_line_y - parameters.first_line_y);
+            let offset = if shape == NeutralClefShape::Bass {
+                parameters.f_area_pitch_offset
+            } else {
+                0.0
+            };
+            let even = 2 * ((center_pitch + offset) / 2.0).round_ties_even() as i32;
+            if shape == NeutralClefShape::Bass {
+                even.clamp(-2, 0)
+            } else {
+                even.clamp(-2, 4)
+            }
+        }
+    }
 }
 
 /// Native candidate lifecycle around the injected glyph/classifier seam.
@@ -655,6 +1218,89 @@ mod tests {
     use std::convert::Infallible;
 
     #[derive(Default)]
+    struct RecordingClassifier {
+        calls: Vec<(usize, Vec<usize>, HeaderBounds, usize)>,
+        fail_on_call: Option<usize>,
+    }
+
+    impl ClefShapeClassifier for RecordingClassifier {
+        type Error = &'static str;
+
+        fn evaluate(
+            &mut self,
+            glyph: &NativeClefGlyph,
+            _staff_interline: i32,
+            _maximum_rank: usize,
+            _minimum_grade: f64,
+        ) -> Result<Vec<ClefShapeEvaluation>, Self::Error> {
+            self.calls
+                .push((glyph.id, glyph.part_ids.clone(), glyph.bounds, glyph.weight));
+            if self.fail_on_call == Some(self.calls.len()) {
+                return Err("classifier");
+            }
+            Ok(vec![ClefShapeEvaluation {
+                shape: NeutralClefShape::Treble,
+                grade: 0.75,
+                symbol_bounds: glyph.bounds,
+            }])
+        }
+    }
+
+    fn native_parameters() -> NativeClefParameters {
+        NativeClefParameters {
+            staff_interline: 4,
+            first_line_y: 4.0,
+            last_line_y: 12.0,
+            min_part_weight: 1,
+            max_part_count: 8,
+            max_part_gap: 2.0,
+            max_glyph_height: 20.0,
+            min_glyph_weight: 1,
+            max_eval_rank: 3,
+            minimum_classifier_grade: 0.1,
+            f_area_pitch_offset: 0.0,
+        }
+    }
+
+    fn native_context() -> ClefLookupContext {
+        ClefLookupContext {
+            outer: ClefLookupRect {
+                x: 0,
+                y: 0,
+                width: 12,
+                height: 16,
+            },
+            inner: ClefLookupRect {
+                x: 1,
+                y: 2,
+                width: 10,
+                height: 12,
+            },
+            percussion_only: false,
+        }
+    }
+
+    fn native_recognizer(
+        black: &[(usize, usize)],
+        classifier: RecordingClassifier,
+        parameters: NativeClefParameters,
+    ) -> NativeClefProposalRecognizer<RecordingClassifier> {
+        let mut pixels = vec![BACKGROUND; 12 * 16];
+        for &(x, y) in black {
+            pixels[(y * 12) + x] = FOREGROUND;
+        }
+        let source = RunTable::from_pixels(Orientation::Horizontal, 12, 16, &pixels).unwrap();
+        NativeClefProposalRecognizer::new(
+            classifier,
+            BTreeMap::from([(7, source)]),
+            BTreeMap::from([(1, native_context())]),
+            BTreeMap::from([(1, parameters)]),
+            10,
+            20,
+        )
+    }
+
+    #[derive(Default)]
     struct FakeProposalVisual {
         existing: Option<NeutralClefCandidate>,
         passes: Vec<Vec<ClefClassifierProposal>>,
@@ -1010,5 +1656,143 @@ mod tests {
             .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].kind, NeutralClefKind::Percussion);
+    }
+
+    #[test]
+    fn native_lookup_builds_vertical_parts_and_connected_subsets_in_java_order() {
+        let mut native = native_recognizer(
+            &[(2, 6), (4, 6)],
+            RecordingClassifier::default(),
+            native_parameters(),
+        );
+        let proposals = native
+            .classify_clefs(
+                7,
+                1,
+                ClefRecognitionPass::OuterAndInner,
+                native_context().outer,
+            )
+            .unwrap();
+        assert_eq!(
+            native.classifier().calls,
+            vec![
+                (11, vec![11], bounds(2, 6, 1, 1), 1),
+                (13, vec![11, 12], bounds(2, 6, 3, 1), 2),
+                (12, vec![12], bounds(4, 6, 1, 1), 1),
+            ]
+        );
+        assert_eq!(
+            native.mutations(),
+            &[
+                NativeClefMutation::PartRegistered {
+                    staff_id: 1,
+                    glyph_id: 11
+                },
+                NativeClefMutation::PartRegistered {
+                    staff_id: 1,
+                    glyph_id: 12
+                },
+                NativeClefMutation::GlyphEvaluated {
+                    staff_id: 1,
+                    glyph_id: 11
+                },
+                NativeClefMutation::CompoundRegistered {
+                    staff_id: 1,
+                    glyph_id: 13
+                },
+                NativeClefMutation::GlyphEvaluated {
+                    staff_id: 1,
+                    glyph_id: 13
+                },
+                NativeClefMutation::GlyphEvaluated {
+                    staff_id: 1,
+                    glyph_id: 12
+                },
+            ]
+        );
+        assert_eq!(
+            proposals
+                .iter()
+                .map(|proposal| proposal.id)
+                .collect::<Vec<_>>(),
+            vec![21, 22, 23]
+        );
+    }
+
+    #[test]
+    fn native_first_pass_purges_parts_outside_inner_and_keeps_registered_order() {
+        let mut parameters = native_parameters();
+        parameters.min_part_weight = 2;
+        let mut native = native_recognizer(
+            &[(0, 0), (0, 1), (3, 5), (3, 6), (8, 7)],
+            RecordingClassifier::default(),
+            parameters,
+        );
+        native
+            .classify_clefs(
+                7,
+                1,
+                ClefRecognitionPass::OuterAndInner,
+                native_context().outer,
+            )
+            .unwrap();
+        assert_eq!(native.classifier().calls.len(), 1);
+        assert_eq!(native.classifier().calls[0].2, bounds(3, 5, 1, 2));
+        assert_eq!(
+            native.mutations()[0],
+            NativeClefMutation::PartRegistered {
+                staff_id: 1,
+                glyph_id: 11
+            }
+        );
+    }
+
+    #[test]
+    fn native_part_cap_uses_stable_reverse_weight_before_registration() {
+        let mut parameters = native_parameters();
+        parameters.max_part_count = 2;
+        parameters.max_part_gap = 0.0;
+        let mut native = native_recognizer(
+            &[(2, 5), (5, 5), (5, 6), (8, 5), (8, 6), (8, 7)],
+            RecordingClassifier::default(),
+            parameters,
+        );
+        native
+            .classify_clefs(
+                7,
+                1,
+                ClefRecognitionPass::OuterAndInner,
+                native_context().outer,
+            )
+            .unwrap();
+        assert_eq!(native.classifier().calls.len(), 2);
+        assert_eq!(native.classifier().calls[0].2, bounds(5, 5, 1, 2));
+        assert_eq!(native.classifier().calls[1].2, bounds(8, 5, 1, 3));
+    }
+
+    #[test]
+    fn classifier_failure_retains_registered_and_evaluated_prefix() {
+        let classifier = RecordingClassifier {
+            fail_on_call: Some(2),
+            ..RecordingClassifier::default()
+        };
+        let mut native = native_recognizer(&[(2, 6), (4, 6)], classifier, native_parameters());
+        assert!(matches!(
+            native.classify_clefs(
+                7,
+                1,
+                ClefRecognitionPass::OuterAndInner,
+                native_context().outer,
+            ),
+            Err(NativeClefError::Classifier("classifier"))
+        ));
+        assert_eq!(native.classifier().calls.len(), 2);
+        assert_eq!(
+            native.mutations().last(),
+            Some(&NativeClefMutation::GlyphEvaluated {
+                staff_id: 1,
+                glyph_id: 13
+            })
+        );
     }
 }
