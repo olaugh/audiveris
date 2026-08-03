@@ -439,11 +439,7 @@ pub fn dispatch_grid_runs(
     let min_vertical_run_length = 1 + adjusted.round_ties_even() as usize;
 
     let mut short_vertical = source.clone();
-    let mut long_vertical = RunTable::new(
-        Orientation::Vertical,
-        source.width(),
-        source.height(),
-    )?;
+    let mut long_vertical = RunTable::new(Orientation::Vertical, source.width(), source.height())?;
     short_vertical.purge(
         |run| run.length >= min_vertical_run_length,
         Some(&mut long_vertical),
@@ -456,6 +452,42 @@ pub fn dispatch_grid_runs(
     )?;
 
     Ok((horizontal, long_vertical))
+}
+
+/// Run-table partitions produced by Java `LinesRetriever.createBothLags`
+/// before section construction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridRunTables {
+    /// Long vertical runs used to build the barline lag.
+    pub long_vertical: RunTable,
+    /// Horizontal runs shorter than `min_horizontal_run_length`, held back
+    /// until `LinesRetriever.addShortSections`.
+    pub short_horizontal: RunTable,
+    /// Remaining horizontal runs used for initial staff-line retrieval.
+    pub long_horizontal: RunTable,
+}
+
+/// Produce the three run-table partitions used by
+/// `LinesRetriever.createBothLags` without mutating `source`.
+pub fn create_grid_run_tables(
+    source: &RunTable,
+    max_fore: usize,
+    ledger_thickness: f64,
+    min_horizontal_run_length: usize,
+) -> Result<GridRunTables, RunTableError> {
+    let (mut horizontal, long_vertical) = dispatch_grid_runs(source, max_fore, ledger_thickness)?;
+    let mut short_horizontal =
+        RunTable::new(Orientation::Horizontal, source.width(), source.height())?;
+    horizontal.purge(
+        |run| run.length < min_horizontal_run_length,
+        Some(&mut short_horizontal),
+    )?;
+
+    Ok(GridRunTables {
+        long_vertical,
+        short_horizontal,
+        long_horizontal: horizontal,
+    })
 }
 
 impl fmt::Display for RunTable {
@@ -534,16 +566,14 @@ mod tests {
         assert_eq!(long_vertical.weight(), 12);
         assert_eq!(horizontal.orientation(), Orientation::Horizontal);
         assert_eq!(horizontal.weight(), 5);
-        assert_eq!(horizontal.to_pixels(), vec![
-            0, 255, 255, 0, 255,
-            0, 255, 255, 255, 255,
-            255, 255, 255, 255, 255,
-            255, 255, 255, 0, 255,
-            255, 255, 255, 0, 255,
-            255, 255, 255, 255, 255,
-            255, 255, 255, 255, 255,
-            255, 255, 255, 255, 255,
-        ]);
+        assert_eq!(
+            horizontal.to_pixels(),
+            vec![
+                0, 255, 255, 0, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                0, 255, 255, 255, 255, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                255, 255, 255, 255, 255,
+            ]
+        );
     }
 
     #[test]
@@ -562,6 +592,44 @@ mod tests {
         assert_eq!(
             dispatch_grid_runs(&source, 2, -1.0),
             Err(RunTableError::InvalidDimensions)
+        );
+    }
+
+    #[test]
+    fn create_grid_run_tables_holds_back_only_short_horizontal_runs() {
+        let pixels = [
+            0, 0, 0, 255, 0, 255, 255, 255, 255, 255, 255, 255, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0,
+            255, 255, 255, 255, 255, 255, 0, 255, 255, 255,
+        ];
+        let source = RunTable::from_pixels(Orientation::Vertical, 8, 4, &pixels).unwrap();
+
+        // Vertical threshold 3 removes the x=4 run (length 4). Its removal
+        // splits the second horizontal row into lengths 4 and 1; min length 4
+        // holds back the length-3 and length-1 runs.
+        let tables = create_grid_run_tables(&source, 2, 1.0, 4).unwrap();
+
+        assert_eq!(tables.long_vertical.weight(), 4);
+        assert_eq!(tables.short_horizontal.weight(), 4);
+        assert_eq!(tables.long_horizontal.weight(), 4);
+        assert_eq!(source.weight(), 12);
+        let mut reunited = tables.short_horizontal.clone();
+        reunited.include(&tables.long_horizontal).unwrap();
+        assert_eq!(reunited.weight(), 8);
+    }
+
+    #[test]
+    fn create_grid_run_tables_keeps_threshold_length_in_long_partition() {
+        let mut source = RunTable::new(Orientation::Vertical, 5, 3).unwrap();
+        for x in 0..5 {
+            source.add_run(x, Run::new(1, 1)).unwrap();
+        }
+
+        let tables = create_grid_run_tables(&source, 3, 1.0, 5).unwrap();
+        assert_eq!(tables.short_horizontal.weight(), 0);
+        assert_eq!(tables.long_horizontal.weight(), 5);
+        assert_eq!(
+            tables.long_horizontal.sequence(1).unwrap(),
+            [Run::new(0, 5)]
         );
     }
 
