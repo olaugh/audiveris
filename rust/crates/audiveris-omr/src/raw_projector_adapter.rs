@@ -35,10 +35,11 @@ use audiveris_image::{
         BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks, build_sub_stick,
     },
     bars_coordinator::{
-        BarsCoordinatorError, BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult,
-        BarsPurgeParameters, BarsPurgeResult, BarsRightCClefParameters, BarsRightCClefResult,
-        BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
-        BarsWidthInterParameters, BarsWidthInterResult, process_bars_after_braces,
+        BarsConnectionGroupParameters, BarsConnectionGroupResult, BarsCoordinatorError,
+        BarsCoordinatorParameters, BarsPostBraceResult, BarsPrefixResult, BarsPurgeParameters,
+        BarsPurgeResult, BarsRightCClefParameters, BarsRightCClefResult, BarsRightEvidence,
+        BarsRootEvidence, BarsStaffState, BarsSystemState, BarsWidthInterParameters,
+        BarsWidthInterResult, process_bars_after_braces, process_bars_connections_and_groups,
         process_bars_peak_purges, process_bars_right_ends_and_c_clefs,
         process_bars_through_too_far_left, process_bars_widths_and_inters,
     },
@@ -203,6 +204,12 @@ pub enum RawSystemGroupingBoundary {
     /// Width classes and vertical bar/bracket interpretations now exist.
     /// Java next promotes cross-staff connection interpretations.
     NeedsConnectionInters {
+        staff_ids: Vec<StaffId>,
+        system_count: usize,
+    },
+    /// Cross-staff connectors and within-staff bar groups are materialized.
+    /// Java next records barline inters on their owning staffs.
+    NeedsBarRecording {
         staff_ids: Vec<StaffId>,
         system_count: usize,
     },
@@ -389,6 +396,22 @@ pub struct RawWidthInterSystemReport {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RawWidthInterStageReport {
     pub systems: Vec<RawWidthInterSystemReport>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RawConnectionGroupStageParameters {
+    pub bars: BarsConnectionGroupParameters,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawConnectionGroupSystemReport {
+    pub system_id: usize,
+    pub result: BarsConnectionGroupResult,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RawConnectionGroupStageReport {
+    pub systems: Vec<RawConnectionGroupSystemReport>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1423,6 +1446,48 @@ pub fn continue_raw_bars_through_widths_and_inters(
     Ok(report)
 }
 
+/// Continue through Java `createConnectionInters` and `groupBarlines` for
+/// every system. Each system SIG retains connector identities, support/freeze
+/// effects, warnings, and any mutation prefix from a later grouping failure.
+pub fn continue_raw_bars_through_connections_and_groups(
+    bridge: &mut RawBarsPrefixBridge,
+    parameters: RawConnectionGroupStageParameters,
+) -> Result<RawConnectionGroupStageReport, RawProjectorAdapterError> {
+    let mut report = RawConnectionGroupStageReport::default();
+    for raw_system in &mut bridge.bars {
+        let system_id = raw_system.state.system_id();
+        let result = process_bars_connections_and_groups(
+            &raw_system.state,
+            &mut raw_system.sig,
+            parameters.bars,
+        )
+        .map_err(RawProjectorAdapterError::Bars)?;
+        report
+            .systems
+            .push(RawConnectionGroupSystemReport { system_id, result });
+    }
+    bridge
+        .systems
+        .split
+        .connections
+        .alignments
+        .bars
+        .projectors
+        .grouping = RawSystemGroupingBoundary::NeedsBarRecording {
+        staff_ids: bridge
+            .systems
+            .split
+            .connections
+            .alignments
+            .bars
+            .projectors
+            .retained_staff_ids
+            .clone(),
+        system_count: bridge.bars.len(),
+    };
+    Ok(report)
+}
+
 fn reconcile_graph_peak_attributes(
     state: &mut BarsSystemState,
 ) -> Result<(), RawProjectorAdapterError> {
@@ -2224,6 +2289,9 @@ mod tests {
             RawSystemGroupingBoundary::NeedsConnectionInters { .. } => {
                 panic!("one retained staff does not require connection-inter grouping")
             }
+            RawSystemGroupingBoundary::NeedsBarRecording { .. } => {
+                panic!("one retained staff does not require bar-recording grouping")
+            }
         }
 
         let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
@@ -2884,6 +2952,38 @@ mod tests {
                 .projectors
                 .grouping,
             RawSystemGroupingBoundary::NeedsConnectionInters {
+                ref staff_ids,
+                system_count: 1,
+            } if staff_ids == &[StaffId::new(1), StaffId::new(2)]
+        ));
+
+        let connection_report = continue_raw_bars_through_connections_and_groups(
+            &mut prefix,
+            RawConnectionGroupStageParameters {
+                bars: BarsConnectionGroupParameters {
+                    maximum_double_bar_gap: 2,
+                    interline: 10.0,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(connection_report.systems.len(), 1);
+        assert!(
+            connection_report.systems[0]
+                .result
+                .connection_warnings()
+                .is_empty()
+        );
+        assert!(matches!(
+            prefix
+                .systems
+                .split
+                .connections
+                .alignments
+                .bars
+                .projectors
+                .grouping,
+            RawSystemGroupingBoundary::NeedsBarRecording {
                 ref staff_ids,
                 system_count: 1,
             } if staff_ids == &[StaffId::new(1), StaffId::new(2)]

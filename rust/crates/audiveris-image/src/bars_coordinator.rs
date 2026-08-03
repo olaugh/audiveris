@@ -19,7 +19,9 @@ use crate::{
         peaks_too_far_left, plan_connection_inters, plan_vertical_inters, purge_c_clef_peaks,
         start_column_candidate, unaligned_peak_keys, validate_start_column,
     },
-    grid_sig::{GridInterId, GridSig},
+    grid_sig::{
+        BarGroupPromotionError, ConnectionPromotionWarning, GridInterId, GridSig, GridSigEdge,
+    },
     peak_graph::{PeakGraph, PeakGraphError},
     projection::{ProjectionBlank, check_lines_root_transition, refine_right_end_transition},
     staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey},
@@ -392,6 +394,36 @@ pub struct BarsWidthInterResult {
     width_assignments: Vec<PeakWidthAssignment>,
     vertical_inters: Vec<VerticalInterPlan>,
     promoted_inters: Vec<GridInterId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarsConnectionGroupParameters {
+    pub maximum_double_bar_gap: i32,
+    pub interline: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarsConnectionGroupResult {
+    connection_inters: Vec<ConnectionInterPlan>,
+    connection_warnings: Vec<ConnectionPromotionWarning>,
+    group_relations: Vec<GridSigEdge>,
+}
+
+impl BarsConnectionGroupResult {
+    #[must_use]
+    pub fn connection_inters(&self) -> &[ConnectionInterPlan] {
+        &self.connection_inters
+    }
+
+    #[must_use]
+    pub fn connection_warnings(&self) -> &[ConnectionPromotionWarning] {
+        &self.connection_warnings
+    }
+
+    #[must_use]
+    pub fn group_relations(&self) -> &[GridSigEdge] {
+        &self.group_relations
+    }
 }
 
 impl BarsWidthInterResult {
@@ -985,6 +1017,44 @@ pub fn process_bars_widths_and_inters(
     })
 }
 
+/// Continue Java `BarsRetriever.process` through `createConnectionInters` and
+/// `groupBarlines`.
+///
+/// Connection promotion retains Java's per-edge partial failures: an orphan
+/// connector and any already-added endpoint relation remain in the SIG. A
+/// later missing bar inter likewise leaves all earlier group relations intact.
+pub fn process_bars_connections_and_groups(
+    state: &BarsSystemState,
+    sig: &mut GridSig,
+    parameters: BarsConnectionGroupParameters,
+) -> Result<BarsConnectionGroupResult, BarsCoordinatorError> {
+    if parameters.maximum_double_bar_gap < 0
+        || !parameters.interline.is_finite()
+        || parameters.interline <= 0.0
+    {
+        return Err(BarsCoordinatorError::InvalidConnectionGroupParameters);
+    }
+
+    let connection_inters = plan_connection_inters(&state.graph, |key| sig.inter_of(key).is_some());
+    let connection_warnings = sig.promote_connection_inters(&state.graph, &connection_inters)?;
+    let staff_peaks = state
+        .staffs
+        .iter()
+        .map(|staff| staff.peaks.clone())
+        .collect::<Vec<_>>();
+    let first_group_edge = sig.edges().len();
+    sig.group_barlines(&staff_peaks, parameters.maximum_double_bar_gap, |gap| {
+        f64::from(gap) / parameters.interline
+    })?;
+    let group_relations = sig.edges()[first_group_edge..].to_vec();
+
+    Ok(BarsConnectionGroupResult {
+        connection_inters,
+        connection_warnings,
+        group_relations,
+    })
+}
+
 fn process_prefix(
     next: &mut BarsSystemState,
     parameters: BarsCoordinatorParameters,
@@ -1328,8 +1398,10 @@ pub enum BarsCoordinatorError {
     MissingRightEvidence(StaffId),
     InvalidRightEvidence(StaffId),
     InvalidWidthInterParameters,
+    InvalidConnectionGroupParameters,
     InvalidColumnIndex(usize),
     Logic(BarsLogicError),
+    BarGroup(BarGroupPromotionError),
     Graph(PeakGraphError),
 }
 
@@ -1342,6 +1414,12 @@ impl From<BarsLogicError> for BarsCoordinatorError {
 impl From<PeakGraphError> for BarsCoordinatorError {
     fn from(value: PeakGraphError) -> Self {
         Self::Graph(value)
+    }
+}
+
+impl From<BarGroupPromotionError> for BarsCoordinatorError {
+    fn from(value: BarGroupPromotionError) -> Self {
+        Self::BarGroup(value)
     }
 }
 
@@ -1418,10 +1496,14 @@ impl fmt::Display for BarsCoordinatorError {
             Self::InvalidWidthInterParameters => {
                 formatter.write_str("invalid width-partition/inter parameters")
             }
+            Self::InvalidConnectionGroupParameters => {
+                formatter.write_str("invalid connection/group parameters")
+            }
             Self::InvalidColumnIndex(index) => {
                 write!(formatter, "invalid bar column index {index}")
             }
             Self::Logic(error) => write!(formatter, "bars logic failed: {error}"),
+            Self::BarGroup(error) => write!(formatter, "bar grouping failed: {error:?}"),
             Self::Graph(error) => write!(formatter, "peak graph failed: {error}"),
         }
     }
@@ -2164,5 +2246,142 @@ mod tests {
         assert!(!state.staffs()[0].peaks()[0].is_set(StaffPeakAttribute::Thick));
         assert!(sig.nodes_in_order().next().is_none());
         assert_eq!(sig.inter_of(bar.key()), None);
+    }
+
+    #[test]
+    fn connection_promotion_precedes_staff_ordered_bar_groups() {
+        let top_left = peak(1, 10, 10);
+        let top_right = peak(1, 12, 12);
+        let bottom_left = peak(2, 10, 10);
+        let bottom_right = peak(2, 12, 12);
+        let mut graph = PeakGraph::new();
+        for value in [&top_left, &top_right, &bottom_left, &bottom_right] {
+            graph.add_vertex(value.clone());
+        }
+        graph
+            .add_edge(
+                top_left.key(),
+                bottom_left.key(),
+                connection(top_left.key(), bottom_left.key()),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                top_right.key(),
+                bottom_right.key(),
+                connection(top_right.key(), bottom_right.key()),
+            )
+            .unwrap();
+        let top = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![top_left.clone(), top_right.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let bottom = BarsStaffState::new(
+            StaffId::new(2),
+            0,
+            false,
+            vec![bottom_left.clone(), bottom_right.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let state = BarsSystemState::new(1, vec![top, bottom], graph).unwrap();
+        let staff_peaks = state
+            .staffs()
+            .iter()
+            .map(|staff| staff.peaks().to_vec())
+            .collect::<Vec<_>>();
+        let plans = plan_vertical_inters(&staff_peaks, 2);
+        let mut sig = GridSig::default();
+        sig.promote_vertical_inters(&plans);
+
+        let result = process_bars_connections_and_groups(
+            &state,
+            &mut sig,
+            BarsConnectionGroupParameters {
+                maximum_double_bar_gap: 2,
+                interline: 10.0,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.connection_inters().len(), 2);
+        assert!(result.connection_warnings().is_empty());
+        assert_eq!(result.group_relations().len(), 2);
+        assert_eq!(sig.edges().len(), 8);
+        assert_eq!(
+            result
+                .group_relations()
+                .iter()
+                .map(|edge| (edge.source, edge.target))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    sig.inter_of(top_left.key()).unwrap(),
+                    sig.inter_of(top_right.key()).unwrap(),
+                ),
+                (
+                    sig.inter_of(bottom_left.key()).unwrap(),
+                    sig.inter_of(bottom_right.key()).unwrap(),
+                ),
+            ]
+        );
+        for peak in [
+            top_left.key(),
+            top_right.key(),
+            bottom_left.key(),
+            bottom_right.key(),
+        ] {
+            assert!(matches!(
+                sig.node(sig.inter_of(peak).unwrap()),
+                Some(crate::grid_sig::GridSigNode::Vertical { frozen: true, .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn missing_later_bar_inter_retains_earlier_group_relation() {
+        let first = peak(1, 10, 10);
+        let second = peak(1, 12, 12);
+        let third = peak(1, 14, 14);
+        let mut graph = PeakGraph::new();
+        for value in [&first, &second, &third] {
+            graph.add_vertex(value.clone());
+        }
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![first.clone(), second.clone(), third.clone()],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let state = BarsSystemState::new(1, vec![staff], graph).unwrap();
+        let plans = plan_vertical_inters(&[vec![first.clone(), second.clone()]], 2);
+        let mut sig = GridSig::default();
+        sig.promote_vertical_inters(&plans);
+
+        assert_eq!(
+            process_bars_connections_and_groups(
+                &state,
+                &mut sig,
+                BarsConnectionGroupParameters {
+                    maximum_double_bar_gap: 2,
+                    interline: 10.0,
+                },
+            ),
+            Err(BarsCoordinatorError::BarGroup(
+                BarGroupPromotionError::MissingInter(third.key())
+            ))
+        );
+        assert_eq!(sig.edges().len(), 1);
+        assert!(matches!(
+            sig.edges()[0].relation,
+            crate::grid_sig::GridSigRelation::BarGroup { gap_fraction }
+                if (gap_fraction - 0.1).abs() < f64::EPSILON
+        ));
     }
 }
