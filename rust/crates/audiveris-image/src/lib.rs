@@ -21,6 +21,7 @@ pub mod filament_factory;
 pub mod global_filter;
 pub mod grid_coordinator;
 pub mod grid_lifecycle;
+pub mod grid_sig;
 pub mod ingest;
 pub mod lag_rebuild;
 pub mod line_cluster;
