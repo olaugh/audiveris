@@ -2083,6 +2083,42 @@ mod tests {
     }
 
     #[test]
+    fn rejected_overwide_range_leaves_cursor_for_following_oracle_peak() {
+        let mut projection = ShortProjection::new(0, 22).unwrap();
+        for position in 2..=18 {
+            projection.increment(position, 30);
+        }
+        projection.increment(20, 40);
+        let refinement = PeakRefinementParams::new(25, 2, 5, 2, 2).unwrap();
+        let params = PeakConstructionParams::new(refinement, 15).unwrap();
+        assert!(
+            projection
+                .browse_peak_range(PeakRangeRequest::new(2, 18, false, 20, 20, 0), params)
+                .unwrap()
+                .is_empty()
+        );
+        let accepted = projection
+            .find_peaks_in_range(
+                PeakScanRequest::new(0, 21, ProjectionPeakMode::Full, 25, 20, 20, 0),
+                params,
+                |candidate| Ok(Some(candidate)),
+            )
+            .unwrap();
+        assert_eq!(
+            accepted
+                .iter()
+                .map(|candidate| (
+                    candidate.raw_start,
+                    candidate.raw_stop,
+                    candidate.start,
+                    candidate.stop
+                ))
+                .collect::<Vec<_>>(),
+            [(20, 20, 20, 20)]
+        );
+    }
+
+    #[test]
     fn brace_search_requires_valley_and_refines_to_neighboring_minima() {
         let mut projection = ShortProjection::new(0, 15).unwrap();
         for (position, value) in [(9, 6), (10, 7), (12, 8)] {
