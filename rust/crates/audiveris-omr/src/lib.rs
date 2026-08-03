@@ -24,6 +24,7 @@ pub mod brace_filament;
 pub mod brace_portions;
 pub mod brace_sig;
 pub mod bracket_serif;
+pub mod chords_step;
 pub mod clef_column;
 pub mod cue_beams_step;
 pub mod grid_executor;
