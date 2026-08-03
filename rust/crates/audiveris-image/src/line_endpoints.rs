@@ -526,7 +526,7 @@ mod tests {
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
-            fill_hole_insertions: Vec::new(),
+            fill_hole_invocations: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),

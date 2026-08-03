@@ -18,7 +18,7 @@ use crate::{
         LineCompletionExecutor, LineCompletionStage, complete_lines as run_line_completion,
     },
     line_endpoints::PreparedStaffEndPoints,
-    line_holes::PreparedHoleInsertion,
+    line_holes::PreparedHoleFillInvocation,
     line_section_dispatch::dispatch_horizontal_sections,
     prepared_bars::{PreparedBarsHandoff, PreparedBarsStage},
     prepared_lines::{
@@ -47,8 +47,8 @@ pub struct PreparedCompletionState {
     /// Java `defineEndPoints` results in completed-staff order. A failure
     /// retains only the fully applied staff prefix.
     pub defined_endpoints: Vec<PreparedStaffEndPoints>,
-    /// Ordered virtual points inserted by the concrete initial hole fill.
-    pub fill_hole_insertions: Vec<PreparedHoleInsertion>,
+    /// Separate audit boundaries for Java's three repeated hole-fill calls.
+    pub fill_hole_invocations: Vec<PreparedHoleFillInvocation>,
     pub discarded_filament_steals: Vec<PreparedDiscardedFilamentSteal>,
     pub discarded_filament_recomputations: Vec<PreparedFilamentRecomputation>,
     pub section_inclusion_batches: Vec<PreparedSectionInclusionBatch>,
@@ -229,7 +229,7 @@ where
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
-            fill_hole_insertions: Vec::new(),
+            fill_hole_invocations: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),

@@ -28,6 +28,34 @@ pub struct PreparedHoleInsertion {
     pub source: HoleInsertionSource,
 }
 
+/// Which of Java's three `fillHoles` invocations produced an audit boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoleFillInvocation {
+    Initial,
+    AfterPolish,
+    Final,
+}
+
+impl HoleFillInvocation {
+    fn from_stage(stage: LineCompletionStage) -> Option<Self> {
+        match stage {
+            LineCompletionStage::FillHolesInitial => Some(Self::Initial),
+            LineCompletionStage::FillHolesAfterPolish => Some(Self::AfterPolish),
+            LineCompletionStage::FillHolesFinal => Some(Self::Final),
+            _ => None,
+        }
+    }
+}
+
+/// One non-transactional Java `fillHoles` call and its retained mutation prefix.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedHoleFillInvocation {
+    pub invocation: HoleFillInvocation,
+    pub insertions: Vec<PreparedHoleInsertion>,
+    /// False when this invocation stopped after retaining a partial mutation.
+    pub completed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FillHolesError {
     Filament {
@@ -84,7 +112,10 @@ impl<NextError: Error + 'static> Error for FillHolesCompletionError<NextError> {
     }
 }
 
-/// Additive collaborator that owns only the first Java `fillHoles` call.
+/// Additive collaborator that owns all three Java `fillHoles` calls.
+///
+/// Each invocation runs the same core over the then-current filament geometry;
+/// none of the later calls replays a snapshot from the initial call.
 pub struct FillHolesInitialCompletion<Next> {
     next: Next,
 }
@@ -113,8 +144,8 @@ where
         stage: LineCompletionStage,
         state: &mut PreparedCompletionState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
-        if stage == LineCompletionStage::FillHolesInitial {
-            fill_holes_initial(state).map_err(|error| {
+        if let Some(invocation) = HoleFillInvocation::from_stage(stage) {
+            fill_holes(state, invocation).map_err(|error| {
                 GridStageFailure::Other(FillHolesCompletionError::FillHoles(error))
             })
         } else {
@@ -141,8 +172,26 @@ where
 }
 
 pub fn fill_holes_initial(state: &mut PreparedCompletionState) -> Result<(), FillHolesError> {
-    state.fill_hole_insertions.clear();
-    for staff in &mut state.staffs {
+    fill_holes(state, HoleFillInvocation::Initial)
+}
+
+pub fn fill_holes(
+    state: &mut PreparedCompletionState,
+    invocation: HoleFillInvocation,
+) -> Result<(), FillHolesError> {
+    state
+        .fill_hole_invocations
+        .push(PreparedHoleFillInvocation {
+            invocation,
+            insertions: Vec::new(),
+            completed: false,
+        });
+    let (staffs, invocations) = (&mut state.staffs, &mut state.fill_hole_invocations);
+    let audit = &mut invocations
+        .last_mut()
+        .expect("invocation audit was just appended")
+        .insertions;
+    for staff in staffs {
         for position in 0..staff.lines.len() {
             let (above, current_and_below) = staff.lines.split_at_mut(position);
             let (current, below) = current_and_below
@@ -150,20 +199,19 @@ pub fn fill_holes_initial(state: &mut PreparedCompletionState) -> Result<(), Fil
                 .expect("position is within staff lines");
             let staff_id = staff.id;
             let line_id = current.id;
-            fill_line_holes(
-                staff_id,
-                current,
-                above,
-                below,
-                &mut state.fill_hole_insertions,
-            )
-            .map_err(|source| FillHolesError::Filament {
-                staff_id,
-                line_id,
-                source,
+            fill_line_holes(staff_id, current, above, below, audit).map_err(|source| {
+                FillHolesError::Filament {
+                    staff_id,
+                    line_id,
+                    source,
+                }
             })?;
         }
     }
+    invocations
+        .last_mut()
+        .expect("invocation audit remains installed")
+        .completed = true;
     Ok(())
 }
 
@@ -302,7 +350,7 @@ mod tests {
             thick_section_ids: Vec::new(),
             thin_section_ids: Vec::new(),
             defined_endpoints: Vec::new(),
-            fill_hole_insertions: Vec::new(),
+            fill_hole_invocations: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),
@@ -328,7 +376,7 @@ mod tests {
             vec![(0.0, 12.0), (50.0, 12.0), (100.0, 12.0)]
         );
         assert_eq!(
-            state.fill_hole_insertions[1].source,
+            state.fill_hole_invocations[0].insertions[1].source,
             HoleInsertionSource::NeighborInterpolation
         );
     }
@@ -342,7 +390,7 @@ mod tests {
             vec![(0.0, 8.0), (50.0, 8.0), (100.0, 8.0)]
         );
         assert_eq!(
-            state.fill_hole_insertions[0].source,
+            state.fill_hole_invocations[0].insertions[0].source,
             HoleInsertionSource::CurrentSplineFallback
         );
     }
@@ -368,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_owns_only_initial_fill_holes_stage() {
+    fn wrapper_owns_all_repeated_fill_holes_stages() {
         let mut completion = FillHolesInitialCompletion::new(Tail::default());
         let mut state = state(vec![line(7, 0, 8)]);
         completion
@@ -377,9 +425,88 @@ mod tests {
         completion
             .run_stage(LineCompletionStage::FillHolesAfterPolish, &mut state)
             .unwrap();
+        completion
+            .run_stage(LineCompletionStage::FillHolesFinal, &mut state)
+            .unwrap();
+        completion
+            .run_stage(LineCompletionStage::PolishCurvatures, &mut state)
+            .unwrap();
         assert_eq!(
             completion.next().0,
-            vec![LineCompletionStage::FillHolesAfterPolish]
+            vec![LineCompletionStage::PolishCurvatures]
+        );
+        assert_eq!(
+            state
+                .fill_hole_invocations
+                .iter()
+                .map(|audit| (audit.invocation, audit.completed))
+                .collect::<Vec<_>>(),
+            vec![
+                (HoleFillInvocation::Initial, true),
+                (HoleFillInvocation::AfterPolish, true),
+                (HoleFillInvocation::Final, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn repeated_invocations_read_current_mutated_geometry() {
+        let mut completion = FillHolesInitialCompletion::new(Tail::default());
+        let mut state = state(vec![line(7, 0, 8)]);
+        completion
+            .run_stage(LineCompletionStage::FillHolesInitial, &mut state)
+            .unwrap();
+
+        state.staffs[0].lines[0]
+            .filament
+            .replace_defining_points(vec![(0.0, 8.0), (25.0, 8.0), (100.0, 8.0)])
+            .unwrap();
+        completion
+            .run_stage(LineCompletionStage::FillHolesAfterPolish, &mut state)
+            .unwrap();
+
+        state.staffs[0].lines[0]
+            .filament
+            .replace_defining_points(vec![(0.0, 8.0), (10.0, 8.0), (100.0, 8.0)])
+            .unwrap();
+        completion
+            .run_stage(LineCompletionStage::FillHolesFinal, &mut state)
+            .unwrap();
+
+        assert_eq!(state.fill_hole_invocations.len(), 3);
+        assert_eq!(state.fill_hole_invocations[0].insertions[0].preferred_x, 50);
+        assert_eq!(state.fill_hole_invocations[1].insertions[0].preferred_x, 62);
+        assert_eq!(state.fill_hole_invocations[2].insertions[0].preferred_x, 55);
+    }
+
+    #[test]
+    fn failed_invocation_retains_its_boundary_and_mutation_prefix() {
+        let mut state = state(vec![line(7, 0, 8)]);
+        let mut invalid = line(8, 0, 18);
+        let section_id = invalid.filament.sections()[0].id();
+        assert!(invalid.filament.remove_section_by_id(section_id));
+        state.staffs.push(PreparedStaff {
+            id: 10,
+            kind: StaffCandidateKind::Standard,
+            left: 0.0,
+            right: 100.0,
+            interline: 10,
+            small: false,
+            short: false,
+            lines: vec![invalid],
+        });
+
+        assert!(fill_holes(&mut state, HoleFillInvocation::Final).is_err());
+        assert_eq!(state.fill_hole_invocations.len(), 1);
+        assert_eq!(
+            state.fill_hole_invocations[0].invocation,
+            HoleFillInvocation::Final
+        );
+        assert!(!state.fill_hole_invocations[0].completed);
+        assert_eq!(state.fill_hole_invocations[0].insertions.len(), 1);
+        assert_eq!(
+            state.staffs[0].lines[0].filament.defining_points().unwrap(),
+            vec![(0.0, 8.0), (50.0, 8.0), (100.0, 8.0)]
         );
     }
 }

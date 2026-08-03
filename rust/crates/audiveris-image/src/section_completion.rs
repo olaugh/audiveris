@@ -547,7 +547,7 @@ mod tests {
             thick_section_ids: vec![1],
             thin_section_ids: vec![2],
             defined_endpoints: Vec::<PreparedStaffEndPoints>::new(),
-            fill_hole_insertions: Vec::new(),
+            fill_hole_invocations: Vec::new(),
             discarded_filament_steals: Vec::new(),
             discarded_filament_recomputations: Vec::new(),
             section_inclusion_batches: Vec::new(),
