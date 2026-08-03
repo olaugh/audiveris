@@ -323,17 +323,33 @@ denied, and passed `git diff --check` before commit.
 239. `a33b86fd` — exact Java/Rust pixel-backed connection differential vector.
 240. `c49b8628` — raw split subfilaments, rediscovery, connection, and purge integration.
 241. `b5d54b66` — shared concrete thick/thin section inclusion completion stages.
+242. `88225193` — raw peak-graph system grouping and initial column construction.
+243. `416f7878` — prepared staff-filament curvature polishing and retained failure prefix.
+244. `4666b99b` — exact pre-brace column/start/purge coordinator prefix.
+245. `b1a2345b` — raw bar processing bridged to the brace-evidence boundary.
+246. `de0f387b` — exact Java/Rust `StaffFilament.fillHoles` differential vector.
+247. `14906986` — all three prepared hole-fill invocations over live geometry.
+248. `9c44d9f5` — brace-portion evidence gates, windows, and replacement intents.
+249. `ba4f0453` — non-transactional mistaken-first-bar replacement mutation.
+250. `4840bf42` — prepared one-pixel staff-sticker inclusion and endpoint preservation.
+251. `05de4f60` — brace polygon selection and compound curved-filament construction.
+252. `4b8856ee` — prepared crossing-chunk inspection, removal, and recomputation.
+253. `76e6c3c2` — brace glyph registration and ordered system-SIG promotion.
+254. `309877e3` — dependency-light headless `HEADERS` step and `StaffHeader` boundary.
+255. `5127409c` — injected headless `HeaderBuilder` shell and mutation lifecycle.
+256. `03a65cb4` — complete raw 11-stage line-completion composition.
+257. `5381b34b` — raw post-brace purge and exact lines-root correction.
 
-At the two-hundred-and-forty-first checkpoint the Rust workspace executes 614 tests:
+At the two-hundred-and-fifty-seventh checkpoint the Rust workspace executes 663 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 442
-- `audiveris-omr`: 119
+- `audiveris-image`: 460
+- `audiveris-omr`: 150
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 69 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 70 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -347,6 +363,9 @@ short-vertical pixels used for horizontal staff processing.
 The latest vector additionally executes production Java `Book.updateScores` and the
 Rust topology port across a movement-boundary removal, reinsertion, and following-score
 merge, matching both the initial two-score grouping and final one-score result exactly.
+The newest vector freezes production `StaffFilament.fillHoles`, including ties-to-even
+insertion, neighbor interpolation and fallback, defining-point order, and regenerated
+spline position/slope.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
