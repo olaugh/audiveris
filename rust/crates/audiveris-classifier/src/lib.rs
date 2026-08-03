@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::io::{Cursor, Read};
+use std::sync::OnceLock;
 
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -19,6 +20,18 @@ pub const INPUT_SIZE: usize = 110;
 pub const HIDDEN_SIZE: usize = 149;
 /// Number of ordered physical shape grades emitted by the classifier.
 pub const OUTPUT_SIZE: usize = 149;
+
+/// The angular order used by Audiveris' `BasicARTExtractor`.
+pub const ART_ANGULAR: usize = 20;
+/// The radial order used by Audiveris' `BasicARTExtractor`.
+pub const ART_RADIAL: usize = 5;
+/// The number of ART modules retained by `MixGlyphDescriptor` (all but F00).
+pub const ART_FEATURE_COUNT: usize = ART_ANGULAR * ART_RADIAL - 1;
+/// The number of leading geometric values retained by `MixGlyphDescriptor`.
+pub const GEOMETRIC_FEATURE_COUNT: usize = 10;
+
+const LUT_RADIUS: usize = 50;
+const LUT_SIZE: usize = LUT_RADIUS * 2 + 1;
 
 /// One raw basic-classifier result, in the model's exact output-label order.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +53,231 @@ impl fmt::Display for ModelLoadError {
 }
 
 impl std::error::Error for ModelLoadError {}
+
+/// Failure while extracting the bundled classifier's raw glyph descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FeatureExtractionError {
+    /// The descriptor requires at least one foreground pixel.
+    EmptyPixels,
+    /// Audiveris normalizes geometric values by the staff interline, which must be positive.
+    InvalidInterline,
+}
+
+impl fmt::Display for FeatureExtractionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyPixels => formatter.write_str("cannot extract a descriptor from no pixels"),
+            Self::InvalidInterline => formatter.write_str("interline must be positive"),
+        }
+    }
+}
+
+impl std::error::Error for FeatureExtractionError {}
+
+/// Extracts the 110 `MixGlyphDescriptor` inputs expected by [`BasicClassifier`].
+///
+/// `pixels` is Audiveris' foreground-point list in its original iteration order. The feature
+/// values are translation-independent except for the geometric centroid values which the Java
+/// descriptor deliberately omits. Consequently the coordinates may be either glyph-local or
+/// absolute sheet coordinates, as long as their bounding box matches the glyph's bounds.
+///
+/// This ports `RunTable.computeArtMoments`, `BasicARTExtractor`, `GeometricMoments`, and
+/// `MixGlyphDescriptor`, but intentionally does not assume a RunTable/Glyph representation.
+pub fn mix_glyph_features(
+    pixels: &[(i32, i32)],
+    interline: i32,
+) -> Result<[f64; INPUT_SIZE], FeatureExtractionError> {
+    if pixels.is_empty() {
+        return Err(FeatureExtractionError::EmptyPixels);
+    }
+    if interline <= 0 {
+        return Err(FeatureExtractionError::InvalidInterline);
+    }
+
+    let art = art_modules(pixels);
+    let geometric = geometric_moments(pixels, interline);
+    let (min_x, max_x, min_y, max_y) = bounds(pixels);
+    let width = f64::from(max_x - min_x + 1);
+    let height = f64::from(max_y - min_y + 1);
+    let mut features = [0.0; INPUT_SIZE];
+    features[..ART_FEATURE_COUNT].copy_from_slice(&art);
+    features[ART_FEATURE_COUNT..ART_FEATURE_COUNT + GEOMETRIC_FEATURE_COUNT]
+        .copy_from_slice(&geometric[..GEOMETRIC_FEATURE_COUNT]);
+    features[INPUT_SIZE - 1] = height / width;
+    Ok(features)
+}
+
+fn bounds(pixels: &[(i32, i32)]) -> (i32, i32, i32, i32) {
+    pixels.iter().fold(
+        (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
+        |(min_x, max_x, min_y, max_y), &(x, y)| {
+            (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y))
+        },
+    )
+}
+
+fn art_modules(pixels: &[(i32, i32)]) -> [f64; ART_FEATURE_COUNT] {
+    // Preserve Java's `AbstractExtractor.findCenterOfMass` operation ordering.
+    let (sum_x, sum_y) = pixels
+        .iter()
+        .fold((0_i64, 0_i64), |(sum_x, sum_y), &(x, y)| {
+            (sum_x + i64::from(x), sum_y + i64::from(y))
+        });
+    let mass = pixels.len() as f64;
+    let center_x = sum_x as f64 / mass;
+    let center_y = sum_y as f64 / mass;
+    let (dx_max, dy_max) = pixels
+        .iter()
+        .fold((f64::MIN, f64::MIN), |(dx, dy), &(x, y)| {
+            (
+                dx.max((f64::from(x) - center_x).abs()),
+                dy.max((f64::from(y) - center_y).abs()),
+            )
+        });
+    let radius = dx_max.hypot(dy_max);
+    let tables = art_luts();
+    let mut real = [[0.0; ART_RADIAL]; ART_ANGULAR];
+    let mut imaginary = [[0.0; ART_RADIAL]; ART_ANGULAR];
+
+    for &(x, y) in pixels {
+        let lx = ((f64::from(x) - center_x) * LUT_RADIUS as f64 / radius) + LUT_RADIUS as f64;
+        let ly = ((f64::from(y) - center_y) * LUT_RADIUS as f64 / radius) + LUT_RADIUS as f64;
+        if !(0.0..LUT_SIZE as f64).contains(&lx) || !(0.0..LUT_SIZE as f64).contains(&ly) {
+            continue;
+        }
+        for p in 0..ART_ANGULAR {
+            for r in 0..ART_RADIAL {
+                let index = p * ART_RADIAL + r;
+                real[p][r] += interpolate(&tables.real[index], lx, ly);
+                // Java accumulates `coeffImag -= imagLut.interpolate(...)`.
+                imaginary[p][r] -= interpolate(&tables.imaginary[index], lx, ly);
+            }
+        }
+    }
+
+    let mut result = [0.0; ART_FEATURE_COUNT];
+    let mut output = 0;
+    for p in 0..ART_ANGULAR {
+        for r in 0..ART_RADIAL {
+            if p != 0 || r != 0 {
+                result[output] = (imaginary[p][r] / mass).hypot(real[p][r] / mass);
+                output += 1;
+            }
+        }
+    }
+    result
+}
+
+fn geometric_moments(pixels: &[(i32, i32)], interline: i32) -> [f64; 12] {
+    let dim = pixels.len() as f64;
+    let mut mean_x = 0.0;
+    let mut mean_y = 0.0;
+    // Java traverses the supplied collector arrays backwards for both passes.
+    for &(x, y) in pixels.iter().rev() {
+        mean_x += f64::from(x);
+        mean_y += f64::from(y);
+    }
+    mean_x /= dim;
+    mean_y /= dim;
+
+    let mut n11 = 0.0;
+    let mut n12 = 0.0;
+    let mut n21 = 0.0;
+    let mut n20 = 0.0;
+    let mut n02 = 0.0;
+    let mut n30 = 0.0;
+    let mut n03 = 0.0;
+    for &(px, py) in pixels.iter().rev() {
+        let x = f64::from(px) - mean_x;
+        let y = f64::from(py) - mean_y;
+        n11 += x * y;
+        n12 += x * y * y;
+        n21 += x * x * y;
+        n20 += x * x;
+        n02 += y * y;
+        n30 += x * x * x;
+        n03 += y * y * y;
+    }
+    let w2 = dim * dim;
+    let w3 = (dim * dim * dim * dim * dim).sqrt();
+    let (min_x, max_x, min_y, max_y) = bounds(pixels);
+    let unit = f64::from(interline);
+    [
+        dim / (unit * unit),
+        f64::from(max_x - min_x + 1) / unit,
+        f64::from(max_y - min_y + 1) / unit,
+        n20 / w2,
+        n11 / w2,
+        n02 / w2,
+        n30 / w3,
+        n21 / w3,
+        n12 / w3,
+        n03 / w3,
+        mean_x,
+        mean_y,
+    ]
+}
+
+struct ArtLuts {
+    real: Vec<Vec<f64>>,
+    imaginary: Vec<Vec<f64>>,
+}
+
+fn art_luts() -> &'static ArtLuts {
+    static TABLES: OnceLock<ArtLuts> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let count = ART_ANGULAR * ART_RADIAL;
+        let mut real = vec![vec![0.0; LUT_SIZE * LUT_SIZE]; count];
+        let mut imaginary = vec![vec![0.0; LUT_SIZE * LUT_SIZE]; count];
+        for x in 0..LUT_SIZE {
+            let tx = (x as f64 - LUT_RADIUS as f64) / LUT_RADIUS as f64;
+            for y in 0..LUT_SIZE {
+                let ty = (y as f64 - LUT_RADIUS as f64) / LUT_RADIUS as f64;
+                let radial = tx.hypot(ty);
+                if radial < 1.0 {
+                    let angle = ty.atan2(tx);
+                    for p in 0..ART_ANGULAR {
+                        for r in 0..ART_RADIAL {
+                            let index = p * ART_RADIAL + r;
+                            let basis = (radial * std::f64::consts::PI * r as f64).cos();
+                            let cell = x * LUT_SIZE + y;
+                            real[index][cell] = basis * (angle * p as f64).cos();
+                            imaginary[index][cell] = basis * (angle * p as f64).sin();
+                        }
+                    }
+                }
+            }
+        }
+        ArtLuts { real, imaginary }
+    })
+}
+
+fn interpolate(table: &[f64], px: f64, py: f64) -> f64 {
+    // Inputs have been range checked and are non-negative, so Java's truncation is floor here.
+    let x = px as usize;
+    let y = py as usize;
+    let ix = px - x as f64;
+    let iy = py - y as f64;
+    let max = LUT_SIZE - 1;
+    let value = table[x * LUT_SIZE + y];
+    if x == max {
+        if y == max {
+            value
+        } else {
+            value + iy * (table[x * LUT_SIZE + y + 1] - value)
+        }
+    } else {
+        let x_next = table[(x + 1) * LUT_SIZE + y];
+        let vpxy = value + ix * (x_next - value);
+        if y == max {
+            vpxy
+        } else {
+            let xy_next = table[x * LUT_SIZE + y + 1];
+            let vpxy_next = xy_next + ix * (table[(x + 1) * LUT_SIZE + y + 1] - xy_next);
+            vpxy + iy * (vpxy_next - vpxy)
+        }
+    }
+}
 
 /// Immutable, bundled 110 -> 149 -> 149 sigmoid network and its feature norms.
 #[derive(Clone, Debug)]
@@ -387,6 +625,57 @@ mod tests {
                 (grades[index].grade - expected).abs() < 5e-18,
                 "grade for {shape}: {}",
                 grades[index].grade
+            );
+        }
+    }
+
+    #[test]
+    fn mix_descriptor_rejects_empty_pixels_and_invalid_interline() {
+        assert_eq!(
+            mix_glyph_features(&[], 10),
+            Err(FeatureExtractionError::EmptyPixels)
+        );
+        assert_eq!(
+            mix_glyph_features(&[(0, 0)], 0),
+            Err(FeatureExtractionError::InvalidInterline)
+        );
+    }
+
+    #[test]
+    fn mix_descriptor_preserves_art_geometry_and_aspect_layout() {
+        // This is the same deliberately asymmetric point list as the live Java vector. These
+        // positions make a zero/one-based coordinate mistake, an ART order mistake, or a signed
+        // third-order geometric-moment mistake immediately observable.
+        let pixels = [
+            (2, 1),
+            (3, 1),
+            (5, 2),
+            (2, 3),
+            (3, 3),
+            (4, 3),
+            (4, 4),
+            (6, 5),
+            (3, 6),
+            (7, 6),
+        ];
+        let features = mix_glyph_features(&pixels, 11).expect("valid asymmetric glyph");
+        assert_eq!(features.len(), INPUT_SIZE);
+        for (index, expected) in [
+            (0, 0.008_405_864_717),
+            (1, 0.151_875_526_046),
+            (98, 0.205_662_345_252),  // final ART module (F194)
+            (99, 0.082_644_628_099),  // normalized weight
+            (100, 0.545_454_545_455), // normalized width
+            (101, 0.545_454_545_455), // normalized height
+            (103, 0.154),             // n11
+            (106, 0.063_498_535_416), // n21
+            (107, 0.018_594_192_642), // n12
+            (109, 1.0),
+        ] {
+            assert!(
+                (features[index] - expected).abs() < 5e-13,
+                "feature {index}: {}",
+                features[index]
             );
         }
     }

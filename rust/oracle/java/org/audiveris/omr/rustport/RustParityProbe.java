@@ -51,6 +51,10 @@ import org.audiveris.omr.math.NaturalSpline;
 import org.audiveris.omr.math.Projection;
 import org.audiveris.omr.math.Range;
 import org.audiveris.omr.math.Rational;
+import org.audiveris.omr.moments.ARTMoments;
+import org.audiveris.omr.moments.BasicARTExtractor;
+import org.audiveris.omr.moments.BasicARTMoments;
+import org.audiveris.omr.moments.GeometricMoments;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
@@ -179,6 +183,37 @@ public final class RustParityProbe
                     .append(String.format(java.util.Locale.ROOT, "%.17f", basicGrades[index]));
         }
         System.out.println("classifier.basic.synthetic=" + basicVector);
+
+        // Sparse asymmetric pixels force non-trivial ART interpolation plus both signed
+        // third-order geometric moments. Keep this oracle below Glyph/RunTable integration:
+        // it is the exact point-list contract consumed by the Rust feature extractor.
+        int[] glyphX = {2, 3, 5, 2, 3, 4, 4, 6, 3, 7};
+        int[] glyphY = {1, 1, 2, 3, 3, 3, 4, 5, 6, 6};
+        BasicARTMoments glyphArts = new BasicARTMoments();
+        BasicARTExtractor glyphExtractor = new BasicARTExtractor();
+        glyphExtractor.setDescriptor(glyphArts);
+        glyphExtractor.extract(glyphX, glyphY, glyphX.length);
+        GeometricMoments glyphGeos = new GeometricMoments(glyphX, glyphY, glyphX.length, 11);
+        double[] glyphFeatures = new double[110];
+        int glyphFeatureIndex = 0;
+        for (int p = 0; p < ARTMoments.ANGULAR; p++) {
+            for (int r = 0; r < ARTMoments.RADIAL; r++) {
+                if ((p != 0) || (r != 0)) {
+                    glyphFeatures[glyphFeatureIndex++] = glyphArts.getMoment(p, r);
+                }
+            }
+        }
+        System.arraycopy(glyphGeos.getValues(), 0, glyphFeatures, glyphFeatureIndex, 10);
+        glyphFeatureIndex += 10;
+        glyphFeatures[glyphFeatureIndex] = 6.0 / 6.0;
+        StringBuilder glyphVector = new StringBuilder();
+        for (int index = 0; index < glyphFeatures.length; index++) {
+            if (index > 0) {
+                glyphVector.append(',');
+            }
+            glyphVector.append(String.format(java.util.Locale.ROOT, "%.12f", glyphFeatures[index]));
+        }
+        System.out.println("classifier.mix-glyph.asymmetric=" + glyphVector);
 
         InjectionSolver solver = new InjectionSolver(
                 3,

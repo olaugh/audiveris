@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use audiveris_classifier::{BasicClassifier, INPUT_SIZE};
+use audiveris_classifier::{BasicClassifier, INPUT_SIZE, mix_glyph_features};
 use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
     integer_function::IntegerFunction, natural_spec, natural_spline::NaturalSpline,
@@ -285,7 +285,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 71] = [
+const VECTOR_KEYS: [&str; 72] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -296,6 +296,7 @@ const VECTOR_KEYS: [&str; 71] = [
     "line.one-ten=",
     "grade.contextual=",
     "classifier.basic.synthetic=",
+    "classifier.mix-glyph.asymmetric=",
     "injection=",
     "integer.function=",
     "projection.short.synthetic=",
@@ -1966,6 +1967,30 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .map(|grade| format!("{}:{:.17}", grade.shape, grade.grade))
             .collect::<Vec<_>>()
             .join(";")
+    ));
+
+    // This deliberately asymmetric, sparse raster holds ART basis interpolation, third-order
+    // geometric signs, normalized bounds, and aspect in one compact Java-backed oracle.
+    let glyph_pixels = [
+        (2, 1),
+        (3, 1),
+        (5, 2),
+        (2, 3),
+        (3, 3),
+        (4, 3),
+        (4, 4),
+        (6, 5),
+        (3, 6),
+        (7, 6),
+    ];
+    let glyph_features = mix_glyph_features(&glyph_pixels, 11)?;
+    lines.push(format!(
+        "classifier.mix-glyph.asymmetric={}",
+        glyph_features
+            .iter()
+            .map(|value| format!("{value:.12}"))
+            .collect::<Vec<_>>()
+            .join(",")
     ));
 
     let (mapping, cost) = injection_solver::solve(3, 3, |domain, range| {
