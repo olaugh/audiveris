@@ -140,6 +140,61 @@ impl LineCluster {
         Ok(())
     }
 
+    /// Java `mergeWith`: consume another cluster after aligning its first line.
+    ///
+    /// `delta_position` is expressed between the two clusters' zero-based line
+    /// indices, rather than between their raw relative-position keys. Existing
+    /// destination lines absorb the source line; empty positions retain the
+    /// complete source identity history. The operation is transactional if a
+    /// stable filament ID already occurs in both clusters.
+    pub fn merge_with(&mut self, other: Self, delta_position: i32) -> Result<(), LineClusterError> {
+        let self_first = *self.lines.first_key_value().expect("seeded cluster").0;
+        let other_first = *other.lines.first_key_value().expect("seeded cluster").0;
+        let shift = delta_position + self_first - other_first;
+
+        for line in other.lines.values() {
+            if self.contains_id(line.primary_id) {
+                return Err(LineClusterError::DuplicateFilamentId(line.primary_id));
+            }
+            if let Some(id) = line
+                .absorbed_ids
+                .iter()
+                .copied()
+                .find(|&id| self.contains_id(id))
+            {
+                return Err(LineClusterError::DuplicateFilamentId(id));
+            }
+        }
+
+        let mut merged_lines = self.lines.clone();
+        for (position, incoming) in other.lines {
+            let target_position = position + shift;
+            if let Some(current) = merged_lines.get_mut(&target_position) {
+                for section in incoming.filament.sections() {
+                    current.filament.add_section(section.clone())?;
+                }
+                current.absorbed_ids.push(incoming.primary_id);
+                current.absorbed_ids.extend(incoming.absorbed_ids);
+            } else {
+                merged_lines.insert(target_position, incoming);
+            }
+        }
+        self.lines = merged_lines;
+        Ok(())
+    }
+
+    /// Shift the first remaining relative line to position zero.
+    pub fn renumber_lines(&mut self) {
+        let first_position = *self.lines.first_key_value().expect("seeded cluster").0;
+        if first_position == 0 {
+            return;
+        }
+        self.lines = std::mem::take(&mut self.lines)
+            .into_iter()
+            .map(|(position, line)| (position - first_position, line))
+            .collect();
+    }
+
     fn contains_id(&self, id: FilamentId) -> bool {
         self.lines
             .values()
@@ -587,6 +642,79 @@ mod tests {
         assert_eq!(
             at_limit.include_filament_by_index(FilamentId::new(2), filament(50, 12, 10), 0, 4, 3,),
             Err(LineClusterError::DuplicateFilamentId(FilamentId::new(2)))
+        );
+    }
+
+    #[test]
+    fn cluster_merge_aligns_first_lines_and_preserves_absorbed_ids() {
+        let mut destination =
+            LineCluster::new(10, FilamentId::new(10), filament(0, 10, 20)).unwrap();
+        destination
+            .include_line(2, FilamentId::new(30), filament(0, 30, 20))
+            .unwrap();
+
+        let mut source = LineCluster::new(10, FilamentId::new(40), filament(25, 10, 20)).unwrap();
+        source
+            .include_line(0, FilamentId::new(41), filament(50, 10, 20))
+            .unwrap();
+        source
+            .include_line(1, FilamentId::new(50), filament(25, 20, 20))
+            .unwrap();
+
+        destination.merge_with(source, 1).unwrap();
+
+        assert_eq!(
+            destination
+                .lines()
+                .map(|(position, line)| (position, line.primary_id().value()))
+                .collect::<Vec<_>>(),
+            [(0, 10), (1, 40), (2, 30)]
+        );
+        assert_eq!(destination.lines[&1].absorbed_ids(), &[FilamentId::new(41)]);
+        assert_eq!(destination.lines[&2].absorbed_ids(), &[FilamentId::new(50)]);
+        assert_eq!(destination.lines[&2].filament().sections().len(), 2);
+    }
+
+    #[test]
+    fn cluster_merge_rejects_duplicate_identity_without_mutation() {
+        let mut destination =
+            LineCluster::new(10, FilamentId::new(1), filament(0, 10, 20)).unwrap();
+        let source = LineCluster::new(10, FilamentId::new(1), filament(30, 10, 20)).unwrap();
+
+        assert_eq!(
+            destination.merge_with(source, 0),
+            Err(LineClusterError::DuplicateFilamentId(FilamentId::new(1)))
+        );
+        assert_eq!(destination.size(), 1);
+        assert_eq!(destination.first_line().filament().sections().len(), 1);
+    }
+
+    #[test]
+    fn renumber_lines_moves_first_position_to_zero_without_reordering() {
+        let mut cluster = LineCluster::new(10, FilamentId::new(10), filament(0, 10, 20)).unwrap();
+        cluster
+            .include_line(-2, FilamentId::new(1), filament(0, 2, 20))
+            .unwrap();
+        cluster
+            .include_line(3, FilamentId::new(40), filament(0, 40, 20))
+            .unwrap();
+
+        cluster.renumber_lines();
+
+        assert_eq!(
+            cluster
+                .lines()
+                .map(|(position, line)| (position, line.primary_id().value()))
+                .collect::<Vec<_>>(),
+            [(0, 1), (2, 10), (5, 40)]
+        );
+        cluster.renumber_lines();
+        assert_eq!(
+            cluster
+                .lines()
+                .map(|(position, _)| position)
+                .collect::<Vec<_>>(),
+            [0, 2, 5]
         );
     }
 }
