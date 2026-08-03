@@ -107,6 +107,52 @@ impl<R> PeakGraph<R> {
         &self.vertices
     }
 
+    /// JGraphT `ConnectivityInspector.connectedSets` semantics used by Java
+    /// `BarsRetriever.buildColumns`: directed edges are treated as undirected
+    /// for component membership. Components begin in vertex insertion order;
+    /// each returned chain is sorted by `StaffPeak.compareTo`, as Java's
+    /// subsequent `BarColumn.Chain(TreeSet)` construction does.
+    #[must_use]
+    pub fn connected_peak_chains(&self) -> Vec<Vec<&StaffPeak>> {
+        let mut visited = HashSet::with_capacity(self.vertices.len());
+        let mut components = Vec::new();
+
+        for seed in &self.vertices {
+            if !visited.insert(seed.key()) {
+                continue;
+            }
+            let mut pending = vec![seed.key()];
+            let mut keys = Vec::new();
+            while let Some(current) = pending.pop() {
+                keys.push(current);
+                for edge in &self.edges {
+                    let adjacent = if edge.source == current {
+                        Some(edge.target)
+                    } else if edge.target == current {
+                        Some(edge.source)
+                    } else {
+                        None
+                    };
+                    if let Some(adjacent) = adjacent {
+                        if visited.insert(adjacent) {
+                            pending.push(adjacent);
+                        }
+                    }
+                }
+            }
+            keys.sort_unstable();
+            components.push(
+                keys.into_iter()
+                    .map(|key| {
+                        self.vertex(key)
+                            .expect("component keys originate in graph vertices")
+                    })
+                    .collect(),
+            );
+        }
+        components
+    }
+
     /// Java simple-directed-graph insertion: endpoints must already exist,
     /// loops are forbidden, and only one directed edge can join a pair.
     pub fn add_edge(
@@ -543,6 +589,32 @@ mod tests {
                 .value(),
             2
         );
+    }
+
+    #[test]
+    fn connected_peak_chains_ignore_edge_direction_and_sort_each_component() {
+        let high = peak(3, 30, 31);
+        let low = peak(1, 10, 11);
+        let middle = peak(2, 20, 21);
+        let isolated = peak(4, 5, 6);
+        let expected = [low.key(), middle.key(), high.key()];
+        let isolated_key = isolated.key();
+        let mut graph = PeakGraph::new();
+        for value in [high, low, isolated, middle] {
+            assert!(graph.add_vertex(value));
+        }
+        graph.add_edge(expected[1], expected[0], 1_u8).unwrap();
+        graph.add_edge(expected[1], expected[2], 2_u8).unwrap();
+
+        let components = graph.connected_peak_chains();
+        assert_eq!(
+            components[0]
+                .iter()
+                .map(|peak| peak.key())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(components[1][0].key(), isolated_key);
     }
 
     #[test]
