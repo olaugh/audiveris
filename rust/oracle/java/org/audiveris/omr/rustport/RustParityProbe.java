@@ -36,6 +36,7 @@ import org.audiveris.omr.math.Histogram;
 import org.audiveris.omr.math.InjectionSolver;
 import org.audiveris.omr.math.IntegerFunction;
 import org.audiveris.omr.math.NaturalSpline;
+import org.audiveris.omr.math.Projection;
 import org.audiveris.omr.math.Range;
 import org.audiveris.omr.math.Rational;
 import org.audiveris.omr.run.Orientation;
@@ -122,6 +123,26 @@ public final class RustParityProbe
             integer.setValue(entry[0], entry[1]);
         }
         System.out.println("integer.function=" + integer.argMax(2, 9) + "/" + integer.getArea() + "/" + integer.getLocalMaxima(0, 20) + "/" + integer.getDerivative(3));
+
+        Projection.Short shortProjection = new Projection.Short(-3, 1);
+        shortProjection.increment(-3, Short.MAX_VALUE);
+        shortProjection.increment(-3);
+        shortProjection.increment(-2, 65_537);
+        shortProjection.increment(-1, -65_537);
+        shortProjection.increment(0, Integer.MAX_VALUE);
+        shortProjection.increment(1, Short.MIN_VALUE);
+        List<Integer> shortValues = new ArrayList<>();
+        for (int pos = shortProjection.getStart(); pos <= shortProjection.getStop(); pos++) {
+            shortValues.add(shortProjection.getValue(pos));
+        }
+        List<Integer> shortDerivatives = new ArrayList<>();
+        for (int pos = shortProjection.getStart() - 1; pos <= shortProjection.getStop(); pos++) {
+            shortDerivatives.add(shortProjection.getDerivative(pos));
+        }
+        System.out.println(
+                "projection.short.synthetic=" + shortProjection.getStart() + ":"
+                        + shortProjection.getStop() + ":" + shortProjection.getLength()
+                        + "/" + shortValues + "/" + shortDerivatives);
 
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));

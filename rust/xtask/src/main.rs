@@ -15,6 +15,7 @@ use audiveris_image::{
     global_filter, ingest,
     line_cluster::{FilamentId, LineCluster},
     median,
+    projection::ShortProjection,
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
@@ -201,7 +202,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 46] = [
+const VECTOR_KEYS: [&str; 47] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -213,6 +214,7 @@ const VECTOR_KEYS: [&str; 46] = [
     "grade.contextual=",
     "injection=",
     "integer.function=",
+    "projection.short.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -511,6 +513,26 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
         integer.area(),
         integer.local_maxima(0, 20),
         integer.derivative(3)
+    ));
+
+    let mut short_projection = ShortProjection::new(-3, 1)?;
+    short_projection.increment(-3, i32::from(i16::MAX));
+    short_projection.increment_one(-3);
+    short_projection.increment(-2, 65_537);
+    short_projection.increment(-1, -65_537);
+    short_projection.increment(0, i32::MAX);
+    short_projection.increment(1, i32::from(i16::MIN));
+    let short_values = (short_projection.start()..=short_projection.stop())
+        .map(|position| short_projection.value(position))
+        .collect::<Vec<_>>();
+    let short_derivatives = ((short_projection.start() - 1)..=short_projection.stop())
+        .map(|position| short_projection.derivative(position))
+        .collect::<Vec<_>>();
+    lines.push(format!(
+        "projection.short.synthetic={}:{}:{}/{short_values:?}/{short_derivatives:?}",
+        short_projection.start(),
+        short_projection.stop(),
+        short_projection.len()
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
