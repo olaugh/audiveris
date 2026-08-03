@@ -8,13 +8,17 @@
 //! `HorizontalLedgerGlyphFactory` is the first injected geometric collaborator:
 //! Java's horizontal `StickFactory`/`StraightFilament` construction.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use audiveris_image::{
     run_table::{Orientation, RunTable, RunTableError},
     section::{Bounds, JunctionPolicy, Section, build_sections_from_id},
     stick_factory::{HorizontalStickFactory, HorizontalStickParameters, StraightStickError},
     system_population::PopulationSystemArea,
+};
+
+use crate::ledgers_step::{
+    LedgerDelta, LedgerDeltaMutation, NeutralLedgerGlyph, NeutralLedgerInter, NeutralLedgerRelation,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -566,6 +570,29 @@ pub fn evaluate_ledger_line(
     scale: RawLedgerScale,
     parameters: RawLedgerCandidateParameters,
 ) -> Vec<LedgerLineCandidate> {
+    let mut accepted =
+        evaluate_ledger_line_unreduced(staff, index, candidates, previous, scale, parameters);
+    accepted.sort_by(|one, two| {
+        one.candidate
+            .bounds
+            .x
+            .total_cmp(&two.candidate.bounds.x)
+            .then_with(|| one.candidate.id.cmp(&two.candidate.id))
+    });
+    reduce_overlaps(accepted)
+}
+
+/// Java candidate visitation through intrinsic grade, before glyph/SIG
+/// materialization and the later abscissa sort/exclusion reduction.
+#[must_use]
+pub fn evaluate_ledger_line_unreduced(
+    staff: &RawLedgerStaffZone,
+    index: i32,
+    candidates: &[RawLedgerCandidate],
+    previous: &[LedgerPreviousReference],
+    scale: RawLedgerScale,
+    parameters: RawLedgerCandidateParameters,
+) -> Vec<LedgerLineCandidate> {
     if staff.tablature || index == 0 || staff.specific_interline <= 0 {
         return Vec::new();
     }
@@ -628,14 +655,7 @@ pub fn evaluate_ledger_line(
         }
     }
 
-    accepted.sort_by(|one, two| {
-        one.candidate
-            .bounds
-            .x
-            .total_cmp(&two.candidate.bounds.x)
-            .then_with(|| one.candidate.id.cmp(&two.candidate.id))
-    });
-    reduce_overlaps(accepted)
+    accepted
 }
 
 fn y_on_reference(reference: &LedgerPreviousReference, x: f64) -> f64 {
@@ -808,6 +828,402 @@ fn reduce_overlaps(mut candidates: Vec<LedgerLineCandidate>) -> Vec<LedgerLineCa
 
 fn candidate_tie_id(candidate: &RawLedgerCandidate) -> usize {
     candidate.inter_id.unwrap_or(candidate.id)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterializedLedgerGlyph {
+    pub id: usize,
+    pub filament_id: usize,
+    pub section_ids: Vec<usize>,
+    pub bounds: LedgerFloatBounds,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterializedLedgerInter {
+    pub id: usize,
+    pub glyph_id: usize,
+    pub filament_id: usize,
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub ledger_index: i32,
+    pub pitch: i32,
+    pub bounds: LedgerFloatBounds,
+    pub grade: f64,
+    pub impacts: [LedgerCandidateImpact; 7],
+    pub removed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterializedLedgerRelation {
+    pub id: usize,
+    pub system_id: usize,
+    pub source_inter_id: usize,
+    pub target_inter_id: usize,
+    pub removed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerIdentityKind {
+    Glyph,
+    Inter,
+    Relation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LedgerMaterializationError {
+    IdentityOverflow(LedgerIdentityKind),
+    PreMaterializedFilament(usize),
+}
+
+impl fmt::Display for LedgerMaterializationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::IdentityOverflow(kind) => write!(formatter, "{kind:?} identity overflow"),
+            Self::PreMaterializedFilament(id) => {
+                write!(
+                    formatter,
+                    "filament {id} already carries glyph/SIG identity"
+                )
+            }
+        }
+    }
+}
+
+impl Error for LedgerMaterializationError {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LedgerMaterializationOutcome {
+    pub delta: LedgerDelta,
+    pub survivor_inter_ids: Vec<usize>,
+    /// Exact registration/SIG prefix is retained in both `delta` and state.
+    pub error: Option<LedgerMaterializationError>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LedgerMaterializer {
+    next_glyph_id: usize,
+    next_inter_id: usize,
+    next_relation_id: usize,
+    glyphs: Vec<MaterializedLedgerGlyph>,
+    inters: Vec<MaterializedLedgerInter>,
+    relations: Vec<MaterializedLedgerRelation>,
+    by_filament: BTreeMap<usize, (usize, usize)>,
+    staff_ownership: BTreeMap<(usize, usize, i32), Vec<usize>>,
+}
+
+impl LedgerMaterializer {
+    #[must_use]
+    pub const fn new(next_glyph_id: usize, next_inter_id: usize, next_relation_id: usize) -> Self {
+        Self {
+            next_glyph_id,
+            next_inter_id,
+            next_relation_id,
+            glyphs: Vec::new(),
+            inters: Vec::new(),
+            relations: Vec::new(),
+            by_filament: BTreeMap::new(),
+            staff_ownership: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn glyphs(&self) -> &[MaterializedLedgerGlyph] {
+        &self.glyphs
+    }
+
+    #[must_use]
+    pub fn inters(&self) -> &[MaterializedLedgerInter] {
+        &self.inters
+    }
+
+    #[must_use]
+    pub fn relations(&self) -> &[MaterializedLedgerRelation] {
+        &self.relations
+    }
+
+    #[must_use]
+    pub const fn next_ids(&self) -> (usize, usize, usize) {
+        (
+            self.next_glyph_id,
+            self.next_inter_id,
+            self.next_relation_id,
+        )
+    }
+
+    #[must_use]
+    pub fn staff_inter_ids(&self, system_id: usize, staff_id: usize, index: i32) -> &[usize] {
+        self.staff_ownership
+            .get(&(system_id, staff_id, index))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// Java `lookupLine` from `registerOriginal(stick.toGlyph(null))` through
+    /// SIG insertion, overlap exclusions/reduction and staff attachment.
+    #[must_use]
+    pub fn materialize_line(
+        &mut self,
+        system_id: usize,
+        staff_id: usize,
+        index: i32,
+        candidates_in_factory_order: &[LedgerLineCandidate],
+    ) -> LedgerMaterializationOutcome {
+        let mut delta = LedgerDelta::default();
+        let mut line_inter_ids = Vec::new();
+        for evaluated in candidates_in_factory_order {
+            let filament_id = evaluated.candidate.id;
+            if evaluated.candidate.glyph_id.is_some() || evaluated.candidate.inter_id.is_some() {
+                return LedgerMaterializationOutcome {
+                    delta,
+                    survivor_inter_ids: Vec::new(),
+                    error: Some(LedgerMaterializationError::PreMaterializedFilament(
+                        filament_id,
+                    )),
+                };
+            }
+            let inter_id = if let Some((_, inter_id)) = self.by_filament.get(&filament_id) {
+                *inter_id
+            } else {
+                let Some(glyph_id) = allocate_identity(&mut self.next_glyph_id) else {
+                    return identity_failure(delta, LedgerIdentityKind::Glyph);
+                };
+                self.glyphs.push(MaterializedLedgerGlyph {
+                    id: glyph_id,
+                    filament_id,
+                    section_ids: evaluated.candidate.section_ids.clone(),
+                    bounds: evaluated.candidate.bounds,
+                });
+                delta
+                    .mutations
+                    .push(LedgerDeltaMutation::RegisterGlyph(NeutralLedgerGlyph {
+                        id: glyph_id,
+                        section_ids: evaluated.candidate.section_ids.clone(),
+                    }));
+
+                let Some(inter_id) = allocate_identity(&mut self.next_inter_id) else {
+                    return identity_failure(delta, LedgerIdentityKind::Inter);
+                };
+                self.inters.push(MaterializedLedgerInter {
+                    id: inter_id,
+                    glyph_id,
+                    filament_id,
+                    system_id,
+                    staff_id,
+                    ledger_index: index,
+                    pitch: index,
+                    bounds: evaluated.candidate.bounds,
+                    grade: evaluated.grade.grade,
+                    impacts: evaluated.grade.impacts,
+                    removed: false,
+                });
+                self.by_filament.insert(filament_id, (glyph_id, inter_id));
+                delta
+                    .mutations
+                    .push(LedgerDeltaMutation::AddInter(NeutralLedgerInter {
+                        id: inter_id,
+                        glyph_id,
+                        staff_id,
+                        index,
+                    }));
+                inter_id
+            };
+            if !self.inter(inter_id).is_some_and(|inter| inter.removed)
+                && !line_inter_ids.contains(&inter_id)
+            {
+                line_inter_ids.push(inter_id);
+            }
+        }
+
+        line_inter_ids.sort_by(|one, two| {
+            self.inter(*one)
+                .expect("line inter exists")
+                .bounds
+                .x
+                .total_cmp(&self.inter(*two).expect("line inter exists").bounds.x)
+                .then_with(|| one.cmp(two))
+        });
+        let mut line_relation_ids = Vec::new();
+        for left in 0..line_inter_ids.len() {
+            for right in left + 1..line_inter_ids.len() {
+                let left_inter = self.inter(line_inter_ids[left]).expect("line inter exists");
+                let right_inter = self
+                    .inter(line_inter_ids[right])
+                    .expect("line inter exists");
+                if left_inter.bounds.x_overlap(right_inter.bounds) <= 0.0 {
+                    break;
+                }
+                let (source_inter_id, target_inter_id) = if left_inter.id < right_inter.id {
+                    (left_inter.id, right_inter.id)
+                } else {
+                    (right_inter.id, left_inter.id)
+                };
+                if let Some(relation) = self.relations.iter().find(|relation| {
+                    !relation.removed
+                        && relation.source_inter_id == source_inter_id
+                        && relation.target_inter_id == target_inter_id
+                }) {
+                    line_relation_ids.push(relation.id);
+                    continue;
+                }
+                let Some(relation_id) = allocate_identity(&mut self.next_relation_id) else {
+                    return identity_failure(delta, LedgerIdentityKind::Relation);
+                };
+                self.relations.push(MaterializedLedgerRelation {
+                    id: relation_id,
+                    system_id,
+                    source_inter_id,
+                    target_inter_id,
+                    removed: false,
+                });
+                line_relation_ids.push(relation_id);
+                delta
+                    .mutations
+                    .push(LedgerDeltaMutation::AddRelation(NeutralLedgerRelation {
+                        id: relation_id,
+                        source_inter_id,
+                        target_inter_id,
+                    }));
+            }
+        }
+
+        self.reduce_line_exclusions(system_id, &line_relation_ids, &mut delta);
+        let mut survivors = Vec::new();
+        for inter_id in line_inter_ids {
+            if self.inter(inter_id).is_some_and(|inter| inter.removed) {
+                continue;
+            }
+            self.staff_ownership
+                .entry((system_id, staff_id, index))
+                .or_default()
+                .push(inter_id);
+            delta.mutations.push(LedgerDeltaMutation::AttachToStaff {
+                system_id,
+                staff_id,
+                index,
+                inter_id,
+            });
+            survivors.push(inter_id);
+        }
+        LedgerMaterializationOutcome {
+            delta,
+            survivor_inter_ids: survivors,
+            error: None,
+        }
+    }
+
+    fn inter(&self, id: usize) -> Option<&MaterializedLedgerInter> {
+        self.inters.iter().find(|inter| inter.id == id)
+    }
+
+    fn reduce_line_exclusions(
+        &mut self,
+        system_id: usize,
+        line_relation_ids: &[usize],
+        delta: &mut LedgerDelta,
+    ) {
+        loop {
+            let mut best = None;
+            let mut best_grade = 0.0;
+            for (relation_index, relation) in self.relations.iter().enumerate() {
+                if relation.removed
+                    || relation.system_id != system_id
+                    || !line_relation_ids.contains(&relation.id)
+                {
+                    continue;
+                }
+                let grade = self
+                    .inter(relation.source_inter_id)
+                    .map_or(0.0, |inter| inter.grade)
+                    .max(
+                        self.inter(relation.target_inter_id)
+                            .map_or(0.0, |inter| inter.grade),
+                    );
+                if best_grade < grade {
+                    best_grade = grade;
+                    best = Some(relation_index);
+                }
+            }
+            let Some(relation_index) = best else {
+                break;
+            };
+            let relation = self.relations[relation_index].clone();
+            let source_grade = self
+                .inter(relation.source_inter_id)
+                .expect("relation source exists")
+                .grade;
+            let target_grade = self
+                .inter(relation.target_inter_id)
+                .expect("relation target exists")
+                .grade;
+            let weaker = if source_grade < target_grade {
+                relation.source_inter_id
+            } else {
+                relation.target_inter_id
+            };
+
+            let incident = self
+                .relations
+                .iter()
+                .enumerate()
+                .filter(|(_, relation)| {
+                    !relation.removed
+                        && (relation.source_inter_id == weaker
+                            || relation.target_inter_id == weaker)
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            for incident_index in incident {
+                self.relations[incident_index].removed = true;
+                delta.mutations.push(LedgerDeltaMutation::RemoveRelation {
+                    system_id,
+                    relation_id: self.relations[incident_index].id,
+                });
+            }
+            let ownership_keys = self
+                .staff_ownership
+                .iter()
+                .filter(|(_, inter_ids)| inter_ids.contains(&weaker))
+                .map(|(key, _)| *key)
+                .collect::<Vec<_>>();
+            for (owner_system, staff_id, index) in ownership_keys {
+                if let Some(inter_ids) =
+                    self.staff_ownership
+                        .get_mut(&(owner_system, staff_id, index))
+                    && let Some(position) = inter_ids.iter().position(|id| *id == weaker)
+                {
+                    inter_ids.remove(position);
+                }
+                delta.mutations.push(LedgerDeltaMutation::DetachFromStaff {
+                    system_id: owner_system,
+                    staff_id,
+                    index,
+                    inter_id: weaker,
+                });
+            }
+            self.inters
+                .iter_mut()
+                .find(|inter| inter.id == weaker)
+                .expect("weaker inter exists")
+                .removed = true;
+            delta.mutations.push(LedgerDeltaMutation::RemoveInter {
+                system_id,
+                inter_id: weaker,
+            });
+        }
+    }
+}
+
+fn allocate_identity(next: &mut usize) -> Option<usize> {
+    let id = *next;
+    *next = id.checked_add(1)?;
+    Some(id)
+}
+
+fn identity_failure(delta: LedgerDelta, kind: LedgerIdentityKind) -> LedgerMaterializationOutcome {
+    LedgerMaterializationOutcome {
+        delta,
+        survivor_inter_ids: Vec::new(),
+        error: Some(LedgerMaterializationError::IdentityOverflow(kind)),
+    }
 }
 
 fn java_rint(value: f64) -> i32 {
@@ -1228,5 +1644,214 @@ mod tests {
         assert_eq!(outcome.next_filament_id, u64::MAX);
         assert_eq!(outcome.candidates.len(), 1);
         assert_eq!(outcome.candidates[0].id, usize::MAX - 1);
+    }
+
+    fn unresolved_candidate(id: usize, x: f64, y: f64) -> RawLedgerCandidate {
+        let mut candidate = candidate(id, id, x, y);
+        candidate.glyph_id = None;
+        candidate.inter_id = None;
+        candidate
+    }
+
+    fn evaluated_unresolved(candidates: &[RawLedgerCandidate]) -> Vec<LedgerLineCandidate> {
+        evaluate_ledger_line_unreduced(
+            &staff(),
+            -1,
+            candidates,
+            &[],
+            RawLedgerScale {
+                large_interline: 10,
+                mean_line_thickness: 2.0,
+            },
+            RawLedgerCandidateParameters::default(),
+        )
+    }
+
+    #[test]
+    fn materializer_registers_in_factory_order_then_reduces_in_abscissa_sig_order() {
+        // Factory order is right then left. Exact equal grades make Java remove
+        // the exclusion target (higher inter ID), not whichever is rightmost.
+        let right = unresolved_candidate(50, 15.0, 10.0);
+        let left = unresolved_candidate(51, 5.0, 10.0);
+        let evaluated = evaluated_unresolved(&[right.clone(), left.clone()]);
+        let mut materializer = LedgerMaterializer::new(10, 100, 500);
+
+        let outcome = materializer.materialize_line(1, 5, -1, &evaluated);
+
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.survivor_inter_ids, vec![100]);
+        assert_eq!(materializer.next_ids(), (12, 102, 501));
+        assert_eq!(
+            materializer
+                .glyphs()
+                .iter()
+                .map(|glyph| (glyph.id, glyph.filament_id, glyph.bounds.x))
+                .collect::<Vec<_>>(),
+            vec![(10, 50, 15.0), (11, 51, 5.0)]
+        );
+        assert_eq!(materializer.inters()[0].glyph_id, 10);
+        assert_eq!(materializer.inters()[0].staff_id, 5);
+        assert_eq!(materializer.inters()[0].ledger_index, -1);
+        assert_eq!(materializer.inters()[0].pitch, -1);
+        assert_eq!(materializer.inters()[0].bounds, right.bounds);
+        assert_eq!(materializer.inters()[0].grade, evaluated[0].grade.grade);
+        assert_eq!(materializer.inters()[0].impacts, evaluated[0].grade.impacts);
+        assert!(!materializer.inters()[0].removed);
+        assert!(materializer.inters()[1].removed);
+        assert_eq!(
+            materializer.relations(),
+            &[MaterializedLedgerRelation {
+                id: 500,
+                system_id: 1,
+                source_inter_id: 100,
+                target_inter_id: 101,
+                removed: true,
+            }]
+        );
+        assert_eq!(materializer.staff_inter_ids(1, 5, -1), [100]);
+        assert_eq!(
+            outcome.delta.mutations,
+            vec![
+                LedgerDeltaMutation::RegisterGlyph(NeutralLedgerGlyph {
+                    id: 10,
+                    section_ids: right.section_ids,
+                }),
+                LedgerDeltaMutation::AddInter(NeutralLedgerInter {
+                    id: 100,
+                    glyph_id: 10,
+                    staff_id: 5,
+                    index: -1,
+                }),
+                LedgerDeltaMutation::RegisterGlyph(NeutralLedgerGlyph {
+                    id: 11,
+                    section_ids: left.section_ids,
+                }),
+                LedgerDeltaMutation::AddInter(NeutralLedgerInter {
+                    id: 101,
+                    glyph_id: 11,
+                    staff_id: 5,
+                    index: -1,
+                }),
+                LedgerDeltaMutation::AddRelation(NeutralLedgerRelation {
+                    id: 500,
+                    source_inter_id: 100,
+                    target_inter_id: 101,
+                }),
+                LedgerDeltaMutation::RemoveRelation {
+                    system_id: 1,
+                    relation_id: 500,
+                },
+                LedgerDeltaMutation::RemoveInter {
+                    system_id: 1,
+                    inter_id: 101,
+                },
+                LedgerDeltaMutation::AttachToStaff {
+                    system_id: 1,
+                    staff_id: 5,
+                    index: -1,
+                    inter_id: 100,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn reused_filament_keeps_creation_pitch_and_adds_adjacent_staff_ownership_only() {
+        let raw = unresolved_candidate(7, 5.0, 10.0);
+        let evaluated = evaluated_unresolved(std::slice::from_ref(&raw));
+        let mut materializer = LedgerMaterializer::new(1, 20, 30);
+        let first = materializer.materialize_line(1, 5, -1, &evaluated);
+        assert_eq!(first.survivor_inter_ids, vec![20]);
+
+        let mut outer = evaluated.clone();
+        outer[0].grade.index = -2;
+        outer[0].grade.y_target = 0.0;
+        let second = materializer.materialize_line(1, 5, -2, &outer);
+
+        assert_eq!(second.error, None);
+        assert_eq!(second.survivor_inter_ids, vec![20]);
+        assert_eq!(materializer.next_ids(), (2, 21, 30));
+        assert_eq!(materializer.glyphs().len(), 1);
+        assert_eq!(materializer.inters().len(), 1);
+        assert_eq!(materializer.inters()[0].ledger_index, -1);
+        assert_eq!(materializer.inters()[0].pitch, -1);
+        assert_eq!(materializer.staff_inter_ids(1, 5, -1), [20]);
+        assert_eq!(materializer.staff_inter_ids(1, 5, -2), [20]);
+        assert_eq!(
+            second.delta.mutations,
+            vec![LedgerDeltaMutation::AttachToStaff {
+                system_id: 1,
+                staff_id: 5,
+                index: -2,
+                inter_id: 20,
+            }]
+        );
+    }
+
+    #[test]
+    fn inter_identity_failure_retains_registered_glyph_prefix() {
+        let raw = unresolved_candidate(9, 5.0, 10.0);
+        let evaluated = evaluated_unresolved(&[raw]);
+        let mut materializer = LedgerMaterializer::new(4, usize::MAX, 30);
+
+        let outcome = materializer.materialize_line(1, 5, -1, &evaluated);
+
+        assert_eq!(
+            outcome.error,
+            Some(LedgerMaterializationError::IdentityOverflow(
+                LedgerIdentityKind::Inter
+            ))
+        );
+        assert_eq!(materializer.glyphs().len(), 1);
+        assert!(materializer.inters().is_empty());
+        assert_eq!(materializer.next_ids(), (5, usize::MAX, 30));
+        assert_eq!(
+            outcome.delta.mutations,
+            vec![LedgerDeltaMutation::RegisterGlyph(NeutralLedgerGlyph {
+                id: 4,
+                section_ids: vec![9],
+            })]
+        );
+    }
+
+    #[test]
+    fn relation_identity_failure_retains_both_sig_vertices_without_attachment() {
+        let evaluated = evaluated_unresolved(&[
+            unresolved_candidate(1, 15.0, 10.0),
+            unresolved_candidate(2, 5.0, 10.0),
+        ]);
+        let mut materializer = LedgerMaterializer::new(1, 10, usize::MAX);
+
+        let outcome = materializer.materialize_line(1, 5, -1, &evaluated);
+
+        assert_eq!(
+            outcome.error,
+            Some(LedgerMaterializationError::IdentityOverflow(
+                LedgerIdentityKind::Relation
+            ))
+        );
+        assert_eq!(materializer.glyphs().len(), 2);
+        assert_eq!(materializer.inters().len(), 2);
+        assert!(materializer.relations().is_empty());
+        assert!(materializer.staff_inter_ids(1, 5, -1).is_empty());
+        assert_eq!(outcome.delta.mutations.len(), 4);
+    }
+
+    #[test]
+    fn pre_materialized_candidate_fails_before_any_registry_mutation() {
+        let evaluated = evaluated_unresolved(&[unresolved_candidate(1, 5.0, 10.0)]);
+        let mut invalid = evaluated;
+        invalid[0].candidate.glyph_id = Some(99);
+        let mut materializer = LedgerMaterializer::new(1, 10, 20);
+
+        let outcome = materializer.materialize_line(1, 5, -1, &invalid);
+
+        assert_eq!(
+            outcome.error,
+            Some(LedgerMaterializationError::PreMaterializedFilament(1))
+        );
+        assert!(outcome.delta.mutations.is_empty());
+        assert!(materializer.glyphs().is_empty());
+        assert!(materializer.inters().is_empty());
     }
 }

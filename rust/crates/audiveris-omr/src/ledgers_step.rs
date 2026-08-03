@@ -718,9 +718,9 @@ fn apply_delta(
                 if inter.staff_id != staff_id {
                     return Err(LedgersContractError::InterStaffMismatch { inter_id, staff_id });
                 }
-                if inter.index != index {
-                    return Err(LedgersContractError::InterIndexMismatch { inter_id, index });
-                }
+                // Java can temporarily accept the same LedgerInter on two
+                // adjacent virtual lines. Its creation-time index remains on
+                // the inter while Staff.addLedger owns the requested index.
                 let ledgers = sheet.systems[system_index].staves[staff_index]
                     .ledgers
                     .entry(index)
