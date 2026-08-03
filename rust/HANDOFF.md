@@ -275,17 +275,24 @@ denied, and passed `git diff --check` before commit.
 191. `c02ab205` — concrete filament glyph registration and persistent staff-line conversion.
 192. `b2882109` — curved GRID system areas and side-by-side slicing.
 193. `04370090` — `SystemInfo.buildRef` soft-reference identity and ownership.
+194. `cec9a53e` — page allocation wired to fresh system references and backlinks.
+195. `43ecff8f` — live Java/Rust `SystemInfo.buildRef` differential vector.
+196. `47cd7873` — concrete GRID bar/bracket SIG identities, relations, and freezing.
+197. `9be6dce6` — exact removal of original staff sections and runs from the GRID lag.
+198. `4788c1db` — concrete headless GRID sheet/page/reference/score executor state.
+199. `6b62cba8` — promoted barline grouping with exact gap and partial-failure behavior.
+200. `4c9c2985` — glyph-backed persistent lines and ordered GRID SIG ownership attachment.
 
-At the one-hundred-and-ninety-third checkpoint the Rust workspace executes 499 tests:
+At the two-hundredth checkpoint the Rust workspace executes 517 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 352
-- `audiveris-omr`: 94
+- `audiveris-image`: 360
+- `audiveris-omr`: 104
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 61 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 62 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -352,8 +359,12 @@ start validation, partial/left/unaligned/C-clef purges, related-column deletion,
 classification, and interpretation planning with rollback on missing evidence. Neutral `StaffPeak`,
 `PartGroup`, and stable-ID `PeakGraph` types now cover graph storage, incident and
 connection queries, alignment purge, median connection geometry, and brace checks
-without recreating Java object cycles. Promotion into the production SIG and the full
-GRID orchestration remain deliberately unported coupling boundaries.
+without recreating Java object cycles. Concrete sheet-owned SIG state now registers
+bar/bracket glyph and inter identities, peak backlinks, connector nodes and relations,
+connection freezing, and grouped-barline edges. It preserves Java's system-major
+vertical/group passes, global connection-edge order, per-connection catches, and
+ordinary-error prefix mutation. The post-group `recordBars`, staff-group/part creation,
+and contextualization tail remains outside this boundary.
 
 The neutral LinesRetriever coordinator now executes the main cluster pass, the
 conditional small-interline pass over ID-sorted primary discards, and Java's
@@ -369,24 +380,25 @@ Java's clear-first/non-transactional failure behavior, horizontal and vertical s
 ownership order, indentation traversal, physical page/PageRef allocation, and report
 maxima. Curved line/quadratic/cubic staff boundaries now reproduce neighbor expansion,
 vertical margins, strict containment, reversed south paths, and side-by-side midpoint
-slicing under production's x-monotone staff-spline invariant. `StaffFilament.toStaffLine`
-now builds and registers the union glyph before +0.5 ordinate adjustment, exact iterative
-spline simplification, and glyph assignment. Remaining boundaries include
-`SystemInfo.buildRef` details, concrete sheet-executor attachment, and production SIG
-integration. `SystemInfo.buildRef` now also preserves fresh-reference replacement, shared
-backlinks, physical part/staff order, exact `StaffConfig` defaults, separate PageRef append,
-and Java partial mutation on collaborator failure. The next seam is wiring these stable IDs
-into the concrete page allocator/sheet executor—not an assertion that GRID is fully
-behaviorally equivalent.
+slicing under production's x-monotone staff-spline invariant. The concrete executor now
+invokes `StaffFilament.toStaffLine`, registers the union glyph before +0.5 ordinate
+adjustment and exact iterative spline simplification, and stores the persistent line.
+Its clear-first loop also preserves Java's unusual conversion-failure prefix: converted
+lines and glyphs remain while the current and later originals are detached. `SystemInfo.buildRef`
+preserves fresh-reference replacement, shared backlinks, physical part/staff order, exact
+`StaffConfig` defaults, separate PageRef append, and Java partial mutation on collaborator
+failure, and those references are now wired into page allocation, sheet state, and score
+regrouping. The next major seam is a concrete low-level raster `GridBuildExecutor`, not an
+assertion that GRID is already fully behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
 validation, multi-rest serif rejection, six-impact grading, brace discovery, and
 neutral peak output. Result-list, lines-root, and right-end decisions are also ported,
 and the BarsRetriever registry preserves retained-staff/projector order and unique
-graph-vertex intents. This is an end-to-end dependency-light projector computation,
-but not the full Java object lifecycle: sheet/glyph ownership, deskew mutation,
-peak-graph edges, and downstream SIG mutation remain queued.
+graph-vertex intents. Downstream SIG promotion is now concrete, but the low-level raster
+builder still needs to feed production projector and graph state directly; deskew mutation
+and the post-group BarsRetriever tail remain queued.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
@@ -443,10 +455,10 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Complete the remaining concrete `GRID` seams: page-reference/buildRef wiring,
-   sheet-executor attachment, remaining glyph/index ownership, and peak-graph/SIG attachment. Keep UI
-   integration behind explicit neutral boundaries until the headless output has stable
-   full-stage differential fixtures.
+1. Complete the remaining concrete `GRID` seams: implement the low-level raster
+   `GridBuildExecutor`, attach the post-group `recordBars`/group/part/contextualize tail,
+   and freeze a stable full-stage GRID differential fixture. Keep UI integration behind
+   explicit neutral boundaries until the headless output matches that fixture.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
