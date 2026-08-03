@@ -10,6 +10,7 @@
 
 use std::{error::Error, fmt};
 
+use crate::bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide};
 use crate::staff_peak::{StaffPeak, StaffPeakKey};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -241,6 +242,54 @@ impl<R> PeakGraph<R> {
     }
 }
 
+impl PeakGraph<BarAlignment> {
+    /// Java `PeakGraph.getConnectedPeaks`: retain concrete connections on the
+    /// requested side and return partner peaks in `StaffPeak.compareTo` order.
+    pub fn connected_peaks(
+        &self,
+        peak: StaffPeakKey,
+        side: VerticalSide,
+    ) -> Result<Vec<&StaffPeak>, PeakGraphError> {
+        self.require_vertex(peak)?;
+        let mut partners = self
+            .edges
+            .iter()
+            .filter(|edge| edge.relation.kind() == BarAlignmentKind::Connection)
+            .filter_map(|edge| match side {
+                VerticalSide::Top if edge.target == peak => Some(edge.source),
+                VerticalSide::Bottom if edge.source == peak => Some(edge.target),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        partners.sort_unstable();
+        partners.dedup();
+        Ok(partners
+            .into_iter()
+            .map(|key| {
+                self.vertex(key)
+                    .expect("peak graph edges always reference present vertices")
+            })
+            .collect())
+    }
+
+    /// Java `BarsRetriever.isConnected`: direction matters and alignments do
+    /// not count until promoted to concrete connections.
+    pub fn is_connected(
+        &self,
+        peak: StaffPeakKey,
+        side: VerticalSide,
+    ) -> Result<bool, PeakGraphError> {
+        self.require_vertex(peak)?;
+        Ok(self.edges.iter().any(|edge| {
+            edge.relation.kind() == BarAlignmentKind::Connection
+                && match side {
+                    VerticalSide::Top => edge.target == peak,
+                    VerticalSide::Bottom => edge.source == peak,
+                }
+        }))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeakGraphError {
     MissingVertex(StaffPeakKey),
@@ -275,11 +324,38 @@ impl Error for PeakGraphError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bar_column::StaffId;
+    use crate::bar_alignment::{AlignmentPeak, BarImpacts};
+    use crate::bar_column::{PeakId, StaffId};
     use crate::staff_peak::StaffPeakAttribute;
 
     fn peak(staff: usize, start: i32, stop: i32) -> StaffPeak {
         StaffPeak::new(StaffId::new(staff), 10, 20, start, stop).unwrap()
+    }
+
+    fn relation(
+        id: usize,
+        top: StaffPeakKey,
+        bottom: StaffPeakKey,
+        kind: BarAlignmentKind,
+    ) -> BarAlignment {
+        let alignment = BarAlignment::new(
+            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), 1.0).unwrap(),
+            AlignmentPeak::new(
+                PeakId::new(id + 100),
+                bottom.staff_id(),
+                bottom.start(),
+                1.0,
+            )
+            .unwrap(),
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0).unwrap(),
+        )
+        .unwrap();
+        match kind {
+            BarAlignmentKind::Alignment => alignment,
+            BarAlignmentKind::Connection => BarAlignment::connection(&alignment, 1.0, 1.0).unwrap(),
+        }
     }
 
     #[test]
@@ -452,5 +528,102 @@ mod tests {
         assert!(graph.remove_vertex(keys[1]).is_none());
         assert!(graph.remove_edge(survivor).is_some());
         assert!(graph.remove_edge(survivor).is_none());
+    }
+
+    #[test]
+    fn connected_peak_queries_filter_alignments_respect_side_and_sort_partners() {
+        let mut graph = PeakGraph::new();
+        let focus = peak(2, 50, 51);
+        let top_late = peak(1, 30, 31);
+        let top_alignment = peak(1, 20, 21);
+        let top_early = peak(1, 10, 11);
+        let bottom_late = peak(3, 40, 41);
+        let bottom_early = peak(3, 5, 6);
+        let focus_key = focus.key();
+        let keys = [
+            top_late.key(),
+            top_alignment.key(),
+            top_early.key(),
+            bottom_late.key(),
+            bottom_early.key(),
+        ];
+        for vertex in [
+            focus,
+            top_late,
+            top_alignment,
+            top_early,
+            bottom_late,
+            bottom_early,
+        ] {
+            graph.add_vertex(vertex);
+        }
+
+        graph
+            .add_edge(
+                keys[0],
+                focus_key,
+                relation(1, keys[0], focus_key, BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[1],
+                focus_key,
+                relation(2, keys[1], focus_key, BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                keys[2],
+                focus_key,
+                relation(3, keys[2], focus_key, BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                focus_key,
+                keys[3],
+                relation(4, focus_key, keys[3], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+        graph
+            .add_edge(
+                focus_key,
+                keys[4],
+                relation(5, focus_key, keys[4], BarAlignmentKind::Connection),
+            )
+            .unwrap();
+
+        assert_eq!(
+            graph
+                .connected_peaks(focus_key, VerticalSide::Top)
+                .unwrap()
+                .into_iter()
+                .map(StaffPeak::key)
+                .collect::<Vec<_>>(),
+            [keys[2], keys[0]]
+        );
+        assert_eq!(
+            graph
+                .connected_peaks(focus_key, VerticalSide::Bottom)
+                .unwrap()
+                .into_iter()
+                .map(StaffPeak::key)
+                .collect::<Vec<_>>(),
+            [keys[4], keys[3]]
+        );
+        assert!(graph.is_connected(focus_key, VerticalSide::Top).unwrap());
+        assert!(graph.is_connected(focus_key, VerticalSide::Bottom).unwrap());
+        assert!(!graph.is_connected(keys[1], VerticalSide::Bottom).unwrap());
+
+        let missing = peak(9, 0, 1).key();
+        assert!(matches!(
+            graph.connected_peaks(missing, VerticalSide::Top),
+            Err(PeakGraphError::MissingVertex(key)) if key == missing
+        ));
+        assert_eq!(
+            graph.is_connected(missing, VerticalSide::Top),
+            Err(PeakGraphError::MissingVertex(missing))
+        );
     }
 }
