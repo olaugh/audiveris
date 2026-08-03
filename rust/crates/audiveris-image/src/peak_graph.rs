@@ -8,6 +8,7 @@
 //! contracts and explicit insertion order without owning sheet/projector/UI
 //! state. The generic relation payload can later be the neutral bar alignment.
 
+use std::collections::HashSet;
 use std::{error::Error, fmt};
 
 use crate::bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide};
@@ -288,6 +289,67 @@ impl PeakGraph<BarAlignment> {
                 }
         }))
     }
+
+    /// Java `PeakGraph.purgeAlignments`.
+    ///
+    /// Conflicts are selected against the original graph before any removal.
+    /// Each peak retains at most one incoming and one outgoing relation, using
+    /// Java's connection priority, contextual grade, and strict tie behavior.
+    pub fn purge_alignments(&mut self) -> Vec<PeakGraphEdge<BarAlignment>> {
+        let mut marked = Vec::new();
+        let mut seen = HashSet::new();
+
+        for peak in &self.vertices {
+            self.mark_conflicts(peak.key(), VerticalSide::Top, &mut marked, &mut seen);
+            self.mark_conflicts(peak.key(), VerticalSide::Bottom, &mut marked, &mut seen);
+        }
+
+        marked
+            .into_iter()
+            .map(|id| {
+                self.remove_edge(id)
+                    .expect("marked peak edge remains until purge removal")
+            })
+            .collect()
+    }
+
+    fn mark_conflicts(
+        &self,
+        peak: StaffPeakKey,
+        side: VerticalSide,
+        marked: &mut Vec<PeakEdgeId>,
+        seen: &mut HashSet<PeakEdgeId>,
+    ) {
+        let candidates = self
+            .edges
+            .iter()
+            .filter(|edge| match side {
+                VerticalSide::Top => edge.target == peak,
+                VerticalSide::Bottom => edge.source == peak,
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() <= 1 {
+            return;
+        }
+
+        let relations = candidates
+            .iter()
+            .map(|edge| edge.relation)
+            .collect::<Vec<_>>();
+        let best = BarAlignment::best_of(&relations, side)
+            .expect("multiple candidate relations always yield a best relation");
+        let best_index = relations
+            .iter()
+            .position(|relation| std::ptr::eq(relation, best))
+            .expect("best relation belongs to the candidate relation slice");
+        let best_id = candidates[best_index].id;
+
+        for edge in candidates {
+            if edge.id != best_id && seen.insert(edge.id) {
+                marked.push(edge.id);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,23 +400,37 @@ mod tests {
         bottom: StaffPeakKey,
         kind: BarAlignmentKind,
     ) -> BarAlignment {
+        graded_relation(id, top, bottom, kind, 1.0, 1.0, 1.0)
+    }
+
+    fn graded_relation(
+        id: usize,
+        top: StaffPeakKey,
+        bottom: StaffPeakKey,
+        kind: BarAlignmentKind,
+        impact: f64,
+        top_grade: f64,
+        bottom_grade: f64,
+    ) -> BarAlignment {
         let alignment = BarAlignment::new(
-            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), 1.0).unwrap(),
+            AlignmentPeak::new(PeakId::new(id), top.staff_id(), top.start(), top_grade).unwrap(),
             AlignmentPeak::new(
                 PeakId::new(id + 100),
                 bottom.staff_id(),
                 bottom.start(),
-                1.0,
+                bottom_grade,
             )
             .unwrap(),
             0.0,
             0.0,
-            BarImpacts::alignment(1.0, 1.0).unwrap(),
+            BarImpacts::alignment(impact, impact).unwrap(),
         )
         .unwrap();
         match kind {
             BarAlignmentKind::Alignment => alignment,
-            BarAlignmentKind::Connection => BarAlignment::connection(&alignment, 1.0, 1.0).unwrap(),
+            BarAlignmentKind::Connection => {
+                BarAlignment::connection(&alignment, impact, impact).unwrap()
+            }
         }
     }
 
@@ -625,5 +701,136 @@ mod tests {
             graph.is_connected(missing, VerticalSide::Top),
             Err(PeakGraphError::MissingVertex(missing))
         );
+    }
+
+    #[test]
+    fn purge_prefers_connections_then_requested_partner_contextual_grade() {
+        let mut graph = PeakGraph::new();
+        let top_strong = peak(1, 10, 11);
+        let top_connected = peak(1, 20, 21);
+        let focus = peak(2, 10, 11);
+        let bottom_strong = peak(3, 10, 11);
+        let bottom_weak = peak(3, 20, 21);
+        let keys = [
+            top_strong.key(),
+            top_connected.key(),
+            focus.key(),
+            bottom_strong.key(),
+            bottom_weak.key(),
+        ];
+        // The conflicted vertex comes first, freezing Java's vertex traversal
+        // and LinkedHashSet removal order.
+        for vertex in [focus, top_strong, top_connected, bottom_strong, bottom_weak] {
+            graph.add_vertex(vertex);
+        }
+
+        let incoming_alignment = graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                graded_relation(
+                    1,
+                    keys[0],
+                    keys[2],
+                    BarAlignmentKind::Alignment,
+                    1.0,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let incoming_connection = graph
+            .add_edge(
+                keys[1],
+                keys[2],
+                graded_relation(
+                    2,
+                    keys[1],
+                    keys[2],
+                    BarAlignmentKind::Connection,
+                    0.2,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let outgoing_strong = graph
+            .add_edge(
+                keys[2],
+                keys[3],
+                graded_relation(
+                    3,
+                    keys[2],
+                    keys[3],
+                    BarAlignmentKind::Connection,
+                    0.6,
+                    1.0,
+                    0.9,
+                ),
+            )
+            .unwrap();
+        let outgoing_weak = graph
+            .add_edge(
+                keys[2],
+                keys[4],
+                graded_relation(
+                    4,
+                    keys[2],
+                    keys[4],
+                    BarAlignmentKind::Connection,
+                    0.6,
+                    1.0,
+                    0.2,
+                ),
+            )
+            .unwrap();
+
+        let removed = graph.purge_alignments();
+        assert_eq!(
+            removed.iter().map(PeakGraphEdge::id).collect::<Vec<_>>(),
+            [incoming_alignment, outgoing_weak]
+        );
+        assert_eq!(graph.edges().len(), 2);
+        assert!(graph.edge(incoming_connection).is_some());
+        assert!(graph.edge(outgoing_strong).is_some());
+        assert_eq!(graph.in_degree(keys[2]).unwrap(), 1);
+        assert_eq!(graph.out_degree(keys[2]).unwrap(), 1);
+    }
+
+    #[test]
+    fn purge_uses_strict_first_on_tie_and_is_idempotent() {
+        let mut graph = PeakGraph::new();
+        let left = peak(1, 10, 11);
+        let right = peak(1, 20, 21);
+        let focus = peak(2, 10, 11);
+        let keys = [left.key(), right.key(), focus.key()];
+        for vertex in [left, right, focus] {
+            graph.add_vertex(vertex);
+        }
+        let first = graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                relation(1, keys[0], keys[2], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+        let second = graph
+            .add_edge(
+                keys[1],
+                keys[2],
+                relation(2, keys[1], keys[2], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+
+        assert_eq!(
+            graph
+                .purge_alignments()
+                .iter()
+                .map(PeakGraphEdge::id)
+                .collect::<Vec<_>>(),
+            [second]
+        );
+        assert!(graph.edge(first).is_some());
+        assert!(graph.purge_alignments().is_empty());
     }
 }
