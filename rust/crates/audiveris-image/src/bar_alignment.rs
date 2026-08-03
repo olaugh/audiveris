@@ -2,8 +2,8 @@
 
 //! Stable-ID selection semantics from Java `BarAlignment` and `BarConnection`.
 //!
-//! Peak geometry discovery, connection areas/medians, PeakGraph, SIG, and UI
-//! ownership are intentionally outside this neutral value layer.
+//! Peak geometry discovery, connection areas, PeakGraph, SIG, and UI ownership
+//! are intentionally outside this neutral value layer.
 
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
@@ -21,6 +21,39 @@ pub struct AlignmentPeak {
     staff_id: StaffId,
     start: i32,
     grade: f64,
+    geometry: Option<PeakGeometry>,
+}
+
+/// Integer extrema consumed by Java `BarConnection.getMedian/getWidth`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakGeometry {
+    width: usize,
+    top: i32,
+    bottom: i32,
+}
+
+impl PeakGeometry {
+    #[must_use]
+    pub const fn width(self) -> usize {
+        self.width
+    }
+
+    #[must_use]
+    pub const fn top(self) -> i32 {
+        self.top
+    }
+
+    #[must_use]
+    pub const fn bottom(self) -> i32 {
+        self.bottom
+    }
+}
+
+/// Rather-vertical connector median between the two peak extrema.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConnectionMedian {
+    pub top: (f64, f64),
+    pub bottom: (f64, f64),
 }
 
 impl AlignmentPeak {
@@ -44,7 +77,26 @@ impl AlignmentPeak {
             staff_id,
             start,
             grade,
+            geometry: None,
         })
+    }
+
+    /// Construct a peak with geometry needed by connection width and median.
+    pub fn with_geometry(
+        id: PeakId,
+        staff_id: StaffId,
+        start: i32,
+        width: usize,
+        top: i32,
+        bottom: i32,
+        grade: f64,
+    ) -> Result<Self, BarAlignmentError> {
+        let mut peak = Self::new(id, staff_id, start, grade)?;
+        if width == 0 || top > bottom {
+            return Err(BarAlignmentError::InvalidPeakGeometry(id));
+        }
+        peak.geometry = Some(PeakGeometry { width, top, bottom });
+        Ok(peak)
     }
 
     #[must_use]
@@ -65,6 +117,11 @@ impl AlignmentPeak {
     #[must_use]
     pub const fn grade(self) -> f64 {
         self.grade
+    }
+
+    #[must_use]
+    pub const fn geometry(self) -> Option<PeakGeometry> {
+        self.geometry
     }
 }
 
@@ -255,6 +312,57 @@ impl BarAlignment {
         self.kind
     }
 
+    /// Java `BarConnection.getWidth`.
+    pub fn connection_width(&self) -> Result<f64, BarAlignmentError> {
+        if self.kind != BarAlignmentKind::Connection {
+            return Err(BarAlignmentError::WrongRelationType);
+        }
+        let top = self
+            .top
+            .geometry
+            .ok_or(BarAlignmentError::MissingPeakGeometry(self.top.id))?;
+        let bottom = self
+            .bottom
+            .geometry
+            .ok_or(BarAlignmentError::MissingPeakGeometry(self.bottom.id))?;
+        Ok((top.width as f64 + bottom.width as f64) / 2.0)
+    }
+
+    /// Java `BarConnection.getMedian` using resolved foreground thickness.
+    ///
+    /// The `+0.5` terms preserve Java's inside-extrema to pixel-center
+    /// adjustment.
+    pub fn connection_median(
+        &self,
+        foreground_thickness: usize,
+    ) -> Result<ConnectionMedian, BarAlignmentError> {
+        if self.kind != BarAlignmentKind::Connection {
+            return Err(BarAlignmentError::WrongRelationType);
+        }
+        if foreground_thickness == 0 {
+            return Err(BarAlignmentError::InvalidForegroundThickness);
+        }
+        let top = self
+            .top
+            .geometry
+            .ok_or(BarAlignmentError::MissingPeakGeometry(self.top.id))?;
+        let bottom = self
+            .bottom
+            .geometry
+            .ok_or(BarAlignmentError::MissingPeakGeometry(self.bottom.id))?;
+        let half_line = foreground_thickness as f64 / 2.0;
+        Ok(ConnectionMedian {
+            top: (
+                self.top.start as f64 + top.width as f64 / 2.0,
+                top.bottom as f64 + half_line + 0.5,
+            ),
+            bottom: (
+                self.bottom.start as f64 + bottom.width as f64 / 2.0,
+                bottom.top as f64 - half_line + 0.5,
+            ),
+        })
+    }
+
     #[must_use]
     pub fn same_peaks(&self, other: &Self) -> bool {
         self.top.id == other.top.id && self.bottom.id == other.bottom.id
@@ -350,6 +458,9 @@ pub enum BarAlignmentError {
     InvalidPeakId,
     InvalidStaffId,
     InvalidPeakGrade(PeakId),
+    InvalidPeakGeometry(PeakId),
+    MissingPeakGeometry(PeakId),
+    InvalidForegroundThickness,
     InvalidPeakPair,
     InvalidGeometry,
     NonFiniteImpact,
@@ -368,6 +479,15 @@ impl fmt::Display for BarAlignmentError {
                     "invalid contextual grade for peak {}",
                     id.value()
                 )
+            }
+            Self::InvalidPeakGeometry(id) => {
+                write!(formatter, "invalid geometry for peak {}", id.value())
+            }
+            Self::MissingPeakGeometry(id) => {
+                write!(formatter, "missing geometry for peak {}", id.value())
+            }
+            Self::InvalidForegroundThickness => {
+                formatter.write_str("foreground thickness must be positive")
             }
             Self::InvalidPeakPair => formatter.write_str("alignment peak pair is invalid"),
             Self::InvalidGeometry => formatter.write_str("alignment geometry is not finite"),
@@ -388,6 +508,27 @@ mod tests {
 
     fn peak(id: usize, staff: usize, start: i32, grade: f64) -> AlignmentPeak {
         AlignmentPeak::new(PeakId::new(id), StaffId::new(staff), start, grade).unwrap()
+    }
+
+    fn geometric_peak(
+        id: usize,
+        staff: usize,
+        start: i32,
+        width: usize,
+        top: i32,
+        bottom: i32,
+        grade: f64,
+    ) -> AlignmentPeak {
+        AlignmentPeak::with_geometry(
+            PeakId::new(id),
+            StaffId::new(staff),
+            start,
+            width,
+            top,
+            bottom,
+            grade,
+        )
+        .unwrap()
     }
 
     fn alignment(
@@ -523,6 +664,66 @@ mod tests {
                 BarImpacts::alignment(1.0, 1.0).unwrap(),
             ),
             Err(BarAlignmentError::InvalidGeometry)
+        );
+    }
+
+    #[test]
+    fn connection_width_and_median_match_java_pixel_center_adjustment() {
+        let alignment = BarAlignment::new(
+            geometric_peak(1, 1, 10, 3, 12, 20, 1.0),
+            geometric_peak(2, 2, 12, 4, 30, 38, 1.0),
+            0.0,
+            1.0,
+            BarImpacts::alignment(1.0, 1.0).unwrap(),
+        )
+        .unwrap();
+        let connection = BarAlignment::connection(&alignment, 1.0, 1.0).unwrap();
+
+        assert_eq!(connection.connection_width().unwrap(), 3.5);
+        assert_eq!(
+            connection.connection_median(3).unwrap(),
+            ConnectionMedian {
+                top: (11.5, 22.0),
+                bottom: (14.0, 29.0),
+            }
+        );
+        assert_eq!(
+            connection.connection_median(2).unwrap(),
+            ConnectionMedian {
+                top: (11.5, 21.5),
+                bottom: (14.0, 29.5),
+            }
+        );
+    }
+
+    #[test]
+    fn connection_geometry_fails_closed_for_incomplete_state() {
+        let plain = alignment(1, 1, 10, 1.0, 1.0, 1.0);
+        assert_eq!(
+            plain.connection_width(),
+            Err(BarAlignmentError::WrongRelationType)
+        );
+
+        let connection = BarAlignment::connection(&plain, 1.0, 1.0).unwrap();
+        assert_eq!(
+            connection.connection_width(),
+            Err(BarAlignmentError::MissingPeakGeometry(PeakId::new(1)))
+        );
+        assert_eq!(
+            connection.connection_median(0),
+            Err(BarAlignmentError::InvalidForegroundThickness)
+        );
+        assert_eq!(
+            connection.connection_median(1),
+            Err(BarAlignmentError::MissingPeakGeometry(PeakId::new(1)))
+        );
+        assert_eq!(
+            AlignmentPeak::with_geometry(PeakId::new(3), StaffId::new(1), 0, 0, 10, 20, 1.0,),
+            Err(BarAlignmentError::InvalidPeakGeometry(PeakId::new(3)))
+        );
+        assert_eq!(
+            AlignmentPeak::with_geometry(PeakId::new(4), StaffId::new(1), 0, 2, 20, 10, 1.0,),
+            Err(BarAlignmentError::InvalidPeakGeometry(PeakId::new(4)))
         );
     }
 }
