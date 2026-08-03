@@ -1,13 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Transactional recursive comb inclusion from Java `LineCluster.include`.
+//! Transactional comb-network following and recursive cluster inclusion.
 //!
 //! The caller supplies explicit comb snapshots and current unclustered filament
 //! values. `ClusterOwnership` supplies all mutable back-references; `LineCluster`
-//! remains the geometric value. Sheet ordering, skew-based candidate selection,
-//! cluster consistency policy, glyph ownership, and SIG integration stay outside.
+//! remains the geometric value. This module first supports Java
+//! `ClustersRetriever.followCombsNetwork`, which joins fragments occupying the
+//! same relative line before cluster creation, and then the recursive
+//! `LineCluster.include` traversal. Sheet ordering, skew-based candidate
+//! selection, cluster consistency policy, glyph ownership, and SIG integration
+//! stay outside.
 
-use std::{cmp::Reverse, collections::BTreeMap, error::Error, fmt};
+use std::{
+    cmp::Reverse,
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use audiveris_core::histogram::Histogram;
 
@@ -49,6 +58,254 @@ impl RecursiveCombSnapshot {
         self.processed
     }
 }
+
+/// Follow Java's comb network and merge fragments that represent the same
+/// relative staff line.
+///
+/// `filament_order` is Java's `allFilaments` list after factory merging. It is
+/// traversed in caller order, while every filament's reverse comb map is
+/// traversed by ascending column. Within a comb, append order is retained.
+/// When two current ancestors occupy the same relative line, the longer one
+/// wins; the first-seen ancestor wins an exact length tie (`>=` in Java).
+///
+/// The supplied states are committed together only after the whole traversal
+/// succeeds. On success, swallowed values remain addressable in `filaments`, as
+/// they do through Java's global filament index, while `filament_order` retains
+/// only current roots, matching `removeMergedFilaments(allFilaments)`.
+pub fn follow_combs_network(
+    ownership: &mut ClusterOwnership,
+    filaments: &mut BTreeMap<FilamentId, StaffFilament>,
+    combs: &BTreeMap<CombId, RecursiveCombSnapshot>,
+    filament_order: &mut Vec<FilamentId>,
+) -> Result<(), FollowCombsNetworkError> {
+    let mut next_ownership = ownership.clone();
+    let mut next_filaments = filaments.clone();
+    let mut next_order = filament_order.clone();
+    follow_combs_network_inner(
+        &mut next_ownership,
+        &mut next_filaments,
+        combs,
+        &mut next_order,
+    )?;
+    *ownership = next_ownership;
+    *filaments = next_filaments;
+    *filament_order = next_order;
+    Ok(())
+}
+
+fn follow_combs_network_inner(
+    ownership: &mut ClusterOwnership,
+    filaments: &mut BTreeMap<FilamentId, StaffFilament>,
+    combs: &BTreeMap<CombId, RecursiveCombSnapshot>,
+    filament_order: &mut Vec<FilamentId>,
+) -> Result<(), FollowCombsNetworkError> {
+    let mut seen = BTreeSet::new();
+    let mut direct_combs = BTreeMap::new();
+    for &filament in filament_order.iter() {
+        if !seen.insert(filament) {
+            return Err(FollowCombsNetworkError::DuplicateFilamentInput(filament));
+        }
+        let ancestor = ownership.filament_ancestor(filament)?;
+        if ancestor != filament {
+            return Err(FollowCombsNetworkError::NonRootFilamentInput { filament, ancestor });
+        }
+        if !filaments.contains_key(&filament) {
+            return Err(FollowCombsNetworkError::MissingFilamentValue(filament));
+        }
+        direct_combs.insert(filament, ownership.combs_of(filament)?.clone());
+    }
+
+    // Keep direct per-object maps locally. Java leaves a swallowed object's
+    // map intact, but a winning object receives putAll from every swallowed
+    // root. ClusterOwnership intentionally exposes only the resolved root map.
+    for &pivot in filament_order.iter() {
+        let pivot_combs = direct_combs
+            .get(&pivot)
+            .ok_or(FollowCombsNetworkError::MissingFilamentInput(pivot))?
+            .values()
+            .copied()
+            .collect::<Vec<_>>();
+        let mut relative_lines = BTreeMap::<i32, FilamentId>::new();
+
+        for comb_id in pivot_combs {
+            let snapshot = combs
+                .get(&comb_id)
+                .ok_or(FollowCombsNetworkError::MissingCombSnapshot(comb_id))?;
+            let pivot_ancestor = ownership.filament_ancestor(pivot)?;
+            let mut pivot_index = None;
+            for (index, &member) in snapshot.members.iter().enumerate() {
+                if ownership.filament_ancestor(member)? == pivot_ancestor {
+                    pivot_index = Some(index);
+                    break;
+                }
+            }
+            let pivot_index = pivot_index.ok_or(FollowCombsNetworkError::PivotMissingFromComb {
+                pivot,
+                comb: comb_id,
+            })?;
+            let pivot_index = i32::try_from(pivot_index)
+                .map_err(|_| FollowCombsNetworkError::PositionOverflow)?;
+
+            for (index, &member) in snapshot.members.iter().enumerate() {
+                let index =
+                    i32::try_from(index).map_err(|_| FollowCombsNetworkError::PositionOverflow)?;
+                let relative = index
+                    .checked_sub(pivot_index)
+                    .ok_or(FollowCombsNetworkError::PositionOverflow)?;
+                if relative == 0 {
+                    continue;
+                }
+
+                if let Some(&incumbent) = relative_lines.get(&relative) {
+                    connect_filament_ancestors(
+                        ownership,
+                        filaments,
+                        &mut direct_combs,
+                        incumbent,
+                        member,
+                    )?;
+                } else {
+                    relative_lines.insert(relative, member);
+                }
+            }
+        }
+    }
+
+    let mut roots = Vec::with_capacity(filament_order.len());
+    for &filament in filament_order.iter() {
+        if ownership.filament_parent(filament)?.is_none() {
+            roots.push(filament);
+        }
+    }
+    *filament_order = roots;
+    Ok(())
+}
+
+fn connect_filament_ancestors(
+    ownership: &mut ClusterOwnership,
+    filaments: &mut BTreeMap<FilamentId, StaffFilament>,
+    direct_combs: &mut BTreeMap<FilamentId, BTreeMap<i32, CombId>>,
+    one: FilamentId,
+    two: FilamentId,
+) -> Result<(), FollowCombsNetworkError> {
+    let one = ownership.filament_ancestor(one)?;
+    let two = ownership.filament_ancestor(two)?;
+    if one == two {
+        return Ok(());
+    }
+
+    let one_length = filaments
+        .get(&one)
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(one))?
+        .bounds()?
+        .width;
+    let two_length = filaments
+        .get(&two)
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(two))?
+        .bounds()?
+        .width;
+    // Java uses >=, so the incumbent (`one`) wins an exact tie.
+    let (winner, swallowed) = if one_length >= two_length {
+        (one, two)
+    } else {
+        (two, one)
+    };
+
+    let swallowed_value = filaments
+        .get(&swallowed)
+        .cloned()
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(swallowed))?;
+    let mut winner_value = filaments
+        .get(&winner)
+        .cloned()
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(winner))?;
+    for section in swallowed_value.sections().iter().cloned() {
+        winner_value.add_section(section)?;
+    }
+
+    let swallowed_combs = direct_combs
+        .get(&swallowed)
+        .cloned()
+        .ok_or(FollowCombsNetworkError::MissingFilamentInput(swallowed))?;
+    direct_combs
+        .get_mut(&winner)
+        .ok_or(FollowCombsNetworkError::MissingFilamentInput(winner))?
+        .extend(swallowed_combs);
+    ownership.merge_filaments(winner, swallowed)?;
+    filaments.insert(winner, winner_value);
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FollowCombsNetworkError {
+    Ownership(ClusterOwnershipError),
+    Filament(FilamentError),
+    DuplicateFilamentInput(FilamentId),
+    NonRootFilamentInput {
+        filament: FilamentId,
+        ancestor: FilamentId,
+    },
+    MissingFilamentInput(FilamentId),
+    MissingFilamentValue(FilamentId),
+    MissingCombSnapshot(CombId),
+    PivotMissingFromComb {
+        pivot: FilamentId,
+        comb: CombId,
+    },
+    PositionOverflow,
+}
+
+impl From<ClusterOwnershipError> for FollowCombsNetworkError {
+    fn from(value: ClusterOwnershipError) -> Self {
+        Self::Ownership(value)
+    }
+}
+
+impl From<FilamentError> for FollowCombsNetworkError {
+    fn from(value: FilamentError) -> Self {
+        Self::Filament(value)
+    }
+}
+
+impl fmt::Display for FollowCombsNetworkError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ownership(error) => write!(formatter, "comb-network ownership error: {error}"),
+            Self::Filament(error) => write!(formatter, "comb-network filament error: {error}"),
+            Self::DuplicateFilamentInput(id) => {
+                write!(formatter, "duplicate input filament {}", id.value())
+            }
+            Self::NonRootFilamentInput { filament, ancestor } => write!(
+                formatter,
+                "input filament {} already belongs to ancestor {}",
+                filament.value(),
+                ancestor.value()
+            ),
+            Self::MissingFilamentInput(id) => {
+                write!(
+                    formatter,
+                    "filament {} is absent from input order",
+                    id.value()
+                )
+            }
+            Self::MissingFilamentValue(id) => {
+                write!(formatter, "missing filament value {}", id.value())
+            }
+            Self::MissingCombSnapshot(id) => {
+                write!(formatter, "missing comb snapshot {}", id.value())
+            }
+            Self::PivotMissingFromComb { pivot, comb } => write!(
+                formatter,
+                "pivot filament {} is absent from comb {}",
+                pivot.value(),
+                comb.value()
+            ),
+            Self::PositionOverflow => formatter.write_str("comb relative position overflow"),
+        }
+    }
+}
+
+impl Error for FollowCombsNetworkError {}
 
 /// Observable result of Java `createClusters`' neutral batch boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -412,6 +669,7 @@ impl Error for RecursiveIncludeError {}
 mod tests {
     use super::*;
     use crate::{
+        comb_builder::{CombFilament, retrieve_combs},
         run_table::{Orientation, Run, RunTable},
         section::{JunctionPolicy, build_sections},
     };
@@ -466,6 +724,218 @@ mod tests {
         let id = CombId::new(id);
         ownership.register_comb(id, &comb).unwrap();
         snapshots.insert(id, RecursiveCombSnapshot::from_comb(&comb));
+    }
+
+    #[test]
+    fn split_middle_line_follows_combs_to_longer_right_ancestor() {
+        let mut table = RunTable::new(Orientation::Horizontal, 100, 61).unwrap();
+        for y in [10, 20, 40, 50] {
+            assert!(table.add_run(y, Run::new(0, 100)).unwrap());
+        }
+        assert!(table.add_run(30, Run::new(0, 21)).unwrap());
+        assert!(table.add_run(30, Run::new(40, 60)).unwrap());
+        let sections = build_sections(&table, JunctionPolicy::All);
+        assert_eq!(sections.len(), 6);
+
+        let mut ownership = ClusterOwnership::new();
+        let mut filaments = BTreeMap::new();
+        let mut order = Vec::new();
+        let mut left = None;
+        let mut right = None;
+        for (index, section) in sections.into_iter().enumerate() {
+            let bounds = section.bounds();
+            let section_id = section.id();
+            let id = FilamentId::new((index + 1) as u64);
+            if bounds.y == 30 && bounds.x == 0 {
+                left = Some((id, section_id));
+            } else if bounds.y == 30 && bounds.x == 40 {
+                right = Some((id, section_id));
+            }
+            let mut filament = StaffFilament::new(10).unwrap();
+            filament.add_section(section).unwrap();
+            ownership.register_filament(id, &filament).unwrap();
+            filaments.insert(id, filament);
+            order.push(id);
+        }
+        let (left, left_section) = left.unwrap();
+        let (right, right_section) = right.unwrap();
+
+        let comb_filaments = order
+            .iter()
+            .map(|id| {
+                CombFilament::new(
+                    id.value() as usize,
+                    id.value() as usize,
+                    filaments[id].geometry().unwrap(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let columns = retrieve_combs(100, 10, 10, 10, &comb_filaments).unwrap();
+        let mut snapshots = BTreeMap::new();
+        for (next_comb_id, comb) in (1_u64..).zip(columns.iter().flat_map(|column| column.combs()))
+        {
+            let id = CombId::new(next_comb_id);
+            ownership.register_comb(id, comb).unwrap();
+            snapshots.insert(id, RecursiveCombSnapshot::from_comb(comb));
+        }
+        assert_eq!(snapshots.len(), 10);
+
+        follow_combs_network(&mut ownership, &mut filaments, &snapshots, &mut order).unwrap();
+
+        assert_eq!(order.len(), 5);
+        assert!(!order.contains(&left));
+        assert!(order.contains(&right));
+        assert_eq!(ownership.filament_parent(left).unwrap(), Some(right));
+        assert_eq!(ownership.filament_ancestor(left).unwrap(), right);
+        assert_eq!(ownership.section_owner(left_section), Some(right));
+        assert_eq!(ownership.section_owner(right_section), Some(right));
+        assert_eq!(filaments[&right].sections().len(), 2);
+        assert_eq!(filaments[&right].bounds().unwrap().width, 100);
+        assert_eq!(
+            ownership
+                .combs_of(right)
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [1, 2, 4, 5, 6, 7, 8, 9]
+        );
+
+        let mut clusters = BTreeMap::new();
+        let mut cluster_snapshots = snapshots.clone();
+        let formation = form_clusters_from_combs(
+            &mut ownership,
+            &mut clusters,
+            &filaments,
+            &mut cluster_snapshots,
+            &order,
+            10,
+            false,
+        )
+        .unwrap();
+        assert_eq!(formation.cluster_ids().len(), 1);
+        assert_eq!(clusters[&formation.cluster_ids()[0]].size(), 5);
+    }
+
+    #[test]
+    fn follow_network_uses_column_order_and_incumbent_wins_length_tie() {
+        let (mut ownership, mut filaments) = fixture_with_lengths(&[40, 20, 20]);
+        let pivot = FilamentId::new(1);
+        let lower_column = FilamentId::new(2);
+        let higher_column = FilamentId::new(3);
+        let higher_section = filaments[&higher_column].sections()[0].id();
+        let mut snapshots = BTreeMap::new();
+        // Register the higher column first. StaffFilament.getCombs is a
+        // TreeMap, so Java still visits column 10 before column 20.
+        add_comb(&mut ownership, &mut snapshots, 100, 20, &[1, 3]);
+        add_comb(&mut ownership, &mut snapshots, 200, 10, &[1, 2]);
+        let mut order = vec![pivot, lower_column, higher_column];
+
+        follow_combs_network(&mut ownership, &mut filaments, &snapshots, &mut order).unwrap();
+
+        assert_eq!(order, [pivot, lower_column]);
+        assert_eq!(
+            ownership.filament_ancestor(higher_column).unwrap(),
+            lower_column
+        );
+        assert_eq!(ownership.section_owner(higher_section), Some(lower_column));
+        assert_eq!(filaments[&lower_column].sections().len(), 2);
+        assert_eq!(
+            ownership
+                .combs_of(lower_column)
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [10, 20]
+        );
+    }
+
+    #[test]
+    fn swallowed_outer_pivot_traverses_its_frozen_direct_comb_map() {
+        let (mut ownership, mut filaments) = fixture_with_lengths(&[3, 2, 5, 1]);
+        let ids = [
+            FilamentId::new(1),
+            FilamentId::new(2),
+            FilamentId::new(3),
+            FilamentId::new(4),
+        ];
+        let mut snapshots = BTreeMap::new();
+        add_comb(&mut ownership, &mut snapshots, 10, 1, &[3, 1]);
+        add_comb(&mut ownership, &mut snapshots, 20, 2, &[1, 2, 3]);
+        add_comb(&mut ownership, &mut snapshots, 30, 3, &[3, 4, 1]);
+        let mut order = ids.to_vec();
+
+        follow_combs_network(&mut ownership, &mut filaments, &snapshots, &mut order).unwrap();
+
+        // Filament 4 is swallowed during filament 1's turn. Java still runs
+        // its later outer turn over only its own original {column 3} map. If
+        // that alias were resolved through ownership to filament 3's union,
+        // filament 2 would be swallowed as well.
+        assert_eq!(order, [ids[1], ids[2]]);
+        assert_eq!(
+            ids.map(|id| ownership.filament_ancestor(id).unwrap()),
+            [ids[2], ids[1], ids[2], ids[2]]
+        );
+    }
+
+    #[test]
+    fn chained_collision_compares_the_winners_enlarged_bounds() {
+        let (mut ownership, mut filaments) = fixture_with_lengths(&[10, 20, 30, 40]);
+        let pivot = FilamentId::new(1);
+        let first = FilamentId::new(2);
+        let winner = FilamentId::new(3);
+        let last = FilamentId::new(4);
+        let mut snapshots = BTreeMap::new();
+        add_comb(&mut ownership, &mut snapshots, 10, 10, &[1, 2]);
+        add_comb(&mut ownership, &mut snapshots, 20, 20, &[1, 3]);
+        add_comb(&mut ownership, &mut snapshots, 30, 30, &[1, 4]);
+        let mut order = vec![pivot, first, winner, last];
+
+        follow_combs_network(&mut ownership, &mut filaments, &snapshots, &mut order).unwrap();
+
+        // Filament 3 first wins 2 by 30 > 20. Their current union spans 50
+        // pixels, so it then wins 4 by 50 > 40; comparing the original width
+        // of 3 would choose 4 incorrectly.
+        assert_eq!(order, [pivot, winner]);
+        assert_eq!(ownership.filament_ancestor(first).unwrap(), winner);
+        assert_eq!(ownership.filament_ancestor(last).unwrap(), winner);
+        assert_eq!(filaments[&winner].bounds().unwrap().width, 80);
+        assert_eq!(filaments[&winner].sections().len(), 3);
+    }
+
+    #[test]
+    fn follow_network_failure_rolls_back_prior_merges() {
+        let (mut ownership, mut filaments) = fixture_with_lengths(&[40, 20, 20, 20]);
+        let ids = [
+            FilamentId::new(1),
+            FilamentId::new(2),
+            FilamentId::new(3),
+            FilamentId::new(4),
+        ];
+        let mut snapshots = BTreeMap::new();
+        add_comb(&mut ownership, &mut snapshots, 10, 10, &[1, 2]);
+        add_comb(&mut ownership, &mut snapshots, 20, 20, &[1, 3]);
+        add_comb(&mut ownership, &mut snapshots, 30, 30, &[1, 4]);
+        snapshots.remove(&CombId::new(30));
+        let mut order = ids.to_vec();
+        let original_sections = ids.map(|id| filaments[&id].sections()[0].id());
+
+        assert_eq!(
+            follow_combs_network(&mut ownership, &mut filaments, &snapshots, &mut order),
+            Err(FollowCombsNetworkError::MissingCombSnapshot(CombId::new(
+                30
+            )))
+        );
+
+        assert_eq!(order, ids);
+        for (id, section) in ids.into_iter().zip(original_sections) {
+            assert_eq!(ownership.filament_ancestor(id).unwrap(), id);
+            assert_eq!(ownership.filament_parent(id).unwrap(), None);
+            assert_eq!(ownership.section_owner(section), Some(id));
+            assert_eq!(filaments[&id].sections().len(), 1);
+        }
     }
 
     #[test]
