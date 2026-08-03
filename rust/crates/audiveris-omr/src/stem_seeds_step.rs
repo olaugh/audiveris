@@ -6,6 +6,11 @@
 use std::error::Error;
 use std::fmt;
 
+use audiveris_core::{
+    integer_function::IntegerFunction,
+    peak_finder::{HiLoPeakFinder, Quorum},
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NeutralStemScale {
     pub main: i32,
@@ -65,6 +70,9 @@ pub struct NeutralStemSystem {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NeutralStemSheet {
     pub id: usize,
+    pub interline: i32,
+    pub foreground_main: i32,
+    pub foreground_maximum: i32,
     pub stem_scale: Option<NeutralStemScale>,
     pub systems: Vec<NeutralStemSystem>,
     /// Java sheet glyph-index registration order for checked candidates.
@@ -97,10 +105,12 @@ pub struct StemSeedRetrievalInput<'a> {
 pub trait VisualStemSeeds {
     type Error;
 
-    fn retrieve_stem_scale(
+    /// Prepare the staff-core, staff-line/barline-cleaned raster and return
+    /// every horizontal foreground run length in raster traversal order.
+    fn retrieve_horizontal_run_lengths(
         &mut self,
         sheet: &NeutralStemSheet,
-    ) -> Result<NeutralStemScale, Self::Error>;
+    ) -> Result<Vec<i32>, Self::Error>;
 
     fn retrieve_candidates(
         &mut self,
@@ -168,10 +178,22 @@ where
         let stem_scale = if let Some(user_scale) = sheet.stem_scale {
             user_scale
         } else {
-            let measured = self
+            let runs = self
                 .visual
-                .retrieve_stem_scale(sheet)
+                .retrieve_horizontal_run_lengths(sheet)
                 .map_err(StemSeedsStepError::StemScale)?;
+            let measured = compute_stem_scale(
+                &runs,
+                StemScaleComputation {
+                    interline: sheet.interline,
+                    foreground_main: sheet.foreground_main,
+                    foreground_maximum: sheet.foreground_maximum,
+                    minimum_value_ratio: 0.1,
+                    minimum_derivative_ratio: 0.05,
+                    minimum_gain_ratio: 0.1,
+                    stem_as_foreground_ratio: 1.0,
+                },
+            );
             // Java sets the scale before any system task begins.
             sheet.stem_scale = Some(measured);
             sheet
@@ -244,6 +266,59 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StemScaleComputation {
+    pub interline: i32,
+    pub foreground_main: i32,
+    pub foreground_maximum: i32,
+    pub minimum_value_ratio: f64,
+    pub minimum_derivative_ratio: f64,
+    pub minimum_gain_ratio: f64,
+    pub stem_as_foreground_ratio: f64,
+}
+
+/// Java `HistoKeeper.populateFunction` + `StemScaler.computeStem` over concrete
+/// horizontal run evidence.
+#[must_use]
+pub fn compute_stem_scale(
+    horizontal_run_lengths: &[i32],
+    parameters: StemScaleComputation,
+) -> NeutralStemScale {
+    let mut histogram = IntegerFunction::new(0, parameters.interline);
+    for length in horizontal_run_lengths {
+        if *length <= parameters.interline {
+            histogram.add_value(*length, 1);
+        }
+    }
+    let area = histogram.area();
+    let quorum = java_rint(f64::from(area) * parameters.minimum_value_ratio);
+    let derivative = java_rint(f64::from(area) * parameters.minimum_derivative_ratio);
+    let mut finder = HiLoPeakFinder::new("stem", &histogram);
+    finder.set_quorum(Quorum::new(quorum));
+    let peak = finder
+        .find_peaks(1, derivative, parameters.minimum_gain_ratio)
+        .first()
+        .copied();
+    peak.map_or_else(
+        || NeutralStemScale {
+            main: java_rint(
+                parameters.stem_as_foreground_ratio * f64::from(parameters.foreground_main),
+            ),
+            maximum: java_rint(
+                parameters.stem_as_foreground_ratio * f64::from(parameters.foreground_maximum),
+            ),
+        },
+        |peak| NeutralStemScale {
+            main: java_rint(f64::from(peak.main)),
+            maximum: java_rint(f64::from(peak.max)),
+        },
+    )
+}
+
+fn java_rint(value: f64) -> i32 {
+    value.round_ties_even() as i32
+}
+
 fn filter_sections(
     system: &NeutralStemSystem,
     orientation: NeutralSectionOrientation,
@@ -269,7 +344,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeVisual {
-        scale: Option<Result<NeutralStemScale, &'static str>>,
+        runs: Option<Result<Vec<i32>, &'static str>>,
         by_system: BTreeMap<usize, Result<Vec<NeutralStemCandidate>, &'static str>>,
         scale_calls: usize,
         section_calls: Vec<(usize, Vec<usize>, Vec<usize>)>,
@@ -278,12 +353,12 @@ mod tests {
     impl VisualStemSeeds for FakeVisual {
         type Error = &'static str;
 
-        fn retrieve_stem_scale(
+        fn retrieve_horizontal_run_lengths(
             &mut self,
             _sheet: &NeutralStemSheet,
-        ) -> Result<NeutralStemScale, Self::Error> {
+        ) -> Result<Vec<i32>, Self::Error> {
             self.scale_calls += 1;
-            self.scale.take().unwrap()
+            self.runs.take().unwrap()
         }
 
         fn retrieve_candidates(
@@ -355,6 +430,9 @@ mod tests {
     fn sheet(stem_scale: Option<NeutralStemScale>) -> NeutralStemSheet {
         NeutralStemSheet {
             id: 5,
+            interline: 10,
+            foreground_main: 3,
+            foreground_maximum: 5,
             stem_scale,
             systems: vec![system(2), system(1)],
             registered_glyph_ids: Vec::new(),
@@ -400,11 +478,14 @@ mod tests {
     #[test]
     fn measured_scale_is_committed_before_first_system_and_survives_failure() {
         let measured = NeutralStemScale {
-            main: 3,
-            maximum: 5,
+            main: 2,
+            maximum: 3,
         };
         let mut visual = FakeVisual {
-            scale: Some(Ok(measured)),
+            runs: Some(Ok(std::iter::repeat_n(2, 20)
+                .chain(std::iter::repeat_n(3, 10))
+                .chain([1, 1, 4])
+                .collect())),
             ..FakeVisual::default()
         };
         visual.by_system.insert(2, Err("stick factory failed"));
@@ -438,7 +519,7 @@ mod tests {
     #[test]
     fn scale_failure_aborts_before_any_system_mutation() {
         let visual = FakeVisual {
-            scale: Some(Err("no histogram")),
+            runs: Some(Err("no histogram")),
             ..FakeVisual::default()
         };
         let mut step = HeadlessStemSeedsStep::new(visual, 0.5);
@@ -472,6 +553,9 @@ mod tests {
         let mut step = HeadlessStemSeedsStep::new(visual, 0.5);
         let mut sheet = NeutralStemSheet {
             id: 5,
+            interline: 10,
+            foreground_main: 3,
+            foreground_maximum: 5,
             stem_scale: Some(user),
             systems: vec![system(2)],
             registered_glyph_ids: Vec::new(),
@@ -488,5 +572,47 @@ mod tests {
         );
         assert!(sheet.systems[0].free_glyphs[0].vertical_seed_group);
         assert_eq!(sheet.registered_glyph_ids, vec![1, 2, 3, 4, 5]);
+    }
+
+    fn scale_parameters() -> StemScaleComputation {
+        StemScaleComputation {
+            interline: 10,
+            foreground_main: 3,
+            foreground_maximum: 5,
+            minimum_value_ratio: 0.1,
+            minimum_derivative_ratio: 0.05,
+            minimum_gain_ratio: 0.1,
+            stem_as_foreground_ratio: 1.0,
+        }
+    }
+
+    #[test]
+    fn concrete_histogram_selects_first_peak_and_ignores_runs_over_interline() {
+        let runs = std::iter::repeat_n(2, 20)
+            .chain(std::iter::repeat_n(3, 10))
+            .chain([1, 1, 4, 11, 99])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            compute_stem_scale(&runs, scale_parameters()),
+            NeutralStemScale {
+                main: 2,
+                maximum: 3
+            }
+        );
+    }
+
+    #[test]
+    fn empty_histogram_uses_foreground_fallback_with_java_ties_to_even() {
+        let mut parameters = scale_parameters();
+        parameters.stem_as_foreground_ratio = 0.5;
+        assert_eq!(
+            compute_stem_scale(&[], parameters),
+            NeutralStemScale {
+                main: 2,
+                maximum: 2
+            }
+        );
+        assert_eq!(java_rint(2.5), 2);
+        assert_eq!(java_rint(3.5), 4);
     }
 }
