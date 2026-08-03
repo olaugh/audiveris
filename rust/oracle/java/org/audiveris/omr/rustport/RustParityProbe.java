@@ -177,6 +177,44 @@ public final class RustParityProbe
                         + roundUpThreshold + "," + roundDownThreshold
                         + ";top0:" + zeroTopThreshold);
 
+        StaffProjector blankProjector = staffProjector(
+                projectorScale,
+                new int[]{0, 0, 1, 0, 0, 0, 0, 1, 0, 0});
+        Method findAllBlanks = StaffProjector.class.getDeclaredMethod("findAllBlanks");
+        findAllBlanks.setAccessible(true);
+        findAllBlanks.invoke(blankProjector);
+        List<String> blankRegions = new ArrayList<>();
+        for (Object blank : (List<?>) field(blankProjector, "allBlanks")) {
+            blankRegions.add(blank(blank));
+        }
+        Method selectBlank = StaffProjector.class.getDeclaredMethod(
+                "selectBlank",
+                org.audiveris.omr.util.HorizontalSide.class,
+                int.class,
+                int.class);
+        selectBlank.setAccessible(true);
+        Object rightFromTwo = selectBlank.invoke(
+                blankProjector,
+                org.audiveris.omr.util.HorizontalSide.RIGHT,
+                2,
+                2);
+        Object rightFromFour = selectBlank.invoke(
+                blankProjector,
+                org.audiveris.omr.util.HorizontalSide.RIGHT,
+                4,
+                2);
+        Object leftFromSeven = selectBlank.invoke(
+                blankProjector,
+                org.audiveris.omr.util.HorizontalSide.LEFT,
+                7,
+                2);
+        System.out.println(
+                "grid.staff-projector-blanks.synthetic=all:"
+                        + String.join(",", blankRegions)
+                        + ";right2:" + blank(rightFromTwo)
+                        + ";right4:" + blank(rightFromFour)
+                        + ";left7:" + blank(leftFromSeven));
+
         RunTable runs = new RunTable(Orientation.HORIZONTAL, 10, 5);
         runs.addRun(0, new Run(1, 2));
         runs.addRun(0, new Run(5, 3));
@@ -1092,6 +1130,13 @@ public final class RustParityProbe
                                                  int[] counts)
         throws Exception
     {
+        return (Integer) field(staffProjector(scale, counts), "derivativeThreshold");
+    }
+
+    private static StaffProjector staffProjector (Scale scale,
+                                                  int[] counts)
+        throws Exception
+    {
         final int height = 101;
         RunTable binary = new RunTable(Orientation.VERTICAL, counts.length, height);
         for (int x = 0; x < counts.length; x++) {
@@ -1117,7 +1162,13 @@ public final class RustParityProbe
         Method computeProjection = StaffProjector.class.getDeclaredMethod("computeProjection");
         computeProjection.setAccessible(true);
         computeProjection.invoke(projector);
-        return (Integer) field(projector, "derivativeThreshold");
+        return projector;
+    }
+
+    private static String blank (Object blank)
+        throws ReflectiveOperationException
+    {
+        return blank != null ? field(blank, "start") + "-" + field(blank, "stop") : "null";
     }
 
     private static StaffFilament staffFilament (int x,

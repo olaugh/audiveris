@@ -15,12 +15,13 @@ use audiveris_image::{
     global_filter, ingest,
     line_cluster::{FilamentId, LineCluster},
     median,
-    projection::ShortProjection,
+    projection::{ShortProjection, select_blank},
     run_table::{Orientation, Run, RunTable},
     scale_estimate::{ScaleOptions, estimate_scale},
     scale_runs::{VerticalRunHistograms, vertical_run_histograms},
     section::{JunctionPolicy, Section, build_sections},
     staff_pattern::StaffPattern,
+    staff_peak::HorizontalSide,
     target_line::TargetLine,
     watershed,
 };
@@ -202,7 +203,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 48] = [
+const VECTOR_KEYS: [&str; 49] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -216,6 +217,7 @@ const VECTOR_KEYS: [&str; 48] = [
     "integer.function=",
     "projection.short.synthetic=",
     "grid.staff-projector-threshold.synthetic=",
+    "grid.staff-projector-blanks.synthetic=",
     "runs=",
     "grid.sections.synthetic=",
     "grid.filament.synthetic=",
@@ -549,6 +551,31 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     let zero_top_threshold = staff_threshold(&[0, 5, 10, 15, 20, 25], 0)?;
     lines.push(format!(
         "grid.staff-projector-threshold.synthetic=ties:{round_up_threshold},{round_down_threshold};top0:{zero_top_threshold}"
+    ));
+
+    let mut blank_projection = ShortProjection::new(0, 9)?;
+    blank_projection.increment_one(2);
+    blank_projection.increment_one(7);
+    let blank_regions = blank_projection.blank_regions(0);
+    let blank_name = |blank: Option<audiveris_image::projection::ProjectionBlank>| {
+        blank.map_or_else(
+            || "null".to_owned(),
+            |blank| format!("{}-{}", blank.start(), blank.stop()),
+        )
+    };
+    let all_blanks = blank_regions
+        .iter()
+        .map(|blank| blank_name(Some(*blank)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let right_from_two = select_blank(&blank_regions, HorizontalSide::Right, 2, 2);
+    let right_from_four = select_blank(&blank_regions, HorizontalSide::Right, 4, 2);
+    let left_from_seven = select_blank(&blank_regions, HorizontalSide::Left, 7, 2);
+    lines.push(format!(
+        "grid.staff-projector-blanks.synthetic=all:{all_blanks};right2:{};right4:{};left7:{}",
+        blank_name(right_from_two),
+        blank_name(right_from_four),
+        blank_name(left_from_seven)
     ));
 
     let mut runs = RunTable::new(Orientation::Horizontal, 10, 5)?;
