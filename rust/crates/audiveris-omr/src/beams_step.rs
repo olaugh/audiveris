@@ -9,6 +9,10 @@
 use std::{error::Error, fmt};
 
 use audiveris_image::{
+    beam_extension::{
+        BeamExtensionEvidence, BeamExtensionInput as RasterBeamExtensionInput,
+        BeamExtensionParameters, ExtensionBeam, ExtensionGlyph, beam_extension_evidence,
+    },
     beam_structure::{
         BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster,
         BeamStructureParameters, analyze_beam_structure, compute_beam_impacts,
@@ -209,6 +213,15 @@ pub struct NativeBeamKernelConfig {
     pub pixel_filter_offset_y: i32,
     pub standard: NativeBeamClassParameters,
     pub small: Option<NativeBeamClassParameters>,
+    pub extension_systems: Vec<NativeBeamExtensionSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeBeamExtensionSystem {
+    pub system_id: usize,
+    pub beams: Vec<ExtensionBeam>,
+    pub seeds: Vec<ExtensionGlyph>,
+    pub parameters: BeamExtensionParameters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -225,13 +238,14 @@ pub enum BeamHookSide {
     Bottom,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BeamExtensionInput {
     pub sheet_id: usize,
     pub system_id: usize,
     pub remaining_spot_ids: Vec<usize>,
     pub vertical_seed_ids: Vec<usize>,
     pub raw_beam_ids: Vec<usize>,
+    pub native_evidence: Vec<BeamExtensionEvidence>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -735,12 +749,20 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             .filter(|glyph| glyph.groups.contains(&NeutralBeamGlyphGroup::VerticalSeed))
             .map(|glyph| glyph.id)
             .collect::<Vec<_>>();
+        let current_raw_beam_ids = raw_beam_ids(&sheet.systems[system_index]);
+        let native_evidence = self.native_extension_evidence(
+            &sheet.systems[system_index],
+            &remaining_spot_ids,
+            &vertical_seed_ids,
+            &current_raw_beam_ids,
+        );
         let extension = self.visual.extend_beams(BeamExtensionInput {
             sheet_id: sheet.id,
             system_id,
             remaining_spot_ids: remaining_spot_ids.clone(),
             vertical_seed_ids,
-            raw_beam_ids: raw_beam_ids(&sheet.systems[system_index]),
+            raw_beam_ids: current_raw_beam_ids,
+            native_evidence,
         });
         apply_delta(sheet, system_index, extension.delta)?;
         if let Some(error) = extension.error {
@@ -836,6 +858,68 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             }
         }
         Some(candidates)
+    }
+
+    fn native_extension_evidence(
+        &self,
+        system: &NeutralBeamSystem,
+        remaining_spot_ids: &[usize],
+        vertical_seed_ids: &[usize],
+        raw_beam_ids: &[usize],
+    ) -> Vec<BeamExtensionEvidence> {
+        let Some(config) = self.native_kernel.as_ref() else {
+            return Vec::new();
+        };
+        let Some(scene) = config
+            .extension_systems
+            .iter()
+            .find(|scene| scene.system_id == system.id)
+        else {
+            return Vec::new();
+        };
+        let beams = raw_beam_ids
+            .iter()
+            .filter_map(|id| scene.beams.iter().find(|beam| beam.id == *id).copied())
+            .collect::<Vec<_>>();
+        let seeds = vertical_seed_ids
+            .iter()
+            .filter_map(|id| scene.seeds.iter().find(|seed| seed.id == *id).copied())
+            .collect::<Vec<_>>();
+        let spots = remaining_spot_ids
+            .iter()
+            .filter_map(|id| {
+                let glyph = system.free_glyphs.iter().find(|glyph| glyph.id == *id)?;
+                let geometry = glyph.geometry?;
+                Some(ExtensionGlyph {
+                    id: glyph.id,
+                    left: glyph.left,
+                    top: glyph.top,
+                    width: geometry.width,
+                    height: geometry.height,
+                    vertical_median: None,
+                })
+            })
+            .collect::<Vec<_>>();
+        beam_extension_evidence(
+            RasterBeamExtensionInput {
+                beams: &beams,
+                seeds: &seeds,
+                spots: &spots,
+                raster: BeamRaster {
+                    table: &config.pixel_filter,
+                    offset_x: config.pixel_filter_offset_x,
+                    offset_y: config.pixel_filter_offset_y,
+                },
+                parameters: scene.parameters,
+            },
+            |point, height| {
+                [-1.0, 1.0].into_iter().all(|direction| {
+                    system
+                        .area
+                        .contains(point.0, point.1 + (direction * height / 2.0))
+                })
+            },
+        )
     }
 
     fn dispatch_spots(
@@ -1500,6 +1584,7 @@ mod tests {
                 minimum_grade: 0.08,
                 ..class
             }),
+            extension_systems: Vec::new(),
         }
     }
 
@@ -1940,6 +2025,90 @@ mod tests {
         assert_eq!(step.visual().candidate_inputs[0].native_candidates.len(), 1);
         assert_eq!(sheet.systems[0].inters[0].id, 101);
         assert!(step.visual().extension_inputs.is_empty());
+    }
+
+    #[test]
+    fn native_extension_evidence_is_added_without_taking_mutation_authority() {
+        let visual = visual_with_spots(Vec::new());
+        let mut config = native_kernel_config(0.08);
+        let class = audiveris_image::beam_extension::ExtensionClassParameters {
+            impacts: config.standard.impacts,
+            minimum_grade: 0.08,
+        };
+        config.extension_systems.push(NativeBeamExtensionSystem {
+            system_id: 2,
+            beams: vec![ExtensionBeam {
+                id: 100,
+                median: audiveris_image::beam_structure::Segment {
+                    x1: 10.0,
+                    y1: 22.0,
+                    x2: 15.0,
+                    y2: 22.0,
+                },
+                height: 4.0,
+                distance_impact: 1.0,
+                class: audiveris_image::beam_extension::BeamExtensionClass::Standard,
+                glyph_id: Some(10),
+                removed: false,
+            }],
+            seeds: vec![ExtensionGlyph {
+                id: 50,
+                left: 17,
+                top: 17,
+                width: 1,
+                height: 10,
+                vertical_median: Some(audiveris_image::beam_structure::Segment {
+                    x1: 17.0,
+                    y1: 17.0,
+                    x2: 17.0,
+                    y2: 26.0,
+                }),
+            }],
+            parameters: BeamExtensionParameters {
+                standard: class,
+                small: None,
+                max_side_beam_dx: 12.0,
+                min_beams_gap_x: 2.0,
+                max_beams_gap_y: 2.0,
+                beams_x_margin: 1.0,
+                max_extension_to_stem: 8.0,
+                max_extension_to_spot: 10.0,
+                max_stem_beam_gap_x: 2.0,
+                max_stem_beam_gap_y: 2.0,
+                min_extension_black_ratio: 0.5,
+                min_neighbor_x_overlap: 2.0,
+                max_neighbor_y_distance: 8.0,
+                max_neighbor_slope_diff: 0.1,
+            },
+        });
+        let mut step = HeadlessBeamsStep::new(visual).with_native_beam_kernel(config);
+        let mut sheet = sheet();
+        sheet.systems[0].inters.push(NeutralBeamInter {
+            id: 100,
+            kind: NeutralBeamInterKind::Beam,
+        });
+        let mut seed = beam_spot_glyph(50, 17, 17);
+        seed.groups = vec![NeutralBeamGlyphGroup::VerticalSeed];
+        sheet.systems[0].free_glyphs.push(seed);
+
+        assert_eq!(step.build_system_beams(&mut sheet, 0).unwrap(), None);
+
+        let extension = &step.visual().extension_inputs[0];
+        assert_eq!(extension.vertical_seed_ids, vec![50]);
+        assert_eq!(extension.native_evidence.len(), 1);
+        assert_eq!(
+            extension.native_evidence[0].mode,
+            audiveris_image::beam_extension::BeamExtensionMode::Stem { seed_id: 50 }
+        );
+        // The injected seam still returned the empty delta, so no replacement
+        // beam was materialized merely because native evidence existed.
+        assert_eq!(
+            sheet.systems[0].inters,
+            vec![NeutralBeamInter {
+                id: 100,
+                kind: NeutralBeamInterKind::Beam,
+            }]
+        );
     }
 
     #[test]
