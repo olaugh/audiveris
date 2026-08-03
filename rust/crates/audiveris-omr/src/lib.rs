@@ -43,6 +43,7 @@ pub mod staff_header;
 pub mod stem_seeds_step;
 pub mod stems_step;
 pub mod system_grouping;
+pub mod texts_step;
 pub mod xml;
 
 use sheet_xml::{SheetXml, SheetXmlError};
