@@ -199,6 +199,78 @@ impl LineCluster {
         Ok(sum / self.lines.len())
     }
 
+    /// Java `getStarts`, in top-to-bottom relative-position order.
+    pub fn starts(&self) -> Result<Vec<(f64, f64)>, LineClusterError> {
+        self.lines
+            .values()
+            .map(|line| Ok(line.filament.geometry()?.start()))
+            .collect()
+    }
+
+    /// Java `getStops`, in top-to-bottom relative-position order.
+    pub fn stops(&self) -> Result<Vec<(f64, f64)>, LineClusterError> {
+        self.lines
+            .values()
+            .map(|line| Ok(line.filament.geometry()?.stop()))
+            .collect()
+    }
+
+    /// Java `includeFilamentByIndex` with resolved scale pixel values.
+    ///
+    /// The zero-based index addresses lines in top-to-bottom relative-position
+    /// order. `Ok(false)` means the index did not exist or an overlapping probe
+    /// would exceed `max_fore`. Equality with `max_fore` is accepted. The
+    /// filament is absorbed at the selected existing position; this method
+    /// never inserts a new relative line.
+    pub fn include_filament_by_index(
+        &mut self,
+        id: FilamentId,
+        filament: StaffFilament,
+        index: usize,
+        probe_width: usize,
+        max_fore: usize,
+    ) -> Result<bool, LineClusterError> {
+        filament.bounds()?;
+        if self.contains_id(id) {
+            return Err(LineClusterError::DuplicateFilamentId(id));
+        }
+        let Some(position) = self.lines.keys().nth(index).copied() else {
+            return Ok(false);
+        };
+
+        let incoming_bounds = filament.bounds()?;
+        let resident = &self.lines[&position].filament;
+        for section in resident.sections() {
+            let bounds = section.bounds();
+            let common_left = incoming_bounds.x.max(bounds.x);
+            let common_right =
+                (incoming_bounds.x + incoming_bounds.width).min(bounds.x + bounds.width);
+            let overlap = common_right.saturating_sub(common_left);
+            if overlap > 0 {
+                // Java integer division deliberately biases an odd overlap's
+                // midpoint to the left.
+                let coordinate = common_left + (overlap / 2);
+                if combined_thickness_at(coordinate, probe_width, [&filament, resident])?
+                    > max_fore as f64
+                {
+                    return Ok(false);
+                }
+            }
+        }
+
+        let current = self
+            .lines
+            .get_mut(&position)
+            .expect("selected cluster line");
+        let mut merged = current.filament.clone();
+        for section in filament.sections() {
+            merged.add_section(section.clone())?;
+        }
+        current.filament = merged;
+        current.absorbed_ids.push(id);
+        Ok(true)
+    }
+
     /// Java-compatible points at `x`, ordered from top to bottom.
     ///
     /// Missing points first try vertical transfer from an immediately adjacent
@@ -261,6 +333,54 @@ impl LineCluster {
 
         Ok(points.into_values().collect())
     }
+}
+
+/// Horizontal `Compounds.getThicknessAt` for two staff filaments.
+fn combined_thickness_at(
+    coordinate: usize,
+    probe_width: usize,
+    filaments: [&StaffFilament; 2],
+) -> Result<f64, FilamentError> {
+    let mut min_x = usize::MAX;
+    let mut max_x = 0;
+    for filament in filaments {
+        let bounds = filament.bounds()?;
+        min_x = min_x.min(bounds.x);
+        max_x = max_x.max(bounds.x + bounds.width - 1);
+    }
+    if coordinate < min_x || coordinate > max_x {
+        return Ok(0.0);
+    }
+
+    // Java grows a zero-width rectangle by integer probeWidth / 2.
+    let half_width = probe_width / 2;
+    if half_width == 0 {
+        return Ok(0.0);
+    }
+    let probe_start = coordinate.saturating_sub(half_width);
+    let probe_stop = coordinate + half_width; // exclusive
+    let mut minimum_y = usize::MAX;
+    let mut maximum_y = 0;
+    let mut found = false;
+
+    for filament in filaments {
+        for section in filament.sections() {
+            for (offset, run) in section.runs().iter().enumerate() {
+                if run.start < probe_stop && run.stop() + 1 > probe_start {
+                    let y = section.first_pos() + offset;
+                    minimum_y = minimum_y.min(y);
+                    maximum_y = maximum_y.max(y);
+                    found = true;
+                }
+            }
+        }
+    }
+
+    Ok(if found {
+        (maximum_y - minimum_y + 1) as f64
+    } else {
+        0.0
+    })
 }
 
 /// Failure in the supported neutral line-cluster surface.
@@ -395,5 +515,78 @@ mod tests {
             [Some((-3.0, 1.25)), None]
         );
         assert_eq!(cluster.points_at(100.0, 3, 0.25).unwrap(), [None, None]);
+    }
+
+    #[test]
+    fn starts_and_stops_follow_relative_position_order() {
+        let mut cluster = LineCluster::new(10, FilamentId::new(1), filament(10, 10, 40)).unwrap();
+        cluster
+            .include_line(2, FilamentId::new(3), filament(5, 30, 45))
+            .unwrap();
+        cluster
+            .include_line(-1, FilamentId::new(2), filament(2, 2, 42))
+            .unwrap();
+
+        assert_eq!(
+            cluster.starts().unwrap(),
+            [(2.0, 2.0), (10.0, 10.0), (5.0, 30.0)]
+        );
+        assert_eq!(
+            cluster.stops().unwrap(),
+            [(43.0, 2.0), (49.0, 10.0), (49.0, 30.0)]
+        );
+    }
+
+    #[test]
+    fn indexed_inclusion_uses_top_to_bottom_order_and_requires_existing_line() {
+        let mut cluster = LineCluster::new(10, FilamentId::new(10), filament(0, 10, 40)).unwrap();
+        cluster
+            .include_line(-1, FilamentId::new(5), filament(0, 2, 40))
+            .unwrap();
+        cluster
+            .include_line(2, FilamentId::new(30), filament(0, 30, 40))
+            .unwrap();
+
+        assert!(
+            cluster
+                .include_filament_by_index(FilamentId::new(11), filament(45, 10, 20), 1, 4, 1,)
+                .unwrap()
+        );
+        assert_eq!(cluster.lines[&0].absorbed_ids(), &[FilamentId::new(11)]);
+        assert_eq!(cluster.lines[&0].filament().sections().len(), 2);
+        assert_eq!(cluster.lines[&-1].filament().sections().len(), 1);
+
+        assert!(
+            !cluster
+                .include_filament_by_index(FilamentId::new(99), filament(0, 50, 20), 3, 4, 10,)
+                .unwrap()
+        );
+        assert_eq!(cluster.size(), 3);
+    }
+
+    #[test]
+    fn indexed_inclusion_rejects_only_thickness_strictly_above_max_fore() {
+        let incoming = || filament(10, 12, 20);
+        let mut rejected = LineCluster::new(10, FilamentId::new(1), filament(0, 10, 40)).unwrap();
+        assert!(
+            !rejected
+                .include_filament_by_index(FilamentId::new(2), incoming(), 0, 4, 2)
+                .unwrap()
+        );
+        assert_eq!(rejected.first_line().filament().sections().len(), 1);
+        assert!(rejected.first_line().absorbed_ids().is_empty());
+
+        let mut at_limit = LineCluster::new(10, FilamentId::new(1), filament(0, 10, 40)).unwrap();
+        assert!(
+            at_limit
+                .include_filament_by_index(FilamentId::new(2), incoming(), 0, 4, 3)
+                .unwrap()
+        );
+        assert_eq!(at_limit.first_line().filament().sections().len(), 2);
+        assert_eq!(at_limit.first_line().absorbed_ids(), &[FilamentId::new(2)]);
+        assert_eq!(
+            at_limit.include_filament_by_index(FilamentId::new(2), filament(50, 12, 10), 0, 4, 3,),
+            Err(LineClusterError::DuplicateFilamentId(FilamentId::new(2)))
+        );
     }
 }
