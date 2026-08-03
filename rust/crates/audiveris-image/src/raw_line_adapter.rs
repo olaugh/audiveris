@@ -10,7 +10,9 @@ use crate::{
     cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombBuilderError, CombFilament, popular_comb_size, retrieve_combs},
     filament::FilamentError,
-    filament_factory::{FilamentFactory, FilamentFactoryParams, OverlapParams},
+    filament_factory::{
+        FilamentFactory, FilamentFactoryIdentityError, FilamentFactoryParams, OverlapParams,
+    },
     line_cluster::FilamentId,
     line_rejection::{
         LineCandidate, LinePoint, LineRejectionError, LineRejectionParameters,
@@ -42,6 +44,8 @@ pub struct RawPrimaryPassBuild {
     curved_ids: Vec<FilamentId>,
     sloped_ids: Vec<FilamentId>,
     sloped_filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
+    factory_creation_ids: Vec<FilamentId>,
+    next_filament_id: FilamentId,
 }
 
 impl RawPrimaryPassBuild {
@@ -72,17 +76,13 @@ impl RawPrimaryPassBuild {
         self.global_slope
     }
 
-    /// Adapter-stable IDs rejected for curvature, in pre-sort order.
-    ///
-    /// These IDs are assigned to final `retrieve_filaments` output before
-    /// rejection. They do not yet reproduce gaps in Java `FilamentIndex` IDs
-    /// left by temporary factory candidates that were subsequently merged.
+    /// Java `FilamentIndex` IDs rejected for curvature, in pre-sort order.
     #[must_use]
     pub fn curved_ids(&self) -> &[FilamentId] {
         &self.curved_ids
     }
 
-    /// Adapter-stable IDs rejected for slope, in post-length-sort order.
+    /// Java `FilamentIndex` IDs rejected for slope, in post-length-sort order.
     #[must_use]
     pub fn sloped_ids(&self) -> &[FilamentId] {
         &self.sloped_ids
@@ -93,6 +93,19 @@ impl RawPrimaryPassBuild {
     #[must_use]
     pub const fn sloped_filaments(&self) -> &BTreeMap<FilamentId, crate::filament::StaffFilament> {
         &self.sloped_filaments
+    }
+
+    /// Every ID registered by the factory, including swallowed cores and
+    /// temporary expansion candidates.
+    #[must_use]
+    pub fn factory_creation_ids(&self) -> &[FilamentId] {
+        &self.factory_creation_ids
+    }
+
+    /// Next ID for another factory sharing the same Java `FilamentIndex`.
+    #[must_use]
+    pub const fn next_filament_id(&self) -> FilamentId {
+        self.next_filament_id
     }
 
     #[must_use]
@@ -106,8 +119,34 @@ pub fn build_primary_cluster_pass(
     lag: &HorizontalSectionLag,
     parameters: RawPrimaryPassParameters,
 ) -> Result<RawPrimaryPassBuild, RawLineAdapterError> {
+    build_primary_cluster_pass_with_first_filament_id(lag, parameters, FilamentId::new(1))
+}
+
+/// Identity-aware entry point for a sheet whose Java `FilamentIndex` may
+/// already contain entities from an earlier factory.
+pub fn build_primary_cluster_pass_with_first_filament_id(
+    lag: &HorizontalSectionLag,
+    parameters: RawPrimaryPassParameters,
+    first_filament_id: FilamentId,
+) -> Result<RawPrimaryPassBuild, RawLineAdapterError> {
     let factory = FilamentFactory::new(parameters.factory);
-    let values = factory.retrieve_filaments(lag.sections(), parameters.overlap)?;
+    let identified = factory.retrieve_filaments_with_ids(
+        lag.sections(),
+        parameters.overlap,
+        first_filament_id.value(),
+    )?;
+    let factory_creation_ids = identified
+        .creation_ids()
+        .iter()
+        .copied()
+        .map(FilamentId::new)
+        .collect::<Vec<_>>();
+    let next_filament_id = FilamentId::new(identified.next_creation_id());
+    let values = identified
+        .into_survivors()
+        .into_iter()
+        .map(|entry| (entry.id(), entry.into_filament()))
+        .collect();
     let rejection_parameters =
         LineRejectionParameters::java_defaults(parameters.factory.interline as f64);
     let FilteredRawFilaments {
@@ -172,6 +211,8 @@ pub fn build_primary_cluster_pass(
         curved_ids,
         sloped_ids,
         sloped_filaments,
+        factory_creation_ids,
+        next_filament_id,
     })
 }
 
@@ -187,21 +228,15 @@ struct FilteredRawFilaments {
 }
 
 fn filter_raw_filaments(
-    values: Vec<crate::filament::StaffFilament>,
+    values: Vec<(u64, crate::filament::StaffFilament)>,
     parameters: LineRejectionParameters,
 ) -> Result<FilteredRawFilaments, RawLineAdapterError> {
     let mut all = BTreeMap::new();
     let mut candidates = Vec::with_capacity(values.len());
-    for (index, filament) in values.into_iter().enumerate() {
-        // Assign once, before either rejection pass, so filtering leaves gaps
-        // rather than renumbering survivors. These are adapter identities over
-        // final factory output, not yet Java FilamentIndex creation identities.
-        let raw_id = index
-            .checked_add(1)
-            .ok_or(RawLineAdapterError::IdentityOverflow)?;
-        let id = FilamentId::new(
-            u64::try_from(raw_id).map_err(|_| RawLineAdapterError::IdentityOverflow)?,
-        );
+    for (factory_id, filament) in values {
+        let raw_id =
+            usize::try_from(factory_id).map_err(|_| RawLineAdapterError::IdentityOverflow)?;
+        let id = FilamentId::new(factory_id);
         let geometry = filament.geometry()?;
         let start = geometry.start();
         let stop = geometry.stop();
@@ -265,6 +300,7 @@ fn filter_raw_filaments(
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawLineAdapterError {
     Filament(FilamentError),
+    FactoryIdentity(FilamentFactoryIdentityError),
     Rejection(LineRejectionError),
     Comb(CombBuilderError),
     Ownership(ClusterOwnershipError),
@@ -276,6 +312,12 @@ pub enum RawLineAdapterError {
 impl From<FilamentError> for RawLineAdapterError {
     fn from(value: FilamentError) -> Self {
         Self::Filament(value)
+    }
+}
+
+impl From<FilamentFactoryIdentityError> for RawLineAdapterError {
+    fn from(value: FilamentFactoryIdentityError) -> Self {
+        Self::FactoryIdentity(value)
     }
 }
 
@@ -307,6 +349,9 @@ impl fmt::Display for RawLineAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Filament(error) => write!(formatter, "raw filament construction failed: {error}"),
+            Self::FactoryIdentity(error) => {
+                write!(formatter, "raw filament identity failed: {error}")
+            }
             Self::Rejection(error) => write!(formatter, "raw filament rejection failed: {error}"),
             Self::Comb(error) => write!(formatter, "raw comb sampling failed: {error}"),
             Self::Ownership(error) => write!(formatter, "raw ownership failed: {error}"),
@@ -382,6 +427,34 @@ mod tests {
         }
     }
 
+    fn identity_parameters() -> RawPrimaryPassParameters {
+        let mut parameters = parameters();
+        parameters.factory = FilamentFactoryParams {
+            interline: 2,
+            min_core_section_length: 6,
+            min_section_aspect: 3.0,
+            max_coord_gap: 10.0,
+            max_pos_gap: 2.0,
+            max_pos_gap_for_slope: 0.5,
+            max_gap_slope: 0.5,
+            min_length_for_delta_slope: 100.0,
+            max_delta_slope: 0.01,
+        };
+        parameters.overlap = OverlapParams {
+            probe_width: 2,
+            max_overlap_delta_pos: 2.0,
+            max_thickness: 4.0,
+            max_overlap_space: 1.0,
+            max_expansion_space: 0.0,
+            max_involving_length: 10.0,
+            max_consistent_ratio: 1.7,
+        };
+        parameters.sampling_dx = 10;
+        parameters.minimum_delta_y = 1;
+        parameters.maximum_delta_y = 2;
+        parameters
+    }
+
     fn rejection_fixture_filaments() -> Vec<StaffFilament> {
         let mut runs = RunTable::new(Orientation::Horizontal, 130, 200).unwrap();
         // ID 1: short horizontal, accepted by the sloped-page tolerance.
@@ -443,12 +516,24 @@ mod tests {
             [
                 FilamentId::new(1),
                 FilamentId::new(2),
+                FilamentId::new(5),
+                FilamentId::new(6),
+                FilamentId::new(4),
+                FilamentId::new(3),
+            ]
+        );
+        assert_eq!(
+            built.factory_creation_ids(),
+            [
+                FilamentId::new(1),
+                FilamentId::new(2),
                 FilamentId::new(3),
                 FilamentId::new(4),
                 FilamentId::new(5),
                 FilamentId::new(6),
             ]
         );
+        assert_eq!(built.next_filament_id(), FilamentId::new(7));
         assert_eq!(built.root_order().len(), 5);
         assert_eq!(built.popular_comb_size(), Some(5));
         assert_eq!(built.global_slope(), 0.0);
@@ -508,8 +593,13 @@ mod tests {
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let identified = values
+            .into_iter()
+            .enumerate()
+            .map(|(index, filament)| ((index + 1) as u64, filament))
+            .collect();
         let filtered =
-            filter_raw_filaments(values, LineRejectionParameters::java_defaults(10.0)).unwrap();
+            filter_raw_filaments(identified, LineRejectionParameters::java_defaults(10.0)).unwrap();
 
         assert!((filtered.global_slope - (6.0 / 119.0)).abs() < 1e-12);
         assert_eq!(
@@ -550,5 +640,60 @@ mod tests {
             survivor_sections[&FilamentId::new(4)]
         );
         assert!(!filtered.sloped_filaments.contains_key(&FilamentId::new(2)));
+    }
+
+    #[test]
+    fn adapter_uses_factory_creation_ids_across_swallow_and_expansion() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 320, 8).unwrap();
+        for (x, length) in [(0, 80), (91, 80), (220, 80)] {
+            runs.add_run(2, Run::new(x, length)).unwrap();
+        }
+        for (x, length) in [(80, 5), (86, 5)] {
+            runs.add_run(3, Run::new(x, length)).unwrap();
+        }
+        let lag = HorizontalSectionLag::from_long_runs(runs).unwrap();
+        let built = build_primary_cluster_pass_with_first_filament_id(
+            &lag,
+            identity_parameters(),
+            FilamentId::new(41),
+        )
+        .unwrap();
+
+        assert_eq!(
+            built.factory_creation_ids(),
+            [
+                FilamentId::new(41),
+                FilamentId::new(42),
+                FilamentId::new(43),
+                FilamentId::new(44),
+                FilamentId::new(45),
+            ]
+        );
+        assert_eq!(built.next_filament_id(), FilamentId::new(46));
+        assert_eq!(
+            built.survivor_order(),
+            [FilamentId::new(41), FilamentId::new(43)]
+        );
+        assert_eq!(
+            built
+                .state()
+                .filaments()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [FilamentId::new(41), FilamentId::new(43)]
+        );
+        assert!(!built.state().filaments().contains_key(&FilamentId::new(42)));
+        for section in lag.sections() {
+            let expected = if section.bounds().x < 200 {
+                FilamentId::new(41)
+            } else {
+                FilamentId::new(43)
+            };
+            assert_eq!(
+                built.state().ownership().section_owner(section.id()),
+                Some(expected)
+            );
+        }
     }
 }

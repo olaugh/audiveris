@@ -8,6 +8,8 @@
 //! phase. Glyph ownership, indexes, and vertical filaments remain outside this
 //! dependency-light slice.
 
+use std::{error::Error, fmt};
+
 use crate::filament::{FilamentError, StaffFilament};
 use crate::run_table::Orientation;
 use crate::section::{Bounds, Section};
@@ -63,6 +65,89 @@ pub enum Incompatibility {
 pub struct FilamentFactory {
     params: FilamentFactoryParams,
 }
+
+/// One final filament with the ID assigned by Java `FilamentIndex.register`
+/// when its initial core section was created.
+#[derive(Clone, Debug)]
+pub struct IdentifiedFilament {
+    id: u64,
+    filament: StaffFilament,
+}
+
+impl IdentifiedFilament {
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn filament(&self) -> &StaffFilament {
+        &self.filament
+    }
+
+    #[must_use]
+    pub fn into_filament(self) -> StaffFilament {
+        self.filament
+    }
+}
+
+/// Identity-bearing factory result. `creation_ids` includes swallowed initial
+/// filaments and every temporary expansion filament, matching registrations
+/// that remain visible in Java's sheet-global `FilamentIndex`.
+#[derive(Clone, Debug)]
+pub struct IdentifiedFilamentResult {
+    survivors: Vec<IdentifiedFilament>,
+    creation_ids: Vec<u64>,
+    next_creation_id: u64,
+}
+
+impl IdentifiedFilamentResult {
+    #[must_use]
+    pub fn survivors(&self) -> &[IdentifiedFilament] {
+        &self.survivors
+    }
+
+    #[must_use]
+    pub fn creation_ids(&self) -> &[u64] {
+        &self.creation_ids
+    }
+
+    /// ID to pass to a later factory sharing the same Java `FilamentIndex`.
+    #[must_use]
+    pub const fn next_creation_id(&self) -> u64 {
+        self.next_creation_id
+    }
+
+    #[must_use]
+    pub fn into_survivors(self) -> Vec<IdentifiedFilament> {
+        self.survivors
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilamentFactoryIdentityError {
+    Filament(FilamentError),
+    InvalidFirstId,
+    IdentityOverflow,
+}
+
+impl From<FilamentError> for FilamentFactoryIdentityError {
+    fn from(value: FilamentError) -> Self {
+        Self::Filament(value)
+    }
+}
+
+impl fmt::Display for FilamentFactoryIdentityError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Filament(error) => write!(formatter, "filament construction failed: {error}"),
+            Self::InvalidFirstId => formatter.write_str("first filament ID must be positive"),
+            Self::IdentityOverflow => formatter.write_str("filament identity overflow"),
+        }
+    }
+}
+
+impl Error for FilamentFactoryIdentityError {}
 
 impl FilamentFactory {
     #[must_use]
@@ -326,6 +411,184 @@ impl FilamentFactory {
         Ok(filaments)
     }
 
+    /// Java `retrieveFilaments` with sheet-global creation identities.
+    ///
+    /// `first_creation_id` is one greater than the current
+    /// `FilamentIndex.getLastId()`. Every accepted initial core and every
+    /// temporary leftover candidate consumes an ID immediately, before merge
+    /// or expansion can swallow it. Final survivors therefore retain gaps.
+    /// The existing value-only [`Self::retrieve_filaments`] API remains
+    /// available for callers that do not own sheet index state.
+    pub fn retrieve_filaments_with_ids(
+        &self,
+        sections: &[Section],
+        overlap: OverlapParams,
+        first_creation_id: u64,
+    ) -> Result<IdentifiedFilamentResult, FilamentFactoryIdentityError> {
+        if first_creation_id == 0 {
+            return Err(FilamentFactoryIdentityError::InvalidFirstId);
+        }
+        let mut next_creation_id = first_creation_id;
+        let mut creation_ids = Vec::new();
+        let mut filaments = Vec::new();
+        for section in sections.iter().filter(|section| {
+            section.orientation() == Orientation::Horizontal
+                && section.length(Orientation::Horizontal) >= self.params.min_core_section_length
+                && !self.is_section_fat(section, overlap)
+        }) {
+            let id = allocate_filament_id(&mut next_creation_id, &mut creation_ids)?;
+            let mut filament = StaffFilament::new(self.params.interline)?;
+            filament.add_section(section.clone())?;
+            filaments.push(IdentifiedFilament { id, filament });
+        }
+        self.merge_identified_filaments(&mut filaments, Some(overlap))?;
+        self.expand_identified_filaments(
+            &mut filaments,
+            sections,
+            overlap,
+            &mut next_creation_id,
+            &mut creation_ids,
+        )?;
+        self.merge_identified_filaments(&mut filaments, Some(overlap))?;
+        Ok(IdentifiedFilamentResult {
+            survivors: filaments,
+            creation_ids,
+            next_creation_id,
+        })
+    }
+
+    fn expand_identified_filaments(
+        &self,
+        filaments: &mut [IdentifiedFilament],
+        source: &[Section],
+        overlap: OverlapParams,
+        next_creation_id: &mut u64,
+        creation_ids: &mut Vec<u64>,
+    ) -> Result<(), FilamentFactoryIdentityError> {
+        let mut leftovers = source
+            .iter()
+            .filter(|section| {
+                section.orientation() == Orientation::Horizontal
+                    && !filaments
+                        .iter()
+                        .any(|entry| entry.filament.sections().contains(section))
+                    && !self.is_section_fat(section, overlap)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        leftovers.sort_by_key(Section::first_pos);
+
+        let mut section_filaments = Vec::with_capacity(leftovers.len());
+        for section in leftovers {
+            let id = allocate_filament_id(next_creation_id, creation_ids)?;
+            let mut filament = StaffFilament::new(self.params.interline)?;
+            filament.add_section(section)?;
+            section_filaments.push(IdentifiedFilament { id, filament });
+        }
+
+        filaments.sort_by_key(|entry| {
+            std::cmp::Reverse(entry.filament.bounds().map_or(0, |bounds| bounds.width))
+        });
+        for entry in filaments {
+            let fixed_bounds = entry.filament.bounds()?;
+            loop {
+                let mut compatible_index = None;
+                for (index, candidate) in section_filaments.iter().enumerate() {
+                    if grown_bounds_intersect(
+                        fixed_bounds,
+                        candidate.filament.bounds()?,
+                        self.params.max_coord_gap,
+                        self.params.max_pos_gap,
+                    ) && self
+                        .compatibility(&entry.filament, &candidate.filament, Some(overlap), true)
+                        .is_ok()
+                    {
+                        compatible_index = Some(index);
+                        break;
+                    }
+                }
+                let Some(index) = compatible_index else {
+                    break;
+                };
+                let candidate = section_filaments.remove(index);
+                for section in candidate.filament.sections().iter().cloned() {
+                    entry.filament.add_section(section)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn merge_identified_filaments(
+        &self,
+        filaments: &mut Vec<IdentifiedFilament>,
+        overlap: Option<OverlapParams>,
+    ) -> Result<(), FilamentError> {
+        filaments.sort_by_key(|entry| {
+            std::cmp::Reverse(entry.filament.bounds().map_or(0, |bounds| bounds.width))
+        });
+
+        let mut live = filaments.drain(..).map(Some).collect::<Vec<_>>();
+        for current in 0..live.len() {
+            if live[current].is_none() {
+                continue;
+            }
+            let mut candidate = current;
+            loop {
+                let mut merged_into = None;
+                for head in 0..current {
+                    if head == candidate || live[head].is_none() {
+                        continue;
+                    }
+                    let head_bounds = live[head].as_ref().expect("live head").filament.bounds()?;
+                    let candidate_bounds = live[candidate]
+                        .as_ref()
+                        .expect("live candidate")
+                        .filament
+                        .bounds()?;
+                    if !grown_bounds_intersect(
+                        candidate_bounds,
+                        head_bounds,
+                        self.params.max_coord_gap,
+                        self.params.max_pos_gap,
+                    ) {
+                        continue;
+                    }
+                    let compatible = self
+                        .compatibility(
+                            &live[head].as_ref().expect("live head").filament,
+                            &live[candidate].as_ref().expect("live candidate").filament,
+                            overlap,
+                            false,
+                        )
+                        .is_ok();
+                    if compatible {
+                        let sections = live[candidate]
+                            .as_ref()
+                            .expect("live candidate")
+                            .filament
+                            .sections()
+                            .to_vec();
+                        for section in sections {
+                            live[head]
+                                .as_mut()
+                                .expect("live head")
+                                .filament
+                                .add_section(section)?;
+                        }
+                        live[candidate] = None;
+                        merged_into = Some(head);
+                        break;
+                    }
+                }
+                let Some(head) = merged_into else { break };
+                candidate = head;
+            }
+        }
+        filaments.extend(live.into_iter().flatten());
+        Ok(())
+    }
+
     /// Attach unprocessed, non-fat horizontal source sections to existing filaments.
     ///
     /// The returned count is the number of attached leftovers. This ports
@@ -489,6 +752,18 @@ impl FilamentFactory {
         filaments.extend(live.into_iter().flatten());
         Ok(())
     }
+}
+
+fn allocate_filament_id(
+    next_creation_id: &mut u64,
+    creation_ids: &mut Vec<u64>,
+) -> Result<u64, FilamentFactoryIdentityError> {
+    let id = *next_creation_id;
+    *next_creation_id = id
+        .checked_add(1)
+        .ok_or(FilamentFactoryIdentityError::IdentityOverflow)?;
+    creation_ids.push(id);
+    Ok(id)
 }
 
 #[derive(Clone, Copy)]
@@ -948,5 +1223,49 @@ mod tests {
         assert_eq!(filaments.len(), 1);
         assert_eq!(filaments[0].sections().len(), 4);
         assert_eq!(filaments[0].bounds().unwrap().width, 26);
+    }
+
+    #[test]
+    fn identity_result_keeps_swallowed_gap_and_temporary_creation_ids() {
+        let factory = FilamentFactory::new(params());
+        let source = [
+            section(0, 2, 8, 1),
+            section(18, 2, 8, 1),
+            section(50, 8, 8, 1),
+            section(8, 2, 5, 1),
+            section(13, 2, 5, 1),
+        ];
+        let result = factory
+            .retrieve_filaments_with_ids(&source, overlap_params(), 41)
+            .unwrap();
+        let value_only = factory
+            .retrieve_filaments(&source, overlap_params())
+            .unwrap();
+
+        // Initial cores consume 41,42,43. Expansion candidates consume 44,45.
+        assert_eq!(result.creation_ids(), [41, 42, 43, 44, 45]);
+        assert_eq!(result.next_creation_id(), 46);
+        assert_eq!(
+            result
+                .survivors()
+                .iter()
+                .map(IdentifiedFilament::id)
+                .collect::<Vec<_>>(),
+            [41, 43]
+        );
+        assert_eq!(result.survivors()[0].filament().sections().len(), 4);
+        assert_eq!(result.survivors()[0].filament().bounds().unwrap().width, 26);
+        assert_eq!(result.survivors()[1].filament().sections().len(), 1);
+        assert_eq!(
+            result
+                .survivors()
+                .iter()
+                .map(|entry| entry.filament().sections().to_vec())
+                .collect::<Vec<_>>(),
+            value_only
+                .iter()
+                .map(|filament| filament.sections().to_vec())
+                .collect::<Vec<_>>()
+        );
     }
 }
