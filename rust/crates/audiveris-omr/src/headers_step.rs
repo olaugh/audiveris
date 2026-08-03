@@ -32,6 +32,8 @@ pub struct HeadlessHeaderStaff {
     pub barline_ids: Vec<usize>,
     pub left_side_barline_id: Option<usize>,
     pub right_side_barline_id: Option<usize>,
+    /// Exclusive Java `Staff.timeStop`, distinct from rectangle right edge.
+    pub time_stop: Option<i32>,
     pub header: Option<StaffHeader>,
 }
 
@@ -51,6 +53,7 @@ impl HeadlessHeaderStaff {
             barline_ids: Vec::new(),
             left_side_barline_id: None,
             right_side_barline_id: None,
+            time_stop: None,
             header: None,
         }
     }
