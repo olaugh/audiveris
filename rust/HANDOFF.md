@@ -294,12 +294,17 @@ denied, and passed `git diff --check` before commit.
 210. `304d53c7` — GRID SIG contextual grading in final system order.
 211. `efd64567` — live production Java/Rust SIG contextual-grade vector.
 212. `6c0cf709` — exact Java comb-network fragment following.
+213. `d1714e2e` — primary cluster-pass construction from a live horizontal lag.
+214. `6a7443d4` — Java-ordered curvature and slope rejection.
+215. `73702157` — live-lag production `RetrieveLines` and staff handoff.
+216. `8d879240` — concrete raw-raster sheet-aware GRID executor constructor.
+217. `cd8a3583` — raw filament rejection before comb sampling and clustering.
 
-At the two-hundred-and-twelfth checkpoint the Rust workspace executes 551 tests:
+At the two-hundred-and-seventeenth checkpoint the Rust workspace executes 565 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 388
-- `audiveris-omr`: 110
+- `audiveris-image`: 400
+- `audiveris-omr`: 112
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
@@ -383,12 +388,16 @@ from intrinsic grades without changing topology or frozen state. A live Java/Rus
 freezes the unequal support-chain arithmetic, ignored relations, insertion order, and
 state preservation.
 
-The neutral LinesRetriever coordinator now executes Java's comb-network fragment joining,
-the main cluster pass, the conditional small-interline pass over ID-sorted primary
-discards, and Java's
-buildStaves purge/layout/right-indentation sequence. It returns typed standard,
+The neutral LinesRetriever path now constructs primary filaments from the live horizontal
+lag, applies Java's curvature purge, stable reverse-length slope estimate, asymmetric
+short-horizontal tolerance, and slope purge before comb sampling, then executes Java's
+comb-network fragment joining and main cluster pass. The coordinator retains the optional
+small-interline pass over ID-sorted primary discards and Java's buildStaves
+purge/layout/right-indentation sequence. It returns typed standard,
 one-line, and tablature staff candidates with median sides and small/short flags while
-leaving sheet ownership and glyph/SIG mutation outside the boundary.
+keeping curvature and slope rejects distinct. Slope rejects remain available for later
+fallback; curvature rejects do not. The current adapter IDs are stable across rejection
+but do not yet reproduce Java `FilamentIndex` gaps created by temporary factory objects.
 
 The headless GRID coordinator now joins that staff-candidate output to the transactional
 BarsRetriever coordinator in production order. The production outer lifecycle continues
@@ -408,11 +417,14 @@ preserves fresh-reference replacement, shared backlinks, physical part/staff ord
 failure, and those references are now wired into page allocation, sheet state, and score
 regrouping. A stage-owned raster builder now concretely creates both initial lags, adds
 short sections, and installs every completed prefix into the sheet on success, swallowed
-failure, or step failure. Prepared cluster, bar-system, and completion adapters then call
-the production-backed Rust coordinators and preserve their outputs across the sheet-aware
-driver. They still require prepared cluster/projector inputs, and several coordinator
-exceptional paths remain transactional, so this is not yet a claim that raw-page GRID is
-fully behaviorally equivalent.
+failure, or step failure. Prepared cluster, bar-system, and completion adapters call the
+production-backed Rust coordinators and preserve their outputs across the sheet-aware
+driver. An additive raw `RetrieveLines` adapter now builds the primary state from that
+live lag, materializes a staff handoff, and the concrete raw-raster executor installs the
+staff and raster prefix into sheet state. Secondary/small-interline construction, computed
+global-slope propagation, raw projector/bar/completion inputs, and several transactional
+exceptional paths remain, so this is not yet a claim that raw-page GRID is fully
+behaviorally equivalent.
 
 The StaffProjector slice now composes scale-derived parameters, raster accumulation,
 `ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
@@ -421,8 +433,8 @@ neutral peak output. Result-list, lines-root, and right-end decisions are also p
 and the BarsRetriever registry preserves retained-staff/projector order and unique
 graph-vertex intents. Downstream SIG promotion, detached brace ownership, and GRID
 contextual grading are now concrete. The remaining upstream gap is constructing
-cluster/projector/system inputs directly from the live lag and raster, including raw
-slope/curvature rejection and deskew mutation.
+projector/system/bar/completion inputs directly from the live lag and raster, plus
+secondary line recovery and sheet deskew mutation from the already computed raw slope.
 
 The newest composed differential constructs the same two-system synthetic sheet in live
 Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
