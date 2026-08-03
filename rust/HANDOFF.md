@@ -185,20 +185,52 @@ denied, and passed `git diff --check` before commit.
 101. `195de90b` — source-guided StaffProjector brace discovery and neutral brace peak.
 102. `2e2da81b` — regression for continued scanning after an over-wide rejected range.
 103. `d7c982b6` — live Java/Rust StaffProjector range-scanning vector.
+104. `ba7ce4b2` — BarsRetriever adjacent-peak grouping.
+105. `4f74e3aa` — neutral filament/cluster ownership registry.
+106. `9fafce02` — BarsRetriever left-peak purge decisions.
+107. `283d39b7` — transactional recursive comb/cluster inclusion.
+108. `65e95e2f` — live Java/Rust StaffProjector brace vector.
+109. `73f72f19` — StaffProjector raster-column accumulation.
+110. `aeb9544a` — BarsRetriever start and brace purge decisions.
+111. `8d7fea8f` — live recursive cluster-coordination vector.
+112. `9af7a885` — neutral StaffProjector composition through graded peaks and brace lookup.
+113. `9bb044db` — stable cluster formation from comb seeds.
+114. `f8998f0d` — StaffProjector lines-root correction decision.
+115. `2966d9a1` — live composed StaffProjector vector.
+116. `10aea1f7` — live lines-root correction vector.
+117. `bc1ef467` — bar-filament section preselection.
+118. `fff6c947` — StaffProjector result mutation and right-end decisions.
+119. `98ae08ed` — line-cluster merge compatibility kernel.
+120. `41ac300f` — BarsRetriever VLAG/HLAG section-width filtering.
+121. `7ae6815b` — StaffProjector multi-rest serif scan.
+122. `c476c8fb` — StaffProjector core thickness and line thresholds.
+123. `26075897` — ordered repeated line-cluster merge orchestration.
+124. `d3b72603` — BarsRetriever isolated/grouped thin/thick width partitioning.
+125. `3ef67e68` — StaffProjector scale-derived parameter construction.
+126. `3a15306d` — partial bar-column purge selection.
+127. `a983c2b6` — barline group-relation decisions.
+128. `fdf5e043` — extending bar-peak purge selection.
+129. `db773e5f` — raster-to-neutral-peak StaffProjector process orchestration.
+130. `4aa2e5fe` — live StaffProjector result-operation vector.
+131. `84ef60f1` — same-size cluster pair pass and short-cluster discard behavior.
+132. `bf5b9b5d` — initial start-bar-column candidate selection.
+133. `cab56e0c` — ordered BarsRetriever/StaffProjector registry and graph-vertex intents.
 
-At the one-hundred-and-third checkpoint the Rust workspace executes 303 tests:
+At the one-hundred-and-thirty-third checkpoint the Rust workspace executes 357 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 159
+- `audiveris-image`: 213
 - `audiveris-omr`: 91
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 53 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 58 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
-refinement, peak-candidate construction, core-pixel validation, and range scanning.
+refinement, peak-candidate construction, core-pixel validation, range scanning,
+brace discovery, composed projection, lines-root correction, recursive cluster
+coordination, and StaffProjector result operations.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -227,8 +259,9 @@ The same lossless view now exposes sheet compatibility attributes and direct pag
 references while leaving nested SIG content opaque. GRID additionally has the
 dependency-light sticker filter, comb state, regular comb discovery, and ordered
 line-cluster core. Cluster merge, absorption, trimming, geometry, and the combined
-lifecycle now have exact live Java parity. Full recursive cluster orchestration,
-glyph ownership, SIG integration, and UI behavior remain outside the ported surface.
+lifecycle now have exact live Java parity. Recursive cluster construction, general
+merge orchestration, and the same-size pair pass are now ported with transactional
+stable-ID ownership. Glyph creation, SIG integration, and UI behavior remain outside.
 Target-line deskew mapping begins the neutral destination geometry used later in GRID
 cleanup.
 Target-line mapping now has exact live parity on a sloped source, and the surrounding
@@ -244,15 +277,14 @@ connection queries, alignment purge, median connection geometry, and brace check
 without recreating Java object cycles. Promotion into the production SIG and the full
 GRID orchestration remain deliberately unported coupling boundaries.
 
-The StaffProjector slice now includes `ShortProjection`, derivative thresholds, blank
-selection, peak-side refinement, candidate construction, core-pixel validation, and
-range scanning.
-Every boundary through core-pixel validation has an exact live Java vector. Validated
-evidence now also feeds source-compatible six-impact grading and neutral `StaffPeak`
-promotion. Range scanning composes these pieces while advancing only after final
-candidate acceptance, matching Java's rejection behavior. It is still a library slice
-rather than an end-to-end staff projector. Dependency-light brace discovery is also
-ported; sheet/glyph ownership and downstream graph mutation remain queued.
+The StaffProjector slice now composes scale-derived parameters, raster accumulation,
+`ShortProjection`, derivative thresholds, blanks, candidate refinement, core-pixel
+validation, multi-rest serif rejection, six-impact grading, brace discovery, and
+neutral peak output. Result-list, lines-root, and right-end decisions are also ported,
+and the BarsRetriever registry preserves retained-staff/projector order and unique
+graph-vertex intents. This is an end-to-end dependency-light projector computation,
+but not the full Java object lifecycle: sheet/glyph ownership, deskew mutation,
+peak-graph edges, and downstream SIG mutation remain queued.
 
 The `.omr` view now continues through ordered score page links, logical parts, score-root
 metadata, sheet selection, legacy beam/OCR metadata, and book interline/beam/OCR/lyrics
@@ -309,9 +341,10 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue `GRID` from StaffProjector range scanning into full projection orchestration
-   and staff-line/cluster formation. Keep glyph ownership and UI/SIG integration behind
-   explicit neutral boundaries until their inputs have stable differential vectors.
+1. Complete `GRID` orchestration around the composed StaffProjector, cluster
+   finalization, BarsRetriever column validation, and peak-graph integration. Keep
+   glyph ownership and UI/SIG integration behind explicit neutral boundaries until
+   their inputs have stable differential vectors.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
