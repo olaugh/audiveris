@@ -29,6 +29,9 @@ use crate::{
 pub struct PreparedBarsSystem {
     pub system_id: usize,
     pub staff_peaks: Vec<Vec<StaffPeak>>,
+    /// Java `StaffProjector.getBracePeak()` per staff, kept detached from the
+    /// ordinary peak list and SIG promotion path.
+    pub brace_peaks: Vec<Option<StaffPeak>>,
     pub vertical_plans: Vec<VerticalInterPlan>,
     pub maximum_group_gap: i32,
     pub interline: f64,
@@ -333,6 +336,11 @@ fn append_system_in_place<UpstreamError>(
             .iter()
             .map(|staff| staff.peaks().to_vec())
             .collect(),
+        brace_peaks: state
+            .staffs()
+            .iter()
+            .map(|staff| staff.brace_peak().cloned())
+            .collect(),
         vertical_plans: vertical_plans.to_vec(),
         maximum_group_gap,
         interline,
@@ -444,6 +452,42 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(1, 1), (2, 2)]
         );
+    }
+
+    #[test]
+    fn handoff_preserves_detached_brace_outside_graph_and_peak_list() {
+        use crate::staff_peak::StaffPeakAttribute;
+
+        let top = peak(1, 10);
+        let bottom = peak(2, 10);
+        let mut brace = peak(1, 4);
+        brace.set(StaffPeakAttribute::BraceTop);
+        let state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(StaffId::new(1), 0, true, vec![top.clone()], BTreeMap::new())
+                    .unwrap()
+                    .with_brace_peak(brace.clone())
+                    .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    0,
+                    true,
+                    vec![bottom.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            PeakGraph::new(),
+        )
+        .unwrap();
+        let mut handoff = empty_handoff();
+
+        append_system::<()>(&mut handoff, &state, &[], &[], 6, 10.0).unwrap();
+
+        assert_eq!(handoff.systems[0].brace_peaks, [Some(brace), None]);
+        assert_eq!(handoff.systems[0].staff_peaks[0], [top]);
+        assert!(handoff.peak_graph.vertices().is_empty());
     }
 
     #[test]

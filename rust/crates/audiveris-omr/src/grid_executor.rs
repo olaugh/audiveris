@@ -96,6 +96,7 @@ pub struct HeadlessSystemSigState {
     pub sig: GridSig,
     pub vertical_plans: Vec<VerticalInterPlan>,
     pub staff_peaks: Vec<Vec<StaffPeak>>,
+    pub brace_peaks: Vec<Option<StaffPeak>>,
     pub maximum_group_gap: i32,
     pub interline: f64,
     pub bar_tail: BarTailResult,
@@ -127,6 +128,7 @@ impl HeadlessGridSigState {
                 sig: GridSig::default(),
                 vertical_plans: system.vertical_plans,
                 staff_peaks: system.staff_peaks,
+                brace_peaks: system.brace_peaks,
                 maximum_group_gap: system.maximum_group_gap,
                 interline: system.interline,
                 bar_tail: BarTailResult::default(),
@@ -604,6 +606,7 @@ fn promote_grid_sigs(
             .build_bar_tail(
                 &mut system.bar_tail,
                 &system.staff_peaks,
+                &system.brace_peaks,
                 &state.peak_graph,
                 bar_tail_parameters,
             )
@@ -1213,11 +1216,13 @@ mod tests {
         peaks: Vec<Vec<StaffPeak>>,
         vertical_plans: Vec<VerticalInterPlan>,
     ) -> HeadlessSystemSigState {
+        let brace_peaks = vec![None; peaks.len()];
         HeadlessSystemSigState {
             system_id: 1,
             sig: GridSig::default(),
             vertical_plans,
             staff_peaks: peaks,
+            brace_peaks,
             maximum_group_gap: 3,
             interline: 10.0,
             bar_tail: BarTailResult::default(),

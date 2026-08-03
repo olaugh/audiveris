@@ -256,18 +256,24 @@ impl GridSig {
     /// Execute the concrete post-`groupBarlines` tail currently available in
     /// Java order: `recordBars`, `createGroups`, then `createParts`.
     ///
-    /// Group creation is exact for brace candidates present in `staff_peaks`.
-    /// Java's separately held `projector.getBracePeak()` candidate is not yet
-    /// supplied by prepared bar state, so detached brace grouping remains an
-    /// explicit gap. Contextual grading likewise remains pending.
+    /// `brace_peaks` carries Java's separately held
+    /// `StaffProjector.getBracePeak()` candidate per staff. It participates in
+    /// grouping but never in ordinary peak traversal or SIG promotion.
     pub fn build_bar_tail(
         &self,
         result: &mut BarTailResult,
         staff_peaks: &[Vec<StaffPeak>],
+        brace_peaks: &[Option<StaffPeak>],
         peak_graph: &PeakGraph<BarAlignment>,
         parameters: BarTailParameters,
     ) -> Result<(), BarTailError> {
         self.record_bars(result, staff_peaks)?;
+        if brace_peaks.len() != staff_peaks.len() {
+            return Err(BarTailError::BracePeakCount {
+                staffs: staff_peaks.len(),
+                braces: brace_peaks.len(),
+            });
+        }
 
         let facts = staff_peaks
             .iter()
@@ -279,16 +285,29 @@ impl GridSig {
             })
             .collect::<Vec<_>>();
         let mut staff_facts = Vec::new();
-        for (peaks, facts) in staff_peaks.iter().zip(&facts) {
+        for ((peaks, facts), detached_brace) in staff_peaks.iter().zip(&facts).zip(brace_peaks) {
             if let Some(first) = peaks.first() {
                 let start_peak_index = peaks
                     .iter()
                     .position(|peak| peak.is_staff_end(crate::staff_peak::HorizontalSide::Left));
                 let start_peak = start_peak_index.map(|index| &peaks[index]);
-                let brace_peak = peaks
-                    .iter()
-                    .position(StaffPeak::is_brace)
-                    .map(|index| facts[index]);
+                let brace_peak = if let Some(brace) = detached_brace {
+                    if brace.staff_id() != first.staff_id() {
+                        return Err(BarTailError::BracePeakStaffMismatch {
+                            expected: first.staff_id().value(),
+                            actual: brace.staff_id().value(),
+                        });
+                    }
+                    if !brace.is_brace() {
+                        return Err(BarTailError::InvalidBracePeak(brace.key()));
+                    }
+                    Some(group_peak_facts(brace, peak_graph))
+                } else {
+                    peaks
+                        .iter()
+                        .position(StaffPeak::is_brace)
+                        .map(|index| facts[index])
+                };
                 staff_facts.push(GroupStaffFacts {
                     staff_id: i32::try_from(first.staff_id().value())
                         .map_err(|_| BarTailError::StaffIdOverflow(first.staff_id().value()))?,
@@ -434,6 +453,9 @@ pub struct BarTailParameters {
 pub enum BarTailError {
     MissingStaffRange,
     StaffIdOverflow(usize),
+    BracePeakCount { staffs: usize, braces: usize },
+    BracePeakStaffMismatch { expected: usize, actual: usize },
+    InvalidBracePeak(crate::staff_peak::StaffPeakKey),
     Logic(BarsLogicError),
 }
 
@@ -656,6 +678,7 @@ mod tests {
         sig.build_bar_tail(
             &mut tail,
             &[vec![top], vec![bottom]],
+            &[None, None],
             &graph,
             BarTailParameters::default(),
         )
@@ -699,6 +722,7 @@ mod tests {
         sig.build_bar_tail(
             &mut tail,
             &[vec![top_brace, top_bar], vec![bottom_brace, bottom_bar]],
+            &[None, None],
             &PeakGraph::new(),
             BarTailParameters {
                 allow_disconnected_braced_parts: true,
@@ -710,6 +734,70 @@ mod tests {
         assert!(tail.part_groups.is_empty());
         assert_eq!(
             tail.parts,
+            [PlannedPart {
+                first_staff_id: 1,
+                last_staff_id: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn detached_brace_matches_in_list_grouping_and_builds_one_part() {
+        use crate::staff_peak::StaffPeakAttribute;
+
+        let mut top_brace = peak(1, 5);
+        top_brace.set(StaffPeakAttribute::BraceTop);
+        let mut bottom_brace = peak(2, 5);
+        bottom_brace.set(StaffPeakAttribute::BraceBottom);
+        let mut top_bar = peak(1, 10);
+        top_bar.set(StaffPeakAttribute::StaffLeftEnd);
+        let mut bottom_bar = peak(2, 10);
+        bottom_bar.set(StaffPeakAttribute::StaffLeftEnd);
+        let mut sig = GridSig::default();
+        sig.promote_vertical_inters(&[vertical_plan(&top_bar), vertical_plan(&bottom_bar)]);
+
+        let mut in_list = BarTailResult::default();
+        sig.build_bar_tail(
+            &mut in_list,
+            &[
+                vec![top_brace.clone(), top_bar.clone()],
+                vec![bottom_brace.clone(), bottom_bar.clone()],
+            ],
+            &[None, None],
+            &PeakGraph::new(),
+            BarTailParameters::default(),
+        )
+        .unwrap();
+        let mut detached = BarTailResult::default();
+        sig.build_bar_tail(
+            &mut detached,
+            &[vec![top_bar.clone()], vec![bottom_bar.clone()]],
+            &[Some(top_brace.clone()), Some(bottom_brace.clone())],
+            &PeakGraph::new(),
+            BarTailParameters::default(),
+        )
+        .unwrap();
+
+        assert_eq!(detached, in_list);
+        assert_eq!(detached.part_groups.len(), 1);
+        assert_eq!(detached.part_groups[0].first_staff_id(), 1);
+        assert_eq!(detached.part_groups[0].last_staff_id(), 2);
+
+        let mut merged = BarTailResult::default();
+        sig.build_bar_tail(
+            &mut merged,
+            &[vec![top_bar], vec![bottom_bar]],
+            &[Some(top_brace), Some(bottom_brace)],
+            &PeakGraph::new(),
+            BarTailParameters {
+                allow_disconnected_braced_parts: true,
+                ..BarTailParameters::default()
+            },
+        )
+        .unwrap();
+        assert!(merged.part_groups.is_empty());
+        assert_eq!(
+            merged.parts,
             [PlannedPart {
                 first_staff_id: 1,
                 last_staff_id: 2,
@@ -732,6 +820,7 @@ mod tests {
         sig.build_bar_tail(
             &mut tail,
             &[vec![first, missing], vec![bracket]],
+            &[None, None],
             &PeakGraph::new(),
             BarTailParameters::default(),
         )

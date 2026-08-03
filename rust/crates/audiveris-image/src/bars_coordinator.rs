@@ -29,6 +29,7 @@ pub struct BarsStaffState {
     left: i32,
     one_line: bool,
     peaks: Vec<StaffPeak>,
+    brace_peak: Option<StaffPeak>,
     standard_blank_to_lines: BTreeMap<StaffPeakKey, bool>,
 }
 
@@ -51,6 +52,7 @@ impl BarsStaffState {
             left,
             one_line,
             peaks,
+            brace_peak: None,
             standard_blank_to_lines,
         })
     }
@@ -73,6 +75,27 @@ impl BarsStaffState {
     #[must_use]
     pub fn peaks(&self) -> &[StaffPeak] {
         &self.peaks
+    }
+
+    /// Preserve Java `StaffProjector.getBracePeak()`, which is held outside
+    /// the ordinary peak list and is not necessarily promoted into the SIG.
+    pub fn with_brace_peak(mut self, brace_peak: StaffPeak) -> Result<Self, BarsCoordinatorError> {
+        if brace_peak.staff_id() != self.staff_id {
+            return Err(BarsCoordinatorError::BracePeakOutsideStaff {
+                staff: self.staff_id,
+                peak: brace_peak.key(),
+            });
+        }
+        if !brace_peak.is_brace() {
+            return Err(BarsCoordinatorError::InvalidBracePeak(brace_peak.key()));
+        }
+        self.brace_peak = Some(brace_peak);
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn brace_peak(&self) -> Option<&StaffPeak> {
+        self.brace_peak.as_ref()
     }
 }
 
@@ -637,6 +660,8 @@ fn set_width(peak: &mut StaffPeak, class: PeakWidthClass) {
 pub enum BarsCoordinatorError {
     InvalidParameters,
     InvalidStaffState(StaffId),
+    BracePeakOutsideStaff { staff: StaffId, peak: StaffPeakKey },
+    InvalidBracePeak(StaffPeakKey),
     InvalidSystemState(usize),
     GraphPeakOutsideSystem(StaffPeakKey),
     GraphPeakMissingFromStaff(StaffPeakKey),
@@ -669,6 +694,15 @@ impl fmt::Display for BarsCoordinatorError {
             }
             Self::InvalidStaffState(id) => {
                 write!(formatter, "invalid bars state for staff {}", id.value())
+            }
+            Self::BracePeakOutsideStaff { staff, peak } => write!(
+                formatter,
+                "brace peak {:?} does not belong to staff {}",
+                peak,
+                staff.value()
+            ),
+            Self::InvalidBracePeak(peak) => {
+                write!(formatter, "detached peak {:?} is not a brace", peak)
             }
             Self::InvalidSystemState(id) => write!(formatter, "invalid bars state for system {id}"),
             Self::GraphPeakOutsideSystem(key) => {
@@ -782,6 +816,33 @@ mod tests {
         assert_eq!(result.vertical_inters().len(), 2);
         assert_eq!(result.connection_inters().len(), 1);
         assert!(result.connection_inters()[0].endpoints_complete);
+    }
+
+    #[test]
+    fn detached_brace_requires_matching_staff_provenance() {
+        let staff = BarsStaffState::new(
+            StaffId::new(1),
+            0,
+            false,
+            vec![peak(1, 10, 11)],
+            BTreeMap::new(),
+        )
+        .unwrap();
+        let mut foreign = peak(2, 4, 6);
+        foreign.set(StaffPeakAttribute::BraceTop);
+        assert!(matches!(
+            staff.clone().with_brace_peak(foreign),
+            Err(BarsCoordinatorError::BracePeakOutsideStaff {
+                staff: id,
+                ..
+            }) if id == StaffId::new(1)
+        ));
+
+        let plain = peak(1, 4, 6);
+        assert!(matches!(
+            staff.with_brace_peak(plain),
+            Err(BarsCoordinatorError::InvalidBracePeak(_))
+        ));
     }
 
     #[test]
