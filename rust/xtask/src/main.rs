@@ -5,6 +5,11 @@ use audiveris_core::{
     integer_function::IntegerFunction, natural_spec, natural_spline::NaturalSpline,
     rational::Rational, step::OmrStep,
 };
+use audiveris_image::system_population::{
+    PopulationPage, PopulationReferencePage, PopulationReferencePart, PopulationReferenceRegistry,
+    PopulationReferenceStaff, PopulationStaffConfig, PopulationSystem, PopulationSystemRefState,
+    allocate_population_pages,
+};
 use audiveris_image::{
     adaptive,
     bar_column::{BarColumn, BarPeak, PeakId, PeakRelation, StaffId},
@@ -216,7 +221,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 61] = [
+const VECTOR_KEYS: [&str; 62] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -254,6 +259,7 @@ const VECTOR_KEYS: [&str; 61] = [
     "grid.combs.synthetic=",
     "grid.target-line.synthetic=",
     "grid.score-update.synthetic=",
+    "grid.system-ref.synthetic=",
     "spline.synthetic=",
     "image.threshold=",
     "image.median=",
@@ -1718,6 +1724,93 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     lines.push(format!(
         "grid.score-update.synthetic=initial:{initial_score_topology};updated:{}",
         format_score_topology(&score_topology)
+    ));
+    let mut reference_registry = PopulationReferenceRegistry::default();
+    let reference_parts = [
+        PopulationReferencePart {
+            part_id: 1,
+            staves: vec![
+                PopulationReferenceStaff {
+                    staff_id: 1,
+                    config: PopulationStaffConfig {
+                        line_count: 5,
+                        is_small: false,
+                    },
+                },
+                PopulationReferenceStaff {
+                    staff_id: 2,
+                    config: PopulationStaffConfig {
+                        line_count: 1,
+                        is_small: true,
+                    },
+                },
+            ],
+        },
+        PopulationReferencePart {
+            part_id: 2,
+            staves: vec![PopulationReferenceStaff {
+                staff_id: 3,
+                config: PopulationStaffConfig {
+                    line_count: 6,
+                    is_small: false,
+                },
+            }],
+        },
+    ];
+    let mut reference_systems = [PopulationSystem {
+        id: 1,
+        indented: false,
+        parts: reference_parts.to_vec(),
+        system_ref: PopulationSystemRefState::default(),
+        page_id: None,
+    }];
+    let mut reference_pages: Vec<PopulationPage> = Vec::new();
+    let mut reference_page_refs: Vec<PopulationReferencePage> = Vec::new();
+    allocate_population_pages(
+        &mut reference_systems,
+        &mut reference_pages,
+        &mut reference_page_refs,
+        &mut reference_registry,
+    );
+    let reference_id = reference_systems[0]
+        .system_ref
+        .system_ref
+        .expect("population builds a system ref");
+    let reference = reference_registry
+        .get(reference_id)
+        .expect("fresh system ref");
+    let reference_parts = reference
+        .parts
+        .iter()
+        .map(|part| {
+            let configs = part
+                .staff_configs
+                .iter()
+                .map(|config| {
+                    format!(
+                        "{}{}",
+                        config.line_count,
+                        if config.is_small { "s" } else { "" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{configs}:{}:{}:{}:back{}",
+                part.name.as_deref().unwrap_or("null"),
+                part.logical_id
+                    .map_or_else(|| "null".to_owned(), |id| id.to_string()),
+                part.manual,
+                part.system_ref == reference_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    lines.push(format!(
+        "grid.system-ref.synthetic=parts:{reference_parts};pageSystems:{};same:{};field:{}",
+        reference_page_refs[0].systems.len(),
+        reference_page_refs[0].systems.first() == Some(&reference_id),
+        reference_systems[0].system_ref.system_ref == Some(reference_id)
     ));
     let line_spline = NaturalSpline::interpolate(&[(0.0, 1.0), (10.0, 6.0)])?;
     let quadratic_spline = NaturalSpline::interpolate(&[(0.0, 0.0), (20.0, 10.0), (30.0, 10.0)])?;

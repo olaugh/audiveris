@@ -48,11 +48,15 @@ import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.run.RunTableFactory;
 import org.audiveris.omr.score.PageNumber;
+import org.audiveris.omr.score.Page;
 import org.audiveris.omr.score.PageRef;
 import org.audiveris.omr.score.Score;
+import org.audiveris.omr.score.StaffConfig;
+import org.audiveris.omr.score.SystemRef;
 import org.audiveris.omr.sig.GradeUtil;
 import org.audiveris.omr.sheet.Book;
 import org.audiveris.omr.sheet.OneLineStaff;
+import org.audiveris.omr.sheet.Part;
 import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.ScaleBuilder;
@@ -1328,6 +1332,52 @@ public final class RustParityProbe
                         + initialScoreTopology
                         + ";updated:"
                         + scoreTopology(scoreBook.getScores()));
+
+        Book referenceBook = new Book(Path.of("system-ref.synthetic"));
+        SheetStub referenceStub = new SheetStub(referenceBook, 1);
+        referenceBook.addStub(referenceStub);
+        Sheet referenceSheet = new Sheet(referenceStub, (RunTable) null);
+        PageRef referencePageRef = new PageRef(referenceStub, 1, false);
+        referenceStub.addPageRef(referencePageRef);
+        Page referencePage = new Page(referenceSheet, 1, 1);
+        referenceSheet.addPage(referencePage);
+        Staff referenceStaff1 = new Staff(
+                1, 0, 100, 10, new ArrayList<>(Collections.nCopies(5, null)));
+        Staff referenceStaff2 = new Staff(
+                2, 0, 100, 10, new ArrayList<>(Collections.nCopies(1, null)));
+        referenceStaff2.setSmall();
+        Staff referenceStaff3 = new Staff(
+                3, 0, 100, 10, new ArrayList<>(Collections.nCopies(6, null)));
+        SystemInfo referenceSystem = new SystemInfo(
+                1,
+                referenceSheet,
+                Arrays.asList(referenceStaff1, referenceStaff2, referenceStaff3));
+        referenceSystem.setPage(referencePage);
+        referencePage.setSystemsFrom(Arrays.asList(referenceSystem));
+        Part referencePart1 = new Part(referenceSystem);
+        referencePart1.addStaff(referenceStaff1);
+        referencePart1.addStaff(referenceStaff2);
+        referenceSystem.addPart(referencePart1);
+        Part referencePart2 = new Part(referenceSystem);
+        referencePart2.addStaff(referenceStaff3);
+        referenceSystem.addPart(referencePart2);
+        SystemRef referenceSystemRef = referenceSystem.buildRef();
+        referencePageRef.addSystem(referenceSystemRef);
+        List<String> referenceParts = new ArrayList<>();
+        for (org.audiveris.omr.score.PartRef partRef : referenceSystemRef.getParts()) {
+            referenceParts.add(
+                    StaffConfig.toCsvString(partRef.getStaffConfigs())
+                            + ":" + partRef.getName()
+                            + ":" + partRef.getLogicalId()
+                            + ":" + partRef.isManual()
+                            + ":back" + (partRef.getSystem() == referenceSystemRef));
+        }
+        System.out.println(
+                "grid.system-ref.synthetic=parts:"
+                        + String.join("|", referenceParts)
+                        + ";pageSystems:" + referencePageRef.getSystems().size()
+                        + ";same:" + (referencePageRef.getSystems().get(0) == referenceSystemRef)
+                        + ";field:" + (referenceSystem.getRef() == referenceSystemRef));
 
         NaturalSpline lineSpline = NaturalSpline.interpolate(
                 new double[]{0, 10},
