@@ -5,7 +5,67 @@
 //! Staff projection counts are stored in Java `short` cells. Increments narrow
 //! with two's-complement wrapping, while reads and derivatives widen to `int`.
 
+use std::cmp::Ordering;
+use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
+
+use crate::staff_peak::HorizontalSide;
+
+/// Java `StaffProjector.Blank`: an inclusive region without staff lines.
+#[derive(Clone, Copy, Debug)]
+pub struct ProjectionBlank {
+    start: i32,
+    stop: i32,
+}
+
+impl ProjectionBlank {
+    #[must_use]
+    pub const fn start(self) -> i32 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn stop(self) -> i32 {
+        self.stop
+    }
+
+    /// Java's inclusive `stop - start + 1` arithmetic.
+    #[must_use]
+    pub const fn width(self) -> i32 {
+        self.stop.wrapping_sub(self.start).wrapping_add(1)
+    }
+
+    const fn midpoint(self) -> i32 {
+        self.start.wrapping_add(self.stop) / 2
+    }
+}
+
+impl PartialEq for ProjectionBlank {
+    fn eq(&self, other: &Self) -> bool {
+        // Java Blank equality and ordering intentionally use start only.
+        self.start == other.start
+    }
+}
+
+impl Eq for ProjectionBlank {}
+
+impl PartialOrd for ProjectionBlank {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProjectionBlank {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.start.cmp(&other.start)
+    }
+}
+
+impl Hash for ProjectionBlank {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.start.hash(state);
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShortProjection {
@@ -118,6 +178,31 @@ impl ShortProjection {
         Ok((elite * minimum_ratio).round_ties_even() as i32)
     }
 
+    /// Java `StaffProjector.findAllBlanks` over the projection domain.
+    #[must_use]
+    pub fn blank_regions(&self, maximum_value: i32) -> Vec<ProjectionBlank> {
+        let mut blanks = Vec::new();
+        let mut active_start = None;
+
+        for position in self.start..=self.stop {
+            if self.value(position) <= maximum_value {
+                active_start.get_or_insert(position);
+            } else if let Some(start) = active_start.take() {
+                blanks.push(ProjectionBlank {
+                    start,
+                    stop: position - 1,
+                });
+            }
+        }
+        if let Some(start) = active_start {
+            blanks.push(ProjectionBlank {
+                start,
+                stop: self.stop,
+            });
+        }
+        blanks
+    }
+
     fn index(&self, position: i32) -> usize {
         assert!(
             (self.start..=self.stop).contains(&position),
@@ -128,6 +213,44 @@ impl ShortProjection {
         usize::try_from(i64::from(position) - i64::from(self.start))
             .expect("validated projection offset is nonnegative")
     }
+}
+
+/// Java `StaffProjector.selectBlank` over its start-ordered blank list.
+#[must_use]
+pub fn select_blank(
+    blanks: &[ProjectionBlank],
+    side: HorizontalSide,
+    start: i32,
+    minimum_width: i32,
+) -> Option<ProjectionBlank> {
+    let qualifies = |blank: &&ProjectionBlank| {
+        let direction = match side {
+            HorizontalSide::Left => -1_i32,
+            HorizontalSide::Right => 1_i32,
+        };
+        direction.wrapping_mul(blank.midpoint().wrapping_sub(start)) > 0
+            && blank.width() >= minimum_width
+    };
+
+    match side {
+        HorizontalSide::Left => blanks.iter().rev().find(qualifies).copied(),
+        HorizontalSide::Right => blanks.iter().find(qualifies).copied(),
+    }
+}
+
+/// Java `StaffProjector.hasStandardBlank`.
+#[must_use]
+pub fn has_blank_between(
+    blanks: &[ProjectionBlank],
+    start: i32,
+    stop: i32,
+    minimum_width: i32,
+) -> bool {
+    if stop <= start {
+        return false;
+    }
+    select_blank(blanks, HorizontalSide::Right, start, minimum_width)
+        .is_some_and(|blank| blank.start <= stop)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,6 +405,99 @@ mod tests {
                 required: 3,
             })
         );
+    }
+
+    #[test]
+    fn blank_regions_use_inclusive_thresholds_and_finish_at_domain_end() {
+        let mut projection = ShortProjection::new(0, 9).unwrap();
+        for (position, value) in [
+            (0, 0),
+            (1, 0),
+            (2, 2),
+            (3, 1),
+            (4, 0),
+            (5, 0),
+            (6, 0),
+            (7, 3),
+            (8, 0),
+            (9, 0),
+        ] {
+            projection.increment(position, value);
+        }
+        let blanks = projection.blank_regions(1);
+        assert_eq!(
+            blanks
+                .iter()
+                .map(|blank| (blank.start(), blank.stop(), blank.width()))
+                .collect::<Vec<_>>(),
+            [(0, 1, 2), (3, 6, 4), (8, 9, 2)]
+        );
+
+        let mut none = ShortProjection::new(20, 21).unwrap();
+        none.increment(20, 2);
+        none.increment(21, 2);
+        assert!(none.blank_regions(1).is_empty());
+        assert_eq!(
+            ShortProjection::new(20, 21)
+                .unwrap()
+                .blank_regions(0)
+                .iter()
+                .map(|blank| (blank.start(), blank.stop()))
+                .collect::<Vec<_>>(),
+            [(20, 21)]
+        );
+    }
+
+    #[test]
+    fn blank_selection_respects_side_width_and_strict_midpoint_position() {
+        let mut projection = ShortProjection::new(0, 9).unwrap();
+        projection.increment(2, 2);
+        projection.increment(7, 2);
+        let blanks = projection.blank_regions(1);
+
+        assert_eq!(
+            select_blank(&blanks, HorizontalSide::Right, 2, 2)
+                .map(|blank| (blank.start(), blank.stop())),
+            Some((3, 6))
+        );
+        // The 3..6 midpoint is 4 and is not strictly right of start=4.
+        assert_eq!(
+            select_blank(&blanks, HorizontalSide::Right, 4, 2)
+                .map(|blank| (blank.start(), blank.stop())),
+            Some((8, 9))
+        );
+        assert_eq!(
+            select_blank(&blanks, HorizontalSide::Left, 7, 2)
+                .map(|blank| (blank.start(), blank.stop())),
+            Some((3, 6))
+        );
+        assert_eq!(select_blank(&blanks, HorizontalSide::Right, 2, 5), None);
+    }
+
+    #[test]
+    fn blank_selection_preserves_java_negative_midpoint_truncation() {
+        let projection = ShortProjection::new(-13, -10).unwrap();
+        let blanks = projection.blank_regions(0);
+        // Java (-13 + -10) / 2 truncates -11.5 toward zero to -11.
+        assert_eq!(
+            select_blank(&blanks, HorizontalSide::Right, -12, 4)
+                .map(|blank| (blank.start(), blank.stop())),
+            Some((-13, -10))
+        );
+        assert_eq!(select_blank(&blanks, HorizontalSide::Left, -11, 4), None);
+    }
+
+    #[test]
+    fn standard_blank_range_uses_blank_start_and_rejects_empty_ranges() {
+        let mut projection = ShortProjection::new(0, 9).unwrap();
+        projection.increment(2, 2);
+        projection.increment(7, 2);
+        let blanks = projection.blank_regions(1);
+
+        assert!(has_blank_between(&blanks, 2, 3, 2));
+        assert!(!has_blank_between(&blanks, 2, 2, 2));
+        assert!(!has_blank_between(&blanks, 2, 9, 5));
+        assert!(!has_blank_between(&blanks, 9, 3, 1));
     }
 
     #[test]
