@@ -11,6 +11,7 @@ description = "Lossless, read-only persistence boundary for Audiveris .omr archi
 
 [dependencies]
 audiveris-core = { path = "../audiveris-core" }
+audiveris-image = { path = "../audiveris-image" }
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 quick-xml = { version = "=0.39.4", default-features = false }
 zip = { version = "=4.6.1", default-features = false, features = ["deflate-flate2"] }

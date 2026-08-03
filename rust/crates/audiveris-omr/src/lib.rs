@@ -19,6 +19,7 @@ use std::path::Path;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub mod grid_executor;
 pub mod score_update;
 pub mod sheet_xml;
 pub mod xml;

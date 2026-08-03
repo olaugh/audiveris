@@ -41,6 +41,7 @@ name = "audiveris-omr"
 version = "0.1.0"
 dependencies = [
  "audiveris-core",
+ "audiveris-image",
  "flate2",
  "quick-xml",
  "zip",
