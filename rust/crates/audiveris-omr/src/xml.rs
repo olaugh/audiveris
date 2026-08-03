@@ -25,6 +25,8 @@ const PAGE_ELEMENT: &[u8] = b"page";
 const LAST_TIME_RATIONAL_ELEMENT: &[u8] = b"last-time-rational";
 const SYSTEM_ELEMENT: &[u8] = b"system";
 const PART_ELEMENT: &[u8] = b"part";
+const STAFF_CONFIGURATION_ELEMENT: &[u8] = b"staff-configuration";
+const DEPRECATED_LINE_COUNT_ELEMENT: &[u8] = b"line-count";
 const SOFTWARE_VERSION_ATTRIBUTE: &[u8] = b"software-version";
 const NUMBER_ATTRIBUTE: &[u8] = b"number";
 const VERSION_ATTRIBUTE: &[u8] = b"version";
@@ -37,6 +39,8 @@ const DEN_ATTRIBUTE: &[u8] = b"den";
 const NAME_ATTRIBUTE: &[u8] = b"name";
 const LOGICAL_ID_ATTRIBUTE: &[u8] = b"logical-id";
 const MANUAL_ATTRIBUTE: &[u8] = b"manual";
+const LINE_COUNT_ATTRIBUTE: &[u8] = b"line-count";
+const SMALL_ATTRIBUTE: &[u8] = b"small";
 
 /// A lossless, read-only view of an Audiveris `book.xml` document.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,6 +71,8 @@ impl BookXml {
         let mut active_page = None;
         let mut active_time_rational = None;
         let mut active_system = None;
+        let mut active_part = None;
+        let mut active_staff_leaf: Option<StaffLeafCapture> = None;
         let mut root_closed = false;
 
         loop {
@@ -76,6 +82,9 @@ impl BookXml {
 
             match event {
                 Event::Start(element) => {
+                    if let Some(capture) = active_staff_leaf.as_ref() {
+                        return Err(unexpected_staff_config_content(&sheet_stubs, capture));
+                    }
                     if let Some((sheet_index, page_index)) = active_time_rational {
                         return Err(unexpected_time_rational_content(
                             &sheet_stubs,
@@ -155,19 +164,38 @@ impl BookXml {
                         && element.name().as_ref() == PART_ELEMENT
                         && let Some((sheet_index, page_index, system_index)) = active_system
                     {
-                        push_part_ref(
+                        let part_index = push_part_ref(
                             &reader,
                             &element,
                             &mut sheet_stubs[sheet_index],
                             page_index,
                             system_index,
                         )?;
+                        active_part = Some((sheet_index, page_index, system_index, part_index));
+                    } else if depth == 5
+                        && let Some((sheet_index, page_index, system_index, part_index)) =
+                            active_part
+                        && let Some(kind) = staff_leaf_kind(element.name().as_ref())
+                    {
+                        active_staff_leaf = Some(begin_staff_leaf(
+                            &reader,
+                            &element,
+                            sheet_index,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                            system_index,
+                            part_index,
+                            kind,
+                        )?);
                     }
                     depth = depth.checked_add(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "XML nesting overflow")
                     })?;
                 }
                 Event::Empty(element) => {
+                    if let Some(capture) = active_staff_leaf.as_ref() {
+                        return Err(unexpected_staff_config_content(&sheet_stubs, capture));
+                    }
                     if let Some((sheet_index, page_index)) = active_time_rational {
                         return Err(unexpected_time_rational_content(
                             &sheet_stubs,
@@ -254,9 +282,28 @@ impl BookXml {
                             page_index,
                             system_index,
                         )?;
+                    } else if depth == 5
+                        && let Some((sheet_index, page_index, system_index, part_index)) =
+                            active_part
+                        && let Some(kind) = staff_leaf_kind(element.name().as_ref())
+                    {
+                        finish_empty_staff_leaf(
+                            &reader,
+                            &element,
+                            &mut sheet_stubs[sheet_index],
+                            page_index,
+                            system_index,
+                            part_index,
+                            kind,
+                        )?;
                     }
                 }
                 Event::End(element) => {
+                    if depth == 6
+                        && let Some(capture) = active_staff_leaf.take()
+                    {
+                        finish_staff_leaf(&mut sheet_stubs, capture)?;
+                    }
                     if element.name().as_ref() == LAST_TIME_RATIONAL_ELEMENT && depth == 4 {
                         active_time_rational = None;
                     }
@@ -300,6 +347,9 @@ impl BookXml {
                     if depth == 4 && active_system.is_some() {
                         active_system = None;
                     }
+                    if depth == 5 && active_part.is_some() {
+                        active_part = None;
+                    }
                     depth = depth.checked_sub(1).ok_or_else(|| {
                         BookXmlError::malformed(reader.buffer_position(), "unexpected closing tag")
                     })?;
@@ -314,6 +364,16 @@ impl BookXml {
                     if !text.trim().is_empty() {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
+                }
+                Event::Text(text) if active_staff_leaf.is_some() => {
+                    let decoded = text.xml_content().map_err(|error| {
+                        BookXmlError::malformed(reader.error_position(), error.to_string())
+                    })?;
+                    let capture = active_staff_leaf.as_mut().unwrap();
+                    if capture.kind == StaffLeafKind::Current && !decoded.trim().is_empty() {
+                        return Err(unexpected_staff_config_content(&sheet_stubs, capture));
+                    }
+                    capture.text.push_str(&decoded);
                 }
                 Event::Text(text) if active_steps.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
@@ -352,6 +412,12 @@ impl BookXml {
                         return Err(BookXmlError::ContentOutsideRoot);
                     }
                 }
+                Event::CData(_) if active_staff_leaf.is_some() => {
+                    return Err(unexpected_staff_config_content(
+                        &sheet_stubs,
+                        active_staff_leaf.as_ref().unwrap(),
+                    ));
+                }
                 Event::CData(text) if active_steps.is_some() => {
                     let decoded = text.xml_content().map_err(|error| {
                         BookXmlError::malformed(reader.error_position(), error.to_string())
@@ -379,6 +445,12 @@ impl BookXml {
                 Event::GeneralRef(_) if depth == 0 => {
                     return Err(BookXmlError::ContentOutsideRoot);
                 }
+                Event::GeneralRef(_) if active_staff_leaf.is_some() => {
+                    return Err(unexpected_staff_config_content(
+                        &sheet_stubs,
+                        active_staff_leaf.as_ref().unwrap(),
+                    ));
+                }
                 Event::GeneralRef(_) if active_steps.is_some() => {
                     let sheet_index = active_steps.as_ref().unwrap().0;
                     return Err(BookXmlError::UnexpectedStepsContent(
@@ -398,6 +470,14 @@ impl BookXml {
                         &sheet_stubs,
                         sheet_index,
                         page_index,
+                    ));
+                }
+                Event::Comment(_) | Event::PI(_) | Event::DocType(_)
+                    if active_staff_leaf.is_some() =>
+                {
+                    return Err(unexpected_staff_config_content(
+                        &sheet_stubs,
+                        active_staff_leaf.as_ref().unwrap(),
                     ));
                 }
                 Event::Comment(_) | Event::PI(_) | Event::DocType(_)
@@ -626,6 +706,7 @@ pub struct PartRef {
     name: Option<String>,
     logical_id: Option<i32>,
     manual: Option<bool>,
+    staff_configs: Vec<PersistedStaffConfig>,
 }
 
 impl PartRef {
@@ -657,6 +738,48 @@ impl PartRef {
     #[must_use]
     pub fn is_manual(&self) -> bool {
         self.manual.unwrap_or(false)
+    }
+
+    /// Direct current and deprecated staff-config spellings in document order.
+    #[must_use]
+    pub fn staff_configs(&self) -> &[PersistedStaffConfig] {
+        &self.staff_configs
+    }
+}
+
+/// One persisted staff configuration without normalizing legacy spelling.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PersistedStaffConfig {
+    /// Current attribute-based `<staff-configuration>` JAXB object.
+    Current(StaffConfig),
+    /// Deprecated scalar `<line-count>` entry migrated by Java after unmarshal.
+    DeprecatedLineCount(i32),
+}
+
+/// Current `StaffConfig` scalar fields.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StaffConfig {
+    line_count: i32,
+    small: Option<bool>,
+}
+
+impl StaffConfig {
+    /// Raw Java `int` line count persisted in the required attribute.
+    #[must_use]
+    pub const fn line_count(self) -> i32 {
+        self.line_count
+    }
+
+    /// Explicit state of the optional JAXB boolean-positive `small` attribute.
+    #[must_use]
+    pub const fn small_attribute(self) -> Option<bool> {
+        self.small
+    }
+
+    /// Effective Java small-staff state; absent defaults to false.
+    #[must_use]
+    pub fn is_small(self) -> bool {
+        self.small.unwrap_or(false)
     }
 }
 
@@ -728,6 +851,22 @@ impl InputScalar {
 struct InputScalarCapture {
     sheet_index: usize,
     scalar: InputScalar,
+    text: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StaffLeafKind {
+    Current,
+    DeprecatedLineCount,
+}
+
+#[derive(Debug)]
+struct StaffLeafCapture {
+    sheet_index: usize,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+    kind: StaffLeafKind,
     text: String,
 }
 
@@ -859,6 +998,39 @@ pub enum BookXmlError {
         system_id: u32,
         field: &'static str,
         value: String,
+    },
+    /// A current staff configuration lacks its required line-count attribute.
+    MissingStaffConfigField {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        part_index: u32,
+        field: &'static str,
+    },
+    /// A staff-configuration integer is malformed or outside Java `int` range.
+    InvalidStaffConfigInteger {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        part_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A current staff-configuration boolean has an invalid XML Schema spelling.
+    InvalidStaffConfigBoolean {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        part_index: u32,
+        field: &'static str,
+        value: String,
+    },
+    /// A typed staff configuration contains nested, entity, or scalar markup.
+    UnexpectedStaffConfigContent {
+        sheet_number: u32,
+        page_id: u32,
+        system_id: u32,
+        part_index: u32,
     },
     /// A direct sheet stub contains more than one `steps` element.
     DuplicateSheetSteps(u32),
@@ -1038,6 +1210,47 @@ impl fmt::Display for BookXmlError {
             } => write!(
                 formatter,
                 "sheet stub {sheet_number} page {page_id} system {system_id} has invalid part boolean {field}: {value:?}"
+            ),
+            Self::MissingStaffConfigField {
+                sheet_number,
+                page_id,
+                system_id,
+                part_index,
+                field,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} part index {part_index} staff config is missing {field}"
+            ),
+            Self::InvalidStaffConfigInteger {
+                sheet_number,
+                page_id,
+                system_id,
+                part_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} part index {part_index} has invalid staff integer {field}: {value:?}"
+            ),
+            Self::InvalidStaffConfigBoolean {
+                sheet_number,
+                page_id,
+                system_id,
+                part_index,
+                field,
+                value,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} part index {part_index} has invalid staff boolean {field}: {value:?}"
+            ),
+            Self::UnexpectedStaffConfigContent {
+                sheet_number,
+                page_id,
+                system_id,
+                part_index,
+            } => write!(
+                formatter,
+                "sheet stub {sheet_number} page {page_id} system {system_id} part index {part_index} staff config contains content"
             ),
             Self::DuplicateSheetSteps(number) => {
                 write!(
@@ -1261,7 +1474,7 @@ fn push_part_ref(
     sheet_stub: &mut SheetStub,
     page_index: usize,
     system_index: usize,
-) -> Result<(), BookXmlError> {
+) -> Result<usize, BookXmlError> {
     let page_id = sheet_stub.page_refs[page_index].id;
     let system = &mut sheet_stub.page_refs[page_index].system_refs[system_index];
     let index = u32::try_from(system.part_refs.len())
@@ -1312,8 +1525,229 @@ fn push_part_ref(
         name,
         logical_id,
         manual,
+        staff_configs: Vec::new(),
     });
+    Ok(system.part_refs.len() - 1)
+}
+
+fn staff_leaf_kind(name: &[u8]) -> Option<StaffLeafKind> {
+    match name {
+        STAFF_CONFIGURATION_ELEMENT => Some(StaffLeafKind::Current),
+        DEPRECATED_LINE_COUNT_ELEMENT => Some(StaffLeafKind::DeprecatedLineCount),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn begin_staff_leaf(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_index: usize,
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+    kind: StaffLeafKind,
+) -> Result<StaffLeafCapture, BookXmlError> {
+    if kind == StaffLeafKind::Current {
+        push_current_staff_config(
+            reader,
+            element,
+            sheet_stub,
+            page_index,
+            system_index,
+            part_index,
+        )?;
+    }
+    Ok(StaffLeafCapture {
+        sheet_index,
+        page_index,
+        system_index,
+        part_index,
+        kind,
+        text: String::new(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_empty_staff_leaf(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+    kind: StaffLeafKind,
+) -> Result<(), BookXmlError> {
+    match kind {
+        StaffLeafKind::Current => push_current_staff_config(
+            reader,
+            element,
+            sheet_stub,
+            page_index,
+            system_index,
+            part_index,
+        ),
+        StaffLeafKind::DeprecatedLineCount => {
+            push_deprecated_line_count(sheet_stub, page_index, system_index, part_index, "")
+        }
+    }
+}
+
+fn finish_staff_leaf(
+    sheet_stubs: &mut [SheetStub],
+    capture: StaffLeafCapture,
+) -> Result<(), BookXmlError> {
+    if capture.kind == StaffLeafKind::DeprecatedLineCount {
+        push_deprecated_line_count(
+            &mut sheet_stubs[capture.sheet_index],
+            capture.page_index,
+            capture.system_index,
+            capture.part_index,
+            &capture.text,
+        )?;
+    }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_current_staff_config(
+    reader: &Reader<Cursor<&[u8]>>,
+    element: &BytesStart<'_>,
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+) -> Result<(), BookXmlError> {
+    let (sheet_number, page_id, system_id, part_source_index) =
+        staff_context(sheet_stub, page_index, system_index, part_index);
+    let mut line_count = None;
+    let mut small = None;
+    for attribute in element.attributes() {
+        let attribute = attribute
+            .map_err(|error| BookXmlError::malformed(reader.error_position(), error.to_string()))?;
+        let key = attribute.key.as_ref();
+        if key == LINE_COUNT_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            line_count = Some(parse_staff_integer(
+                &value,
+                sheet_number,
+                page_id,
+                system_id,
+                part_source_index,
+                "sheet/page/system/part/staff-configuration/@line-count",
+            )?);
+        } else if key == SMALL_ATTRIBUTE {
+            let value = decode_attribute(reader, &attribute)?;
+            small = Some(parse_jaxb_boolean(&value).ok_or_else(|| {
+                BookXmlError::InvalidStaffConfigBoolean {
+                    sheet_number,
+                    page_id,
+                    system_id,
+                    part_index: part_source_index,
+                    field: "sheet/page/system/part/staff-configuration/@small",
+                    value: value.clone(),
+                }
+            })?);
+        }
+    }
+    let line_count = line_count.ok_or(BookXmlError::MissingStaffConfigField {
+        sheet_number,
+        page_id,
+        system_id,
+        part_index: part_source_index,
+        field: "sheet/page/system/part/staff-configuration/@line-count",
+    })?;
+    part_mut(sheet_stub, page_index, system_index, part_index)
+        .staff_configs
+        .push(PersistedStaffConfig::Current(StaffConfig {
+            line_count,
+            small,
+        }));
+    Ok(())
+}
+
+fn push_deprecated_line_count(
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+    text: &str,
+) -> Result<(), BookXmlError> {
+    let (sheet_number, page_id, system_id, part_source_index) =
+        staff_context(sheet_stub, page_index, system_index, part_index);
+    let count = parse_staff_integer(
+        text,
+        sheet_number,
+        page_id,
+        system_id,
+        part_source_index,
+        "sheet/page/system/part/line-count",
+    )?;
+    part_mut(sheet_stub, page_index, system_index, part_index)
+        .staff_configs
+        .push(PersistedStaffConfig::DeprecatedLineCount(count));
+    Ok(())
+}
+
+fn parse_staff_integer(
+    value: &str,
+    sheet_number: u32,
+    page_id: u32,
+    system_id: u32,
+    part_index: u32,
+    field: &'static str,
+) -> Result<i32, BookXmlError> {
+    value
+        .trim()
+        .parse::<i32>()
+        .map_err(|_| BookXmlError::InvalidStaffConfigInteger {
+            sheet_number,
+            page_id,
+            system_id,
+            part_index,
+            field,
+            value: value.to_owned(),
+        })
+}
+
+fn staff_context(
+    sheet_stub: &SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+) -> (u32, u32, u32, u32) {
+    let page = &sheet_stub.page_refs[page_index];
+    let system = &page.system_refs[system_index];
+    let part = &system.part_refs[part_index];
+    (sheet_stub.number, page.id, system.id, part.index)
+}
+
+fn part_mut(
+    sheet_stub: &mut SheetStub,
+    page_index: usize,
+    system_index: usize,
+    part_index: usize,
+) -> &mut PartRef {
+    &mut sheet_stub.page_refs[page_index].system_refs[system_index].part_refs[part_index]
+}
+
+fn unexpected_staff_config_content(
+    sheet_stubs: &[SheetStub],
+    capture: &StaffLeafCapture,
+) -> BookXmlError {
+    let (sheet_number, page_id, system_id, part_index) = staff_context(
+        &sheet_stubs[capture.sheet_index],
+        capture.page_index,
+        capture.system_index,
+        capture.part_index,
+    );
+    BookXmlError::UnexpectedStaffConfigContent {
+        sheet_number,
+        page_id,
+        system_id,
+        part_index,
+    }
 }
 
 fn push_last_time_rational(
@@ -1709,6 +2143,13 @@ mod tests {
         assert_eq!(parts[0].name(), None);
         assert_eq!(parts[0].manual_attribute(), None);
         assert!(!parts[0].is_manual());
+        assert_eq!(parts[0].staff_configs().len(), 1);
+        let PersistedStaffConfig::Current(staff) = parts[0].staff_configs()[0] else {
+            panic!("real 5.11 spelling must stay current")
+        };
+        assert_eq!(staff.line_count(), 5);
+        assert_eq!(staff.small_attribute(), None);
+        assert!(!staff.is_small());
         assert_eq!(book.original_bytes(), xml);
     }
 
@@ -1792,9 +2233,34 @@ mod tests {
     }
 
     #[test]
+    fn preserves_current_and_deprecated_staff_spellings_in_document_order() {
+        let xml = br#"<book><sheet number="1"><page id="1"><system><part><line-count>1</line-count><staff-configuration line-count="5" small="true"/><line-count> 0 </line-count><staff-configuration line-count="-2" small="false"> </staff-configuration></part><part/></system></page></sheet></book>"#;
+        let book = BookXml::parse(xml).unwrap();
+        let parts = book.sheet_stubs()[0].page_refs()[0].system_refs()[0].part_refs();
+        let configs = parts[0].staff_configs();
+
+        assert_eq!(configs[0], PersistedStaffConfig::DeprecatedLineCount(1));
+        let PersistedStaffConfig::Current(first) = configs[1] else {
+            panic!("second spelling must stay current")
+        };
+        assert_eq!(first.line_count(), 5);
+        assert_eq!(first.small_attribute(), Some(true));
+        assert!(first.is_small());
+        assert_eq!(configs[2], PersistedStaffConfig::DeprecatedLineCount(0));
+        let PersistedStaffConfig::Current(last) = configs[3] else {
+            panic!("fourth spelling must stay current")
+        };
+        assert_eq!(last.line_count(), -2);
+        assert_eq!(last.small_attribute(), Some(false));
+        assert!(!last.is_small());
+        assert!(parts[1].staff_configs().is_empty());
+        assert_eq!(book.original_bytes(), xml);
+    }
+
+    #[test]
     fn ignores_nested_and_namespaced_page_lookalikes() {
         let book = BookXml::parse(
-            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><f:system/><future><av:page id="77"/><last-time-rational num="2" den="2"/><system/></future><system><f:part logical-id="88"/><future><part logical-id="77"/></future><part f:logical-id="66" future="opaque"/></system></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
+            br#"<book xmlns:av="urn:audiveris" xmlns:f="urn:future"><av:sheet number="1"><future><av:page id="99"/></future><av:page id="3" f:id="88" f:movement-start="true"><f:last-time-rational num="3" den="4"/><f:system/><future><av:page id="77"/><last-time-rational num="2" den="2"/><system/></future><system><f:part logical-id="88"/><future><part logical-id="77"/></future><part f:logical-id="66" future="opaque"><f:staff-configuration line-count="88"/><future><staff-configuration line-count="77"/><line-count>66</line-count></future><staff-configuration f:line-count="55" line-count="3"/></part></system></av:page></av:sheet><score><av:page id="66"/></score></book>"#,
         )
         .unwrap();
 
@@ -1809,6 +2275,11 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].index(), 0);
         assert_eq!(parts[0].logical_id(), None);
+        assert_eq!(parts[0].staff_configs().len(), 1);
+        let PersistedStaffConfig::Current(config) = parts[0].staff_configs()[0] else {
+            panic!("direct unqualified spelling must be current")
+        };
+        assert_eq!(config.line_count(), 3);
     }
 
     #[test]
@@ -2029,6 +2500,97 @@ mod tests {
                 BookXml::parse(xml).unwrap_err(),
                 BookXmlError::Malformed { .. }
             ));
+        }
+    }
+
+    #[test]
+    fn rejects_missing_and_invalid_staff_config_scalars() {
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><system><part><staff-configuration small="true"/></part></system></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::MissingStaffConfigField {
+                sheet_number: 2,
+                page_id: 1,
+                system_id: 1,
+                part_index: 0,
+                field: "sheet/page/system/part/staff-configuration/@line-count",
+            }
+        );
+
+        for (element, field, value) in [
+            (
+                "<staff-configuration line-count=\"2147483648\"/>",
+                "sheet/page/system/part/staff-configuration/@line-count",
+                "2147483648",
+            ),
+            (
+                "<line-count>not-a-number</line-count>",
+                "sheet/page/system/part/line-count",
+                "not-a-number",
+            ),
+        ] {
+            let xml = format!(
+                "<book><sheet number=\"2\"><page id=\"1\"><system><part>{element}</part></system></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::InvalidStaffConfigInteger {
+                    sheet_number: 2,
+                    page_id: 1,
+                    system_id: 1,
+                    part_index: 0,
+                    field,
+                    value: value.to_owned(),
+                }
+            );
+        }
+
+        assert_eq!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><system><part><staff-configuration line-count="5" small="yes"/></part></system></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::InvalidStaffConfigBoolean {
+                sheet_number: 2,
+                page_id: 1,
+                system_id: 1,
+                part_index: 0,
+                field: "sheet/page/system/part/staff-configuration/@small",
+                value: "yes".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_staff_attributes_and_leaf_markup() {
+        assert!(matches!(
+            BookXml::parse(
+                br#"<book><sheet number="2"><page id="1"><system><part><staff-configuration line-count="5" line-count="1"/></part></system></page></sheet></book>"#
+            )
+            .unwrap_err(),
+            BookXmlError::Malformed { .. }
+        ));
+
+        for leaf in [
+            "<staff-configuration line-count=\"5\">text</staff-configuration>",
+            "<staff-configuration line-count=\"5\"><future/></staff-configuration>",
+            "<line-count><![CDATA[5]]></line-count>",
+            "<line-count>&#53;</line-count>",
+        ] {
+            let xml = format!(
+                "<book><sheet number=\"2\"><page id=\"1\"><system><part>{leaf}</part></system></page></sheet></book>"
+            );
+            assert_eq!(
+                BookXml::parse(xml).unwrap_err(),
+                BookXmlError::UnexpectedStaffConfigContent {
+                    sheet_number: 2,
+                    page_id: 1,
+                    system_id: 1,
+                    part_index: 0,
+                }
+            );
         }
     }
 
