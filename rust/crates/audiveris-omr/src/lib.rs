@@ -38,6 +38,7 @@ pub mod score_update;
 pub mod sheet_xml;
 pub mod staff_header;
 pub mod stem_seeds_step;
+pub mod stems_step;
 pub mod system_grouping;
 pub mod xml;
 
