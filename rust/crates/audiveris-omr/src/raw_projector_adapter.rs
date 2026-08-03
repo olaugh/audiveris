@@ -19,6 +19,7 @@ use std::fmt;
 use audiveris_image::{
     bar_alignment::BarAlignment,
     bar_column::{BarColumn, StaffId},
+    bar_sticks::{BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks},
     bars_logic::{BarsLogicError, build_bar_columns_from_graph},
     filament::{FilamentError, FilamentGeometry},
     lines_coordinator::StaffCandidateKind,
@@ -30,6 +31,7 @@ use audiveris_image::{
         StaffProjectorProcessTuning, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
         barline_height, process_staff_projection,
     },
+    section::Section,
     staff_peak::{StaffPeak, StaffPeakError, StaffPeakKey},
 };
 
@@ -113,6 +115,14 @@ pub struct RawProjectorGraphBridge {
     pub grouping: RawSystemGroupingBoundary,
 }
 
+/// Raw projector graph after real section-backed sticks have been built and
+/// the weak Java curvature pass has marked brace-like peaks.
+#[derive(Clone, Debug)]
+pub struct RawBarStickGraphBridge {
+    pub projectors: RawProjectorGraphBridge,
+    pub sticks: BarStickBuildState,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RawProjectorAdapterError {
     DuplicateStaffSettings(usize),
@@ -138,6 +148,7 @@ pub enum RawProjectorAdapterError {
     },
     MissingRegisteredPeak(StaffPeakKey),
     DuplicateRegisteredPeak(StaffPeakKey),
+    BarSticks(BarStickError),
     BarColumns(BarsLogicError),
 }
 
@@ -190,7 +201,10 @@ impl fmt::Display for RawProjectorAdapterError {
                 key.start(),
                 key.stop()
             ),
-            Self::BarColumns(source) => write!(formatter, "bar-column construction failed: {source}"),
+            Self::BarSticks(source) => write!(formatter, "bar-stick construction failed: {source}"),
+            Self::BarColumns(source) => {
+                write!(formatter, "bar-column construction failed: {source}")
+            }
         }
     }
 }
@@ -201,6 +215,7 @@ impl Error for RawProjectorAdapterError {
             Self::Filament { source, .. } => Some(source),
             Self::Projection { source, .. } => Some(source),
             Self::Deskew { source, .. } => Some(source),
+            Self::BarSticks(source) => Some(source),
             Self::BarColumns(source) => Some(source),
             _ => None,
         }
@@ -238,30 +253,68 @@ pub fn bridge_raw_projectors_to_graph(
         .iter()
         .map(|projector| projector.staff_id)
         .collect::<Vec<_>>();
-    let grouping = if let [staff_id] = retained_staff_ids.as_slice() {
-        let columns = build_bar_columns_from_graph(&graph, &[*staff_id], maximum_column_dx)
-            .map_err(RawProjectorAdapterError::BarColumns)?;
-        RawSystemGroupingBoundary::CompleteSingleStaff {
-            system_id: 1,
-            staff_id: *staff_id,
-            columns,
-        }
-    } else {
-        RawSystemGroupingBoundary::NeedsAlignmentAndConnectionDiscovery {
-            staff_ids: retained_staff_ids.clone(),
-        }
-    };
+    let grouping = group_raw_projector_graph(&graph, &retained_staff_ids, maximum_column_dx)?;
 
     Ok(RawProjectorGraphBridge {
         graph,
         retained_staff_ids,
-        discarded_one_line_staff_ids: preparation
-            .registry
-            .discarded_one_line_staves()
-            .to_vec(),
+        discarded_one_line_staff_ids: preparation.registry.discarded_one_line_staves().to_vec(),
         brace_peaks: preparation.brace_peaks.clone(),
         grouping,
     })
+}
+
+/// Continue the raw graph through Java's section-backed `buildBarSticks` and
+/// weak curvature pass, without creating any alignment or connection edge.
+pub fn bridge_raw_projectors_through_bar_sticks(
+    preparation: &RawProjectorPreparation,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    stick_parameters: BarStickParameters,
+    maximum_column_dx: i32,
+) -> Result<RawBarStickGraphBridge, RawProjectorAdapterError> {
+    let peak_order = preparation.registry.graph_vertex_order().to_vec();
+    let mut projectors = bridge_raw_projectors_to_graph(preparation, maximum_column_dx)?;
+    let mut sticks = BarStickBuildState::new(stick_parameters.first_filament_id)
+        .map_err(RawProjectorAdapterError::BarSticks)?;
+    build_bar_sticks(
+        &mut projectors.graph,
+        &peak_order,
+        vertical_sections,
+        horizontal_sections,
+        stick_parameters,
+        &mut sticks,
+    )
+    .map_err(RawProjectorAdapterError::BarSticks)?;
+
+    projectors.grouping = group_raw_projector_graph(
+        &projectors.graph,
+        &projectors.retained_staff_ids,
+        maximum_column_dx,
+    )?;
+    Ok(RawBarStickGraphBridge { projectors, sticks })
+}
+
+fn group_raw_projector_graph(
+    graph: &PeakGraph<BarAlignment>,
+    retained_staff_ids: &[StaffId],
+    maximum_column_dx: i32,
+) -> Result<RawSystemGroupingBoundary, RawProjectorAdapterError> {
+    if let [staff_id] = retained_staff_ids {
+        let columns = build_bar_columns_from_graph(graph, &[*staff_id], maximum_column_dx)
+            .map_err(RawProjectorAdapterError::BarColumns)?;
+        Ok(RawSystemGroupingBoundary::CompleteSingleStaff {
+            system_id: 1,
+            staff_id: *staff_id,
+            columns,
+        })
+    } else {
+        Ok(
+            RawSystemGroupingBoundary::NeedsAlignmentAndConnectionDiscovery {
+                staff_ids: retained_staff_ids.to_vec(),
+            },
+        )
+    }
 }
 
 /// Build and register raw per-staff projectors with construction-time deskew.
@@ -674,6 +727,45 @@ mod tests {
                 panic!("one retained staff does not require alignment discovery")
             }
         }
+
+        let mut vertical_table = RunTable::new(Orientation::Vertical, 20, 6).unwrap();
+        vertical_table.add_run(5, Run::new(0, 6)).unwrap();
+        vertical_table.add_run(6, Run::new(0, 6)).unwrap();
+        let vertical_sections = build_sections(&vertical_table, JunctionPolicy::All);
+        let with_sticks = bridge_raw_projectors_through_bar_sticks(
+            &prepared,
+            &vertical_sections,
+            &[],
+            BarStickParameters {
+                vertical_extension: 0,
+                minimum_core_section_length: 3,
+                probe_width: 1,
+                minimum_probe_weight: 1,
+                segment_length: 3,
+                minimum_mean_curvature: 0.0,
+                first_filament_id: 1,
+            },
+            2,
+        )
+        .unwrap();
+        assert_eq!(with_sticks.sticks.sticks().len(), 1);
+        assert_eq!(with_sticks.sticks.sticks()[0].peak, expected_key);
+        assert_eq!(with_sticks.sticks.sticks()[0].id, 1);
+        assert_eq!(with_sticks.sticks.sticks()[0].members.len(), 1);
+        assert_eq!(
+            with_sticks
+                .projectors
+                .graph
+                .vertex(expected_key)
+                .unwrap()
+                .deskewed_center(),
+            Some(expected_center)
+        );
+        assert!(matches!(
+            with_sticks.projectors.grouping,
+            RawSystemGroupingBoundary::CompleteSingleStaff { ref columns, .. }
+                if columns.len() == 1
+        ));
     }
 
     #[test]
