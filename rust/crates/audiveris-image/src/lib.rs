@@ -8,6 +8,7 @@ pub mod bar_column;
 pub mod bars_logic;
 pub mod chamfer;
 pub mod cluster_coordinator;
+pub mod cluster_merge;
 pub mod cluster_ownership;
 pub mod comb_builder;
 pub mod filament;

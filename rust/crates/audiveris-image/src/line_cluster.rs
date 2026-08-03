@@ -286,6 +286,11 @@ impl LineCluster {
         self.lines.iter().map(|(&position, line)| (position, line))
     }
 
+    #[must_use]
+    pub fn first_position(&self) -> i32 {
+        *self.lines.first_key_value().expect("seeded cluster").0
+    }
+
     /// Member at one raw relative-position key.
     #[must_use]
     pub fn line_at(&self, position: i32) -> Option<&ClusterLine> {
@@ -477,7 +482,7 @@ impl LineCluster {
 }
 
 /// Horizontal `Compounds.getThicknessAt` for two staff filaments.
-fn combined_thickness_at(
+pub(crate) fn combined_thickness_at(
     coordinate: usize,
     probe_width: usize,
     filaments: [&StaffFilament; 2],

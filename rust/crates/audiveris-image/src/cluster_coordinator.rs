@@ -305,7 +305,7 @@ fn include_recursive(
     Ok(())
 }
 
-fn merge_cluster_values(
+pub(crate) fn merge_cluster_values(
     ownership: &mut ClusterOwnership,
     clusters: &mut BTreeMap<ClusterId, LineCluster>,
     destination: ClusterId,
