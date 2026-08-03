@@ -82,6 +82,46 @@ pub struct PeakWidthAssignment {
     pub class: PeakWidthClass,
 }
 
+/// Neutral form of Java `BarGroupRelation` creation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarGroupLink {
+    pub left: StaffPeakKey,
+    pub right: StaffPeakKey,
+    pub normalized_gap: f64,
+}
+
+/// Java `groupBarlines` adjacent-bar relation decisions for one staff.
+///
+/// Brace and bracket peaks are skipped without clearing the prior ordinary
+/// bar, exactly matching the Java loop. Gap subtraction wraps as Java `int`
+/// before conversion to the interline fraction.
+#[must_use]
+pub fn bar_group_links(
+    peaks: &[StaffPeak],
+    maximum_double_bar_gap: i32,
+    interline: i32,
+) -> Vec<BarGroupLink> {
+    let mut previous: Option<&StaffPeak> = None;
+    let mut links = Vec::new();
+    for peak in peaks {
+        if peak.is_brace() || peak.is_bracket() {
+            continue;
+        }
+        if let Some(left) = previous {
+            let gap = peak.start().wrapping_sub(left.stop()).wrapping_sub(1);
+            if gap <= maximum_double_bar_gap {
+                links.push(BarGroupLink {
+                    left: left.key(),
+                    right: peak.key(),
+                    normalized_gap: f64::from(gap) / f64::from(interline),
+                });
+            }
+        }
+        previous = Some(peak);
+    }
+    links
+}
+
 /// Dispatch structural peaks, isolated bars, and adjacent bar groups, then
 /// reproduce Java's within-group thin/thick width partition.
 ///
@@ -479,6 +519,34 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn bar_group_links_skip_structural_peaks_without_resetting_previous_bar() {
+        let left = peak(1, 0, 1);
+        let mut brace = peak(1, 2, 2);
+        brace.set(StaffPeakAttribute::Brace);
+        let right = peak(1, 4, 4);
+        let far = peak(1, 10, 10);
+        let links = bar_group_links(&[left.clone(), brace, right.clone(), far], 2, 4);
+        assert_eq!(
+            links,
+            [BarGroupLink {
+                left: left.key(),
+                right: right.key(),
+                normalized_gap: 0.5,
+            }]
+        );
+    }
+
+    #[test]
+    fn bar_group_links_preserve_java_wrapping_and_zero_interline() {
+        let left = peak(1, 0, i32::MIN);
+        let right = peak(1, i32::MAX, i32::MAX);
+        let links = bar_group_links(&[left, right], -1, 0);
+        assert_eq!(links.len(), 1);
+        assert!(links[0].normalized_gap.is_sign_negative());
+        assert!(links[0].normalized_gap.is_infinite());
     }
 
     #[test]
