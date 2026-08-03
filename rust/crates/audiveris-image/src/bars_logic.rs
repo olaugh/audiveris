@@ -114,6 +114,53 @@ pub fn detect_bracket_middles(
     Ok(marked)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BracketEndDetection {
+    pub peak: StaffPeakKey,
+    pub side: VerticalSide,
+}
+
+/// Java `BarsRetriever.detectBracketEnds` for one staff projector.
+///
+/// The caller supplies the geometric extension and serif lookup because those
+/// depend on staff-line and filament state. Peaks are visited right-to-left,
+/// stopping at the first brace, and top is tested before bottom.
+pub fn detect_bracket_ends(
+    peaks: &mut [StaffPeak],
+    start_peak_index: Option<usize>,
+    minimum_bracket_width: i32,
+    maximum_bracket_extension: f64,
+    mut extension_of: impl FnMut(StaffPeakKey, VerticalSide) -> f64,
+    mut has_serif: impl FnMut(StaffPeakKey, StaffPeakKey, VerticalSide) -> bool,
+) -> Result<Vec<BracketEndDetection>, BarsLogicError> {
+    let Some(start_index) = start_peak_index else {
+        return Ok(Vec::new());
+    };
+    if start_index >= peaks.len() {
+        return Err(BarsLogicError::InvalidStartIndex(start_index));
+    }
+
+    let mut detections = Vec::new();
+    for index in (0..start_index).rev() {
+        if peaks[index].is_brace() {
+            break;
+        }
+        if peaks[index].width() < minimum_bracket_width {
+            continue;
+        }
+        let peak = peaks[index].key();
+        let right = peaks[index + 1].key();
+        for side in [VerticalSide::Top, VerticalSide::Bottom] {
+            if extension_of(peak, side) <= maximum_bracket_extension && has_serif(peak, right, side)
+            {
+                peaks[index].set_bracket_end(side);
+                detections.push(BracketEndDetection { peak, side });
+            }
+        }
+    }
+    Ok(detections)
+}
+
 /// Java `getGroups`: collect maximal adjacent peak runs separated by at most
 /// `maximum_double_bar_gap`, omitting singleton runs.
 ///
@@ -1358,6 +1405,89 @@ mod tests {
             Err(BarsLogicError::BracketConnectionCycle(keys[0]))
         );
         assert!(!graph.vertex(keys[1]).unwrap().is_bracket());
+    }
+
+    #[test]
+    fn bracket_end_detection_walks_backwards_stops_at_brace_and_uses_right_neighbor() {
+        use std::cell::RefCell;
+
+        let hidden_left = peak(1, 0, 4);
+        let mut brace = peak(1, 6, 9);
+        brace.set(StaffPeakAttribute::Brace);
+        let candidate = peak(1, 11, 14);
+        let thin = peak(1, 16, 16);
+        let start = peak(1, 20, 21);
+        let candidate_key = candidate.key();
+        let thin_key = thin.key();
+        let start_key = start.key();
+        let calls = RefCell::new(Vec::new());
+        let mut peaks = [hidden_left, brace, candidate, thin, start];
+
+        let detections = detect_bracket_ends(
+            &mut peaks,
+            Some(4),
+            4,
+            2.0,
+            |key, side| {
+                calls.borrow_mut().push(("extension", key, key, side));
+                match side {
+                    VerticalSide::Top => 2.0,
+                    VerticalSide::Bottom => 2.5,
+                }
+            },
+            |key, right, side| {
+                calls.borrow_mut().push(("serif", key, right, side));
+                side == VerticalSide::Top
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            detections,
+            [BracketEndDetection {
+                peak: candidate_key,
+                side: VerticalSide::Top,
+            }]
+        );
+        assert_eq!(
+            calls.into_inner(),
+            [
+                ("extension", candidate_key, candidate_key, VerticalSide::Top),
+                ("serif", candidate_key, thin_key, VerticalSide::Top),
+                (
+                    "extension",
+                    candidate_key,
+                    candidate_key,
+                    VerticalSide::Bottom,
+                ),
+            ]
+        );
+        assert!(peaks[2].is_bracket_end(VerticalSide::Top));
+        assert!(!peaks[2].is_bracket_end(VerticalSide::Bottom));
+        assert!(!peaks[0].is_bracket());
+        assert_eq!(peaks[4].key(), start_key);
+    }
+
+    #[test]
+    fn bracket_end_detection_skips_missing_start_and_rejects_invalid_index() {
+        let mut values = [peak(1, 5, 8)];
+        assert!(
+            detect_bracket_ends(
+                &mut values,
+                None,
+                1,
+                1.0,
+                |_, _| { panic!("no start peak must bypass extension checks") },
+                |_, _, _| false
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(
+            detect_bracket_ends(&mut values, Some(1), 1, 1.0, |_, _| 0.0, |_, _, _| true),
+            Err(BarsLogicError::InvalidStartIndex(1))
+        );
+        assert!(!values[0].is_bracket());
     }
 
     #[test]
