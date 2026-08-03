@@ -1067,6 +1067,8 @@ pub fn plan_parts(
 }
 
 /// Java `extensionOf`: signed filament extension beyond a staff limit.
+/// The bottom branch preserves Java's integer `Rectangle` arithmetic before
+/// promotion to `double`, including overflow wrapping.
 #[must_use]
 pub fn peak_extension(
     peak: &StaffPeak,
@@ -1446,6 +1448,30 @@ mod tests {
         assert_eq!(bracket_kind(&value), Some(BracketKind::Both));
         value.unset(StaffPeakAttribute::BracketTop);
         assert_eq!(bracket_kind(&value), Some(BracketKind::Bottom));
+    }
+
+    #[test]
+    fn peak_extension_preserves_asymmetric_pixel_formula_and_bottom_wrapping() {
+        let value = StaffPeak::new(StaffId::new(1), 10, 30, 5, 6).unwrap();
+        let bounds = PeakBounds {
+            x: 5,
+            y: 6,
+            width: 2,
+            height: 30,
+        };
+        assert_eq!(peak_extension(&value, bounds, 3, VerticalSide::Top), 2.5);
+        assert_eq!(peak_extension(&value, bounds, 3, VerticalSide::Bottom), 3.5);
+
+        let wrapped = PeakBounds {
+            x: 0,
+            y: i32::MAX,
+            width: 1,
+            height: 2,
+        };
+        assert_eq!(
+            peak_extension(&value, wrapped, 2, VerticalSide::Bottom),
+            f64::from(i32::MIN) - 1.0 - 30.0
+        );
     }
 
     #[test]
