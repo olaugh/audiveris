@@ -290,17 +290,21 @@ denied, and passed `git diff --check` before commit.
 206. `8c51f6b2` — production-backed prepared line completion state and lifecycle.
 207. `d37b227e` — exact composed Java/Rust GRID output-boundary vector.
 208. `a44e2a77` — concrete staff bar ownership and system group/part tail.
+209. `4c053118` — detached StaffProjector brace-candidate ownership.
+210. `304d53c7` — GRID SIG contextual grading in final system order.
+211. `efd64567` — live production Java/Rust SIG contextual-grade vector.
+212. `6c0cf709` — exact Java comb-network fragment following.
 
-At the two-hundred-and-eighth checkpoint the Rust workspace executes 539 tests:
+At the two-hundred-and-twelfth checkpoint the Rust workspace executes 551 tests:
 
 - `audiveris-core`: 38
-- `audiveris-image`: 376
+- `audiveris-image`: 388
 - `audiveris-omr`: 110
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
 
-The live Java/Rust oracle compares 63 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 64 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -372,12 +376,16 @@ bar/bracket glyph and inter identities, peak backlinks, connector nodes and rela
 connection freezing, and grouped-barline edges. It preserves Java's system-major
 vertical/group passes, global connection-edge order, per-connection catches, and
 ordinary-error prefix mutation. The post-group tail now records barline IDs on concrete
-staff state and stores group/part plans on concrete system state in Java order. SIG
-contextual grading remains outside this boundary, as does the separately held
-`StaffProjector.getBracePeak()` candidate when it is absent from the projector peak list.
+staff state and stores group/part plans on concrete system state in Java order. Detached
+`StaffProjector.getBracePeak()` candidates remain separately owned when absent from the
+ordinary peak list, and the final system-ordered pass contextualizes every GRID SIG node
+from intrinsic grades without changing topology or frozen state. A live Java/Rust vector
+freezes the unequal support-chain arithmetic, ignored relations, insertion order, and
+state preservation.
 
-The neutral LinesRetriever coordinator now executes the main cluster pass, the
-conditional small-interline pass over ID-sorted primary discards, and Java's
+The neutral LinesRetriever coordinator now executes Java's comb-network fragment joining,
+the main cluster pass, the conditional small-interline pass over ID-sorted primary
+discards, and Java's
 buildStaves purge/layout/right-indentation sequence. It returns typed standard,
 one-line, and tablature staff candidates with median sides and small/short flags while
 leaving sheet ownership and glyph/SIG mutation outside the boundary.
@@ -411,9 +419,10 @@ The StaffProjector slice now composes scale-derived parameters, raster accumulat
 validation, multi-rest serif rejection, six-impact grading, brace discovery, and
 neutral peak output. Result-list, lines-root, and right-end decisions are also ported,
 and the BarsRetriever registry preserves retained-staff/projector order and unique
-graph-vertex intents. Downstream SIG promotion is now concrete. The remaining upstream
-gap is constructing cluster/projector/system inputs directly from the live lag and raster;
-deskew mutation, detached brace-candidate ownership, and SIG contextualization remain queued.
+graph-vertex intents. Downstream SIG promotion, detached brace ownership, and GRID
+contextual grading are now concrete. The remaining upstream gap is constructing
+cluster/projector/system inputs directly from the live lag and raster, including raw
+slope/curvature rejection and deskew mutation.
 
 The newest composed differential constructs the same two-system synthetic sheet in live
 Java and Rust. It matches the swallowed `PROCESS_BARS` prefix, 15 persistent staff glyphs
@@ -477,9 +486,9 @@ it does not duplicate production Java implementations in the harness.
 Commit each slice separately after the full verification block above.
 
 1. Complete the remaining concrete `GRID` seams: construct cluster/projector/system inputs
-   directly from the live raster lags, attach detached brace candidates and SIG
-   contextualization, eliminate the documented transactional exceptional-path mismatches,
-   and freeze a raw-image full-stage GRID differential.
+   directly from the live raster lags, integrate raw slope/curvature rejection and deskew,
+   eliminate the documented transactional exceptional-path mismatches, and freeze a
+   raw-image full-stage GRID differential.
    Keep UI integration behind explicit neutral boundaries until the headless output
    matches that fixture.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
