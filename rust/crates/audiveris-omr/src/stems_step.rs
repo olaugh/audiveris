@@ -149,7 +149,7 @@ pub struct NativeStemHead {
     pub requires_stem: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NativeStemHeadSide {
     Left,
     Right,
@@ -171,6 +171,129 @@ pub struct NativeHeadStemLink {
     pub target_ratio: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemLine {
+    pub start: NativeStemPoint,
+    pub stop: NativeStemPoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NativeStemVerticalSide {
+    Top,
+    Bottom,
+}
+
+impl NativeStemVerticalSide {
+    const fn direction(self) -> i32 {
+        match self {
+            Self::Top => -1,
+            Self::Bottom => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeBeamPortion {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeStemGeometrySiteKind {
+    BeamSide(NativeStemHeadSide),
+    BeamStump {
+        source_order: usize,
+    },
+    HeadCorner {
+        horizontal: NativeStemHeadSide,
+        vertical: NativeStemVerticalSide,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemGeometrySite {
+    pub owner_inter_id: usize,
+    pub kind: NativeStemGeometrySiteKind,
+    pub reference: NativeStemPoint,
+    /// Head lookup starts with `out_point -> in_point`. Beam lookup derives
+    /// these from `beam_border` and `half_beam_lookup_dx`.
+    pub out_point: Option<NativeStemPoint>,
+    pub in_point: Option<NativeStemPoint>,
+    pub y_limit: f64,
+    pub profile: u8,
+    pub beam_median: Option<NativeStemLine>,
+    pub beam_border: Option<NativeStemLine>,
+    pub beam_height: f64,
+    pub head_bounds: Option<NativeStemRect>,
+    pub stump_bounds: Option<NativeStemRect>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemGeometryCandidateLine {
+    pub candidate_id: usize,
+    pub glyph_id: Option<usize>,
+    pub median: NativeStemLine,
+    pub bounds: NativeStemRect,
+    /// Java collection/SIG insertion order, used for exact stable ties.
+    pub source_order: usize,
+    pub existing_stem: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsLinkGeometrySource {
+    pub system_id: usize,
+    pub interline: f64,
+    pub stem_thickness: f64,
+    pub sheet_slope: f64,
+    pub slope_margin: f64,
+    pub half_beam_lookup_dx: f64,
+    pub max_beam_seed_dy_ratio: f64,
+    pub sites: Vec<NativeStemGeometrySite>,
+    pub candidates: Vec<NativeStemGeometryCandidateLine>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeStemRelationGeometryKind {
+    BeamStem { portion: NativeBeamPortion },
+    HeadStem { side: NativeStemHeadSide },
+}
+
+/// Accepted candidate evidence. The injected collaborator now decides only
+/// classifier/materializer policy; it no longer recomputes lookup geometry or
+/// relation impacts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemLinkCandidate {
+    pub owner_inter_id: usize,
+    pub candidate_id: usize,
+    pub glyph_id: Option<usize>,
+    pub site: NativeStemGeometrySiteKind,
+    pub lookup_polygon: [NativeStemPoint; 4],
+    pub relation: NativeStemRelationGeometryKind,
+    pub dx: f64,
+    pub dy: f64,
+    pub x_impact: f64,
+    pub y_impact: f64,
+    pub grade: f64,
+    pub extension: NativeStemPoint,
+    pub distance_to_theoretical: f64,
+    pub source_order: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsSystemSource {
     pub system_id: usize,
@@ -179,6 +302,9 @@ pub struct NativeStemsSystemSource {
     pub heads: Vec<NativeStemHead>,
     /// Existing SIG relations in graph iteration order.
     pub head_stem_links: Vec<NativeHeadStemLink>,
+    /// Optional native lookup/impact kernel input. Absence keeps the previous
+    /// dependency-injected behavior and supplies an empty candidate slice.
+    pub link_geometry: Option<NativeStemsLinkGeometrySource>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +368,7 @@ pub struct NativeStemCandidateInput<'a, Candidate> {
     pub seeds: &'a [NativeStemSeed],
     pub beams: &'a [NativeStemBeam],
     pub heads: &'a [NativeStemHead],
+    pub link_candidates: &'a [NativeStemLinkCandidate],
     pub candidate: Candidate,
 }
 
@@ -252,6 +379,7 @@ pub struct NativeHeadLinkInput<'a> {
     pub seeds: &'a [NativeStemSeed],
     pub beams: &'a [NativeStemBeam],
     pub heads: &'a [NativeStemHead],
+    pub link_candidates: &'a [NativeStemLinkCandidate],
     pub head: NativeStemHead,
     /// False in Java phase 1; true when retrying the unlinked list.
     pub existing_stems_only: bool,
@@ -871,6 +999,507 @@ fn apply_delta(
     Ok(())
 }
 
+impl NativeStemsLinkGeometrySource {
+    fn candidates_for(
+        &self,
+        owner_inter_id: usize,
+        phase: NativeStemsPhase,
+    ) -> Vec<NativeStemLinkCandidate> {
+        let mut accepted = Vec::new();
+        let mut sites = self
+            .sites
+            .iter()
+            .filter(|site| {
+                site.owner_inter_id == owner_inter_id
+                    && matches!(
+                        (phase, site.kind),
+                        (
+                            NativeStemsPhase::LinkBeamSides,
+                            NativeStemGeometrySiteKind::BeamSide(_)
+                        ) | (
+                            NativeStemsPhase::LinkBeamStumps,
+                            NativeStemGeometrySiteKind::BeamStump { .. },
+                        ) | (
+                            NativeStemsPhase::LinkHeadSides | NativeStemsPhase::RelinkHeadSides,
+                            NativeStemGeometrySiteKind::HeadCorner { .. },
+                        )
+                    )
+            })
+            .collect::<Vec<_>>();
+        sites.sort_by_key(|site| stem_geometry_site_order(site.kind));
+        for site in sites {
+            let Some(polygon) = lookup_polygon(self, site) else {
+                continue;
+            };
+            let theoretical = theoretical_line(self.sheet_slope, site.reference, site.y_limit);
+            let mut site_accepted = Vec::new();
+            for candidate in self.candidates.iter().filter(|candidate| match phase {
+                NativeStemsPhase::RelinkHeadSides => candidate.existing_stem,
+                NativeStemsPhase::LinkHeadSides => !candidate.existing_stem,
+                NativeStemsPhase::LinkBeamSides | NativeStemsPhase::LinkBeamStumps => true,
+                _ => false,
+            }) {
+                if !polygon_intersects_rect(polygon, candidate.bounds) {
+                    continue;
+                }
+                let evidence = match site.kind {
+                    NativeStemGeometrySiteKind::BeamSide(_)
+                    | NativeStemGeometrySiteKind::BeamStump { .. } => {
+                        beam_relation_evidence(self, site, *candidate, polygon, theoretical)
+                    }
+                    NativeStemGeometrySiteKind::HeadCorner { .. } => {
+                        head_relation_evidence(self, site, *candidate, polygon, theoretical)
+                    }
+                };
+                if let Some(evidence) = evidence {
+                    site_accepted.push(evidence);
+                }
+            }
+            // Java traversal keeps site side/stump/corner order. Within one
+            // site, distance order is stable and exact ties retain source/SIG
+            // insertion order.
+            site_accepted.sort_by(|left, right| {
+                left.distance_to_theoretical
+                    .total_cmp(&right.distance_to_theoretical)
+                    .then(left.source_order.cmp(&right.source_order))
+            });
+            accepted.extend(site_accepted);
+        }
+        accepted
+    }
+}
+
+fn stem_geometry_site_order(kind: NativeStemGeometrySiteKind) -> (u8, usize) {
+    match kind {
+        NativeStemGeometrySiteKind::BeamSide(NativeStemHeadSide::Left) => (0, 0),
+        NativeStemGeometrySiteKind::BeamSide(NativeStemHeadSide::Right) => (0, 1),
+        NativeStemGeometrySiteKind::BeamStump { source_order } => (1, source_order),
+        NativeStemGeometrySiteKind::HeadCorner {
+            horizontal,
+            vertical,
+        } => {
+            let horizontal = match horizontal {
+                NativeStemHeadSide::Left => 0,
+                NativeStemHeadSide::Right => 2,
+            };
+            let vertical = match vertical {
+                NativeStemVerticalSide::Top => 0,
+                NativeStemVerticalSide::Bottom => 1,
+            };
+            (2, horizontal + vertical)
+        }
+    }
+}
+
+fn lookup_polygon(
+    geometry: &NativeStemsLinkGeometrySource,
+    site: &NativeStemGeometrySite,
+) -> Option<[NativeStemPoint; 4]> {
+    let slope = -geometry.sheet_slope;
+    match site.kind {
+        NativeStemGeometrySiteKind::BeamSide(_) | NativeStemGeometrySiteKind::BeamStump { .. } => {
+            let border = site.beam_border?;
+            let y_dir = beam_site_vertical_direction(site)?;
+            let left_x = site.reference.x - geometry.half_beam_lookup_dx;
+            let right_x = site.reference.x + geometry.half_beam_lookup_dx;
+            let y_offset = f64::from(y_dir)
+                * geometry.max_beam_seed_dy_ratio
+                * geometry.interline
+                * beam_y_gap_max(site.profile);
+            let left = NativeStemPoint {
+                x: left_x,
+                y: line_y_at_x(border, left_x)? + y_offset,
+            };
+            let right = NativeStemPoint {
+                x: right_x,
+                y: line_y_at_x(border, right_x)? + y_offset,
+            };
+            let dy = site.y_limit - site.reference.y;
+            let d_slope = f64::from(y_dir) * geometry.slope_margin;
+            Some([
+                left,
+                right,
+                NativeStemPoint {
+                    x: right.x + ((slope + d_slope) * dy),
+                    y: site.y_limit,
+                },
+                NativeStemPoint {
+                    x: left.x + ((slope - d_slope) * dy),
+                    y: site.y_limit,
+                },
+            ])
+        }
+        NativeStemGeometrySiteKind::HeadCorner {
+            horizontal,
+            vertical,
+        } => {
+            let out_point = site.out_point?;
+            let in_point = site.in_point?;
+            let x_dir = match horizontal {
+                NativeStemHeadSide::Left => -1,
+                NativeStemHeadSide::Right => 1,
+            };
+            let y_dir = vertical.direction();
+            let d_slope = f64::from(x_dir * y_dir) * geometry.slope_margin;
+            let dy = site.y_limit - out_point.y;
+            Some([
+                out_point,
+                in_point,
+                NativeStemPoint {
+                    x: in_point.x + ((slope - d_slope) * dy),
+                    y: site.y_limit,
+                },
+                NativeStemPoint {
+                    x: out_point.x + ((slope + d_slope) * dy),
+                    y: site.y_limit,
+                },
+            ])
+        }
+    }
+}
+
+fn beam_site_vertical_direction(site: &NativeStemGeometrySite) -> Option<i32> {
+    let border = site.beam_border?;
+    let border_y = line_y_at_x(border, site.reference.x)?;
+    Some(if site.y_limit < border_y { -1 } else { 1 })
+}
+
+fn theoretical_line(sheet_slope: f64, reference: NativeStemPoint, y_limit: f64) -> NativeStemLine {
+    NativeStemLine {
+        start: reference,
+        stop: NativeStemPoint {
+            x: reference.x - (sheet_slope * (y_limit - reference.y)),
+            y: y_limit,
+        },
+    }
+}
+
+fn beam_relation_evidence(
+    geometry: &NativeStemsLinkGeometrySource,
+    site: &NativeStemGeometrySite,
+    candidate: NativeStemGeometryCandidateLine,
+    polygon: [NativeStemPoint; 4],
+    theoretical: NativeStemLine,
+) -> Option<NativeStemLinkCandidate> {
+    let border = site.beam_border?;
+    let median = site.beam_median?;
+    let cross = line_intersection(candidate.median, border)?;
+    let max_dx = (0.5 * geometry.interline).round_ties_even();
+    let portion = if cross.x < median.start.x + max_dx {
+        NativeBeamPortion::Left
+    } else if cross.x > median.stop.x - max_dx {
+        NativeBeamPortion::Right
+    } else {
+        NativeBeamPortion::Center
+    };
+    let half_stem = geometry.stem_thickness / 2.0;
+    let dx = match portion {
+        NativeBeamPortion::Center => 0.0,
+        NativeBeamPortion::Left => border.start.x + half_stem - cross.x,
+        NativeBeamPortion::Right => cross.x - border.stop.x + half_stem,
+    };
+    let dy = 0_f64
+        .max(candidate.median.start.y - cross.y)
+        .max(cross.y - candidate.median.stop.y);
+    let dx_fraction = dx.abs() / geometry.interline;
+    let dy_fraction = dy / geometry.interline;
+    let (x_impact, y_impact, grade) = relation_impacts(
+        dx_fraction,
+        dy_fraction,
+        beam_x_out_max(site.profile),
+        beam_y_gap_max(site.profile),
+        1.0,
+        4.0,
+    );
+    if grade < 0.1 {
+        return None;
+    }
+    let y_dir = beam_site_vertical_direction(site)?;
+    Some(NativeStemLinkCandidate {
+        owner_inter_id: site.owner_inter_id,
+        candidate_id: candidate.candidate_id,
+        glyph_id: candidate.glyph_id,
+        site: site.kind,
+        lookup_polygon: polygon,
+        relation: NativeStemRelationGeometryKind::BeamStem { portion },
+        dx: dx_fraction,
+        dy: dy_fraction,
+        x_impact,
+        y_impact,
+        grade,
+        extension: NativeStemPoint {
+            x: cross.x,
+            y: cross.y + (f64::from(y_dir) * (site.beam_height - 1.0)),
+        },
+        distance_to_theoretical: point_line_distance(line_midpoint(candidate.median), theoretical),
+        source_order: candidate.source_order,
+    })
+}
+
+fn head_relation_evidence(
+    geometry: &NativeStemsLinkGeometrySource,
+    site: &NativeStemGeometrySite,
+    candidate: NativeStemGeometryCandidateLine,
+    polygon: [NativeStemPoint; 4],
+    theoretical: NativeStemLine,
+) -> Option<NativeStemLinkCandidate> {
+    let NativeStemGeometrySiteKind::HeadCorner {
+        horizontal,
+        vertical,
+    } = site.kind
+    else {
+        return None;
+    };
+    let x_dir = match horizontal {
+        NativeStemHeadSide::Left => -1.0,
+        NativeStemHeadSide::Right => 1.0,
+    };
+    let y_dir = f64::from(vertical.direction());
+    let x_stem = line_x_at_y(candidate.median, site.reference.y)?;
+    let dx = x_dir * (x_stem - site.reference.x);
+    let dy = if let Some(stump) = site.stump_bounds {
+        let overlap = if y_dir > 0.0 {
+            stump.y + stump.height - candidate.median.start.y
+        } else {
+            candidate.median.stop.y - stump.y
+        };
+        overlap.min(0.0).abs()
+    } else if site.reference.y < candidate.median.start.y {
+        candidate.median.start.y - site.reference.y
+    } else if site.reference.y > candidate.median.stop.y {
+        site.reference.y - candidate.median.stop.y
+    } else {
+        0.0
+    };
+    let (x_max, x_weight) = if dx >= 0.0 {
+        (head_x_out_max(site.profile), 2.0)
+    } else {
+        (head_x_in_max(site.profile), 1.0)
+    };
+    let dx_fraction = dx / geometry.interline;
+    let dy_fraction = dy / geometry.interline;
+    let (x_impact, y_impact, grade) = relation_impacts(
+        dx_fraction,
+        dy_fraction,
+        x_max,
+        head_y_gap_max(site.profile),
+        x_weight,
+        1.0,
+    );
+    if grade < 0.1 {
+        return None;
+    }
+    let head_bounds = site.head_bounds?;
+    Some(NativeStemLinkCandidate {
+        owner_inter_id: site.owner_inter_id,
+        candidate_id: candidate.candidate_id,
+        glyph_id: candidate.glyph_id,
+        site: site.kind,
+        lookup_polygon: polygon,
+        relation: NativeStemRelationGeometryKind::HeadStem { side: horizontal },
+        dx: dx_fraction,
+        dy: dy_fraction,
+        x_impact,
+        y_impact,
+        grade,
+        extension: NativeStemPoint {
+            x: x_stem,
+            y: if y_dir > 0.0 {
+                head_bounds.y
+            } else {
+                head_bounds.y + head_bounds.height - 1.0
+            },
+        },
+        distance_to_theoretical: point_line_distance(line_midpoint(candidate.median), theoretical),
+        source_order: candidate.source_order,
+    })
+}
+
+fn relation_impacts(
+    dx: f64,
+    dy: f64,
+    x_max: f64,
+    y_max: f64,
+    x_weight: f64,
+    y_weight: f64,
+) -> (f64, f64, f64) {
+    let x_impact = if dx >= 0.0 {
+        ((x_max - dx) / x_max).clamp(0.0, 1.0)
+    } else {
+        ((x_max + dx) / x_max).clamp(0.0, 1.0)
+    };
+    let y_impact = ((y_max - dy) / y_max).clamp(0.0, 1.0);
+    let product = x_impact.powf(x_weight) * y_impact.powf(y_weight);
+    let grade = 0.8 * product.powf(1.0 / (x_weight + y_weight));
+    (x_impact, y_impact, grade)
+}
+
+fn beam_x_out_max(profile: u8) -> f64 {
+    if profile == 0 { 0.15 } else { 0.2 }
+}
+
+fn beam_y_gap_max(profile: u8) -> f64 {
+    match profile {
+        0 => 0.8,
+        1 => 1.2,
+        2 => 2.0,
+        _ => 4.0,
+    }
+}
+
+fn head_x_in_max(profile: u8) -> f64 {
+    if profile == 0 { 0.2 } else { 0.4 }
+}
+
+fn head_x_out_max(profile: u8) -> f64 {
+    match profile {
+        0 => 0.15,
+        1 => 0.25,
+        _ => 0.35,
+    }
+}
+
+fn head_y_gap_max(profile: u8) -> f64 {
+    if profile == 0 { 0.8 } else { 1.2 }
+}
+
+fn line_y_at_x(line: NativeStemLine, x: f64) -> Option<f64> {
+    let dx = line.stop.x - line.start.x;
+    (dx.abs() > f64::EPSILON)
+        .then(|| line.start.y + ((x - line.start.x) * (line.stop.y - line.start.y) / dx))
+}
+
+fn line_x_at_y(line: NativeStemLine, y: f64) -> Option<f64> {
+    let dy = line.stop.y - line.start.y;
+    (dy.abs() > f64::EPSILON)
+        .then(|| line.start.x + ((y - line.start.y) * (line.stop.x - line.start.x) / dy))
+}
+
+fn line_intersection(one: NativeStemLine, two: NativeStemLine) -> Option<NativeStemPoint> {
+    let x1 = one.start.x;
+    let y1 = one.start.y;
+    let x2 = one.stop.x;
+    let y2 = one.stop.y;
+    let x3 = two.start.x;
+    let y3 = two.start.y;
+    let x4 = two.stop.x;
+    let y4 = two.stop.y;
+    let denominator = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4));
+    if denominator.abs() <= f64::EPSILON {
+        return None;
+    }
+    let cross_one = (x1 * y2) - (y1 * x2);
+    let cross_two = (x3 * y4) - (y3 * x4);
+    Some(NativeStemPoint {
+        x: ((cross_one * (x3 - x4)) - ((x1 - x2) * cross_two)) / denominator,
+        y: ((cross_one * (y3 - y4)) - ((y1 - y2) * cross_two)) / denominator,
+    })
+}
+
+fn line_midpoint(line: NativeStemLine) -> NativeStemPoint {
+    NativeStemPoint {
+        x: (line.start.x + line.stop.x) / 2.0,
+        y: (line.start.y + line.stop.y) / 2.0,
+    }
+}
+
+fn point_line_distance(point: NativeStemPoint, line: NativeStemLine) -> f64 {
+    let dx = line.stop.x - line.start.x;
+    let dy = line.stop.y - line.start.y;
+    let length = dx.hypot(dy);
+    if length <= f64::EPSILON {
+        return f64::INFINITY;
+    }
+    ((dy * point.x) - (dx * point.y) + (line.stop.x * line.start.y) - (line.stop.y * line.start.x))
+        .abs()
+        / length
+}
+
+fn polygon_intersects_rect(polygon: [NativeStemPoint; 4], rect: NativeStemRect) -> bool {
+    if rect.width <= 0.0 || rect.height <= 0.0 {
+        return false;
+    }
+    let mut clipped = polygon.to_vec();
+    for (axis, boundary, keep_greater) in [
+        (0_u8, rect.x, true),
+        (0, rect.x + rect.width, false),
+        (1, rect.y, true),
+        (1, rect.y + rect.height, false),
+    ] {
+        clipped = clip_polygon(&clipped, axis, boundary, keep_greater);
+        if clipped.len() < 3 {
+            return false;
+        }
+    }
+    polygon_area(&clipped) > f64::EPSILON
+}
+
+fn clip_polygon(
+    polygon: &[NativeStemPoint],
+    axis: u8,
+    boundary: f64,
+    keep_greater: bool,
+) -> Vec<NativeStemPoint> {
+    let mut output = Vec::new();
+    let Some(mut previous) = polygon.last().copied() else {
+        return output;
+    };
+    let mut previous_inside = point_inside_boundary(previous, axis, boundary, keep_greater);
+    for current in polygon.iter().copied() {
+        let current_inside = point_inside_boundary(current, axis, boundary, keep_greater);
+        if current_inside != previous_inside {
+            output.push(boundary_intersection(previous, current, axis, boundary));
+        }
+        if current_inside {
+            output.push(current);
+        }
+        previous = current;
+        previous_inside = current_inside;
+    }
+    output
+}
+
+fn point_inside_boundary(
+    point: NativeStemPoint,
+    axis: u8,
+    boundary: f64,
+    keep_greater: bool,
+) -> bool {
+    let value = if axis == 0 { point.x } else { point.y };
+    if keep_greater {
+        value >= boundary
+    } else {
+        value <= boundary
+    }
+}
+
+fn boundary_intersection(
+    start: NativeStemPoint,
+    stop: NativeStemPoint,
+    axis: u8,
+    boundary: f64,
+) -> NativeStemPoint {
+    let start_value = if axis == 0 { start.x } else { start.y };
+    let stop_value = if axis == 0 { stop.x } else { stop.y };
+    let ratio = (boundary - start_value) / (stop_value - start_value);
+    NativeStemPoint {
+        x: start.x + (ratio * (stop.x - start.x)),
+        y: start.y + (ratio * (stop.y - start.y)),
+    }
+}
+
+fn polygon_area(polygon: &[NativeStemPoint]) -> f64 {
+    let mut twice_area = 0.0;
+    for (start, stop) in polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+    {
+        twice_area += (start.x * stop.y) - (start.y * stop.x);
+    }
+    twice_area.abs() / 2.0
+}
+
 struct NativeStemsContext {
     working: NeutralStemsSystem,
     delta: StemsDelta,
@@ -1275,6 +1904,7 @@ where
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &[],
                 candidate: *beam,
             });
             let tremolo = match Self::absorb_decision(
@@ -1300,6 +1930,7 @@ where
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &[],
                 candidate: *head,
             });
             if let Err(error) =
@@ -1320,12 +1951,20 @@ where
         beams_by_width.sort_by_key(|beam| Reverse(beam.width));
         let mut linked_beams = Vec::new();
         for beam in beams_by_width {
+            let link_candidates = source
+                .link_geometry
+                .as_ref()
+                .map(|geometry| {
+                    geometry.candidates_for(beam.inter_id, NativeStemsPhase::LinkBeamSides)
+                })
+                .unwrap_or_default();
             let decision = self.linker.link_beam_sides(NativeStemCandidateInput {
                 sheet_id: input.sheet_id,
                 system: &context.working,
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &link_candidates,
                 candidate: beam,
             });
             let result = match Self::absorb_decision(
@@ -1344,12 +1983,20 @@ where
             }
         }
         for beam in linked_beams {
+            let link_candidates = source
+                .link_geometry
+                .as_ref()
+                .map(|geometry| {
+                    geometry.candidates_for(beam.inter_id, NativeStemsPhase::LinkBeamStumps)
+                })
+                .unwrap_or_default();
             let decision = self.linker.link_beam_stumps(NativeStemCandidateInput {
                 sheet_id: input.sheet_id,
                 system: &context.working,
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &link_candidates,
                 candidate: beam,
             });
             let result = match Self::absorb_decision(
@@ -1371,12 +2018,20 @@ where
         heads_by_grade.sort_by(|left, right| right.grade.total_cmp(&left.grade));
         let mut unlinked = Vec::new();
         for head in &heads_by_grade {
+            let link_candidates = source
+                .link_geometry
+                .as_ref()
+                .map(|geometry| {
+                    geometry.candidates_for(head.inter_id, NativeStemsPhase::LinkHeadSides)
+                })
+                .unwrap_or_default();
             let decision = self.linker.link_head_sides(NativeHeadLinkInput {
                 sheet_id: input.sheet_id,
                 system: &context.working,
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &link_candidates,
                 head: *head,
                 existing_stems_only: false,
             });
@@ -1396,12 +2051,20 @@ where
             }
         }
         for head in unlinked {
+            let link_candidates = source
+                .link_geometry
+                .as_ref()
+                .map(|geometry| {
+                    geometry.candidates_for(head.inter_id, NativeStemsPhase::RelinkHeadSides)
+                })
+                .unwrap_or_default();
             let decision = self.linker.link_head_sides(NativeHeadLinkInput {
                 sheet_id: input.sheet_id,
                 system: &context.working,
                 seeds: &seeds,
                 beams: &beams_by_x,
                 heads: &heads_by_x,
+                link_candidates: &link_candidates,
                 head,
                 existing_stems_only: true,
             });
@@ -2115,6 +2778,7 @@ mod tests {
                     target_ratio: 2.0,
                 },
             ],
+            link_geometry: None,
         }
     }
 
@@ -2246,5 +2910,163 @@ mod tests {
                 .iter()
                 .any(|call| call.starts_with("beam-sides:11"))
         );
+    }
+
+    fn geometry_point(x: f64, y: f64) -> NativeStemPoint {
+        NativeStemPoint { x, y }
+    }
+
+    fn geometry_line(x1: f64, y1: f64, x2: f64, y2: f64) -> NativeStemLine {
+        NativeStemLine {
+            start: geometry_point(x1, y1),
+            stop: geometry_point(x2, y2),
+        }
+    }
+
+    fn geometry_rect(x: f64, y: f64, width: f64, height: f64) -> NativeStemRect {
+        NativeStemRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn native_beam_link_geometry_matches_lookup_impacts_extension_and_ties() {
+        let geometry = NativeStemsLinkGeometrySource {
+            system_id: 7,
+            interline: 10.0,
+            stem_thickness: 2.0,
+            sheet_slope: 0.0,
+            slope_margin: 0.015,
+            half_beam_lookup_dx: 3.0,
+            max_beam_seed_dy_ratio: 0.25,
+            sites: vec![NativeStemGeometrySite {
+                owner_inter_id: 10,
+                kind: NativeStemGeometrySiteKind::BeamSide(NativeStemHeadSide::Left),
+                reference: geometry_point(1.0, 12.0),
+                out_point: None,
+                in_point: None,
+                y_limit: 30.0,
+                profile: 0,
+                beam_median: Some(geometry_line(0.0, 10.0, 20.0, 10.0)),
+                beam_border: Some(geometry_line(0.0, 12.0, 20.0, 12.0)),
+                beam_height: 4.0,
+                head_bounds: None,
+                stump_bounds: None,
+            }],
+            candidates: vec![
+                NativeStemGeometryCandidateLine {
+                    candidate_id: 501,
+                    glyph_id: Some(601),
+                    median: geometry_line(1.0, 12.0, 1.0, 30.0),
+                    bounds: geometry_rect(0.5, 12.0, 1.0, 18.0),
+                    source_order: 9,
+                    existing_stem: false,
+                },
+                NativeStemGeometryCandidateLine {
+                    candidate_id: 500,
+                    glyph_id: Some(600),
+                    median: geometry_line(1.0, 12.0, 1.0, 30.0),
+                    bounds: geometry_rect(0.5, 12.0, 1.0, 18.0),
+                    source_order: 2,
+                    existing_stem: false,
+                },
+                NativeStemGeometryCandidateLine {
+                    candidate_id: 999,
+                    glyph_id: None,
+                    median: geometry_line(30.0, 12.0, 30.0, 30.0),
+                    bounds: geometry_rect(29.5, 12.0, 1.0, 18.0),
+                    source_order: 0,
+                    existing_stem: true,
+                },
+            ],
+        };
+
+        let candidates = geometry.candidates_for(10, NativeStemsPhase::LinkBeamSides);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|item| item.candidate_id)
+                .collect::<Vec<_>>(),
+            vec![500, 501]
+        );
+        let item = &candidates[0];
+        assert_eq!(item.lookup_polygon[0], geometry_point(-2.0, 14.0));
+        assert_eq!(item.lookup_polygon[1], geometry_point(4.0, 14.0));
+        assert_eq!(
+            (item.dx, item.dy, item.x_impact, item.y_impact),
+            (0.0, 0.0, 1.0, 1.0)
+        );
+        assert!((item.grade - 0.8).abs() < 1e-12);
+        assert_eq!(item.extension, geometry_point(1.0, 15.0));
+        assert_eq!(
+            item.relation,
+            NativeStemRelationGeometryKind::BeamStem {
+                portion: NativeBeamPortion::Left
+            }
+        );
+    }
+
+    #[test]
+    fn native_head_link_geometry_splits_new_existing_and_rejects_bad_impact() {
+        let site = NativeStemGeometrySite {
+            owner_inter_id: 20,
+            kind: NativeStemGeometrySiteKind::HeadCorner {
+                horizontal: NativeStemHeadSide::Right,
+                vertical: NativeStemVerticalSide::Bottom,
+            },
+            reference: geometry_point(10.0, 10.0),
+            out_point: Some(geometry_point(20.0, 10.0)),
+            in_point: Some(geometry_point(0.0, 10.0)),
+            y_limit: 30.0,
+            profile: 0,
+            beam_median: None,
+            beam_border: None,
+            beam_height: 0.0,
+            head_bounds: Some(geometry_rect(8.0, 8.0, 4.0, 5.0)),
+            stump_bounds: None,
+        };
+        let candidate = |id, x, existing, source_order| NativeStemGeometryCandidateLine {
+            candidate_id: id,
+            glyph_id: Some(id + 100),
+            median: geometry_line(x, 10.0, x, 30.0),
+            bounds: geometry_rect(x - 0.5, 10.0, 1.0, 20.0),
+            source_order,
+            existing_stem: existing,
+        };
+        let geometry = NativeStemsLinkGeometrySource {
+            system_id: 7,
+            interline: 10.0,
+            stem_thickness: 2.0,
+            sheet_slope: 0.0,
+            slope_margin: 0.015,
+            half_beam_lookup_dx: 3.0,
+            max_beam_seed_dy_ratio: 0.25,
+            sites: vec![site],
+            candidates: vec![
+                candidate(700, 11.0, false, 0),
+                candidate(701, 10.5, true, 1),
+                candidate(702, 13.0, false, 2),
+            ],
+        };
+
+        let new = geometry.candidates_for(20, NativeStemsPhase::LinkHeadSides);
+        let existing = geometry.candidates_for(20, NativeStemsPhase::RelinkHeadSides);
+        assert_eq!(
+            new.iter().map(|item| item.candidate_id).collect::<Vec<_>>(),
+            vec![700]
+        );
+        assert_eq!(
+            existing
+                .iter()
+                .map(|item| item.candidate_id)
+                .collect::<Vec<_>>(),
+            vec![701]
+        );
+        assert_eq!((new[0].dx, new[0].dy), (0.1, 0.0));
+        assert!((new[0].x_impact - (1.0 / 3.0)).abs() < 1e-12);
+        assert_eq!(new[0].extension, geometry_point(11.0, 8.0));
     }
 }
