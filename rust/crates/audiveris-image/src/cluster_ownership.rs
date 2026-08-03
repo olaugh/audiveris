@@ -304,6 +304,53 @@ impl ClusterOwnership {
         Ok(members)
     }
 
+    /// Apply Java `LineCluster.trim` housekeeping after the value has selected
+    /// and renumbered its surviving lines.
+    pub fn synchronize_trimmed_cluster(
+        &mut self,
+        cluster: ClusterId,
+        remaining: &[(FilamentId, i32)],
+        removed: &[FilamentId],
+    ) -> Result<(), ClusterOwnershipError> {
+        let cluster = self.cluster_ancestor(cluster)?;
+        let mut supplied = std::collections::BTreeSet::new();
+        for &(filament, _) in remaining {
+            let root = self.filament_ancestor(filament)?;
+            if root != filament || !supplied.insert(root) {
+                return Err(ClusterOwnershipError::InvalidClusterMembers);
+            }
+        }
+        for &filament in removed {
+            let root = self.filament_ancestor(filament)?;
+            if root != filament || !supplied.insert(root) {
+                return Err(ClusterOwnershipError::InvalidClusterMembers);
+            }
+        }
+        let current = self
+            .memberships
+            .iter()
+            .filter_map(|(&filament, membership)| {
+                (membership.cluster == cluster).then_some(filament)
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if supplied != current {
+            return Err(ClusterOwnershipError::InvalidClusterMembers);
+        }
+
+        for &filament in removed {
+            self.memberships.remove(&filament);
+            self.reverse_combs
+                .get_mut(&filament)
+                .expect("registered filament has a reverse-comb map")
+                .clear();
+        }
+        for &(filament, position) in remaining {
+            self.memberships
+                .insert(filament, ClusterMembership { cluster, position });
+        }
+        Ok(())
+    }
+
     pub fn filament_ancestor(
         &self,
         filament: FilamentId,
@@ -413,6 +460,7 @@ pub enum ClusterOwnershipError {
     FilamentAlreadyClustered(FilamentId),
     SectionAlreadyOwned { section: usize, owner: FilamentId },
     PositionOverflow,
+    InvalidClusterMembers,
 }
 
 impl fmt::Display for ClusterOwnershipError {
@@ -437,6 +485,9 @@ impl fmt::Display for ClusterOwnershipError {
                 owner.value()
             ),
             Self::PositionOverflow => formatter.write_str("cluster line position overflow"),
+            Self::InvalidClusterMembers => {
+                formatter.write_str("trimmed cluster members do not match ownership")
+            }
         }
     }
 }

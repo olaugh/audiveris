@@ -8,6 +8,7 @@
 //! by the neutral ownership registry.
 
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
@@ -81,6 +82,24 @@ pub struct FilamentPartitionResult {
     remaining: Vec<FilamentId>,
     discarded: Vec<FilamentId>,
     merged: Vec<FilamentId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClusterTrimResult {
+    cluster_order: Vec<ClusterId>,
+    removed_filaments: Vec<FilamentId>,
+}
+
+impl ClusterTrimResult {
+    #[must_use]
+    pub fn cluster_order(&self) -> &[ClusterId] {
+        &self.cluster_order
+    }
+
+    #[must_use]
+    pub fn removed_filaments(&self) -> &[FilamentId] {
+        &self.removed_filaments
+    }
 }
 
 impl FilamentPartitionResult {
@@ -263,6 +282,66 @@ pub fn partition_non_clustered_filaments_in_order(
     })
 }
 
+/// Java `trimClusters`: stably sort by deskewed ordinate, trim each cluster,
+/// release removed line roots, and synchronize renumbered memberships.
+pub fn trim_clusters_in_ordinate_order(
+    ownership: &mut ClusterOwnership,
+    clusters: &mut BTreeMap<ClusterId, LineCluster>,
+    cluster_order: &[ClusterId],
+    global_slope: f64,
+    allowed_comb_sizes: &BTreeSet<usize>,
+    minimum_tablature_length_ratio: f64,
+) -> Result<ClusterTrimResult, ClusterFinalizeError> {
+    if !global_slope.is_finite() {
+        return Err(ClusterFinalizeError::InvalidParameters);
+    }
+    let mut seen = BTreeSet::new();
+    let mut ordered = cluster_order
+        .iter()
+        .copied()
+        .map(|id| {
+            if !seen.insert(id) {
+                return Err(ClusterFinalizeError::DuplicateClusterOrder(id));
+            }
+            let cluster = clusters
+                .get(&id)
+                .ok_or(ClusterFinalizeError::MissingClusterValue(id))?;
+            let bounds = cluster.bounds()?;
+            let x = bounds.x + (bounds.width / 2);
+            let y = bounds.y + (bounds.height / 2);
+            Ok((id, y as f64 - (global_slope * x as f64)))
+        })
+        .collect::<Result<Vec<_>, ClusterFinalizeError>>()?;
+    ordered.sort_by(|one, two| one.1.partial_cmp(&two.1).unwrap_or(Ordering::Equal));
+
+    let mut next_ownership = ownership.clone();
+    let mut next_clusters = clusters.clone();
+    let mut removed_filaments = Vec::new();
+    for &(id, _) in &ordered {
+        let removed = next_clusters
+            .get_mut(&id)
+            .ok_or(ClusterFinalizeError::MissingClusterValue(id))?
+            .trim(allowed_comb_sizes, minimum_tablature_length_ratio)?;
+        let remaining = next_clusters[&id]
+            .lines()
+            .map(|(position, line)| (line.primary_id(), position))
+            .collect::<Vec<_>>();
+        let removed = removed
+            .into_iter()
+            .map(|line| line.primary_id())
+            .collect::<Vec<_>>();
+        next_ownership.synchronize_trimmed_cluster(id, &remaining, &removed)?;
+        removed_filaments.extend(removed);
+    }
+    let cluster_order = ordered.into_iter().map(|(id, _)| id).collect();
+    *ownership = next_ownership;
+    *clusters = next_clusters;
+    Ok(ClusterTrimResult {
+        cluster_order,
+        removed_filaments,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClusterFinalizeError {
     InvalidParameters,
@@ -383,6 +462,26 @@ mod tests {
         ownership.assign_filament(second.0, cluster, 1).unwrap();
         let mut value = LineCluster::new(10, first.0, first.1).unwrap();
         value.include_line(1, second.0, second.1).unwrap();
+        clusters.insert(cluster, value);
+        cluster
+    }
+
+    fn cluster_from_lines(
+        ownership: &mut ClusterOwnership,
+        clusters: &mut BTreeMap<ClusterId, LineCluster>,
+        lines: Vec<(FilamentId, StaffFilament)>,
+    ) -> ClusterId {
+        let mut lines = lines.into_iter();
+        let (seed_id, seed) = lines.next().unwrap();
+        ownership.register_filament(seed_id, &seed).unwrap();
+        let cluster = ownership.register_cluster(seed_id).unwrap();
+        let mut value = LineCluster::new(10, seed_id, seed).unwrap();
+        for (index, (id, filament)) in lines.enumerate() {
+            ownership.register_filament(id, &filament).unwrap();
+            let position = (index + 1) as i32;
+            ownership.assign_filament(id, cluster, position).unwrap();
+            value.include_line(position, id, filament).unwrap();
+        }
         clusters.insert(cluster, value);
         cluster
     }
@@ -518,12 +617,8 @@ mod tests {
     fn non_desired_size_pass_calls_destroy_and_preserves_survivor_order() {
         let mut ownership = ClusterOwnership::new();
         let mut clusters = BTreeMap::new();
-        let mut filaments = filaments(&[
-            (1, 0, 10, 30),
-            (2, 50, 20, 30),
-            (3, 50, 30, 30),
-        ])
-        .into_iter();
+        let mut filaments =
+            filaments(&[(1, 0, 10, 30), (2, 50, 20, 30), (3, 50, 30, 30)]).into_iter();
         let (single_id, single_value) = filaments.next().unwrap();
         ownership
             .register_filament(single_id, &single_value)
@@ -558,18 +653,12 @@ mod tests {
     #[test]
     fn filament_partition_keeps_merged_children_for_later_removal() {
         let mut ownership = ClusterOwnership::new();
-        let values = filaments(&[
-            (1, 0, 10, 30),
-            (2, 50, 20, 30),
-            (3, 100, 30, 30),
-        ]);
+        let values = filaments(&[(1, 0, 10, 30), (2, 50, 20, 30), (3, 100, 30, 30)]);
         for (id, filament) in &values {
             ownership.register_filament(*id, filament).unwrap();
         }
         let cluster = ownership.register_cluster(values[0].0).unwrap();
-        ownership
-            .merge_filaments(values[0].0, values[2].0)
-            .unwrap();
+        ownership.merge_filaments(values[0].0, values[2].0).unwrap();
 
         let result = partition_non_clustered_filaments_in_order(
             &ownership,
@@ -580,6 +669,69 @@ mod tests {
         assert_eq!(result.remaining(), [values[0].0, values[2].0]);
         assert_eq!(result.discarded(), [values[1].0]);
         assert_eq!(result.merged(), [values[2].0]);
-        assert_eq!(ownership.membership_of(values[2].0).unwrap().unwrap().cluster(), cluster);
+        assert_eq!(
+            ownership
+                .membership_of(values[2].0)
+                .unwrap()
+                .unwrap()
+                .cluster(),
+            cluster
+        );
+    }
+
+    #[test]
+    fn trim_pass_releases_removed_top_and_renumbers_memberships() {
+        let mut ownership = ClusterOwnership::new();
+        let mut clusters = BTreeMap::new();
+        let cluster = cluster_from_lines(
+            &mut ownership,
+            &mut clusters,
+            filaments(&[(1, 0, 10, 10), (2, 0, 20, 30), (3, 0, 30, 20)]),
+        );
+        let result = trim_clusters_in_ordinate_order(
+            &mut ownership,
+            &mut clusters,
+            &[cluster],
+            0.0,
+            &BTreeSet::from([2]),
+            0.5,
+        )
+        .unwrap();
+
+        assert_eq!(result.cluster_order(), [cluster]);
+        assert_eq!(result.removed_filaments(), [FilamentId::new(1)]);
+        assert_eq!(ownership.membership_of(FilamentId::new(1)).unwrap(), None);
+        assert_eq!(ownership.membership_of(FilamentId::new(2)).unwrap().unwrap().position(), 0);
+        assert_eq!(ownership.membership_of(FilamentId::new(3)).unwrap().unwrap().position(), 1);
+        assert_eq!(clusters[&cluster].first_position(), 0);
+    }
+
+    #[test]
+    fn trim_pass_stably_sorts_clusters_by_deskewed_ordinate() {
+        let mut ownership = ClusterOwnership::new();
+        let mut clusters = BTreeMap::new();
+        let mut values = filaments(&[(1, 0, 10, 30), (2, 0, 30, 30)]).into_iter();
+        let upper = cluster_from_lines(
+            &mut ownership,
+            &mut clusters,
+            vec![values.next().unwrap()],
+        );
+        let lower = cluster_from_lines(
+            &mut ownership,
+            &mut clusters,
+            vec![values.next().unwrap()],
+        );
+        let result = trim_clusters_in_ordinate_order(
+            &mut ownership,
+            &mut clusters,
+            &[lower, upper],
+            0.0,
+            &BTreeSet::from([1]),
+            0.5,
+        )
+        .unwrap();
+
+        assert_eq!(result.cluster_order(), [upper, lower]);
+        assert!(result.removed_filaments().is_empty());
     }
 }
