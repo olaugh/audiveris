@@ -139,48 +139,80 @@ pub fn find_connections(
     let snapshot = graph
         .edges()
         .iter()
-        .map(|edge| (edge.id(), edge.source(), edge.target(), *edge.relation()))
+        .map(|edge| (edge.id(), *edge.relation()))
         .collect::<Vec<_>>();
 
-    for (edge_id, source, target, alignment) in snapshot {
+    for (edge_id, alignment) in snapshot {
         if alignment.kind() != BarAlignmentKind::Alignment {
             return Err(ConnectionBuildError::WrongRelation(edge_id));
         }
-        let top_stick = stick_for(sticks, source)?;
-        let bottom_stick = stick_for(sticks, target)?;
-        let top = graph.vertex(source).ok_or(ConnectionBuildError::Graph(
-            PeakGraphError::MissingVertex(source),
-        ))?;
-        let bottom = graph.vertex(target).ok_or(ConnectionBuildError::Graph(
-            PeakGraphError::MissingVertex(target),
-        ))?;
-        let core = connection_core(raster, top, bottom)?;
-        let mut decision = ConnectionDecision {
-            alignment_edge: edge_id,
-            source,
-            target,
-            top_filament_id: top_stick.id,
-            bottom_filament_id: bottom_stick.id,
-            top_section_count: top_stick.members.len(),
-            bottom_section_count: bottom_stick.members.len(),
-            core,
-            promoted_edge: None,
-        };
-
-        if core.gap <= parameters.maximum_gap && core.white_ratio <= parameters.maximum_white_ratio
-        {
-            let gap_impact = 1.0 - (f64::from(core.gap) / f64::from(parameters.maximum_gap));
-            let white_impact = 1.0 - (core.white_ratio / parameters.maximum_white_ratio);
-            let connection = BarAlignment::connection(&alignment, gap_impact, white_impact)
-                .map_err(ConnectionBuildError::Relation)?;
-            let (_, promoted) = graph
-                .replace_edge(edge_id, connection)
-                .map_err(ConnectionBuildError::Graph)?;
-            decision.promoted_edge = Some(promoted);
-        }
-        report.decisions.push(decision);
+        report.decisions.push(check_connection_edge(
+            graph, edge_id, raster, sticks, parameters,
+        )?);
     }
     Ok(())
+}
+
+/// Evaluate and, when qualified, promote one alignment edge. This is the
+/// immediate `checkConnection` operation used after a split peak is inserted.
+pub fn check_connection_edge(
+    graph: &mut PeakGraph<BarAlignment>,
+    edge_id: PeakEdgeId,
+    raster: ConnectionRaster<'_>,
+    sticks: &[BarStick],
+    parameters: ConnectionParameters,
+) -> Result<ConnectionDecision, ConnectionBuildError> {
+    validate(raster, sticks, parameters)?;
+    let edge =
+        graph
+            .edge(edge_id)
+            .ok_or(ConnectionBuildError::Graph(PeakGraphError::MissingEdge(
+                edge_id,
+            )))?;
+    if edge.relation().kind() != BarAlignmentKind::Alignment {
+        return Err(ConnectionBuildError::WrongRelation(edge_id));
+    }
+    let source = edge.source();
+    let target = edge.target();
+    let alignment = *edge.relation();
+    let top_stick = stick_for(sticks, source)?;
+    let bottom_stick = stick_for(sticks, target)?;
+    let top =
+        graph
+            .vertex(source)
+            .ok_or(ConnectionBuildError::Graph(PeakGraphError::MissingVertex(
+                source,
+            )))?;
+    let bottom =
+        graph
+            .vertex(target)
+            .ok_or(ConnectionBuildError::Graph(PeakGraphError::MissingVertex(
+                target,
+            )))?;
+    let core = connection_core(raster, top, bottom)?;
+    let mut decision = ConnectionDecision {
+        alignment_edge: edge_id,
+        source,
+        target,
+        top_filament_id: top_stick.id,
+        bottom_filament_id: bottom_stick.id,
+        top_section_count: top_stick.members.len(),
+        bottom_section_count: bottom_stick.members.len(),
+        core,
+        promoted_edge: None,
+    };
+
+    if core.gap <= parameters.maximum_gap && core.white_ratio <= parameters.maximum_white_ratio {
+        let gap_impact = 1.0 - (f64::from(core.gap) / f64::from(parameters.maximum_gap));
+        let white_impact = 1.0 - (core.white_ratio / parameters.maximum_white_ratio);
+        let connection = BarAlignment::connection(&alignment, gap_impact, white_impact)
+            .map_err(ConnectionBuildError::Relation)?;
+        let (_, promoted) = graph
+            .replace_edge(edge_id, connection)
+            .map_err(ConnectionBuildError::Graph)?;
+        decision.promoted_edge = Some(promoted);
+    }
+    Ok(decision)
 }
 
 fn validate(

@@ -161,6 +161,48 @@ pub fn find_all_alignments(
     Ok(())
 }
 
+/// Check one ordered peak pair with the same insertion-ID and geometry rules
+/// used by [`find_all_alignments`]. Split-peak recovery uses this immediately
+/// after each replacement vertex is inserted.
+pub fn alignment_for_pair(
+    graph: &PeakGraph<BarAlignment>,
+    top: StaffPeakKey,
+    bottom: StaffPeakKey,
+    parameters: AlignmentParameters,
+) -> Result<Option<BarAlignment>, AlignmentBuildError> {
+    if !parameters.sheet_slope.is_finite()
+        || !parameters.maximum_alignment_slope.is_finite()
+        || parameters.maximum_alignment_slope <= 0.0
+        || parameters.maximum_alignment_delta_width <= 0
+    {
+        return Err(AlignmentBuildError::InvalidParameters);
+    }
+    let peak_ids = graph
+        .vertices()
+        .iter()
+        .enumerate()
+        .map(|(index, peak)| {
+            let value = index
+                .checked_add(1)
+                .ok_or(AlignmentBuildError::PeakIdExhausted)?;
+            Ok((peak.key(), PeakId::new(value)))
+        })
+        .collect::<Result<Vec<_>, AlignmentBuildError>>()?;
+    let top_peak = graph
+        .vertex(top)
+        .ok_or(AlignmentBuildError::MissingPeak(top))?;
+    let bottom_peak = graph
+        .vertex(bottom)
+        .ok_or(AlignmentBuildError::MissingPeak(bottom))?;
+    if top_peak.impacts().is_none() {
+        return Err(AlignmentBuildError::MissingPeakImpacts(top));
+    }
+    if bottom_peak.impacts().is_none() {
+        return Err(AlignmentBuildError::MissingPeakImpacts(bottom));
+    }
+    check_alignment(top_peak, bottom_peak, &peak_ids, parameters)
+}
+
 fn validate_inputs(
     graph: &PeakGraph<BarAlignment>,
     staffs: &[AlignmentStaff],
