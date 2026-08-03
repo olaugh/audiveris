@@ -16,6 +16,7 @@ pub mod line_cluster;
 pub mod line_sections;
 pub mod mask;
 pub mod median;
+pub mod part_group;
 pub mod peak_graph;
 pub mod run_table;
 pub mod scale_estimate;
