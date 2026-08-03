@@ -26,6 +26,7 @@ pub mod ingest;
 pub mod lag_rebuild;
 pub mod line_cluster;
 pub mod line_completion;
+pub mod line_rejection;
 pub mod line_section_dispatch;
 pub mod line_sections;
 pub mod line_short_sections;
