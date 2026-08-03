@@ -415,6 +415,49 @@ impl RunTable {
     }
 }
 
+/// Split a vertical binary run table for the GRID step, matching Java
+/// `LagManager.dispatchRuns`.
+///
+/// Runs at least `1 + rint(max_fore * ledger_thickness)` pixels long are
+/// copied into the returned vertical table. All remaining pixels are rebuilt
+/// as horizontal runs in the other returned table. The source is not modified.
+/// Java's `Math.rint` uses ties-to-even rounding, which is significant for
+/// half-pixel thresholds.
+pub fn dispatch_grid_runs(
+    source: &RunTable,
+    max_fore: usize,
+    ledger_thickness: f64,
+) -> Result<(RunTable, RunTable), RunTableError> {
+    if source.orientation() != Orientation::Vertical {
+        return Err(RunTableError::IncompatibleTable);
+    }
+
+    let adjusted = (max_fore as f64) * ledger_thickness;
+    if !adjusted.is_finite() || adjusted < 0.0 || adjusted > (usize::MAX - 1) as f64 {
+        return Err(RunTableError::InvalidDimensions);
+    }
+    let min_vertical_run_length = 1 + adjusted.round_ties_even() as usize;
+
+    let mut short_vertical = source.clone();
+    let mut long_vertical = RunTable::new(
+        Orientation::Vertical,
+        source.width(),
+        source.height(),
+    )?;
+    short_vertical.purge(
+        |run| run.length >= min_vertical_run_length,
+        Some(&mut long_vertical),
+    )?;
+    let horizontal = RunTable::from_pixels(
+        Orientation::Horizontal,
+        source.width(),
+        source.height(),
+        &short_vertical.to_pixels(),
+    )?;
+
+    Ok((horizontal, long_vertical))
+}
+
 impl fmt::Display for RunTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let orientation = match self.orientation {
@@ -465,6 +508,61 @@ mod tests {
             assert!(table.add_run(sequence, run).unwrap());
         }
         table
+    }
+
+    #[test]
+    fn dispatch_grid_runs_matches_java_threshold_and_reorientation() {
+        let mut source = RunTable::new(Orientation::Vertical, 5, 8).unwrap();
+        for (x, run) in [
+            (0, Run::new(0, 2)),
+            (0, Run::new(4, 3)),
+            (1, Run::new(1, 4)),
+            (3, Run::new(0, 1)),
+            (3, Run::new(3, 2)),
+            (4, Run::new(2, 5)),
+        ] {
+            source.add_run(x, run).unwrap();
+        }
+        let before = source.clone();
+
+        // 1 + Math.rint(2 * 1.25) = 1 + 2 = 3 (ties to even).
+        let (horizontal, long_vertical) = dispatch_grid_runs(&source, 2, 1.25).unwrap();
+
+        assert_eq!(source, before, "dispatch must not mutate its source");
+        assert_eq!(long_vertical.orientation(), Orientation::Vertical);
+        assert_eq!(long_vertical.total_run_count(), 3);
+        assert_eq!(long_vertical.weight(), 12);
+        assert_eq!(horizontal.orientation(), Orientation::Horizontal);
+        assert_eq!(horizontal.weight(), 5);
+        assert_eq!(horizontal.to_pixels(), vec![
+            0, 255, 255, 0, 255,
+            0, 255, 255, 255, 255,
+            255, 255, 255, 255, 255,
+            255, 255, 255, 0, 255,
+            255, 255, 255, 0, 255,
+            255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255,
+        ]);
+    }
+
+    #[test]
+    fn dispatch_grid_runs_rejects_nonvertical_and_invalid_thresholds() {
+        let source = RunTable::new(Orientation::Horizontal, 2, 2).unwrap();
+        assert_eq!(
+            dispatch_grid_runs(&source, 2, 1.0),
+            Err(RunTableError::IncompatibleTable)
+        );
+
+        let source = RunTable::new(Orientation::Vertical, 2, 2).unwrap();
+        assert_eq!(
+            dispatch_grid_runs(&source, 2, f64::NAN),
+            Err(RunTableError::InvalidDimensions)
+        );
+        assert_eq!(
+            dispatch_grid_runs(&source, 2, -1.0),
+            Err(RunTableError::InvalidDimensions)
+        );
     }
 
     #[test]
