@@ -27,6 +27,7 @@ pub mod bracket_serif;
 pub mod chords_step;
 pub mod clef_column;
 pub mod cue_beams_step;
+pub mod curves_step;
 pub mod grid_executor;
 pub mod header_builder;
 pub mod header_time_column;
