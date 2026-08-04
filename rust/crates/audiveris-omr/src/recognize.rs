@@ -25,7 +25,8 @@ use audiveris_image::bar_connections::{
 };
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
 use audiveris_image::bars_coordinator::{
-    BarsCoordinatorParameters, BarsStaffState, BarsSystemState, process_bars_system,
+    BarsCoordinatorParameters, BarsPurgeParameters, BarsStaffState, BarsSystemState,
+    process_bars_peak_purges, process_bars_system,
 };
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
@@ -47,7 +48,7 @@ use audiveris_image::scale_estimate::{
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
-use audiveris_image::staff_peak::{HorizontalSide, StaffPeak, StaffPeakKey};
+use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
 #[derive(Debug, Clone)]
@@ -372,10 +373,7 @@ fn project_staff_peaks(
     // Take the rightmost such peak: anything further left is a brace or
     // bracket, and marking that instead would leave the real opening bar
     // exposed to the purge.
-    if let Some(opening) = peaks.iter_mut().rfind(|peak| {
-        peak.start() <= staff_left
-            && staff_left - peak.stop() <= scale_parameters.maximum_left_extremum
-    }) {
+    if let Some(opening) = peaks.iter_mut().rfind(|peak| peak.start() <= staff_left) {
         opening.set_staff_end(HorizontalSide::Left);
     }
     Ok((
@@ -400,6 +398,7 @@ fn build_peak_graph(
     alignment_staffs: &[AlignmentStaff],
     global_slope: f64,
     interline: i32,
+    fore: i32,
     raster_pixels: &[u8],
     lags: &InitialGridLags,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
@@ -596,24 +595,60 @@ fn build_peak_graph(
             .map_err(grid_stage("bars system state"))?;
         let outcome = process_bars_system(&mut system_state, *bars_parameters)
             .map_err(grid_stage("bars purges"))?;
+        // Java `purgeExtendingPeaks` drops peaks whose bar filament runs too
+        // far above or below the staff. It needs each peak's stick bounds, so
+        // it lives in its own entry point rather than `process_bars_system`.
+        let filament_bounds: Vec<(StaffPeakKey, PeakBounds)> = stick_state
+            .sticks()
+            .iter()
+            .map(|stick| {
+                (
+                    stick.peak,
+                    PeakBounds {
+                        x: i32::try_from(stick.bounds.x).unwrap_or(i32::MAX),
+                        y: i32::try_from(stick.bounds.y).unwrap_or(i32::MAX),
+                        width: i32::try_from(stick.bounds.width).unwrap_or(i32::MAX),
+                        height: i32::try_from(stick.bounds.height).unwrap_or(i32::MAX),
+                    },
+                )
+            })
+            .collect();
+        let extending = process_bars_peak_purges(
+            &mut system_state,
+            &filament_bounds,
+            BarsPurgeParameters {
+                // BarsRetriever.largeSystemStaffCount = 4.
+                large_system_staff_count: 4,
+                maximum_foreground_thickness: fore,
+                // maxBarExtension = rint(1.0 * interline).
+                maximum_bar_extension: f64::from(pixels(1.0, interline)),
+            },
+        )
+        .map_err(grid_stage("extending purge"))?;
         // A peak can be reported by more than one purge stage; count distinct
         // keys so the retained total is not undercounted.
         let removed = outcome
             .removed_peaks()
             .iter()
+            .chain(extending.removed_peaks())
             .map(|removed| removed.peak)
             .collect::<std::collections::BTreeSet<_>>()
             .len();
         purged_peaks += removed;
         retained_peaks += before.saturating_sub(removed);
         if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
-            for entry in outcome.removed_peaks() {
+            for entry in outcome
+                .removed_peaks()
+                .iter()
+                .chain(extending.removed_peaks())
+            {
                 eprintln!("purge peak={:?} stage={:?}", entry.peak, entry.stage);
             }
         }
         let removed_keys: std::collections::BTreeSet<_> = outcome
             .removed_peaks()
             .iter()
+            .chain(extending.removed_peaks())
             .map(|entry| entry.peak)
             .collect();
         for staff_id in member_ids {
@@ -814,6 +849,7 @@ pub fn recognize_grid_lines(
         &alignment_staffs,
         global_slope,
         scale_recognition.scale.interline.main,
+        scale_recognition.scale.line.main,
         projector_pixels,
         &lags,
         &staff_blanks,
@@ -1074,6 +1110,21 @@ mod tests {
             let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
             let systems: Vec<Vec<usize>> = recognition.peak_graph.systems.clone();
+            let expected_barlines: usize = match name {
+                "D0392410-1.256.png" => 53,
+                "allegretto.png" => 44,
+                "batuque.png" => 64,
+                "carmen.png" => 76,
+                "chula.png" => 58,
+                "cucaracha.png" => 40,
+                "hove.png" => 17,
+                "zizi.png" => 22,
+                _ => 46,
+            };
+            assert_eq!(
+                recognition.peak_graph.retained_peaks, expected_barlines,
+                "{name} barline total diverged from Java"
+            );
             let expected: Vec<Vec<usize>> = expected.iter().map(|ids| ids.to_vec()).collect();
             assert_eq!(systems, expected, "{name} system grouping diverged");
         }
@@ -1114,6 +1165,24 @@ mod tests {
             }
         }
         assert_eq!(recognition.peak_graph.retained_peaks, 58);
+    }
+
+    #[test]
+    fn barline_totals_match_the_java_oracle_on_representative_pages() {
+        // Totals from live Java Audiveris 5.11 GRID runs (sum of per-staff
+        // barline lists in sheet#1.xml). One page per system shape.
+        for (name, expected) in [
+            ("chula.png", 58),
+            ("hove.png", 17),
+            ("D0392410-1.256.png", 53),
+        ] {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                recognition.peak_graph.retained_peaks, expected,
+                "{name} barline total diverged from Java"
+            );
+        }
     }
 
     #[test]
