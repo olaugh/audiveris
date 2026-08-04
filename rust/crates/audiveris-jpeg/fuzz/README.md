@@ -42,7 +42,21 @@ tests in `tests/data/regressions` so they are covered on stable:
 - one carried a Huffman table whose DC symbol exceeded the standard's magnitude
   range, overflowing a shift. Now rejected as `InvalidMagnitudeCategory`.
 
-No sample divergence from libjpeg has been found.
+One sample divergence, found and **not fixed**. When a chroma plane has an odd
+number of rows, the vertical context libjpeg uses for the bottom rows of the
+fancy 2x2 upsampler differs from the straightforward clamp-at-the-edge rule, and
+a few samples in the last two output rows can differ by one.
+
+The decode is not implicated: on the reproducer, libjpeg's raw downsampled
+planes read back through `raw_data_out` are identical to ours, and only the last
+two output rows disagree. Whether it shows is value-dependent, which is why
+generated fixtures with odd chroma heights still pass. The corpus page is 2592
+rows, so its chroma plane is even and unaffected.
+
+The reproducer is in `../tests/data/known-divergence`, bounded by
+`known_chroma_upsampling_divergence_stays_bounded`. Until it is fixed, the
+`matches_libjpeg` target will rediscover it; minimize new crashes against that
+fixture before assuming they are separate.
 
 Crashes land in `artifacts/`. Copy new ones into `tests/data/regressions` so the
 fix stays covered without a nightly toolchain.

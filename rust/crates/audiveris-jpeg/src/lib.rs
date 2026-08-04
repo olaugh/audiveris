@@ -23,6 +23,25 @@
 //! adaptive binarization downstream turns them into flipped pixels, and GRID
 //! amplifies single flipped pixels into structural differences.
 //!
+//! # Known divergence
+//!
+//! Differential fuzzing against libjpeg found one, and it is not fixed. When a
+//! chroma plane has an **odd** number of rows, the vertical context libjpeg
+//! uses for the bottom rows of the fancy 2x2 upsampler is not the
+//! straightforward "nearer neighbour, clamped at the edge" rule this decoder
+//! implements, and a few samples in the last two output rows can differ by one.
+//!
+//! What is ruled out: the decoded planes themselves. On the reproducer in
+//! `tests/data/known-divergence`, libjpeg's raw downsampled Cb and Cr planes,
+//! read back through `raw_data_out`, are identical to this decoder's, and the Y
+//! plane and every output row but the last two agree exactly. Whether it shows
+//! at all is value-dependent, which is why the generated fixtures with odd
+//! chroma heights still pass.
+//!
+//! The example corpus page is 2592 rows, so its chroma plane is 1296 rows and
+//! even, and unaffected. A scan with an odd height could hit this, so it wants
+//! fixing before this decoder is pointed at a large corpus.
+//!
 //! # Scope
 //!
 //! Baseline sequential, 8-bit, Huffman-coded, one or three components, with
@@ -609,6 +628,25 @@ struct Plane {
 /// Returns [`JpegError`] for malformed data and for any process outside the
 /// documented scope, never a best-effort approximation.
 pub fn decode(bytes: &[u8]) -> Result<Decoded, JpegError> {
+    let decoded = decode_inner(bytes, false)?;
+    Ok(Decoded {
+        width: decoded.width,
+        height: decoded.height,
+        components: decoded.components,
+        samples: decoded.samples,
+    })
+}
+
+/// Shared body of [`decode`] and [`decode_component_planes`].
+struct DecodedInner {
+    width: usize,
+    height: usize,
+    components: usize,
+    samples: Vec<u8>,
+    planes: Vec<Vec<u8>>,
+}
+
+fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegError> {
     if bytes.len() < 2 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
         return Err(JpegError::MissingSoi);
     }
@@ -776,7 +814,7 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, JpegError> {
                     &ac_tables,
                     restart_interval,
                 )?;
-                return assemble(*width, *height, components, &planes);
+                return assemble(*width, *height, components, &planes, keep_planes);
             }
             // APPn, COM, and other skippable segments.
             0xC8 | 0xCC | 0xDC | 0xDE | 0xDF | 0xE0..=0xEF | 0xFE => {}
@@ -931,7 +969,8 @@ fn assemble(
     height: usize,
     components: &[Component],
     planes: &[Plane],
-) -> Result<Decoded, JpegError> {
+    keep_planes: bool,
+) -> Result<DecodedInner, JpegError> {
     let max_h = components
         .iter()
         .map(|component| component.horizontal)
@@ -970,11 +1009,12 @@ fn assemble(
         }
     }
 
-    Ok(Decoded {
+    Ok(DecodedInner {
         width,
         height,
         components: count,
         samples,
+        planes: if keep_planes { upsampled } else { Vec::new() },
     })
 }
 
@@ -1043,6 +1083,20 @@ fn upsample_plane(
             vertical,
         }),
     }
+}
+
+/// Decodes to upsampled component planes, before colour conversion.
+///
+/// Exists for parity diagnosis: when output samples disagree with libjpeg it is
+/// far quicker to see whether the disagreement is already present in Y, Cb, or
+/// Cr than to reason backwards through the colour transform.
+///
+/// # Errors
+///
+/// Propagates any [`JpegError`] from the scan.
+pub fn decode_component_planes(bytes: &[u8]) -> Result<(usize, usize, Vec<Vec<u8>>), JpegError> {
+    let decoded = decode_inner(bytes, true)?;
+    Ok((decoded.width, decoded.height, decoded.planes))
 }
 
 /// Decodes and reduces to Audiveris's grayscale rule: the maximum RGB channel.
