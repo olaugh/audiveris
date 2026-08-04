@@ -53,6 +53,7 @@ pub mod peak_graph;
 pub mod prepared_bars;
 pub mod prepared_completion;
 pub mod prepared_lines;
+pub mod production_grid_params;
 pub mod projection;
 pub mod raster_grid_builder;
 pub mod raw_line_adapter;
