@@ -9,13 +9,12 @@ authors.workspace = true
 [dependencies]
 audiveris-core = { path = "../audiveris-core" }
 image = { version = "0.25", default-features = false, features = ["png"] }
-# JPEG goes through libjpeg-turbo, not a pure-Rust decoder. Java's ImageIO
-# reader is libjpeg-backed and the pure-Rust decoders do not reproduce it: on
-# the one JPEG in the example corpus `zune-jpeg` differs from libjpeg on 177046
-# of 5018112 grayscale samples, which flips 844 binary pixels and perturbs
-# everything GRID derives from them. `mozjpeg-sys` vendors and builds
-# libjpeg-turbo, whose decoder is bit-identical to libjpeg's.
-mozjpeg-sys = "2"
+# JPEG goes through our own decoder, which reproduces libjpeg sample for
+# sample. The `image` crate's `zune-jpeg` does not: on the one JPEG in the
+# example corpus it differs from libjpeg on 177046 of 5018112 grayscale
+# samples, which flips 844 binary pixels and perturbs everything GRID derives
+# from them.
+audiveris-jpeg = { path = "../audiveris-jpeg" }
 
 
 [lints]

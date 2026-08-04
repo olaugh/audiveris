@@ -4,6 +4,7 @@ members = [
     "crates/audiveris-classifier",
     "crates/audiveris-cli",
     "crates/audiveris-image",
+    "crates/audiveris-jpeg",
     "crates/audiveris-omr",
     "crates/audiveris-testkit",
     "xtask",
@@ -18,11 +19,10 @@ rust-version = "1.85"
 authors = ["Audiveris contributors"]
 
 [workspace.lints.rust]
-# `deny`, not `forbid`, solely so the libjpeg FFI in `audiveris-image::ingest`
-# can carry a single justified `#[allow(unsafe_code)]`. Java decodes JPEG through
-# a libjpeg-backed ImageIO reader and the pure-Rust decoders do not reproduce it
-# bit for bit, which perturbs every GRID result on a JPEG page. Every other
-# `unsafe` in the workspace is still a build failure.
+# `deny`, not `forbid`, solely so `audiveris-jpeg`'s differential test can call
+# libjpeg as its reference decoder. No shipped code contains `unsafe`:
+# `audiveris-jpeg` itself is `#![forbid(unsafe_code)]`, and libjpeg is a
+# dev-dependency of that one crate. Every other `unsafe` is a build failure.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
