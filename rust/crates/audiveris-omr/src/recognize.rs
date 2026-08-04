@@ -19,7 +19,10 @@ use audiveris_image::bar_alignments::{
     AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
 };
 use audiveris_image::bar_column::StaffId;
-use audiveris_image::bar_connections::{ConnectionRaster, connection_core};
+use audiveris_image::bar_connections::{
+    ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
+};
+use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{
@@ -39,6 +42,7 @@ use audiveris_image::scale_estimate::{
     ScaleEstimate, ScaleEstimateError, ScaleOptions, estimate_scale,
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
+use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
 use audiveris_image::staff_peak::{StaffPeak, StaffPeakKey};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
@@ -160,6 +164,10 @@ pub struct StaffCandidateReport {
 pub struct PeakGraphReport {
     pub alignment_count: usize,
     pub connection_count: usize,
+    /// Peaks that yielded a registered bar filament.
+    pub stick_count: usize,
+    /// Peaks Java drops because no acceptable bar filament could be built.
+    pub stickless_peak_count: usize,
     /// Staff ids grouped by shared aligned barlines, in Java's system order.
     pub systems: Vec<Vec<usize>>,
 }
@@ -356,6 +364,7 @@ fn build_peak_graph(
     global_slope: f64,
     interline: i32,
     raster_pixels: &[u8],
+    lags: &InitialGridLags,
     (width, height): (usize, usize),
 ) -> Result<PeakGraphReport, GridRecognitionError> {
     let skew = HeadlessSkew::new(
@@ -395,34 +404,72 @@ fn build_peak_graph(
 
     let alignment_count = graph.edges().len();
 
-    // Java promotes an alignment to a connection when the inter-staff
-    // corridor is mostly ink: `gap <= maxConnectionGap` (rint(1.0*interline))
-    // and `whiteRatio <= 0.25`. Only connected peaks bind two staves into one
-    // system, which is what separates systems from merely aligned barlines.
-    let raster = ConnectionRaster {
-        width,
-        height,
-        pixels: raster_pixels,
+    // Java `PeakGraph.buildBarSticks` registers one vertical filament per
+    // peak; peaks without an acceptable stick are dropped from the graph.
+    let peak_order: Vec<StaffPeakKey> = graph.vertices().iter().map(StaffPeak::key).collect();
+    let stick_parameters = BarStickParameters {
+        // PeakGraph.bracketLookupExtension = rint(2.0 * interline).
+        vertical_extension: pixels(2.0, interline),
+        // BarFilamentFactory.minCoreSectionLength = rint(0.5 * interline).
+        minimum_core_section_length: pixels(0.5, interline).max(1) as usize,
+        // Filament.probeWidth = rint(0.5 * interline).
+        probe_width: pixels(0.5, interline).max(1) as usize,
+        // Filament.probeMinWeight = rint(0.2 * interline).
+        minimum_probe_weight: pixels(0.2, interline).max(1) as usize,
+        // BarFilamentFactory.segmentLength = rint(1 * interline).
+        segment_length: pixels(1.0, interline).max(1) as usize,
+        // PeakGraph.minBarCurvature = rint(10 * interline).
+        minimum_mean_curvature: f64::from(pixels(10.0, interline)),
+        first_filament_id: 1,
     };
-    let maximum_gap = f64::from(interline).round_ties_even() as i32;
+    let mut stick_state = BarStickBuildState::new(1).map_err(grid_stage("bar stick state"))?;
+    build_bar_sticks(
+        &mut graph,
+        &peak_order,
+        &lags.vertical,
+        &lags.horizontal,
+        stick_parameters,
+        &mut stick_state,
+    )
+    .map_err(grid_stage("bar sticks"))?;
+    let stick_count = stick_state.sticks().len();
+    let stickless_peak_count = stick_state.removed_peaks().len();
+
+    // Java `PeakGraph.findConnections` promotes an alignment when the
+    // inter-staff corridor is mostly ink: gap within one interline and white
+    // ratio at most 0.25. Only connected peaks bind two staves into a system.
+    let mut connection_report = ConnectionBuildReport::default();
+    find_connections(
+        &mut graph,
+        ConnectionRaster {
+            width,
+            height,
+            pixels: raster_pixels,
+        },
+        stick_state.sticks(),
+        ConnectionParameters {
+            maximum_gap: pixels(1.0, interline),
+            maximum_white_ratio: 0.25,
+        },
+        &mut connection_report,
+    )
+    .map_err(grid_stage("connections"))?;
+
     let mut connection_count = 0usize;
     let mut connected_pairs: Vec<(usize, usize)> = Vec::new();
-    for edge in graph.edges() {
-        let (Some(top), Some(bottom)) = (graph.vertex(edge.source()), graph.vertex(edge.target()))
-        else {
+    for decision in connection_report.decisions() {
+        if decision.promoted_edge.is_none() {
             continue;
-        };
-        let core = connection_core(raster, top, bottom).map_err(grid_stage("connection core"))?;
-        if core.gap <= maximum_gap && core.white_ratio <= 0.25 {
-            connection_count += 1;
-            if let (Some(source), Some(target)) = (
-                staff_of_key(staff_peaks, alignment_staffs, edge.source()),
-                staff_of_key(staff_peaks, alignment_staffs, edge.target()),
-            ) {
-                connected_pairs.push((source, target));
-            }
+        }
+        connection_count += 1;
+        if let (Some(source), Some(target)) = (
+            staff_of_key(staff_peaks, alignment_staffs, decision.source),
+            staff_of_key(staff_peaks, alignment_staffs, decision.target),
+        ) {
+            connected_pairs.push((source, target));
         }
     }
+
     // Every staff starts alone; connected pairs merge their groups.
     let mut systems: Vec<Vec<usize>> = alignment_staffs
         .iter()
@@ -436,8 +483,15 @@ fn build_peak_graph(
     Ok(PeakGraphReport {
         alignment_count,
         connection_count,
+        stick_count,
+        stickless_peak_count,
         systems,
     })
+}
+
+/// Java `Scale.toPixels(Fraction)`: `rint(ratio * interline)`, ties to even.
+fn pixels(ratio: f64, interline: i32) -> i32 {
+    (ratio * f64::from(interline)).round_ties_even() as i32
 }
 
 /// Resolves which staff owns a peak key.
@@ -496,6 +550,7 @@ pub fn recognize_grid_lines(
     .map_err(grid_stage("run partition"))?;
     let lag = HorizontalSectionLag::from_long_runs(tables.long_horizontal.clone())
         .map_err(grid_stage("horizontal lag"))?;
+    let lags = build_initial_grid_lags(&tables, seed_parameters.raster.maximum_vertical_run_shift);
 
     let seed_pass = build_primary_cluster_pass(&lag, seed_parameters.raw_primary)
         .map_err(grid_stage("primary pass (slope seed)"))?;
@@ -588,6 +643,7 @@ pub fn recognize_grid_lines(
         global_slope,
         scale_recognition.scale.interline.main,
         projector_pixels,
+        &lags,
         (scale_recognition.width, scale_recognition.height),
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
@@ -615,9 +671,11 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
         recognition.staves.len(),
     ));
     report.push_str(&format!(
-        "systems=alignments:{};connections:{};groups:{}\n",
+        "systems=alignments:{};connections:{};sticks:{};stickless:{};groups:{}\n",
         recognition.peak_graph.alignment_count,
         recognition.peak_graph.connection_count,
+        recognition.peak_graph.stick_count,
+        recognition.peak_graph.stickless_peak_count,
         if recognition.peak_graph.systems.is_empty() {
             "none".to_owned()
         } else {

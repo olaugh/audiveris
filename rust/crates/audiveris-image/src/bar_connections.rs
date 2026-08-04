@@ -258,13 +258,7 @@ fn stick_for(sticks: &[BarStick], peak: StaffPeakKey) -> Result<&BarStick, Conne
         .ok_or(ConnectionBuildError::MissingStick(peak))
 }
 
-/// Java `BarConnection` core measurement between two vertically aligned
-/// peaks: the white ratio and largest gap in the inter-staff corridor.
-///
-/// This is the whole promotion test; `find_connections` adds only filament
-/// provenance on top of it, so a driver that has peaks and the binary raster
-/// but no registered bar sticks can still reproduce Java's decision.
-pub fn connection_core(
+fn connection_core(
     raster: ConnectionRaster<'_>,
     top: &crate::staff_peak::StaffPeak,
     bottom: &crate::staff_peak::StaffPeak,
