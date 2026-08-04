@@ -1491,6 +1491,103 @@ mod tests {
         );
     }
 
+    /// Parses `rust/oracle/grid-barlines.txt`: surviving barline abscissae per
+    /// staff, keyed by page file name.
+    fn java_barline_oracle() -> BTreeMap<String, Vec<(usize, Vec<i32>)>> {
+        let text = include_str!("../../../oracle/grid-barlines.txt");
+        let mut pages: BTreeMap<String, Vec<(usize, Vec<i32>)>> = BTreeMap::new();
+        let mut current = String::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split_whitespace();
+            match fields.next() {
+                Some("page") => {
+                    current = fields.next().expect("page name").to_owned();
+                    pages.entry(current.clone()).or_default();
+                }
+                Some("staff") => {
+                    let id = fields.next().expect("staff id").parse().expect("staff id");
+                    let starts = fields.map(|v| v.parse().expect("peak start")).collect();
+                    pages
+                        .get_mut(&current)
+                        .expect("staff before page")
+                        .push((id, starts));
+                }
+                _ => panic!("unparsable oracle record: {line}"),
+            }
+        }
+        pages
+    }
+
+    /// The only barlines that do not reproduce Java's abscissa.
+    ///
+    /// `(page, staff id, index within the staff, Java's value, the port's)`.
+    /// This staff also carries one of the completed-line endpoint residuals, and
+    /// both look like the same family: a one-pixel disagreement in peak
+    /// refinement on the corpus's only JPEG. Open.
+    const KNOWN_BARLINE_RESIDUALS: [(&str, usize, usize, i32, i32); 1] =
+        [("BachInvention5.jpg", 10, 1, 744, 745)];
+
+    /// Diffs every surviving barline against a live Java run, position by
+    /// position, on every example page.
+    ///
+    /// `barline_totals_match_the_java_oracle_on_representative_pages` checks
+    /// only counts, which a compensating pair of errors would satisfy; this
+    /// pins the abscissae themselves.
+    #[test]
+    fn barline_positions_match_the_java_oracle_across_the_example_corpus() {
+        let oracle = java_barline_oracle();
+        assert_eq!(oracle.len(), 9, "oracle should cover every example page");
+        let mut checked = 0usize;
+
+        for (name, java) in &oracle {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let produced = &recognition.peak_graph.surviving_barlines;
+            assert_eq!(
+                produced.len(),
+                java.len(),
+                "{name} reported a different number of staves"
+            );
+
+            for ((produced_id, produced_starts), (java_id, java_starts)) in
+                produced.iter().zip(java)
+            {
+                assert_eq!(produced_id, java_id, "{name} staff order diverged");
+                assert_eq!(
+                    produced_starts.len(),
+                    java_starts.len(),
+                    "{name} staff {java_id} kept {} barlines against Java's {}",
+                    produced_starts.len(),
+                    java_starts.len()
+                );
+                for (index, (&produced, &expected)) in
+                    produced_starts.iter().zip(java_starts).enumerate()
+                {
+                    checked += 1;
+                    if produced == expected {
+                        continue;
+                    }
+                    assert!(
+                        KNOWN_BARLINE_RESIDUALS.contains(&(
+                            name.as_str(),
+                            *java_id,
+                            index,
+                            expected,
+                            produced
+                        )),
+                        "{name} staff {java_id} barline {index} diverged: \
+                         {produced} vs Java {expected}"
+                    );
+                }
+            }
+        }
+        assert_eq!(checked, 420, "every barline must be compared");
+    }
+
     #[test]
     fn line_completion_runs_every_java_stage_on_the_example_corpus() {
         const EXPECTED_STAGES: [LineCompletionStage; 10] = [
