@@ -148,3 +148,28 @@ fn rejects_processes_it_cannot_reproduce() {
         "a progressive JPEG must be refused, not approximated"
     );
 }
+
+/// Inputs that once panicked, kept as ordinary tests.
+///
+/// Each came out of `fuzz/fuzz_targets/decode_never_panics`, minimized by
+/// libFuzzer. Two overflowed the inverse transform on coefficient and quantizer
+/// products a malformed file can present; one carried a Huffman table whose DC
+/// symbol exceeded the standard's magnitude range. They live here so the fixes
+/// are covered without needing a nightly toolchain to run the fuzzer.
+#[test]
+fn fuzz_regressions_decode_or_error_without_panicking() {
+    let directory = repo_path("rust/crates/audiveris-jpeg/tests/data/regressions");
+    let entries = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("{}: {error}", directory.display()));
+    let mut checked = 0usize;
+    for entry in entries.filter_map(Result::ok) {
+        let bytes = std::fs::read(entry.path()).expect("regression input");
+        // The contract is only that this returns rather than unwinds.
+        let _ = audiveris_jpeg::decode(&bytes);
+        checked += 1;
+    }
+    assert!(
+        checked >= 3,
+        "expected the saved regressions, found {checked}"
+    );
+}

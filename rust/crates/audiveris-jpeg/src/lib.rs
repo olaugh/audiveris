@@ -64,6 +64,9 @@ pub enum JpegError {
         id: usize,
     },
     BadHuffmanCode,
+    /// A coefficient magnitude category outside the standard's range, which
+    /// only a corrupt Huffman table can produce.
+    InvalidMagnitudeCategory(u8),
     ZeroDimension,
 }
 
@@ -95,6 +98,12 @@ impl fmt::Display for JpegError {
                 write!(f, "missing Huffman table class {class} id {id}")
             }
             Self::BadHuffmanCode => f.write_str("undecodable Huffman code"),
+            Self::InvalidMagnitudeCategory(category) => {
+                write!(
+                    f,
+                    "coefficient magnitude category {category} is out of range"
+                )
+            }
             Self::ZeroDimension => f.write_str("frame declared a zero dimension"),
         }
     }
@@ -179,7 +188,7 @@ const FIX_3_072711026: i32 = 25172; // 3.072711026
 /// Round-to-nearest right shift, the descaling step of the integer transform.
 #[must_use]
 const fn descale(value: i32, bits: i32) -> i32 {
-    (value + (1 << (bits - 1))) >> bits
+    value.wrapping_add(1 << (bits - 1)) >> bits
 }
 
 /// Odd-part butterfly shared by both passes.
@@ -187,29 +196,29 @@ const fn descale(value: i32, bits: i32) -> i32 {
 /// Returns the four odd-index outputs in coefficient order.
 #[must_use]
 fn odd_part(mut tmp0: i32, mut tmp1: i32, mut tmp2: i32, mut tmp3: i32) -> [i32; 4] {
-    let mut z1 = tmp0 + tmp3;
-    let mut z2 = tmp1 + tmp2;
-    let mut z3 = tmp0 + tmp2;
-    let mut z4 = tmp1 + tmp3;
-    let z5 = (z3 + z4) * FIX_1_175875602;
+    let mut z1 = tmp0.wrapping_add(tmp3);
+    let mut z2 = tmp1.wrapping_add(tmp2);
+    let mut z3 = tmp0.wrapping_add(tmp2);
+    let mut z4 = tmp1.wrapping_add(tmp3);
+    let z5 = z3.wrapping_add(z4).wrapping_mul(FIX_1_175875602);
 
-    tmp0 *= FIX_0_298631336;
-    tmp1 *= FIX_2_053119869;
-    tmp2 *= FIX_3_072711026;
-    tmp3 *= FIX_1_501321110;
-    z1 *= -FIX_0_899976223;
-    z2 *= -FIX_2_562915447;
-    z3 *= -FIX_1_961570560;
-    z4 *= -FIX_0_390180644;
+    tmp0 = tmp0.wrapping_mul(FIX_0_298631336);
+    tmp1 = tmp1.wrapping_mul(FIX_2_053119869);
+    tmp2 = tmp2.wrapping_mul(FIX_3_072711026);
+    tmp3 = tmp3.wrapping_mul(FIX_1_501321110);
+    z1 = z1.wrapping_mul(-FIX_0_899976223);
+    z2 = z2.wrapping_mul(-FIX_2_562915447);
+    z3 = z3.wrapping_mul(-FIX_1_961570560);
+    z4 = z4.wrapping_mul(-FIX_0_390180644);
 
-    z3 += z5;
-    z4 += z5;
+    z3 = z3.wrapping_add(z5);
+    z4 = z4.wrapping_add(z5);
 
     [
-        tmp0 + z1 + z3,
-        tmp1 + z2 + z4,
-        tmp2 + z2 + z3,
-        tmp3 + z1 + z4,
+        tmp0.wrapping_add(z1).wrapping_add(z3),
+        tmp1.wrapping_add(z2).wrapping_add(z4),
+        tmp2.wrapping_add(z2).wrapping_add(z3),
+        tmp3.wrapping_add(z1).wrapping_add(z4),
     ]
 }
 
@@ -219,17 +228,27 @@ fn odd_part(mut tmp0: i32, mut tmp1: i32, mut tmp2: i32, mut tmp3: i32) -> [i32;
 /// part: `[tmp10, tmp11, tmp12, tmp13]`.
 #[must_use]
 fn even_part(in0: i32, in2: i32, in4: i32, in6: i32) -> [i32; 4] {
-    let z1 = (in2 + in6) * FIX_0_541196100;
-    let tmp2 = z1 + in6 * -FIX_1_847759065;
-    let tmp3 = z1 + in2 * FIX_0_765366865;
+    let z1 = in2.wrapping_add(in6).wrapping_mul(FIX_0_541196100);
+    let tmp2 = z1.wrapping_add(in6.wrapping_mul(-FIX_1_847759065));
+    let tmp3 = z1.wrapping_add(in2.wrapping_mul(FIX_0_765366865));
 
-    let tmp0 = (in0 + in4) << CONST_BITS;
-    let tmp1 = (in0 - in4) << CONST_BITS;
+    let tmp0 = in0.wrapping_add(in4).wrapping_shl(CONST_BITS as u32);
+    let tmp1 = in0.wrapping_sub(in4).wrapping_shl(CONST_BITS as u32);
 
-    [tmp0 + tmp3, tmp1 + tmp2, tmp1 - tmp2, tmp0 - tmp3]
+    [
+        tmp0.wrapping_add(tmp3),
+        tmp1.wrapping_add(tmp2),
+        tmp1.wrapping_sub(tmp2),
+        tmp0.wrapping_sub(tmp3),
+    ]
 }
 
 /// libjpeg's `jpeg_idct_islow`: dequantize and inverse transform one block.
+///
+/// All arithmetic wraps. A malformed file can present coefficient and quantizer
+/// pairs whose product overflows, and libjpeg's C arithmetic wraps there; a
+/// checked or saturating result would both panic on input this decoder must
+/// survive and disagree with libjpeg on damaged images.
 ///
 /// Both passes take the shortcut for an all-zero AC set, which is an algebraic
 /// identity rather than an approximation.
@@ -239,10 +258,11 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
     // Pass 1: columns, leaving PASS1_BITS of extra fraction.
     for column in 0..8 {
         let at = |row: usize| -> i32 {
-            i32::from(coefficients[row * 8 + column]) * i32::from(quantizers[row * 8 + column])
+            i32::from(coefficients[row * 8 + column])
+                .wrapping_mul(i32::from(quantizers[row * 8 + column]))
         };
         if (1..8).all(|row| coefficients[row * 8 + column] == 0) {
-            let dc = at(0) << PASS1_BITS;
+            let dc = at(0).wrapping_shl(PASS1_BITS as u32);
             for row in 0..8 {
                 workspace[row * 8 + column] = dc;
             }
@@ -253,14 +273,14 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
         let [odd0, odd1, odd2, odd3] = odd_part(at(7), at(5), at(3), at(1));
 
         let shift = CONST_BITS - PASS1_BITS;
-        workspace[column] = descale(tmp10 + odd3, shift);
-        workspace[7 * 8 + column] = descale(tmp10 - odd3, shift);
-        workspace[8 + column] = descale(tmp11 + odd2, shift);
-        workspace[6 * 8 + column] = descale(tmp11 - odd2, shift);
-        workspace[2 * 8 + column] = descale(tmp12 + odd1, shift);
-        workspace[5 * 8 + column] = descale(tmp12 - odd1, shift);
-        workspace[3 * 8 + column] = descale(tmp13 + odd0, shift);
-        workspace[4 * 8 + column] = descale(tmp13 - odd0, shift);
+        workspace[column] = descale(tmp10.wrapping_add(odd3), shift);
+        workspace[7 * 8 + column] = descale(tmp10.wrapping_sub(odd3), shift);
+        workspace[8 + column] = descale(tmp11.wrapping_add(odd2), shift);
+        workspace[6 * 8 + column] = descale(tmp11.wrapping_sub(odd2), shift);
+        workspace[2 * 8 + column] = descale(tmp12.wrapping_add(odd1), shift);
+        workspace[5 * 8 + column] = descale(tmp12.wrapping_sub(odd1), shift);
+        workspace[3 * 8 + column] = descale(tmp13.wrapping_add(odd0), shift);
+        workspace[4 * 8 + column] = descale(tmp13.wrapping_sub(odd0), shift);
     }
 
     // Pass 2: rows, descaling the whole accumulated fraction away.
@@ -278,14 +298,14 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
         let [tmp10, tmp11, tmp12, tmp13] = even_part(line[0], line[2], line[4], line[6]);
         let [odd0, odd1, odd2, odd3] = odd_part(line[7], line[5], line[3], line[1]);
 
-        output[row * 8] = range_limit_idct(descale(tmp10 + odd3, shift));
-        output[row * 8 + 7] = range_limit_idct(descale(tmp10 - odd3, shift));
-        output[row * 8 + 1] = range_limit_idct(descale(tmp11 + odd2, shift));
-        output[row * 8 + 6] = range_limit_idct(descale(tmp11 - odd2, shift));
-        output[row * 8 + 2] = range_limit_idct(descale(tmp12 + odd1, shift));
-        output[row * 8 + 5] = range_limit_idct(descale(tmp12 - odd1, shift));
-        output[row * 8 + 3] = range_limit_idct(descale(tmp13 + odd0, shift));
-        output[row * 8 + 4] = range_limit_idct(descale(tmp13 - odd0, shift));
+        output[row * 8] = range_limit_idct(descale(tmp10.wrapping_add(odd3), shift));
+        output[row * 8 + 7] = range_limit_idct(descale(tmp10.wrapping_sub(odd3), shift));
+        output[row * 8 + 1] = range_limit_idct(descale(tmp11.wrapping_add(odd2), shift));
+        output[row * 8 + 6] = range_limit_idct(descale(tmp11.wrapping_sub(odd2), shift));
+        output[row * 8 + 2] = range_limit_idct(descale(tmp12.wrapping_add(odd1), shift));
+        output[row * 8 + 5] = range_limit_idct(descale(tmp12.wrapping_sub(odd1), shift));
+        output[row * 8 + 3] = range_limit_idct(descale(tmp13.wrapping_add(odd0), shift));
+        output[row * 8 + 4] = range_limit_idct(descale(tmp13.wrapping_sub(odd0), shift));
     }
 }
 
@@ -501,7 +521,7 @@ impl<'a> BitReader<'a> {
     fn receive(&mut self, length: u32) -> i32 {
         let mut value = 0i32;
         for _ in 0..length {
-            value = (value << 1) | self.bit() as i32;
+            value = value.wrapping_shl(1) | self.bit() as i32;
         }
         value
     }
@@ -517,7 +537,7 @@ impl<'a> BitReader<'a> {
                     .copied()
                     .ok_or(JpegError::BadHuffmanCode);
             }
-            code = (code << 1) | self.bit() as i32;
+            code = code.wrapping_shl(1) | self.bit() as i32;
         }
         Err(JpegError::BadHuffmanCode)
     }
@@ -542,13 +562,19 @@ impl<'a> BitReader<'a> {
 }
 
 /// Sign-extends an `Sn` magnitude as the standard's `EXTEND` procedure does.
+///
+/// Shifts wrap rather than overflow. Callers reject out-of-range categories
+/// before reaching here, but a decoder that reads untrusted scans should not
+/// depend on a caller's check to stay panic-free.
 #[must_use]
 const fn extend(value: i32, length: u32) -> i32 {
     if length == 0 {
         return 0;
     }
-    if value < (1 << (length - 1)) {
-        value - (1 << length) + 1
+    if value < 1i32.wrapping_shl(length - 1) {
+        value
+            .wrapping_sub(1i32.wrapping_shl(length))
+            .wrapping_add(1)
     } else {
         value
     }
@@ -848,9 +874,14 @@ fn decode_scan(
                         let mut coefficients = [0i16; 64];
 
                         let symbol = reader.decode(dc)?;
+                        // The standard caps a DC magnitude category at 15; a
+                        // corrupt Huffman table can hand back any byte.
+                        if symbol > 15 {
+                            return Err(JpegError::InvalidMagnitudeCategory(symbol));
+                        }
                         let magnitude = u32::from(symbol);
                         let difference = extend(reader.receive(magnitude), magnitude);
-                        predictors[index] += difference;
+                        predictors[index] = predictors[index].wrapping_add(difference);
                         coefficients[0] = predictors[index] as i16;
 
                         let mut position = 1usize;
