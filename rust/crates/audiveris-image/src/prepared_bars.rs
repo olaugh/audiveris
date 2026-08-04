@@ -12,7 +12,8 @@ use crate::{
     bar_alignment::BarAlignment,
     bar_column::StaffId,
     bars_coordinator::{
-        BarsCoordinatorError, BarsCoordinatorParameters, BarsSystemState, process_bars_system,
+        BarsCoordinatorError, BarsCoordinatorParameters, BarsPurgeParameters, BarsSystemState,
+        RemovedPeak, process_bars_peak_purges, process_bars_system,
     },
     bars_logic::{ConnectionInterPlan, VerticalInterPlan},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
@@ -24,7 +25,7 @@ use crate::{
     raster_grid_builder::{
         HeadlessRasterGridBuilder, RasterGridBuildState, RemainingRasterGridStages,
     },
-    staff_peak::StaffPeak,
+    staff_peak::{PeakBounds, StaffPeak, StaffPeakKey},
 };
 
 #[derive(Clone, Debug)]
@@ -93,7 +94,20 @@ pub struct ProductionProcessBars<Upstream> {
     systems: Vec<BarsSystemState>,
     parameters: BarsCoordinatorParameters,
     maximum_group_gap: i32,
+    extending: Option<ExtendingPurge>,
     handoff: Option<PreparedBarsHandoff>,
+    removals: Vec<(usize, RemovedPeak)>,
+}
+
+/// Inputs for Java `BarsRetriever.purgeExtendingPeaks`.
+///
+/// That stage needs each peak's bar-filament bounds, which `BarsSystemState`
+/// does not carry, so it lives behind its own entry point
+/// ([`process_bars_peak_purges`]) and is supplied here rather than derived.
+#[derive(Clone, Debug)]
+struct ExtendingPurge {
+    filament_bounds: Vec<(StaffPeakKey, PeakBounds)>,
+    parameters: BarsPurgeParameters,
 }
 
 impl<Upstream> ProductionProcessBars<Upstream> {
@@ -117,13 +131,122 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             systems,
             parameters,
             maximum_group_gap,
+            extending: None,
             handoff: None,
+            removals: Vec::new(),
         })
+    }
+
+    /// Enables Java's `purgeExtendingPeaks`, which runs after the coordinator
+    /// purges and before the peaks are published downstream.
+    ///
+    /// Callers that own the bar filaments should always enable it: without it
+    /// the handoff retains peaks whose stick runs too far past the staff, which
+    /// Java drops. It stays opt-in because the bounds are not reconstructible
+    /// from `BarsSystemState` alone.
+    #[must_use]
+    pub fn with_extending_purge(
+        mut self,
+        filament_bounds: Vec<(StaffPeakKey, PeakBounds)>,
+        parameters: BarsPurgeParameters,
+    ) -> Self {
+        self.extending = Some(ExtendingPurge {
+            filament_bounds,
+            parameters,
+        });
+        self
     }
 
     #[must_use]
     pub const fn upstream(&self) -> &Upstream {
         &self.upstream
+    }
+
+    /// Every peak the last run dropped, as `(system id, record)` in removal
+    /// order.
+    ///
+    /// Kept for diffing against a Java run: each record names both the peak and
+    /// the `BarsRetriever` stage that discarded it.
+    #[must_use]
+    pub fn removals(&self) -> &[(usize, RemovedPeak)] {
+        &self.removals
+    }
+
+    /// Runs `processBars` without a `RasterGridBuildState`.
+    ///
+    /// The stage never reads the build state: its inputs are the prepared
+    /// systems it owns and the upstream staff handoff. Callers that already
+    /// derived both — `recognize_grid_lines` builds them from the live
+    /// projectors — run the stage through here instead of standing up a
+    /// builder just to satisfy the signature.
+    pub fn run_process_bars(
+        &mut self,
+    ) -> Result<(), ProductionProcessBarsError<Upstream::OtherError>>
+    where
+        Upstream: RemainingRasterGridStages + PreparedStaffStage,
+    {
+        self.handoff = None;
+        self.removals.clear();
+        let staffs = self
+            .upstream
+            .prepared_staff_handoff()
+            .ok_or(ProductionProcessBarsError::MissingStaffHandoff)?;
+        validate_staff_join(staffs, &self.systems)?;
+
+        let mut handoff = PreparedBarsHandoff {
+            systems: Vec::with_capacity(self.systems.len()),
+            peak_graph: PeakGraph::new(),
+            connections: Vec::new(),
+        };
+        for system in &mut self.systems {
+            let system_id = system.system_id();
+            let result = match process_bars_system(system, self.parameters) {
+                Ok(result) => result,
+                Err(source) => {
+                    self.handoff = Some(handoff);
+                    return Err(ProductionProcessBarsError::Bars { system_id, source });
+                }
+            };
+            self.removals.extend(
+                result
+                    .removed_peaks()
+                    .iter()
+                    .map(|removed| (system_id, *removed)),
+            );
+            // Java `BarsRetriever.purgeExtendingPeaks` runs after the
+            // coordinator purges and before the peaks are published.
+            if let Some(extending) = self.extending.as_ref() {
+                match process_bars_peak_purges(
+                    system,
+                    &extending.filament_bounds,
+                    extending.parameters,
+                ) {
+                    Ok(purged) => self.removals.extend(
+                        purged
+                            .removed_peaks()
+                            .iter()
+                            .map(|removed| (system_id, *removed)),
+                    ),
+                    Err(source) => {
+                        self.handoff = Some(handoff);
+                        return Err(ProductionProcessBarsError::Bars { system_id, source });
+                    }
+                }
+            }
+            if let Err(error) = append_system(
+                &mut handoff,
+                system,
+                result.vertical_inters(),
+                result.connection_inters(),
+                self.maximum_group_gap,
+                f64::from(self.parameters.interline()),
+            ) {
+                self.handoff = Some(handoff);
+                return Err(error);
+            }
+        }
+        self.handoff = Some(handoff);
+        Ok(())
     }
 }
 
@@ -184,43 +307,7 @@ where
         &mut self,
         _state: &mut RasterGridBuildState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
-        self.handoff = None;
-        let staffs = self.upstream.prepared_staff_handoff().ok_or_else(|| {
-            GridStageFailure::Other(ProductionProcessBarsError::MissingStaffHandoff)
-        })?;
-        validate_staff_join(staffs, &self.systems).map_err(GridStageFailure::Other)?;
-
-        let mut handoff = PreparedBarsHandoff {
-            systems: Vec::with_capacity(self.systems.len()),
-            peak_graph: PeakGraph::new(),
-            connections: Vec::new(),
-        };
-        for system in &mut self.systems {
-            let system_id = system.system_id();
-            let result = match process_bars_system(system, self.parameters) {
-                Ok(result) => result,
-                Err(source) => {
-                    self.handoff = Some(handoff);
-                    return Err(GridStageFailure::Other(ProductionProcessBarsError::Bars {
-                        system_id,
-                        source,
-                    }));
-                }
-            };
-            if let Err(error) = append_system(
-                &mut handoff,
-                system,
-                result.vertical_inters(),
-                result.connection_inters(),
-                self.maximum_group_gap,
-                f64::from(self.parameters.interline()),
-            ) {
-                self.handoff = Some(handoff);
-                return Err(GridStageFailure::Other(error));
-            }
-        }
-        self.handoff = Some(handoff);
-        Ok(())
+        self.run_process_bars().map_err(GridStageFailure::Other)
     }
 
     fn complete_lines(

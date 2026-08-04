@@ -14,19 +14,19 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::grid_executor::HeadlessSkew;
+use crate::production_stages::TerminalRasterStages;
 use audiveris_image::adaptive;
 use audiveris_image::bar_alignment::BarAlignment;
 use audiveris_image::bar_alignments::{
     AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
 };
-use audiveris_image::bar_column::{PeakId, StaffId};
+use audiveris_image::bar_column::StaffId;
 use audiveris_image::bar_connections::{
     ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
 };
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
 use audiveris_image::bars_coordinator::{
     BarsCoordinatorParameters, BarsPurgeParameters, BarsStaffState, BarsSystemState,
-    process_bars_peak_purges, process_bars_system,
 };
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
@@ -34,6 +34,12 @@ use audiveris_image::lines_coordinator::{
     ClusterPassState, StaffCandidate, retrieve_staff_candidates,
 };
 use audiveris_image::peak_graph::PeakGraph;
+use audiveris_image::prepared_bars::{
+    PreparedBarsHandoff, PreparedBarsStage, ProductionProcessBars,
+};
+use audiveris_image::prepared_lines::{
+    PreparedStaffHandoff, index_lag_sections, materialize_staffs,
+};
 use audiveris_image::production_grid_params::production_grid_parameters;
 use audiveris_image::projection::{
     BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
@@ -184,6 +190,10 @@ pub struct PeakGraphReport {
     pub surviving_barlines: Vec<(usize, Vec<i32>)>,
     /// Staff ids grouped by shared aligned barlines, in Java's system order.
     pub systems: Vec<Vec<usize>>,
+    /// What `ProductionProcessBars` published for the line-completion stage:
+    /// per-system peaks and brace peaks, the sheet-wide peak graph, and the
+    /// promoted connections.
+    pub bars: PreparedBarsHandoff,
 }
 
 /// Result of running the native GRID staff-line slice on one raster page.
@@ -407,6 +417,8 @@ fn build_peak_graph(
     lags: &InitialGridLags,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
     bars_parameters: &BarsCoordinatorParameters,
+    maximum_group_gap: i32,
+    prepared_staffs: &PreparedStaffHandoff,
     (width, height): (usize, usize),
 ) -> Result<PeakGraphReport, GridRecognitionError> {
     let skew = HeadlessSkew::new(
@@ -522,18 +534,129 @@ fn build_peak_graph(
     }
     merge_overlapping(&mut systems);
 
+    let derived = derive_bars_systems(
+        staff_peaks,
+        alignment_staffs,
+        &systems,
+        &stick_state,
+        staff_blanks,
+        global_slope,
+        interline,
+    )?;
+
     // Java `BarsRetriever.process` per system: drop peaks left of the staff
     // start, unaligned peaks, curved and short peaks, then run the width,
-    // C-clef, and column purges. This narrows the raw projector candidates to
-    // real barlines.
-    let mut retained_peaks = 0usize;
-    let mut purged_peaks = 0usize;
+    // C-clef, and column purges, and finally `purgeExtendingPeaks`. This
+    // narrows the raw projector candidates to real barlines, and is exactly the
+    // ported `ProductionProcessBars` stage.
+    let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
+    let mut bars = ProductionProcessBars::new(
+        TerminalRasterStages::new().with_prepared_staffs(prepared_staffs.clone()),
+        derived.systems,
+        *bars_parameters,
+        maximum_group_gap,
+    )
+    .map_err(grid_stage("process bars"))?
+    .with_extending_purge(
+        derived.filament_bounds,
+        BarsPurgeParameters {
+            // BarsRetriever.largeSystemStaffCount = 4.
+            large_system_staff_count: 4,
+            maximum_foreground_thickness: fore,
+            // maxBarExtension = rint(1.0 * interline).
+            maximum_bar_extension: f64::from(pixels(1.0, interline)),
+        },
+    );
+    bars.run_process_bars()
+        .map_err(grid_stage("process bars"))?;
+    if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
+        for (system_id, removed) in bars.removals() {
+            eprintln!(
+                "purge system={system_id} peak={:?} stage={:?}",
+                removed.peak, removed.stage
+            );
+        }
+    }
+    let bars_handoff =
+        bars.take_prepared_bars_handoff()
+            .ok_or_else(|| GridRecognitionError::Stage {
+                stage: "process bars",
+                message: "stage published no prepared bars handoff".to_owned(),
+            })?;
+
+    // The handoff carries each system's post-purge peaks, so the survivors are
+    // read off directly rather than reconstructed from removal records.
     let mut surviving: Vec<(usize, Vec<i32>)> = Vec::new();
+    for system in &bars_handoff.systems {
+        for (staff_id, peaks) in system.staff_ids.iter().zip(system.staff_peaks.iter()) {
+            surviving.push((*staff_id, peaks.iter().map(StaffPeak::start).collect()));
+        }
+    }
+    let retained_peaks: usize = surviving.iter().map(|(_, peaks)| peaks.len()).sum();
+    let purged_peaks = candidate_peaks.saturating_sub(retained_peaks);
+
+    Ok(PeakGraphReport {
+        alignment_count,
+        connection_count,
+        stick_count,
+        stickless_peak_count,
+        retained_peaks,
+        purged_peaks,
+        surviving_barlines: surviving,
+        systems,
+        bars: bars_handoff,
+    })
+}
+
+/// Per-system bars state, derived but not yet purged.
+///
+/// This is the seam between deriving `BarsRetriever` input and running its
+/// purges. `ProductionProcessBars` takes an already-built `Vec<BarsSystemState>`
+/// rather than deriving one, so anything driving the ported GRID decorator
+/// chain needs exactly this, produced exactly this way.
+#[derive(Debug)]
+pub struct DerivedBarsSystems {
+    /// One state per system, in Java's system order, ids starting at 1.
+    pub systems: Vec<BarsSystemState>,
+    /// Bar-filament bounds keyed by peak, for the `purgeExtendingPeaks` stage
+    /// that `process_bars_system` does not cover.
+    pub filament_bounds: Vec<(StaffPeakKey, PeakBounds)>,
+}
+
+/// Builds each system's `BarsSystemState` from the sheet-wide peak derivation.
+///
+/// Java rebuilds alignments inside each `SystemInfo` rather than reusing the
+/// sheet graph, so this re-runs `findAllAlignments` and `purgeAlignments` over
+/// a graph holding only that system's peaks.
+fn derive_bars_systems(
+    staff_peaks: &[Vec<StaffPeak>],
+    alignment_staffs: &[AlignmentStaff],
+    systems: &[Vec<usize>],
+    stick_state: &BarStickBuildState,
+    staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
+    global_slope: f64,
+    interline: i32,
+) -> Result<DerivedBarsSystems, GridRecognitionError> {
+    let filament_bounds: Vec<(StaffPeakKey, PeakBounds)> = stick_state
+        .sticks()
+        .iter()
+        .map(|stick| {
+            (
+                stick.peak,
+                PeakBounds {
+                    x: i32::try_from(stick.bounds.x).unwrap_or(i32::MAX),
+                    y: i32::try_from(stick.bounds.y).unwrap_or(i32::MAX),
+                    width: i32::try_from(stick.bounds.width).unwrap_or(i32::MAX),
+                    height: i32::try_from(stick.bounds.height).unwrap_or(i32::MAX),
+                },
+            )
+        })
+        .collect();
+
+    let mut states = Vec::with_capacity(systems.len());
     for (system_index, member_ids) in systems.iter().enumerate() {
         let mut bars_staffs = Vec::with_capacity(member_ids.len());
         let mut system_graph: PeakGraph<BarAlignment> = PeakGraph::new();
-        let mut peak_ids: Vec<(PeakId, StaffPeakKey)> = Vec::new();
-        let mut next_peak_id = 1usize;
         for staff_id in member_ids {
             let Some(index) = alignment_staffs
                 .iter()
@@ -544,8 +667,6 @@ fn build_peak_graph(
             let peaks = staff_peaks[index].clone();
             for peak in &peaks {
                 system_graph.add_vertex(peak.clone());
-                peak_ids.push((PeakId::new(next_peak_id), peak.key()));
-                next_peak_id += 1;
             }
             bars_staffs.push(
                 BarsStaffState::new(
@@ -585,100 +706,15 @@ fn build_peak_graph(
         // peak and side, so column chains cannot contain a staff twice.
         system_graph.purge_alignments();
 
-        let before: usize = member_ids
-            .iter()
-            .filter_map(|staff_id| {
-                alignment_staffs
-                    .iter()
-                    .position(|staff| staff.staff_id.value() == *staff_id)
-            })
-            .map(|index| staff_peaks[index].len())
-            .sum();
-        let _ = &peak_ids;
-        let mut system_state = BarsSystemState::new(system_index + 1, bars_staffs, system_graph)
-            .map_err(grid_stage("bars system state"))?;
-        let outcome = process_bars_system(&mut system_state, *bars_parameters)
-            .map_err(grid_stage("bars purges"))?;
-        // Java `purgeExtendingPeaks` drops peaks whose bar filament runs too
-        // far above or below the staff. It needs each peak's stick bounds, so
-        // it lives in its own entry point rather than `process_bars_system`.
-        let filament_bounds: Vec<(StaffPeakKey, PeakBounds)> = stick_state
-            .sticks()
-            .iter()
-            .map(|stick| {
-                (
-                    stick.peak,
-                    PeakBounds {
-                        x: i32::try_from(stick.bounds.x).unwrap_or(i32::MAX),
-                        y: i32::try_from(stick.bounds.y).unwrap_or(i32::MAX),
-                        width: i32::try_from(stick.bounds.width).unwrap_or(i32::MAX),
-                        height: i32::try_from(stick.bounds.height).unwrap_or(i32::MAX),
-                    },
-                )
-            })
-            .collect();
-        let extending = process_bars_peak_purges(
-            &mut system_state,
-            &filament_bounds,
-            BarsPurgeParameters {
-                // BarsRetriever.largeSystemStaffCount = 4.
-                large_system_staff_count: 4,
-                maximum_foreground_thickness: fore,
-                // maxBarExtension = rint(1.0 * interline).
-                maximum_bar_extension: f64::from(pixels(1.0, interline)),
-            },
-        )
-        .map_err(grid_stage("extending purge"))?;
-        // A peak can be reported by more than one purge stage; count distinct
-        // keys so the retained total is not undercounted.
-        let removed = outcome
-            .removed_peaks()
-            .iter()
-            .chain(extending.removed_peaks())
-            .map(|removed| removed.peak)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
-        purged_peaks += removed;
-        retained_peaks += before.saturating_sub(removed);
-        if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
-            for entry in outcome
-                .removed_peaks()
-                .iter()
-                .chain(extending.removed_peaks())
-            {
-                eprintln!("purge peak={:?} stage={:?}", entry.peak, entry.stage);
-            }
-        }
-        let removed_keys: std::collections::BTreeSet<_> = outcome
-            .removed_peaks()
-            .iter()
-            .chain(extending.removed_peaks())
-            .map(|entry| entry.peak)
-            .collect();
-        for staff_id in member_ids {
-            if let Some(index) = alignment_staffs
-                .iter()
-                .position(|staff| staff.staff_id.value() == *staff_id)
-            {
-                let kept: Vec<i32> = staff_peaks[index]
-                    .iter()
-                    .filter(|peak| !removed_keys.contains(&peak.key()))
-                    .map(StaffPeak::start)
-                    .collect();
-                surviving.push((*staff_id, kept));
-            }
-        }
+        states.push(
+            BarsSystemState::new(system_index + 1, bars_staffs, system_graph)
+                .map_err(grid_stage("bars system state"))?,
+        );
     }
 
-    Ok(PeakGraphReport {
-        alignment_count,
-        connection_count,
-        stick_count,
-        stickless_peak_count,
-        retained_peaks,
-        purged_peaks,
-        surviving_barlines: surviving,
-        systems,
+    Ok(DerivedBarsSystems {
+        systems: states,
+        filament_bounds,
     })
 }
 
@@ -848,6 +884,19 @@ pub fn recognize_grid_lines(
             peaks,
         });
     }
+    // The same handoff `RawProductionRetrieveLines` publishes, built here from
+    // the candidates this driver retrieved so `ProductionProcessBars` reads
+    // real staff state rather than a lookalike.
+    let lag_sections = index_lag_sections::<std::convert::Infallible>(lag.sections())
+        .map_err(grid_stage("lag"))?;
+    let prepared_staffs = materialize_staffs::<std::convert::Infallible>(
+        result.staffs(),
+        &primary,
+        None,
+        &lag_sections,
+    )
+    .map_err(grid_stage("prepared staffs"))?;
+
     let peak_graph = build_peak_graph(
         &mut staff_peaks,
         &alignment_staffs,
@@ -858,6 +907,8 @@ pub fn recognize_grid_lines(
         &lags,
         &staff_blanks,
         &parameters.bars,
+        parameters.maximum_group_gap,
+        &prepared_staffs,
         (scale_recognition.width, scale_recognition.height),
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
@@ -952,6 +1003,7 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn repo_path(relative: &str) -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1131,6 +1183,80 @@ mod tests {
             );
             let expected: Vec<Vec<usize>> = expected.iter().map(|ids| ids.to_vec()).collect();
             assert_eq!(systems, expected, "{name} system grouping diverged");
+        }
+    }
+
+    /// The prepared bars handoff is what `completeLines` will consume, so it
+    /// must agree with the barline report that is already oracle-locked rather
+    /// than being a parallel, unvalidated view of the same page.
+    #[test]
+    fn chula_prepared_bars_handoff_agrees_with_the_oracle_locked_barlines() {
+        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
+            .unwrap_or_else(|error| panic!("chula: {error}"));
+        let bars = &recognition.peak_graph.bars;
+
+        let staff_ids: Vec<Vec<usize>> = bars
+            .systems
+            .iter()
+            .map(|system| system.staff_ids.clone())
+            .collect();
+        assert_eq!(staff_ids, vec![vec![1, 2], vec![3, 4], vec![5, 6]]);
+        assert_eq!(
+            bars.systems
+                .iter()
+                .map(|system| system.system_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "system ids must be Java's 1-based traversal order"
+        );
+
+        // Every published peak, in handoff order, must be exactly the surviving
+        // barlines the Java oracle pins position by position.
+        let published: Vec<(usize, Vec<i32>)> = bars
+            .systems
+            .iter()
+            .flat_map(|system| {
+                system
+                    .staff_ids
+                    .iter()
+                    .zip(system.staff_peaks.iter())
+                    .map(|(id, peaks)| (*id, peaks.iter().map(StaffPeak::start).collect()))
+            })
+            .collect();
+        assert_eq!(published, recognition.peak_graph.surviving_barlines);
+        assert_eq!(
+            published
+                .iter()
+                .map(|(_, peaks)| peaks.len())
+                .sum::<usize>(),
+            58
+        );
+
+        // The handoff graph carries the post-purge peaks, so it holds the
+        // survivors and nothing else.
+        let graph_keys: BTreeSet<_> = bars
+            .peak_graph
+            .vertices()
+            .iter()
+            .map(StaffPeak::key)
+            .collect();
+        let published_keys: BTreeSet<_> = bars
+            .systems
+            .iter()
+            .flat_map(|system| system.staff_peaks.iter().flatten())
+            .map(StaffPeak::key)
+            .collect();
+        assert_eq!(graph_keys, published_keys);
+
+        // Each connection must name a system that exists in the handoff.
+        for connection in &bars.connections {
+            assert!(
+                bars.systems
+                    .iter()
+                    .any(|system| system.system_id == connection.system_id),
+                "connection references unknown system {}",
+                connection.system_id
+            );
         }
     }
 
