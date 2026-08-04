@@ -1370,15 +1370,28 @@ mod tests {
     /// `(page, line index, component)` where component is `1` for the start
     /// ordinate and `3` for the stop ordinate.
     ///
-    /// Both causes are known and neither is the staff-limit refinement:
+    /// Traced to section membership, not arithmetic. Every one of these is
+    /// nine or more orders of magnitude above an f64 ulp, so floating point is
+    /// not involved; Java has been strict-IEEE since 17 and Rust never enables
+    /// fast-math, so the two agree bitwise on `+ - * /` and `sqrt` already.
     ///
-    /// - staff 5's `Staff.getEndingSlope(LEFT)` is `0.001469` here against
-    ///   Java's `0.000537`. The line endpoints feeding it agree exactly, so the
-    ///   gap is in the spline derivative, not the geometry.
-    /// - staff 3's `defineEndPoints` output is byte-exact against Java
-    ///   (`788.812270`), yet the final endpoint is not, so a later completion
-    ///   stage moves it differently -- `includeStickers` deletes intermediate
-    ///   points and the third `fillHoles` recomputes from what remains.
+    /// A live diff of `Staff.getEndingSlope(LEFT)` on `BachInvention5.jpg`
+    /// showed the port and Java holding the same number of spline points per
+    /// line but different member section counts on exactly the lines whose
+    /// slopes disagree -- staff 5 line 4 carries 63 sections against Java's 62,
+    /// and its slope moves from `0.004620` to `0.008368`. That reorders the
+    /// sort inside `getEndingSlope`, which discards the extreme slopes and
+    /// averages the middle three, so a different slope enters the mean and the
+    /// staff's ending slope lands at `0.001469` against Java's `0.000537`.
+    /// Lines whose section counts differ far from the endpoint keep an exact
+    /// slope, which is why only some lines move.
+    ///
+    /// Centroids over identical sections are exact, so the remaining question
+    /// is which gate in `includeSections`/`includeStickers` admits or rejects
+    /// those few sections differently on the corpus's only JPEG. Staff 3 is a
+    /// separate case: its slopes and `defineEndPoints` output are byte-exact,
+    /// yet its final endpoint is not, so something after `defineEndPoints`
+    /// moves it.
     ///
     /// Listing them individually rather than applying a blanket tolerance keeps
     /// every other endpoint pinned to equality, so a new divergence anywhere
