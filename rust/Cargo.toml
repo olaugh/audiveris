@@ -18,7 +18,12 @@ rust-version = "1.85"
 authors = ["Audiveris contributors"]
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny`, not `forbid`, solely so the libjpeg FFI in `audiveris-image::ingest`
+# can carry a single justified `#[allow(unsafe_code)]`. Java decodes JPEG through
+# a libjpeg-backed ImageIO reader and the pure-Rust decoders do not reproduce it
+# bit for bit, which perturbs every GRID result on a JPEG page. Every other
+# `unsafe` in the workspace is still a build failure.
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = "warn"

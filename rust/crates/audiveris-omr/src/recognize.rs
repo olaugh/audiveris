@@ -1392,40 +1392,17 @@ mod tests {
         pages
     }
 
-    /// The only endpoints that do not reproduce Java bit for bit, as
-    /// `(page, line index, component)` where component is `1` for the start
-    /// ordinate and `3` for the stop ordinate.
+    /// Endpoints that do not reproduce Java: none.
     ///
-    /// Descends from the JPEG decoder gap; see [`JPEG_DECODER_DIVERGENT_PAGE`].
-    /// Not arithmetic: every one is nine or more orders of magnitude above an
-    /// f64 ulp, and Java has been strict-IEEE since 17 while Rust never enables
-    /// fast-math, so the two already agree bitwise on `+ - * /` and `sqrt`.
-    ///
-    /// The mechanism from those 844 flipped binary pixels to here is worth
-    /// keeping, because it shows how small an input difference needs to be to
-    /// matter. A live diff of `Staff.getEndingSlope(LEFT)` showed both runtimes
-    /// holding the same number of spline points per line but different member
-    /// section counts on exactly the lines whose slopes disagree -- staff 5 line
-    /// 4 carries 63 sections against Java's 62, moving its slope from `0.004620`
-    /// to `0.008368`. `getEndingSlope` discards the extreme slopes and averages
-    /// the middle three, so that one changed slope reorders the sort, a
-    /// different value enters the mean, and the staff's ending slope lands at
-    /// `0.001469` against Java's `0.000537`. One flipped pixel, amplified 1.7x
-    /// by a sort boundary.
-    ///
-    /// Listing them individually rather than applying a blanket tolerance keeps
-    /// every other endpoint pinned to equality, so a new divergence anywhere
-    /// fails instead of hiding under a bound.
-    /// Each affected line diverges in both ordinates: the start ordinate by up
-    /// to 0.085px and the stop ordinate by under 0.0003px.
-    const KNOWN_ENDPOINT_RESIDUALS: [(&str, usize, usize); 6] = [
-        ("BachInvention5.jpg", 13, 1),
-        ("BachInvention5.jpg", 13, 3),
-        ("BachInvention5.jpg", 24, 1),
-        ("BachInvention5.jpg", 24, 3),
-        ("BachInvention5.jpg", 45, 1),
-        ("BachInvention5.jpg", 45, 3),
-    ];
+    /// All six former exceptions were on `BachInvention5.jpg` and were the JPEG
+    /// decoder. The amplification is worth remembering, because it shows how
+    /// little an input difference needs to be to matter: a flipped binary pixel
+    /// changed one line's member section count, which changed its spline slope,
+    /// which reordered the sort inside `Staff.getEndingSlope` -- that method
+    /// discards the extreme slopes and averages the middle three -- so a
+    /// different value entered the mean and the staff's ending slope landed
+    /// `0.001469` against Java's `0.000537`, a 1.7x error from one pixel.
+    const KNOWN_ENDPOINT_RESIDUALS: [(&str, usize, usize); 0] = [];
 
     /// Largest residual any listed exception may show, in pixels.
     const MAXIMUM_KNOWN_RESIDUAL: f64 = 0.1;
@@ -1555,12 +1532,14 @@ mod tests {
         pages
     }
 
-    /// The only barlines that do not reproduce Java's abscissa.
+    /// Barlines that do not reproduce Java's abscissa: none.
     ///
-    /// `(page, staff id, index within the staff, Java's value, the port's)`.
-    /// Descends from the JPEG decoder gap; see [`JPEG_DECODER_DIVERGENT_PAGE`].
-    const KNOWN_BARLINE_RESIDUALS: [(&str, usize, usize, i32, i32); 1] =
-        [("BachInvention5.jpg", 10, 1, 744, 745)];
+    /// The single former exception, `BachInvention5.jpg` staff 10's second
+    /// barline at 745 against Java's 744, was the JPEG decoder and went away
+    /// when decoding moved to libjpeg-turbo. Kept as an explicit empty list so
+    /// the exception path stays exercised and a regression has somewhere
+    /// obvious to be recorded.
+    const KNOWN_BARLINE_RESIDUALS: [(&str, usize, usize, i32, i32); 0] = [];
 
     /// Diffs every surviving barline against a live Java run, position by
     /// position, on every example page.
@@ -1727,13 +1706,20 @@ mod tests {
     /// asserted exactly, not as ceilings, so fixing one of these fails the test
     /// and forces the ledger to be updated rather than silently drifting.
     ///
-    /// Eight of the nine pages are exact or nearly so: five inters across four
-    /// pages differ in grade by at most 0.005, and one chula median sits a pixel
-    /// high. `BachInvention5.jpg` carries the rest, including three medians 11
-    /// to 18 pixels short at the bottom, and all of it descends from the JPEG
-    /// decoder gap; see [`JPEG_DECODER_DIVERGENT_PAGE`].
+    /// **Not the JPEG decoder.** Moving JPEG decoding to libjpeg-turbo made
+    /// every binary raster, every barline abscissa, and every completed line
+    /// endpoint exact, and it removed this page's one core-field mismatch,
+    /// three of its medians, and six of its grades. What is left survived that
+    /// fix and appears on PNG pages whose binary rasters are bit-identical, so
+    /// it is an independent divergence inside `createInters`.
+    ///
+    /// Five inters across three PNG pages differ in grade by at most 0.005 and
+    /// one chula median sits a pixel high, which look like threshold effects.
+    /// `BachInvention5.jpg` still carries three medians 11 to 18 pixels short at
+    /// the bottom, which does not: that is structural and is the thread to pull
+    /// next.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
-        ("BachInvention5.jpg", 1, 9, 18.0, 19, 0.18),
+        ("BachInvention5.jpg", 0, 6, 18.0, 13, 0.18),
         ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),
         ("allegretto.png", 0, 0, 0.0, 0, 0.0),
         ("batuque.png", 0, 0, 0.0, 0, 0.0),
@@ -1914,39 +1900,18 @@ mod tests {
         pages
     }
 
-    /// `BachInvention5.jpg` is the corpus's only JPEG, and its binary raster is
-    /// the one input the port does not reproduce bit for bit.
-    ///
-    /// The cause is the JPEG decoder, not anything ported. Measured on this
-    /// page: Java's decode agrees with libjpeg exactly, while `image` 0.25's
-    /// `zune-jpeg` differs on 177046 of 5018112 grayscale samples by up to 4.
-    /// The adaptive threshold absorbs nearly all of that -- only 844 binary
-    /// pixels flip, 0.017%, and 820 of those are isolated single pixels flipping
-    /// in both directions, the signature of samples sitting on the threshold.
-    /// The older pure-Rust `jpeg-decoder` is no closer (224558 samples, delta 3).
-    ///
-    /// Proof that nothing downstream is implicated: re-encoding the same page
-    /// losslessly to PNG and running both runtimes over it yields **zero**
-    /// differing binary pixels. Every remaining GRID divergence on this page --
-    /// the one-pixel barline abscissa, the three completed-line endpoints, the
-    /// nine SIG medians, the section-membership counts -- descends from these
-    /// 844 pixels.
-    ///
-    /// Closing it needs a libjpeg-compatible decoder, which today means a C
-    /// dependency (libjpeg-turbo). That is a dependency decision, not a porting
-    /// fix, so the divergence is recorded rather than papered over.
-    const JPEG_DECODER_DIVERGENT_PAGE: &str = "BachInvention5.jpg";
-
-    /// Digest of the port's own binary raster for that page, pinned so the
-    /// JPEG path still cannot drift unnoticed.
-    const JPEG_PAGE_RUST_BINARY_DIGEST: u64 = 0xc267_5dde_2cfc_7545;
-
     /// Every page's binary raster must equal Java's bit for bit.
     ///
     /// This is the foundation the rest of GRID parity rests on: run tables,
     /// SCALE, filaments, projectors, and peaks all read this raster, so an
     /// input that already differs makes every later comparison unreliable. It is
     /// checked by digest rather than by shipping nine PNGs.
+    ///
+    /// The JPEG page only joined the other eight once decoding moved to
+    /// libjpeg-turbo. `image` 0.25's `zune-jpeg` differed from libjpeg on 177046
+    /// of 5018112 grayscale samples by up to 4, flipping 844 binary pixels
+    /// through the adaptive threshold, and every GRID divergence on that page
+    /// descended from those pixels.
     #[test]
     fn binary_rasters_match_the_java_oracle_across_the_example_corpus() {
         let oracle = java_binary_oracle();
@@ -1960,18 +1925,6 @@ mod tests {
                 "{name} raster size"
             );
             let produced = audiveris_image::ingest::fnv1a64_bytes(&recognition.binary);
-            if name == JPEG_DECODER_DIVERGENT_PAGE {
-                assert_ne!(
-                    produced, digest,
-                    "{name} now matches Java's binary: the JPEG decoder gap has closed, \
-                     so fold this page back into the exact assertion below"
-                );
-                assert_eq!(
-                    produced, JPEG_PAGE_RUST_BINARY_DIGEST,
-                    "{name} binary raster changed; the JPEG decode is no longer what was measured"
-                );
-                continue;
-            }
             assert_eq!(
                 produced, digest,
                 "{name} binary raster diverged from Java's"
