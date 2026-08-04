@@ -10,6 +10,7 @@
 //! almost-blank-page check. The GRID continuation will extend
 //! [`ScaleRecognition`] rather than replace it.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::grid_executor::HeadlessSkew;
@@ -18,11 +19,14 @@ use audiveris_image::bar_alignment::BarAlignment;
 use audiveris_image::bar_alignments::{
     AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
 };
-use audiveris_image::bar_column::StaffId;
+use audiveris_image::bar_column::{PeakId, StaffId};
 use audiveris_image::bar_connections::{
     ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
 };
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
+use audiveris_image::bars_coordinator::{
+    BarsCoordinatorParameters, BarsStaffState, BarsSystemState, process_bars_system,
+};
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{
@@ -32,9 +36,9 @@ use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::production_grid_params::production_grid_parameters;
 use audiveris_image::projection::{
     BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
-    PeakCoreParams, PeakRefinementParams, ShortProjection, StaffProjectionRequest,
+    PeakCoreParams, PeakRefinementParams, ProjectionBlank, ShortProjection, StaffProjectionRequest,
     StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
-    staff_projector_scale_parameters,
+    has_blank_between, staff_projector_scale_parameters,
 };
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
 use audiveris_image::run_table::{Orientation, RunTable, RunTableError, create_grid_run_tables};
@@ -168,6 +172,9 @@ pub struct PeakGraphReport {
     pub stick_count: usize,
     /// Peaks Java drops because no acceptable bar filament could be built.
     pub stickless_peak_count: usize,
+    /// Peaks surviving the `BarsRetriever` purges, i.e. real barlines.
+    pub retained_peaks: usize,
+    pub purged_peaks: usize,
     /// Staff ids grouped by shared aligned barlines, in Java's system order.
     pub systems: Vec<Vec<usize>>,
 }
@@ -235,7 +242,7 @@ fn project_staff_peaks(
     staff: &StaffCandidate,
     primary: &ClusterPassState,
     scale_parameters: &StaffProjectorScaleParameters,
-) -> Result<Vec<StaffPeak>, GridRecognitionError> {
+) -> Result<(Vec<StaffPeak>, Vec<ProjectionBlank>, i32), GridRecognitionError> {
     let lines: Vec<_> = staff
         .line_ids()
         .iter()
@@ -250,7 +257,11 @@ fn project_staff_peaks(
         })
         .collect::<Result<_, _>>()?;
     let Some((first, last)) = lines.first().zip(lines.last()) else {
-        return Ok(Vec::new());
+        return Ok((
+            Vec::new(),
+            Vec::new(),
+            scale_parameters.minimum_standard_blank_width,
+        ));
     };
     let middle = lines[lines.len() / 2];
     // Build each needed line's spline geometry once, not per abscissa.
@@ -347,7 +358,11 @@ fn project_staff_peaks(
         )
         .map_err(grid_stage("projector"))?;
 
-    Ok(result.peaks)
+    Ok((
+        result.peaks,
+        result.all_blanks,
+        scale_parameters.minimum_standard_blank_width,
+    ))
 }
 
 /// Builds Java `PeakGraph` alignments across staves and groups the staves
@@ -358,6 +373,7 @@ fn project_staff_peaks(
 /// candidate pair by inverted-slope agreement and width delta. Systems are the
 /// connected components over the surviving alignment edges, which is how Java
 /// derives its staff grouping before the connection purges.
+#[allow(clippy::too_many_arguments)]
 fn build_peak_graph(
     staff_peaks: &mut [Vec<StaffPeak>],
     alignment_staffs: &[AlignmentStaff],
@@ -365,6 +381,8 @@ fn build_peak_graph(
     interline: i32,
     raster_pixels: &[u8],
     lags: &InitialGridLags,
+    staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
+    bars_parameters: &BarsCoordinatorParameters,
     (width, height): (usize, usize),
 ) -> Result<PeakGraphReport, GridRecognitionError> {
     let skew = HeadlessSkew::new(
@@ -480,11 +498,101 @@ fn build_peak_graph(
     }
     merge_overlapping(&mut systems);
 
+    // Java `BarsRetriever.process` per system: drop peaks left of the staff
+    // start, unaligned peaks, curved and short peaks, then run the width,
+    // C-clef, and column purges. This narrows the raw projector candidates to
+    // real barlines.
+    let mut retained_peaks = 0usize;
+    let mut purged_peaks = 0usize;
+    for (system_index, member_ids) in systems.iter().enumerate() {
+        let mut bars_staffs = Vec::with_capacity(member_ids.len());
+        let mut system_graph: PeakGraph<BarAlignment> = PeakGraph::new();
+        let mut peak_ids: Vec<(PeakId, StaffPeakKey)> = Vec::new();
+        let mut next_peak_id = 1usize;
+        for staff_id in member_ids {
+            let Some(index) = alignment_staffs
+                .iter()
+                .position(|staff| staff.staff_id.value() == *staff_id)
+            else {
+                continue;
+            };
+            let peaks = staff_peaks[index].clone();
+            for peak in &peaks {
+                system_graph.add_vertex(peak.clone());
+                peak_ids.push((PeakId::new(next_peak_id), peak.key()));
+                next_peak_id += 1;
+            }
+            bars_staffs.push(
+                BarsStaffState::new(
+                    StaffId::new(*staff_id),
+                    alignment_staffs[index].left.round() as i32,
+                    false,
+                    peaks,
+                    staff_blanks[index].clone(),
+                )
+                .map_err(grid_stage("bars staff state"))?
+                .with_right(alignment_staffs[index].right.round() as i32),
+            );
+        }
+        // Re-derive the alignments inside this system's own graph.
+        let system_alignment_staffs: Vec<AlignmentStaff> = member_ids
+            .iter()
+            .filter_map(|staff_id| {
+                alignment_staffs
+                    .iter()
+                    .find(|staff| staff.staff_id.value() == *staff_id)
+                    .cloned()
+            })
+            .collect();
+        let mut system_report = AlignmentBuildReport::default();
+        find_all_alignments(
+            &mut system_graph,
+            &system_alignment_staffs,
+            AlignmentParameters {
+                sheet_slope: global_slope,
+                maximum_alignment_slope: 0.06,
+                maximum_alignment_delta_width: pixels(0.6, interline),
+            },
+            &mut system_report,
+        )
+        .map_err(grid_stage("system alignments"))?;
+        // Java `PeakGraph.purgeAlignments` keeps only the best alignment per
+        // peak and side, so column chains cannot contain a staff twice.
+        system_graph.purge_alignments();
+
+        let before: usize = member_ids
+            .iter()
+            .filter_map(|staff_id| {
+                alignment_staffs
+                    .iter()
+                    .position(|staff| staff.staff_id.value() == *staff_id)
+            })
+            .map(|index| staff_peaks[index].len())
+            .sum();
+        let _ = &peak_ids;
+        let mut system_state = BarsSystemState::new(system_index + 1, bars_staffs, system_graph)
+            .map_err(grid_stage("bars system state"))?;
+        let outcome = process_bars_system(&mut system_state, *bars_parameters)
+            .map_err(grid_stage("bars purges"))?;
+        // A peak can be reported by more than one purge stage; count distinct
+        // keys so the retained total is not undercounted.
+        let removed = outcome
+            .removed_peaks()
+            .iter()
+            .map(|removed| removed.peak)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        purged_peaks += removed;
+        retained_peaks += before.saturating_sub(removed);
+    }
+
     Ok(PeakGraphReport {
         alignment_count,
         connection_count,
         stick_count,
         stickless_peak_count,
+        retained_peaks,
+        purged_peaks,
         systems,
     })
 }
@@ -583,8 +691,9 @@ pub fn recognize_grid_lines(
     let mut staves = Vec::with_capacity(result.staffs().len());
     let mut staff_peaks: Vec<Vec<StaffPeak>> = Vec::with_capacity(result.staffs().len());
     let mut alignment_staffs: Vec<AlignmentStaff> = Vec::with_capacity(result.staffs().len());
+    let mut staff_blanks: Vec<BTreeMap<StaffPeakKey, bool>> = Vec::new();
     for staff in result.staffs() {
-        let projected = project_staff_peaks(
+        let (projected, blanks, minimum_standard_blank) = project_staff_peaks(
             &scale_recognition,
             projector_pixels,
             staff,
@@ -624,6 +733,23 @@ pub fn recognize_grid_lines(
             short: staff.is_short(),
             peaks: projected.iter().map(StaffPeak::key).collect(),
         });
+        // Java `BarsRetriever` asks each projector whether a standard blank
+        // separates the peak from the staff's line start.
+        let blank_evidence: BTreeMap<StaffPeakKey, bool> = projected
+            .iter()
+            .map(|peak| {
+                (
+                    peak.key(),
+                    has_blank_between(
+                        &blanks,
+                        staff.left().round() as i32,
+                        peak.start(),
+                        minimum_standard_blank,
+                    ),
+                )
+            })
+            .collect();
+        staff_blanks.push(blank_evidence);
         staff_peaks.push(projected);
         staves.push(StaffCandidateReport {
             id: staff.id(),
@@ -644,6 +770,8 @@ pub fn recognize_grid_lines(
         scale_recognition.scale.interline.main,
         projector_pixels,
         &lags,
+        &staff_blanks,
+        &parameters.bars,
         (scale_recognition.width, scale_recognition.height),
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
@@ -671,11 +799,13 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
         recognition.staves.len(),
     ));
     report.push_str(&format!(
-        "systems=alignments:{};connections:{};sticks:{};stickless:{};groups:{}\n",
+        "systems=alignments:{};connections:{};sticks:{};stickless:{};barlines:{};purged:{};groups:{}\n",
         recognition.peak_graph.alignment_count,
         recognition.peak_graph.connection_count,
         recognition.peak_graph.stick_count,
         recognition.peak_graph.stickless_peak_count,
+        recognition.peak_graph.retained_peaks,
+        recognition.peak_graph.purged_peaks,
         if recognition.peak_graph.systems.is_empty() {
             "none".to_owned()
         } else {
