@@ -366,10 +366,16 @@ fn project_staff_peaks(
     // mark every staff loses its opening barline to that purge.
     let mut peaks = result.peaks;
     let staff_left = staff.left().round() as i32;
-    if let Some(opening) = peaks
-        .iter_mut()
-        .find(|peak| peak.start() <= staff_left && peak.stop() >= staff_left - 1)
-    {
+    // The opening bar starts at or before the staff edge and sits within
+    // Java's `maxLeftExtremum` of it; anything further left is a brace or
+    // bracket, which `purgeTooLeft` already exempts on its own.
+    // Take the rightmost such peak: anything further left is a brace or
+    // bracket, and marking that instead would leave the real opening bar
+    // exposed to the purge.
+    if let Some(opening) = peaks.iter_mut().rfind(|peak| {
+        peak.start() <= staff_left
+            && staff_left - peak.stop() <= scale_parameters.maximum_left_extremum
+    }) {
         opening.set_staff_end(HorizontalSide::Left);
     }
     Ok((
@@ -600,6 +606,11 @@ fn build_peak_graph(
             .len();
         purged_peaks += removed;
         retained_peaks += before.saturating_sub(removed);
+        if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
+            for entry in outcome.removed_peaks() {
+                eprintln!("purge peak={:?} stage={:?}", entry.peak, entry.stage);
+            }
+        }
         let removed_keys: std::collections::BTreeSet<_> = outcome
             .removed_peaks()
             .iter()
@@ -1066,6 +1077,43 @@ mod tests {
             let expected: Vec<Vec<usize>> = expected.iter().map(|ids| ids.to_vec()).collect();
             assert_eq!(systems, expected, "{name} system grouping diverged");
         }
+    }
+
+    #[test]
+    fn chula_barlines_match_the_java_oracle_exactly() {
+        // Per-staff barline abscissae from a live Java Audiveris 5.11 GRID run
+        // (sheet#1.xml barline inter medians). Java reports 58 in total.
+        const JAVA: [&[i32]; 6] = [
+            &[
+                200, 464, 832, 1174, 1364, 1546, 1804, 1817, 1828, 1962, 2325,
+            ],
+            &[
+                202, 466, 833, 1175, 1364, 1546, 1804, 1818, 1830, 1963, 2326,
+            ],
+            &[86, 558, 986, 1283, 1297, 1452, 1902, 2325],
+            &[87, 558, 986, 1282, 1296, 1452, 1902, 2325],
+            &[82, 413, 460, 607, 976, 1344, 1668, 2034, 2312, 2322],
+            &[82, 414, 460, 608, 978, 1345, 1668, 2034, 2312, 2324],
+        ];
+        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
+            .expect("chula grid recognition");
+        let surviving = &recognition.peak_graph.surviving_barlines;
+        assert_eq!(surviving.len(), JAVA.len());
+        for ((staff_id, kept), expected) in surviving.iter().zip(JAVA) {
+            assert_eq!(
+                kept.len(),
+                expected.len(),
+                "staff {staff_id} kept {kept:?}, Java kept {expected:?}"
+            );
+            // Peak starts sit a few pixels left of Java's barline medians.
+            for (&actual, &java) in kept.iter().zip(expected) {
+                assert!(
+                    (java - actual).abs() <= 8,
+                    "staff {staff_id}: peak {actual} does not match Java barline {java}"
+                );
+            }
+        }
+        assert_eq!(recognition.peak_graph.retained_peaks, 58);
     }
 
     #[test]
