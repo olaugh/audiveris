@@ -1898,7 +1898,9 @@ fn append_page_scale_vectors(
     slug: &str,
     relative_path: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let loaded = ingest::load_max_channel_gray(root.join(relative_path))?;
+    let path = root.join(relative_path);
+    let loaded = ingest::load_max_channel_gray(&path)
+        .map_err(|error| format!("cannot load scale fixture {}: {error}", path.display()))?;
     let binary =
         adaptive::default_adaptive_filter(loaded.width(), loaded.height(), loaded.pixels());
     let vertical = RunTable::from_pixels(
@@ -3455,7 +3457,9 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
     ));
 
     if let Some(root) = root {
-        let loaded = ingest::load_max_channel_gray(root.join("data/examples/chula.png"))?;
+        let chula_path = root.join("data/examples/chula.png");
+        let loaded = ingest::load_max_channel_gray(&chula_path)
+            .map_err(|error| format!("cannot load fixture {}: {error}", chula_path.display()))?;
         lines.push(format!(
             "load.chula={}x{}/{:016x}",
             loaded.width(),
@@ -3606,9 +3610,14 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             "../../data/synth/josquin-4vperilludaveprolatum/page-001.png",
         )?;
 
-        let loaded = ingest::load_max_channel_gray(
-            root.join("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png"),
-        )?;
+        let dichterliebe_path =
+            root.join("app/src/test/resources/org/audiveris/omr/image/Dichterliebe01-1.png");
+        let loaded = ingest::load_max_channel_gray(&dichterliebe_path).map_err(|error| {
+            format!(
+                "cannot load fixture {}: {error}",
+                dichterliebe_path.display()
+            )
+        })?;
         lines.push(format!(
             "load.dichterliebe={}x{}/{:016x}",
             loaded.width(),
