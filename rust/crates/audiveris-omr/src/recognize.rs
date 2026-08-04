@@ -13,10 +13,19 @@
 use std::path::Path;
 
 use audiveris_image::adaptive;
+use audiveris_image::bar_column::StaffId;
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
-use audiveris_image::lines_coordinator::retrieve_staff_candidates;
+use audiveris_image::lines_coordinator::{
+    ClusterPassState, StaffCandidate, retrieve_staff_candidates,
+};
 use audiveris_image::production_grid_params::production_grid_parameters;
+use audiveris_image::projection::{
+    BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
+    PeakCoreParams, PeakRefinementParams, ShortProjection, StaffProjectionRequest,
+    StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
+    staff_projector_scale_parameters,
+};
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
 use audiveris_image::run_table::{Orientation, RunTable, RunTableError, create_grid_run_tables};
 use audiveris_image::scale_estimate::{
@@ -31,7 +40,8 @@ pub struct ScaleRecognition {
     pub height: usize,
     /// FNV-1a digest of the loaded grayscale raster, as in the parity vectors.
     pub gray_digest: u64,
-    /// Adaptive binary mask, black = 1, in row-major order.
+    /// Adaptive binary mask in Java ByteProcessor convention:
+    /// `0` is ink, `255` is background, row-major.
     pub binary: Vec<u8>,
     /// Vertical black runs of the binary mask, the SCALE/GRID source table.
     pub vertical_runs: RunTable,
@@ -133,6 +143,8 @@ pub struct StaffCandidateReport {
     pub small: bool,
     pub short: bool,
     pub line_count: usize,
+    /// Graded bar peaks from this staff's projector, as `(start, stop, grade)`.
+    pub peaks: Vec<(i32, i32, f64)>,
 }
 
 /// Result of running the native GRID staff-line slice on one raster page.
@@ -186,6 +198,142 @@ fn grid_stage<E: std::fmt::Debug>(stage: &'static str) -> impl FnOnce(E) -> Grid
     }
 }
 
+/// Runs one staff's `StaffProjector`, returning its graded bar peaks.
+///
+/// Reproduces Java `StaffProjector.process`: raster accumulation over the
+/// staff band, per-staff thresholds measured from actual line thickness
+/// (`computeLineThresholds`), and peak construction with refinement.
+fn project_staff_peaks(
+    recognition: &ScaleRecognition,
+    projector_pixels: &[u8],
+    staff: &StaffCandidate,
+    primary: &ClusterPassState,
+    scale_parameters: &StaffProjectorScaleParameters,
+) -> Result<Vec<(i32, i32, f64)>, GridRecognitionError> {
+    let lines: Vec<_> = staff
+        .line_ids()
+        .iter()
+        .map(|id| {
+            primary
+                .filaments()
+                .get(id)
+                .ok_or_else(|| GridRecognitionError::Stage {
+                    stage: "projector",
+                    message: format!("staff line {} is missing", id.value()),
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    let Some((first, last)) = lines.first().zip(lines.last()) else {
+        return Ok(Vec::new());
+    };
+    let middle = lines[lines.len() / 2];
+    // Build each needed line's spline geometry once, not per abscissa.
+    let geometry_of = |filament: &audiveris_image::filament::StaffFilament, which: &'static str| {
+        filament
+            .geometry()
+            .map_err(|error| GridRecognitionError::Stage {
+                stage: "projector",
+                message: format!("{which} staff line geometry: {error:?}"),
+            })
+    };
+    let first_geometry = geometry_of(first, "first")?;
+    let last_geometry = geometry_of(last, "last")?;
+    let middle_geometry = geometry_of(middle, "middle")?;
+    let ordinate = |geometry: &audiveris_image::filament::FilamentGeometry, x: i32| {
+        geometry.position_at(f64::from(x)).unwrap_or(0.0).round() as i32
+    };
+
+    // Java computeCoreLinesThickness: sum of line thicknesses, scaled by
+    // (n-1)/n for multi-line staves.
+    let mut lines_cumul = lines
+        .iter()
+        .map(|line| line.thickness().unwrap_or(0.0))
+        .sum::<f64>();
+    let line_count = lines.len();
+    if line_count > 1 {
+        lines_cumul *= (line_count as f64 - 1.0) / line_count as f64;
+    }
+    // blankThreshold uses floor, not rint; linesThreshold uses rint.
+    let blank_threshold = (0.5 * lines_cumul).floor() as i32;
+    let lines_threshold = lines_cumul.round_ties_even() as i32;
+    let specific_interline = staff.interline() as i32;
+    // chunkThreshold = (lineCount - 1) * fore + rint(1.2 * specificInterline)
+    let chunk_threshold = (line_count as i32 - 1) * recognition.scale.line.main
+        + (1.2 * f64::from(specific_interline)).round_ties_even() as i32;
+    let total_height = specific_interline * (line_count as i32 - 1);
+
+    let accumulation = ShortProjection::from_staff_raster(
+        recognition.width,
+        recognition.height,
+        projector_pixels,
+        StaffProjectionRequest::new(
+            staff.left().round() as i32,
+            staff.right().round() as i32,
+            scale_parameters.staff_abscissa_margin,
+        ),
+        |x| ordinate(&first_geometry, x),
+        |x| ordinate(&last_geometry, x),
+    )
+    .map_err(grid_stage("projection accumulation"))?;
+
+    let refinement = PeakRefinementParams::new(
+        scale_parameters.bar_threshold,
+        lines_threshold,
+        chunk_threshold,
+        scale_parameters.bar_refine_dx,
+        scale_parameters.chunk_width.max(1),
+    )
+    .map_err(grid_stage("peak refinement parameters"))?;
+    let result = accumulation
+        .finish_neutral(
+            recognition.width,
+            recognition.height,
+            projector_pixels,
+            NeutralStaffProjectorRequest {
+                staff_id: StaffId::new(staff.id()),
+                staff_left: staff.left().round() as i32,
+                staff_right: staff.right().round() as i32,
+                blank_threshold,
+                minimum_wide_blank_width: scale_parameters.minimum_wide_blank_width,
+                // Java topDerivativeNumber = 5, minDerivativeRatio = 0.3.
+                top_derivative_count: 5,
+                minimum_derivative_ratio: 0.3,
+                use_one_line_half_mode: scale_parameters.use_one_line_half_mode,
+                is_one_line_staff: false,
+                bar_threshold: scale_parameters.bar_threshold,
+                total_height,
+                peak_construction: PeakConstructionParams::new(
+                    refinement,
+                    scale_parameters.maximum_bar_width,
+                )
+                .map_err(grid_stage("peak construction parameters"))?,
+                peak_core: PeakCoreParams::new(scale_parameters.gap_threshold, 0.3)
+                    .map_err(grid_stage("peak core parameters"))?,
+                brace_search: None,
+            },
+            |x| {
+                PeakCoreGeometry::new(
+                    ordinate(&first_geometry, x),
+                    ordinate(&last_geometry, x),
+                    ordinate(&middle_geometry, x),
+                )
+            },
+        )
+        .map_err(grid_stage("projector"))?;
+
+    Ok(result
+        .peaks
+        .iter()
+        .map(|peak| {
+            (
+                peak.start(),
+                peak.stop(),
+                peak.impacts().map_or(0.0, |impacts| impacts.grade()),
+            )
+        })
+        .collect())
+}
+
 /// Runs the native GRID staff-line slice with production, scale-derived
 /// parameters.
 ///
@@ -223,10 +371,30 @@ pub fn recognize_grid_lines(
     let result = retrieve_staff_candidates(&mut primary, None, parameters.lines)
         .map_err(grid_stage("staff retrieval"))?;
 
-    let staves = result
-        .staffs()
-        .iter()
-        .map(|staff| StaffCandidateReport {
+    // The adaptive filter already emits Java ByteProcessor semantics
+    // (`FOREGROUND == 0`, `BACKGROUND == 255`), which is exactly what the
+    // projector expects; no inversion.
+    let projector_pixels = scale_recognition.binary.as_slice();
+
+    let projector_scale = staff_projector_scale_parameters(StaffProjectorScaleRequest {
+        large_interline: scale_recognition.scale.interline.main,
+        staff_specific_interline: 0,
+        is_one_line_staff: false,
+        // Java default BarlineHeight for standard staves.
+        barline_height: BarlineHeightSpec::Four,
+        ratios: StaffProjectorScaleRatios::java_defaults(),
+    });
+
+    let mut staves = Vec::with_capacity(result.staffs().len());
+    for staff in result.staffs() {
+        let peaks = project_staff_peaks(
+            &scale_recognition,
+            projector_pixels,
+            staff,
+            &primary,
+            &projector_scale,
+        )?;
+        staves.push(StaffCandidateReport {
             id: staff.id(),
             kind: format!("{:?}", staff.kind()).to_lowercase(),
             left: staff.left(),
@@ -235,8 +403,9 @@ pub fn recognize_grid_lines(
             small: staff.is_small(),
             short: staff.is_short(),
             line_count: staff.line_ids().len(),
-        })
-        .collect();
+            peaks,
+        });
+    }
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
     Ok(GridLinesRecognition {
@@ -262,7 +431,7 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
     ));
     for staff in &recognition.staves {
         report.push_str(&format!(
-            "staff={}:{}:x{:.0}-{:.0}:interline:{}:lines:{}{}{}\n",
+            "staff={}:{}:x{:.0}-{:.0}:interline:{}:lines:{}{}{}:peaks:{}\n",
             staff.id,
             staff.kind,
             staff.left,
@@ -271,7 +440,19 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
             staff.line_count,
             if staff.small { ":small" } else { "" },
             if staff.short { ":short" } else { "" },
+            staff.peaks.len(),
         ));
+        if !staff.peaks.is_empty() {
+            report.push_str(&format!(
+                "  peak-x={}\n",
+                staff
+                    .peaks
+                    .iter()
+                    .map(|(start, stop, _)| format!("{start}-{stop}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
     }
     report
 }
@@ -334,6 +515,50 @@ mod tests {
         assert!(report.contains("staves:6"));
         assert!(report.contains("staff=1:standard:x203-2323:interline:21:lines:5"));
         assert!(report.contains("staff=6:standard:x83-2309:interline:21:lines:5"));
+    }
+
+    #[test]
+    fn chula_peaks_cover_every_java_barline() {
+        // Barline abscissae extracted from a live Java Audiveris 5.11 GRID run
+        // on this page (sheet#1.xml barline inter medians, per staff).
+        const JAVA_BARLINES: [&[i32]; 6] = [
+            &[
+                200, 464, 832, 1174, 1364, 1546, 1804, 1817, 1828, 1962, 2325,
+            ],
+            &[
+                202, 466, 833, 1175, 1364, 1546, 1804, 1818, 1830, 1963, 2326,
+            ],
+            &[86, 558, 986, 1283, 1297, 1452, 1902, 2325],
+            &[87, 558, 986, 1282, 1296, 1452, 1902, 2325],
+            &[82, 413, 460, 607, 976, 1344, 1668, 2034, 2312, 2322],
+            &[82, 414, 460, 608, 978, 1345, 1668, 2034, 2312, 2324],
+        ];
+        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
+            .expect("chula grid recognition");
+        assert_eq!(recognition.staves.len(), JAVA_BARLINES.len());
+        for (staff, expected) in recognition.staves.iter().zip(JAVA_BARLINES) {
+            for &barline in expected {
+                // The projector emits raw candidates whose refined sides may
+                // exceed Java's final barline box by a few pixels; the
+                // peak-graph purges that narrow these are a later slice.
+                let covered = staff
+                    .peaks
+                    .iter()
+                    .any(|&(start, stop, _)| (start - 3..=stop + 3).contains(&barline));
+                assert!(
+                    covered,
+                    "staff {} lost Java barline at x={barline}; peaks: {:?}",
+                    staff.id, staff.peaks
+                );
+            }
+            // Every peak must be graded above Java's minimum inter grade.
+            assert!(staff.peaks.iter().all(|&(_, _, grade)| grade > 0.0));
+        }
+        // Raw projector output is deliberately a superset of the final
+        // barlines: stems and other vertical ink survive until the peak graph
+        // filters them.
+        let total: usize = recognition.staves.iter().map(|s| s.peaks.len()).sum();
+        assert!((58..=200).contains(&total), "unexpected peak total {total}");
     }
 
     #[test]
