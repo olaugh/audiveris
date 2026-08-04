@@ -13,38 +13,35 @@
 //! `retrieveLines`, `processBars`, and `completeLines`, mirroring Java
 //! `GridBuilder.buildInfo`.
 //!
-//! # Prefer the ported decorator chain
+//! # The ported decorator chain
 //!
-//! `retrieve_lines` below duplicates
-//! [`audiveris_image::prepared_lines::RawProductionRetrieveLines`], which
-//! already implements the same stage and handles more than this does: the
-//! optional small-interline secondary pass, retained sloped filaments, and the
-//! raw line-metadata handoff that carries the measured slope downstream. This
-//! struct exists because it was the shortest way to prove the executor runs in
-//! production at all; the parity-correct shape is the ported chain
+//! The parity-correct shape is the chain that
+//! `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` composes:
 //!
 //! ```text
-//! RawProductionRetrieveLines -> ProductionProcessBars -> ProductionCompleteLines
+//! ProductionCompleteLines -> ProductionProcessBars -> RawProductionRetrieveLines -> terminal
 //! ```
 //!
-//! composed exactly as `HeadlessGridExecutor::from_completed_raw_bars_complete_lines`
-//! does. Migrating to it is preferable to extending this struct.
+//! Each decorator owns one stage and delegates the rest, so the innermost
+//! element is a terminal that only records what reached it —
+//! [`TerminalRasterStages`] here, the `RasterStages` double in
+//! `grid_executor`'s tests.
 //!
-//! The reason that composition cannot simply be dropped in today is
-//! `ProductionProcessBars::new`, which takes an already-built
-//! `Vec<BarsSystemState>` rather than deriving one. Those states need staff
-//! projectors, graded peaks, alignments, and connections, none of which the
-//! chain produces. [`crate::recognize::recognize_grid_lines`] does produce them,
-//! oracle-matched against Java on every example page, so the migration is:
-//! keep that derivation, feed its `BarsSystemState` values into
-//! `ProductionProcessBars`, and let `ProductionCompleteLines` follow with the
-//! already-ported completion chain.
+//! [`production_retrieve_lines`] builds the innermost two links today. The
+//! remaining blocker for the outer two is `ProductionProcessBars::new`, which
+//! takes an already-built `Vec<BarsSystemState>` rather than deriving one.
+//! Those states need staff projectors, graded peaks, alignments, and
+//! connections, none of which the chain produces.
+//! [`crate::recognize::recognize_grid_lines`] does produce them, oracle-matched
+//! against Java on every example page, so the migration is: keep that
+//! derivation, feed its `BarsSystemState` values into `ProductionProcessBars`,
+//! and let `ProductionCompleteLines` follow with the already-ported completion
+//! chain.
 
 use audiveris_image::grid_lifecycle::{GridBuildStage, GridStageFailure};
-use audiveris_image::lines_coordinator::{ClusterPassState, StaffCandidate};
+use audiveris_image::prepared_lines::RawProductionRetrieveLines;
 use audiveris_image::production_grid_params::ProductionGridParameters;
 use audiveris_image::raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages};
-use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
 
 /// Failure raised by a production GRID stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,79 +58,28 @@ impl std::fmt::Display for ProductionStageError {
 
 impl std::error::Error for ProductionStageError {}
 
-fn stage_error<E: std::fmt::Debug>(stage: &'static str) -> impl FnOnce(E) -> ProductionStageError {
-    move |error| ProductionStageError {
-        stage,
-        message: format!("{error:?}"),
-    }
-}
-
-/// Production GRID stages driven by `HeadlessRasterGridBuilder`.
+/// Terminal stage recorder for the production GRID chain.
 ///
-/// The struct accumulates what each stage produces so later stages, and the
-/// caller once the run finishes, can read it.
-pub struct ProductionRasterStages {
-    parameters: ProductionGridParameters,
-    /// Measured sheet slope, available after `retrieve_lines`.
-    global_slope: f64,
-    primary: Option<ClusterPassState>,
-    staffs: Vec<StaffCandidate>,
-    filament_count: usize,
-    sloped_reject_count: usize,
-    discarded_filament_count: usize,
+/// The ported decorators (`RawProductionRetrieveLines`,
+/// `ProductionProcessBars`, `ProductionCompleteLines`) each implement one
+/// stage and delegate the rest, so the innermost element of the chain is a
+/// terminal that only records what reached it. This is that terminal; the
+/// `RasterStages` test double plays the same role inside `grid_executor`'s
+/// tests.
+#[derive(Debug, Default)]
+pub struct TerminalRasterStages {
     completed_stages: Vec<GridBuildStage>,
     swallowed: Vec<GridBuildStage>,
     finish_count: usize,
 }
 
-impl ProductionRasterStages {
+impl TerminalRasterStages {
     #[must_use]
-    pub fn new(parameters: ProductionGridParameters) -> Self {
-        Self {
-            parameters,
-            global_slope: 0.0,
-            primary: None,
-            staffs: Vec::new(),
-            filament_count: 0,
-            sloped_reject_count: 0,
-            discarded_filament_count: 0,
-            completed_stages: Vec::new(),
-            swallowed: Vec::new(),
-            finish_count: 0,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    #[must_use]
-    pub const fn global_slope(&self) -> f64 {
-        self.global_slope
-    }
-
-    #[must_use]
-    pub fn staffs(&self) -> &[StaffCandidate] {
-        &self.staffs
-    }
-
-    #[must_use]
-    pub const fn primary(&self) -> Option<&ClusterPassState> {
-        self.primary.as_ref()
-    }
-
-    #[must_use]
-    pub const fn filament_count(&self) -> usize {
-        self.filament_count
-    }
-
-    #[must_use]
-    pub const fn sloped_reject_count(&self) -> usize {
-        self.sloped_reject_count
-    }
-
-    #[must_use]
-    pub const fn discarded_filament_count(&self) -> usize {
-        self.discarded_filament_count
-    }
-
-    /// Stages that ran to completion, in order.
+    /// Stages that reached the terminal, in order.
     #[must_use]
     pub fn completed_stages(&self) -> &[GridBuildStage] {
         &self.completed_stages
@@ -150,60 +96,18 @@ impl ProductionRasterStages {
     }
 }
 
-impl RemainingRasterGridStages for ProductionRasterStages {
+impl RemainingRasterGridStages for TerminalRasterStages {
     type StepError = ProductionStageError;
     type OtherError = ProductionStageError;
 
-    /// Java `LinesRetriever.retrieveLines`: primary filament pass, measured
-    /// slope, cluster retrieval, and staff candidates.
-    ///
-    /// The primary pass runs twice, as Java does: once to measure the sheet
-    /// slope from the top filaments, then again with that slope seeded into
-    /// every slope-carrying parameter.
     fn retrieve_lines(
         &mut self,
-        state: &mut RasterGridBuildState,
+        _state: &mut RasterGridBuildState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
-        let lag = state.horizontal_lag().ok_or_else(|| {
-            GridStageFailure::Other(ProductionStageError {
-                stage: "retrieve_lines",
-                message: "the builder did not supply a horizontal lag".to_owned(),
-            })
-        })?;
-
-        let seed = build_primary_cluster_pass(lag, self.parameters.raw_primary.clone())
-            .map_err(stage_error("primary pass (slope seed)"))
-            .map_err(GridStageFailure::Step)?;
-        self.global_slope = seed.global_slope();
-
-        let pass = build_primary_cluster_pass(lag, self.parameters.raw_primary.clone())
-            .map_err(stage_error("primary pass"))
-            .map_err(GridStageFailure::Step)?;
-        self.filament_count = pass.factory_creation_ids().len();
-        self.sloped_reject_count = pass.sloped_ids().len();
-
-        let mut primary = pass.into_state();
-        let result = audiveris_image::lines_coordinator::retrieve_staff_candidates(
-            &mut primary,
-            None,
-            self.parameters
-                .lines
-                .with_global_slope(self.global_slope)
-                .map_err(stage_error("lines parameters"))
-                .map_err(GridStageFailure::Step)?,
-        )
-        .map_err(stage_error("staff retrieval"))
-        .map_err(GridStageFailure::Step)?;
-        self.discarded_filament_count = result.primary().discarded_filaments().len();
-        self.staffs = result.staffs().to_vec();
-        self.primary = Some(primary);
         self.completed_stages.push(GridBuildStage::RetrieveLines);
         Ok(())
     }
 
-    /// Java `BarsRetriever.process`. Not yet reimplemented behind this trait;
-    /// [`crate::recognize::recognize_grid_lines`] still owns the oracle-verified
-    /// projector, alignment, stick, connection, and purge chain.
     fn process_bars(
         &mut self,
         _state: &mut RasterGridBuildState,
@@ -212,8 +116,6 @@ impl RemainingRasterGridStages for ProductionRasterStages {
         Ok(())
     }
 
-    /// Java `LinesRetriever.completeLines`. The completion chain and its
-    /// parameters are ported; attaching them here is the next slice.
     fn complete_lines(
         &mut self,
         _state: &mut RasterGridBuildState,
@@ -231,10 +133,28 @@ impl RemainingRasterGridStages for ProductionRasterStages {
     }
 }
 
+/// Builds the ported `retrieveLines` stage over a terminal recorder.
+///
+/// This is the first link of the chain that
+/// `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` composes.
+/// `ProductionProcessBars` and `ProductionCompleteLines` wrap this once the
+/// derived `BarsSystemState` values are available.
+#[must_use]
+pub fn production_retrieve_lines(
+    parameters: &ProductionGridParameters,
+) -> RawProductionRetrieveLines<TerminalRasterStages> {
+    RawProductionRetrieveLines::new(
+        parameters.raw_primary.clone(),
+        parameters.lines,
+        TerminalRasterStages::new(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::recognize::recognize_scale;
+    use audiveris_image::prepared_lines::PreparedStaffStage;
     use audiveris_image::production_grid_params::production_grid_parameters;
     use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 
@@ -245,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn production_stages_retrieve_chula_staffs_through_the_builder() {
+    fn ported_retrieve_lines_stage_runs_chula_through_the_builder() {
         let recognition =
             recognize_scale(repo_path("data/examples/chula.png")).expect("chula scale");
         let parameters =
@@ -254,28 +174,28 @@ mod tests {
         let mut builder = HeadlessRasterGridBuilder::new(
             recognition.vertical_runs.clone(),
             raster,
-            ProductionRasterStages::new(parameters),
+            production_retrieve_lines(&parameters),
         );
 
         audiveris_image::grid_lifecycle::build_grid_info(&mut builder)
             .expect("grid build should succeed");
 
-        let stages = builder.stages();
-        // The builder must have driven all three stages in Java order.
+        // `RawProductionRetrieveLines` owns retrieveLines and forwards the
+        // other two stages to the terminal, so the terminal must see exactly
+        // those, in Java order.
+        let terminal = builder.stages().downstream();
         assert_eq!(
-            stages.completed_stages(),
-            [
-                GridBuildStage::RetrieveLines,
-                GridBuildStage::ProcessBars,
-                GridBuildStage::CompleteLines,
-            ]
+            terminal.completed_stages(),
+            [GridBuildStage::ProcessBars, GridBuildStage::CompleteLines]
         );
-        assert!(stages.swallowed_stages().is_empty());
-        assert_eq!(stages.finish_count(), 1);
-        // Same recognition result as the direct driver: six standard staves
-        // and the measured slope Java reports as 0.00792.
-        assert_eq!(stages.staffs().len(), 6);
-        assert!((stages.global_slope() - 0.007_915).abs() < 5e-6);
-        assert!(stages.staffs().iter().all(|staff| staff.interline() == 21));
+        assert!(terminal.swallowed_stages().is_empty());
+
+        // The ported stage published its prepared staffs: six for this page,
+        // the same count the direct driver and Java both report.
+        let staffs = builder
+            .stages_mut()
+            .take_prepared_staff_handoff()
+            .expect("retrieveLines must publish its prepared staffs");
+        assert_eq!(staffs.staffs.len(), 6);
     }
 }
