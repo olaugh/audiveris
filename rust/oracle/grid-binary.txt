@@ -1,0 +1,14 @@
+# FNV-1a-64 of the Java Audiveris 5.11 (JDK 25) BINARY raster, taken from
+# sheet#1/BINARY.png inside the saved .omr (batch -step GRID -save). Row-major,
+# Java ByteProcessor convention: 0 is ink, 255 is background.
+#
+# page <file> <width> <height> <fnv1a64>
+page D0392410-1.256.png 3105 4162 75e0d96907b57076
+page allegretto.png 2520 2183 f0239ff49497d0fc
+page batuque.png 2400 1944 b1c084d1b154f727
+page carmen.png 2520 3500 1793f85967471846
+page chula.png 2450 1954 2179468ede9f7ec6
+page cucaracha.png 2520 1984 e1d57cf55b30da01
+page hove.png 2520 1984 d3e3d82a80bea56a
+page zizi.png 2520 1386 215a933c9e60817b
+page BachInvention5.jpg 1936 2592 2a61617dfda1dc0d
