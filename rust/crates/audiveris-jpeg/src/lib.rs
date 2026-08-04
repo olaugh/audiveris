@@ -23,24 +23,30 @@
 //! adaptive binarization downstream turns them into flipped pixels, and GRID
 //! amplifies single flipped pixels into structural differences.
 //!
-//! # Known divergence
+//! # Damaged input
 //!
-//! Differential fuzzing against libjpeg found one, and it is not fixed. When a
-//! chroma plane has an **odd** number of rows, the vertical context libjpeg
-//! uses for the bottom rows of the fancy 2x2 upsampler is not the
-//! straightforward "nearer neighbour, clamped at the edge" rule this decoder
-//! implements, and a few samples in the last two output rows can differ by one.
+//! Truncation is reproduced: once the scan runs out, libjpeg stops decoding and
+//! leaves every later block zeroed, which the transform renders as flat
+//! mid-grey, and so does this decoder. Padding with zero bits and carrying on
+//! instead yields plausible-looking noise, and a corpus of scans is full of
+//! truncated files.
 //!
-//! What is ruled out: the decoded planes themselves. On the reproducer in
-//! `tests/data/known-divergence`, libjpeg's raw downsampled Cb and Cr planes,
-//! read back through `raw_data_out`, are identical to this decoder's, and the Y
-//! plane and every output row but the last two agree exactly. Whether it shows
-//! at all is value-dependent, which is why the generated fixtures with odd
-//! chroma heights still pass.
+//! Resynchronisation after *mid-scan* corruption is not reproduced. Where
+//! libjpeg resumes after extraneous bytes differs from where this decoder does,
+//! and blocks in the affected MCU row disagree. See
+//! `corrupt_resync_divergence_stays_confined_to_the_last_mcu_row`, which bounds
+//! it. This was the long tail called out when the decoder was proposed:
+//! matching libjpeg on clean input is mechanical, matching its error recovery
+//! is not.
 //!
-//! The example corpus page is 2592 rows, so its chroma plane is 1296 rows and
-//! even, and unaffected. A scan with an odd height could hit this, so it wants
-//! fixing before this decoder is pointed at a large corpus.
+//! # A caution about libjpeg's method selection
+//!
+//! Reproducing libjpeg means reproducing which algorithm it picks, not only the
+//! arithmetic of the algorithms. Both of its two-times upsamplers are chosen
+//! only when a component's downsampled width exceeds two, and it replicates
+//! instead below that. Filtering unconditionally is wrong for 4:2:0 on any image
+//! at most four pixels wide. Differential fuzzing caught it; reading the
+//! transform code alone would not have, because the transform was correct.
 //!
 //! # Scope
 //!
@@ -181,6 +187,12 @@ fn range_limit_idct(value: i32) -> u8 {
 // ---------------------------------------------------------------------------
 // Inverse DCT
 // ---------------------------------------------------------------------------
+
+/// Widest plane for which libjpeg declines the fancy upsamplers.
+///
+/// Both two-times paths test `downsampled_width > 2` before choosing the
+/// triangle filter, so a plane of one or two samples is replicated instead.
+const FANCY_UPSAMPLE_MINIMUM_WIDTH: usize = 2;
 
 /// Fractional bits in the fixed-point multipliers.
 const CONST_BITS: i32 = 13;
@@ -391,6 +403,21 @@ impl ColourTables {
 // Upsampling
 // ---------------------------------------------------------------------------
 
+/// Plain replication, which libjpeg uses instead of the triangle filter when a
+/// plane is at most two samples wide.
+///
+/// Both of libjpeg's two-times paths select the fancy filter only when
+/// `downsampled_width > 2`, and fall back here otherwise. It is not a rounding
+/// detail: replication and the triangle filter give visibly different answers,
+/// and a decoder that always filters disagrees on any image whose chroma plane
+/// is that narrow -- which for 4:2:0 means any image at most four pixels wide.
+fn box_upsample_h2(input: &[u8], output: &mut [u8], width: usize) {
+    for column in 0..width {
+        output[column * 2] = input[column];
+        output[column * 2 + 1] = input[column];
+    }
+}
+
 /// Triangle-filter upsampling by two horizontally, libjpeg's "fancy" variant.
 ///
 /// The output weights are three parts near sample to one part far, and the two
@@ -496,6 +523,15 @@ struct BitReader<'a> {
     position: usize,
     bits: u32,
     count: u32,
+    /// Set once the reader has been asked for a bit the scan does not contain.
+    ///
+    /// libjpeg tracks the same condition and stops decoding entirely once it
+    /// holds, leaving every later block zeroed, which an inverse transform turns
+    /// into a flat mid-grey. Padding with zero bits and carrying on instead
+    /// decodes plausible-looking noise, so matching this is what parity on a
+    /// truncated file means -- and truncated files are exactly what a corpus of
+    /// scans contains.
+    insufficient: bool,
 }
 
 impl<'a> BitReader<'a> {
@@ -505,6 +541,7 @@ impl<'a> BitReader<'a> {
             position,
             bits: 0,
             count: 0,
+            insufficient: false,
         }
     }
 
@@ -521,14 +558,20 @@ impl<'a> BitReader<'a> {
                             self.position += 2;
                             0xFF
                         }
-                        _ => 0,
+                        _ => {
+                            self.insufficient = true;
+                            0
+                        }
                     }
                 }
                 Some(byte) => {
                     self.position += 1;
                     *byte
                 }
-                None => 0,
+                None => {
+                    self.insufficient = true;
+                    0
+                }
             };
             self.bits = u32::from(byte);
             self.count = 8;
@@ -887,6 +930,11 @@ fn decode_scan(
                 until_restart -= 1;
             }
 
+            // libjpeg decides this once per MCU: having run out of scan data, it
+            // stops decoding and leaves the rest of the image zeroed rather than
+            // reading meaning into padding.
+            let exhausted = reader.insufficient;
+
             for (index, component) in components.iter().enumerate() {
                 let quantizer = quantizers
                     .get(component.quantizer)
@@ -910,6 +958,23 @@ fn decode_scan(
                 for block_y in 0..component.vertical {
                     for block_x in 0..component.horizontal {
                         let mut coefficients = [0i16; 64];
+
+                        if exhausted {
+                            // Left zeroed, which the transform renders as the
+                            // flat mid-grey libjpeg produces here.
+                            let mut block = [0u8; 64];
+                            inverse_dct(&coefficients, quantizer, &mut block);
+                            write_block(
+                                &mut planes[index],
+                                component,
+                                mcu_x,
+                                mcu_y,
+                                block_x,
+                                block_y,
+                                &block,
+                            );
+                            continue;
+                        }
 
                         let symbol = reader.decode(dc)?;
                         // The standard caps a DC magnitude category at 15; a
@@ -945,15 +1010,15 @@ fn decode_scan(
 
                         let mut block = [0u8; 64];
                         inverse_dct(&coefficients, quantizer, &mut block);
-
-                        let plane = &mut planes[index];
-                        let origin_x = (mcu_x * component.horizontal + block_x) * 8;
-                        let origin_y = (mcu_y * component.vertical + block_y) * 8;
-                        for row in 0..8 {
-                            let target = (origin_y + row) * plane.stride + origin_x;
-                            plane.samples[target..target + 8]
-                                .copy_from_slice(&block[row * 8..row * 8 + 8]);
-                        }
+                        write_block(
+                            &mut planes[index],
+                            component,
+                            mcu_x,
+                            mcu_y,
+                            block_x,
+                            block_y,
+                            &block,
+                        );
                     }
                 }
             }
@@ -961,6 +1026,25 @@ fn decode_scan(
     }
 
     Ok(planes)
+}
+
+/// Places one transformed block into its component plane.
+#[allow(clippy::too_many_arguments)]
+fn write_block(
+    plane: &mut Plane,
+    component: &Component,
+    mcu_x: usize,
+    mcu_y: usize,
+    block_x: usize,
+    block_y: usize,
+    block: &[u8; 64],
+) {
+    let origin_x = (mcu_x * component.horizontal + block_x) * 8;
+    let origin_y = (mcu_y * component.vertical + block_y) * 8;
+    for row in 0..8 {
+        let target = (origin_y + row) * plane.stride + origin_x;
+        plane.samples[target..target + 8].copy_from_slice(&block[row * 8..row * 8 + 8]);
+    }
 }
 
 /// Upsamples every plane to full resolution and converts to output samples.
@@ -1046,8 +1130,13 @@ fn upsample_plane(
         (2, 1) => {
             let mut output = vec![0u8; width * height];
             let mut expanded = vec![0u8; plane.width * 2];
+            let fancy = plane.width > FANCY_UPSAMPLE_MINIMUM_WIDTH;
             for row in 0..height {
-                fancy_upsample_h2(row_of(row), &mut expanded, plane.width);
+                if fancy {
+                    fancy_upsample_h2(row_of(row), &mut expanded, plane.width);
+                } else {
+                    box_upsample_h2(row_of(row), &mut expanded, plane.width);
+                }
                 let target = &mut output[row * width..row * width + width];
                 let take = width.min(expanded.len());
                 target[..take].copy_from_slice(&expanded[..take]);
@@ -1057,7 +1146,17 @@ fn upsample_plane(
         (2, 2) => {
             let mut output = vec![0u8; width * height];
             let mut expanded = vec![0u8; plane.width * 2];
+            let fancy = plane.width > FANCY_UPSAMPLE_MINIMUM_WIDTH;
             for row in 0..height {
+                if !fancy {
+                    // Replication in both directions: no vertical mixing at all,
+                    // so the row's own samples are simply doubled.
+                    box_upsample_h2(row_of(row / 2), &mut expanded, plane.width);
+                    let target = &mut output[row * width..row * width + width];
+                    let take = width.min(expanded.len());
+                    target[..take].copy_from_slice(&expanded[..take]);
+                    continue;
+                }
                 // Each output row pairs its source row with the vertical
                 // neighbour it lies nearer; edges replicate.
                 let source_row = row / 2;

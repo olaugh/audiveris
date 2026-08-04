@@ -42,21 +42,28 @@ tests in `tests/data/regressions` so they are covered on stable:
 - one carried a Huffman table whose DC symbol exceeded the standard's magnitude
   range, overflowing a shift. Now rejected as `InvalidMagnitudeCategory`.
 
-One sample divergence, found and **not fixed**. When a chroma plane has an odd
-number of rows, the vertical context libjpeg uses for the bottom rows of the
-fancy 2x2 upsampler differs from the straightforward clamp-at-the-edge rule, and
-a few samples in the last two output rows can differ by one.
+Three sample divergences found by `matches_libjpeg`. Two are fixed:
 
-The decode is not implicated: on the reproducer, libjpeg's raw downsampled
-planes read back through `raw_data_out` are identical to ours, and only the last
-two output rows disagree. Whether it shows is value-dependent, which is why
-generated fixtures with odd chroma heights still pass. The corpus page is 2592
-rows, so its chroma plane is even and unaffected.
+- **Narrow planes.** libjpeg picks its fancy two-times upsamplers only when a
+  component's downsampled width exceeds two, and replicates instead below that.
+  This decoder filtered unconditionally, so for 4:2:0 any image at most four
+  pixels wide decoded differently. Reproducing libjpeg means reproducing which
+  method it selects, not only the arithmetic of each method -- reading the
+  transform code would never have shown this, because the transform was right.
+- **Truncated scans.** Once the data runs out libjpeg stops decoding and leaves
+  the remaining blocks zeroed, a flat mid-grey. Padding with zero bits and
+  carrying on produces plausible-looking noise instead. Scans are full of
+  truncated files, so this one matters.
 
-The reproducer is in `../tests/data/known-divergence`, bounded by
-`known_chroma_upsampling_divergence_stays_bounded`. Until it is fixed, the
-`matches_libjpeg` target will rediscover it; minimize new crashes against that
-fixture before assuming they are separate.
+One is open and bounded by a test rather than blessed:
+
+- **Resynchronisation after mid-scan corruption.** Where libjpeg resumes after
+  extraneous bytes is not reproduced, and blocks in the affected MCU row
+  disagree. This is the long tail flagged when the decoder was proposed:
+  matching libjpeg on clean input is mechanical, matching its recovery is not.
+  The fixture is `../tests/data/corrupt-resync-80x80-420.bin`; the fuzzer will
+  keep rediscovering this class, so minimize new crashes against it before
+  assuming they are separate.
 
 Crashes land in `artifacts/`. Copy new ones into `tests/data/regressions` so the
 fix stays covered without a nightly toolchain.
