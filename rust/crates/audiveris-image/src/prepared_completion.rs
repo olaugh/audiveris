@@ -8,7 +8,7 @@
 //! acquisition precedes it, so acquisition failure does not finish the inner
 //! completion timer, while every later success or failure does.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     crossing_completion::{
@@ -517,7 +517,7 @@ where
         &mut self,
         raster: &mut RasterGridBuildState,
     ) -> Result<(), GridStageFailure<Self::StepError, Self::OtherError>> {
-        let staffs = self
+        let mut staffs = self
             .upstream
             .prepared_staff_handoff()
             .ok_or_else(|| {
@@ -525,6 +525,15 @@ where
             })?
             .staffs
             .clone();
+        // Java `defineEndPoints` pins every line ending at
+        // `staff.getAbscissa(side)`, which `BarsRetriever` refined during
+        // `processBars`: the start column sets LEFT, `verifyLinesRoot` may push
+        // it right, and `refineRightEnds` sets RIGHT. The prepared staffs still
+        // carry the cluster candidate limits from `retrieveLines`, so adopt the
+        // refined ones before the endpoints are computed from them.
+        if let Some(handoff) = self.prepared_bars_handoff.as_ref() {
+            adopt_refined_staff_limits(&mut staffs, handoff);
+        }
         let horizontal_sections = raster
             .horizontal_lag()
             .ok_or_else(|| {
@@ -593,6 +602,27 @@ where
 
     fn finish(&mut self) {
         self.upstream.finish();
+    }
+}
+
+/// Replaces each prepared staff's abscissae with the ones `BarsRetriever`
+/// refined, keyed by staff id.
+///
+/// A staff the bars handoff does not mention keeps its candidate limits: that
+/// is a staff `processBars` never saw, and inventing a limit for it would be
+/// worse than leaving the retrieval's own answer in place.
+fn adopt_refined_staff_limits(staffs: &mut [PreparedStaff], handoff: &PreparedBarsHandoff) {
+    let mut refined = HashMap::new();
+    for system in &handoff.systems {
+        for (id, limits) in system.staff_ids.iter().zip(system.staff_limits.iter()) {
+            refined.insert(*id, *limits);
+        }
+    }
+    for staff in staffs {
+        if let Some(&(left, right)) = refined.get(&staff.id) {
+            staff.left = f64::from(left);
+            staff.right = f64::from(right);
+        }
     }
 }
 
@@ -996,6 +1026,10 @@ mod tests {
                     system_id,
                     staff_ids: staff_ids.to_vec(),
                     staff_peaks: vec![Vec::new(); staff_ids.len()],
+                    // These fixtures exercise ownership validation, not staff
+                    // geometry; leaving the limits empty keeps the prepared
+                    // staffs' own abscissae in place.
+                    staff_limits: Vec::new(),
                     brace_peaks: vec![None; staff_ids.len()],
                     vertical_plans: Vec::new(),
                     maximum_group_gap: 3,

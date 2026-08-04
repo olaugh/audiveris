@@ -905,26 +905,20 @@ pub fn process_bars_peak_purges(
     Ok(result)
 }
 
-/// Continue Java `BarsRetriever.process` through `refineRightEnds` and
-/// `purgeCClefs`.
+/// Java `BarsRetriever.refineRightEnds` on its own.
 ///
-/// Right endpoints are committed for every staff before C-clef traversal
-/// begins. A missing later staff's evidence therefore retains the exact
-/// earlier projector/graph mutation prefix.
-pub fn process_bars_right_ends_and_c_clefs(
+/// Split out of [`process_bars_right_ends_and_c_clefs`] because it is the only
+/// stage that sets a staff's right abscissa, and callers that already ran the
+/// C-clef purge need this without repeating it. Java runs the two back to back;
+/// the composed entry point below preserves that.
+///
+/// Every staff commits before the caller sees a failure, so a missing later
+/// staff's evidence retains the exact earlier projector/graph mutation prefix.
+pub fn process_bars_right_ends(
     state: &mut BarsSystemState,
     right_evidence: &[BarsRightEvidence],
-    parameters: BarsRightCClefParameters,
-) -> Result<BarsRightCClefResult, BarsCoordinatorError> {
-    if parameters.maximum_double_bar_gap < 0
-        || parameters.c_clef.minimum_first_peak_width < 0
-        || parameters.c_clef.maximum_second_peak_width < 0
-        || parameters.c_clef.minimum_measure_width < 0
-        || parameters.c_clef.tail_width < 0
-    {
-        return Err(BarsCoordinatorError::InvalidRightCClefParameters);
-    }
-    let mut result = BarsRightCClefResult::default();
+) -> Result<Vec<RightEndUpdate>, BarsCoordinatorError> {
+    let mut updates = Vec::with_capacity(state.staffs.len());
     for staff_index in 0..state.staffs.len() {
         let staff_id = state.staffs[staff_index].staff_id;
         let evidence = right_evidence
@@ -958,13 +952,39 @@ pub fn process_bars_right_ends_and_c_clefs(
                 .expect("projector right peak remains in its system graph")
                 .set_staff_end(HorizontalSide::Right);
         }
-        result.right_updates.push(RightEndUpdate {
+        updates.push(RightEndUpdate {
             staff_id,
             lines_right,
             staff_right: transition.staff_right,
             marked_peak,
         });
     }
+    Ok(updates)
+}
+
+/// Continue Java `BarsRetriever.process` through `refineRightEnds` and
+/// `purgeCClefs`.
+///
+/// Right endpoints are committed for every staff before C-clef traversal
+/// begins. A missing later staff's evidence therefore retains the exact
+/// earlier projector/graph mutation prefix.
+pub fn process_bars_right_ends_and_c_clefs(
+    state: &mut BarsSystemState,
+    right_evidence: &[BarsRightEvidence],
+    parameters: BarsRightCClefParameters,
+) -> Result<BarsRightCClefResult, BarsCoordinatorError> {
+    if parameters.maximum_double_bar_gap < 0
+        || parameters.c_clef.minimum_first_peak_width < 0
+        || parameters.c_clef.maximum_second_peak_width < 0
+        || parameters.c_clef.minimum_measure_width < 0
+        || parameters.c_clef.tail_width < 0
+    {
+        return Err(BarsCoordinatorError::InvalidRightCClefParameters);
+    }
+    let mut result = BarsRightCClefResult {
+        right_updates: process_bars_right_ends(state, right_evidence)?,
+        ..BarsRightCClefResult::default()
+    };
 
     let id_to_key = state.peak_ids.clone();
     for staff_index in 0..state.staffs.len() {

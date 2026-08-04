@@ -2416,6 +2416,7 @@ mod tests {
                 system_id: 1,
                 staff_ids: vec![1],
                 staff_peaks: vec![vec![bar]],
+                staff_limits: vec![(0, 100)],
                 brace_peaks: vec![None],
                 vertical_plans: Vec::new(),
                 maximum_group_gap: 3,

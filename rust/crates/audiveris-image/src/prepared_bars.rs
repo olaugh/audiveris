@@ -12,8 +12,9 @@ use crate::{
     bar_alignment::BarAlignment,
     bar_column::StaffId,
     bars_coordinator::{
-        BarsCoordinatorError, BarsCoordinatorParameters, BarsPurgeParameters, BarsSystemState,
-        RemovedPeak, process_bars_peak_purges, process_bars_system,
+        BarsCoordinatorError, BarsCoordinatorParameters, BarsPurgeParameters, BarsRightEvidence,
+        BarsRootEvidence, BarsSystemState, RemovedPeak, process_bars_after_braces,
+        process_bars_peak_purges, process_bars_right_ends, process_bars_system,
     },
     bars_logic::{ConnectionInterPlan, VerticalInterPlan},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
@@ -36,6 +37,11 @@ pub struct PreparedBarsSystem {
     /// valid staff may own no surviving bar peak.
     pub staff_ids: Vec<usize>,
     pub staff_peaks: Vec<Vec<StaffPeak>>,
+    /// Java `staff.getAbscissa(LEFT/RIGHT)` per staff, after `BarsRetriever`
+    /// refined it: the start column sets LEFT, `verifyLinesRoot` may push it
+    /// right again, and `refineRightEnds` sets RIGHT. `completeLines` pins every
+    /// line ending at these, so they must travel with the peaks.
+    pub staff_limits: Vec<(i32, i32)>,
     /// Java `StaffProjector.getBracePeak()` per staff, kept detached from the
     /// ordinary peak list and SIG promotion path.
     pub brace_peaks: Vec<Option<StaffPeak>>,
@@ -95,8 +101,19 @@ pub struct ProductionProcessBars<Upstream> {
     parameters: BarsCoordinatorParameters,
     maximum_group_gap: i32,
     extending: Option<ExtendingPurge>,
+    limits: Option<StaffLimitRefinement>,
     handoff: Option<PreparedBarsHandoff>,
     removals: Vec<(usize, RemovedPeak)>,
+}
+
+/// Projector evidence for the two stages that set a staff's abscissae.
+///
+/// Both need the staff's projection blanks, which `BarsSystemState` does not
+/// carry, so they are supplied here for the same reason the extending purge is.
+#[derive(Clone, Debug)]
+struct StaffLimitRefinement {
+    root_evidence: Vec<BarsRootEvidence>,
+    right_evidence: Vec<BarsRightEvidence>,
 }
 
 /// Inputs for Java `BarsRetriever.purgeExtendingPeaks`.
@@ -132,6 +149,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             parameters,
             maximum_group_gap,
             extending: None,
+            limits: None,
             handoff: None,
             removals: Vec::new(),
         })
@@ -153,6 +171,35 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         self.extending = Some(ExtendingPurge {
             filament_bounds,
             parameters,
+        });
+        self
+    }
+
+    /// Enables Java's two staff-abscissa refinements: `verifyLinesRoot` and
+    /// `refineRightEnds`.
+    ///
+    /// Without this the handoff publishes the staff limits as the start column
+    /// left them, and `completeLines` pins every staff line ending at an
+    /// unrefined right abscissa. Evidence is looked up by staff id, so passing
+    /// the whole sheet's is fine.
+    ///
+    /// Ordering caveat: Java runs `verifyLinesRoot` before the left/unaligned/
+    /// extending purges and `refineRightEnds` after them, whereas this runs both
+    /// after. `verifyLinesRoot` only fires on single-staff systems and only when
+    /// the first peak sits far enough past the preceding blank; when it does
+    /// fire it raises the staff's left abscissa, which would feed
+    /// `purgeLeftPeaks`. That the barline output already matches Java exactly on
+    /// every example page is the evidence this does not bite there. Reordering
+    /// needs the full staged sequence, which also needs a `GridSig`.
+    #[must_use]
+    pub fn with_staff_limit_refinement(
+        mut self,
+        root_evidence: Vec<BarsRootEvidence>,
+        right_evidence: Vec<BarsRightEvidence>,
+    ) -> Self {
+        self.limits = Some(StaffLimitRefinement {
+            root_evidence,
+            right_evidence,
         });
         self
     }
@@ -231,6 +278,18 @@ impl<Upstream> ProductionProcessBars<Upstream> {
                         self.handoff = Some(handoff);
                         return Err(ProductionProcessBarsError::Bars { system_id, source });
                     }
+                }
+            }
+            // Java `verifyLinesRoot` (single-staff systems only) then
+            // `refineRightEnds`, in that relative order.
+            if let Some(limits) = self.limits.as_ref() {
+                if let Err(source) = process_bars_after_braces(system, &limits.root_evidence) {
+                    self.handoff = Some(handoff);
+                    return Err(ProductionProcessBarsError::Bars { system_id, source });
+                }
+                if let Err(source) = process_bars_right_ends(system, &limits.right_evidence) {
+                    self.handoff = Some(handoff);
+                    return Err(ProductionProcessBarsError::Bars { system_id, source });
                 }
             }
             if let Err(error) = append_system(
@@ -442,6 +501,11 @@ fn append_system_in_place<UpstreamError>(
             .staffs()
             .iter()
             .map(|staff| staff.peaks().to_vec())
+            .collect(),
+        staff_limits: state
+            .staffs()
+            .iter()
+            .map(|staff| (staff.left(), staff.right()))
             .collect(),
         brace_peaks: state
             .staffs()

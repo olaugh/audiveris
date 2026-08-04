@@ -25,7 +25,9 @@ use audiveris_image::bar_connections::{
     ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
 };
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
-use audiveris_image::bars_coordinator::{BarsPurgeParameters, BarsStaffState, BarsSystemState};
+use audiveris_image::bars_coordinator::{
+    BarsPurgeParameters, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
+};
 use audiveris_image::grid_lifecycle::build_grid_info;
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_completion::LineCompletionStage;
@@ -474,6 +476,8 @@ fn build_peak_graph(
     raster_pixels: &[u8],
     lags: &InitialGridLags,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
+    staff_projection_blanks: &[Vec<ProjectionBlank>],
+    projector_scale: &StaffProjectorScaleParameters,
     production: &ProductionGridParameters,
     source: &RunTable,
     (width, height): (usize, usize),
@@ -567,6 +571,11 @@ fn build_peak_graph(
     )
     .map_err(grid_stage("connections"))?;
 
+    // Java `PeakGraph.buildSystems` order: findAllAlignments, findConnections,
+    // splitMergedGroups, then purgeAlignments -- on one sheet-wide graph, which
+    // is also the graph the per-system columns are later built from.
+    graph.purge_alignments();
+
     let mut connection_count = 0usize;
     let mut connected_pairs: Vec<(usize, usize)> = Vec::new();
     for decision in connection_report.decisions() {
@@ -598,8 +607,7 @@ fn build_peak_graph(
         &systems,
         &stick_state,
         staff_blanks,
-        global_slope,
-        interline,
+        &graph,
     )?;
 
     // Java `BarsRetriever.process` per system: drop peaks left of the staff
@@ -607,6 +615,36 @@ fn build_peak_graph(
     // C-clef, and column purges, and finally `purgeExtendingPeaks`. This
     // narrows the raw projector candidates to real barlines, and is exactly the
     // ported `ProductionProcessBars` stage.
+    // Java `verifyLinesRoot` and `refineRightEnds` read the staff's projection
+    // blanks, the sheet's right edge, and the projector's blank/extremum
+    // thresholds. `sheet_right` is Java's `sheet.getWidth() - 1`.
+    let sheet_right = i32::try_from(width).unwrap_or(i32::MAX).saturating_sub(1);
+    let (root_evidence, right_evidence): (Vec<_>, Vec<_>) = alignment_staffs
+        .iter()
+        .enumerate()
+        .map(|(index, staff)| {
+            let blanks = staff_projection_blanks
+                .get(index)
+                .cloned()
+                .unwrap_or_default();
+            (
+                BarsRootEvidence {
+                    staff_id: staff.staff_id,
+                    blanks: blanks.clone(),
+                    minimum_small_blank_width: projector_scale.minimum_small_blank_width,
+                    maximum_left_extremum: projector_scale.maximum_left_extremum,
+                },
+                BarsRightEvidence {
+                    staff_id: staff.staff_id,
+                    blanks,
+                    sheet_right,
+                    minimum_small_blank_width: projector_scale.minimum_small_blank_width,
+                    maximum_right_extremum: projector_scale.maximum_right_extremum,
+                },
+            )
+        })
+        .unzip();
+
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
     let bars = ProductionProcessBars::new(
         RawProductionRetrieveLines::new(
@@ -628,7 +666,8 @@ fn build_peak_graph(
             // maxBarExtension = rint(1.0 * interline).
             maximum_bar_extension: f64::from(pixels(1.0, interline)),
         },
-    );
+    )
+    .with_staff_limit_refinement(root_evidence, right_evidence);
     // The full ported decorator chain, composed as
     // `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` does.
     // `retrieveLines` runs inside it and republishes the staffs, so
@@ -730,8 +769,7 @@ fn derive_bars_systems(
     systems: &[Vec<usize>],
     stick_state: &BarStickBuildState,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
-    global_slope: f64,
-    interline: i32,
+    sheet_graph: &PeakGraph<BarAlignment>,
 ) -> Result<DerivedBarsSystems, GridRecognitionError> {
     let filament_bounds: Vec<(StaffPeakKey, PeakBounds)> = stick_state
         .sticks()
@@ -776,31 +814,21 @@ fn derive_bars_systems(
                 .with_right(alignment_staffs[index].right.round() as i32),
             );
         }
-        // Re-derive the alignments inside this system's own graph.
-        let system_alignment_staffs: Vec<AlignmentStaff> = member_ids
-            .iter()
-            .filter_map(|staff_id| {
-                alignment_staffs
-                    .iter()
-                    .find(|staff| staff.staff_id.value() == *staff_id)
-                    .cloned()
-            })
-            .collect();
-        let mut system_report = AlignmentBuildReport::default();
-        find_all_alignments(
-            &mut system_graph,
-            &system_alignment_staffs,
-            AlignmentParameters {
-                sheet_slope: global_slope,
-                maximum_alignment_slope: 0.06,
-                maximum_alignment_delta_width: pixels(0.6, interline),
-            },
-            &mut system_report,
-        )
-        .map_err(grid_stage("system alignments"))?;
-        // Java `PeakGraph.purgeAlignments` keeps only the best alignment per
-        // peak and side, so column chains cannot contain a staff twice.
-        system_graph.purge_alignments();
+        // Java keeps a single sheet-wide `PeakGraph` and builds each system's
+        // columns from it, so this system's graph is that graph's induced
+        // subgraph, not a fresh re-derivation. Rebuilding would re-run
+        // `findAllAlignments` and drop every `findConnections` promotion, which
+        // leaves `BarColumn::is_fully_connected` false for every column and so
+        // no start column at all.
+        let members: std::collections::BTreeSet<StaffPeakKey> =
+            system_graph.vertices().iter().map(StaffPeak::key).collect();
+        for edge in sheet_graph.edges() {
+            if members.contains(&edge.source()) && members.contains(&edge.target()) {
+                system_graph
+                    .add_edge(edge.source(), edge.target(), *edge.relation())
+                    .map_err(grid_stage("system graph edge"))?;
+            }
+        }
 
         states.push(
             BarsSystemState::new(system_index + 1, bars_staffs, system_graph)
@@ -909,6 +937,10 @@ pub fn recognize_grid_lines(
     let mut staff_peaks: Vec<Vec<StaffPeak>> = Vec::with_capacity(result.staffs().len());
     let mut alignment_staffs: Vec<AlignmentStaff> = Vec::with_capacity(result.staffs().len());
     let mut staff_blanks: Vec<BTreeMap<StaffPeakKey, bool>> = Vec::new();
+    // Java `StaffProjector` keeps its blanks for the two stages that set a
+    // staff's abscissae; the port previously used them only for the
+    // blank-to-lines test and dropped the rest.
+    let mut staff_projection_blanks: Vec<Vec<ProjectionBlank>> = Vec::new();
     for staff in result.staffs() {
         let (projected, blanks, minimum_standard_blank, refined_left) = project_staff_peaks(
             &scale_recognition,
@@ -950,23 +982,24 @@ pub fn recognize_grid_lines(
             short: staff.is_short(),
             peaks: projected.iter().map(StaffPeak::key).collect(),
         });
-        // Java `BarsRetriever` asks each projector whether a standard blank
-        // separates the peak from the staff's line start.
+        // Java `BarsRetriever.detectStartColumns` asks each projector
+        // `hasStandardBlank(peak.getStop(), xLeft)`: the range runs from the
+        // peak's stop rightwards to the staff's own left abscissa, so a peak
+        // separated from its lines by a standard blank cannot start the staff.
+        // The range is directional -- `hasStandardBlank` returns false outright
+        // when `stop <= start` -- so the argument order is load-bearing, and
+        // `xLeft` must be the same left the start-column check compares against.
         let blank_evidence: BTreeMap<StaffPeakKey, bool> = projected
             .iter()
             .map(|peak| {
                 (
                     peak.key(),
-                    has_blank_between(
-                        &blanks,
-                        staff.left().round() as i32,
-                        peak.start(),
-                        minimum_standard_blank,
-                    ),
+                    has_blank_between(&blanks, peak.stop(), refined_left, minimum_standard_blank),
                 )
             })
             .collect();
         staff_blanks.push(blank_evidence);
+        staff_projection_blanks.push(blanks);
         staff_peaks.push(projected);
         staves.push(StaffCandidateReport {
             id: staff.id(),
@@ -989,6 +1022,8 @@ pub fn recognize_grid_lines(
         projector_pixels,
         &lags,
         &staff_blanks,
+        &staff_projection_blanks,
+        &projector_scale,
         &parameters,
         &scale_recognition.vertical_runs,
         (scale_recognition.width, scale_recognition.height),
@@ -1283,107 +1318,179 @@ mod tests {
     /// The prepared bars handoff is what `completeLines` will consume, so it
     /// must agree with the barline report that is already oracle-locked rather
     /// than being a parallel, unvalidated view of the same page.
-    /// Java `LinesRetriever.completeLines` output for chula, dumped from a live
-    /// Audiveris 5.11 run (JDK 25) via a temporary probe on `StaffFilament`'s
-    /// start and stop points, taken immediately after the final `fillHoles`.
-    ///
-    /// These are the filament endpoints, not `sheet#1.xml`. The persisted XML
-    /// runs the points through `StaffLine.simplifyPoints` and one-decimal
-    /// rounding afterwards, which shifts every ordinate by about half a pixel;
-    /// diffing against it would chase an artifact.
-    const JAVA_CHULA_LINES: [(usize, f64, f64, f64, f64); 30] = [
-        (1, 202.0, 350.4877, 2326.0, 363.5184),
-        (1, 202.0, 371.994, 2326.0, 384.7828),
-        (1, 202.0, 392.9136, 2326.0, 406.4807),
-        (1, 202.0, 413.9269, 2326.0, 427.641),
-        (1, 202.0, 435.8686, 2326.0, 449.5128),
-        (2, 201.0, 592.1674, 2324.0, 607.5072),
-        (2, 201.0, 613.4544, 2324.0, 628.5527),
-        (2, 201.0, 634.4853, 2324.0, 650.0753),
-        (2, 201.0, 656.0596, 2324.0, 671.4761),
-        (2, 201.0, 677.4786, 2324.0, 692.5932),
-        (3, 88.0, 934.057, 2324.0, 950.9151),
-        (3, 88.0, 954.9924, 2324.0, 972.0152),
-        (3, 88.0, 976.4926, 2324.0, 993.0794),
-        (3, 88.0, 997.4922, 2324.0, 1015.0157),
-        (3, 88.0, 1018.9394, 2324.0, 1036.5157),
-        (4, 86.0, 1180.6058, 2324.0, 1198.3492),
-        (4, 86.0, 1201.9921, 2324.0, 1219.5947),
-        (4, 86.0, 1223.4847, 2324.0, 1240.5537),
-        (4, 86.0, 1244.4923, 2324.0, 1261.7297),
-        (4, 86.0, 1265.9924, 2324.0, 1283.0152),
-        (5, 83.0, 1520.3636, 2323.0, 1537.7883),
-        (5, 83.0, 1541.9279, 2323.0, 1558.9411),
-        (5, 83.0, 1563.4539, 2323.0, 1580.5229),
-        (5, 83.0, 1584.5307, 2323.0, 1602.0156),
-        (5, 83.0, 1606.4925, 2323.0, 1623.2312),
-        (6, 82.0, 1764.9274, 2322.0, 1783.0962),
-        (6, 82.0, 1786.4534, 2322.0, 1804.6714),
-        (6, 82.0, 1807.7697, 2322.0, 1825.9422),
-        (6, 82.0, 1828.5916, 2322.0, 1847.5169),
-        (6, 82.0, 1849.9269, 2322.0, 1869.0464),
-    ];
-
-    /// Diffs the completed staff lines against that Java run.
-    ///
-    /// The ordinates agree; the abscissae do not, and the whole ordinate
-    /// residual is a consequence of that. Java pins each line ending at
-    /// `staff.getAbscissa(side)`, which `BarsRetriever` and `StaffProjector`
-    /// refine to the start column and the right-end blank before `completeLines`
-    /// runs. The port still feeds `completeLines` the unrefined cluster
-    /// candidate limits, so every ending sits 1-3px inside Java's, and
-    /// `defineEndPoints` extrapolates by `dx * slope` from there -- which at
-    /// this page's slope of 0.0079 is the ~0.02px ordinate residual seen here.
-    ///
-    /// So the bound below is not slack for rounding. It is the exact size of
-    /// one unported behavior, and it should collapse to an equality assertion
-    /// once the staff-limit refinement lands. See PORTING.md.
-    #[test]
-    fn completed_staff_lines_match_the_java_ordinates_on_chula() {
-        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
-            .unwrap_or_else(|error| panic!("chula: {error}"));
-        let produced: Vec<(usize, f64, f64, f64, f64)> = recognition
-            .peak_graph
-            .completion
-            .staff_lines
-            .iter()
-            .flat_map(|staff| {
-                staff
-                    .lines
-                    .iter()
-                    .map(move |line| (staff.staff_id, line.0, line.1, line.2, line.3))
-            })
-            .collect();
-        assert_eq!(produced.len(), JAVA_CHULA_LINES.len());
-
-        for (index, (produced, java)) in produced.iter().zip(JAVA_CHULA_LINES).enumerate() {
-            let &(staff, x1, y1, x2, y2) = produced;
-            let (java_staff, java_x1, java_y1, java_x2, java_y2) = java;
-            assert_eq!(staff, java_staff, "line {index} belongs to another staff");
-            assert!(
-                (y1 - java_y1).abs() < 0.15 && (y2 - java_y2).abs() < 0.15,
-                "line {index} on staff {staff} diverged in ordinate: \
-                 ({y1}, {y2}) vs Java ({java_y1}, {java_y2})"
-            );
-            // The abscissa gap is bounded and one-sided: the port's endings sit
-            // inside Java's on both ends, never outside.
-            assert!(
-                x1 >= java_x1 && x2 <= java_x2,
-                "line {index} on staff {staff} ended outside Java's staff limits: \
-                 ({x1}, {x2}) vs Java ({java_x1}, {java_x2})"
-            );
-        }
+    /// One Java `completeLines` record: a page, its staff abscissae, and every
+    /// completed staff line's endpoints.
+    #[derive(Default)]
+    struct JavaCompletion {
+        staffs: Vec<(usize, i32, i32)>,
+        lines: Vec<(usize, f64, f64, f64, f64)>,
     }
 
-    /// `completeLines` mutates staff-line geometry rather than returning a
-    /// value, so what a run can be pinned on is its stage trace and per-stage
-    /// tallies.
+    /// Parses `rust/oracle/grid-completed-lines.txt`, keyed by page file name.
+    fn java_completion_oracle() -> BTreeMap<String, JavaCompletion> {
+        let text = include_str!("../../../oracle/grid-completed-lines.txt");
+        let mut pages: BTreeMap<String, JavaCompletion> = BTreeMap::new();
+        let mut current = String::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            match fields.as_slice() {
+                ["page", name] => {
+                    current = (*name).to_owned();
+                    pages.entry(current.clone()).or_default();
+                }
+                ["staff", id, left, right] => {
+                    let entry = pages.get_mut(&current).expect("staff before page");
+                    entry.staffs.push((
+                        id.parse().expect("staff id"),
+                        left.parse().expect("staff left"),
+                        right.parse().expect("staff right"),
+                    ));
+                }
+                ["line", id, x1, y1, x2, y2] => {
+                    let entry = pages.get_mut(&current).expect("line before page");
+                    entry.lines.push((
+                        id.parse().expect("staff id"),
+                        x1.parse().expect("start x"),
+                        y1.parse().expect("start y"),
+                        x2.parse().expect("stop x"),
+                        y2.parse().expect("stop y"),
+                    ));
+                }
+                _ => panic!("unparsable oracle record: {line}"),
+            }
+        }
+        pages
+    }
+
+    /// The only endpoints that do not reproduce Java bit for bit, as
+    /// `(page, line index, component)` where component is `1` for the start
+    /// ordinate and `3` for the stop ordinate.
     ///
-    /// These are structural facts about Java `LinesRetriever.completeLines`,
-    /// not values read off a Java run: the stage order is fixed by the source,
-    /// every retrieved staff gets endpoints, section dispatch batches both
-    /// thickness classes for each staff line, and `fillHoles` is called exactly
-    /// three times. Diffing the geometry itself against Java is still open.
+    /// Both causes are known and neither is the staff-limit refinement:
+    ///
+    /// - staff 5's `Staff.getEndingSlope(LEFT)` is `0.001469` here against
+    ///   Java's `0.000537`. The line endpoints feeding it agree exactly, so the
+    ///   gap is in the spline derivative, not the geometry.
+    /// - staff 3's `defineEndPoints` output is byte-exact against Java
+    ///   (`788.812270`), yet the final endpoint is not, so a later completion
+    ///   stage moves it differently -- `includeStickers` deletes intermediate
+    ///   points and the third `fillHoles` recomputes from what remains.
+    ///
+    /// Listing them individually rather than applying a blanket tolerance keeps
+    /// every other endpoint pinned to equality, so a new divergence anywhere
+    /// fails instead of hiding under a bound.
+    /// Each affected line diverges in both ordinates: the start ordinate by up
+    /// to 0.085px and the stop ordinate by under 0.0003px.
+    const KNOWN_ENDPOINT_RESIDUALS: [(&str, usize, usize); 6] = [
+        ("BachInvention5.jpg", 13, 1),
+        ("BachInvention5.jpg", 13, 3),
+        ("BachInvention5.jpg", 24, 1),
+        ("BachInvention5.jpg", 24, 3),
+        ("BachInvention5.jpg", 45, 1),
+        ("BachInvention5.jpg", 45, 3),
+    ];
+
+    /// Largest residual any listed exception may show, in pixels.
+    const MAXIMUM_KNOWN_RESIDUAL: f64 = 0.1;
+
+    /// The oracle fixture stores six decimals, so agreement can only be
+    /// asserted to half a unit in that last place. Every unlisted endpoint must
+    /// land inside this; it is the fixture's precision, not a tolerance for
+    /// disagreement.
+    const ORACLE_PRECISION: f64 = 5e-7;
+
+    /// Diffs GRID's staff abscissae and completed line geometry against a live
+    /// Java Audiveris 5.11 run on every example page.
+    ///
+    /// This is the assertion the staff-limit work was for. Java pins each line
+    /// ending at `staff.getAbscissa(side)`, which `BarsRetriever` refines during
+    /// `processBars`: the start column sets LEFT, `verifyLinesRoot` may push it
+    /// right, and `refineRightEnds` sets RIGHT. All three now travel with the
+    /// prepared bars handoff and are adopted before `defineEndPoints` runs.
+    #[test]
+    fn completed_staff_lines_match_the_java_oracle_across_the_example_corpus() {
+        let oracle = java_completion_oracle();
+        assert_eq!(oracle.len(), 9, "oracle should cover every example page");
+        let mut checked = 0usize;
+
+        for (name, java) in &oracle {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+
+            // Staff abscissae, in Java's staff order.
+            let produced_staffs: Vec<(usize, i32, i32)> = recognition
+                .peak_graph
+                .bars
+                .systems
+                .iter()
+                .flat_map(|system| {
+                    system
+                        .staff_ids
+                        .iter()
+                        .zip(system.staff_limits.iter())
+                        .map(|(id, &(left, right))| (*id, left, right))
+                })
+                .collect();
+            assert_eq!(
+                produced_staffs, java.staffs,
+                "{name} staff abscissae diverged from Java"
+            );
+
+            // Completed line endpoints, in Java's staff-then-line order.
+            let produced: Vec<(usize, f64, f64, f64, f64)> = recognition
+                .peak_graph
+                .completion
+                .staff_lines
+                .iter()
+                .flat_map(|staff| {
+                    staff
+                        .lines
+                        .iter()
+                        .map(move |line| (staff.staff_id, line.0, line.1, line.2, line.3))
+                })
+                .collect();
+            assert_eq!(
+                produced.len(),
+                java.lines.len(),
+                "{name} produced a different number of staff lines"
+            );
+
+            for (index, (produced, java_line)) in produced.iter().zip(&java.lines).enumerate() {
+                assert_eq!(
+                    produced.0, java_line.0,
+                    "{name} line {index} belongs to another staff"
+                );
+                let produced = [produced.1, produced.2, produced.3, produced.4];
+                let expected = [java_line.1, java_line.2, java_line.3, java_line.4];
+                for (component, (&produced, &expected)) in
+                    produced.iter().zip(expected.iter()).enumerate()
+                {
+                    checked += 1;
+                    let residual = (produced - expected).abs();
+                    if residual <= ORACLE_PRECISION {
+                        continue;
+                    }
+                    let known =
+                        KNOWN_ENDPOINT_RESIDUALS.contains(&(name.as_str(), index, component));
+                    assert!(
+                        known && residual < MAXIMUM_KNOWN_RESIDUAL,
+                        "{name} line {index} component {component} diverged from Java by \
+                         {residual}: {produced} vs {expected}"
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            checked,
+            4 * 325,
+            "every endpoint component must be compared"
+        );
+    }
+
     #[test]
     fn line_completion_runs_every_java_stage_on_the_example_corpus() {
         const EXPECTED_STAGES: [LineCompletionStage; 10] = [
