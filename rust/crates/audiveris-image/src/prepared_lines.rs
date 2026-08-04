@@ -556,8 +556,7 @@ fn map_downstream_failure<StepError, DownstreamError>(
     }
 }
 
-/// Indexes lag sections by id for [`materialize_staffs`].
-pub fn index_lag_sections<DownstreamError>(
+fn index_lag_sections<DownstreamError>(
     sections: &[Section],
 ) -> Result<BTreeMap<usize, &Section>, ProductionRetrieveLinesError<DownstreamError>> {
     let mut indexed = BTreeMap::new();
@@ -571,12 +570,7 @@ pub fn index_lag_sections<DownstreamError>(
     Ok(indexed)
 }
 
-/// Builds the `retrieveLines` staff handoff from retrieved candidates.
-///
-/// Public so callers that ran `retrieve_staff_candidates` themselves can
-/// produce the exact handoff the ported stage publishes, instead of assembling
-/// a lookalike.
-pub fn materialize_staffs<DownstreamError>(
+fn materialize_staffs<DownstreamError>(
     candidates: &[crate::lines_coordinator::StaffCandidate],
     primary: &ClusterPassState,
     secondary: Option<&ClusterPassState>,

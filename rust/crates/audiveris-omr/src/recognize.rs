@@ -25,10 +25,10 @@ use audiveris_image::bar_connections::{
     ConnectionBuildReport, ConnectionParameters, ConnectionRaster, find_connections,
 };
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
-use audiveris_image::bars_coordinator::{
-    BarsCoordinatorParameters, BarsPurgeParameters, BarsStaffState, BarsSystemState,
-};
+use audiveris_image::bars_coordinator::{BarsPurgeParameters, BarsStaffState, BarsSystemState};
+use audiveris_image::grid_lifecycle::build_grid_info;
 use audiveris_image::ingest::{self, LoadError};
+use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{
     ClusterPassState, StaffCandidate, retrieve_staff_candidates,
@@ -37,16 +37,18 @@ use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::prepared_bars::{
     PreparedBarsHandoff, PreparedBarsStage, ProductionProcessBars,
 };
-use audiveris_image::prepared_lines::{
-    PreparedStaffHandoff, index_lag_sections, materialize_staffs,
+use audiveris_image::prepared_completion::{ProductionCompleteLines, production_line_completion};
+use audiveris_image::prepared_lines::RawProductionRetrieveLines;
+use audiveris_image::production_grid_params::{
+    ProductionGridParameters, production_grid_parameters,
 };
-use audiveris_image::production_grid_params::production_grid_parameters;
 use audiveris_image::projection::{
     BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
     PeakCoreParams, PeakRefinementParams, ProjectionBlank, ShortProjection, StaffProjectionRequest,
     StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
     has_blank_between, staff_projector_scale_parameters,
 };
+use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
 use audiveris_image::run_table::{Orientation, RunTable, RunTableError, create_grid_run_tables};
 use audiveris_image::scale_estimate::{
@@ -194,6 +196,28 @@ pub struct PeakGraphReport {
     /// per-system peaks and brace peaks, the sheet-wide peak graph, and the
     /// promoted connections.
     pub bars: PreparedBarsHandoff,
+    /// What the ported `completeLines` chain did to the retrieved staff lines.
+    pub completion: LineCompletionReport,
+}
+
+/// Tallies from Java `LinesRetriever.completeLines`.
+///
+/// The stage mutates staff-line geometry rather than producing a value, so its
+/// per-stage counts are what a run can be compared on.
+#[derive(Debug, Clone)]
+pub struct LineCompletionReport {
+    /// Every stage that ran, in Java's fixed order.
+    pub completed_stages: Vec<LineCompletionStage>,
+    /// Staves whose endpoints `defineEndPoints` fixed.
+    pub endpoint_staffs: usize,
+    /// Sections Java `getAllStickers` offered to `includeStickers`.
+    pub sticker_candidates: usize,
+    pub sticker_batches: usize,
+    pub section_batches: usize,
+    pub discarded_filament_steals: usize,
+    pub curvature_removals: usize,
+    /// Java calls `fillHoles` three times; each call is a separate invocation.
+    pub hole_fill_invocations: usize,
 }
 
 /// Result of running the native GRID staff-line slice on one raster page.
@@ -416,11 +440,11 @@ fn build_peak_graph(
     raster_pixels: &[u8],
     lags: &InitialGridLags,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
-    bars_parameters: &BarsCoordinatorParameters,
-    maximum_group_gap: i32,
-    prepared_staffs: &PreparedStaffHandoff,
+    production: &ProductionGridParameters,
+    source: &RunTable,
     (width, height): (usize, usize),
 ) -> Result<PeakGraphReport, GridRecognitionError> {
+    let bars_parameters = &production.bars;
     let skew = HeadlessSkew::new(
         global_slope,
         i32::try_from(width).unwrap_or(i32::MAX),
@@ -550,11 +574,15 @@ fn build_peak_graph(
     // narrows the raw projector candidates to real barlines, and is exactly the
     // ported `ProductionProcessBars` stage.
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
-    let mut bars = ProductionProcessBars::new(
-        TerminalRasterStages::new().with_prepared_staffs(prepared_staffs.clone()),
+    let bars = ProductionProcessBars::new(
+        RawProductionRetrieveLines::new(
+            production.raw_primary.clone(),
+            production.lines,
+            TerminalRasterStages::new(),
+        ),
         derived.systems,
         *bars_parameters,
-        maximum_group_gap,
+        production.maximum_group_gap,
     )
     .map_err(grid_stage("process bars"))?
     .with_extending_purge(
@@ -567,22 +595,54 @@ fn build_peak_graph(
             maximum_bar_extension: f64::from(pixels(1.0, interline)),
         },
     );
-    bars.run_process_bars()
-        .map_err(grid_stage("process bars"))?;
+    // The full ported decorator chain, composed as
+    // `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` does.
+    // `retrieveLines` runs inside it and republishes the staffs, so
+    // `ProductionProcessBars` cross-checks the systems derived above against
+    // the ported line retrieval before purging anything.
+    let stages = ProductionCompleteLines::new(
+        bars,
+        production_line_completion(production.completion),
+        Some(source.clone()),
+        production.maximum_thin_weight,
+        production.inspect_crossing_chunks,
+    )
+    .with_completion_systems_from_prepared_bars();
+    let mut builder = HeadlessRasterGridBuilder::new(source.clone(), production.raster, stages);
+    build_grid_info(&mut builder).map_err(grid_stage("grid build"))?;
+
     if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
-        for (system_id, removed) in bars.removals() {
+        for (system_id, removed) in builder.stages().upstream().removals() {
             eprintln!(
                 "purge system={system_id} peak={:?} stage={:?}",
                 removed.peak, removed.stage
             );
         }
     }
-    let bars_handoff =
-        bars.take_prepared_bars_handoff()
-            .ok_or_else(|| GridRecognitionError::Stage {
-                stage: "process bars",
-                message: "stage published no prepared bars handoff".to_owned(),
-            })?;
+    let completion = builder
+        .stages()
+        .state()
+        .ok_or_else(|| GridRecognitionError::Stage {
+            stage: "complete lines",
+            message: "stage published no completion state".to_owned(),
+        })
+        .map(|state| LineCompletionReport {
+            completed_stages: state.completed_stages.clone(),
+            endpoint_staffs: state.defined_endpoints.len(),
+            sticker_candidates: state.sticker_section_ids.len(),
+            sticker_batches: state.sticker_inclusion_batches.len(),
+            section_batches: state.section_inclusion_batches.len(),
+            discarded_filament_steals: state.discarded_filament_steals.len(),
+            curvature_removals: state.curvature_removals.len(),
+            hole_fill_invocations: state.fill_hole_invocations.len(),
+        })?;
+    let bars_handoff = builder
+        .stages_mut()
+        .take_prepared_bars_handoff()
+        .ok_or_else(|| GridRecognitionError::Stage {
+            stage: "process bars",
+            message: "stage published no prepared bars handoff".to_owned(),
+        })?;
 
     // The handoff carries each system's post-purge peaks, so the survivors are
     // read off directly rather than reconstructed from removal records.
@@ -605,6 +665,7 @@ fn build_peak_graph(
         surviving_barlines: surviving,
         systems,
         bars: bars_handoff,
+        completion,
     })
 }
 
@@ -787,7 +848,7 @@ pub fn recognize_grid_lines(
 
     let parameters = production_grid_parameters(&scale_recognition.scale, global_slope)
         .map_err(grid_stage("parameter derivation"))?;
-    let pass = build_primary_cluster_pass(&lag, parameters.raw_primary)
+    let pass = build_primary_cluster_pass(&lag, parameters.raw_primary.clone())
         .map_err(grid_stage("primary pass"))?;
     let filament_count = pass.factory_creation_ids().len();
     let sloped_reject_count = pass.sloped_ids().len();
@@ -884,19 +945,6 @@ pub fn recognize_grid_lines(
             peaks,
         });
     }
-    // The same handoff `RawProductionRetrieveLines` publishes, built here from
-    // the candidates this driver retrieved so `ProductionProcessBars` reads
-    // real staff state rather than a lookalike.
-    let lag_sections = index_lag_sections::<std::convert::Infallible>(lag.sections())
-        .map_err(grid_stage("lag"))?;
-    let prepared_staffs = materialize_staffs::<std::convert::Infallible>(
-        result.staffs(),
-        &primary,
-        None,
-        &lag_sections,
-    )
-    .map_err(grid_stage("prepared staffs"))?;
-
     let peak_graph = build_peak_graph(
         &mut staff_peaks,
         &alignment_staffs,
@@ -906,9 +954,8 @@ pub fn recognize_grid_lines(
         projector_pixels,
         &lags,
         &staff_blanks,
-        &parameters.bars,
-        parameters.maximum_group_gap,
-        &prepared_staffs,
+        &parameters,
+        &scale_recognition.vertical_runs,
         (scale_recognition.width, scale_recognition.height),
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
@@ -962,6 +1009,18 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         }
+    ));
+    let completion = &recognition.peak_graph.completion;
+    report.push_str(&format!(
+        "completion=stages:{};endpoints:{};sections:{};stickers:{}/{};steals:{};curvature:{};holes:{}\n",
+        completion.completed_stages.len(),
+        completion.endpoint_staffs,
+        completion.section_batches,
+        completion.sticker_batches,
+        completion.sticker_candidates,
+        completion.discarded_filament_steals,
+        completion.curvature_removals,
+        completion.hole_fill_invocations,
     ));
     for (staff_id, kept) in &recognition.peak_graph.surviving_barlines {
         report.push_str(&format!(
@@ -1189,6 +1248,66 @@ mod tests {
     /// The prepared bars handoff is what `completeLines` will consume, so it
     /// must agree with the barline report that is already oracle-locked rather
     /// than being a parallel, unvalidated view of the same page.
+    /// `completeLines` mutates staff-line geometry rather than returning a
+    /// value, so what a run can be pinned on is its stage trace and per-stage
+    /// tallies.
+    ///
+    /// These are structural facts about Java `LinesRetriever.completeLines`,
+    /// not values read off a Java run: the stage order is fixed by the source,
+    /// every retrieved staff gets endpoints, section dispatch batches both
+    /// thickness classes for each staff line, and `fillHoles` is called exactly
+    /// three times. Diffing the geometry itself against Java is still open.
+    #[test]
+    fn line_completion_runs_every_java_stage_on_the_example_corpus() {
+        const EXPECTED_STAGES: [LineCompletionStage; 10] = [
+            LineCompletionStage::DefineEndPoints,
+            LineCompletionStage::IncludeDiscardedFilaments,
+            LineCompletionStage::FillHolesInitial,
+            LineCompletionStage::DispatchHorizontalSections,
+            LineCompletionStage::IncludeThickSections,
+            LineCompletionStage::IncludeThinSections,
+            LineCompletionStage::PolishCurvatures,
+            LineCompletionStage::FillHolesAfterPolish,
+            LineCompletionStage::IncludeStickers,
+            LineCompletionStage::FillHolesFinal,
+        ];
+        for name in [
+            "chula.png",
+            "allegretto.png",
+            "hove.png",
+            "carmen.png",
+            "D0392410-1.256.png",
+        ] {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let completion = &recognition.peak_graph.completion;
+            assert_eq!(
+                completion.completed_stages, EXPECTED_STAGES,
+                "{name} ran completeLines stages out of Java's fixed order"
+            );
+            let staff_count = recognition.staves.len();
+            assert_eq!(
+                completion.endpoint_staffs, staff_count,
+                "{name} left some staves without defined endpoints"
+            );
+            // Java dispatches thick and thin sections per staff line, and every
+            // example staff has five lines.
+            assert_eq!(
+                completion.section_batches,
+                staff_count * 10,
+                "{name} section dispatch skipped a staff line"
+            );
+            assert_eq!(
+                completion.hole_fill_invocations, 3,
+                "{name} did not call fillHoles Java's three times"
+            );
+            assert!(
+                completion.sticker_candidates > 0,
+                "{name} offered no sticker candidates"
+            );
+        }
+    }
+
     #[test]
     fn chula_prepared_bars_handoff_agrees_with_the_oracle_locked_barlines() {
         let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))

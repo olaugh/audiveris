@@ -3,46 +3,43 @@
 //! Production implementation of the raster GRID stage protocol.
 //!
 //! `HeadlessRasterGridBuilder` drives GRID through
-//! [`RemainingRasterGridStages`], but until now the only implementation was the
-//! `RasterStages` test double inside `grid_executor`'s test module, so the
-//! executor path had never run outside tests. That is why
-//! [`crate::recognize::recognize_grid_lines`] calls the subsystems directly.
-//!
-//! This module supplies the production implementation. The builder computes the
-//! run-table partition and the initial lags itself, then hands control here for
-//! `retrieveLines`, `processBars`, and `completeLines`, mirroring Java
-//! `GridBuilder.buildInfo`.
+//! [`RemainingRasterGridStages`]. For a long time the only implementation was
+//! the `RasterStages` test double inside `grid_executor`'s test module, so the
+//! executor path had never run outside tests. This module supplies the terminal
+//! that makes the production chain assemblable.
 //!
 //! # The ported decorator chain
 //!
-//! The parity-correct shape is the chain that
-//! `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` composes:
+//! [`crate::recognize::recognize_grid_lines`] composes and runs
 //!
 //! ```text
 //! ProductionCompleteLines -> ProductionProcessBars -> RawProductionRetrieveLines -> terminal
 //! ```
 //!
-//! Each decorator owns one stage and delegates the rest, so the innermost
+//! exactly as `HeadlessGridExecutor::from_completed_raw_bars_complete_lines`
+//! does. Each decorator owns one stage and delegates the rest, so the innermost
 //! element is a terminal that only records what reached it —
 //! [`TerminalRasterStages`] here, the `RasterStages` double in
 //! `grid_executor`'s tests.
 //!
-//! [`production_retrieve_lines`] builds the innermost two links.
+//! The builder computes the run-table partition and the initial lags, then
+//! hands control to the chain for `retrieveLines`, `processBars`, and
+//! `completeLines`, mirroring Java `GridBuilder.buildInfo`.
 //!
-//! `ProductionProcessBars` is already live, but reached from the other side:
-//! `ProductionProcessBars::new` takes an already-built `Vec<BarsSystemState>`
-//! rather than deriving one, and those states need staff projectors, graded
-//! peaks, alignments, and connections that the chain does not produce.
-//! [`crate::recognize::recognize_grid_lines`] does produce them, oracle-matched
-//! against Java on every example page, so it derives the systems and runs the
-//! stage through `run_process_bars`, using [`TerminalRasterStages`] as the
-//! staff-handoff source. `ProductionCompleteLines` consumes the
-//! `PreparedBarsHandoff` that stage publishes and is the next link to attach.
+//! One seam is not inside the chain. `ProductionProcessBars::new` takes an
+//! already-built `Vec<BarsSystemState>` rather than deriving one, and those
+//! states need staff projectors, graded peaks, alignments, and connections that
+//! the chain does not produce. `recognize_grid_lines` derives them first — that
+//! derivation is what the Java barline oracle pins — and hands them to the
+//! stage at construction. `retrieveLines` still runs inside the chain and
+//! republishes its staffs, so `ProductionProcessBars` cross-checks the derived
+//! systems against the ported line retrieval before purging anything.
+//!
+//! [`production_retrieve_lines`] builds the innermost two links on their own,
+//! for tests that want `retrieveLines` without the rest.
 
 use audiveris_image::grid_lifecycle::{GridBuildStage, GridStageFailure};
-use audiveris_image::prepared_lines::{
-    PreparedStaffHandoff, PreparedStaffStage, RawProductionRetrieveLines,
-};
+use audiveris_image::prepared_lines::RawProductionRetrieveLines;
 use audiveris_image::production_grid_params::ProductionGridParameters;
 use audiveris_image::raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages};
 
@@ -74,24 +71,12 @@ pub struct TerminalRasterStages {
     completed_stages: Vec<GridBuildStage>,
     swallowed: Vec<GridBuildStage>,
     finish_count: usize,
-    prepared_staffs: Option<PreparedStaffHandoff>,
 }
 
 impl TerminalRasterStages {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Seeds the staff handoff that `ProductionProcessBars` reads from its
-    /// upstream.
-    ///
-    /// Used when `retrieveLines` already ran outside the chain, so the terminal
-    /// stands in for it as the handoff source.
-    #[must_use]
-    pub fn with_prepared_staffs(mut self, handoff: PreparedStaffHandoff) -> Self {
-        self.prepared_staffs = Some(handoff);
-        self
     }
 
     /// Stages that reached the terminal, in order.
@@ -145,16 +130,6 @@ impl RemainingRasterGridStages for TerminalRasterStages {
 
     fn finish(&mut self) {
         self.finish_count += 1;
-    }
-}
-
-impl PreparedStaffStage for TerminalRasterStages {
-    fn prepared_staff_handoff(&self) -> Option<&PreparedStaffHandoff> {
-        self.prepared_staffs.as_ref()
-    }
-
-    fn take_prepared_staff_handoff(&mut self) -> Option<PreparedStaffHandoff> {
-        self.prepared_staffs.take()
     }
 }
 
