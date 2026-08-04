@@ -7,7 +7,9 @@ is intentionally parallel to the unchanged Java production tree.
 ## Repository state
 
 - Repository: `/Users/john/sources/jul10-charter/omr/tools/audiveris`
-- Branch: `codex/rust-port`
+- Branch: `codex/rust-port`; the current work is on `claude/rust-port-takeover`,
+  branched from `8418c6a` and pushed to `github.com/olaugh/audiveris`. Rebase
+  onto `codex/rust-port` if that has moved.
 - Java baseline: Audiveris 5.11.0, source commit
   `9e1e55cd2746037d059345881c53e6a6754bffbd`
 - Rust workspace: `rust/`
@@ -17,6 +19,41 @@ is intentionally parallel to the unchanged Java production tree.
 The Java checkout has 991 production files and about 327,673 lines. Its unit suite
 does not run the 20-stage recognizer, save an asserted `.omr`, or compare MusicXML.
 Do not equate either Java or Rust unit-test success with recognition parity.
+
+## Current status (read this first)
+
+The port now performs native page recognition. `audiveris-cli -batch -step
+SCALE|GRID <image>` runs `LOAD -> BINARY -> SCALE -> GRID` on a real raster
+through `audiveris_omr::recognize`, with every threshold derived from the
+measured sheet scale by `production_grid_parameters`.
+
+GRID agrees with a live Java 5.11 oracle on every output currently measurable,
+across all nine `data/examples` pages:
+
+| Output | Status |
+| --- | --- |
+| Staff count and geometry | matches; extents within about 3 px |
+| Global slope | matches (chula 0.007915 vs 0.00792) |
+| System grouping | 9/9 pages exact, including a single-staff score and mixed 2/3-staff systems |
+| Barline totals | 9/9 pages exact (53/44/64/76/58/40/17/22/46) |
+| Barline positions | chula verified peak by peak, all 58 across 6 staves |
+
+887 Rust tests pass; `cargo fmt --all --check` and strict Clippy are clean.
+Barline and system parity are asserted for representative pages in the default
+suite and for the whole corpus in an `#[ignore]`d sweep
+(`cargo test -p audiveris-omr -- --ignored`, about 70 s).
+
+Not yet done in GRID: line completion. See the last section of this file.
+
+`AUDIVERIS_DEBUG_PURGE=1` prints per-peak purge stages on the Rust side. The
+matching Java diagnostic is a temporary log in `StaffProjector.removePeak` that
+walks the stack for the calling `purge*` method; it was reverted after use and
+is easy to reapply. Running both and diffing is how the last two barline
+divergences were found, and it is the recommended first move for any future
+divergence.
+
+Linux setup, including the JDK 25 requirement and the out-of-repo
+`../../data/synth` scale fixtures, is in `LINUX-SETUP.md`.
 
 ## Green checkpoints
 
