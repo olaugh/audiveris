@@ -2,7 +2,9 @@
 
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
-use audiveris_omr::recognize::{recognize_scale, scale_report};
+use audiveris_omr::recognize::{
+    grid_lines_report, recognize_grid_lines, recognize_scale, scale_report,
+};
 
 fn usage() {
     println!(
@@ -23,16 +25,26 @@ fn run_native(parameters: &Parameters) -> Result<bool, String> {
     let Some(step) = parameters.step else {
         return Ok(false);
     };
-    if step > OmrStep::Scale {
+    if step > OmrStep::Grid {
         return Ok(false);
     }
     if parameters.arguments.is_empty() {
         return Err(format!("-step {step:?} requires at least one input image"));
     }
     for input in &parameters.arguments {
-        let recognition =
-            recognize_scale(input).map_err(|error| format!("{}: {error}", input.display()))?;
-        print!("input={}\n{}", input.display(), scale_report(&recognition));
+        if step == OmrStep::Grid {
+            let recognition = recognize_grid_lines(input)
+                .map_err(|error| format!("{}: {error}", input.display()))?;
+            print!(
+                "input={}\n{}",
+                input.display(),
+                grid_lines_report(&recognition)
+            );
+        } else {
+            let recognition =
+                recognize_scale(input).map_err(|error| format!("{}: {error}", input.display()))?;
+            print!("input={}\n{}", input.display(), scale_report(&recognition));
+        }
     }
     Ok(true)
 }
