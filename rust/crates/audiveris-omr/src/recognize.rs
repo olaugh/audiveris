@@ -47,7 +47,7 @@ use audiveris_image::scale_estimate::{
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
-use audiveris_image::staff_peak::{StaffPeak, StaffPeakKey};
+use audiveris_image::staff_peak::{HorizontalSide, StaffPeak, StaffPeakKey};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
 #[derive(Debug, Clone)]
@@ -175,6 +175,8 @@ pub struct PeakGraphReport {
     /// Peaks surviving the `BarsRetriever` purges, i.e. real barlines.
     pub retained_peaks: usize,
     pub purged_peaks: usize,
+    /// Surviving peak abscissae per staff id, for oracle diffing.
+    pub surviving_barlines: Vec<(usize, Vec<i32>)>,
     /// Staff ids grouped by shared aligned barlines, in Java's system order.
     pub systems: Vec<Vec<usize>>,
 }
@@ -242,7 +244,7 @@ fn project_staff_peaks(
     staff: &StaffCandidate,
     primary: &ClusterPassState,
     scale_parameters: &StaffProjectorScaleParameters,
-) -> Result<(Vec<StaffPeak>, Vec<ProjectionBlank>, i32), GridRecognitionError> {
+) -> Result<(Vec<StaffPeak>, Vec<ProjectionBlank>, i32, i32), GridRecognitionError> {
     let lines: Vec<_> = staff
         .line_ids()
         .iter()
@@ -261,6 +263,7 @@ fn project_staff_peaks(
             Vec::new(),
             Vec::new(),
             scale_parameters.minimum_standard_blank_width,
+            staff.left().round() as i32,
         ));
     };
     let middle = lines[lines.len() / 2];
@@ -358,10 +361,22 @@ fn project_staff_peaks(
         )
         .map_err(grid_stage("projector"))?;
 
+    // Java's projector marks the peak sitting at the staff's left end as
+    // STAFF_LEFT_END, and `purgeTooLeft` exempts marked peaks. Without the
+    // mark every staff loses its opening barline to that purge.
+    let mut peaks = result.peaks;
+    let staff_left = staff.left().round() as i32;
+    if let Some(opening) = peaks
+        .iter_mut()
+        .find(|peak| peak.start() <= staff_left && peak.stop() >= staff_left - 1)
+    {
+        opening.set_staff_end(HorizontalSide::Left);
+    }
     Ok((
-        result.peaks,
+        peaks,
         result.all_blanks,
         scale_parameters.minimum_standard_blank_width,
+        staff_left,
     ))
 }
 
@@ -504,6 +519,7 @@ fn build_peak_graph(
     // real barlines.
     let mut retained_peaks = 0usize;
     let mut purged_peaks = 0usize;
+    let mut surviving: Vec<(usize, Vec<i32>)> = Vec::new();
     for (system_index, member_ids) in systems.iter().enumerate() {
         let mut bars_staffs = Vec::with_capacity(member_ids.len());
         let mut system_graph: PeakGraph<BarAlignment> = PeakGraph::new();
@@ -584,6 +600,24 @@ fn build_peak_graph(
             .len();
         purged_peaks += removed;
         retained_peaks += before.saturating_sub(removed);
+        let removed_keys: std::collections::BTreeSet<_> = outcome
+            .removed_peaks()
+            .iter()
+            .map(|entry| entry.peak)
+            .collect();
+        for staff_id in member_ids {
+            if let Some(index) = alignment_staffs
+                .iter()
+                .position(|staff| staff.staff_id.value() == *staff_id)
+            {
+                let kept: Vec<i32> = staff_peaks[index]
+                    .iter()
+                    .filter(|peak| !removed_keys.contains(&peak.key()))
+                    .map(StaffPeak::start)
+                    .collect();
+                surviving.push((*staff_id, kept));
+            }
+        }
     }
 
     Ok(PeakGraphReport {
@@ -593,6 +627,7 @@ fn build_peak_graph(
         stickless_peak_count,
         retained_peaks,
         purged_peaks,
+        surviving_barlines: surviving,
         systems,
     })
 }
@@ -693,7 +728,7 @@ pub fn recognize_grid_lines(
     let mut alignment_staffs: Vec<AlignmentStaff> = Vec::with_capacity(result.staffs().len());
     let mut staff_blanks: Vec<BTreeMap<StaffPeakKey, bool>> = Vec::new();
     for staff in result.staffs() {
-        let (projected, blanks, minimum_standard_blank) = project_staff_peaks(
+        let (projected, blanks, minimum_standard_blank, refined_left) = project_staff_peaks(
             &scale_recognition,
             projector_pixels,
             staff,
@@ -726,7 +761,7 @@ pub fn recognize_grid_lines(
         };
         alignment_staffs.push(AlignmentStaff {
             staff_id: StaffId::new(staff.id()),
-            left: staff.left(),
+            left: f64::from(refined_left),
             right: staff.right(),
             top: line_ordinate(0)?,
             bottom: line_ordinate(staff.line_ids().len().saturating_sub(1))?,
@@ -826,6 +861,15 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
                 .join(" ")
         }
     ));
+    for (staff_id, kept) in &recognition.peak_graph.surviving_barlines {
+        report.push_str(&format!(
+            "barlines={staff_id}:{}\n",
+            kept.iter()
+                .map(i32::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
     for staff in &recognition.staves {
         report.push_str(&format!(
             "staff={}:{}:x{:.0}-{:.0}:interline:{}:lines:{}{}{}:peaks:{}\n",
