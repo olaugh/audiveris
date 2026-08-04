@@ -38,7 +38,7 @@ use audiveris_image::prepared_bars::{
     PreparedBarsHandoff, PreparedBarsStage, ProductionProcessBars,
 };
 use audiveris_image::prepared_completion::{ProductionCompleteLines, production_line_completion};
-use audiveris_image::prepared_lines::RawProductionRetrieveLines;
+use audiveris_image::prepared_lines::{PreparedStaff, RawProductionRetrieveLines};
 use audiveris_image::production_grid_params::{
     ProductionGridParameters, production_grid_parameters,
 };
@@ -218,6 +218,40 @@ pub struct LineCompletionReport {
     pub curvature_removals: usize,
     /// Java calls `fillHoles` three times; each call is a separate invocation.
     pub hole_fill_invocations: usize,
+    /// Final staff-line geometry, the actual product of `completeLines`. One
+    /// entry per staff, each holding its lines top to bottom.
+    pub staff_lines: Vec<CompletedStaffLines>,
+}
+
+/// Final geometry of one staff's lines after `completeLines`.
+#[derive(Debug, Clone)]
+pub struct CompletedStaffLines {
+    pub staff_id: usize,
+    /// Per line, the spline endpoints as `(start_x, start_y, stop_x, stop_y)`.
+    /// This is what Java persists as the staff line in `sheet#N.xml`.
+    pub lines: Vec<(f64, f64, f64, f64)>,
+}
+
+/// Reads each completed staff line's endpoints out of its filament.
+///
+/// A filament whose spline cannot be rebuilt is skipped rather than faked; a
+/// short line list is a visible signal, an invented endpoint is not.
+fn completed_staff_lines(staffs: &[PreparedStaff]) -> Vec<CompletedStaffLines> {
+    staffs
+        .iter()
+        .map(|staff| CompletedStaffLines {
+            staff_id: staff.id,
+            lines: staff
+                .lines
+                .iter()
+                .filter_map(|line| {
+                    let geometry = line.filament.geometry().ok()?;
+                    let (start, stop) = (geometry.start(), geometry.stop());
+                    Some((start.0, start.1, stop.0, stop.1))
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 /// Result of running the native GRID staff-line slice on one raster page.
@@ -635,6 +669,7 @@ fn build_peak_graph(
             discarded_filament_steals: state.discarded_filament_steals.len(),
             curvature_removals: state.curvature_removals.len(),
             hole_fill_invocations: state.fill_hole_invocations.len(),
+            staff_lines: completed_staff_lines(&state.staffs),
         })?;
     let bars_handoff = builder
         .stages_mut()
@@ -1248,6 +1283,98 @@ mod tests {
     /// The prepared bars handoff is what `completeLines` will consume, so it
     /// must agree with the barline report that is already oracle-locked rather
     /// than being a parallel, unvalidated view of the same page.
+    /// Java `LinesRetriever.completeLines` output for chula, dumped from a live
+    /// Audiveris 5.11 run (JDK 25) via a temporary probe on `StaffFilament`'s
+    /// start and stop points, taken immediately after the final `fillHoles`.
+    ///
+    /// These are the filament endpoints, not `sheet#1.xml`. The persisted XML
+    /// runs the points through `StaffLine.simplifyPoints` and one-decimal
+    /// rounding afterwards, which shifts every ordinate by about half a pixel;
+    /// diffing against it would chase an artifact.
+    const JAVA_CHULA_LINES: [(usize, f64, f64, f64, f64); 30] = [
+        (1, 202.0, 350.4877, 2326.0, 363.5184),
+        (1, 202.0, 371.994, 2326.0, 384.7828),
+        (1, 202.0, 392.9136, 2326.0, 406.4807),
+        (1, 202.0, 413.9269, 2326.0, 427.641),
+        (1, 202.0, 435.8686, 2326.0, 449.5128),
+        (2, 201.0, 592.1674, 2324.0, 607.5072),
+        (2, 201.0, 613.4544, 2324.0, 628.5527),
+        (2, 201.0, 634.4853, 2324.0, 650.0753),
+        (2, 201.0, 656.0596, 2324.0, 671.4761),
+        (2, 201.0, 677.4786, 2324.0, 692.5932),
+        (3, 88.0, 934.057, 2324.0, 950.9151),
+        (3, 88.0, 954.9924, 2324.0, 972.0152),
+        (3, 88.0, 976.4926, 2324.0, 993.0794),
+        (3, 88.0, 997.4922, 2324.0, 1015.0157),
+        (3, 88.0, 1018.9394, 2324.0, 1036.5157),
+        (4, 86.0, 1180.6058, 2324.0, 1198.3492),
+        (4, 86.0, 1201.9921, 2324.0, 1219.5947),
+        (4, 86.0, 1223.4847, 2324.0, 1240.5537),
+        (4, 86.0, 1244.4923, 2324.0, 1261.7297),
+        (4, 86.0, 1265.9924, 2324.0, 1283.0152),
+        (5, 83.0, 1520.3636, 2323.0, 1537.7883),
+        (5, 83.0, 1541.9279, 2323.0, 1558.9411),
+        (5, 83.0, 1563.4539, 2323.0, 1580.5229),
+        (5, 83.0, 1584.5307, 2323.0, 1602.0156),
+        (5, 83.0, 1606.4925, 2323.0, 1623.2312),
+        (6, 82.0, 1764.9274, 2322.0, 1783.0962),
+        (6, 82.0, 1786.4534, 2322.0, 1804.6714),
+        (6, 82.0, 1807.7697, 2322.0, 1825.9422),
+        (6, 82.0, 1828.5916, 2322.0, 1847.5169),
+        (6, 82.0, 1849.9269, 2322.0, 1869.0464),
+    ];
+
+    /// Diffs the completed staff lines against that Java run.
+    ///
+    /// The ordinates agree; the abscissae do not, and the whole ordinate
+    /// residual is a consequence of that. Java pins each line ending at
+    /// `staff.getAbscissa(side)`, which `BarsRetriever` and `StaffProjector`
+    /// refine to the start column and the right-end blank before `completeLines`
+    /// runs. The port still feeds `completeLines` the unrefined cluster
+    /// candidate limits, so every ending sits 1-3px inside Java's, and
+    /// `defineEndPoints` extrapolates by `dx * slope` from there -- which at
+    /// this page's slope of 0.0079 is the ~0.02px ordinate residual seen here.
+    ///
+    /// So the bound below is not slack for rounding. It is the exact size of
+    /// one unported behavior, and it should collapse to an equality assertion
+    /// once the staff-limit refinement lands. See PORTING.md.
+    #[test]
+    fn completed_staff_lines_match_the_java_ordinates_on_chula() {
+        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
+            .unwrap_or_else(|error| panic!("chula: {error}"));
+        let produced: Vec<(usize, f64, f64, f64, f64)> = recognition
+            .peak_graph
+            .completion
+            .staff_lines
+            .iter()
+            .flat_map(|staff| {
+                staff
+                    .lines
+                    .iter()
+                    .map(move |line| (staff.staff_id, line.0, line.1, line.2, line.3))
+            })
+            .collect();
+        assert_eq!(produced.len(), JAVA_CHULA_LINES.len());
+
+        for (index, (produced, java)) in produced.iter().zip(JAVA_CHULA_LINES).enumerate() {
+            let &(staff, x1, y1, x2, y2) = produced;
+            let (java_staff, java_x1, java_y1, java_x2, java_y2) = java;
+            assert_eq!(staff, java_staff, "line {index} belongs to another staff");
+            assert!(
+                (y1 - java_y1).abs() < 0.15 && (y2 - java_y2).abs() < 0.15,
+                "line {index} on staff {staff} diverged in ordinate: \
+                 ({y1}, {y2}) vs Java ({java_y1}, {java_y2})"
+            );
+            // The abscissa gap is bounded and one-sided: the port's endings sit
+            // inside Java's on both ends, never outside.
+            assert!(
+                x1 >= java_x1 && x2 <= java_x2,
+                "line {index} on staff {staff} ended outside Java's staff limits: \
+                 ({x1}, {x2}) vs Java ({java_x1}, {java_x2})"
+            );
+        }
+    }
+
     /// `completeLines` mutates staff-line geometry rather than returning a
     /// value, so what a run can be pinned on is its stage trace and per-stage
     /// tallies.
