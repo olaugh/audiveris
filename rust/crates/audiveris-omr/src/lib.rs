@@ -39,6 +39,7 @@ pub mod ledgers_step;
 pub mod links_step;
 pub mod measures_step;
 pub mod page_step;
+pub mod production_stages;
 pub mod raw_ledger_filter;
 pub mod raw_projector_adapter;
 pub mod recognize;

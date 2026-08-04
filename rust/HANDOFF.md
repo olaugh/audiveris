@@ -722,19 +722,28 @@ The chain is reached through
 `RemainingRasterGridStages` (`raster_grid_builder.rs:86`): `retrieve_lines`,
 `process_bars`, and the remaining stage hooks.
 
-**There is no production implementation of that trait.** The only one is
-`RasterStages` at `grid_executor.rs:1417`, inside `#[cfg(test)] mod tests`. The
-whole raster-executor path has been exercised with test doubles only. That is
-the missing piece, not the completion stages themselves.
+**This is now partly done.** `ProductionRasterStages`
+(`crates/audiveris-omr/src/production_stages.rs`) is the first production
+implementation of that trait; before it, the only one was the `RasterStages`
+test double at `grid_executor.rs:1417`, so the raster-executor path had never
+run outside tests.
+
+`retrieve_lines` is real: it performs the measure-then-cluster primary passes
+and staff retrieval through the builder, and a test drives
+`build_grid_info` end to end on chula, getting the same six staves and the same
+measured slope as the direct driver. `process_bars` and `complete_lines` are
+still recorded-but-empty, so the next steps are to move the oracle-verified bars
+chain out of `recognize_grid_lines` into `process_bars`, then attach the
+completion chain in `complete_lines`.
 
 ### Suggested order
 
-1. Implement `RemainingRasterGridStages` for production by moving the body of
-   `recognize_grid_lines` behind it: `retrieve_lines` performs the run
-   partition, lag, measure-then-cluster passes, and staff retrieval;
-   `process_bars` performs the projector, alignments, sticks, connections, and
-   the two purge entry points. The logic is already written and oracle-verified,
-   so this is a re-shaping, not new recognition code.
+1. `retrieve_lines` is done. Move the projector, alignments, sticks,
+   connections, and the two purge entry points from `recognize_grid_lines` into
+   `process_bars` the same way. The logic is already written and
+   oracle-verified, so this is a re-shaping, not new recognition code. Keep
+   `recognize_grid_lines` working off the new stages so the existing barline and
+   system parity tests keep guarding the move.
 2. Build the `HeadlessGridSheet` and `HeadlessGridBook` initial state. The exact
    required fields, and which are overwritten by handoffs rather than
    pre-filled, are enumerated per field in the raster-path tests around
