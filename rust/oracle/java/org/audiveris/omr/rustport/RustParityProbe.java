@@ -30,6 +30,7 @@ import org.audiveris.omr.image.WatershedGrayLevel;
 import org.audiveris.omr.glyph.Glyph;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.classifier.MixGlyphDescriptor;
+import org.audiveris.omr.classifier.Evaluation;
 import org.audiveris.omr.glyph.dynamic.FilamentFactory;
 import org.audiveris.omr.glyph.dynamic.FilamentIndex;
 import org.audiveris.omr.glyph.dynamic.StraightFilament;
@@ -185,6 +186,63 @@ public final class RustParityProbe
                     .append(String.format(java.util.Locale.ROOT, "%.17f", basicGrades[index]));
         }
         System.out.println("classifier.basic.synthetic=" + basicVector);
+
+        // Isolate AbstractClassifier.evaluate's post-model policy without a Glyph or the
+        // substantial ShapeChecker graph. This uses the production Evaluation comparator and
+        // the byte-for-byte loop shape: stable reverse-grade sort, count/minimum early stop,
+        // checker mutation/failure, then duplicate suppression on the mutated shape.
+        Evaluation[] policyEvals = {
+                new Evaluation(Shape.SHARP, 0.80),
+                new Evaluation(Shape.FLAT, 0.80),
+                new Evaluation(Shape.NATURAL, 0.90),
+                new Evaluation(Shape.CLUTTER, Double.NaN),
+                new Evaluation(Shape.WHOLE_REST, 0.85),
+                new Evaluation(Shape.HALF_REST, 0.84),
+                new Evaluation(Shape.DOT_set, 0.79),
+                new Evaluation(Shape.FERMATA, 0.74),
+        };
+        Arrays.sort(policyEvals, Evaluation.byReverseGrade);
+        List<Evaluation> checkedPolicy = new ArrayList<>();
+        policyLoop:
+        for (Evaluation eval : policyEvals) {
+            if ((checkedPolicy.size() >= 99) || (eval.grade < 0.75)) {
+                break;
+            }
+            if (eval.shape == Shape.WHOLE_REST) {
+                eval.shape = Shape.HALF_REST;
+            }
+            if (eval.shape == Shape.DOT_set) {
+                eval.failure = new Evaluation.Failure("synthetic failure");
+            }
+            if (eval.failure != null) {
+                continue;
+            }
+            for (Evaluation prior : checkedPolicy) {
+                if (prior.shape == eval.shape) {
+                    continue policyLoop;
+                }
+            }
+            checkedPolicy.add(eval);
+        }
+        Evaluation[] plainPolicy = {
+                new Evaluation(Shape.SHARP, 0.80),
+                new Evaluation(Shape.FLAT, 0.80),
+                new Evaluation(Shape.NATURAL, 0.90),
+                new Evaluation(Shape.WHOLE_REST, 0.85),
+                new Evaluation(Shape.HALF_REST, 0.84),
+        };
+        Arrays.sort(plainPolicy, Evaluation.byReverseGrade);
+        List<Evaluation> plainBests = new ArrayList<>();
+        for (Evaluation eval : plainPolicy) {
+            if ((plainBests.size() >= 3) || (eval.grade < 0.75)) {
+                break;
+            }
+            plainBests.add(eval);
+        }
+        System.out.println("classifier.ranking.synthetic="
+                + joinShapes(checkedPolicy)
+                + ";"
+                + joinShapes(plainBests));
 
         // Sparse asymmetric pixels force non-trivial ART interpolation plus both signed
         // third-order geometric moments. Keep this oracle below Glyph/RunTable integration:
@@ -3189,6 +3247,15 @@ public final class RustParityProbe
                     + ":" + String.join(",", systems) + "]");
         }
         return String.join(",", values);
+    }
+
+    private static String joinShapes (List<Evaluation> evaluations)
+    {
+        List<String> shapes = new ArrayList<>();
+        for (Evaluation evaluation : evaluations) {
+            shapes.add(evaluation.shape.name());
+        }
+        return String.join(",", shapes);
     }
 
     private static String outputBoundaryRefs (List<SystemInfo> systems)

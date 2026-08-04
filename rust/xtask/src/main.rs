@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use audiveris_classifier::{
-    BasicClassifier, INPUT_SIZE, mix_glyph_features, mix_glyph_features_from_run_table,
+    BasicClassifier, Evaluation as ClassifierEvaluation, INPUT_SIZE, mix_glyph_features,
+    mix_glyph_features_from_run_table, rank_evaluations,
 };
 use audiveris_core::{
     basic_line::BasicLine, grade, histogram::Histogram, injection_solver,
@@ -287,7 +288,7 @@ fn baseline(args: &[String]) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-const VECTOR_KEYS: [&str; 73] = [
+const VECTOR_KEYS: [&str; 74] = [
     "natural.decode=",
     "natural.encode=",
     "rational.sum=",
@@ -298,6 +299,7 @@ const VECTOR_KEYS: [&str; 73] = [
     "line.one-ten=",
     "grade.contextual=",
     "classifier.basic.synthetic=",
+    "classifier.ranking.synthetic=",
     "classifier.mix-glyph.asymmetric=",
     "classifier.mix-glyph.runtable=",
     "injection=",
@@ -1970,6 +1972,48 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             .map(|grade| format!("{}:{:.17}", grade.shape, grade.grade))
             .collect::<Vec<_>>()
             .join(";")
+    ));
+
+    let policy_candidates = vec![
+        ClassifierEvaluation::new("SHARP", 0.80),
+        ClassifierEvaluation::new("FLAT", 0.80),
+        ClassifierEvaluation::new("NATURAL", 0.90),
+        ClassifierEvaluation::new("CLUTTER", f64::NAN),
+        ClassifierEvaluation::new("WHOLE_REST", 0.85),
+        ClassifierEvaluation::new("HALF_REST", 0.84),
+        ClassifierEvaluation::new("DOT_set", 0.79),
+        ClassifierEvaluation::new("FERMATA", 0.74),
+    ];
+    let mut policy_checker = |evaluation: &mut ClassifierEvaluation<&str>| match evaluation.shape {
+        "WHOLE_REST" => evaluation.shape = "HALF_REST",
+        "DOT_set" => evaluation.reject("synthetic failure"),
+        _ => {}
+    };
+    let checked_policy = rank_evaluations(policy_candidates, 99, 0.75, Some(&mut policy_checker));
+    let plain_policy = rank_evaluations(
+        vec![
+            ClassifierEvaluation::new("SHARP", 0.80),
+            ClassifierEvaluation::new("FLAT", 0.80),
+            ClassifierEvaluation::new("NATURAL", 0.90),
+            ClassifierEvaluation::new("WHOLE_REST", 0.85),
+            ClassifierEvaluation::new("HALF_REST", 0.84),
+        ],
+        3,
+        0.75,
+        None,
+    );
+    lines.push(format!(
+        "classifier.ranking.synthetic={};{}",
+        checked_policy
+            .iter()
+            .map(|evaluation| evaluation.shape)
+            .collect::<Vec<_>>()
+            .join(","),
+        plain_policy
+            .iter()
+            .map(|evaluation| evaluation.shape)
+            .collect::<Vec<_>>()
+            .join(","),
     ));
 
     // This deliberately asymmetric, sparse raster holds ART basis interpolation, third-order

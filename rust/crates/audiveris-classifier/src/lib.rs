@@ -43,6 +43,107 @@ pub struct ShapeGrade {
     pub grade: f64,
 }
 
+/// A classifier interpretation after its model grade has been assigned.
+///
+/// This is the small, glyph-independent subset of Java's mutable
+/// `Evaluation`: a caller may use [`rank_evaluations`] with a checker to
+/// mutate its shape or mark it as failed before duplicate suppression.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Evaluation<S> {
+    /// Candidate physical shape (or a caller-defined neutral shape token).
+    pub shape: S,
+    /// Raw classifier grade; larger values are normally preferred.
+    pub grade: f64,
+    /// A checker failure. A non-`None` value removes the candidate.
+    pub failure: Option<String>,
+}
+
+impl<S> Evaluation<S> {
+    /// Creates an unchecked candidate.
+    #[must_use]
+    pub fn new(shape: S, grade: f64) -> Self {
+        Self {
+            shape,
+            grade,
+            failure: None,
+        }
+    }
+
+    /// Marks this candidate as rejected by a caller-supplied checker.
+    pub fn reject(&mut self, failure: impl Into<String>) {
+        self.failure = Some(failure.into());
+    }
+}
+
+/// Optional glyph-independent analogue of Java's `ShapeChecker.annotate` callback.
+pub type EvaluationChecker<'a, S> = &'a mut dyn FnMut(&mut Evaluation<S>);
+
+/// Sorts and filters raw classifier candidates using Java `AbstractClassifier.evaluate` policy.
+///
+/// The input is first stably sorted with `Evaluation.byReverseGrade`, then candidates are
+/// considered in that order. Evaluation stops as soon as `count` accepted candidates are present
+/// or the next grade is less than `min_grade`. If present, `checker` runs before duplicate-shape
+/// suppression and may mutate a candidate or call [`Evaluation::reject`]. This intentionally does
+/// not implement Java's glyph-size/noise gate, `ShapeChecker`, user overrides, or font metrics.
+#[must_use]
+pub fn rank_evaluations<S: Eq>(
+    mut evaluations: Vec<Evaluation<S>>,
+    count: usize,
+    min_grade: f64,
+    mut checker: Option<EvaluationChecker<'_, S>>,
+) -> Vec<Evaluation<S>> {
+    // Rust's stable sort is required: Java `Arrays.sort(Object[], Comparator)` is stable, so
+    // equal grades retain the incoming model-label order. `java_reverse_grade_cmp` also retains
+    // Java `Double.compare` details for signed zero and canonical NaNs.
+    evaluations.sort_by(java_reverse_grade_cmp);
+    let mut bests = Vec::new();
+
+    'evaluations: for mut evaluation in evaluations {
+        if bests.len() >= count || evaluation.grade < min_grade {
+            break;
+        }
+        if let Some(checker) = checker.as_deref_mut() {
+            checker(&mut evaluation);
+            if evaluation.failure.is_some() {
+                continue;
+            }
+        }
+        if bests
+            .iter()
+            .any(|best: &Evaluation<S>| best.shape == evaluation.shape)
+        {
+            continue 'evaluations;
+        }
+        bests.push(evaluation);
+    }
+    bests
+}
+
+fn java_reverse_grade_cmp<S>(left: &Evaluation<S>, right: &Evaluation<S>) -> std::cmp::Ordering {
+    java_double_compare(right.grade, left.grade)
+}
+
+fn java_double_compare(left: f64, right: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    if left < right {
+        Ordering::Less
+    } else if left > right {
+        Ordering::Greater
+    } else {
+        // Java `Double.compare` uses `doubleToLongBits`, which canonicalizes every NaN payload
+        // before a signed-long comparison. `total_cmp` deliberately differs for NaN payloads.
+        let bits = |value: f64| -> i64 {
+            if value.is_nan() {
+                0x7ff8_0000_0000_0000_u64 as i64
+            } else {
+                value.to_bits() as i64
+            }
+        };
+        bits(left).cmp(&bits(right))
+    }
+}
+
 /// Failure while loading or validating the checked-in model.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModelLoadError(String);
@@ -644,6 +745,59 @@ mod tests {
                 grades[index].grade
             );
         }
+    }
+
+    #[test]
+    fn ranking_matches_java_sort_threshold_check_and_duplicate_policy() {
+        let candidates = vec![
+            Evaluation::new("SHARP", 0.8),
+            Evaluation::new("FLAT", 0.8),
+            Evaluation::new("NATURAL", 0.9),
+            Evaluation::new("CLUTTER", f64::NAN),
+            Evaluation::new("WHOLE_REST", 0.85),
+            Evaluation::new("HALF_REST", 0.84),
+            Evaluation::new("DOT", 0.79),
+            Evaluation::new("FERMATA", 0.74),
+        ];
+        let mut checker = |evaluation: &mut Evaluation<&str>| match evaluation.shape {
+            "WHOLE_REST" => evaluation.shape = "HALF_REST",
+            "DOT" => evaluation.reject("synthetic failure"),
+            _ => {}
+        };
+        let ranked = rank_evaluations(candidates, 99, 0.75, Some(&mut checker));
+        assert_eq!(
+            ranked.iter().map(|item| item.shape).collect::<Vec<_>>(),
+            vec!["CLUTTER", "NATURAL", "HALF_REST", "SHARP", "FLAT"]
+        );
+        assert!(ranked[0].grade.is_nan());
+        assert_eq!(ranked[3].grade, ranked[4].grade); // stable equal-grade model order
+    }
+
+    #[test]
+    fn ranking_without_checker_preserves_distinct_original_shapes_and_count() {
+        let candidates = vec![
+            Evaluation::new("SHARP", 0.8),
+            Evaluation::new("FLAT", 0.8),
+            Evaluation::new("NATURAL", 0.9),
+            Evaluation::new("WHOLE_REST", 0.85),
+            Evaluation::new("HALF_REST", 0.84),
+        ];
+        let ranked = rank_evaluations(candidates, 3, 0.75, None);
+        assert_eq!(
+            ranked.iter().map(|item| item.shape).collect::<Vec<_>>(),
+            vec!["NATURAL", "WHOLE_REST", "HALF_REST"]
+        );
+    }
+
+    #[test]
+    fn java_double_compare_canonicalizes_nan_and_orders_signed_zero() {
+        let first_nan = f64::from_bits(0x7ff8_0000_0000_0001);
+        let second_nan = f64::from_bits(0x7fff_ffff_ffff_ffff);
+        assert_eq!(
+            java_double_compare(first_nan, second_nan),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(java_double_compare(-0.0, 0.0), std::cmp::Ordering::Less);
     }
 
     #[test]
