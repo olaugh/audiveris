@@ -136,12 +136,16 @@ pub fn scale_report(recognition: &ScaleRecognition) -> String {
     let optional =
         |value: Option<i32>| value.map_or_else(|| "null".to_owned(), |value| value.to_string());
     format!(
-        "page={}x{}/{:016x}\nscale=line:{};interline:{};small-interline:{};beam:{};small-beam:{}\nresolution={:?}\n",
+        "page={}x{}/{:016x}\nscale=line:{},{},{};interline:{},{},{};small-interline:{};beam:{};small-beam:{}\nresolution={:?}\n",
         recognition.width,
         recognition.height,
         recognition.gray_digest,
+        scale.line.min,
         scale.line.main,
+        scale.line.max,
+        scale.interline.min,
         scale.interline.main,
+        scale.interline.max,
         optional(scale.small_interline.map(|value| value.main)),
         scale.beam.main,
         optional(scale.small_beam.map(|value| value.main)),
@@ -972,7 +976,7 @@ mod tests {
         assert_eq!(
             scale_report(&recognition),
             "page=2450x1954/2179468ede9f7ec6\n\
-             scale=line:3;interline:21;small-interline:null;beam:12;small-beam:null\n\
+             scale=line:2,3,4;interline:20,21,22;small-interline:null;beam:12;small-beam:null\n\
              resolution=Accepted\n"
         );
     }
@@ -1182,6 +1186,45 @@ mod tests {
                 recognition.peak_graph.retained_peaks, expected,
                 "{name} barline total diverged from Java"
             );
+        }
+    }
+
+    #[test]
+    fn scale_triples_match_the_java_oracle_across_the_corpus() {
+        // `<line>` and `<interline>` min/main/max plus beam thickness, read
+        // from each page's sheet#1.xml after a live Java 5.11 SCALE run. The
+        // percentiles matter as much as the main values: the GRID comb bounds
+        // derive from `interline.min` and `interline.max`.
+        const JAVA_SCALE: [(&str, [i32; 3], [i32; 3], i32); 9] = [
+            ("D0392410-1.256.png", [1, 4, 5], [18, 20, 21], 12),
+            ("allegretto.png", [2, 3, 4], [21, 21, 23], 12),
+            ("batuque.png", [2, 3, 4], [20, 21, 22], 12),
+            ("carmen.png", [2, 3, 4], [20, 21, 23], 12),
+            ("chula.png", [2, 3, 4], [20, 21, 22], 12),
+            ("cucaracha.png", [2, 3, 4], [20, 21, 23], 12),
+            ("hove.png", [2, 3, 5], [19, 20, 22], 11),
+            ("zizi.png", [2, 3, 4], [20, 21, 22], 12),
+            ("BachInvention5.jpg", [3, 4, 5], [15, 17, 18], 10),
+        ];
+        for (name, line, interline, beam) in JAVA_SCALE {
+            let recognition = recognize_scale(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let scale = &recognition.scale;
+            assert_eq!(
+                [scale.line.min, scale.line.main, scale.line.max],
+                line,
+                "{name} line scale diverged"
+            );
+            assert_eq!(
+                [
+                    scale.interline.min,
+                    scale.interline.main,
+                    scale.interline.max
+                ],
+                interline,
+                "{name} interline scale diverged"
+            );
+            assert_eq!(scale.beam.main, beam, "{name} beam thickness diverged");
         }
     }
 
