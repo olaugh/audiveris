@@ -12,13 +12,20 @@
 
 use std::path::Path;
 
+use crate::grid_executor::HeadlessSkew;
 use audiveris_image::adaptive;
+use audiveris_image::bar_alignment::BarAlignment;
+use audiveris_image::bar_alignments::{
+    AlignmentBuildReport, AlignmentParameters, AlignmentStaff, find_all_alignments,
+};
 use audiveris_image::bar_column::StaffId;
+use audiveris_image::bar_connections::{ConnectionRaster, connection_core};
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{
     ClusterPassState, StaffCandidate, retrieve_staff_candidates,
 };
+use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::production_grid_params::production_grid_parameters;
 use audiveris_image::projection::{
     BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
@@ -32,6 +39,7 @@ use audiveris_image::scale_estimate::{
     ScaleEstimate, ScaleEstimateError, ScaleOptions, estimate_scale,
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
+use audiveris_image::staff_peak::{StaffPeak, StaffPeakKey};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
 #[derive(Debug, Clone)]
@@ -147,6 +155,15 @@ pub struct StaffCandidateReport {
     pub peaks: Vec<(i32, i32, f64)>,
 }
 
+/// Cross-staff barline structure recovered by the peak graph.
+#[derive(Debug, Clone)]
+pub struct PeakGraphReport {
+    pub alignment_count: usize,
+    pub connection_count: usize,
+    /// Staff ids grouped by shared aligned barlines, in Java's system order.
+    pub systems: Vec<Vec<usize>>,
+}
+
 /// Result of running the native GRID staff-line slice on one raster page.
 ///
 /// This covers Java `LinesRetriever` through `buildStaves`: run partition,
@@ -162,6 +179,7 @@ pub struct GridLinesRecognition {
     pub sloped_reject_count: usize,
     pub discarded_filament_count: usize,
     pub staves: Vec<StaffCandidateReport>,
+    pub peak_graph: PeakGraphReport,
 }
 
 /// Failure of the native GRID staff-line slice.
@@ -209,7 +227,7 @@ fn project_staff_peaks(
     staff: &StaffCandidate,
     primary: &ClusterPassState,
     scale_parameters: &StaffProjectorScaleParameters,
-) -> Result<Vec<(i32, i32, f64)>, GridRecognitionError> {
+) -> Result<Vec<StaffPeak>, GridRecognitionError> {
     let lines: Vec<_> = staff
         .line_ids()
         .iter()
@@ -321,17 +339,139 @@ fn project_staff_peaks(
         )
         .map_err(grid_stage("projector"))?;
 
-    Ok(result
-        .peaks
+    Ok(result.peaks)
+}
+
+/// Builds Java `PeakGraph` alignments across staves and groups the staves
+/// that share aligned barlines.
+///
+/// Mirrors `PeakGraph.findAllAlignments`: every peak first receives its
+/// deskewed center through the sheet skew, then `checkAlignment` scores each
+/// candidate pair by inverted-slope agreement and width delta. Systems are the
+/// connected components over the surviving alignment edges, which is how Java
+/// derives its staff grouping before the connection purges.
+fn build_peak_graph(
+    staff_peaks: &mut [Vec<StaffPeak>],
+    alignment_staffs: &[AlignmentStaff],
+    global_slope: f64,
+    interline: i32,
+    raster_pixels: &[u8],
+    (width, height): (usize, usize),
+) -> Result<PeakGraphReport, GridRecognitionError> {
+    let skew = HeadlessSkew::new(
+        global_slope,
+        i32::try_from(width).unwrap_or(i32::MAX),
+        i32::try_from(height).unwrap_or(i32::MAX),
+    );
+    let mut graph: PeakGraph<BarAlignment> = PeakGraph::new();
+    for peaks in staff_peaks.iter_mut() {
+        for peak in peaks.iter_mut() {
+            peak.compute_deskewed_center(|point| skew.deskewed(point))
+                .map_err(grid_stage("deskewed center"))?;
+            if !graph.add_vertex(peak.clone()) {
+                return Err(GridRecognitionError::Stage {
+                    stage: "peak graph",
+                    message: format!("duplicate peak key {:?}", peak.key()),
+                });
+            }
+        }
+    }
+
+    let mut report = AlignmentBuildReport::default();
+    find_all_alignments(
+        &mut graph,
+        alignment_staffs,
+        AlignmentParameters {
+            // Java uses the negated sheet skew slope as its vertical reference.
+            sheet_slope: global_slope,
+            // PeakGraph.maxAlignmentSlope = 0.06 (ratio).
+            maximum_alignment_slope: 0.06,
+            // maxAlignmentDeltaWidth = rint(0.6 * interline).
+            maximum_alignment_delta_width: (0.6 * f64::from(interline)).round_ties_even() as i32,
+        },
+        &mut report,
+    )
+    .map_err(grid_stage("alignments"))?;
+
+    let alignment_count = graph.edges().len();
+
+    // Java promotes an alignment to a connection when the inter-staff
+    // corridor is mostly ink: `gap <= maxConnectionGap` (rint(1.0*interline))
+    // and `whiteRatio <= 0.25`. Only connected peaks bind two staves into one
+    // system, which is what separates systems from merely aligned barlines.
+    let raster = ConnectionRaster {
+        width,
+        height,
+        pixels: raster_pixels,
+    };
+    let maximum_gap = f64::from(interline).round_ties_even() as i32;
+    let mut connection_count = 0usize;
+    let mut connected_pairs: Vec<(usize, usize)> = Vec::new();
+    for edge in graph.edges() {
+        let (Some(top), Some(bottom)) = (graph.vertex(edge.source()), graph.vertex(edge.target()))
+        else {
+            continue;
+        };
+        let core = connection_core(raster, top, bottom).map_err(grid_stage("connection core"))?;
+        if core.gap <= maximum_gap && core.white_ratio <= 0.25 {
+            connection_count += 1;
+            if let (Some(source), Some(target)) = (
+                staff_of_key(staff_peaks, alignment_staffs, edge.source()),
+                staff_of_key(staff_peaks, alignment_staffs, edge.target()),
+            ) {
+                connected_pairs.push((source, target));
+            }
+        }
+    }
+    // Every staff starts alone; connected pairs merge their groups.
+    let mut systems: Vec<Vec<usize>> = alignment_staffs
         .iter()
-        .map(|peak| {
-            (
-                peak.start(),
-                peak.stop(),
-                peak.impacts().map_or(0.0, |impacts| impacts.grade()),
-            )
-        })
-        .collect())
+        .map(|staff| vec![staff.staff_id.value()])
+        .collect();
+    for (source, target) in connected_pairs {
+        systems.push(vec![source, target]);
+    }
+    merge_overlapping(&mut systems);
+
+    Ok(PeakGraphReport {
+        alignment_count,
+        connection_count,
+        systems,
+    })
+}
+
+/// Resolves which staff owns a peak key.
+fn staff_of_key(
+    staff_peaks: &[Vec<StaffPeak>],
+    staffs: &[AlignmentStaff],
+    key: StaffPeakKey,
+) -> Option<usize> {
+    staff_peaks
+        .iter()
+        .position(|peaks| peaks.iter().any(|peak| peak.key() == key))
+        .and_then(|index| staffs.get(index))
+        .map(|staff| staff.staff_id.value())
+}
+
+/// Collapses staff groups that share a staff into single systems.
+fn merge_overlapping(groups: &mut Vec<Vec<usize>>) {
+    let mut merged = true;
+    while merged {
+        merged = false;
+        'outer: for i in 0..groups.len() {
+            for j in (i + 1)..groups.len() {
+                if groups[i].iter().any(|id| groups[j].contains(id)) {
+                    let other = groups.remove(j);
+                    groups[i].extend(other);
+                    groups[i].sort_unstable();
+                    groups[i].dedup();
+                    merged = true;
+                    break 'outer;
+                }
+            }
+        }
+    }
+    groups.sort();
 }
 
 /// Runs the native GRID staff-line slice with production, scale-derived
@@ -386,14 +526,50 @@ pub fn recognize_grid_lines(
     });
 
     let mut staves = Vec::with_capacity(result.staffs().len());
+    let mut staff_peaks: Vec<Vec<StaffPeak>> = Vec::with_capacity(result.staffs().len());
+    let mut alignment_staffs: Vec<AlignmentStaff> = Vec::with_capacity(result.staffs().len());
     for staff in result.staffs() {
-        let peaks = project_staff_peaks(
+        let projected = project_staff_peaks(
             &scale_recognition,
             projector_pixels,
             staff,
             &primary,
             &projector_scale,
         )?;
+        let peaks = projected
+            .iter()
+            .map(|peak| {
+                (
+                    peak.start(),
+                    peak.stop(),
+                    peak.impacts().map_or(0.0, |impacts| impacts.grade()),
+                )
+            })
+            .collect();
+        // Java `AlignmentStaff` top/bottom are the first and last line
+        // ordinates taken at the staff's left end.
+        let line_ordinate = |index: usize| -> Result<f64, GridRecognitionError> {
+            let id = staff.line_ids()[index];
+            primary
+                .filaments()
+                .get(&id)
+                .and_then(|filament| filament.geometry().ok())
+                .and_then(|geometry| geometry.position_at(staff.left()).ok())
+                .ok_or_else(|| GridRecognitionError::Stage {
+                    stage: "alignment",
+                    message: format!("staff {} line ordinate is unavailable", staff.id()),
+                })
+        };
+        alignment_staffs.push(AlignmentStaff {
+            staff_id: StaffId::new(staff.id()),
+            left: staff.left(),
+            right: staff.right(),
+            top: line_ordinate(0)?,
+            bottom: line_ordinate(staff.line_ids().len().saturating_sub(1))?,
+            short: staff.is_short(),
+            peaks: projected.iter().map(StaffPeak::key).collect(),
+        });
+        staff_peaks.push(projected);
         staves.push(StaffCandidateReport {
             id: staff.id(),
             kind: format!("{:?}", staff.kind()).to_lowercase(),
@@ -406,6 +582,14 @@ pub fn recognize_grid_lines(
             peaks,
         });
     }
+    let peak_graph = build_peak_graph(
+        &mut staff_peaks,
+        &alignment_staffs,
+        global_slope,
+        scale_recognition.scale.interline.main,
+        projector_pixels,
+        (scale_recognition.width, scale_recognition.height),
+    )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
     Ok(GridLinesRecognition {
@@ -415,6 +599,7 @@ pub fn recognize_grid_lines(
         sloped_reject_count,
         discarded_filament_count,
         staves,
+        peak_graph,
     })
 }
 
@@ -428,6 +613,30 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
         recognition.sloped_reject_count,
         recognition.discarded_filament_count,
         recognition.staves.len(),
+    ));
+    report.push_str(&format!(
+        "systems=alignments:{};connections:{};groups:{}\n",
+        recognition.peak_graph.alignment_count,
+        recognition.peak_graph.connection_count,
+        if recognition.peak_graph.systems.is_empty() {
+            "none".to_owned()
+        } else {
+            recognition
+                .peak_graph
+                .systems
+                .iter()
+                .enumerate()
+                .map(|(index, ids)| {
+                    let members = ids
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("#{}[{members}]", index + 1)
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
     ));
     for staff in &recognition.staves {
         report.push_str(&format!(
@@ -559,6 +768,72 @@ mod tests {
         // filters them.
         let total: usize = recognition.staves.iter().map(|s| s.peaks.len()).sum();
         assert!((58..=200).contains(&total), "unexpected peak total {total}");
+    }
+
+    #[test]
+    fn systems_match_the_java_oracle_on_representative_pages() {
+        // One page per system shape seen in the corpus, from live Java 5.11
+        // GRID runs ("PeakGraph | Systems: ...").
+        let cases: [(&str, Vec<Vec<usize>>); 3] = [
+            // Grand-staff piano: two-staff systems.
+            ("chula.png", vec![vec![1, 2], vec![3, 4], vec![5, 6]]),
+            // Single-staff score: each staff is its own system.
+            (
+                "hove.png",
+                vec![vec![1], vec![2], vec![3], vec![4], vec![5]],
+            ),
+            // Mixed two- and three-staff systems.
+            (
+                "D0392410-1.256.png",
+                vec![vec![1, 2], vec![3, 4], vec![5, 6, 7], vec![8, 9, 10]],
+            ),
+        ];
+        for (name, expected) in cases {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                recognition.peak_graph.systems, expected,
+                "{name} system grouping diverged"
+            );
+        }
+    }
+
+    /// Full nine-page corpus sweep. Excluded from the default suite because
+    /// a debug-build run costs about a minute; run with
+    /// `cargo test -p audiveris-omr -- --ignored`.
+    #[test]
+    #[ignore]
+    fn systems_match_the_java_oracle_across_the_example_corpus() {
+        // Staff groupings logged by live Java Audiveris 5.11 GRID runs
+        // ("PeakGraph | Systems: ...") on each example page.
+        const JAVA_SYSTEMS: [(&str, &[&[usize]]); 9] = [
+            (
+                "D0392410-1.256.png",
+                &[&[1, 2], &[3, 4], &[5, 6, 7], &[8, 9, 10]],
+            ),
+            ("allegretto.png", &[&[1, 2], &[3, 4], &[5, 6]]),
+            ("batuque.png", &[&[1, 2], &[3, 4], &[5, 6]]),
+            (
+                "carmen.png",
+                &[&[1, 2], &[3, 4], &[5, 6], &[7, 8], &[9, 10]],
+            ),
+            ("chula.png", &[&[1, 2], &[3, 4], &[5, 6]]),
+            ("cucaracha.png", &[&[1, 2], &[3, 4], &[5, 6]]),
+            // Single-staff score: every staff is its own system.
+            ("hove.png", &[&[1], &[2], &[3], &[4], &[5]]),
+            ("zizi.png", &[&[1, 2], &[3, 4]]),
+            (
+                "BachInvention5.jpg",
+                &[&[1, 2], &[3, 4], &[5, 6], &[7, 8], &[9, 10], &[11, 12]],
+            ),
+        ];
+        for (name, expected) in JAVA_SYSTEMS {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let systems: Vec<Vec<usize>> = recognition.peak_graph.systems.clone();
+            let expected: Vec<Vec<usize>> = expected.iter().map(|ids| ids.to_vec()).collect();
+            assert_eq!(systems, expected, "{name} system grouping diverged");
+        }
     }
 
     #[test]
