@@ -385,8 +385,9 @@ denied, and passed `git diff --check` before commit.
 301. `f7bdcbd1` — live Java oracle for all 149 raw grades of a fixed 110-value classifier input; the isolated probe loads the frozen bundled artifact explicitly.
 302. `77149f6a` — native point-list `MixGlyphDescriptor` extraction: 99 ART modules, 10 geometric values, and aspect, with an asymmetric live Java oracle.
 303. `dd563914` — Java-order RunTable foreground traversal and absolute-offset adapter into classifier features, with a live coordinate-and-feature vector.
+304. `8418c6a9` — Java `AbstractClassifier` candidate ordering, threshold, count, checker-mutation, failure, and duplicate-suppression policy with a live synthetic oracle.
 
-At checkpoint 303 the Rust workspace executes 875 tests:
+At checkpoint 304 the Rust workspace executes 878 tests:
 
 - `audiveris-core`: 38
 - `audiveris-image`: 506
@@ -394,9 +395,9 @@ At checkpoint 303 the Rust workspace executes 875 tests:
 - `audiveris-testkit`: 6
 - `audiveris-cli`: 4
 - `xtask`: 5
-- `audiveris-classifier`: 6
+- `audiveris-classifier`: 9
 
-The live Java/Rust oracle compares 73 canonical vectors at this checkpoint. Since
+The live Java/Rust oracle compares 74 canonical vectors at this checkpoint. Since
 checkpoint 64 it added exact vectors for comb discovery, line-cluster lifecycle,
 short projections, StaffProjector derivative thresholds, blank selection, peak-side
 refinement, peak-candidate construction, core-pixel validation, range scanning,
@@ -423,8 +424,10 @@ Java-backed fixed-feature oracle now verifies every raw output grade. The point-
 extractor now produces the complete `MixGlyphDescriptor` input layout from foreground
 coordinates, matching a live asymmetric Java vector. Native RunTable foreground pixels
 now flow through the same descriptor with Java sequence/run/pixel order and absolute
-offset semantics. Ranking/minimum-grade policy, user overrides, and MusicFont metrics
-remain separate; do not represent it as a complete visual classifier.
+offset semantics. Java sorting, count/minimum-grade stopping, checker mutation/failure,
+and post-check duplicate suppression are native and differentially pinned. Actual
+ShapeChecker/Glyph ownership, user overrides, and MusicFont metrics remain separate; do
+not represent it as a complete visual classifier.
 
 SCALE matches on Chula plus three parent-corpus pages: K545 exercises a small-interline
 population, Essen rejects a weak beam and extrapolates, and Josquin accepts a weak beam
@@ -616,9 +619,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Port Java candidate ranking/minimum-grade policy independently, then add a narrow
-   connected-component/Glyph ownership adapter around the existing RunTable path. Do not
-   couple this work to MusicFont sizing or a recognition-stage behavior change.
+1. Add a narrow connected-component/Glyph ownership adapter around the existing RunTable
+   path, then connect the full native classifier boundary to its first visual caller. Do
+   not couple this work to MusicFont sizing or a broad recognition-stage behavior change.
 2. Complete the remaining concrete visual seams in `HEADERS`, `STEM_SEEDS`, `BEAMS`,
    `LEDGERS`, and `HEADS`, stopping at the first new raw-image differential boundary.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
