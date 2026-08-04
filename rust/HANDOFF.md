@@ -729,12 +729,27 @@ test double at `grid_executor.rs:1417`, so the raster-executor path had never
 run outside tests.
 
 `retrieve_lines` is real: it performs the measure-then-cluster primary passes
-and staff retrieval through the builder, and a test drives
-`build_grid_info` end to end on chula, getting the same six staves and the same
-measured slope as the direct driver. `process_bars` and `complete_lines` are
-still recorded-but-empty, so the next steps are to move the oracle-verified bars
-chain out of `recognize_grid_lines` into `process_bars`, then attach the
-completion chain in `complete_lines`.
+and staff retrieval through the builder, and a test drives `build_grid_info`
+end to end on chula, getting the same six staves and the same measured slope as
+the direct driver. `process_bars` and `complete_lines` record their stage and
+return.
+
+**Do not extend that struct; migrate off it.** Its `retrieve_lines` duplicates
+`RawProductionRetrieveLines` (`prepared_lines.rs:345`), which already implements
+the same stage and additionally handles the small-interline secondary pass,
+retained sloped filaments, and the raw metadata handoff. The ported shape is the
+decorator chain `RawProductionRetrieveLines -> ProductionProcessBars ->
+ProductionCompleteLines`, composed as
+`HeadlessGridExecutor::from_completed_raw_bars_complete_lines` does.
+
+The one thing blocking a straight drop-in is `ProductionProcessBars::new`
+(`prepared_bars.rs:100`): it takes an already-built `Vec<BarsSystemState>`
+rather than deriving one, and those states need projectors, graded peaks,
+alignments, and connections that the chain does not produce.
+`recognize_grid_lines` does produce them and is oracle-matched on every example
+page. So the migration is: keep that derivation, feed its `BarsSystemState`
+values into `ProductionProcessBars`, and let `ProductionCompleteLines` carry the
+already-ported completion chain.
 
 ### Suggested order
 

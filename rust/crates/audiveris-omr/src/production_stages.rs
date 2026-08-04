@@ -13,8 +13,32 @@
 //! `retrieveLines`, `processBars`, and `completeLines`, mirroring Java
 //! `GridBuilder.buildInfo`.
 //!
-//! Line completion is the stage this unlocks: the completion chain and its
-//! parameters are already ported, and `complete_lines` is where they attach.
+//! # Prefer the ported decorator chain
+//!
+//! `retrieve_lines` below duplicates
+//! [`audiveris_image::prepared_lines::RawProductionRetrieveLines`], which
+//! already implements the same stage and handles more than this does: the
+//! optional small-interline secondary pass, retained sloped filaments, and the
+//! raw line-metadata handoff that carries the measured slope downstream. This
+//! struct exists because it was the shortest way to prove the executor runs in
+//! production at all; the parity-correct shape is the ported chain
+//!
+//! ```text
+//! RawProductionRetrieveLines -> ProductionProcessBars -> ProductionCompleteLines
+//! ```
+//!
+//! composed exactly as `HeadlessGridExecutor::from_completed_raw_bars_complete_lines`
+//! does. Migrating to it is preferable to extending this struct.
+//!
+//! The reason that composition cannot simply be dropped in today is
+//! `ProductionProcessBars::new`, which takes an already-built
+//! `Vec<BarsSystemState>` rather than deriving one. Those states need staff
+//! projectors, graded peaks, alignments, and connections, none of which the
+//! chain produces. [`crate::recognize::recognize_grid_lines`] does produce them,
+//! oracle-matched against Java on every example page, so the migration is:
+//! keep that derivation, feed its `BarsSystemState` values into
+//! `ProductionProcessBars`, and let `ProductionCompleteLines` follow with the
+//! already-ported completion chain.
 
 use audiveris_image::grid_lifecycle::{GridBuildStage, GridStageFailure};
 use audiveris_image::lines_coordinator::{ClusterPassState, StaffCandidate};
