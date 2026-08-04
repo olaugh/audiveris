@@ -659,3 +659,61 @@ Never leave the branch depending on an uncommitted multi-stage rewrite. A commit
 must identify the ported behavior, and `PORTING.md` must be updated in the same commit.
 If interrupted mid-slice, reset nothing: leave the last green commit intact and describe
 the uncommitted failure at the top of this file before handing off.
+
+## Next slice: line completion (started, not finished)
+
+`recognize_grid_lines` drives GRID stage by stage and now matches the Java
+oracle on staff geometry, slope, systems, and barlines for every example page.
+It deliberately does **not** go through `HeadlessGridExecutor`; it calls the
+subsystems directly. Line completion is the point where that shortcut runs out,
+so this is the wiring the next slice has to build.
+
+### What blocks it
+
+`complete_lines` (`line_completion.rs:37`) runs eleven stages against a
+`LineCompletionExecutor`. The production chain for those stages already exists:
+`production_line_completion(parameters)` (`prepared_completion.rs:211`) composes
+DefineEndPoints, IncludeDiscardedFilaments, FillHolesInitial, IncludeSections,
+PolishCurvatures, IncludeStickers, and InspectCrossingChunks in Java order, and
+`production_grid_parameters` already derives every parameter it needs
+(`completion`, `maximum_thin_weight`, `inspect_crossing_chunks`). Those three
+fields are currently derived and unused.
+
+The chain is reached through
+`HeadlessGridExecutor::from_completed_raw_bars_complete_lines`
+(`grid_executor.rs:774`), whose `downstream` argument must implement
+`RemainingRasterGridStages` (`raster_grid_builder.rs:86`): `retrieve_lines`,
+`process_bars`, and the remaining stage hooks.
+
+**There is no production implementation of that trait.** The only one is
+`RasterStages` at `grid_executor.rs:1417`, inside `#[cfg(test)] mod tests`. The
+whole raster-executor path has been exercised with test doubles only. That is
+the missing piece, not the completion stages themselves.
+
+### Suggested order
+
+1. Implement `RemainingRasterGridStages` for production by moving the body of
+   `recognize_grid_lines` behind it: `retrieve_lines` performs the run
+   partition, lag, measure-then-cluster passes, and staff retrieval;
+   `process_bars` performs the projector, alignments, sticks, connections, and
+   the two purge entry points. The logic is already written and oracle-verified,
+   so this is a re-shaping, not new recognition code.
+2. Build the `HeadlessGridSheet` and `HeadlessGridBook` initial state. The exact
+   required fields, and which are overwritten by handoffs rather than
+   pre-filled, are enumerated per field in the raster-path tests around
+   `grid_executor.rs:1942-2043`; `sheet_number`, `no_staff_table`, `max_fore`,
+   `ledger_thickness`, and the `population` geometry/boundaries/systems must be
+   supplied, while `staffs`, `horizontal_lag`, `vertical_lag`, and `skew` are
+   installed by the handoffs.
+3. Call `from_completed_raw_bars_complete_lines` and run the executor, then
+   assert the eleven completion stages ran in Java order and that staff lines
+   gained endpoints and filled holes.
+4. Oracle check: compare completed staff-line endpoints against Java's
+   `sheet#1.xml` staff `left`/`right` and line points. Java's values are already
+   known to sit within about three pixels of the current raw geometry, so
+   completion should close that gap rather than move it.
+
+Keep `AUDIVERIS_DEBUG_PURGE=1` in mind: it prints per-peak removal stages on the
+Rust side, and the same diagnosis on the Java side is a temporary log in
+`StaffProjector.removePeak` that walks the stack for the calling `purge*` method
+(reverted after use, easy to reapply).
