@@ -294,6 +294,12 @@ pub struct ProductionCompleteLines<Upstream, Completion> {
     /// One-shot handoff captured before ownership validation and forwarded to
     /// the sheet even when a later join check rejects the attempt.
     prepared_bars_handoff: Option<PreparedBarsHandoff>,
+    /// Retained copy of the refined staff abscissae, read at `processBars`
+    /// time. `prepared_bars_handoff` above is one-shot and the sheet takes it
+    /// during that same stage, so `completeLines` cannot read the limits back
+    /// out of it; this mirrors the `raw_metadata` / `raw_metadata_handoff`
+    /// split for the same reason.
+    refined_staff_limits: Vec<(usize, i32, i32)>,
     state: Option<PreparedCompletionState>,
     /// Retained copy consumed by concrete completion after ProcessBars.
     raw_metadata: Option<RawLineMetadataHandoff>,
@@ -322,6 +328,7 @@ impl<Upstream, Completion> ProductionCompleteLines<Upstream, Completion> {
             direct_ownership_source: None,
             direct_ownership_handoff: None,
             prepared_bars_handoff: None,
+            refined_staff_limits: Vec::new(),
             state: None,
             raw_metadata: None,
             raw_metadata_handoff: None,
@@ -465,6 +472,11 @@ where
             .map_err(map_upstream_failure);
         if let Some(extract) = self.prepared_bars_source {
             self.prepared_bars_handoff = extract(&mut self.upstream);
+            self.refined_staff_limits = self
+                .prepared_bars_handoff
+                .as_ref()
+                .map(collect_refined_staff_limits)
+                .unwrap_or_default();
         }
         if let Some(extract) = self.direct_ownership_source {
             self.direct_ownership_handoff = extract(&mut self.upstream);
@@ -531,9 +543,7 @@ where
         // it right, and `refineRightEnds` sets RIGHT. The prepared staffs still
         // carry the cluster candidate limits from `retrieveLines`, so adopt the
         // refined ones before the endpoints are computed from them.
-        if let Some(handoff) = self.prepared_bars_handoff.as_ref() {
-            adopt_refined_staff_limits(&mut staffs, handoff);
-        }
+        adopt_refined_staff_limits(&mut staffs, &self.refined_staff_limits);
         let horizontal_sections = raster
             .horizontal_lag()
             .ok_or_else(|| {
@@ -605,19 +615,33 @@ where
     }
 }
 
+/// Flattens the bars handoff's per-system staff abscissae into
+/// `(staff id, left, right)`.
+fn collect_refined_staff_limits(handoff: &PreparedBarsHandoff) -> Vec<(usize, i32, i32)> {
+    handoff
+        .systems
+        .iter()
+        .flat_map(|system| {
+            system
+                .staff_ids
+                .iter()
+                .zip(system.staff_limits.iter())
+                .map(|(id, &(left, right))| (*id, left, right))
+        })
+        .collect()
+}
+
 /// Replaces each prepared staff's abscissae with the ones `BarsRetriever`
 /// refined, keyed by staff id.
 ///
 /// A staff the bars handoff does not mention keeps its candidate limits: that
 /// is a staff `processBars` never saw, and inventing a limit for it would be
 /// worse than leaving the retrieval's own answer in place.
-fn adopt_refined_staff_limits(staffs: &mut [PreparedStaff], handoff: &PreparedBarsHandoff) {
-    let mut refined = HashMap::new();
-    for system in &handoff.systems {
-        for (id, limits) in system.staff_ids.iter().zip(system.staff_limits.iter()) {
-            refined.insert(*id, *limits);
-        }
-    }
+fn adopt_refined_staff_limits(staffs: &mut [PreparedStaff], refined: &[(usize, i32, i32)]) {
+    let refined: HashMap<usize, (i32, i32)> = refined
+        .iter()
+        .map(|&(id, left, right)| (id, (left, right)))
+        .collect();
     for staff in staffs {
         if let Some(&(left, right)) = refined.get(&staff.id) {
             staff.left = f64::from(left);

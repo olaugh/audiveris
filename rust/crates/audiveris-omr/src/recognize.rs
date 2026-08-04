@@ -28,7 +28,12 @@ use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_
 use audiveris_image::bars_coordinator::{
     BarsPurgeParameters, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
 };
-use audiveris_image::grid_lifecycle::build_grid_info;
+use audiveris_image::grid_lifecycle::{GridStepExecutor, GridStepStage};
+
+use crate::grid_executor::{
+    HeadlessGridBook, HeadlessGridExecutor, HeadlessGridSheet, HeadlessGridSigState,
+    HeadlessPopulationState, HeadlessStaff,
+};
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
@@ -36,9 +41,7 @@ use audiveris_image::lines_coordinator::{
     ClusterPassState, StaffCandidate, retrieve_staff_candidates,
 };
 use audiveris_image::peak_graph::PeakGraph;
-use audiveris_image::prepared_bars::{
-    PreparedBarsHandoff, PreparedBarsStage, ProductionProcessBars,
-};
+use audiveris_image::prepared_bars::ProductionProcessBars;
 use audiveris_image::prepared_completion::{ProductionCompleteLines, production_line_completion};
 use audiveris_image::prepared_lines::{PreparedStaff, RawProductionRetrieveLines};
 use audiveris_image::production_grid_params::{
@@ -194,12 +197,14 @@ pub struct PeakGraphReport {
     pub surviving_barlines: Vec<(usize, Vec<i32>)>,
     /// Staff ids grouped by shared aligned barlines, in Java's system order.
     pub systems: Vec<Vec<usize>>,
-    /// What `ProductionProcessBars` published for the line-completion stage:
-    /// per-system peaks and brace peaks, the sheet-wide peak graph, and the
-    /// promoted connections.
-    pub bars: PreparedBarsHandoff,
     /// What the ported `completeLines` chain did to the retrieved staff lines.
     pub completion: LineCompletionReport,
+    /// The sheet SIG the GRID step promoted: barline, bracket, brace, and
+    /// connector inters per system, plus their relations.
+    pub sig: HeadlessGridSigState,
+    /// Staffs the GRID step installed on the sheet, with their recorded
+    /// barlines.
+    pub sheet_staffs: Vec<HeadlessStaff>,
 }
 
 /// Tallies from Java `LinesRetriever.completeLines`.
@@ -681,8 +686,32 @@ fn build_peak_graph(
         production.inspect_crossing_chunks,
     )
     .with_completion_systems_from_prepared_bars();
-    let mut builder = HeadlessRasterGridBuilder::new(source.clone(), production.raster, stages);
-    build_grid_info(&mut builder).map_err(grid_stage("grid build"))?;
+    // Java `GridStep.doit` runs the builder inside the step, which promotes the
+    // surviving peaks into the sheet's SIG as barline, bracket, brace, and
+    // connector inters and installs the staffs. Driving the builder alone stops
+    // short of all of that, so the executor owns the run.
+    let builder = HeadlessRasterGridBuilder::new(source.clone(), production.raster, stages);
+    let mut executor = HeadlessGridExecutor::new(
+        builder,
+        HeadlessGridSheet {
+            sheet_number: 1,
+            population: HeadlessPopulationState {
+                sheet_width: i32::try_from(width).unwrap_or(i32::MAX),
+                sheet_height: i32::try_from(height).unwrap_or(i32::MAX),
+                ..HeadlessPopulationState::default()
+            },
+            ..HeadlessGridSheet::default()
+        },
+        HeadlessGridBook::default(),
+    )
+    .with_raster_grid_handoff()
+    .with_raw_line_metadata_handoff()
+    .with_prepared_staff_handoff()
+    .with_prepared_bars_handoff();
+    executor
+        .run_grid_step_stage(GridStepStage::BuildGrid)
+        .map_err(grid_stage("grid build"))?;
+    let builder = &mut executor.builder;
 
     if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
         for (system_id, removed) in builder.stages().upstream().removals() {
@@ -710,18 +739,11 @@ fn build_peak_graph(
             hole_fill_invocations: state.fill_hole_invocations.len(),
             staff_lines: completed_staff_lines(&state.staffs),
         })?;
-    let bars_handoff = builder
-        .stages_mut()
-        .take_prepared_bars_handoff()
-        .ok_or_else(|| GridRecognitionError::Stage {
-            stage: "process bars",
-            message: "stage published no prepared bars handoff".to_owned(),
-        })?;
-
-    // The handoff carries each system's post-purge peaks, so the survivors are
-    // read off directly rather than reconstructed from removal records.
+    // The executor consumed the prepared bars handoff to build the sheet SIG,
+    // so the post-purge peaks are read from there. That is also the structure
+    // Java ends GRID with, which makes it the right thing to diff.
     let mut surviving: Vec<(usize, Vec<i32>)> = Vec::new();
-    for system in &bars_handoff.systems {
+    for system in &executor.sheet.sig.systems {
         for (staff_id, peaks) in system.staff_ids.iter().zip(system.staff_peaks.iter()) {
             surviving.push((*staff_id, peaks.iter().map(StaffPeak::start).collect()));
         }
@@ -730,6 +752,9 @@ fn build_peak_graph(
     let purged_peaks = candidate_peaks.saturating_sub(retained_peaks);
 
     Ok(PeakGraphReport {
+        sig: executor.sheet.sig.clone(),
+
+        sheet_staffs: executor.sheet.staffs.clone(),
         alignment_count,
         connection_count,
         stick_count,
@@ -738,7 +763,6 @@ fn build_peak_graph(
         purged_peaks,
         surviving_barlines: surviving,
         systems,
-        bars: bars_handoff,
         completion,
     })
 }
@@ -1132,6 +1156,8 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
+    use audiveris_image::grid_sig::GridSigNode;
     use std::collections::BTreeSet;
 
     fn repo_path(relative: &str) -> std::path::PathBuf {
@@ -1437,7 +1463,7 @@ mod tests {
             // Staff abscissae, in Java's staff order.
             let produced_staffs: Vec<(usize, i32, i32)> = recognition
                 .peak_graph
-                .bars
+                .sig
                 .systems
                 .iter()
                 .flat_map(|system| {
@@ -1601,6 +1627,278 @@ mod tests {
         assert_eq!(checked, 420, "every barline must be compared");
     }
 
+    /// One Java GRID barline inter, as persisted in `sheet#1.xml`.
+    #[derive(Debug, PartialEq)]
+    struct JavaBarline {
+        staff: usize,
+        shape: String,
+        width: f64,
+        grade: f64,
+        ctx_grade: f64,
+        frozen: bool,
+        staff_end: String,
+        median: (f64, f64, f64, f64),
+    }
+
+    #[derive(Default)]
+    struct JavaSig {
+        barlines: Vec<JavaBarline>,
+        connectors: Vec<(String, f64, f64, bool)>,
+        relations: BTreeMap<String, usize>,
+    }
+
+    /// Parses `rust/oracle/grid-sig.txt`, keyed by page file name.
+    fn java_sig_oracle() -> BTreeMap<String, JavaSig> {
+        let text = include_str!("../../../oracle/grid-sig.txt");
+        let mut pages: BTreeMap<String, JavaSig> = BTreeMap::new();
+        let mut current = String::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let f: Vec<&str> = line.split_whitespace().collect();
+            match f.as_slice() {
+                ["page", name] => {
+                    current = (*name).to_owned();
+                    pages.entry(current.clone()).or_default();
+                }
+                [
+                    "barline",
+                    staff,
+                    shape,
+                    width,
+                    grade,
+                    ctx,
+                    frozen,
+                    end,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                ] => {
+                    pages
+                        .get_mut(&current)
+                        .expect("barline before page")
+                        .barlines
+                        .push(JavaBarline {
+                            staff: staff.parse().expect("staff"),
+                            shape: (*shape).to_owned(),
+                            width: width.parse().expect("width"),
+                            grade: grade.parse().expect("grade"),
+                            ctx_grade: ctx.parse().expect("ctx grade"),
+                            frozen: *frozen == "true",
+                            staff_end: (*end).to_owned(),
+                            median: (
+                                x1.parse().expect("x1"),
+                                y1.parse().expect("y1"),
+                                x2.parse().expect("x2"),
+                                y2.parse().expect("y2"),
+                            ),
+                        });
+                }
+                ["connector", shape, width, grade, ctx, frozen] => {
+                    pages
+                        .get_mut(&current)
+                        .expect("connector before page")
+                        .connectors
+                        .push((
+                            (*shape).to_owned(),
+                            width.parse().expect("width"),
+                            grade.parse().expect("grade"),
+                            *frozen == "true",
+                        ));
+                    let _ = ctx;
+                }
+                ["relation", kind, count] => {
+                    pages
+                        .get_mut(&current)
+                        .expect("relation before page")
+                        .relations
+                        .insert((*kind).to_owned(), count.parse().expect("count"));
+                }
+                _ => panic!("unparsable sig record: {line}"),
+            }
+        }
+        pages
+    }
+
+    /// Grades are persisted with three decimals, so agreement is asserted to
+    /// half a unit in that last place.
+    const SIG_GRADE_PRECISION: f64 = 5e-4;
+
+    /// Per-page ledger of how far the promoted SIG is from Java's, as
+    /// `(page, inters differing in a core field, inters differing in a median,
+    /// largest median delta, inters differing in a grade, largest grade delta)`.
+    ///
+    /// Core fields are staff, shape, width, frozen, and staff-end. Counts are
+    /// asserted exactly, not as ceilings, so fixing one of these fails the test
+    /// and forces the ledger to be updated rather than silently drifting.
+    ///
+    /// Eight of the nine pages are exact or nearly so: five inters across four
+    /// pages differ in grade by at most 0.005, and one chula median sits a pixel
+    /// high. `BachInvention5.jpg` is the outlier, and the same outlier as
+    /// everywhere else in GRID -- it is the corpus's only JPEG, and already owns
+    /// the barline-abscissa and completed-line residuals. Three of its inters
+    /// have medians 11 to 18 pixels short at the bottom, which is a structural
+    /// difference rather than a rounding one, and its grades follow from that.
+    const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
+        ("BachInvention5.jpg", 1, 9, 18.0, 19, 0.18),
+        ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),
+        ("allegretto.png", 0, 0, 0.0, 0, 0.0),
+        ("batuque.png", 0, 0, 0.0, 0, 0.0),
+        ("carmen.png", 0, 0, 0.0, 2, 0.004),
+        ("chula.png", 0, 1, 1.0, 0, 0.0),
+        ("cucaracha.png", 0, 0, 0.0, 1, 0.004),
+        ("hove.png", 0, 0, 0.0, 0, 0.0),
+        ("zizi.png", 0, 0, 0.0, 0, 0.0),
+    ];
+
+    /// Diffs the sheet SIG the GRID step promotes against Java's persisted
+    /// `sheet#1.xml` on every example page.
+    ///
+    /// This is the step's real product. `recognize_grid_lines` drives
+    /// `HeadlessGridExecutor`, which promotes every surviving peak into a
+    /// barline inter carrying its median, width, intrinsic grade, contextual
+    /// grade, frozen flag, and staff-end marks, then installs the staffs with
+    /// their recorded barlines.
+    ///
+    /// Two things are deliberately not compared, and are gaps rather than
+    /// omissions: braces, because the port keeps `brace_peaks` detached from the
+    /// SIG promotion path so Java's `<brace>` inters have no counterpart; and
+    /// connector medians and widths, because `ConnectionInterPlan` carries
+    /// neither. Connectors are still compared by count.
+    #[test]
+    fn sheet_sig_matches_the_java_oracle_across_the_example_corpus() {
+        let oracle = java_sig_oracle();
+        assert_eq!(oracle.len(), 9, "oracle should cover every example page");
+        let mut total = 0usize;
+
+        for (name, java) in &oracle {
+            let (_, expected_core, expected_medians, median_bound, expected_grades, grade_bound) =
+                SIG_PAGE_LEDGER
+                    .iter()
+                    .find(|entry| entry.0 == name)
+                    .copied()
+                    .unwrap_or_else(|| panic!("{name} is missing from the SIG ledger"));
+
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+
+            let mut produced: Vec<JavaBarline> = Vec::new();
+            let mut connectors = 0usize;
+            for system in &recognition.peak_graph.sig.systems {
+                for (_, node) in system.sig.nodes_in_order() {
+                    match node {
+                        GridSigNode::Vertical {
+                            plan,
+                            frozen,
+                            contextual_grade,
+                            ..
+                        } => {
+                            let VerticalInterKind::Barline {
+                                width_class,
+                                left_staff_end,
+                                right_staff_end,
+                            } = plan.kind
+                            else {
+                                panic!("{name}: unexpected bracket inter {:?}", plan.kind);
+                            };
+                            produced.push(JavaBarline {
+                                staff: plan.peak.staff_id().value(),
+                                shape: match width_class {
+                                    PeakWidthClass::Thin => "THIN_BARLINE".to_owned(),
+                                    PeakWidthClass::Thick => "THICK_BARLINE".to_owned(),
+                                },
+                                width: plan.width,
+                                grade: plan.impacts.map_or(0.0, |i| i.grade()),
+                                ctx_grade: contextual_grade.unwrap_or(f64::NAN),
+                                frozen: *frozen,
+                                staff_end: if left_staff_end {
+                                    "LEFT".to_owned()
+                                } else if right_staff_end {
+                                    "RIGHT".to_owned()
+                                } else {
+                                    "NONE".to_owned()
+                                },
+                                median: (
+                                    plan.median.x,
+                                    plan.median.top,
+                                    plan.median.x,
+                                    plan.median.bottom,
+                                ),
+                            });
+                        }
+                        GridSigNode::Connector { .. } => connectors += 1,
+                    }
+                }
+            }
+
+            // Java lists inters in its own traversal order; sorting both sides
+            // by staff and abscissa compares content without asserting an order
+            // the port does not claim to reproduce.
+            let key = |b: &JavaBarline| (b.staff, b.median.0);
+            let mut expected: Vec<&JavaBarline> = java.barlines.iter().collect();
+            expected.sort_by(|a, b| key(a).partial_cmp(&key(b)).expect("finite abscissae"));
+            produced.sort_by(|a, b| key(a).partial_cmp(&key(b)).expect("finite abscissae"));
+
+            assert_eq!(
+                produced.len(),
+                expected.len(),
+                "{name} promoted {} barline inters against Java's {}",
+                produced.len(),
+                expected.len()
+            );
+            total += produced.len();
+
+            let (mut core, mut medians, mut grades) = (0usize, 0usize, 0usize);
+            for (index, (produced, expected)) in produced.iter().zip(&expected).enumerate() {
+                if produced.staff != expected.staff
+                    || produced.shape != expected.shape
+                    || produced.width != expected.width
+                    || produced.frozen != expected.frozen
+                    || produced.staff_end != expected.staff_end
+                {
+                    core += 1;
+                }
+                let median_delta = (produced.median.0 - expected.median.0)
+                    .abs()
+                    .max((produced.median.1 - expected.median.1).abs())
+                    .max((produced.median.3 - expected.median.3).abs());
+                if median_delta > 0.0 {
+                    medians += 1;
+                    assert!(
+                        median_delta <= median_bound,
+                        "{name} inter {index} median off by {median_delta}, over the \
+                         recorded {median_bound}"
+                    );
+                }
+                let grade_delta = (produced.grade - expected.grade)
+                    .abs()
+                    .max((produced.ctx_grade - expected.ctx_grade).abs());
+                if grade_delta > SIG_GRADE_PRECISION {
+                    grades += 1;
+                    assert!(
+                        grade_delta <= grade_bound,
+                        "{name} inter {index} grade off by {grade_delta}, over the \
+                         recorded {grade_bound}"
+                    );
+                }
+            }
+            assert_eq!(core, expected_core, "{name} core-field mismatches");
+            assert_eq!(medians, expected_medians, "{name} median mismatches");
+            assert_eq!(grades, expected_grades, "{name} grade mismatches");
+
+            assert_eq!(
+                connectors,
+                java.connectors.len(),
+                "{name} promoted {connectors} connector inters against Java's {}",
+                java.connectors.len()
+            );
+        }
+        assert_eq!(total, 420, "every promoted barline inter must be compared");
+    }
+
     #[test]
     fn line_completion_runs_every_java_stage_on_the_example_corpus() {
         const EXPECTED_STAGES: [LineCompletionStage; 10] = [
@@ -1653,10 +1951,10 @@ mod tests {
     }
 
     #[test]
-    fn chula_prepared_bars_handoff_agrees_with_the_oracle_locked_barlines() {
+    fn chula_sheet_sig_agrees_with_the_oracle_locked_barlines() {
         let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
             .unwrap_or_else(|error| panic!("chula: {error}"));
-        let bars = &recognition.peak_graph.bars;
+        let bars = &recognition.peak_graph.sig;
 
         let staff_ids: Vec<Vec<usize>> = bars
             .systems

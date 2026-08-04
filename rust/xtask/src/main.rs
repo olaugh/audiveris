@@ -1357,6 +1357,8 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
                         vertical_plans: [&s1a, &s1b, &s2a, &s2b]
                             .map(output_boundary_vertical_plan)
                             .to_vec(),
+                        staff_ids: vec![1, 2],
+                        staff_limits: Vec::new(),
                         staff_peaks: vec![
                             vec![s1a.clone(), s1b.clone(), missing.clone()],
                             vec![s2a.clone(), s2b.clone()],
@@ -1370,6 +1372,8 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
                         system_id: 2,
                         sig: GridSig::default(),
                         vertical_plans: vec![output_boundary_vertical_plan(&s3a)],
+                        staff_ids: vec![3],
+                        staff_limits: Vec::new(),
                         staff_peaks: vec![vec![s3a.clone()]],
                         brace_peaks: vec![None],
                         maximum_group_gap: 3,

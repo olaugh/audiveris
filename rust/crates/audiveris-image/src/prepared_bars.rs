@@ -12,12 +12,16 @@ use crate::{
     bar_alignment::BarAlignment,
     bar_column::StaffId,
     bars_coordinator::{
-        BarsCoordinatorError, BarsCoordinatorParameters, BarsPurgeParameters, BarsRightEvidence,
-        BarsRootEvidence, BarsSystemState, RemovedPeak, process_bars_after_braces,
-        process_bars_peak_purges, process_bars_right_ends, process_bars_system,
+        BarsConnectionGroupParameters, BarsCoordinatorError, BarsCoordinatorParameters,
+        BarsCoordinatorResult, BarsPurgeParameters, BarsRightCClefParameters, BarsRightEvidence,
+        BarsRootEvidence, BarsSystemState, BarsWidthInterParameters, CClefParameters, RemovedPeak,
+        process_bars_after_braces, process_bars_connections_and_groups, process_bars_peak_purges,
+        process_bars_right_ends_and_c_clefs, process_bars_system,
+        process_bars_through_too_far_left, process_bars_widths_and_inters,
     },
     bars_logic::{ConnectionInterPlan, VerticalInterPlan},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
+    grid_sig::GridSig,
     lines_coordinator::StaffCandidateKind,
     peak_graph::{PeakGraph, PeakGraphError},
     prepared_lines::{
@@ -219,6 +223,97 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         &self.removals
     }
 
+    /// Runs one system through Java `BarsRetriever.process`.
+    ///
+    /// When the caller supplied the projector evidence -- bar-filament bounds
+    /// via [`Self::with_extending_purge`] and projection blanks via
+    /// [`Self::with_staff_limit_refinement`] -- this runs the staged sequence in
+    /// Java's own order:
+    ///
+    /// ```text
+    /// buildColumns .. purgeTooLeft   (process_bars_through_too_far_left)
+    /// purgeLeftOfBraces, verifyLinesRoot (process_bars_after_braces)
+    /// purgeLeftPeaks, purgeUnalignedBars, purgeExtendingPeaks
+    /// refineRightEnds, purgeCClefs
+    /// partitionWidths, createInters
+    /// createConnectionInters, groupBarlines
+    /// ```
+    ///
+    /// Order matters here and not only for tidiness: `createInters` must run
+    /// after the purges, or peaks that `purgeExtendingPeaks` drops still receive
+    /// barline inters. `process_bars_system` bundles the prefix, some purges,
+    /// and `createInters` into one call, so it cannot express that.
+    ///
+    /// Without the evidence it falls back to that bundled call, which is what
+    /// callers holding only a `BarsSystemState` can support.
+    fn staged_system(
+        system: &mut BarsSystemState,
+        parameters: BarsCoordinatorParameters,
+        extending: Option<&ExtendingPurge>,
+        limits: Option<&StaffLimitRefinement>,
+    ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
+        let (Some(extending), Some(limits)) = (extending, limits) else {
+            return process_bars_system(system, parameters);
+        };
+
+        let prefix = process_bars_through_too_far_left(system, parameters)?;
+        let mut removed = prefix.removed_peaks().to_vec();
+
+        let braces = process_bars_after_braces(system, &limits.root_evidence)?;
+        removed.extend_from_slice(braces.removed_peaks());
+
+        let purges =
+            process_bars_peak_purges(system, &extending.filament_bounds, extending.parameters)?;
+        removed.extend_from_slice(purges.removed_peaks());
+
+        let c_clef = parameters.c_clef().unwrap_or(CClefParameters {
+            minimum_first_peak_width: 1,
+            maximum_second_peak_width: 1,
+            minimum_measure_width: 0,
+            tail_width: 0,
+        });
+        let right = process_bars_right_ends_and_c_clefs(
+            system,
+            &limits.right_evidence,
+            BarsRightCClefParameters {
+                maximum_double_bar_gap: parameters.maximum_double_bar_gap(),
+                c_clef,
+            },
+        )?;
+        removed.extend_from_slice(right.removed_peaks());
+
+        // `partitionWidths` and `createInters` need a SIG to register glyphs and
+        // inters into. The sheet builds its own from the published plans, so
+        // this one is scratch space for the traversal.
+        let mut sig = GridSig::default();
+        let widths = process_bars_widths_and_inters(
+            system,
+            &mut sig,
+            BarsWidthInterParameters {
+                maximum_double_bar_gap: parameters.maximum_double_bar_gap(),
+                interline: parameters.interline(),
+                minimum_normalized_width_delta: parameters.minimum_normalized_width_delta(),
+                foreground_thickness: parameters.foreground_thickness(),
+            },
+        )?;
+        let connections = process_bars_connections_and_groups(
+            system,
+            &mut sig,
+            BarsConnectionGroupParameters {
+                maximum_double_bar_gap: parameters.maximum_double_bar_gap(),
+                interline: f64::from(parameters.interline()),
+            },
+        )?;
+
+        Ok(BarsCoordinatorResult::from_staged(
+            prefix.start_column_index(),
+            removed,
+            widths.width_assignments().to_vec(),
+            widths.vertical_inters().to_vec(),
+            connections.connection_inters().to_vec(),
+        ))
+    }
+
     /// Runs `processBars` without a `RasterGridBuildState`.
     ///
     /// The stage never reads the build state: its inputs are the prepared
@@ -245,9 +340,17 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             peak_graph: PeakGraph::new(),
             connections: Vec::new(),
         };
+        let extending = self.extending.clone();
+        let limits = self.limits.clone();
+        let parameters = self.parameters;
         for system in &mut self.systems {
             let system_id = system.system_id();
-            let result = match process_bars_system(system, self.parameters) {
+            let result = match Self::staged_system(
+                system,
+                parameters,
+                extending.as_ref(),
+                limits.as_ref(),
+            ) {
                 Ok(result) => result,
                 Err(source) => {
                     self.handoff = Some(handoff);
@@ -260,45 +363,14 @@ impl<Upstream> ProductionProcessBars<Upstream> {
                     .iter()
                     .map(|removed| (system_id, *removed)),
             );
-            // Java `BarsRetriever.purgeExtendingPeaks` runs after the
-            // coordinator purges and before the peaks are published.
-            if let Some(extending) = self.extending.as_ref() {
-                match process_bars_peak_purges(
-                    system,
-                    &extending.filament_bounds,
-                    extending.parameters,
-                ) {
-                    Ok(purged) => self.removals.extend(
-                        purged
-                            .removed_peaks()
-                            .iter()
-                            .map(|removed| (system_id, *removed)),
-                    ),
-                    Err(source) => {
-                        self.handoff = Some(handoff);
-                        return Err(ProductionProcessBarsError::Bars { system_id, source });
-                    }
-                }
-            }
-            // Java `verifyLinesRoot` (single-staff systems only) then
-            // `refineRightEnds`, in that relative order.
-            if let Some(limits) = self.limits.as_ref() {
-                if let Err(source) = process_bars_after_braces(system, &limits.root_evidence) {
-                    self.handoff = Some(handoff);
-                    return Err(ProductionProcessBarsError::Bars { system_id, source });
-                }
-                if let Err(source) = process_bars_right_ends(system, &limits.right_evidence) {
-                    self.handoff = Some(handoff);
-                    return Err(ProductionProcessBarsError::Bars { system_id, source });
-                }
-            }
             if let Err(error) = append_system(
                 &mut handoff,
                 system,
                 result.vertical_inters(),
                 result.connection_inters(),
                 self.maximum_group_gap,
-                f64::from(self.parameters.interline()),
+                f64::from(parameters.interline()),
+                self.limits.is_some(),
             ) {
                 self.handoff = Some(handoff);
                 return Err(error);
@@ -443,6 +515,7 @@ fn append_system<UpstreamError>(
     connections: &[ConnectionInterPlan],
     maximum_group_gap: i32,
     interline: f64,
+    refined_limits: bool,
 ) -> Result<(), ProductionProcessBarsError<UpstreamError>> {
     let mut next = handoff.clone();
     append_system_in_place(
@@ -452,6 +525,7 @@ fn append_system<UpstreamError>(
         connections,
         maximum_group_gap,
         interline,
+        refined_limits,
     )?;
     *handoff = next;
     Ok(())
@@ -464,6 +538,7 @@ fn append_system_in_place<UpstreamError>(
     connections: &[ConnectionInterPlan],
     maximum_group_gap: i32,
     interline: f64,
+    refined_limits: bool,
 ) -> Result<(), ProductionProcessBarsError<UpstreamError>> {
     for peak in state.graph().vertices() {
         handoff.peak_graph.add_vertex(peak.clone());
@@ -502,11 +577,18 @@ fn append_system_in_place<UpstreamError>(
             .iter()
             .map(|staff| staff.peaks().to_vec())
             .collect(),
-        staff_limits: state
-            .staffs()
-            .iter()
-            .map(|staff| (staff.left(), staff.right()))
-            .collect(),
+        // Only published when the abscissa refinement actually ran. Without it
+        // these are whatever the caller constructed the states with, which is
+        // not Java's `getAbscissa` and must not be adopted as such.
+        staff_limits: if refined_limits {
+            state
+                .staffs()
+                .iter()
+                .map(|staff| (staff.left(), staff.right()))
+                .collect()
+        } else {
+            Vec::new()
+        },
         brace_peaks: state
             .staffs()
             .iter()
@@ -602,6 +684,7 @@ mod tests {
                 result.connection_inters(),
                 6,
                 10.0,
+                true,
             )
             .unwrap();
         }
@@ -656,7 +739,7 @@ mod tests {
         .unwrap();
         let mut handoff = empty_handoff();
 
-        append_system::<()>(&mut handoff, &state, &[], &[], 6, 10.0).unwrap();
+        append_system::<()>(&mut handoff, &state, &[], &[], 6, 10.0, true).unwrap();
 
         assert_eq!(handoff.systems[0].brace_peaks, [Some(brace), None]);
         assert_eq!(handoff.systems[0].staff_peaks[0], [top]);
@@ -722,6 +805,7 @@ mod tests {
             first_result.connection_inters(),
             6,
             10.0,
+            true,
         )
         .unwrap();
 
@@ -735,6 +819,7 @@ mod tests {
                 duplicate_result.connection_inters(),
                 6,
                 10.0,
+                true,
             ),
             Err(ProductionProcessBarsError::Graph(_))
         ));

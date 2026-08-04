@@ -327,6 +327,26 @@ impl BarsCoordinatorParameters {
     pub const fn interline(self) -> i32 {
         self.interline
     }
+
+    #[must_use]
+    pub const fn maximum_double_bar_gap(self) -> i32 {
+        self.maximum_double_bar_gap
+    }
+
+    #[must_use]
+    pub const fn foreground_thickness(self) -> i32 {
+        self.foreground_thickness
+    }
+
+    #[must_use]
+    pub const fn minimum_normalized_width_delta(self) -> f64 {
+        self.minimum_normalized_width_delta
+    }
+
+    #[must_use]
+    pub const fn c_clef(self) -> Option<CClefParameters> {
+        self.c_clef
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -573,6 +593,28 @@ impl BarsPrefixResult {
 }
 
 impl BarsCoordinatorResult {
+    /// Assembles a result from the individually staged entry points.
+    ///
+    /// [`process_bars_system`] bundles the same stages into one call, which
+    /// forces `createInters` to run before the later purges; callers that need
+    /// Java's real order run the stages themselves and rejoin here.
+    #[must_use]
+    pub fn from_staged(
+        start_column_index: Option<usize>,
+        removed_peaks: Vec<RemovedPeak>,
+        width_assignments: Vec<PeakWidthAssignment>,
+        vertical_inters: Vec<VerticalInterPlan>,
+        connection_inters: Vec<ConnectionInterPlan>,
+    ) -> Self {
+        Self {
+            start_column_index,
+            removed_peaks,
+            width_assignments,
+            vertical_inters,
+            connection_inters,
+        }
+    }
+
     #[must_use]
     pub const fn start_column_index(&self) -> Option<usize> {
         self.start_column_index

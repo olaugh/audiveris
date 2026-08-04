@@ -116,6 +116,11 @@ pub struct HeadlessSystemSigState {
     pub system_id: usize,
     pub sig: GridSig,
     pub vertical_plans: Vec<VerticalInterPlan>,
+    /// Java `SystemInfo.getStaves()` traversal, parallel to `staff_peaks`,
+    /// `brace_peaks`, and `staff_limits`.
+    pub staff_ids: Vec<usize>,
+    /// Java `staff.getAbscissa(LEFT/RIGHT)` after `BarsRetriever` refined it.
+    pub staff_limits: Vec<(i32, i32)>,
     pub staff_peaks: Vec<Vec<StaffPeak>>,
     pub brace_peaks: Vec<Option<StaffPeak>>,
     pub maximum_group_gap: i32,
@@ -129,7 +134,7 @@ pub struct HeadlessConnectionPlan {
     pub plan: ConnectionInterPlan,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct HeadlessGridSigState {
     pub systems: Vec<HeadlessSystemSigState>,
     /// Global `peakGraph` used by Java `createConnectionInters`.
@@ -182,6 +187,8 @@ impl HeadlessGridSigState {
                 system_id: system.system_id,
                 sig: GridSig::default(),
                 vertical_plans: system.vertical_plans,
+                staff_ids: system.staff_ids,
+                staff_limits: system.staff_limits,
                 staff_peaks: system.staff_peaks,
                 brace_peaks: system.brace_peaks,
                 maximum_group_gap: system.maximum_group_gap,
@@ -234,7 +241,7 @@ pub enum HeadlessBuildOtherError<BuilderError> {
     Promotion(HeadlessGridPromotionError),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct HeadlessPopulationState {
     pub sheet_width: i32,
     pub sheet_height: i32,
@@ -344,7 +351,7 @@ impl HeadlessSkew {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct HeadlessGridSheet {
     pub sheet_number: u32,
     pub staffs: Vec<HeadlessStaff>,
@@ -455,7 +462,7 @@ fn apply_skew_to_population_geometries(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct HeadlessGridBook {
     pub stubs: Vec<StubPages>,
     pub scores: Vec<ScoreTopology>,
@@ -1911,10 +1918,14 @@ mod tests {
         vertical_plans: Vec<VerticalInterPlan>,
     ) -> HeadlessSystemSigState {
         let brace_peaks = vec![None; peaks.len()];
+        let staff_ids = (1..=peaks.len()).collect::<Vec<_>>();
+        let staff_limits = vec![(0, 0); peaks.len()];
         HeadlessSystemSigState {
             system_id: 1,
             sig: GridSig::default(),
             vertical_plans,
+            staff_ids,
+            staff_limits,
             staff_peaks: peaks,
             brace_peaks,
             maximum_group_gap: 3,
