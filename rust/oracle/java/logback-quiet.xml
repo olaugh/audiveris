@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+
+<!--
+  Keeps PDFBox's logging off stdout so an oracle's output is only its records.
+
+  PDFBox logs at DEBUG whenever it recovers from something. "Suspicious stream
+  length 0" appears on three of the seven corpus files, and lines like it are
+  worth reading, because each one names a leniency the port has to reproduce.
+  So they are moved to stderr rather than silenced.
+-->
+<configuration>
+  <appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+    <target>System.err</target>
+    <encoder>
+      <pattern>%-5level %logger{0} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  <root level="DEBUG">
+    <appender-ref ref="STDERR"/>
+  </root>
+</configuration>
