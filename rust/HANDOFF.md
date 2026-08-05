@@ -238,6 +238,48 @@ The narrower probes stay: `GridPdfProbe` generates the committed
 `oracle/grid-pdf.txt`, and `StaffImpactsProbe` is the one that found the
 `rint` bug.
 
+## LEDGERS is not the next slice, and what is
+
+I recommended LEDGERS as the shortest path from "lifecycle" to "real output
+graded against Java", on the strength of PORTING.md's row saying only the
+"visual filter input remains explicit". Reading the code says otherwise. The
+ledger logic really is largely ported -- `filter_raw_ledger_sections`,
+`source_native_ledger_candidates` with a concrete horizontal StickFactory,
+`evaluate_ledger_line` with all seven impacts, and the materializer -- but
+**three inputs it needs do not exist yet on a real page**:
+
+1. **The NO_STAFF raster.** `LedgersFilter` starts from
+   `Picture.getSource(NO_STAFF)`. In Java that is built by *erasing the staff
+   line glyphs from the binary source*, and `buildNoStaffTable` then makes a
+   vertical `RunTable` of it. The port consumes `sheet.no_staff_table` in
+   `rebuild_horizontal_lag` but never produces one: the tests supply a
+   synthetic table, and `recognize.rs` never sets it.
+2. **Staff and system areas.** `RawLedgerStaffZone.area` is Java's `Staff.area`,
+   used by `StaffManager.getClosestStaff` to decide which staff a run belongs
+   to. GRID computes system areas; the staff areas are not published.
+3. **Beams.** `RawLedgerSystemZone.good_full_beams` exists because
+   `LedgersFilter` purges sections lying under good full beams, and BEAMS runs
+   *before* LEDGERS. Supplying an empty list would silently keep sections Java
+   discards, on any page with beams -- which is most piano music.
+
+So the dependency order is NO_STAFF, then staff areas, then BEAMS, then
+LEDGERS. That is a real constraint, and it is worth knowing before someone
+spends a day on the wrong end of it.
+
+### Start with the NO_STAFF raster
+
+It is the right first slice for three reasons. It is small and precisely
+specified: erase the staff-line glyphs from the binary raster, then build a
+vertical run table. The port already holds those glyphs -- `toStaffLine`
+registers them during GRID. And it is **bit-exact gradeable**: dump Java's
+table and compare a hash, the same gate `oracle/grid-binary.txt` already uses
+for the binary raster.
+
+It also unblocks more than LEDGERS. `SheetScanner` (TEXTS) and `KeyExtractor`
+(HEADERS) both read NO_STAFF, and BEAMS works from the same staff-free image.
+Nothing downstream of GRID that looks at ink rather than geometry can be driven
+on a real page until it exists.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)
