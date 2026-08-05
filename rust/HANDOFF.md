@@ -36,8 +36,36 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Completed staff-line endpoints | 1300/1300 exact |
 | Sheet SIG | all 420 barline inters and 184 connectors promoted; 7 median and 21 grade residuals remain, diagnosed below |
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
+| PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green.
+
+### Reproducing the PDF work on a fresh machine
+
+The PDF parity test and its oracle need two things the repository does not carry.
+
+**The corpus.** Seven of the twelve PDFs in the `imslp-pseudo` repo's
+`manifests/acquired_scans.json`, downloaded to any directory, named by the
+basename of the URL. `oracle/pdf-pages.txt` records which seven by name. Then:
+
+```sh
+AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- --nocapture
+```
+
+It prints `checked 189 pages, 189 images, 189 filter chains; still
+unimplemented: {}`. Without the variable it prints that it skipped, so a green
+run that says nothing is not evidence.
+
+**PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
+checked-in `oracle/pdf-pages.txt` is enough to run the test. To regenerate, take
+the classpath from the Audiveris app and follow the header of
+`oracle/java/PdfPageProbe.java`. On a JDK newer than the Gradle build's target,
+`JAVA_HOME` has to point at JDK 25 or `:app:compileJava` fails with "invalid
+source release"; and `JAVA_TOOL_OPTIONS` must be cleared, because a proxy banner
+on stdout corrupts every parsed oracle.
+
+The whole 189-page test takes about 47 s in release and about 12 s in debug for
+the non-JBIG2 half. Run it in release.
 
 ## Open threads, in the order worth taking them
 
@@ -93,134 +121,145 @@ different consumer. `bars_logic.rs` around the `half_line` serif bounds is where
 to start, and `AUDIVERIS_DEBUG_PURGE`-style per-impact tracing on both runtimes
 is the way to close it.
 
-### 2. PDF ingest (uncertain piece done; decoders next)
+### 2. PDF ingest (reading is done; rendering is what is left)
 
 Audiveris renders PDF pages through PDFBox with
 `renderImageWithDPI(page, 300, ImageType.GRAY)` under `ANTIALIAS_OFF` and
 `INTERPOLATION_BICUBIC` (`ImageLoading.PdfboxLoader.getImage`). So this is
 reproducing a rasterizer, not writing a set of decoders, and the sequencing was
-to settle the rasterizer first.
+to settle the rasterizer first, then the file format, then the composition.
 
-**That is done.** `crates/audiveris-pdf` reproduces Java2D's bicubic image
-transform bit for bit: 7 geometries by 8 scales, including the three real IMSLP
-ratios, upscale, downscale, identity and 1x1 -- 112 of 112 cases identical,
-pinned by `oracle/java2d-bicubic.txt` from `oracle/java/Java2dBicubicProbe.java`.
-Note the probe needs no particular JDK, unlike the JPEG oracle, because no image
-codec is involved.
+**Two of the three are done.**
 
-Five things had to be right, none guessable from "bicubic": the Mitchell
--Netravali kernel with `A = -0.5`; its 513-entry table whose tail above index 384
-is *derived* so each group of four sums to one rather than evaluated from the
-polynomial; fixed-point arithmetic with coefficients scaled by 256, a `1 << 15`
-rounding bias and a `>> 16` with saturation (OpenJDK ships the integer variant of
-three); 32.32 fixed-point coordinate stepping with a half-pixel subtraction
-before both the gather and the interpolation; and branchless sign-bit edge
-clamping that duplicates the border row or column. Also: destination pixels whose
-centre maps outside the source are never written, which is why a page render has
-a black margin rather than an extrapolated one.
+#### The oracle
 
-**What is left is the mechanical part**, in rough order:
+`oracle/java/PdfPageProbe.java` -> `oracle/pdf-pages.txt`. It renders the corpus
+through the exact call Audiveris makes and pins, per page:
 
-1. PDF object, xref (classic and stream), object-stream and page-tree parsing.
-2. `FlateDecode` with PNG/TIFF predictors, `LZWDecode`, `RunLengthDecode`,
-   `ASCIIHexDecode`, `ASCII85Decode`. `DCTDecode` is already done in
-   `audiveris-jpeg`.
-3. `CCITTFaxDecode` G3 1D/2D and G4 -- what most of the corpus actually uses.
-4. `JBIG2Decode` generic region with its arithmetic coder. Bounded but meaty;
-   PDFBox delegates to `jbig2-imageio`, so that plugin is the reference rather
-   than the spec.
-5. The page-render plumbing: content-stream CTM, `ImageType.GRAY` conversion,
-   and the destination's initial state.
+- `image` -- each drawn XObject's declared geometry and filter chain, an
+  FNV-1a-64 of its **raw bytes as they sit in the file**, an FNV-1a-64 of those
+  bytes with the **filter chain applied**, and one of the decoded raster.
+- `draw` -- the six-term `AffineTransform` Java2D receives, at 17 significant
+  digits, read out of a `PageDrawer` subclass.
+- `page` -- the boxes, the rotation, the rendered size, and an FNV-1a-64 of the
+  rendered page.
 
-**Subsampling: answered, and the page composition with it.** PDFBox does not
-subsample -- `PDImageXObject.getImage()` on a real IMSLP page returns the full
-2315x2848 raster and the render is 2479x3299. But the naive model, "scale the
-source to fill the destination", is wrong by 22.5% of pixels, and the reason is
-worth knowing before writing any of the above. The page content stream is:
+Four depths, so each layer can be finished and graded before the layer above it
+exists. That is what made the rest of this quick. Run it with
+`-Dlogback.configurationFile=rust/oracle/java/logback-quiet.xml`, or PDFBox's
+own diagnostics land in the data -- and read them, because each one names a
+leniency the port has to reproduce.
 
-```
-q
-515 0 0 633.5724 45 74.2138 cm
-/Im0 Do
-Q
-```
+The corpus is not in the repository: 20 MB of scans, listed with download URLs
+in the `imslp-pseudo` repo's `manifests/acquired_scans.json`. Point
+`AUDIVERIS_PDF_CORPUS` at a directory holding them and
+`cargo test -p audiveris-pdf --test corpus` runs; without it, it prints that it
+skipped rather than passing quietly.
 
-The image occupies 515 x 633.5724 pt at offset (45, 74.2138) on a 595 x 792 pt
-page -- it does *not* fill it, and the render carries white margins. So the
-transform handed to Java2D is a scale *and* a translate, and the scale is a
-**downscale** of about 0.927, not the 1.07 the page-to-image ratio suggests.
+#### The rasterizer: done
 
-Two further details, each of which would break every sample comparison on its
-own:
+`transform.rs` reproduces Java2D's bicubic image transform bit for bit: 112 of
+112 synthetic cases, pinned by `oracle/java2d-bicubic.txt`. Five things had to
+be right, none guessable from "bicubic": the Mitchell-Netravali kernel with
+`A = -0.5`; its 513-entry table whose tail above index 384 is *derived* so each
+group of four sums to one rather than evaluated from the polynomial;
+fixed-point arithmetic with coefficients scaled by 256, a `1 << 15` rounding
+bias and a `>> 16` with saturation; 32.32 fixed-point coordinate stepping with a
+half-pixel subtraction before both the gather and the interpolation; and
+branchless sign-bit edge clamping that duplicates the border row or column.
+Also: destination pixels whose centre maps outside the source are never written,
+which is why a page render has a black margin rather than an extrapolated one.
 
-- **PDFBox computes the DPI scale in `float`.** `792 * (300/72f)` is
-  `3299.999874`, so the page floors to 3299 pixels; in `double` it is exactly
-  3300. The observed render is 3299. A one-pixel page changes every destination
-  coordinate.
-- `PDFStreamEngine.getGraphicsState().getCurrentTransformationMatrix()` reported
-  identity for this image in a naive subclass. Read the content stream, or
-  verify the engine subclass against it, before trusting a CTM.
+#### Reading the file: done, 189 of 189
 
-`draw_bicubic` is that generalization, and fed PDFBox's own composed
-`AffineTransform` it reproduces **eight of twelve real IMSLP pages bit-exactly**,
-covering every case the corpus turns on: offset placements with upscale, and
-0.5-0.53 downscales of 6109x7676 G4 scans.
+`document.rs`, `lexer.rs`, `object.rs`, `filter.rs`, `flate.rs`, `ccitt.rs`,
+`jbig2/`. Against PDFBox on all 189 pages of the seven sampled sources:
 
-Reading the transform rather than deriving it is what closed it. Composed in
-closed form the horizontal terms were already bit-identical, but `scale_y`
-differed in its last bits, which alone put 924 samples wrong across 13
-destination rows. `oracle/java/` has no probe for this yet; the one used was a
-`PageDrawer` subclass overriding `drawImage`, printing
-`getGraphics().getTransform()` concatenated with
-`new AffineTransform(ctm)` -> `scale(1.0/w, -1.0/h)` -> `translate(0, -h)`.
-**Promote that probe into `oracle/java/` and pin these pages** -- it is the only
-way this stays honest once decoders start landing.
+| Layer | Result |
+| --- | --- |
+| Page count, media box, crop box, rotation | 189/189 exact |
+| Image geometry, depth, filter chain | 189/189 exact |
+| Raw stream bytes, by hash | 189/189 exact |
+| Decoded stream bytes, by hash | **189/189 exact** (93 CCITT G4, 95 JBIG2, 1 Flate) |
 
-**Surveying the whole corpus is what caught the real gap.** Across all 189 pages
-of the seven sampled sources: every page has `rot=0` and exactly one image draw,
-scales run 0.5 to 1.0, and 188 of 189 sources are single-band gray -- but **70
-draws carry a shear**, up to 1.2e-2 or about 0.7 degrees, because the scans were
-deskewed by baking a rotation into the content stream's `cm`. Twelve pages of
-spot-testing had missed that regime completely, and the axis-aligned `Placement`
-could not express it at all. `Placement` is now a full six-term affine and both
-sheared SIBLEY pages are exact.
+Everything is ported from PDFBox's and jbig2-imageio's own source, fetched as
+`-sources.jar` from Maven Central, rather than from the specifications. Same
+reasoning as libjpeg 6b versus turbo: the target is the bytes Java produces.
+The places that cost *output* rather than merely robustness, all commented at
+their sites:
 
-Two things still open, neither a transform problem:
+- **`/Length` is often a lie.** Three of the seven sources declare `/Length 0`
+  on streams that are not empty. PDFBox logs "Suspicious stream length" and
+  scans for `endstream`; the port validates the declared length by checking what
+  follows it and falls back the same way. The raw-bytes hash is what pins this.
+- **CCITT is TwelveMonkeys' decoder as PDFBox vendors it**, and three of its
+  behaviours are in neither T.4 nor T.6. An unrecognised two-dimensional mode
+  code *restarts the mode read* instead of failing. A run code that decodes to a
+  negative value returns the full row width. A row that meets the end of the
+  data is dropped whole, not truncated. Also `/Rows` is discarded when the image
+  dictionary carries a `/Height`, and with `/K` at zero PDFBox *sniffs* the
+  first twenty bytes for an end-of-line code to choose between T.4 and modified
+  Huffman.
+- **`FlateDecode` keeps the prefix of a corrupt stream.** Pinned against PDFBox
+  at all eleven truncation points of a test stream, where the two agree exactly.
+- **JBIG2's arithmetic decoder reads -1 past the end of its data**, not the
+  0xFF the standard specifies, and folds it into a `long` code register. A
+  damaged stream diverges from a standards-following decoder immediately.
+- **JBIG2 output is the page bitmap inverted**, with the bits past each row's
+  width cleared, because the raster's colour model has index zero as black.
 
-- One page decodes to `TYPE_INT_RGB`, three bands; the crate is single-band.
-  Only 1 of 189 draws is colour, so this is low priority but real.
-- Three pages: near-identity scale (0.99995927), sub-pixel vertical offset.
-  **`-Dsun.java2d.trace=count` settles what happens** -- it prints the primitive
-  each render invokes:
+**JBIG2 scope was set by measuring.** Dumping segment types across all 95 JBIG2
+images found exactly three -- page information, one arithmetic symbol
+dictionary, one immediate text region -- with flag words 0 and 16, and no
+globals. So Huffman coding, refinement, halftones, striped pages and standalone
+generic region segments are refused *by name* rather than half-written. The
+generic region decoding procedure itself is complete (templates 0-3, adaptive
+pixels, typical prediction), because every symbol bitmap goes through it. Do the
+same measurement before extending it: `Document` can now extract the streams, so
+a twenty-line probe answers "what does this actually use" in a minute.
 
-  ```
-  near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
-  ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
-  ```
+#### What is left: composing the page
 
-  Java2D never reaches the bicubic path on those pages; it uses a ScaledBlit,
-  which is nearest-neighbour, and the render is byte-identical to the source.
-  Use that flag first for anything of this kind -- it answered in one run what
-  two rounds of source reading did not.
+1. **The content stream.** Interpret enough of it to find each `Do` and the CTM
+   it draws under. The corpus needs `q`/`Q`/`cm`/`Do` and nothing else, but
+   check that with a probe rather than assuming it.
+2. **Compose the transform PDFBox composes.** Reading it out of PDFBox rather
+   than deriving it is what closed the last gap once already: composed in closed
+   form the horizontal terms were bit-identical and `m11` was wrong in its last
+   bits, which alone put 924 samples wrong across 13 destination rows. Two traps
+   that are already known -- PDFBox computes the DPI scale in **`float`**, so a
+   792 pt page is 3299.999874 and floors to 3299 rather than 3300; and
+   `PDRectangle` holds **floats**, which is why `document.rs` does too. The
+   `draw` records in `oracle/pdf-pages.txt` are the grader.
+3. **The `ImageType.GRAY` destination**, its initial state, and the sample
+   conversion from a 1-bit `DeviceGray` source. The `page` records grade this.
+4. **Java2D's primitive selection.** This is the one genuinely open question,
+   and it is worth reading `crates/audiveris-pdf/src/transform.rs` on it before
+   starting. `-Dsun.java2d.trace=count` reports the primitive each render
+   invokes:
 
-  The trigger is not the transform in isolation: sweeping scale 0.5..1.1 against
-  offsets 0/0.1249/0.5 through `Graphics2D.drawImage` interpolates in every case
-  but exact identity, so it does not reproduce the real page. It is not PDFBox
-  either -- the hint is `Bicubic` before and after, and the images match the
-  reproducing pages in every property checked. What differs is the draw context:
-  PDFBox draws through a `Graphics2D` that already carries the page transform
-  and a clip, and `DrawImage` dispatches on `sg.transformState` and the composed
-  result rather than on the transform passed to `drawImage`.
+   ```
+   near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
+   ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
+   ```
 
-  **The scoping consequence matters more than the three pages.** A faithful PDF
-  ingest must reproduce Java2D's *primitive selection*, not just
-  `TransformHelper`'s arithmetic -- the same shape as libjpeg's fancy-vs-box
-  upsampler choice, which cost a day earlier in this port. Budget for it. About
-  10 of 189 draws land here, and since Audiveris renders at a fixed 300 DPI, any
-  scan whose page box makes its image roughly 1:1 at 300 DPI will.
+   `ScaledBlit` is nearest-neighbour and ignores the interpolation hint, so on
+   about 10 of 189 draws Java2D never reaches the bicubic path at all. The
+   trigger is not the transform in isolation -- sweeping scale 0.5 to 1.1
+   against offsets 0/0.1249/0.5 through `Graphics2D.drawImage` interpolates in
+   every case but exact identity -- and it is not PDFBox, whose hint reads
+   `Bicubic` before and after the draw. What differs is the *draw context*:
+   PDFBox draws through a `Graphics2D` already carrying the page transform and a
+   clip, and `DrawImage` dispatches on `sg.transformState` and the composed
+   result rather than on the transform passed to `drawImage`. Read
+   `DrawImage.java`'s `transformState` ladder, then confirm against a real page
+   trace. Since Audiveris renders at a fixed 300 DPI, any scan whose page box
+   makes its image roughly 1:1 at 300 DPI lands here.
+5. **Colour.** One page of 189 is `TYPE_INT_RGB`, three bands, `Indexed` colour
+   space over `FlateDecode`. Low priority but real; the crate is single-band.
 
-Test sources are the twelve PDFs in the `imslp-pseudo` repo's
-`manifests/acquired_scans.json`, each with a download URL.
+Use `-Dsun.java2d.trace=count` first for anything of this kind. It answered in
+one run what two rounds of source reading did not.
 
 ### 3. Progressive JPEG (deliberately deferred)
 
