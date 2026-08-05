@@ -84,26 +84,36 @@
 //! problem: it decodes to `TYPE_INT_RGB` with three bands, and this crate is
 //! single-band so far.
 //!
-//! Three others are a genuine open question, and the measurement is worth
-//! keeping because it rules a lot out. Their placement is a near-identity scale
-//! (0.99995927) with a sub-pixel vertical offset and a destination a pixel
-//! smaller than the source. On those pages PDFBox's render is **byte-identical
-//! to the decoded source**, with *zero* intermediate greys anywhere in
-//! 7,546,671 samples.
+//! Three others are open, and instrumentation has now identified *what* happens
+//! even though the trigger is not yet reproducible. `-Dsun.java2d.trace=count`
+//! reports the primitive each render actually invokes:
 //!
-//! That is not what this code produces, and it cannot be: the fractional part
-//! of the source coordinate drifts to about 0.1 across the page, which puts the
-//! bicubic weights near `[-10, 250, 17, -1]`, and applying those across a
-//! bitonal edge must produce greys. So Java2D did not interpolate at all there.
+//! ```text
+//! near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
+//! ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
+//! ```
 //!
-//! What has been ruled out: the images are not stencils, carry no `/Interpolate`
-//! flag, and are 1-bit `DeviceGray` exactly like the pages that *do* reproduce.
-//! `DrawImage.tryCopyOrScale`'s copy branch needs the destination size within
-//! `MAX_TX_ERROR` (1e-4) of the source and this is 0.1 out, and
-//! `renderImageScale` returns false for anything but nearest-neighbour
-//! interpolation. So the branch responsible has not been found yet, and until it
-//! is, the trigger condition cannot be reproduced honestly. About 10 of 189
-//! surveyed draws are in this regime.
+//! So Java2D does not reach this code at all on those pages. It picks a
+//! `ScaledBlit`, which is nearest-neighbour, and the render comes out
+//! byte-identical to the source with zero greys in 7.5M samples.
+//!
+//! The trigger is **not** the transform in isolation. Sweeping scale from 0.5 to
+//! 1.1 and offsets 0/0.1249/0.5 through `Graphics2D.drawImage` with the same
+//! hints interpolates in every case except an exact identity -- it never
+//! reproduces what the real page does. Nor is it PDFBox: the interpolation hint
+//! is `Bicubic` before and after the draw, the images are not stencils, carry no
+//! `/Interpolate`, and are 1-bit `DeviceGray` exactly like the pages that do
+//! reproduce. What differs is the *draw context* -- PDFBox draws through a
+//! `Graphics2D` that already carries the page transform and a clip, and
+//! `DrawImage` dispatches on `sg.transformState` and the composed result, not on
+//! the transform handed to `drawImage`.
+//!
+//! That is a scoping fact worth more than the three pages: a faithful PDF ingest
+//! has to reproduce Java2D's **primitive selection**, not only
+//! `TransformHelper`'s arithmetic -- the same shape as libjpeg choosing between
+//! its fancy and box upsamplers. About 10 of 189 surveyed draws land here, and
+//! since Audiveris renders at a fixed 300 DPI, any scan whose page box makes the
+//! image roughly 1:1 at 300 DPI will.
 //!
 #![forbid(unsafe_code)]
 

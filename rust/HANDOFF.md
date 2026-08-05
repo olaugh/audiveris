@@ -189,23 +189,35 @@ Two things still open, neither a transform problem:
 
 - One page decodes to `TYPE_INT_RGB`, three bands; the crate is single-band.
   Only 1 of 189 draws is colour, so this is low priority but real.
-- Three pages: near-identity scale (0.99995927), sub-pixel vertical offset,
-  destination a pixel smaller than the source. **Measured, not guessed:**
-  PDFBox's render on those pages is byte-identical to the decoded source, with
-  zero intermediate greys in 7.5M samples, so Java2D did not interpolate at all.
-  This code cannot match that -- the source coordinate's fraction drifts to ~0.1
-  across the page, giving bicubic weights near `[-10, 250, 17, -1]`, which must
-  produce greys on a bitonal edge.
+- Three pages: near-identity scale (0.99995927), sub-pixel vertical offset.
+  **`-Dsun.java2d.trace=count` settles what happens** -- it prints the primitive
+  each render invokes:
 
-  Ruled out so far: the images are not stencils, have no `/Interpolate`, and are
-  1-bit `DeviceGray` exactly like the pages that do reproduce;
-  `DrawImage.tryCopyOrScale`'s copy branch needs the destination within
-  `MAX_TX_ERROR` (1e-4) of the source size and this is 0.1 out; and
-  `renderImageScale` returns false for anything but nearest-neighbour. So the
-  responsible branch is still unlocated -- read `SunGraphics2D.drawImage` and
-  `DrawImage.transformImage` (the `x, y, extraAT` overload at line 139 has its
-  own `closeToInteger` copy path) before writing any trigger condition. About 10
-  of 189 draws are in this regime, so it matters but is not the common case.
+  ```
+  near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
+  ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
+  ```
+
+  Java2D never reaches the bicubic path on those pages; it uses a ScaledBlit,
+  which is nearest-neighbour, and the render is byte-identical to the source.
+  Use that flag first for anything of this kind -- it answered in one run what
+  two rounds of source reading did not.
+
+  The trigger is not the transform in isolation: sweeping scale 0.5..1.1 against
+  offsets 0/0.1249/0.5 through `Graphics2D.drawImage` interpolates in every case
+  but exact identity, so it does not reproduce the real page. It is not PDFBox
+  either -- the hint is `Bicubic` before and after, and the images match the
+  reproducing pages in every property checked. What differs is the draw context:
+  PDFBox draws through a `Graphics2D` that already carries the page transform
+  and a clip, and `DrawImage` dispatches on `sg.transformState` and the composed
+  result rather than on the transform passed to `drawImage`.
+
+  **The scoping consequence matters more than the three pages.** A faithful PDF
+  ingest must reproduce Java2D's *primitive selection*, not just
+  `TransformHelper`'s arithmetic -- the same shape as libjpeg's fancy-vs-box
+  upsampler choice, which cost a day earlier in this port. Budget for it. About
+  10 of 189 draws land here, and since Audiveris renders at a fixed 300 DPI, any
+  scan whose page box makes its image roughly 1:1 at 300 DPI will.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.
