@@ -4,10 +4,11 @@
 //!
 //! `oracle/pdf-pages.txt` is what PDFBox makes of the corpus: page geometry,
 //! the image behind every draw, the transform Java2D receives, and hashes at
-//! three depths -- the image's bytes as they sit in the file, those bytes with
-//! their filter chain applied, and the rendered page. This checks whatever the
-//! port can currently reach, and reports how much of the file it is *not*
-//! reaching, so the number moves visibly as decoders land.
+//! four depths -- the image's bytes as they sit in the file, those bytes with
+//! their filter chain applied, the samples they decode to, and the rendered
+//! page. This checks whatever the port can currently reach, and reports how
+//! much of the file it is *not* reaching, so the number moves visibly as each
+//! layer lands.
 //!
 //! # Getting the corpus
 //!
@@ -36,6 +37,10 @@ struct ImageRecord {
     raw_hash: String,
     stream_length: u64,
     stream_hash: String,
+    /// `PDImage.getImage()`'s raster: width, height, band count, and an
+    /// FNV-1a-64 over every sample band-interleaved and row-major. `None` when
+    /// PDFBox itself failed to produce one, which no corpus image does.
+    raster: Option<(u64, u64, usize, String)>,
 }
 
 /// One `page` record.
@@ -114,6 +119,14 @@ fn read_oracle(path: &Path) -> BTreeMap<(String, usize), Expected> {
                     stream_hash: parts
                         [parts.iter().position(|p| *p == "stream").expect("stream") + 2]
                         .to_owned(),
+                    raster: parts.iter().position(|p| *p == "raster").and_then(|at| {
+                        Some((
+                            parts.get(at + 1)?.parse().ok()?,
+                            parts.get(at + 2)?.parse().ok()?,
+                            parts.get(at + 3)?.parse().ok()?,
+                            (*parts.get(at + 4)?).to_owned(),
+                        ))
+                    }),
                 });
             }
             "page" => {
@@ -177,6 +190,7 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     let mut checked_pages = 0usize;
     let mut checked_images = 0usize;
     let mut checked_filters = 0usize;
+    let mut checked_rasters = 0usize;
     let mut unimplemented: BTreeMap<String, usize> = BTreeMap::new();
     let mut missing = Vec::new();
 
@@ -301,6 +315,37 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
                     }
                     Err(error) => panic!("{file} page {index}: {error}"),
                 }
+
+                // The rung above the filter chain: the same bytes turned into
+                // samples. Graded separately so that a wrong composed page
+                // later cannot be blamed on sample conversion without evidence.
+                let Some((width, height, bands, hash)) = &record.raster else {
+                    continue;
+                };
+                match audiveris_pdf::raster::decode(&document, stream) {
+                    Ok(raster) => {
+                        assert_eq!(
+                            (raster.width as u64, raster.height as u64, raster.bands),
+                            (*width, *height, *bands),
+                            "{file} page {index}: raster geometry"
+                        );
+                        assert_eq!(
+                            raster.samples.len(),
+                            raster.width * raster.height * raster.bands,
+                            "{file} page {index}: raster sample count"
+                        );
+                        assert_eq!(
+                            fnv(&raster.samples),
+                            *hash,
+                            "{file} page {index}: raster samples"
+                        );
+                        checked_rasters += 1;
+                    }
+                    Err(audiveris_pdf::Error::UnsupportedImage { reason }) => {
+                        *unimplemented.entry(format!("image: {reason}")).or_default() += 1;
+                    }
+                    Err(error) => panic!("{file} page {index}: raster: {error}"),
+                }
             }
         }
     }
@@ -312,8 +357,8 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     // Reported rather than asserted: this is the ledger of what is left, and it
     // should shrink to nothing as the image filters land.
     eprintln!(
-        "checked {checked_pages} pages, {checked_images} images, {checked_filters} filter chains; \
-         still unimplemented: {unimplemented:?}"
+        "checked {checked_pages} pages, {checked_images} images, {checked_filters} filter chains, \
+         {checked_rasters} rasters; still unimplemented: {unimplemented:?}"
     );
     assert!(checked_pages > 0, "no page was checked");
 }

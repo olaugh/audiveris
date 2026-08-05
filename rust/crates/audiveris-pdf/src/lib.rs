@@ -21,16 +21,19 @@
 //!   trailer chain, and the page tree with its inherited attributes.
 //! - [`flate`], [`filter`] -- the general stream filters and their predictors.
 //! - [`ccitt`] -- `CCITTFaxDecode`, which 93 of the corpus's 189 images use.
+//! - [`jbig2`] -- `JBIG2Decode`, which carries the other 95.
+//! - [`raster`] -- the decoded bytes to samples: bit unpacking, `/Decode`, and
+//!   the colour space, as `SampledImageReader` does them.
 //!
-//! Still to come: `JBIG2Decode`, which carries 95 of the remaining images, and
-//! the content-stream plumbing that composes a page's draws.
+//! Still to come: the content-stream plumbing that composes a page's draws, and
+//! the `ImageType.GRAY` destination it draws into.
 //!
 //! # Verification
 //!
 //! `oracle/java/PdfPageProbe.java` renders the corpus through PDFBox and pins
-//! three things per page: the structure and filter chain of each image, an
-//! FNV-1a-64 of the filtered stream bytes, and an FNV-1a-64 of the rendered
-//! page. Each layer here is graded against the corresponding half of that file,
+//! four things per page: the structure and filter chain of each image, an
+//! FNV-1a-64 of the filtered stream bytes, one of the samples they decode to,
+//! and one of the rendered page. Each layer here is graded against the corresponding half of that file,
 //! so a decoder can be finished and checked before the layer above it exists.
 //!
 //! No non-Rust dependency is linked in: as with the JPEG decoder, matching
@@ -48,9 +51,11 @@ pub mod flate;
 pub mod jbig2;
 pub mod lexer;
 pub mod object;
+pub mod raster;
 pub mod transform;
 
 pub use document::{Document, Page, Rectangle};
 pub use error::{Error, Result};
 pub use object::{Dictionary, Name, Object, Reference, Stream};
+pub use raster::Raster;
 pub use transform::{GrayImage, Placement, draw_bicubic, scale_bicubic};

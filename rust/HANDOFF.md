@@ -55,9 +55,9 @@ basename of the URL. `oracle/pdf-pages.txt` records which seven by name. Then:
 AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- --nocapture
 ```
 
-It prints `checked 189 pages, 189 images, 189 filter chains; still
-unimplemented: {}`. Without the variable it prints that it skipped, so a green
-run that says nothing is not evidence.
+It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters;
+still unimplemented: {}`. Without the variable it prints that it skipped, so a
+green run that says nothing is not evidence.
 
 **PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
 checked-in `oracle/pdf-pages.txt` is enough to run the test. To regenerate, take
@@ -67,13 +67,13 @@ the classpath from the Audiveris app and follow the header of
 source release"; and `JAVA_TOOL_OPTIONS` must be cleared, because a proxy banner
 on stdout corrupts every parsed oracle.
 
-The whole 189-page test takes about 47 s in release and about 12 s in debug for
-the non-JBIG2 half. Run it in release.
+The whole 189-page test takes about two minutes in release, half of it the
+raster depth. Run it in release; in debug it is not worth waiting for.
 
 Reproduced on a second machine, from a fresh clone and the seven sources
 re-downloaded from the manifest URLs and checked against their `content_id`
 SHA-256: `checked 189 pages, 189 images, 189 filter chains; still
-unimplemented: {}`. The oracle names those files by the URL basename
+unimplemented: {}` -- the raster count arrived after. The oracle names those files by the URL basename
 **truncated to twenty characters**, which is what the directory has to contain.
 
 ## Two things that drifted, and neither was the port
@@ -257,6 +257,7 @@ which is why a page render has a black margin rather than an extrapolated one.
 | Image geometry, depth, filter chain | 189/189 exact |
 | Raw stream bytes, by hash | 189/189 exact |
 | Decoded stream bytes, by hash | **189/189 exact** (93 CCITT G4, 95 JBIG2, 1 Flate) |
+| Image samples, by hash | **189/189 exact** (188 one-band gray, 1 three-band RGB) |
 
 Everything is ported from PDFBox's and jbig2-imageio's own source, fetched as
 `-sources.jar` from Maven Central, rather than from the specifications. Same
@@ -294,6 +295,34 @@ pixels, typical prediction), because every symbol bitmap goes through it. Do the
 same measurement before extending it: `Document` can now extract the streams, so
 a twenty-line probe answers "what does this actually use" in a minute.
 
+#### Samples: done, 189 of 189
+
+`raster.rs` is `SampledImageReader`: decoded bytes to samples, which is the rung
+between the filter chain and the page. It was worth doing before anything above
+it because the oracle *already recorded it* -- `PDImage.getImage()`'s raster,
+hashed band-interleaved and row-major -- so it cost a grader rather than a new
+oracle, and it splits sample conversion off from geometry. When the composed
+page is first wrong, the half it is wrong in is already settled.
+
+Scope was measured the way JBIG2's was. Across all 189 images there are exactly
+four shapes: 177 one-bit `DeviceGray` with no `/Decode`, 11 the same with
+`/Decode [1 0]`, and one 4-bit `Indexed` over `DeviceRGB`. No `/ImageMask`, no
+colour-key `/Mask`. Anything else is refused by name through
+`Error::UnsupportedImage`.
+
+Three things in it are load-bearing and none is implied by "unpack the bits":
+
+- **`from1Bit` returns one band, not three.** For `DeviceGray` PDFBox builds a
+  `TYPE_BYTE_GRAY` image and returns it before any colour space runs, so the
+  page later draws a gray source into a gray destination. That is what makes
+  the `ScaledBlit(ByteGray, SrcNoEa, ByteGray)` trace in item 4 below legible.
+- **A short row ends the image and leaves the rest black**, rather than
+  truncating the raster: PDFBox logs "premature EOF, image will be incomplete"
+  and breaks, keeping the rows it has.
+- **The indexed palette is not a byte copy.** `initRgbColorTable` sends every
+  entry through `byte / 255f` and back through `(int)(x * 255f)`, in `float`
+  with a truncating cast. It is written the long way for that reason.
+
 #### What is left: composing the page
 
 1. **The content stream.** Interpret enough of it to find each `Do` and the CTM
@@ -307,8 +336,11 @@ a twenty-line probe answers "what does this actually use" in a minute.
    792 pt page is 3299.999874 and floors to 3299 rather than 3300; and
    `PDRectangle` holds **floats**, which is why `document.rs` does too. The
    `draw` records in `oracle/pdf-pages.txt` are the grader.
-3. **The `ImageType.GRAY` destination**, its initial state, and the sample
-   conversion from a 1-bit `DeviceGray` source. The `page` records grade this.
+3. **The `ImageType.GRAY` destination** and its initial state. The sample
+   conversion this used to also cover is done -- see "Samples" above -- so what
+   is left here is the destination itself: what a `BufferedImage` of that type
+   holds before anything is drawn, and how the draw lands in it. The `page`
+   records grade this.
 4. **Java2D's primitive selection.** This is the one genuinely open question,
    and it is worth reading `crates/audiveris-pdf/src/transform.rs` on it before
    starting. `-Dsun.java2d.trace=count` reports the primitive each render
@@ -332,7 +364,9 @@ a twenty-line probe answers "what does this actually use" in a minute.
    trace. Since Audiveris renders at a fixed 300 DPI, any scan whose page box
    makes its image roughly 1:1 at 300 DPI lands here.
 5. **Colour.** One page of 189 is `TYPE_INT_RGB`, three bands, `Indexed` colour
-   space over `FlateDecode`. Low priority but real; the crate is single-band.
+   space over `FlateDecode`. Its *samples* now decode exactly, so what remains
+   is the composition path: `transform.rs` is single-band, and that page needs a
+   three-band draw and a gray destination to land in.
 
 Use `-Dsun.java2d.trace=count` first for anything of this kind. It answered in
 one run what two rounds of source reading did not.

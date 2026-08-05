@@ -68,6 +68,16 @@ pub enum Error {
         /// Which filter rejected it.
         filter: &'static str,
     },
+    /// An image whose sample layout this port does not reproduce.
+    ///
+    /// Refused by name rather than approximated, on the same reasoning as the
+    /// JBIG2 segment types: the corpus was measured first, and everything it
+    /// actually contains is implemented. A silently wrong raster would be
+    /// indistinguishable from a correct one until a staff line moved.
+    UnsupportedImage {
+        /// What the image asked for, in the terms the dictionary uses.
+        reason: String,
+    },
     /// A structure exceeded a limit that guards against pathological input.
     TooDeep,
 }
@@ -100,6 +110,9 @@ impl fmt::Display for Error {
             Self::Encrypted => write!(formatter, "encrypted PDFs are not supported yet"),
             Self::UnsupportedFilter { name } => write!(formatter, "unsupported filter /{name}"),
             Self::CorruptStream { filter } => write!(formatter, "corrupt {filter} stream"),
+            Self::UnsupportedImage { reason } => {
+                write!(formatter, "unsupported image: {reason}")
+            }
             Self::TooDeep => write!(formatter, "nesting is too deep"),
         }
     }
