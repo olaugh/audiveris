@@ -146,7 +146,7 @@ without disturbing a Homebrew or distribution `cargo`.
 
 ## Open threads, in the order worth taking them
 
-### 1. Staff-line filament assembly (FIXED)
+### 1. Staff-line filament assembly and SIG grades (CLOSED)
 
 Closed. Every median residual in the SIG is gone -- seven across the corpus,
 including chula's -- and the grade residuals dropped from 21 to 6 with
@@ -171,73 +171,72 @@ filaments, and both consumers in `recognize.rs` use them instead of resolving
 ids. `StaffCandidate`'s `PartialEq` is hand-written to skip the new field, which
 is derived data rather than identity.
 
-What is left is 6 grade residuals across four pages, and they are **not** the
-oracle's own precision -- Java persists grades to three decimals, which
-`SIG_GRADE_PRECISION` already absorbs at 5e-4, so a 0.0036-0.0048 delta sits an
-order of magnitude above the artifact floor.
+Closed completely. **Every barline inter now reproduces Java's intrinsic and
+contextual grade on all nine example pages**, alongside the medians and the
+core fields, so `SIG_PAGE_LEDGER` is zeros throughout.
 
-They are also not scattered. Of 420 barlines across 65 staves, the six that
-differ are **every one of them the leftmost or rightmost barline of its staff**,
-and no interior barline differs anywhere in the corpus:
+The last six were one wrong rounding mode.
+
+`StaffProjector.computeProjection` bounds each column by
+`firstLine.yAt(x)` and `lastLine.yAt(x)`, and `StaffFilament.yAt(int x)` is
+`(int) Math.rint(yAt((double) x))`. **`Math.rint` rounds a half to even; Rust's
+`f64::round` rounds it away from zero.** The port used `round`. The two differ
+only when the ordinate lands exactly on a half, and then by one row -- which
+moves the projection's vertical bound by one and its accumulated pixel count by
+up to one. One character of difference, `round` to `round_ties_even`.
+
+That explains the signature that made this look structural. Six of 420
+barlines differed, every one of them the leftmost or rightmost of its staff,
+because that is where a staff line is extrapolated past its defining points --
+and an extrapolated straight line lands on a half far more often than a fitted
+spline through real ink does.
+
+#### How it was found, and what it says about diagnosing by inspection
+
+Two earlier rounds of source reading produced three hypotheses, and all three
+were wrong: the chunk thresholds, `getChunk`'s out-of-image guard, and "the
+staff-vertical impacts measure something differently at an extreme abscissa".
+The residual was in none of them. It was in the *input* to the impacts.
+
+What settled it in one run was measuring rather than reasoning.
+`oracle/java/StaffImpactsProbe.java` prints the six impacts behind every
+promoted barline, and diffing them against the Rust diagnostic showed that in
+all six cases **exactly one integer differed, by exactly one**:
 
 ```
-BachInvention5.jpg  staff  1 x 1917.0   bars  194..1917 (3)  RIGHTMOST
-D0392410-1.256.png  staff  8 x  269.5   bars  270..2774 (6)  LEFTMOST
-D0392410-1.256.png  staff 10 x 2773.0   bars  268..2773 (6)  RIGHTMOST
-carmen.png          staff  3 x 2402.5   bars  166..2402 (7)  RIGHTMOST
-carmen.png          staff 10 x 2412.5   bars  173..2412 (8)  RIGHTMOST
-cucaracha.png       staff  6 x  156.0   bars  156..2399 (7)  LEFTMOST
+                       term          Rust        Java     as a fraction
+BachInvention5 st 1    left chunk    0.913043    0.869565    21/23 vs 20/23
+D0392410       st 8    stop deriv    0.864865    0.891892    32/37 vs 33/37
+D0392410       st10    start deriv   0.837838    0.810811    31/37 vs 30/37
+carmen         st 3    left chunk    0.923077    0.884615    24/26 vs 23/26
+carmen         st10    left chunk    0.875000    0.916667    21/24 vs 22/24
+cucaracha      st 6    right chunk   0.840000    0.880000    21/25 vs 22/25
 ```
 
-#### What the impacts say, and the two suspects it clears
+Two different terms, both signs, always ±1 on an integer read from the
+projection. That points at the projection itself rather than at either
+consumer, which is what a hypothesis about the chunk lookup could never have
+reached.
 
-`diagnose_sig_grade_residuals` (an `#[ignore]`d test in `recognize.rs`) prints
-the six staff-vertical impacts behind each of these, because the grade is a
-weighted geometric mean -- weights `[1, 1, 1, 1, 0.5, 0.5]` over core, gap,
-start derivative, stop derivative, left chunk, right chunk, times
-`Grades.intrinsicRatio` at 0.8 -- and the oracle records only the product.
+The probe needs no change to the production tree, twice over:
+`AbstractInter.getImpacts()` keeps the `GradeImpacts` the peak was built with,
+so the promoted SIG still carries them. It does have to drive the step engine
+itself rather than use Audiveris's `-run` hook, because that hook fires after
+the book is stored and its sheets disposed, and reloading `sheet#1.xml` gives
+back inters whose impacts are `null` -- the XML persists only the product. The
+probe sets `Main.cli` reflectively for the same reason `-run` exists: the step
+engine reads it mid-step.
 
+Run it as:
+
+```sh
+unset JAVA_TOOL_OPTIONS
+JAVA_HOME=/path/to/jdk25/Contents/Home ./gradlew --no-daemon -q \
+  -I rust/oracle/java/staff-impacts.init.gradle :app:staffImpactsProbe \
+  -PimpactPages="data/examples/carmen.png data/examples/cucaracha.png"
 ```
-BachInvention5 st 1  x1917.0  ours .758153 java .754  core .923 gap 1 sd .867 pd 1     lc .913 rc 1
-D0392410       st 8  x 269.5  ours .744216 java .749  core .967 gap .833 sd 1   pd .865 lc 1    rc 1
-D0392410       st10  x2773.0  ours .576560 java .573  core .500 gap .500 sd .838 pd .946 lc .963 rc 1
-carmen         st 3  x2402.5  ours .793622 java .790  core 1    gap 1    sd 1    pd 1    lc .923 rc 1
-carmen         st10  x2412.5  ours .789388 java .793  core 1    gap 1    sd 1    pd 1    lc .875 rc 1
-cucaracha      st 6  x 156.0  ours .786173 java .790  core 1    gap 1    sd 1    pd 1    lc 1    rc .840
-```
 
-Three things follow, and two of them clear a suspect the previous note named.
-
-**It is not the chunk thresholds.** The obvious theory was that
-`computeCoreLinesThickness` differs by a sub-pixel, moving the integer
-`linesThreshold` by one and shifting every chunk grade on that staff. The
-diagnostic counts the barlines whose chunk grade is in the graded band rather
-than saturated at 1.0: **140 of them, and all 140 agree with Java**. A wrong
-threshold would break a staff's worth, not one barline.
-
-**It is not `getChunk`'s out-of-image guard.** Java bounds the chunk window
-against `sheet.getWidth() - 1` and returns 0 outside it, and the natural worry
-was that the port bounds it against the staff's own range instead. It does not:
-`Projection.Short(0, sheet.getWidth() - 1)` and `Self::new(0, last_x)` describe
-the same span, populated over the staff's range in both, so the branch is
-identical.
-
-**And "one cause" is not established.** On carmen 3, carmen 10, cucaracha 6 and
-BachInvention5 1 every impact except one *inward* chunk grade is exactly 1.0, so
-for those four the divergence can only be the chunk. But D0392410 staff 8 has
-**both** chunks at 1.0, and its non-unit terms are core, gap and the stop
-derivative -- a different term entirely. The deltas are not one-signed either:
-we are low on D0392410 staff 8 and high on staff 10. What the six share is only
-their position.
-
-#### What would close it
-
-Java's per-impact values, which no oracle records. `StaffProjector.createPeak`
-builds `StaffVerticalImpacts` from six locals; a probe that prints them
-alongside `linesThreshold`, `chunkThreshold`, and `getChunk`'s raw return for
-the peaks listed above would settle it in one run, and the Rust side already
-prints its half. That needs a JDK, which the machine this was last worked on
-does not have.
+`diagnose_sig_grade_residuals` in `recognize.rs` prints the Rust half.
 
 ### 2. PDF ingest (reading is done; rendering is what is left)
 

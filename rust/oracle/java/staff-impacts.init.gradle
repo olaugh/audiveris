@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Runs StaffImpactsProbe against the app's own runtime classpath, the same way
+// parity.init.gradle runs RustParityProbe. Kept separate because it takes page
+// arguments and is a diagnostic rather than part of the vector suite.
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) {
+        return
+    }
+    def outputDir = app.layout.buildDirectory.dir('rust-impacts/classes')
+
+    app.tasks.register('compileStaffImpactsProbe', JavaCompile) {
+        source = app.fileTree("${gradle.rootProject.projectDir}/rust/oracle/java") {
+            include '**/*.java'
+        }
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+
+    // The probe drives the step engine itself rather than going through
+    // Audiveris's -run hook, because that hook fires after the sheets are
+    // disposed and their impacts are not persisted. See the probe's own note.
+    app.tasks.register('staffImpactsProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StaffImpactsProbe'
+        workingDir = gradle.rootProject.projectDir
+        def pages = (app.findProperty('impactPages') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+        args = pages
+    }
+}

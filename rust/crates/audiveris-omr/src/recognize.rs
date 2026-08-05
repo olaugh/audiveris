@@ -381,8 +381,19 @@ fn project_staff_peaks(
     let first_geometry = geometry_of(first, "first")?;
     let last_geometry = geometry_of(last, "last")?;
     let middle_geometry = geometry_of(middle, "middle")?;
+    // `StaffFilament.yAt(int x)` is `(int) Math.rint(yAt((double) x))`, and
+    // `rint` rounds a half to *even* where Rust's `round` rounds it away from
+    // zero. The two differ only when the ordinate lands exactly on a half, and
+    // then by one row -- which moves the projection's vertical bound by one and
+    // its pixel count by up to one. That was worth six of the corpus's 420
+    // barline grades, every one of them at a staff's leftmost or rightmost
+    // barline, where the line is extrapolated beyond its defining points and
+    // lands on a half far more often.
     let ordinate = |geometry: &audiveris_image::filament::FilamentGeometry, x: i32| {
-        geometry.position_at(f64::from(x)).unwrap_or(0.0).round() as i32
+        geometry
+            .position_at(f64::from(x))
+            .unwrap_or(0.0)
+            .round_ties_even() as i32
     };
 
     // Java computeCoreLinesThickness: sum of line thicknesses, scaled by
@@ -1790,13 +1801,13 @@ mod tests {
     /// `HANDOFF.md` for the table and for the Java-side probe that would
     /// settle it.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
-        ("BachInvention5.jpg", 0, 0, 0.0, 1, 0.005),
-        ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),
+        ("BachInvention5.jpg", 0, 0, 0.0, 0, 0.0),
+        ("D0392410-1.256.png", 0, 0, 0.0, 0, 0.0),
         ("allegretto.png", 0, 0, 0.0, 0, 0.0),
         ("batuque.png", 0, 0, 0.0, 0, 0.0),
-        ("carmen.png", 0, 0, 0.0, 2, 0.004),
+        ("carmen.png", 0, 0, 0.0, 0, 0.0),
         ("chula.png", 0, 0, 0.0, 0, 0.0),
-        ("cucaracha.png", 0, 0, 0.0, 1, 0.004),
+        ("cucaracha.png", 0, 0, 0.0, 0, 0.0),
         ("hove.png", 0, 0, 0.0, 0, 0.0),
         ("zizi.png", 0, 0, 0.0, 0, 0.0),
     ];
