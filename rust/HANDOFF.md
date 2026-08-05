@@ -189,12 +189,23 @@ Two things still open, neither a transform problem:
 
 - One page decodes to `TYPE_INT_RGB`, three bands; the crate is single-band.
   Only 1 of 189 draws is colour, so this is low priority but real.
-- Three pages share a signature: near-identity scale (0.99996), sub-pixel
-  vertical offset, destination a pixel smaller than the source. Java2D's
-  `DrawImage` dispatches by transform type -- identity, integer translate,
-  general scale, general transform each take a different loop -- so the
-  suspicion is that these never reach `TransformHelper`. Confirm before touching
-  this code. About 10 of 189 draws are in that regime.
+- Three pages: near-identity scale (0.99995927), sub-pixel vertical offset,
+  destination a pixel smaller than the source. **Measured, not guessed:**
+  PDFBox's render on those pages is byte-identical to the decoded source, with
+  zero intermediate greys in 7.5M samples, so Java2D did not interpolate at all.
+  This code cannot match that -- the source coordinate's fraction drifts to ~0.1
+  across the page, giving bicubic weights near `[-10, 250, 17, -1]`, which must
+  produce greys on a bitonal edge.
+
+  Ruled out so far: the images are not stencils, have no `/Interpolate`, and are
+  1-bit `DeviceGray` exactly like the pages that do reproduce;
+  `DrawImage.tryCopyOrScale`'s copy branch needs the destination within
+  `MAX_TX_ERROR` (1e-4) of the source size and this is 0.1 out; and
+  `renderImageScale` returns false for anything but nearest-neighbour. So the
+  responsible branch is still unlocated -- read `SunGraphics2D.drawImage` and
+  `DrawImage.transformImage` (the `x, y, extraAT` overload at line 139 has its
+  own `closeToInteger` copy path) before writing any trigger condition. About 10
+  of 189 draws are in this regime, so it matters but is not the common case.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.

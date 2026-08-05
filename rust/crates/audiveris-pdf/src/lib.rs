@@ -84,11 +84,26 @@
 //! problem: it decodes to `TYPE_INT_RGB` with three bands, and this crate is
 //! single-band so far.
 //!
-//! Three others share a signature worth recording -- a near-identity scale
-//! (0.99996) with a sub-pixel vertical offset and a destination a pixel smaller
-//! than the source. Java2D's `DrawImage` dispatches by transform type, so the
-//! suspicion is that they never reach `TransformHelper` at all. Confirm that
-//! before assuming this code is wrong.
+//! Three others are a genuine open question, and the measurement is worth
+//! keeping because it rules a lot out. Their placement is a near-identity scale
+//! (0.99995927) with a sub-pixel vertical offset and a destination a pixel
+//! smaller than the source. On those pages PDFBox's render is **byte-identical
+//! to the decoded source**, with *zero* intermediate greys anywhere in
+//! 7,546,671 samples.
+//!
+//! That is not what this code produces, and it cannot be: the fractional part
+//! of the source coordinate drifts to about 0.1 across the page, which puts the
+//! bicubic weights near `[-10, 250, 17, -1]`, and applying those across a
+//! bitonal edge must produce greys. So Java2D did not interpolate at all there.
+//!
+//! What has been ruled out: the images are not stencils, carry no `/Interpolate`
+//! flag, and are 1-bit `DeviceGray` exactly like the pages that *do* reproduce.
+//! `DrawImage.tryCopyOrScale`'s copy branch needs the destination size within
+//! `MAX_TX_ERROR` (1e-4) of the source and this is 0.1 out, and
+//! `renderImageScale` returns false for anything but nearest-neighbour
+//! interpolation. So the branch responsible has not been found yet, and until it
+//! is, the trigger condition cannot be reproduced honestly. About 10 of 189
+//! surveyed draws are in this regime.
 //!
 #![forbid(unsafe_code)]
 
