@@ -74,11 +74,49 @@ GRID currently asserts. The completed-line endpoint oracle cannot see it because
 `completeLines` later pins both ends at `staff.getAbscissa(side)`, repairing the
 endpoints it compares while leaving the interior short.
 
-**Next two questions, in order.** Do the sections for staff 11's lines 3-4 exist
-in our horizontal lag and get dropped, or were they never built? That decides
-filtering bug versus construction bug. Then: is staff 3's line 0 stopping 65 px
-early the same defect in milder form? Confirm they share a cause before fixing
-either.
+**That question is now answered, and the fault is narrower than it looked.**
+The ink exists, as full-width filaments, and they are correctly clustered. Tracing
+the filaments in the band where staff 11's bottom two lines belong:
+
+```
+FIL id 3042 x   47-55   y 2220.0        sections   1   <- what our staff line 3 uses
+FIL id 3098 x   99-1903 y 2220.5-2235.0 sections 107   <- the real line 3
+FIL id 3107 x   48-62   y 2236.5        sections   1   <- what our staff line 4 uses
+FIL id 3190 x   95-1903 y 2237.5-2252.0 sections  97   <- the real line 4
+```
+
+3098 and 3190 are both members of cluster 2956, at relative positions 2 and 3.
+Cluster 2956's bounds are `x 47 y 2169 w 1857 h 90` -- the whole of staff 11. So
+clustering is right; `LineCluster::include_line` merges sections into an occupied
+position exactly as Java's does; and the pipeline runs Java's `retrieveClusters`
+stages in Java's order.
+
+The divergence is a **single merge**. A two-line cluster of just the stubs,
+bounds `x 47 y 2219 w 16 h 20`, is found compatible with 2956 and merged at
+`delta_position: -3`. After it, staff 11's lines 0-2 are the full-width filaments
+and lines 3-4 are the stubs -- so the merge places the stub lines at positions
+that do not collide with 3098 and 3190, and the long filaments end up displaced
+rather than absorbed.
+
+**Where to look, in order.** Java's `mergeClusters` does
+`candidate.mergeWith(head, deltaPos)`, where `candidate` is the cluster currently
+being grown and `head` runs over clusters *earlier* in ordinate order -- so the
+later cluster absorbs the earlier one. Check that
+`merge_cluster_pair_if_compatible(.., head, current, ..)` merges in that
+direction, and check the sign convention of `delta_position` against Java's
+`canMerge` output. `LineCluster::merge_with` documents its delta as being between
+zero-based line indices rather than raw relative-position keys, which is exactly
+the kind of place a sign or origin can flip without any test noticing.
+
+Then: is staff 3's line 0 stopping 65 px early the same defect in milder form?
+Confirm they share a cause before fixing either.
+
+**Reproducing the traces.** All three were reverted. `FIL_TRACE` dumped filaments
+by y-band after `build_primary_cluster_pass` in `recognize.rs`; `EXP_TRACE`
+logged membership and dy in `cluster_expand::expand_one`; `MRG_TRACE` logged
+bounds, intersection, and the compatibility decision in
+`cluster_merge::merge_clusters_in_order`. Each is a handful of `eprintln!` lines
+keyed on the ids above.
 
 **How to reproduce the diff.** Both instrumentations were reverted; reapply them:
 
