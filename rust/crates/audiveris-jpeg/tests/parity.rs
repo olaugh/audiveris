@@ -125,6 +125,9 @@ fn decodes_generated_jpegs_exactly_across_sampling_factors() {
     for path in names {
         let bytes = std::fs::read(&path).expect("fixture");
         let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if turbo_diverges(&name) {
+            continue;
+        }
         let (width, _, components, reference) = libjpeg_decode(&bytes);
         let decoded = audiveris_jpeg::decode(&bytes)
             .unwrap_or_else(|error| panic!("{name}: decode failed: {error}"));
@@ -227,6 +230,13 @@ fn decodes_every_sampling_combination_exactly_as_libjpeg_does() {
                     if luma_h * luma_v + 2 * chroma.0 * chroma.1 > 10 {
                         continue;
                     }
+                    // Chroma that expands vertically only is where turbo's
+                    // added fancy upsampler has no counterpart in 6b. Those
+                    // combinations are covered by the committed
+                    // `vertical-only-*` fixtures, against Java.
+                    if luma_h / chroma.0 == 1 && luma_v / chroma.1 == 2 {
+                        continue;
+                    }
                     let factors = [(luma_h, luma_v), chroma, chroma];
                     let bytes = libjpeg_encode(width, height, factors, &rgb);
                     let (out_width, _, components, reference) = libjpeg_decode(&bytes);
@@ -242,7 +252,7 @@ fn decodes_every_sampling_combination_exactly_as_libjpeg_does() {
             }
         }
     }
-    assert_eq!(checked, 140, "the sweep lost combinations");
+    assert_eq!(checked, 119, "the sweep lost combinations");
 }
 
 #[test]
@@ -329,25 +339,76 @@ const DELIBERATE_REFUSALS: &[(&str, &str)] = &[(
     "progressive JPEG is refused rather than approximated; see the crate docs",
 )];
 
-/// Damaged files where Java's libjpeg and libjpeg-turbo disagree with each
-/// other, with how many of Java's samples this decoder does not reproduce.
+/// Fixtures where libjpeg-turbo disagrees with the libjpeg Audiveris uses, so
+/// the differential comparisons below skip them.
 ///
-/// This is a real gap, recorded rather than hidden. Every well-formed fixture,
-/// every combination in the sampling sweep, and the corpus page all reproduce
-/// Java exactly -- and so does truncation, which is the damage a scan corpus
-/// actually contains. What remains is mid-scan corruption and the extreme
-/// coefficients a fuzzer synthesises, where the two libjpegs part company:
-/// measured three ways, this decoder agrees with libjpeg-turbo to the sample on
-/// all three files, and turbo differs from Java by exactly the counts below.
-///
-/// Chasing Java here means reproducing libjpeg 6b's corrupt-data path
-/// specifically, against an oracle (turbo) that pulls the other way. The counts
-/// are exact so that any movement, in either direction, shows up.
-const JAVA_DIVERGENCES: &[(&str, usize)] = &[
-    ("corrupt-resync-80x80-420.jpg", 1032),
-    ("crash-2b5f8084239508d1445bd3726c13bad02e7b4a5b", 41),
-    ("wide-coefficients-1x9-422.jpg", 20),
+/// These are not this decoder's failures; they are the two places the two
+/// libjpegs part company, and this decoder follows the one Audiveris bundles.
+/// `oracle/jpeg-verdicts.txt` still pins every one of them against Java, so
+/// they are checked -- just not against turbo.
+const TURBO_DIVERGENCES: &[(&str, &str)] = &[
+    // libjpeg-turbo added `h1v2_fancy_upsample`, a vertical triangle filter for
+    // the 4:4:0 case. libjpeg 6b has no such method and replicates instead, so
+    // the two disagree on every image whose chroma expands vertically only.
+    (
+        "vertical-only-1x9-12-11.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-1x9-14-12.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-1x9-22-21.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-7x7-12-11.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-7x7-14-12.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-7x7-22-21.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-33x25-12-11.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-33x25-14-12.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    (
+        "vertical-only-33x25-22-21.jpg",
+        "4:4:0: turbo filters, 6b replicates",
+    ),
+    // libjpeg-turbo carries the inverse transform's intermediates in `JLONG`,
+    // which is 64-bit here; 6b uses `INT32`, which OpenJDK defines as `int` on
+    // LP64. Indistinguishable until a coefficient/quantizer product passes 2^31,
+    // which only a corrupt file reaches.
+    (
+        "wide-coefficients-1x9-422.jpg",
+        "extreme coefficients: turbo transforms in 64 bits, 6b in 32",
+    ),
+    (
+        "wide-coefficients-31x33-gray.jpg",
+        "extreme coefficients: turbo transforms in 64 bits, 6b in 32",
+    ),
+    (
+        "crash-2b5f8084239508d1445bd3726c13bad02e7b4a5b",
+        "extreme coefficients: turbo transforms in 64 bits, 6b in 32",
+    ),
 ];
+
+/// True if the differential comparison against libjpeg-turbo must skip this
+/// file because turbo and the libjpeg Audiveris uses disagree on it.
+fn turbo_diverges(name: &str) -> bool {
+    TURBO_DIVERGENCES.iter().any(|(file, _)| *file == name)
+}
 
 /// FNV-1a-64, as the other oracles in `rust/oracle` use.
 fn fnv1a64(bytes: &[u8]) -> u64 {
@@ -414,17 +475,11 @@ fn matches_java_on_every_fixture_it_accepts_and_refuses() {
                     "{name}: geometry"
                 );
                 let java = u64::from_str_radix(fields[3], 16).expect("raster hash");
-                let matches = fnv1a64(&decoded.samples) == java;
-                match JAVA_DIVERGENCES.iter().find(|(file, _)| *file == name) {
-                    // A listed divergence must still diverge: if it stops, the
-                    // ledger is stale and should shrink.
-                    Some((_, count)) => assert!(
-                        !matches,
-                        "{name} now reproduces Java; drop it from JAVA_DIVERGENCES \
-                         (it was {count} samples short)"
-                    ),
-                    None => assert!(matches, "{name}: raster differs from Java's"),
-                }
+                assert_eq!(
+                    fnv1a64(&decoded.samples),
+                    java,
+                    "{name}: raster differs from Java's"
+                );
             }
             (Some(("reject", _)), Err(_)) => {}
             (Some(("accept", _)), Err(error)) => {
@@ -447,36 +502,29 @@ fn matches_java_on_every_fixture_it_accepts_and_refuses() {
 
 /// Regression for the integer widths inside the inverse transform.
 ///
-/// libjpeg dequantizes in `int` and then carries the butterflies in `JLONG`,
-/// which is `long` -- 64 bits here -- narrowing back to `int` only for the
-/// inter-pass workspace and the range-limit index. This decoder used 32 bits
-/// throughout, which is indistinguishable until a coefficient is large enough
-/// for a product to pass 2^31.
+/// libjpeg 6b carries the transform's intermediates in `INT32`, which OpenJDK
+/// defines as `int` on LP64. libjpeg-turbo widened them to `JLONG`, which is
+/// `long` and so 64-bit. The difference is invisible until a
+/// coefficient/quantizer product passes 2^31, which only a corrupt file
+/// reaches -- and then it is worth 20 of this 1x9 file's 27 samples.
 ///
-/// This 1x9 4:2:2 file does exactly that: its luma is ordinary and matched all
-/// along, while its chroma blocks carry coefficients near 8191, and 496 samples
-/// -- all of them chroma -- came out wrong. The coefficients themselves were
-/// identical on both sides, which is what pointed past the entropy decoder to
-/// the arithmetic.
-///
-/// The file is also picked up by the corpus sweep above; it is named here so a
-/// regression points straight at the cause.
+/// This one is checked against Java rather than turbo, because turbo is the
+/// side that differs; `oracle/jpeg-verdicts.txt` holds the expected hash and
+/// `matches_java_on_every_fixture_it_accepts_and_refuses` compares it. The test
+/// here just documents that the file is *meant* to be a 32-bit case, so a
+/// future widening does not look like a cleanup.
 #[test]
-fn wide_coefficient_products_do_not_wrap_at_thirty_two_bits() {
+fn wide_coefficient_products_wrap_at_thirty_two_bits() {
     let path = repo_path("rust/crates/audiveris-jpeg/tests/data/wide-coefficients-1x9-422.jpg");
     let bytes = std::fs::read(&path).expect("wide-coefficient fixture");
-    let (width, height, components, reference) = libjpeg_decode(&bytes);
     let decoded = audiveris_jpeg::decode(&bytes).expect("decode");
     assert_eq!(
         (decoded.width, decoded.height, decoded.components),
-        (width, height, components)
+        (1, 9, 3)
     );
-    assert_identical(
-        "wide-coefficients-1x9-422.jpg",
-        &decoded.samples,
-        &reference,
-        width,
-        components,
+    assert!(
+        turbo_diverges("wide-coefficients-1x9-422.jpg"),
+        "this file exists to pin a place the two libjpegs differ"
     );
 }
 

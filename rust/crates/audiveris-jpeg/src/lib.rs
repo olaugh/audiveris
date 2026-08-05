@@ -49,21 +49,35 @@
 //!
 //! # Which libjpeg
 //!
-//! There are two, and on damaged input they are not the same decoder. The
-//! differential test runs libjpeg-turbo, because it is fast and points straight
-//! at the offending sample. Audiveris reads JPEGs through Java's `ImageIO`,
-//! which carries libjpeg 6b. Measured three ways across the fixture set, this
-//! decoder agrees with libjpeg-turbo everywhere, and with Java everywhere except
-//! three damaged files -- on which turbo differs from Java by exactly the same
-//! samples. So the remaining gap is not a mistake in this decoder so much as a
-//! choice of which libjpeg to reproduce, and the one it currently reproduces is
-//! not the one Audiveris uses.
+//! There are two, and choosing the wrong one costs a day. Audiveris reads JPEGs
+//! through Java's `ImageIO`, whose reader is libjpeg -- but *which* libjpeg
+//! depends on how the JDK was built. Temurin statically links the bundled
+//! libjpeg 6b; Ubuntu's OpenJDK package links the system libjpeg-turbo. They are
+//! not the same decoder, and they differ in two places this port can see:
 //!
-//! `oracle/jpeg-verdicts.txt` records Java's verdict and raster hash for every
-//! fixture, and `tests/parity.rs` pins the three divergences by exact sample
-//! count. Everything else -- every well-formed fixture, every combination in the
-//! sampling sweep, the corpus page, and truncation, which is the damage a scan
-//! corpus actually contains -- reproduces Java exactly.
+//! - turbo added `h1v2_fancy_upsample`, a vertical triangle filter for 4:4:0.
+//!   6b has no such method and replicates instead, so the two disagree on every
+//!   image whose chroma expands vertically only -- ordinary, well-formed images.
+//! - turbo widened the inverse transform's intermediates from `INT32`, which
+//!   OpenJDK defines as `int` on LP64, to `JLONG`, which is `long`. Invisible
+//!   until a coefficient/quantizer product passes 2^31.
+//!
+//! Audiveris ships with a bundled JRE, so **6b is the target**, and this decoder
+//! reproduces 6b: 32-bit transform intermediates, replication for 4:4:0.
+//! `oracle/jpeg-verdicts.txt` is the authority, recorded from the same Temurin
+//! JDK the rest of `rust/oracle` uses. `tests/parity.rs` also runs
+//! libjpeg-turbo, which is faster and points at the offending sample, and names
+//! the eleven fixtures where turbo is the side that differs.
+//!
+//! This was worth finding the hard way. Two fixes made earlier against the turbo
+//! oracle -- widening the transform, adding the vertical filter -- were correct
+//! for turbo and wrong for Audiveris, and reverting both closed the last sample
+//! divergences rather than opening any.
+//!
+//! Both behaviours survive behind the off-by-default `libjpeg-turbo` feature,
+//! which the fuzz crate enables. Without it the differential fuzzer spends every
+//! run rediscovering those two classes instead of finding new bugs; with it, the
+//! shipped decoder still reproduces 6b.
 //!
 //! # What parity turned out to mean
 //!
@@ -76,9 +90,10 @@
 //!   replicates instead below that. Filtering unconditionally is wrong for 4:2:0
 //!   on any image at most four pixels wide -- while the filter itself is right.
 //! - **The integer widths.** Dequantization is an `int` multiply, the transform
-//!   that follows is `JLONG`, and the result narrows back to `int` twice. On a
+//!   that follows is `INT32`, and the result narrows back to `int` twice. On a
 //!   file whose coefficients approach the coding limit that is the difference
-//!   between agreement and 496 wrong samples.
+//!   between agreement and 20 of 27 wrong samples -- and it is the one place
+//!   where the two libjpegs disagree with each other.
 //! - **Which files are accepted at all.** libjpeg validates scan components,
 //!   segment lengths, Huffman tables, duplicate markers, and frame headers, and
 //!   a decoder that skips those checks produces an image where Audiveris
@@ -318,22 +333,33 @@ const PASS1_BITS: i32 = 2;
 ///
 /// Each is the scaled form of an exact trigonometric quantity of the
 /// even/odd decomposition, listed with the real number it comes from.
-const FIX_0_298631336: i64 = 2446; // 0.298631336
-const FIX_0_390180644: i64 = 3196; // 0.390180644
-const FIX_0_541196100: i64 = 4433; // 0.541196100
-const FIX_0_765366865: i64 = 6270; // 0.765366865
-const FIX_0_899976223: i64 = 7373; // 0.899976223
-const FIX_1_175875602: i64 = 9633; // 1.175875602
-const FIX_1_501321110: i64 = 12299; // 1.501321110
-const FIX_1_847759065: i64 = 15137; // 1.847759065
-const FIX_1_961570560: i64 = 16069; // 1.961570560
-const FIX_2_053119869: i64 = 16819; // 2.053119869
-const FIX_2_562915447: i64 = 20995; // 2.562915447
-const FIX_3_072711026: i64 = 25172; // 3.072711026
+const FIX_0_298631336: Wide = 2446; // 0.298631336
+const FIX_0_390180644: Wide = 3196; // 0.390180644
+const FIX_0_541196100: Wide = 4433; // 0.541196100
+const FIX_0_765366865: Wide = 6270; // 0.765366865
+const FIX_0_899976223: Wide = 7373; // 0.899976223
+const FIX_1_175875602: Wide = 9633; // 1.175875602
+const FIX_1_501321110: Wide = 12299; // 1.501321110
+const FIX_1_847759065: Wide = 15137; // 1.847759065
+const FIX_1_961570560: Wide = 16069; // 1.961570560
+const FIX_2_053119869: Wide = 16819; // 2.053119869
+const FIX_2_562915447: Wide = 20995; // 2.562915447
+const FIX_3_072711026: Wide = 25172; // 3.072711026
+
+/// The width of the inverse transform's intermediates.
+///
+/// libjpeg 6b uses `INT32`, which OpenJDK defines as `int` on LP64; libjpeg
+/// -turbo widened it to `JLONG`, which is `long`. The two agree until a
+/// coefficient/quantizer product passes 2^31, which only a corrupt file
+/// reaches. Audiveris bundles a JRE, so 6b's width is the default.
+#[cfg(not(feature = "libjpeg-turbo"))]
+type Wide = i32;
+#[cfg(feature = "libjpeg-turbo")]
+type Wide = i64;
 
 /// Round-to-nearest right shift, the descaling step of the integer transform.
 #[must_use]
-const fn descale(value: i64, bits: i32) -> i64 {
+const fn descale(value: Wide, bits: i32) -> Wide {
     value.wrapping_add(1 << (bits - 1)) >> bits
 }
 
@@ -341,7 +367,7 @@ const fn descale(value: i64, bits: i32) -> i64 {
 ///
 /// Returns the four odd-index outputs in coefficient order.
 #[must_use]
-fn odd_part(mut tmp0: i64, mut tmp1: i64, mut tmp2: i64, mut tmp3: i64) -> [i64; 4] {
+fn odd_part(mut tmp0: Wide, mut tmp1: Wide, mut tmp2: Wide, mut tmp3: Wide) -> [Wide; 4] {
     let mut z1 = tmp0.wrapping_add(tmp3);
     let mut z2 = tmp1.wrapping_add(tmp2);
     let mut z3 = tmp0.wrapping_add(tmp2);
@@ -373,7 +399,7 @@ fn odd_part(mut tmp0: i64, mut tmp1: i64, mut tmp2: i64, mut tmp3: i64) -> [i64;
 /// Returns the four running sums in the order the outputs pair with the odd
 /// part: `[tmp10, tmp11, tmp12, tmp13]`.
 #[must_use]
-fn even_part(in0: i64, in2: i64, in4: i64, in6: i64) -> [i64; 4] {
+fn even_part(in0: Wide, in2: Wide, in4: Wide, in6: Wide) -> [Wide; 4] {
     let z1 = in2.wrapping_add(in6).wrapping_mul(FIX_0_541196100);
     let tmp2 = z1.wrapping_add(in6.wrapping_mul(-FIX_1_847759065));
     let tmp3 = z1.wrapping_add(in2.wrapping_mul(FIX_0_765366865));
@@ -420,7 +446,7 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
             i32::from(coefficients[row * 8 + column])
                 .wrapping_mul(i32::from(quantizers[row * 8 + column]))
         };
-        let wide = |row: usize| i64::from(at(row));
+        let wide = |row: usize| Wide::from(at(row));
         if (1..8).all(|row| coefficients[row * 8 + column] == 0) {
             let dc = at(0).wrapping_shl(PASS1_BITS as u32);
             for row in 0..8 {
@@ -433,7 +459,7 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
         let [odd0, odd1, odd2, odd3] = odd_part(wide(7), wide(5), wide(3), wide(1));
 
         let shift = CONST_BITS - PASS1_BITS;
-        let mut store = |row: usize, value: i64| {
+        let mut store = |row: usize, value: Wide| {
             workspace[row * 8 + column] = descale(value, shift) as i32;
         };
         store(0, tmp10.wrapping_add(odd3));
@@ -450,7 +476,7 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
     let shift = CONST_BITS + PASS1_BITS + 3;
     for row in 0..8 {
         let line = &workspace[row * 8..row * 8 + 8];
-        let wide = |column: usize| i64::from(line[column]);
+        let wide = |column: usize| Wide::from(line[column]);
         if line[1..].iter().all(|value| *value == 0) {
             let dc = range_limit_idct(descale(wide(0), PASS1_BITS + 3) as i32);
             for column in 0..8 {
@@ -462,7 +488,7 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
         let [tmp10, tmp11, tmp12, tmp13] = even_part(wide(0), wide(2), wide(4), wide(6));
         let [odd0, odd1, odd2, odd3] = odd_part(wide(7), wide(5), wide(3), wide(1));
 
-        let mut emit = |column: usize, value: i64| {
+        let mut emit = |column: usize, value: Wide| {
             output[row * 8 + column] = range_limit_idct(descale(value, shift) as i32);
         };
         emit(0, tmp10.wrapping_add(odd3));
@@ -1654,16 +1680,15 @@ fn upsample_plane(
             }
             Ok(output)
         }
+        // libjpeg-turbo filters this case vertically; libjpeg 6b, which is what
+        // Audiveris bundles, has no such method and falls through to the
+        // replication below. Every 4:4:0 image decodes differently between them.
+        #[cfg(feature = "libjpeg-turbo")]
         (1, 2) => {
             let mut output = vec![0u8; width * height];
             for row in 0..height {
-                // The vertical triangle filter has no narrow-plane fallback:
-                // libjpeg selects it on `do_fancy` alone, unlike its two
-                // horizontal cousins, which also require a plane wider than two.
                 let source_row = row / 2;
-                // The two halves of a row group round differently: the upper
-                // half biases by one and the lower by two. Using the same bias
-                // for both is off by one wherever the sum lands on a boundary.
+                // The two halves of a row group round with different biases.
                 let (neighbour, bias) = if row % 2 == 0 {
                     (source_row.saturating_sub(1), 1)
                 } else {

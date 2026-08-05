@@ -87,13 +87,12 @@ Five sample divergences found by `matches_libjpeg`, all fixed:
   flat grey to the end of the image instead of recovering at the next marker.
   Fixture `../tests/data/restart-resync-64x64-420.jpg`.
 
-- **Integer widths in the inverse transform.** A 1x9 4:2:2 file whose chroma
-  coefficients approach 8191 differed in every chroma sample and no luma one.
-  The coefficients were identical on both sides, which is what ruled out the
-  entropy decoder. libjpeg dequantizes in `int`, carries the butterflies in
-  `JLONG` -- `long`, so 64 bits here -- and narrows back to `int` for the
-  inter-pass workspace and the range-limit index. Doing all of it in 32 bits is
-  indistinguishable until a product passes 2^31.
+- **Integer widths in the inverse transform** -- and this one turned out to be
+  the oracle's difference, not ours. A 1x9 4:2:2 file whose chroma coefficients
+  approach 8191 differed in every chroma sample and no luma one, with identical
+  coefficients on both sides, which ruled out the entropy decoder. Widening the
+  transform to 64 bits matched turbo. It also broke parity with Java, because
+  6b uses `INT32`, which OpenJDK defines as `int` on LP64. The fix was to revert.
   Fixture `../tests/data/wide-coefficients-1x9-422.jpg`.
 
 Four **accept/reject** divergences, found by the same target but reported
@@ -107,18 +106,26 @@ are now pinned by `../../../oracle/jpeg-verdicts.txt`.
 
 ## The oracle is not the target
 
-`matches_libjpeg` runs libjpeg-turbo. Audiveris runs Java's `ImageIO`, which
-carries libjpeg 6b. On well-formed input the two agree and the distinction does
-not matter; on damaged input they disagree with each other, and then this target
-is chasing the wrong decoder.
+`matches_libjpeg` runs libjpeg-turbo. Audiveris reads through Java's `ImageIO`,
+and Audiveris ships a bundled JRE, so its libjpeg is the 6b that OpenJDK
+vendors. The two are not the same decoder. Turbo added a vertical fancy
+upsampler that 6b lacks, so they disagree on every 4:4:0 image, and turbo
+widened the inverse transform's intermediates from `int` to `long`, so they
+disagree on any file whose coefficients push a product past 2^31.
 
-Measured three ways across the fixture set: this decoder matches libjpeg-turbo
-to the sample everywhere, and matches Java everywhere except three damaged files
--- on which turbo differs from Java by exactly the same samples. Before treating
-a divergence this target reports on a corrupt input as a bug, check it against
-`../../../oracle/jpeg-verdicts.txt`, which records Java's raster hash. The
-sampling factors, the marker dispatch, and every well-formed fixture were worth
-chasing here. A corrupt file's last MCU row may not be.
+Both of those were found *by chasing turbo and getting it wrong*.
+
+So this crate builds the decoder with its `libjpeg-turbo` feature, which
+switches those two behaviours over: the transform's intermediates widen to 64
+bits, and the vertical fancy upsampler comes back. The feature is off
+everywhere else, including in production and in `../tests/parity.rs`, so the
+fuzzer keeps its full power against the oracle it actually has without the
+shipped decoder drifting toward the wrong library.
+
+If this target still reports a divergence, check the input against
+`../../../oracle/jpeg-verdicts.txt`, which records Java's raster hash. Java
+agreeing with us while turbo does not means a third difference between the two
+libraries, and the feature should grow to cover it.
 
 Two lessons worth keeping:
 
@@ -127,8 +134,10 @@ Two lessons worth keeping:
   converse also holds -- when the coefficients agree and the samples do not, the
   entropy decoder is exonerated and the arithmetic is the suspect.
 - "Which files decode" is half of parity and no sample comparison can see it.
-  Running the oracle for accept/reject separately is what turned four silent
-  wrong answers into four errors.
+  Running the oracle for accept/reject separately is what turned seven silent
+  wrong answers into seven errors.
+- Check what the oracle *is*. Two divergences here were chased into fixes that
+  moved away from the real target, because "libjpeg" named two libraries.
 
 Crashes land in `artifacts/`. Copy new ones into `tests/data/regressions` so the
 fix stays covered without a nightly toolchain.

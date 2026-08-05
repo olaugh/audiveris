@@ -77,6 +77,38 @@ Estimate honestly in the units that actually bind:
 The failure mode is specifically: *work the agent performs itself*, estimated in
 *human* hours.
 
+## Know what your oracle actually is
+
+A differential test is only as good as the thing on the other side. On
+2026-08-05 the JPEG decoder was checked against libjpeg-turbo and matched it to
+the sample everywhere. It still did not match Audiveris, because "libjpeg" names
+two libraries, and *which one Java uses depends on how the JDK was built*:
+Temurin statically links the bundled libjpeg 6b, Ubuntu's OpenJDK package links
+the system libjpeg-turbo.
+
+The two differ in ways a port can see. Turbo added a vertical fancy upsampler
+6b does not have, so they disagree on ordinary, well-formed 4:4:0 images; and
+turbo widened the inverse transform's intermediates from `int` to `long`, so
+they disagree wherever a product passes 2^31.
+
+Two fixes had already been made against the turbo oracle -- widening the
+transform, adding the vertical filter. Both were correct for turbo and wrong for
+the target. Reverting both closed the last divergences rather than opening any.
+
+What to take from it:
+
+- **Name the oracle precisely, including its build.** "libjpeg" was not specific
+  enough. Neither is "the JDK" -- check `ldd` on the native library.
+- **Verify against the real target periodically, not only the proxy.** The proxy
+  is there for speed and locality; if it is never checked against the thing that
+  matters, its divergences become the port's.
+- **A divergence the proxy reports is a question, not a verdict.** Ask the real
+  target before writing the fix.
+- **Enumerate the space when it is small.** Two sweeps -- all 254 marker bytes,
+  all 140 legal sampling combinations -- found in minutes what fuzzing had been
+  surfacing one case per twenty-minute run, and the sampling sweep is what
+  exposed 4:4:0 at all.
+
 ## What has repeatedly worked on this port
 
 Recorded because it generalizes better than any estimate:

@@ -8,6 +8,15 @@ authors.workspace = true
 
 [dependencies]
 
+[features]
+# Reproduce libjpeg-turbo instead of the libjpeg 6b Audiveris bundles.
+#
+# Off by default and off in production: 6b is the target. The differential
+# fuzzer's oracle is libjpeg-turbo, and the two libraries genuinely disagree in
+# two places, so without this every fuzzing run rediscovers those two classes
+# instead of finding new bugs. See the crate docs, "Which libjpeg".
+libjpeg-turbo = []
+
 [dev-dependencies]
 mozjpeg-sys = "2"
 

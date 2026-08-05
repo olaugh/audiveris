@@ -9,7 +9,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-audiveris-jpeg = { path = ".." }
+# The oracle here is libjpeg-turbo, so the decoder is built to match it.
+audiveris-jpeg = { path = "..", features = ["libjpeg-turbo"] }
 mozjpeg-sys = "2"
 
 [[bin]]
