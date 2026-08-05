@@ -22,38 +22,109 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The port now performs native page recognition. `audiveris-cli -batch -step
-SCALE|GRID <image>` runs `LOAD -> BINARY -> SCALE -> GRID` on a real raster
-through `audiveris_omr::recognize`, with every threshold derived from the
-measured sheet scale by `production_grid_parameters`.
+The port performs native page recognition through GRID. `audiveris-cli -batch
+-step SCALE|GRID <image>` runs `LOAD -> BINARY -> SCALE -> GRID` on a real
+raster, with every threshold derived from the measured sheet scale.
 
-GRID agrees with a live Java 5.11 oracle on every output currently measurable,
-across all nine `data/examples` pages:
+Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
 | Output | Status |
 | --- | --- |
-| Staff count and geometry | matches; extents within about 3 px |
-| Global slope | matches (chula 0.007915 vs 0.00792) |
-| System grouping | 9/9 pages exact, including a single-staff score and mixed 2/3-staff systems |
-| Barline totals | 9/9 pages exact (53/44/64/76/58/40/17/22/46) |
-| Barline positions | chula verified peak by peak, all 58 across 6 staves |
+| Binary raster | 9/9 pages bit-identical |
+| Staff abscissae | 65/65 exact |
+| Barline abscissae | 420/420 exact |
+| Completed staff-line endpoints | 1300/1300 exact |
+| Sheet SIG | all 420 barline inters and 184 connectors promoted; 7 median and 21 grade residuals remain, diagnosed below |
+| JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 
-887 Rust tests pass; `cargo fmt --all --check` and strict Clippy are clean.
-Barline and system parity are asserted for representative pages in the default
-suite and for the whole corpus in an `#[ignore]`d sweep
-(`cargo test -p audiveris-omr -- --ignored`, about 70 s).
+`cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green.
 
-Not yet done in GRID: line completion. See the last section of this file.
+## Open threads, in the order worth taking them
 
-`AUDIVERIS_DEBUG_PURGE=1` prints per-peak purge stages on the Rust side. The
-matching Java diagnostic is a temporary log in `StaffProjector.removePeak` that
-walks the stack for the calling `purge*` method; it was reverted after use and
-is easy to reapply. Running both and diffing is how the last two barline
-divergences were found, and it is the recommended first move for any future
-divergence.
+### 1. Staff-line filament assembly loses sections (diagnosed, not fixed)
 
-Linux setup, including the JDK 25 requirement and the out-of-repo
-`../../data/synth` scale fixtures, is in `LINUX-SETUP.md`.
+This is the whole of the remaining SIG residual, and the diagnosis is finished --
+what is left is the fix.
+
+The residual is **not** in `createInters`, which an earlier note claimed. Java
+builds a barline median as `peak.getTop() - halfLine + 0.5` to
+`peak.getBottom() + halfLine + 0.5`, which the port reproduces exactly, and
+`StaffPeak`'s top and bottom are `final`, set once from
+`staff.getFirstLine().yAt(xMid)` and `getLastLine().yAt(xMid)`. So every median
+residual is a staff *line* residual.
+
+Instrumenting both runtimes to print each staff's line extents at `createInters`
+time localizes it exactly. On `BachInvention5.jpg`:
+
+```
+staff 11   Java: 47-1903  47-1903  94-1903  47-1903  48-1903
+staff 11   ours: 47-1903  47-1903  94-1903  47-55    48-62     <- 1-section stubs
+staff  3   Java: 50-1918  50-1918  50-1918  50-1918  50-1919
+staff  3   ours: 50-1853  50-1918  50-1918  50-1918  50-1919   <- short by 65 px
+```
+
+Every other staff on the page agrees extent for extent. The port's
+`FilamentGeometry::position_at` then extrapolates along the endpoint chord --
+faithfully; `CurvedFilament.getPositionAt` does the same -- which for a flat stub
+is a constant, so staff 11's four barline bottoms all come out 2236.5 where Java
+follows the real curve (2236, 2248, 2255, 2252).
+
+So the bug is in filament assembly during `retrieveLines`, upstream of everything
+GRID currently asserts. The completed-line endpoint oracle cannot see it because
+`completeLines` later pins both ends at `staff.getAbscissa(side)`, repairing the
+endpoints it compares while leaving the interior short.
+
+**Next two questions, in order.** Do the sections for staff 11's lines 3-4 exist
+in our horizontal lag and get dropped, or were they never built? That decides
+filtering bug versus construction bug. Then: is staff 3's line 0 stopping 65 px
+early the same defect in milder form? Confirm they share a cause before fixing
+either.
+
+**How to reproduce the diff.** Both instrumentations were reverted; reapply them:
+
+- Rust: in `recognize.rs`, the closure `let ordinate = |geometry, x|` and the
+  three `geometry_of(...)` bindings just above it. Print `staff.id()` with each
+  line's `geometry.start()`, `geometry.stop()`, and `filament.sections().len()`.
+- Java: `BarsRetriever.createInters`, inside the per-staff loop, walk
+  `staff.getLines()` and print each `LineInfo.getEndPoint(LEFT/RIGHT).getX()`.
+  Building and running the Java side is described under "Running the Java app"
+  in `LINUX-SETUP.md`.
+
+### 2. PDF ingest (measured and sequenced, not started)
+
+Audiveris renders PDF pages through PDFBox with
+`renderImageWithDPI(page, 300, ImageType.GRAY)` under `ANTIALIAS_OFF` and
+`INTERPOLATION_BICUBIC` (`ImageLoading.PdfboxLoader.getImage`). So this is
+reproducing a rasterizer, not writing a set of decoders.
+
+`oracle/java/PdfRenderProbe.java` is the oracle -- a copy of that same call,
+reporting source geometry, rendered geometry, an FNV-1a-64 of the raster, and how
+much of the output is interpolated. Run over real IMSLP sources it shows every
+page is a single full-page **bilevel** image (CCITTFax G4 or JBIG2, 1 bit per
+component; no `DCTDecode` in seven sampled files) resampled to 8-bit gray at a
+non-integer ratio, with all 256 gray levels present and 2-4% of pixels
+intermediate. Those pixels feed adaptive binarization, where one count flips a
+pixel and GRID amplifies it.
+
+**Sequencing is the point.** The mechanical parts -- object/xref/stream parsing,
+Flate with predictors, CCITTFax G3/G4, LZW, RunLength, ASCII85/Hex, and
+`DCTDecode`, already done -- are worth nothing without a bit-exact Java2D bicubic
+affine transform. Port OpenJDK's `TransformHelper` (fixed-point coordinate
+stepping, edge clamping, kernel, rounding) and verify it against the oracle
+**first**, on a synthetic bilevel image with no PDF parsing involved. If it
+lands, everything downstream is mechanical. JBIG2 is bounded but meaty, and
+PDFBox delegates to `jbig2-imageio`, so that plugin is the reference rather than
+the spec. Unresolved: whether PDFBox subsamples large images before drawing.
+
+Test sources are the twelve PDFs in the `imslp-pseudo` repo's
+`manifests/acquired_scans.json`, each with a download URL.
+
+### 3. Progressive JPEG (deliberately deferred)
+
+Audiveris accepts progressive JPEG; the port refuses it with a clear error. No
+IMSLP source exercises it -- the corpus is bitonal PDFs -- and the corpus JPEG is
+baseline. Revisit only when a real file hits it. Shape of the work is in the
+`audiveris-jpeg` crate docs.
 
 ## Green checkpoints
 

@@ -38,6 +38,24 @@ Gotchas:
   lock; don't run a background `xtask vectors` and foreground builds together
   and expect both to make progress.
 
+## 2b. Which JDK, and why it is not interchangeable
+
+Use the Temurin JDK 25 below for **every** oracle run, including JPEG. This is
+not tidiness: the distribution changes the answer.
+
+Java reads JPEGs through `ImageIO`, whose reader is libjpeg -- but *which*
+libjpeg depends on how the JDK was built. Temurin statically links the bundled
+libjpeg 6b. Ubuntu's `openjdk-21-jre` package links the **system**
+libjpeg-turbo. Check with `ldd $JAVA_HOME/lib/libjavajpeg.so`: a `libjpeg.so`
+line means you have turbo, not the bundled 6b.
+
+The two disagree on real files. libjpeg-turbo added a vertical fancy upsampler
+6b lacks, so they differ on every 4:4:0 image, and turbo widened the inverse
+transform's intermediates from `int` to 64-bit, so they differ wherever a
+coefficient/quantizer product passes 2^31. Audiveris ships a bundled JRE, so 6b
+is the target, and `oracle/jpeg-verdicts.txt` is generated with Temurin. Running
+that generator under the system JDK silently produces a different oracle.
+
 ## 3. JDK 25 (required for anything touching the Java oracle)
 
 `gradle.properties` sets `theMinJavaVersion = 25`. There is **no Gradle
@@ -127,3 +145,40 @@ invoking Gradle — useful for a fast smoke check that the fixtures resolve.
 - Disk: the Gradle caches plus a JDK plus the cargo target dir total several
   GB; on "no space left on device", delete `rust/target/` and Gradle caches
   first — the per-session allowance, not the disk, is what's exhausted.
+
+## Running the Java app for a live diff
+
+Instrument-and-diff is the technique that has found every parity bug on this
+port, so getting the Java side runnable matters. The unit-test route
+(`xtask -- baseline --run-java`) does not run the recognizer; to run a real
+page through a real stage:
+
+```sh
+export JAVA_HOME=/opt/jdk-25.0.4+7        # NOT the system JDK; see section 2b
+./gradlew :app:compileJava --offline      # fails with "invalid source release: 25" under JDK 21
+```
+
+Gradle has no task that prints the runtime classpath, so add one temporarily to
+`app/build.gradle` and revert it afterwards:
+
+```groovy
+tasks.register('dumpClasspath') {
+    doLast { println sourceSets.main.runtimeClasspath.asPath }
+}
+```
+
+```sh
+CP=$(./gradlew -q :app:dumpClasspath --offline | tail -1)
+JAVA_TOOL_OPTIONS= java -cp "$CP" -Djava.awt.headless=true \
+    org.audiveris.omr.Main -batch -step GRID data/examples/BachInvention5.jpg
+```
+
+Notes that cost time to rediscover:
+
+- Clear `JAVA_TOOL_OPTIONS`; the container sets proxy flags that Java echoes to
+  stdout and that corrupt any parsed output.
+- The run warns about missing `res/alias-patterns.xml` and `res/ISO639-3.xml`.
+  Harmless for GRID.
+- It writes `data/examples/<name>.omr` next to the input. Delete it before
+  committing.
+- Revert both the instrumentation and the `dumpClasspath` task when done.
