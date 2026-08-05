@@ -31,22 +31,42 @@
 //! instead yields plausible-looking noise, and a corpus of scans is full of
 //! truncated files.
 //!
-//! Resynchronisation after *mid-scan* corruption is not reproduced. Where
-//! libjpeg resumes after extraneous bytes differs from where this decoder does,
-//! and blocks in the affected MCU row disagree. See
-//! `corrupt_resync_divergence_stays_confined_to_the_last_mcu_row`, which bounds
-//! it. This was the long tail called out when the decoder was proposed:
-//! matching libjpeg on clean input is mechanical, matching its error recovery
-//! is not.
+//! Mid-scan corruption is reproduced too. Two of libjpeg's habits there are
+//! more permissive than a reading of the standard suggests: it consumes a
+//! coefficient's magnitude bits even when the preceding run has pushed the
+//! index past the end of the block, and it writes that stranded coefficient to
+//! index 63 through sixteen padding entries in its zig-zag table rather than
+//! discarding it. Get either wrong and the bitstream falls one field out of
+//! step with libjpeg's, so a single corrupt run silently rewrites the rest of
+//! the scan.
 //!
-//! # A caution about libjpeg's method selection
+//! Restart markers recover the same way, including the part that is easy to
+//! miss: a successful restart *clears* the out-of-data flag, so a segment that
+//! ran short stops rendering flat grey as soon as the next marker arrives.
 //!
-//! Reproducing libjpeg means reproducing which algorithm it picks, not only the
-//! arithmetic of the algorithms. Both of its two-times upsamplers are chosen
-//! only when a component's downsampled width exceeds two, and it replicates
-//! instead below that. Filtering unconditionally is wrong for 4:2:0 on any image
-//! at most four pixels wide. Differential fuzzing caught it; reading the
-//! transform code alone would not have, because the transform was correct.
+//! This was the long tail called out when the decoder was proposed: matching
+//! libjpeg on clean input is mechanical, matching its error recovery is not.
+//! It is nonetheless matched, on every input the fuzzer has produced.
+//!
+//! # What parity turned out to mean
+//!
+//! Every divergence differential fuzzing found after the first build was in one
+//! of three places, and none of them was an algorithm. They are worth naming,
+//! because each is invisible to reading the transform code:
+//!
+//! - **Which method libjpeg selects.** Both of its two-times upsamplers are
+//!   chosen only when a component's downsampled width exceeds two, and it
+//!   replicates instead below that. Filtering unconditionally is wrong for 4:2:0
+//!   on any image at most four pixels wide -- while the filter itself is right.
+//! - **The integer widths.** Dequantization is an `int` multiply, the transform
+//!   that follows is `JLONG`, and the result narrows back to `int` twice. On a
+//!   file whose coefficients approach the coding limit that is the difference
+//!   between agreement and 496 wrong samples.
+//! - **Which files are accepted at all.** libjpeg validates scan components,
+//!   segment lengths, Huffman tables, and duplicate markers, and a decoder that
+//!   skips those checks produces an image where Audiveris produces an error. No
+//!   sample comparison can see that, so `oracle/jpeg-verdicts.txt` pins it
+//!   separately, against Java rather than against libjpeg.
 //!
 //! # Scope
 //!
@@ -89,10 +109,29 @@ pub enum JpegError {
         id: usize,
     },
     BadHuffmanCode,
+    /// A Huffman table that over-subscribes the code space, or carries more
+    /// symbols than a table can hold. libjpeg validates this when the scan
+    /// starts, so such a file fails there even if the table is never used.
+    BadHuffmanTable,
     /// A coefficient magnitude category outside the standard's range, which
     /// only a corrupt Huffman table can produce.
     InvalidMagnitudeCategory(u8),
     ZeroDimension,
+    /// A scan selected a component the frame never declared, or selected one
+    /// twice. libjpeg treats this as fatal.
+    UnknownScanComponent(u8),
+    /// A scan covering fewer components than the frame: the non-interleaved
+    /// sequential process, which has a different MCU layout.
+    NonInterleavedScan {
+        scan: usize,
+        frame: usize,
+    },
+    /// A second frame header. libjpeg allows exactly one.
+    DuplicateFrame,
+    /// A second start-of-image marker, which libjpeg calls fatal.
+    DuplicateStartOfImage,
+    /// A second scan in a sequential file, where libjpeg expects end-of-image.
+    ExpectedEndOfImage,
 }
 
 impl fmt::Display for JpegError {
@@ -123,6 +162,7 @@ impl fmt::Display for JpegError {
                 write!(f, "missing Huffman table class {class} id {id}")
             }
             Self::BadHuffmanCode => f.write_str("undecodable Huffman code"),
+            Self::BadHuffmanTable => f.write_str("bogus Huffman table definition"),
             Self::InvalidMagnitudeCategory(category) => {
                 write!(
                     f,
@@ -130,6 +170,22 @@ impl fmt::Display for JpegError {
                 )
             }
             Self::ZeroDimension => f.write_str("frame declared a zero dimension"),
+            Self::UnknownScanComponent(id) => {
+                write!(
+                    f,
+                    "scan selected component {id}, which the frame does not declare exactly once"
+                )
+            }
+            Self::NonInterleavedScan { scan, frame } => write!(
+                f,
+                "scan covers {scan} of the frame's {frame} components; only the fully \
+                 interleaved sequential scan is decoded here"
+            ),
+            Self::DuplicateFrame => f.write_str("a second frame header"),
+            Self::DuplicateStartOfImage => f.write_str("a second start-of-image marker"),
+            Self::ExpectedEndOfImage => {
+                f.write_str("a second scan where end-of-image was expected")
+            }
         }
     }
 }
@@ -145,11 +201,20 @@ pub struct Decoded {
     pub samples: Vec<u8>,
 }
 
-/// Zig-zag scan position to natural row-major position.
-const NATURAL_ORDER: [usize; 64] = [
+/// Zig-zag scan position to natural row-major position, with sixteen entries of
+/// padding.
+///
+/// A corrupt run length can push the coefficient index past the end of a block.
+/// libjpeg carries the same padding, every entry of it the last coefficient, so
+/// an over-long run lands on coefficient 63 instead of being discarded. That is
+/// observable: dropping the value instead leaves a block one coefficient short
+/// of libjpeg's. A run adds at most fifteen to an index below sixty-four, so
+/// sixteen spare entries cover every reachable case.
+const NATURAL_ORDER: [usize; 80] = [
     0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
     13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
-    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63,
+    63, 63, 63, 63, 63, 63,
 ];
 
 // ---------------------------------------------------------------------------
@@ -203,22 +268,22 @@ const PASS1_BITS: i32 = 2;
 ///
 /// Each is the scaled form of an exact trigonometric quantity of the
 /// even/odd decomposition, listed with the real number it comes from.
-const FIX_0_298631336: i32 = 2446; // 0.298631336
-const FIX_0_390180644: i32 = 3196; // 0.390180644
-const FIX_0_541196100: i32 = 4433; // 0.541196100
-const FIX_0_765366865: i32 = 6270; // 0.765366865
-const FIX_0_899976223: i32 = 7373; // 0.899976223
-const FIX_1_175875602: i32 = 9633; // 1.175875602
-const FIX_1_501321110: i32 = 12299; // 1.501321110
-const FIX_1_847759065: i32 = 15137; // 1.847759065
-const FIX_1_961570560: i32 = 16069; // 1.961570560
-const FIX_2_053119869: i32 = 16819; // 2.053119869
-const FIX_2_562915447: i32 = 20995; // 2.562915447
-const FIX_3_072711026: i32 = 25172; // 3.072711026
+const FIX_0_298631336: i64 = 2446; // 0.298631336
+const FIX_0_390180644: i64 = 3196; // 0.390180644
+const FIX_0_541196100: i64 = 4433; // 0.541196100
+const FIX_0_765366865: i64 = 6270; // 0.765366865
+const FIX_0_899976223: i64 = 7373; // 0.899976223
+const FIX_1_175875602: i64 = 9633; // 1.175875602
+const FIX_1_501321110: i64 = 12299; // 1.501321110
+const FIX_1_847759065: i64 = 15137; // 1.847759065
+const FIX_1_961570560: i64 = 16069; // 1.961570560
+const FIX_2_053119869: i64 = 16819; // 2.053119869
+const FIX_2_562915447: i64 = 20995; // 2.562915447
+const FIX_3_072711026: i64 = 25172; // 3.072711026
 
 /// Round-to-nearest right shift, the descaling step of the integer transform.
 #[must_use]
-const fn descale(value: i32, bits: i32) -> i32 {
+const fn descale(value: i64, bits: i32) -> i64 {
     value.wrapping_add(1 << (bits - 1)) >> bits
 }
 
@@ -226,7 +291,7 @@ const fn descale(value: i32, bits: i32) -> i32 {
 ///
 /// Returns the four odd-index outputs in coefficient order.
 #[must_use]
-fn odd_part(mut tmp0: i32, mut tmp1: i32, mut tmp2: i32, mut tmp3: i32) -> [i32; 4] {
+fn odd_part(mut tmp0: i64, mut tmp1: i64, mut tmp2: i64, mut tmp3: i64) -> [i64; 4] {
     let mut z1 = tmp0.wrapping_add(tmp3);
     let mut z2 = tmp1.wrapping_add(tmp2);
     let mut z3 = tmp0.wrapping_add(tmp2);
@@ -258,7 +323,7 @@ fn odd_part(mut tmp0: i32, mut tmp1: i32, mut tmp2: i32, mut tmp3: i32) -> [i32;
 /// Returns the four running sums in the order the outputs pair with the odd
 /// part: `[tmp10, tmp11, tmp12, tmp13]`.
 #[must_use]
-fn even_part(in0: i32, in2: i32, in4: i32, in6: i32) -> [i32; 4] {
+fn even_part(in0: i64, in2: i64, in4: i64, in6: i64) -> [i64; 4] {
     let z1 = in2.wrapping_add(in6).wrapping_mul(FIX_0_541196100);
     let tmp2 = z1.wrapping_add(in6.wrapping_mul(-FIX_1_847759065));
     let tmp3 = z1.wrapping_add(in2.wrapping_mul(FIX_0_765366865));
@@ -276,22 +341,36 @@ fn even_part(in0: i32, in2: i32, in4: i32, in6: i32) -> [i32; 4] {
 
 /// libjpeg's `jpeg_idct_islow`: dequantize and inverse transform one block.
 ///
-/// All arithmetic wraps. A malformed file can present coefficient and quantizer
-/// pairs whose product overflows, and libjpeg's C arithmetic wraps there; a
-/// checked or saturating result would both panic on input this decoder must
-/// survive and disagree with libjpeg on damaged images.
+/// The integer widths here are copied from libjpeg deliberately, because on a
+/// malformed file they are observable. libjpeg dequantizes in `int` and carries
+/// the butterflies in `JLONG`, which is `long` -- 64 bits on the platforms that
+/// matter here -- then narrows back to `int` for the inter-pass workspace and
+/// again for the range-limit index. So a coefficient/quantizer product wraps at
+/// 32 bits, the transform that follows does not wrap at all, and the pass-1
+/// result is truncated to 32 bits on its way into the workspace. Carrying the
+/// whole thing in 32 bits looks equivalent and is not: differential fuzzing
+/// found a 1x9 file whose chroma blocks hold coefficients near 8191, where the
+/// products reach far enough past 2^31 for the difference to reach the output.
+///
+/// All of it wraps rather than panicking, which is both what C does and what a
+/// decoder reading untrusted scans has to do.
 ///
 /// Both passes take the shortcut for an all-zero AC set, which is an algebraic
 /// identity rather than an approximation.
 fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u8; 64]) {
+    // `int workspace[DCTSIZE2]` in libjpeg: 32 bits, narrower than the
+    // arithmetic that produces it.
     let mut workspace = [0i32; 64];
 
     // Pass 1: columns, leaving PASS1_BITS of extra fraction.
     for column in 0..8 {
+        // Dequantization is an `int` multiply in libjpeg, so it wraps at 32
+        // bits before the transform widens it.
         let at = |row: usize| -> i32 {
             i32::from(coefficients[row * 8 + column])
                 .wrapping_mul(i32::from(quantizers[row * 8 + column]))
         };
+        let wide = |row: usize| i64::from(at(row));
         if (1..8).all(|row| coefficients[row * 8 + column] == 0) {
             let dc = at(0).wrapping_shl(PASS1_BITS as u32);
             for row in 0..8 {
@@ -300,43 +379,50 @@ fn inverse_dct(coefficients: &[i16; 64], quantizers: &[u16; 64], output: &mut [u
             continue;
         }
 
-        let [tmp10, tmp11, tmp12, tmp13] = even_part(at(0), at(2), at(4), at(6));
-        let [odd0, odd1, odd2, odd3] = odd_part(at(7), at(5), at(3), at(1));
+        let [tmp10, tmp11, tmp12, tmp13] = even_part(wide(0), wide(2), wide(4), wide(6));
+        let [odd0, odd1, odd2, odd3] = odd_part(wide(7), wide(5), wide(3), wide(1));
 
         let shift = CONST_BITS - PASS1_BITS;
-        workspace[column] = descale(tmp10.wrapping_add(odd3), shift);
-        workspace[7 * 8 + column] = descale(tmp10.wrapping_sub(odd3), shift);
-        workspace[8 + column] = descale(tmp11.wrapping_add(odd2), shift);
-        workspace[6 * 8 + column] = descale(tmp11.wrapping_sub(odd2), shift);
-        workspace[2 * 8 + column] = descale(tmp12.wrapping_add(odd1), shift);
-        workspace[5 * 8 + column] = descale(tmp12.wrapping_sub(odd1), shift);
-        workspace[3 * 8 + column] = descale(tmp13.wrapping_add(odd0), shift);
-        workspace[4 * 8 + column] = descale(tmp13.wrapping_sub(odd0), shift);
+        let mut store = |row: usize, value: i64| {
+            workspace[row * 8 + column] = descale(value, shift) as i32;
+        };
+        store(0, tmp10.wrapping_add(odd3));
+        store(7, tmp10.wrapping_sub(odd3));
+        store(1, tmp11.wrapping_add(odd2));
+        store(6, tmp11.wrapping_sub(odd2));
+        store(2, tmp12.wrapping_add(odd1));
+        store(5, tmp12.wrapping_sub(odd1));
+        store(3, tmp13.wrapping_add(odd0));
+        store(4, tmp13.wrapping_sub(odd0));
     }
 
     // Pass 2: rows, descaling the whole accumulated fraction away.
     let shift = CONST_BITS + PASS1_BITS + 3;
     for row in 0..8 {
         let line = &workspace[row * 8..row * 8 + 8];
+        let wide = |column: usize| i64::from(line[column]);
         if line[1..].iter().all(|value| *value == 0) {
-            let dc = range_limit_idct(descale(line[0], PASS1_BITS + 3));
+            let dc = range_limit_idct(descale(wide(0), PASS1_BITS + 3) as i32);
             for column in 0..8 {
                 output[row * 8 + column] = dc;
             }
             continue;
         }
 
-        let [tmp10, tmp11, tmp12, tmp13] = even_part(line[0], line[2], line[4], line[6]);
-        let [odd0, odd1, odd2, odd3] = odd_part(line[7], line[5], line[3], line[1]);
+        let [tmp10, tmp11, tmp12, tmp13] = even_part(wide(0), wide(2), wide(4), wide(6));
+        let [odd0, odd1, odd2, odd3] = odd_part(wide(7), wide(5), wide(3), wide(1));
 
-        output[row * 8] = range_limit_idct(descale(tmp10.wrapping_add(odd3), shift));
-        output[row * 8 + 7] = range_limit_idct(descale(tmp10.wrapping_sub(odd3), shift));
-        output[row * 8 + 1] = range_limit_idct(descale(tmp11.wrapping_add(odd2), shift));
-        output[row * 8 + 6] = range_limit_idct(descale(tmp11.wrapping_sub(odd2), shift));
-        output[row * 8 + 2] = range_limit_idct(descale(tmp12.wrapping_add(odd1), shift));
-        output[row * 8 + 5] = range_limit_idct(descale(tmp12.wrapping_sub(odd1), shift));
-        output[row * 8 + 3] = range_limit_idct(descale(tmp13.wrapping_add(odd0), shift));
-        output[row * 8 + 4] = range_limit_idct(descale(tmp13.wrapping_sub(odd0), shift));
+        let mut emit = |column: usize, value: i64| {
+            output[row * 8 + column] = range_limit_idct(descale(value, shift) as i32);
+        };
+        emit(0, tmp10.wrapping_add(odd3));
+        emit(7, tmp10.wrapping_sub(odd3));
+        emit(1, tmp11.wrapping_add(odd2));
+        emit(6, tmp11.wrapping_sub(odd2));
+        emit(2, tmp12.wrapping_add(odd1));
+        emit(5, tmp12.wrapping_sub(odd1));
+        emit(3, tmp13.wrapping_add(odd0));
+        emit(4, tmp13.wrapping_sub(odd0));
     }
 }
 
@@ -487,11 +573,23 @@ struct HuffmanTable {
     max_code: [i32; 17],
     value_offset: [i32; 17],
     values: Vec<u8>,
+    /// Codes per length, kept for the scan-start validation below.
+    counts: [u8; 16],
 }
 
 impl HuffmanTable {
-    fn build(counts: &[u8; 16], values: Vec<u8>) -> Self {
+    /// Builds the decoding table from a `DHT` segment.
+    ///
+    /// Only the symbol-count limit is checked here, because that is the only
+    /// one libjpeg makes while *parsing* the segment. The rest of its
+    /// validation happens when a scan starts, and applies to referenced tables
+    /// only; see [`HuffmanTable::validate`].
+    fn build(counts: &[u8; 16], values: Vec<u8>) -> Result<Self, JpegError> {
+        if values.len() > 256 {
+            return Err(JpegError::BadHuffmanTable);
+        }
         let mut table = Self {
+            counts: *counts,
             values,
             ..Self::default()
         };
@@ -511,9 +609,39 @@ impl HuffmanTable {
             }
             // The canonical code advances a bit at every length, including the
             // lengths that carry no codes at all.
+            code = code.wrapping_shl(1);
+        }
+        Ok(table)
+    }
+
+    /// The checks libjpeg defers to the start of a scan.
+    ///
+    /// These are parity, not defensive tidiness: libjpeg makes them before
+    /// decoding a single MCU, so a file carrying an impossible table fails even
+    /// when none of its codes would ever have been read. Accepting one means
+    /// producing an image where Audiveris raises `Bogus Huffman table
+    /// definition`. Equally, the checks are *not* made on a table the scan
+    /// never names, so validating at parse time would reject files libjpeg
+    /// accepts. Both halves of that are load-bearing.
+    fn validate(&self, is_dc: bool) -> Result<(), JpegError> {
+        let mut code = 0i32;
+        for length in 1..=16usize {
+            code += i32::from(self.counts[length - 1]);
+            // The all-ones code of any length is reserved, so the codes
+            // assigned so far must leave at least one spare. A table that fills
+            // the space over-subscribes it.
+            if code >= 1i32 << length {
+                return Err(JpegError::BadHuffmanTable);
+            }
             code <<= 1;
         }
-        table
+        // A DC symbol is a coefficient magnitude category, which the standard
+        // caps at 15. The AC side has no equivalent limit: its symbols are a
+        // run and a size packed into the byte, so every value is in range.
+        if is_dc && self.values.iter().any(|value| *value > 15) {
+            return Err(JpegError::BadHuffmanTable);
+        }
+        Ok(())
     }
 }
 
@@ -523,6 +651,17 @@ struct BitReader<'a> {
     position: usize,
     bits: u32,
     count: u32,
+    /// The marker that ended the entropy data, held unread.
+    ///
+    /// libjpeg keeps the same field (`cinfo->unread_marker`) because a restart
+    /// needs to know whether the decoder stopped *at* a marker or merely ran
+    /// short of bits: the two resume differently.
+    pending: Option<u8>,
+    /// Where `pending`'s run of `FF` bytes began, so the caller can hand the
+    /// marker back to its own walk.
+    marker_at: usize,
+    /// Which `RSTn` the next restart expects, counting 0..7 and wrapping.
+    next_restart: u8,
     /// Set once the reader has been asked for a bit the scan does not contain.
     ///
     /// libjpeg tracks the same condition and stops decoding entirely once it
@@ -541,7 +680,52 @@ impl<'a> BitReader<'a> {
             position,
             bits: 0,
             count: 0,
+            pending: None,
+            marker_at: 0,
+            next_restart: 0,
             insufficient: false,
+        }
+    }
+
+    /// Consumes one byte of entropy data, or reports the marker that ends it.
+    ///
+    /// Running out of input is not distinguished from meeting an end-of-image:
+    /// libjpeg's source manager fabricates `FF D9` when the data is exhausted,
+    /// so the rest of the decoder sees the two identically, and restart
+    /// handling depends on that.
+    fn next_byte(&mut self) -> Option<u8> {
+        if self.pending.is_some() {
+            return None;
+        }
+        let start = self.position;
+        let fabricate = |reader: &mut Self| {
+            reader.pending = Some(0xD9);
+            reader.marker_at = reader.data.len();
+            None
+        };
+        let Some(&byte) = self.data.get(self.position) else {
+            return fabricate(self);
+        };
+        self.position += 1;
+        if byte != 0xFF {
+            return Some(byte);
+        }
+        // Multiple FFs followed by a zero count as one stuffed data byte, which
+        // is not valid per the standard but is what libjpeg accepts.
+        loop {
+            let Some(&code) = self.data.get(self.position) else {
+                return fabricate(self);
+            };
+            self.position += 1;
+            match code {
+                0xFF => {}
+                0x00 => return Some(0xFF),
+                _ => {
+                    self.pending = Some(code);
+                    self.marker_at = start;
+                    return None;
+                }
+            }
         }
     }
 
@@ -549,25 +733,8 @@ impl<'a> BitReader<'a> {
     /// zero bits, which is how libjpeg pads a truncated final block.
     fn bit(&mut self) -> u32 {
         if self.count == 0 {
-            let byte = match self.data.get(self.position) {
-                Some(0xFF) => {
-                    // A stuffed zero means a literal 0xFF; anything else is a
-                    // marker, so stop consuming and pad.
-                    match self.data.get(self.position + 1) {
-                        Some(0x00) => {
-                            self.position += 2;
-                            0xFF
-                        }
-                        _ => {
-                            self.insufficient = true;
-                            0
-                        }
-                    }
-                }
-                Some(byte) => {
-                    self.position += 1;
-                    *byte
-                }
+            let byte = match self.next_byte() {
+                Some(byte) => byte,
                 None => {
                     self.insufficient = true;
                     0
@@ -604,21 +771,105 @@ impl<'a> BitReader<'a> {
         Err(JpegError::BadHuffmanCode)
     }
 
-    /// Discards buffered bits and steps over a restart marker.
+    /// Scans forward to the next marker, as libjpeg's `next_marker` does.
+    ///
+    /// Anything that is not a marker is discarded -- libjpeg counts those bytes
+    /// and warns about them -- and `FF 00` is stuffed data rather than a marker,
+    /// so the search continues past it.
+    fn find_marker(&mut self) {
+        // `next_byte` yields data bytes until it meets a marker, which it
+        // records in `pending` and reports by returning nothing.
+        while self.next_byte().is_some() {}
+    }
+
+    /// Steps over a restart marker, recovering the way libjpeg recovers.
+    ///
+    /// Three details here are behaviour, not bookkeeping. The restart markers
+    /// are numbered, and meeting an unexpected one puts libjpeg into a
+    /// resynchronisation policy rather than a plain skip. Partial bits are
+    /// discarded. And most visibly, a successful restart *clears* the
+    /// out-of-data flag: a scan that ran short before the marker resumes
+    /// decoding after it, instead of rendering flat grey to the end of the
+    /// image. A file with a restart interval and a damaged segment therefore
+    /// recovers here exactly where it recovers there.
     fn restart(&mut self) {
         self.count = 0;
-        while self.position + 1 < self.data.len() {
-            if self.data[self.position] == 0xFF {
-                let marker = self.data[self.position + 1];
-                if (0xD0..=0xD7).contains(&marker) {
-                    self.position += 2;
+        if self.pending.is_none() {
+            self.find_marker();
+        }
+        if self.pending == Some(0xD0 + self.next_restart) {
+            // The expected marker: swallow it and carry on.
+            self.pending = None;
+        } else {
+            self.resync();
+        }
+        self.next_restart = (self.next_restart + 1) & 7;
+        // Left set if the restart landed on a marker it did not consume, which
+        // means the next segment is empty and its pixels would be invented.
+        if self.pending.is_none() {
+            self.insufficient = false;
+        }
+    }
+
+    /// libjpeg's `jpeg_resync_to_restart`, the default recovery policy.
+    ///
+    /// The question it answers is whether the marker in hand is worth stopping
+    /// for. One of the next two expected restarts means the encoder skipped
+    /// ahead, so it is left unread for the decoder to reach in order. One of the
+    /// previous two means this one is stale, so it advances past it and asks
+    /// again. Anything else is treated as the restart that was wanted.
+    fn resync(&mut self) {
+        /// The three outcomes libjpeg's policy can reach, in its own terms.
+        enum Action {
+            /// Treat this as the wanted restart: discard it and resume.
+            Resume,
+            /// Stale or unusable: step to the next marker and decide again.
+            Advance,
+            /// Worth stopping for: leave it unread.
+            Stop,
+        }
+
+        let desired = self.next_restart;
+        let restart = |offset: u8| 0xD0 + ((desired + offset) & 7);
+        loop {
+            let Some(marker) = self.pending else { return };
+            let action = if marker < 0xC0 {
+                // Below SOF0 is not a marker any recovery can use.
+                Action::Advance
+            } else if !(0xD0..=0xD7).contains(&marker) {
+                Action::Stop
+            } else if marker == restart(1) || marker == restart(2) {
+                // The encoder skipped ahead; reach these in order instead.
+                Action::Stop
+            } else if marker == restart(7) || marker == restart(6) {
+                // Already passed, so this one is stale.
+                Action::Advance
+            } else {
+                Action::Resume
+            };
+            match action {
+                Action::Stop => return,
+                Action::Resume => {
+                    self.pending = None;
                     return;
                 }
-                if marker != 0x00 && marker != 0xFF {
-                    return;
+                Action::Advance => {
+                    self.pending = None;
+                    self.find_marker();
                 }
             }
-            self.position += 1;
+        }
+    }
+
+    /// Where the caller's marker walk should resume.
+    ///
+    /// A marker the entropy decoder stopped at has not been consumed by anyone,
+    /// so the walk has to see it; otherwise the walk starts from wherever the
+    /// entropy data left off.
+    const fn scan_end(&self) -> usize {
+        match self.pending {
+            Some(_) => self.marker_at,
+            None => self.position,
         }
     }
 }
@@ -700,20 +951,29 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
     let mut frame: Option<(usize, usize, Vec<Component>)> = None;
     let mut restart_interval = 0usize;
 
+    // Set once the scan has been decoded. Everything after it is still parsed,
+    // because libjpeg parses it too and can fail there; see `next_marker`.
+    let mut scanned: Option<Vec<Plane>> = None;
+
     let mut at = 2usize;
     loop {
-        // Markers may be preceded by fill bytes.
-        while bytes.get(at) == Some(&0xFF) && bytes.get(at + 1) == Some(&0xFF) {
-            at += 1;
-        }
-        let (Some(0xFF), Some(&marker)) = (bytes.get(at), bytes.get(at + 1)) else {
+        let Some((marker, next)) = next_marker(bytes, at) else {
+            // Running out of data is not itself a failure: libjpeg's source
+            // manager fabricates an end-of-image when the input is exhausted,
+            // which is how a truncated scan still yields an image. Before the
+            // scan there is nothing to yield, so it stays an error.
+            if scanned.is_some() {
+                break;
+            }
             return Err(JpegError::Truncated);
         };
-        at += 2;
+        at = next;
         match marker {
-            // Standalone markers.
-            0xD8 => continue,
+            // The opening SOI was consumed before this loop, so any SOI reached
+            // here is a second one, which libjpeg calls fatal.
+            0xD8 => return Err(JpegError::DuplicateStartOfImage),
             0xD9 => break,
+            // Standalone markers.
             0x01 | 0xD0..=0xD7 => continue,
             _ => {}
         }
@@ -759,6 +1019,11 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                     }
                     quantizers[id] = Some(table);
                 }
+                // libjpeg requires the tables to consume the declared length
+                // exactly, and treats any remainder as fatal.
+                if cursor != segment.len() {
+                    return Err(JpegError::BadSegmentLength(marker));
+                }
             }
             // DHT
             0xC4 => {
@@ -783,45 +1048,60 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                         .ok_or(JpegError::Truncated)?
                         .to_vec();
                     cursor += total;
-                    let table = HuffmanTable::build(&counts, values);
+                    let table = HuffmanTable::build(&counts, values)?;
                     if class == 0 {
                         dc_tables[id] = Some(table);
                     } else {
                         ac_tables[id] = Some(table);
                     }
                 }
+                if cursor != segment.len() {
+                    return Err(JpegError::BadSegmentLength(marker));
+                }
             }
             // DRI
             0xDD => {
-                restart_interval = usize::from(u16::from_be_bytes([
-                    *segment.first().ok_or(JpegError::Truncated)?,
-                    *segment.get(1).ok_or(JpegError::Truncated)?,
-                ]));
+                // Fixed length in libjpeg, and a disagreement is fatal there.
+                if segment.len() != 2 {
+                    return Err(JpegError::BadSegmentLength(marker));
+                }
+                restart_interval = usize::from(u16::from_be_bytes([segment[0], segment[1]]));
             }
             // SOF0 baseline, SOF1 extended sequential: same decoding procedure.
             0xC0 | 0xC1 => {
-                let precision = *segment.first().ok_or(JpegError::Truncated)?;
+                if frame.is_some() {
+                    return Err(JpegError::DuplicateFrame);
+                }
+                // Precision, dimensions, and component count occupy six bytes
+                // before the per-component descriptors.
+                let header: &[u8; 6] = segment
+                    .get(..6)
+                    .and_then(|header| header.try_into().ok())
+                    .ok_or(JpegError::Truncated)?;
+                let precision = header[0];
                 if precision != 8 {
                     return Err(JpegError::UnsupportedPrecision(precision));
                 }
-                let height = usize::from(u16::from_be_bytes([segment[1], segment[2]]));
-                let width = usize::from(u16::from_be_bytes([segment[3], segment[4]]));
+                let height = usize::from(u16::from_be_bytes([header[1], header[2]]));
+                let width = usize::from(u16::from_be_bytes([header[3], header[4]]));
                 if width == 0 || height == 0 {
                     return Err(JpegError::ZeroDimension);
                 }
-                let count = usize::from(segment[5]);
+                let count = usize::from(header[5]);
                 if count != 1 && count != 3 {
                     return Err(JpegError::UnsupportedComponentCount(count));
                 }
+                if segment.len() != 6 + count * 3 {
+                    return Err(JpegError::BadSegmentLength(marker));
+                }
                 let mut components = Vec::with_capacity(count);
-                for index in 0..count {
-                    let base = 6 + index * 3;
-                    let spec = *segment.get(base + 1).ok_or(JpegError::Truncated)?;
+                for descriptor in segment[6..].chunks_exact(3) {
+                    let spec = descriptor[1];
                     components.push(Component {
-                        id: segment[base],
+                        id: descriptor[0],
                         horizontal: usize::from(spec >> 4),
                         vertical: usize::from(spec & 15),
-                        quantizer: usize::from(*segment.get(base + 2).ok_or(JpegError::Truncated)?),
+                        quantizer: usize::from(descriptor[2]),
                         dc_table: 0,
                         ac_table: 0,
                     });
@@ -834,19 +1114,49 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
             }
             // SOS
             0xDA => {
+                // A sequential file has exactly one scan, so libjpeg treats a
+                // second as fatal rather than as another pass to accumulate.
+                if scanned.is_some() {
+                    return Err(JpegError::ExpectedEndOfImage);
+                }
                 let (width, height, components) = frame.as_mut().ok_or(JpegError::MissingFrame)?;
                 let scan_count = usize::from(*segment.first().ok_or(JpegError::Truncated)?);
-                for index in 0..scan_count {
-                    let id = *segment.get(1 + index * 2).ok_or(JpegError::Truncated)?;
-                    let tables = *segment.get(2 + index * 2).ok_or(JpegError::Truncated)?;
-                    for component in components.iter_mut() {
-                        if component.id == id {
-                            component.dc_table = usize::from(tables >> 4);
-                            component.ac_table = usize::from(tables & 15);
-                        }
-                    }
+                // libjpeg checks the declared length against the component
+                // count and treats a disagreement as fatal, so accepting it
+                // here would mean decoding a file it refuses.
+                if segment.len() != 4 + scan_count * 2 {
+                    return Err(JpegError::BadSegmentLength(marker));
                 }
-                let planes = decode_scan(
+                // Only the fully interleaved scan is decoded. A scan that names
+                // fewer components than the frame is the non-interleaved
+                // sequential process: valid JPEG, a different MCU layout, and
+                // several scans to assemble. It is refused rather than decoded
+                // as if it were interleaved.
+                if scan_count != components.len() {
+                    return Err(JpegError::NonInterleavedScan {
+                        scan: scan_count,
+                        frame: components.len(),
+                    });
+                }
+                let mut selected = vec![false; components.len()];
+                for index in 0..scan_count {
+                    let id = segment[1 + index * 2];
+                    let tables = segment[2 + index * 2];
+                    // First match wins, as in libjpeg, which matters only when
+                    // a malformed frame repeats a component id.
+                    let position = components
+                        .iter()
+                        .position(|component| component.id == id)
+                        .ok_or(JpegError::UnknownScanComponent(id))?;
+                    // Each frame component exactly once; anything else is a
+                    // layout this decoder does not reproduce.
+                    if std::mem::replace(&mut selected[position], true) {
+                        return Err(JpegError::UnknownScanComponent(id));
+                    }
+                    components[position].dc_table = usize::from(tables >> 4);
+                    components[position].ac_table = usize::from(tables & 15);
+                }
+                let (planes, end) = decode_scan(
                     bytes,
                     at,
                     *width,
@@ -857,17 +1167,52 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                     &ac_tables,
                     restart_interval,
                 )?;
-                return assemble(*width, *height, components, &planes, keep_planes);
+                scanned = Some(planes);
+                at = end;
             }
             // APPn, COM, and other skippable segments.
             0xC8 | 0xCC | 0xDC | 0xDE | 0xDF | 0xE0..=0xEF | 0xFE => {}
             _ => return Err(JpegError::UnsupportedMarker(marker)),
         }
     }
-    Err(JpegError::MissingFrame)
+
+    let planes = scanned.ok_or(JpegError::MissingFrame)?;
+    let (width, height, components) = frame.as_ref().ok_or(JpegError::MissingFrame)?;
+    assemble(*width, *height, components, &planes, keep_planes)
+}
+
+/// Advances to the next marker, exactly as libjpeg's `next_marker` does.
+///
+/// Two behaviours here are load-bearing rather than tidy. Bytes that are not
+/// part of a marker are skipped -- libjpeg counts them and warns "extraneous
+/// bytes before marker", which is how a scan with corruption in it still
+/// resynchronises. And `FF 00` is stuffed data, not a marker, so the search
+/// continues past it; treating it as one would end the file early.
+///
+/// Returns the marker and the offset just past it, or `None` once the data runs
+/// out. libjpeg's source manager fabricates an end-of-image at that point, so
+/// the caller treats exhaustion the same way it treats `D9`.
+fn next_marker(bytes: &[u8], mut at: usize) -> Option<(u8, usize)> {
+    loop {
+        while *bytes.get(at)? != 0xFF {
+            at += 1;
+        }
+        // Any number of fill bytes may precede the marker code.
+        while *bytes.get(at)? == 0xFF {
+            at += 1;
+        }
+        let marker = *bytes.get(at)?;
+        at += 1;
+        if marker != 0x00 {
+            return Some((marker, at));
+        }
+    }
 }
 
 /// Decodes the entropy-coded segment into one plane per component.
+///
+/// Returns the planes and the offset the entropy decoder stopped at, so the
+/// caller can resume its marker walk where libjpeg's would.
 #[allow(clippy::too_many_arguments)]
 fn decode_scan(
     bytes: &[u8],
@@ -879,7 +1224,7 @@ fn decode_scan(
     dc_tables: &[Option<HuffmanTable>],
     ac_tables: &[Option<HuffmanTable>],
     restart_interval: usize,
-) -> Result<Vec<Plane>, JpegError> {
+) -> Result<(Vec<Plane>, usize), JpegError> {
     let max_h = components
         .iter()
         .map(|component| component.horizontal)
@@ -897,6 +1242,35 @@ fn decode_scan(
                 vertical: component.vertical,
             });
         }
+    }
+
+    // Resolved and checked once, before any MCU, because that is when libjpeg
+    // does it. Deferring a table's validation until a code is read from it
+    // would let a file with an impossible-but-unused table decode here and fail
+    // there.
+    let mut selected = Vec::with_capacity(components.len());
+    for component in components {
+        let quantizer = quantizers
+            .get(component.quantizer)
+            .and_then(Option::as_ref)
+            .ok_or(JpegError::MissingQuantizationTable(component.quantizer))?;
+        let dc = dc_tables
+            .get(component.dc_table)
+            .and_then(Option::as_ref)
+            .ok_or(JpegError::MissingHuffmanTable {
+                class: 0,
+                id: component.dc_table,
+            })?;
+        let ac = ac_tables
+            .get(component.ac_table)
+            .and_then(Option::as_ref)
+            .ok_or(JpegError::MissingHuffmanTable {
+                class: 1,
+                id: component.ac_table,
+            })?;
+        dc.validate(true)?;
+        ac.validate(false)?;
+        selected.push((quantizer, dc, ac));
     }
 
     let mcus_across = width.div_ceil(8 * max_h);
@@ -936,24 +1310,7 @@ fn decode_scan(
             let exhausted = reader.insufficient;
 
             for (index, component) in components.iter().enumerate() {
-                let quantizer = quantizers
-                    .get(component.quantizer)
-                    .and_then(Option::as_ref)
-                    .ok_or(JpegError::MissingQuantizationTable(component.quantizer))?;
-                let dc = dc_tables
-                    .get(component.dc_table)
-                    .and_then(Option::as_ref)
-                    .ok_or(JpegError::MissingHuffmanTable {
-                        class: 0,
-                        id: component.dc_table,
-                    })?;
-                let ac = ac_tables
-                    .get(component.ac_table)
-                    .and_then(Option::as_ref)
-                    .ok_or(JpegError::MissingHuffmanTable {
-                        class: 1,
-                        id: component.ac_table,
-                    })?;
+                let (quantizer, dc, ac) = selected[index];
 
                 for block_y in 0..component.vertical {
                     for block_x in 0..component.horizontal {
@@ -1000,11 +1357,16 @@ fn decode_scan(
                                 continue;
                             }
                             position += run;
-                            if position >= 64 {
-                                break;
-                            }
-                            coefficients[NATURAL_ORDER[position]] =
-                                extend(reader.receive(size), size) as i16;
+                            // The magnitude bits are consumed whether or not the
+                            // coefficient lands inside the block. A run can push
+                            // the index past the end on corrupt input, and
+                            // libjpeg still reads the bits and discards the
+                            // value; stopping short instead leaves the bitstream
+                            // one field out of step with libjpeg's for the rest
+                            // of the scan.
+                            let value = extend(reader.receive(size), size);
+                            let target = NATURAL_ORDER.get(position).copied().unwrap_or(63);
+                            coefficients[target] = value as i16;
                             position += 1;
                         }
 
@@ -1025,7 +1387,7 @@ fn decode_scan(
         }
     }
 
-    Ok(planes)
+    Ok((planes, reader.scan_end()))
 }
 
 /// Places one transformed block into its component plane.

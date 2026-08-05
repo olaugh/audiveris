@@ -154,8 +154,13 @@ fn rejects_processes_it_cannot_reproduce() {
 /// Each came out of `fuzz/fuzz_targets/decode_never_panics`, minimized by
 /// libFuzzer. Two overflowed the inverse transform on coefficient and quantizer
 /// products a malformed file can present; one carried a Huffman table whose DC
-/// symbol exceeded the standard's magnitude range. They live here so the fixes
-/// are covered without needing a nightly toolchain to run the fuzzer.
+/// symbol exceeded the standard's magnitude range; one declared a frame header
+/// shorter than its own fixed fields. They live here so the fixes are covered
+/// without needing a nightly toolchain to run the fuzzer.
+///
+/// The directory also holds the inputs behind
+/// `accepts_and_refuses_the_same_files_java_does`, which this sweep covers for
+/// panic-freedom regardless of their verdict.
 #[test]
 fn fuzz_regressions_decode_or_error_without_panicking() {
     let directory = repo_path("rust/crates/audiveris-jpeg/tests/data/regressions");
@@ -203,24 +208,199 @@ fn narrow_chroma_planes_replicate_as_libjpeg_does() {
     );
 }
 
-/// The one open divergence: libjpeg's resynchronisation after corrupt data.
+/// Files this decoder refuses on purpose, with the reason it refuses them.
+///
+/// Every other disagreement with `oracle/jpeg-verdicts.txt` is a bug. Keeping
+/// the list here rather than in the oracle means the oracle stays a plain
+/// recording of what Java does.
+const DELIBERATE_REFUSALS: &[(&str, &str)] = &[(
+    "unsupported-progressive.bin",
+    "progressive JPEG is refused rather than approximated; see the crate docs",
+)];
+
+/// Accept or reject must match Java's, file for file.
+///
+/// This is the half of parity that `assert_identical` cannot reach. A decoder
+/// that accepts a file Audiveris rejects produces an image where Audiveris
+/// produces an error, and there are no samples to compare because one side has
+/// none. Four such files came out of differential fuzzing, each of them a check
+/// libjpeg makes and this decoder did not: a scan naming a component the frame
+/// never declared, a trailing marker with an impossible length, a Huffman table
+/// whose DC symbols exceed the magnitude range, and a second start-of-image.
+///
+/// Geometry is compared too, so a file that decodes to the wrong size fails here
+/// rather than silently downstream.
+#[test]
+fn accepts_and_refuses_the_same_files_java_does() {
+    let oracle = repo_path("rust/oracle/jpeg-verdicts.txt");
+    let text = std::fs::read_to_string(&oracle)
+        .unwrap_or_else(|error| panic!("{}: {error}", oracle.display()));
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let (relative, verdict) = line.split_once('\t').expect("path and verdict");
+        let name = relative.rsplit('/').next().unwrap_or(relative);
+        let bytes = std::fs::read(repo_path(relative))
+            .unwrap_or_else(|error| panic!("{relative}: {error}"));
+        let ours = audiveris_jpeg::decode(&bytes);
+        checked += 1;
+
+        if let Some((_, reason)) = DELIBERATE_REFUSALS.iter().find(|(file, _)| *file == name) {
+            assert!(
+                ours.is_err(),
+                "{name} is listed as a deliberate refusal ({reason}) but decoded"
+            );
+            continue;
+        }
+
+        match (verdict.split_once(' '), &ours) {
+            (Some(("accept", geometry)), Ok(decoded)) => {
+                let expected: Vec<usize> = geometry
+                    .split_whitespace()
+                    .map(|field| field.parse().expect("geometry field"))
+                    .collect();
+                assert_eq!(
+                    vec![decoded.width, decoded.height, decoded.components],
+                    expected,
+                    "{name}: geometry"
+                );
+            }
+            (Some(("reject", _)), Err(_)) => {}
+            (Some(("accept", _)), Err(error)) => {
+                failures.push(format!("{name}: Java accepts it, we refused it: {error}"));
+            }
+            (Some(("reject", message)), Ok(_)) => {
+                failures.push(format!(
+                    "{name}: Java rejects it ({message}), we decoded it"
+                ));
+            }
+            _ => panic!("{name}: unreadable verdict {verdict:?}"),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(
+        checked >= 100,
+        "expected the full fixture set, ran {checked}"
+    );
+}
+
+/// Regression for the integer widths inside the inverse transform.
+///
+/// libjpeg dequantizes in `int` and then carries the butterflies in `JLONG`,
+/// which is `long` -- 64 bits here -- narrowing back to `int` only for the
+/// inter-pass workspace and the range-limit index. This decoder used 32 bits
+/// throughout, which is indistinguishable until a coefficient is large enough
+/// for a product to pass 2^31.
+///
+/// This 1x9 4:2:2 file does exactly that: its luma is ordinary and matched all
+/// along, while its chroma blocks carry coefficients near 8191, and 496 samples
+/// -- all of them chroma -- came out wrong. The coefficients themselves were
+/// identical on both sides, which is what pointed past the entropy decoder to
+/// the arithmetic.
+///
+/// The file is also picked up by the corpus sweep above; it is named here so a
+/// regression points straight at the cause.
+#[test]
+fn wide_coefficient_products_do_not_wrap_at_thirty_two_bits() {
+    let path = repo_path("rust/crates/audiveris-jpeg/tests/data/wide-coefficients-1x9-422.jpg");
+    let bytes = std::fs::read(&path).expect("wide-coefficient fixture");
+    let (width, height, components, reference) = libjpeg_decode(&bytes);
+    let decoded = audiveris_jpeg::decode(&bytes).expect("decode");
+    assert_eq!(
+        (decoded.width, decoded.height, decoded.components),
+        (width, height, components)
+    );
+    assert_identical(
+        "wide-coefficients-1x9-422.jpg",
+        &decoded.samples,
+        &reference,
+        width,
+        components,
+    );
+}
+
+/// Regression for libjpeg's recovery at a restart marker.
+///
+/// This file sets a restart interval of one and then runs out of scan data
+/// early, so the decoder meets restart markers it did not expect. libjpeg
+/// handles that with a numbered-marker resynchronisation policy, and -- the part
+/// that moved 1511 of 12288 samples here -- a successful restart *clears* its
+/// out-of-data flag. A truncated segment therefore stops rendering flat grey the
+/// moment a restart marker arrives, rather than to the end of the image.
+///
+/// The file is also picked up by the corpus sweep above; it is named here so a
+/// regression points straight at the cause.
+#[test]
+fn restart_markers_resynchronise_as_libjpeg_does() {
+    let path = repo_path("rust/crates/audiveris-jpeg/tests/data/restart-resync-64x64-420.jpg");
+    let bytes = std::fs::read(&path).expect("restart-resync fixture");
+    let (width, height, components, reference) = libjpeg_decode(&bytes);
+    let decoded = audiveris_jpeg::decode(&bytes).expect("decode");
+    assert_eq!(
+        (decoded.width, decoded.height, decoded.components),
+        (width, height, components)
+    );
+    assert_identical(
+        "restart-resync-64x64-420.jpg",
+        &decoded.samples,
+        &reference,
+        width,
+        components,
+    );
+}
+
+/// A scan header this decoder must refuse because libjpeg refuses it.
+///
+/// Parity has a second edge besides sample values: the set of files accepted.
+/// Accepting one libjpeg rejects means the port produces an image where
+/// Audiveris produces an error, and no sample comparison would ever show it --
+/// libjpeg is not there to compare against. Differential fuzzing surfaced it as
+/// libjpeg's error handler exiting the process, which was the intended signal.
+///
+/// This file's scan selects component ids the frame never declared. libjpeg
+/// calls that fatal (`JERR_BAD_COMPONENT_ID`); this decoder used to ignore the
+/// unmatched selector, leave the component's table indices at zero, and decode
+/// an image anyway.
+#[test]
+fn refuses_scan_headers_libjpeg_refuses() {
+    let path = repo_path(
+        "rust/crates/audiveris-jpeg/tests/data/regressions/scan-selects-unknown-component.bin",
+    );
+    let bytes = std::fs::read(&path).expect("scan-header fixture");
+    assert!(
+        matches!(
+            audiveris_jpeg::decode(&bytes),
+            Err(audiveris_jpeg::JpegError::UnknownScanComponent(_))
+        ),
+        "a scan naming a component the frame never declared must be refused"
+    );
+}
+
+/// Regression for libjpeg's behaviour after mid-scan corruption.
 ///
 /// This file carries 142 extraneous bytes before its end-of-image marker.
-/// libjpeg reports the corruption and recovers; where exactly it resumes is not
-/// reproduced here, so blocks in the final MCU row disagree, some completely.
+/// libjpeg reports the corruption and keeps decoding, and it used to be the one
+/// case this decoder could not follow: the final MCU row disagreed, some blocks
+/// completely.
 ///
-/// It is the long-tail case that was called out when this decoder was proposed:
-/// matching libjpeg on *clean* input is mechanical, matching its recovery on
-/// damaged input is not. Truncation is handled -- see
-/// `truncated-scan-80x80-420.jpg` in the corpus sweep -- but resynchronisation
-/// after mid-scan corruption is not.
+/// Two differences caused it, and both are places where libjpeg is more
+/// permissive than a reading of the standard suggests. An AC run can push the
+/// coefficient index past the end of the block; libjpeg still consumes that
+/// coefficient's magnitude bits, and it still stores the value, because its
+/// zig-zag table carries sixteen padding entries that all point at coefficient
+/// 63. Stopping the block early instead leaves the bit reader one field behind
+/// libjpeg's, and every subsequent block in the scan decodes from the wrong
+/// offset -- which is why one corrupt run produced 496 differing samples rather
+/// than a handful.
 ///
-/// The assertions bound the damage rather than bless it: the divergence must
-/// stay inside the last MCU row and inside luma. If it spreads, this fails. The
-/// extension is `.bin` so the corpus sweep, which demands exactness, skips it.
+/// The file is also picked up by the corpus sweep above; it is named here so a
+/// regression points straight at the cause.
 #[test]
-fn corrupt_resync_divergence_stays_confined_to_the_last_mcu_row() {
-    let path = repo_path("rust/crates/audiveris-jpeg/tests/data/corrupt-resync-80x80-420.bin");
+fn corrupt_resynchronisation_matches_libjpeg() {
+    let path = repo_path("rust/crates/audiveris-jpeg/tests/data/corrupt-resync-80x80-420.jpg");
     let bytes = std::fs::read(&path).expect("corrupt-resync fixture");
     let (width, height, components, reference) = libjpeg_decode(&bytes);
     let decoded = audiveris_jpeg::decode(&bytes).expect("decode");
@@ -228,25 +408,11 @@ fn corrupt_resync_divergence_stays_confined_to_the_last_mcu_row() {
         (decoded.width, decoded.height, decoded.components),
         (width, height, components)
     );
-
-    // One 4:2:0 MCU is sixteen rows tall, so the last one starts here.
-    let last_mcu_row = height - height % 16 - if height % 16 == 0 { 16 } else { 0 };
-    let mut differing = 0usize;
-    for (index, (ours, theirs)) in decoded.samples.iter().zip(&reference).enumerate() {
-        if ours == theirs {
-            continue;
-        }
-        differing += 1;
-        let pixel = index / components;
-        assert!(
-            pixel / width >= last_mcu_row,
-            "divergence reached row {}, above the last MCU row {last_mcu_row}",
-            pixel / width
-        );
-    }
-    assert!(
-        differing > 0,
-        "this fixture no longer diverges; libjpeg's resynchronisation is now \
-         reproduced, so move it into the exact corpus sweep"
+    assert_identical(
+        "corrupt-resync-80x80-420.jpg",
+        &decoded.samples,
+        &reference,
+        width,
+        components,
     );
 }
