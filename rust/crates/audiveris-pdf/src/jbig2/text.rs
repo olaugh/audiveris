@@ -99,11 +99,8 @@ pub fn symbol_dictionary(data: &[u8], imported: &[Bitmap]) -> Result<Vec<Bitmap>
         };
         height += delta_height;
         let mut width = 0i64;
-        loop {
-            // Out of band ends the height class.
-            let Some(delta_width) = integer(&mut decoder, &mut banks.delta_width) else {
-                break;
-            };
+        // Out of band ends the height class.
+        while let Some(delta_width) = integer(&mut decoder, &mut banks.delta_width) {
             if new_symbols.len() >= new_count {
                 break;
             }

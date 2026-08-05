@@ -67,6 +67,48 @@ on stdout corrupts every parsed oracle.
 The whole 189-page test takes about 47 s in release and about 12 s in debug for
 the non-JBIG2 half. Run it in release.
 
+Reproduced on a second machine, from a fresh clone and the seven sources
+re-downloaded from the manifest URLs and checked against their `content_id`
+SHA-256: `checked 189 pages, 189 images, 189 filter chains; still
+unimplemented: {}`. The oracle names those files by the URL basename
+**truncated to twenty characters**, which is what the directory has to contain.
+
+## Two things that drifted, and neither was the port
+
+Both surfaced on the first run of the gates on a second machine. Neither was a
+behaviour change in this workspace, and both are the same shape: something the
+tests are measured *against* moved.
+
+### Which libjpeg, again -- now a build-time question too
+
+`audiveris-jpeg`'s differential test decodes every fixture with `mozjpeg-sys`
+alongside the port and requires equality. That reference turned out to depend on
+the *host*: `mozjpeg-sys` compiles SIMD whenever it can -- unconditionally on
+aarch64, and on x86 only when `nasm` is installed -- and mozjpeg's SIMD routines
+disagree with mozjpeg's **own scalar C** on damaged input. Measured on
+`corrupt-resync-80x80-420.jpg`: the scalar build returns `011e68ce7a923ae5`,
+which is both Java's recorded raster and the port's, while the NEON build
+returns `a5649ea51e999926`, 1032 of 19200 samples apart. So the same commit
+passed on a machine without SIMD and failed on one with it, and the port was
+never the side that moved.
+
+The dev-dependency now sets `default-features = false`, dropping `nasm_simd`.
+That is the right reference on the merits and not merely the convenient one:
+libjpeg 6b, the library Audiveris actually reads through, has no SIMD at all.
+It also removes `nasm` from the build requirements, which is part of why the
+two-OS matrix is clean. `TURBO_DIVERGENCES` still names the eleven fixtures
+where turbo genuinely differs from 6b; this was a different axis and does not
+belong in that list.
+
+### Three loops Clippy 1.96 rejects
+
+`clippy::while_let_loop` began firing at 1.96.0 on `loop { let ... else {
+break }; }`, which is the shape three ported decoder loops use -- two in
+`ccitt.rs`, one in `jbig2/text.rs`. They are `while let` loops now; the
+behaviour is unchanged and the corpus still reads 189/189. The rewrite is not
+the point. The point is that a gate of `-D warnings` makes every Clippy release
+a potential source of red on unchanged code, and nothing here pins a Clippy.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly (FIXED)

@@ -498,12 +498,9 @@ impl Decoder<'_> {
         let tree = &alphabets().end_of_line;
         loop {
             let mut at = 0usize;
-            loop {
-                let Some(next) = tree.walk(at, self.bits.bit()?) else {
-                    // Not an end-of-line after all: throw away what was read
-                    // and start again at the next bit.
-                    break;
-                };
+            // A walk that runs out means it was not an end-of-line after all:
+            // throw away what was read and start again at the next bit.
+            while let Some(next) = tree.walk(at, self.bits.bit()?) {
                 if tree.nodes[next].leaf {
                     return Ok(());
                 }
@@ -540,13 +537,10 @@ impl Decoder<'_> {
         let mut index = 0i32;
         while index < self.columns as i32 {
             let mut at = 0usize;
-            loop {
-                let Some(next) = modes.walk(at, self.bits.bit()?) else {
-                    // An unrecognised mode code restarts the mode read rather
-                    // than ending the row. Reproducing this is not optional:
-                    // it is what keeps damaged rows decoding.
-                    break;
-                };
+            // A walk that runs out is an unrecognised mode code, and that
+            // restarts the mode read rather than ending the row. Reproducing
+            // this is not optional: it is what keeps damaged rows decoding.
+            while let Some(next) = modes.walk(at, self.bits.bit()?) {
                 at = next;
                 if !modes.nodes[at].leaf {
                     continue;

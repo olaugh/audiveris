@@ -18,7 +18,20 @@ authors.workspace = true
 libjpeg-turbo = []
 
 [dev-dependencies]
-mozjpeg-sys = "2"
+# Built without SIMD deliberately. libjpeg 6b, the library Audiveris actually
+# reads through, has no SIMD at all, so its scalar C is the closer reference --
+# and mozjpeg's SIMD routines diverge from mozjpeg's *own* scalar C on damaged
+# input. Measured on `corrupt-resync-80x80-420.jpg`: scalar and Java agree on
+# `011e68ce7a923ae5`, the NEON build returns `a5649ea51e999926`, 1032 of 19200
+# samples apart. That made the reference depend on the build host, because
+# `mozjpeg-sys` enables SIMD whenever it can -- on aarch64 always, on x86 only
+# when nasm is installed -- so the same commit passed on one machine and failed
+# on another. `default-features = false` drops `nasm_simd`; `unwinding` and
+# `parallel` are the rest of the default set and are kept.
+mozjpeg-sys = { version = "2", default-features = false, features = [
+    "unwinding",
+    "parallel",
+] }
 
 [lints]
 workspace = true
