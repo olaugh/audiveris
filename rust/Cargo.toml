@@ -6,6 +6,7 @@ members = [
     "crates/audiveris-image",
     "crates/audiveris-jpeg",
     "crates/audiveris-omr",
+    "crates/audiveris-pdf",
     "crates/audiveris-testkit",
     "xtask",
 ]

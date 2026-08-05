@@ -67,6 +67,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "audiveris-pdf"
+version = "0.1.0"
+
+[[package]]
 name = "audiveris-testkit"
 version = "0.1.0"
 

@@ -93,31 +93,47 @@ different consumer. `bars_logic.rs` around the `half_line` serif bounds is where
 to start, and `AUDIVERIS_DEBUG_PURGE`-style per-impact tracing on both runtimes
 is the way to close it.
 
-### 2. PDF ingest (measured and sequenced, not started)
+### 2. PDF ingest (uncertain piece done; decoders next)
 
 Audiveris renders PDF pages through PDFBox with
 `renderImageWithDPI(page, 300, ImageType.GRAY)` under `ANTIALIAS_OFF` and
 `INTERPOLATION_BICUBIC` (`ImageLoading.PdfboxLoader.getImage`). So this is
-reproducing a rasterizer, not writing a set of decoders.
+reproducing a rasterizer, not writing a set of decoders, and the sequencing was
+to settle the rasterizer first.
 
-`oracle/java/PdfRenderProbe.java` is the oracle -- a copy of that same call,
-reporting source geometry, rendered geometry, an FNV-1a-64 of the raster, and how
-much of the output is interpolated. Run over real IMSLP sources it shows every
-page is a single full-page **bilevel** image (CCITTFax G4 or JBIG2, 1 bit per
-component; no `DCTDecode` in seven sampled files) resampled to 8-bit gray at a
-non-integer ratio, with all 256 gray levels present and 2-4% of pixels
-intermediate. Those pixels feed adaptive binarization, where one count flips a
-pixel and GRID amplifies it.
+**That is done.** `crates/audiveris-pdf` reproduces Java2D's bicubic image
+transform bit for bit: 7 geometries by 8 scales, including the three real IMSLP
+ratios, upscale, downscale, identity and 1x1 -- 112 of 112 cases identical,
+pinned by `oracle/java2d-bicubic.txt` from `oracle/java/Java2dBicubicProbe.java`.
+Note the probe needs no particular JDK, unlike the JPEG oracle, because no image
+codec is involved.
 
-**Sequencing is the point.** The mechanical parts -- object/xref/stream parsing,
-Flate with predictors, CCITTFax G3/G4, LZW, RunLength, ASCII85/Hex, and
-`DCTDecode`, already done -- are worth nothing without a bit-exact Java2D bicubic
-affine transform. Port OpenJDK's `TransformHelper` (fixed-point coordinate
-stepping, edge clamping, kernel, rounding) and verify it against the oracle
-**first**, on a synthetic bilevel image with no PDF parsing involved. If it
-lands, everything downstream is mechanical. JBIG2 is bounded but meaty, and
-PDFBox delegates to `jbig2-imageio`, so that plugin is the reference rather than
-the spec. Unresolved: whether PDFBox subsamples large images before drawing.
+Five things had to be right, none guessable from "bicubic": the Mitchell
+-Netravali kernel with `A = -0.5`; its 513-entry table whose tail above index 384
+is *derived* so each group of four sums to one rather than evaluated from the
+polynomial; fixed-point arithmetic with coefficients scaled by 256, a `1 << 15`
+rounding bias and a `>> 16` with saturation (OpenJDK ships the integer variant of
+three); 32.32 fixed-point coordinate stepping with a half-pixel subtraction
+before both the gather and the interpolation; and branchless sign-bit edge
+clamping that duplicates the border row or column. Also: destination pixels whose
+centre maps outside the source are never written, which is why a page render has
+a black margin rather than an extrapolated one.
+
+**What is left is the mechanical part**, in rough order:
+
+1. PDF object, xref (classic and stream), object-stream and page-tree parsing.
+2. `FlateDecode` with PNG/TIFF predictors, `LZWDecode`, `RunLengthDecode`,
+   `ASCIIHexDecode`, `ASCII85Decode`. `DCTDecode` is already done in
+   `audiveris-jpeg`.
+3. `CCITTFaxDecode` G3 1D/2D and G4 -- what most of the corpus actually uses.
+4. `JBIG2Decode` generic region with its arithmetic coder. Bounded but meaty;
+   PDFBox delegates to `jbig2-imageio`, so that plugin is the reference rather
+   than the spec.
+5. The page-render plumbing: content-stream CTM, `ImageType.GRAY` conversion,
+   and the destination's initial state.
+
+Still unresolved and worth settling early, because it changes the transform's
+input: whether PDFBox subsamples large images before drawing.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.
