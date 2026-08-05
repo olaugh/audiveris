@@ -45,6 +45,7 @@ pub mod document;
 pub mod error;
 pub mod filter;
 pub mod flate;
+pub mod jbig2;
 pub mod lexer;
 pub mod object;
 pub mod transform;

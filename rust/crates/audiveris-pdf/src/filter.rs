@@ -25,6 +25,7 @@
 use crate::ccitt;
 use crate::error::{Error, Result};
 use crate::flate;
+use crate::jbig2;
 use crate::object::{Dictionary, Name, Object};
 
 /// Everything a filter needs beyond its own bytes.
@@ -38,6 +39,12 @@ pub struct Parameters<'a> {
     pub parms: Option<&'a Dictionary>,
     /// The stream's dictionary.
     pub stream: &'a Dictionary,
+    /// The `/JBIG2Globals` stream's decoded bytes, if the parameters name one.
+    ///
+    /// PDFBox concatenates it in front of the image's own data rather than
+    /// passing it separately, so it is a filter input like any other. None of
+    /// the corpus uses one.
+    pub globals: &'a [u8],
 }
 
 impl Parameters<'_> {
@@ -133,6 +140,7 @@ pub fn decode(dictionary: &Dictionary, data: &[u8]) -> Result<Vec<u8>> {
         let parameters = Parameters {
             parms: parameters_at(dictionary, index),
             stream: dictionary,
+            globals: &[],
         };
         current = apply(name, &current, parameters)?;
     }
@@ -155,6 +163,7 @@ pub fn apply(name: &Name, data: &[u8], parameters: Parameters<'_>) -> Result<Vec
         "ASCIIHexDecode" => Ok(ascii_hex(data)),
         "RunLengthDecode" => Ok(run_length(data)),
         "CCITTFaxDecode" => ccitt::decode(data, &fax_options(data, parameters)),
+        "JBIG2Decode" => jbig2::decode(data, parameters.globals),
         other => Err(Error::UnsupportedFilter {
             name: if other.is_empty() {
                 String::from_utf8_lossy(name.as_bytes()).into_owned()
@@ -503,6 +512,7 @@ mod tests {
             Parameters {
                 parms: Some(parms),
                 stream: &empty,
+                globals: &[],
             },
         )
     }
