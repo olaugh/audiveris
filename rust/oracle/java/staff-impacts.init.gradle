@@ -32,4 +32,14 @@ gradle.projectsEvaluated {
                 .findAll { !it.isEmpty() }
         args = pages
     }
+
+    app.tasks.register('gridPdfProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.GridPdfProbe'
+        workingDir = gradle.rootProject.projectDir
+        // -PgridPdfPages="/abs/file.pdf:2 /abs/other.pdf:1"
+        args = (app.findProperty('gridPdfPages') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+    }
 }

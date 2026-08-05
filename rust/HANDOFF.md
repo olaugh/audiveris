@@ -514,13 +514,33 @@ A first real run: page 2 of `IMSLP00709-Schumann_.pdf` reaches GRID with 12
 staves in 6 systems and 112 barlines, in about two seconds. Nothing grades that
 yet -- see below.
 
+#### Recognition on a PDF sheet is graded too
+
+`oracle/grid-pdf.txt` closes the gap that "the pixels are right" left open.
+Eleven corpus sheets run through GRID in live Java, and the port reproduces
+**all of it**: staff geometry, and all 392 promoted barlines with their shape,
+width, frozen flag, staff-end mark, median, intrinsic grade and contextual
+grade. Grades are compared at **1e-9**, not the 5e-4 the example corpus uses,
+because this oracle reads the live SIG rather than the three decimals
+`sheet#N.xml` persists.
+
+The sheets span the render regimes deliberately rather than by sampling: JBIG2
+with and without shear, CCITT plain and with `/Decode [1 0]`, the one Indexed
+three-band page, and a sheet from `IMSLP57453`, whose ten pages all take the
+nearest-neighbour `ScaledBlit` instead of the bicubic transform.
+
+Four of the eleven are sheets Java **refuses** -- covers and title pages, where
+it raises `No regularly spaced lines found` rather than returning an empty
+sheet. That is recorded rather than skipped, and asserted: the port has to fail
+on the same sheets. Getting a refusal where Java recognises ten staves would be
+just as wrong as the reverse.
+
+Regenerate with `oracle/java/GridPdfProbe.java`, whose arguments are
+`<path>:<sheet>` with the sheet counted from one.
+
 #### What is left
 
-1. **Nothing grades a PDF page's *recognition*.** The load path is exact, and
-   GRID runs, but `oracle/grid-*.txt` covers the nine `data/examples` pages and
-   none of them is a PDF. A Java run over a few corpus sheets would close that,
-   and is the obvious next oracle.
-2. **Widen the corpus.** Everything here is graded against seven IMSLP sources
+1. **Widen the corpus.** Everything here is graded against seven IMSLP sources
    whose 189 pages contain exactly four image shapes and four content-stream
    operators. Every refusal is by name, so a new source fails loudly rather than
    silently, but the honest description of the current state is "exact on what

@@ -1812,6 +1812,281 @@ mod tests {
         ("zizi.png", 0, 0, 0.0, 0, 0.0),
     ];
 
+    /// Flattens the promoted GRID SIG into comparable barline records.
+    ///
+    /// Shared by the example-corpus SIG test and the PDF-sheet one so both
+    /// compare the same fields extracted the same way; the two differ only in
+    /// where the recognition came from and how precise the oracle's grades are.
+    fn promoted_barlines(
+        recognition: &GridLinesRecognition,
+        name: &str,
+    ) -> (Vec<JavaBarline>, usize) {
+        let mut produced: Vec<JavaBarline> = Vec::new();
+        let mut connectors = 0usize;
+        for system in &recognition.peak_graph.sig.systems {
+            for (_, node) in system.sig.nodes_in_order() {
+                match node {
+                    GridSigNode::Vertical {
+                        plan,
+                        frozen,
+                        contextual_grade,
+                        ..
+                    } => {
+                        let VerticalInterKind::Barline {
+                            width_class,
+                            left_staff_end,
+                            right_staff_end,
+                        } = plan.kind
+                        else {
+                            panic!("{name}: unexpected bracket inter {:?}", plan.kind);
+                        };
+                        produced.push(JavaBarline {
+                            staff: plan.peak.staff_id().value(),
+                            shape: match width_class {
+                                PeakWidthClass::Thin => "THIN_BARLINE".to_owned(),
+                                PeakWidthClass::Thick => "THICK_BARLINE".to_owned(),
+                            },
+                            width: plan.width,
+                            grade: plan.impacts.map_or(0.0, |i| i.grade()),
+                            ctx_grade: contextual_grade.unwrap_or(f64::NAN),
+                            frozen: *frozen,
+                            staff_end: if left_staff_end {
+                                "LEFT".to_owned()
+                            } else if right_staff_end {
+                                "RIGHT".to_owned()
+                            } else {
+                                "NONE".to_owned()
+                            },
+                            median: (
+                                plan.median.x,
+                                plan.median.top,
+                                plan.median.x,
+                                plan.median.bottom,
+                            ),
+                        });
+                    }
+                    GridSigNode::Connector { .. } => connectors += 1,
+                }
+            }
+        }
+
+        (produced, connectors)
+    }
+
+    /// One sheet of `oracle/grid-pdf.txt`.
+    struct JavaPdfSheet {
+        failed: Option<String>,
+        staves: Vec<(usize, i32, i32, usize)>,
+        barlines: Vec<JavaBarline>,
+    }
+
+    /// Parses `oracle/grid-pdf.txt`, keyed by `<file>#<sheet>`.
+    fn java_pdf_oracle() -> BTreeMap<String, JavaPdfSheet> {
+        let text = include_str!("../../../oracle/grid-pdf.txt");
+        let mut sheets: BTreeMap<String, JavaPdfSheet> = BTreeMap::new();
+        let mut current = String::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut fields = line.split_whitespace();
+            match fields.next() {
+                Some("page") => {
+                    current = fields.next().expect("a sheet key").to_owned();
+                    sheets.insert(
+                        current.clone(),
+                        JavaPdfSheet {
+                            failed: None,
+                            staves: Vec::new(),
+                            barlines: Vec::new(),
+                        },
+                    );
+                }
+                Some("failed") => {
+                    let entry = sheets.get_mut(&current).expect("a current sheet");
+                    entry.failed = Some(fields.collect::<Vec<_>>().join(" "));
+                }
+                Some("staff") => {
+                    let entry = sheets.get_mut(&current).expect("a current sheet");
+                    let values: Vec<&str> = fields.collect();
+                    entry.staves.push((
+                        values[0].parse().expect("a staff id"),
+                        values[1].parse().expect("a left abscissa"),
+                        values[2].parse().expect("a right abscissa"),
+                        values[3].parse().expect("a line count"),
+                    ));
+                }
+                Some("barline") => {
+                    let entry = sheets.get_mut(&current).expect("a current sheet");
+                    let v: Vec<&str> = fields.collect();
+                    entry.barlines.push(JavaBarline {
+                        staff: v[0].parse().expect("a staff id"),
+                        shape: v[1].to_owned(),
+                        width: v[2].parse().expect("a width"),
+                        grade: v[3].parse().expect("a grade"),
+                        ctx_grade: v[4].parse().expect("a contextual grade"),
+                        frozen: v[5].parse().expect("a frozen flag"),
+                        staff_end: v[6].to_owned(),
+                        median: (
+                            v[7].parse().expect("x1"),
+                            v[8].parse().expect("y1"),
+                            v[9].parse().expect("x2"),
+                            v[10].parse().expect("y2"),
+                        ),
+                    });
+                }
+                _ => {}
+            }
+        }
+        sheets
+    }
+
+    /// Grades what GRID makes of a PDF sheet, not merely what the renderer
+    /// produced.
+    ///
+    /// `crates/audiveris-pdf` proves the render equals PDFBox's on all 189
+    /// corpus pages and `audiveris-image`'s ingest test proves binarization
+    /// receives it unchanged. Neither says the *recognition* agrees, and
+    /// adaptive binarization sits in between: one flipped pixel has moved a
+    /// staff line before, so this is a separate claim and gets a separate
+    /// oracle.
+    ///
+    /// The eleven sheets span the render regimes deliberately rather than by
+    /// sampling -- JBIG2 with and without shear, CCITT plain and inverted, the
+    /// one Indexed three-band page, and a sheet from the source whose pages all
+    /// take the nearest-neighbour `ScaledBlit` rather than the bicubic
+    /// transform. Four are sheets Java refuses for want of regularly spaced
+    /// lines, and the port has to refuse them too.
+    ///
+    /// Needs `AUDIVERIS_PDF_CORPUS`; without it this reports that it skipped.
+    #[test]
+    fn grid_matches_the_java_oracle_on_pdf_sheets() {
+        let oracle = java_pdf_oracle();
+        assert!(oracle.len() >= 11, "the PDF oracle should cover 11 sheets");
+        let Some(directory) =
+            std::env::var_os("AUDIVERIS_PDF_CORPUS").map(std::path::PathBuf::from)
+        else {
+            eprintln!("skipped: set AUDIVERIS_PDF_CORPUS to the corpus directory");
+            return;
+        };
+
+        let mut checked_sheets = 0usize;
+        let mut checked_barlines = 0usize;
+        let mut checked_refusals = 0usize;
+        for (key, java) in &oracle {
+            let (file, sheet) = key.rsplit_once('#').expect("a <file>#<sheet> key");
+            let sheet: usize = sheet.parse().expect("a sheet number");
+            let path = directory.join(file);
+            if !path.exists() {
+                continue;
+            }
+
+            let recognition = match recognize_grid_lines_sheet(&path, sheet) {
+                Ok(recognition) => {
+                    assert!(
+                        java.failed.is_none(),
+                        "{key}: Java refused it ({:?}) and the port did not",
+                        java.failed
+                    );
+                    recognition
+                }
+                Err(error) => {
+                    // A cover or title page. Java raises
+                    // "No regularly spaced lines found" and so must the port,
+                    // rather than returning an empty sheet.
+                    assert!(
+                        java.failed.is_some(),
+                        "{key}: the port failed with {error} where Java recognised \
+                         {} staves",
+                        java.staves.len()
+                    );
+                    checked_refusals += 1;
+                    checked_sheets += 1;
+                    continue;
+                }
+            };
+
+            let mut staves: Vec<(usize, i32, i32, usize)> = recognition
+                .peak_graph
+                .sheet_staffs
+                .iter()
+                .map(|staff| {
+                    (
+                        staff.id,
+                        staff.left.round() as i32,
+                        staff.right.round() as i32,
+                        staff.lines.len(),
+                    )
+                })
+                .collect();
+            staves.sort_unstable();
+            let mut expected_staves = java.staves.clone();
+            expected_staves.sort_unstable();
+            assert_eq!(staves, expected_staves, "{key}: staff geometry");
+
+            let (mut produced, _) = promoted_barlines(&recognition, key);
+            let key_of = |b: &JavaBarline| (b.staff, b.median.0);
+            let mut expected: Vec<&JavaBarline> = java.barlines.iter().collect();
+            expected.sort_by(|a, b| key_of(a).partial_cmp(&key_of(b)).expect("finite"));
+            produced.sort_by(|a, b| key_of(a).partial_cmp(&key_of(b)).expect("finite"));
+            assert_eq!(
+                produced.len(),
+                expected.len(),
+                "{key}: promoted {} barlines against Java's {}",
+                produced.len(),
+                expected.len()
+            );
+
+            for (index, (produced, expected)) in produced.iter().zip(&expected).enumerate() {
+                assert_eq!(
+                    (
+                        produced.staff,
+                        produced.shape.as_str(),
+                        produced.width,
+                        produced.frozen,
+                        produced.staff_end.as_str()
+                    ),
+                    (
+                        expected.staff,
+                        expected.shape.as_str(),
+                        expected.width,
+                        expected.frozen,
+                        expected.staff_end.as_str()
+                    ),
+                    "{key} barline {index}: core fields"
+                );
+                assert_eq!(
+                    produced.median, expected.median,
+                    "{key} barline {index}: median"
+                );
+                // This oracle reads the live SIG rather than the persisted
+                // three decimals, so the grades are compared far tighter than
+                // the example corpus's.
+                assert!(
+                    (produced.grade - expected.grade).abs() <= 1e-9,
+                    "{key} barline {index}: grade {} against Java's {}",
+                    produced.grade,
+                    expected.grade
+                );
+                assert!(
+                    (produced.ctx_grade - expected.ctx_grade).abs() <= 1e-9,
+                    "{key} barline {index}: contextual grade {} against Java's {}",
+                    produced.ctx_grade,
+                    expected.ctx_grade
+                );
+                checked_barlines += 1;
+            }
+            checked_sheets += 1;
+        }
+
+        eprintln!(
+            "checked {checked_sheets} PDF sheets, {checked_barlines} barlines, \
+             {checked_refusals} refusals"
+        );
+        assert!(checked_sheets > 0, "the corpus directory held none of it");
+    }
+
     /// Diffs the sheet SIG the GRID step promotes against Java's persisted
     /// `sheet#1.xml` on every example page.
     ///
@@ -1923,55 +2198,7 @@ mod tests {
             let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
 
-            let mut produced: Vec<JavaBarline> = Vec::new();
-            let mut connectors = 0usize;
-            for system in &recognition.peak_graph.sig.systems {
-                for (_, node) in system.sig.nodes_in_order() {
-                    match node {
-                        GridSigNode::Vertical {
-                            plan,
-                            frozen,
-                            contextual_grade,
-                            ..
-                        } => {
-                            let VerticalInterKind::Barline {
-                                width_class,
-                                left_staff_end,
-                                right_staff_end,
-                            } = plan.kind
-                            else {
-                                panic!("{name}: unexpected bracket inter {:?}", plan.kind);
-                            };
-                            produced.push(JavaBarline {
-                                staff: plan.peak.staff_id().value(),
-                                shape: match width_class {
-                                    PeakWidthClass::Thin => "THIN_BARLINE".to_owned(),
-                                    PeakWidthClass::Thick => "THICK_BARLINE".to_owned(),
-                                },
-                                width: plan.width,
-                                grade: plan.impacts.map_or(0.0, |i| i.grade()),
-                                ctx_grade: contextual_grade.unwrap_or(f64::NAN),
-                                frozen: *frozen,
-                                staff_end: if left_staff_end {
-                                    "LEFT".to_owned()
-                                } else if right_staff_end {
-                                    "RIGHT".to_owned()
-                                } else {
-                                    "NONE".to_owned()
-                                },
-                                median: (
-                                    plan.median.x,
-                                    plan.median.top,
-                                    plan.median.x,
-                                    plan.median.bottom,
-                                ),
-                            });
-                        }
-                        GridSigNode::Connector { .. } => connectors += 1,
-                    }
-                }
-            }
-
+            let (mut produced, connectors) = promoted_barlines(&recognition, name);
             // Java lists inters in its own traversal order; sorting both sides
             // by staff and abscissa compares content without asserting an order
             // the port does not claim to reproduce.
