@@ -15,6 +15,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # samples, which flips 844 binary pixels and perturbs everything GRID derives
 # from them.
 audiveris-jpeg = { path = "../audiveris-jpeg" }
+# PDF pages are rendered, not extracted: Audiveris runs them through PDFBox's
+# rasterizer and binarizes the result, so the ingest reproduces that render.
+audiveris-pdf = { path = "../audiveris-pdf" }
 
 
 [lints]

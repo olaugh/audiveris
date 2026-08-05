@@ -64,6 +64,12 @@ pub fn fnv1a64_bytes(bytes: &[u8]) -> u64 {
 pub enum LoadError {
     Image(image::ImageError),
     Jpeg(audiveris_jpeg::JpegError),
+    Pdf(audiveris_pdf::Error),
+    /// A sheet id outside `1..=count`, which is `AbstractLoader.checkId`.
+    NoSuchImage {
+        id: usize,
+        count: usize,
+    },
 }
 
 impl fmt::Display for LoadError {
@@ -71,6 +77,10 @@ impl fmt::Display for LoadError {
         match self {
             Self::Image(error) => error.fmt(f),
             Self::Jpeg(error) => error.fmt(f),
+            Self::Pdf(error) => error.fmt(f),
+            Self::NoSuchImage { id, count } => {
+                write!(f, "no sheet {id} in an input holding {count}")
+            }
         }
     }
 }
@@ -80,7 +90,15 @@ impl Error for LoadError {
         match self {
             Self::Image(error) => Some(error),
             Self::Jpeg(error) => Some(error),
+            Self::Pdf(error) => Some(error),
+            Self::NoSuchImage { .. } => None,
         }
+    }
+}
+
+impl From<audiveris_pdf::Error> for LoadError {
+    fn from(error: audiveris_pdf::Error) -> Self {
+        Self::Pdf(error)
     }
 }
 
@@ -96,17 +114,106 @@ impl From<image::ImageError> for LoadError {
     }
 }
 
-pub fn load_max_channel_gray(path: impl AsRef<Path>) -> Result<GrayRaster, LoadError> {
-    let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(image::ImageError::IoError)?;
-    if is_jpeg(&bytes) {
-        return decode_jpeg_max_channel_gray(&bytes);
+/// One input file, and the images in it: `ImageLoading.Loader`.
+///
+/// Audiveris treats an input as a *book* of sheets rather than one image, and
+/// a PDF is the only format that supplies more than one. Sheet ids are
+/// **one-based**, as `Loader.getImage(int id)` is; `PdfboxLoader` renders page
+/// `id - 1`.
+#[derive(Debug)]
+pub enum Loader {
+    /// A single-image raster, which is ImageIO's job in Java.
+    Raster(Box<GrayRaster>),
+    /// A PDF, whose pages are rendered on demand.
+    Pdf(Box<audiveris_pdf::Document>),
+}
+
+impl Loader {
+    /// `ImageLoading.getLoader`.
+    ///
+    /// The dispatch is on the **file extension**, case-insensitively, not on
+    /// the file's magic bytes. That is Java's rule, and reproducing it matters
+    /// in both directions: a PDF named `.png` goes to ImageIO there and fails,
+    /// and sniffing the header here would make the port accept an input
+    /// Audiveris rejects.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the decoder or the PDF parser raises.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).map_err(image::ImageError::IoError)?;
+        let is_pdf = path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
+        if is_pdf {
+            return Ok(Self::Pdf(Box::new(audiveris_pdf::Document::parse(&bytes)?)));
+        }
+        if is_jpeg(&bytes) {
+            return Ok(Self::Raster(Box::new(decode_jpeg_max_channel_gray(
+                &bytes,
+            )?)));
+        }
+        let image = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(image::ImageError::IoError)?
+            .decode()?;
+        Ok(Self::Raster(Box::new(GrayRaster::from_dynamic(&image))))
     }
-    let image = image::ImageReader::new(std::io::Cursor::new(&bytes))
-        .with_guessed_format()
-        .map_err(image::ImageError::IoError)?
-        .decode()?;
-    Ok(GrayRaster::from_dynamic(&image))
+
+    /// `Loader.getImageCount`.
+    #[must_use]
+    pub fn image_count(&self) -> usize {
+        match self {
+            Self::Raster(_) => 1,
+            Self::Pdf(document) => document.page_count(),
+        }
+    }
+
+    /// `Loader.getImage(id)`, with `id` counted from one.
+    ///
+    /// A PDF page is *rendered*, not extracted:
+    /// `renderImageWithDPI(page, 300, ImageType.GRAY)`. The result is already
+    /// single-band gray, so `Picture.adjustImageFormat`'s maximum-channel rule
+    /// is the identity on it -- `max(v, v, v)` is `v` -- and the samples reach
+    /// binarization exactly as rendered.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError::NoSuchImage`] outside `1..=image_count`, and whatever the
+    /// render raises for a page this port refuses.
+    pub fn image(&self, id: usize) -> Result<GrayRaster, LoadError> {
+        let count = self.image_count();
+        if id < 1 || id > count {
+            return Err(LoadError::NoSuchImage { id, count });
+        }
+        match self {
+            Self::Raster(raster) => Ok((**raster).clone()),
+            Self::Pdf(document) => {
+                let page = document.page(id - 1)?;
+                let rendered = audiveris_pdf::render::page(
+                    document,
+                    &page,
+                    audiveris_pdf::render::AUDIVERIS_DPI,
+                )?;
+                Ok(GrayRaster {
+                    width: rendered.image.width,
+                    height: rendered.image.height,
+                    pixels: rendered.image.samples,
+                })
+            }
+        }
+    }
+}
+
+/// The first sheet of `path`, which is the whole input for every format but
+/// PDF.
+///
+/// # Errors
+///
+/// Whatever [`Loader::open`] and [`Loader::image`] raise.
+pub fn load_max_channel_gray(path: impl AsRef<Path>) -> Result<GrayRaster, LoadError> {
+    Loader::open(path)?.image(1)
 }
 
 /// JPEG start-of-image marker.

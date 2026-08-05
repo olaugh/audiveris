@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 audiveris-core = { path = "../audiveris-core" }
+audiveris-image = { path = "../audiveris-image" }
 audiveris-omr = { path = "../audiveris-omr" }
 
 [lints]

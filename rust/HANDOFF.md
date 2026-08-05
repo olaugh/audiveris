@@ -444,15 +444,42 @@ OpenJDK's fixed-point luma from `ByteGray.h`,
 is also why a gray source survives the same round trip untouched: at
 `r == g == b == v` it is `(256v + 128) / 256`, which is `v` for every byte.
 
+#### Wired into the load path
+
+`audiveris-cli -batch -step GRID score.pdf` works. `ingest::Loader` is Java's
+`ImageLoading.Loader`: an input is a **book of sheets**, not an image, sheet ids
+are one-based, and only a PDF supplies more than one. `-sheets` selects a
+subset; an empty selection is every sheet.
+
+Two details are Java's rather than convenient:
+
+- **The dispatch is on the file extension**, case-insensitively, not on magic
+  bytes. `ImageLoading.getLoader` tests `.pdf` and sends everything else to
+  ImageIO, so a PDF named `.png` fails there -- and sniffing the header here
+  would make the port accept an input Audiveris rejects.
+- **`-sheets` consumes every following non-`-` token and fails on one that is
+  not a sheet spec.** That is `CLI.IntArrayOptionHandler`, which calls
+  `NaturalSpec.decode` on each and lets it throw, so `-sheets 2 score.pdf` is an
+  error in Java too. Put inputs before `-sheets`.
+
+`crates/audiveris-image/tests/pdf_ingest.rs` pins the seam, and is deliberately
+redundant with the PDF crate's own corpus test: for all 189 sheets, the raster
+the load path hands binarization has the same FNV-1a-64 as the page PDFBox
+rendered. The two crates prove different things -- one that the render is right,
+the other that the ingest does not then change it -- and the gap between them is
+where `Picture.adjustImageFormat`'s maximum-channel rule would have hidden a
+conversion. It is the identity here only because `max(v, v, v)` is `v`.
+
+A first real run: page 2 of `IMSLP00709-Schumann_.pdf` reaches GRID with 12
+staves in 6 systems and 112 barlines, in about two seconds. Nothing grades that
+yet -- see below.
+
 #### What is left
 
-Nothing, for the corpus. Three sensible next steps, none of them blocking:
-
-1. **Wire the render into `audiveris-omr`'s load path**, so `-batch` accepts a
-   PDF where it currently accepts a PNG or JPEG. The output is a `GrayImage` of
-   exactly the geometry Audiveris expects, so this is plumbing rather than
-   parity work -- but it is the first time the PDF path would feed BINARY and
-   GRID, and that is where a one-count difference starts mattering.
+1. **Nothing grades a PDF page's *recognition*.** The load path is exact, and
+   GRID runs, but `oracle/grid-*.txt` covers the nine `data/examples` pages and
+   none of them is a PDF. A Java run over a few corpus sheets would close that,
+   and is the obvious next oracle.
 2. **Widen the corpus.** Everything here is graded against seven IMSLP sources
    whose 189 pages contain exactly four image shapes and four content-stream
    operators. Every refusal is by name, so a new source fails loudly rather than

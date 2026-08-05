@@ -114,10 +114,42 @@ impl From<ScaleEstimateError> for ScaleRecognitionError {
     }
 }
 
-/// Runs `LOAD -> BINARY -> SCALE` on the raster at `path` with production
-/// settings.
+/// Runs `LOAD -> BINARY -> SCALE` on the first sheet of `path`.
+///
+/// Every format but PDF holds exactly one sheet; see
+/// [`recognize_scale_sheet`] for the rest of a PDF.
+///
+/// # Errors
+///
+/// Whatever loading, run extraction, or scale estimation raises.
 pub fn recognize_scale(path: impl AsRef<Path>) -> Result<ScaleRecognition, ScaleRecognitionError> {
-    let loaded = ingest::load_max_channel_gray(path)?;
+    recognize_scale_sheet(path, 1)
+}
+
+/// Runs `LOAD -> BINARY -> SCALE` on one sheet of `path`, counted from one.
+///
+/// # Errors
+///
+/// Whatever loading, run extraction, or scale estimation raises.
+pub fn recognize_scale_sheet(
+    path: impl AsRef<Path>,
+    sheet: usize,
+) -> Result<ScaleRecognition, ScaleRecognitionError> {
+    recognize_scale_raster(&ingest::Loader::open(path)?.image(sheet)?)
+}
+
+/// Runs `BINARY -> SCALE` on an already-loaded sheet.
+///
+/// Taking the raster rather than a path is what lets a caller open a
+/// multi-sheet PDF once and render its pages in turn, instead of reparsing the
+/// file per sheet.
+///
+/// # Errors
+///
+/// Whatever run extraction or scale estimation raises.
+pub fn recognize_scale_raster(
+    loaded: &ingest::GrayRaster,
+) -> Result<ScaleRecognition, ScaleRecognitionError> {
     let (width, height) = (loaded.width(), loaded.height());
     let gray_digest = loaded.fnv1a64();
     let binary = adaptive::default_adaptive_filter(width, height, loaded.pixels());
@@ -904,7 +936,33 @@ fn merge_overlapping(groups: &mut Vec<Vec<usize>>) {
 pub fn recognize_grid_lines(
     path: impl AsRef<Path>,
 ) -> Result<GridLinesRecognition, GridRecognitionError> {
-    let scale_recognition = recognize_scale(path)?;
+    recognize_grid_lines_sheet(path, 1)
+}
+
+/// The same, on one sheet of `path`, counted from one.
+///
+/// # Errors
+///
+/// Whatever loading or any GRID stage raises.
+pub fn recognize_grid_lines_sheet(
+    path: impl AsRef<Path>,
+    sheet: usize,
+) -> Result<GridLinesRecognition, GridRecognitionError> {
+    let loaded = ingest::Loader::open(path)
+        .and_then(|loader| loader.image(sheet))
+        .map_err(ScaleRecognitionError::from)?;
+    recognize_grid_lines_raster(&loaded)
+}
+
+/// The same, on an already-loaded sheet.
+///
+/// # Errors
+///
+/// Whatever any GRID stage raises.
+pub fn recognize_grid_lines_raster(
+    loaded: &ingest::GrayRaster,
+) -> Result<GridLinesRecognition, GridRecognitionError> {
+    let scale_recognition = recognize_scale_raster(loaded)?;
 
     let seed_parameters = production_grid_parameters(&scale_recognition.scale, 0.0)
         .map_err(grid_stage("parameter derivation"))?;

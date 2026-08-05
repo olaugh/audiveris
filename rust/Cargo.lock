@@ -32,6 +32,7 @@ name = "audiveris-cli"
 version = "0.1.0"
 dependencies = [
  "audiveris-core",
+ "audiveris-image",
  "audiveris-omr",
 ]
 
@@ -45,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "audiveris-core",
  "audiveris-jpeg",
+ "audiveris-pdf",
  "image",
 ]
 
