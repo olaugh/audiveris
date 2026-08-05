@@ -1775,12 +1775,20 @@ mod tests {
     ///
     /// They are also not scattered. Of 420 barlines across 65 staves, the six
     /// that differ are **every one of them the leftmost or rightmost barline of
-    /// its staff**, and no interior barline differs anywhere in the corpus. The
-    /// contextual grades follow their intrinsic ones, so there is one cause, in
-    /// whatever the staff-vertical impacts measure differently at a staff's
-    /// extreme abscissa -- most likely the chunk or serif lookup, which is the
-    /// one part of the peak measurement that reaches past the staff's own line
-    /// data and into extrapolated geometry.
+    /// its staff**, and no interior barline differs anywhere in the corpus.
+    ///
+    /// `diagnose_sig_grade_residuals` prints the six impacts behind each, and
+    /// what it shows is narrower than the earlier guess and rules that guess
+    /// out. It is not the chunk thresholds: 140 barlines have a chunk grade in
+    /// the graded band rather than saturated at 1.0, and all 140 agree with
+    /// Java, where a wrong `linesThreshold` would break a staff's worth. It is
+    /// not `getChunk`'s out-of-image guard either, which is identical once you
+    /// notice both projections span the whole sheet width. And there may not be
+    /// a single cause: four of the six have every impact but one inward chunk
+    /// grade at exactly 1.0, while `D0392410-1.256.png` staff 8 has both chunks
+    /// at 1.0 and differs somewhere in core, gap or the stop derivative. See
+    /// `HANDOFF.md` for the table and for the Java-side probe that would
+    /// settle it.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
         ("BachInvention5.jpg", 0, 0, 0.0, 1, 0.005),
         ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),
@@ -1807,6 +1815,86 @@ mod tests {
     /// SIG promotion path so Java's `<brace>` inters have no counterpart; and
     /// connector medians and widths, because `ConnectionInterPlan` carries
     /// neither. Connectors are still compared by count.
+    /// Prints the six staff-vertical impacts behind every barline whose grade
+    /// disagrees with Java, and every barline whose chunk grades are *not*
+    /// saturated at 1.0 and agrees anyway.
+    ///
+    /// Ignored because it is a diagnostic, not an assertion; run it with
+    /// `cargo test -p audiveris-omr --lib diagnose_sig_grade_residuals --
+    /// --ignored --nocapture`.
+    ///
+    /// It exists because the grade is a weighted geometric mean of six terms
+    /// and the oracle records only the product, so narrowing a residual means
+    /// seeing which terms are even in play. What it has established so far is
+    /// written up in `HANDOFF.md`; the short version is that it refuted two
+    /// hypotheses and did not confirm a third.
+    #[test]
+    #[ignore = "diagnostic, not an assertion"]
+    fn diagnose_sig_grade_residuals() {
+        let oracle = java_sig_oracle();
+        let mut graded_and_agreeing = 0usize;
+        for name in [
+            "BachInvention5.jpg",
+            "D0392410-1.256.png",
+            "carmen.png",
+            "cucaracha.png",
+        ] {
+            let java = &oracle[name];
+            let recognition =
+                recognize_grid_lines(repo_path(&format!("data/examples/{name}"))).expect("grid");
+            for system in &recognition.peak_graph.sig.systems {
+                for (_, node) in system.sig.nodes_in_order() {
+                    let GridSigNode::Vertical {
+                        plan,
+                        contextual_grade,
+                        ..
+                    } = node
+                    else {
+                        continue;
+                    };
+                    let VerticalInterKind::Barline { .. } = plan.kind else {
+                        continue;
+                    };
+                    let staff = plan.peak.staff_id().value();
+                    let x = plan.median.x;
+                    let Some(expected) = java
+                        .barlines
+                        .iter()
+                        .find(|b| b.staff == staff && (b.median.0 - x).abs() < 0.51)
+                    else {
+                        continue;
+                    };
+                    let ours = plan.impacts.map_or(0.0, |i| i.grade());
+                    let delta = (ours - expected.grade).abs();
+                    let i = plan.impacts.expect("impacts");
+                    if delta <= SIG_GRADE_PRECISION {
+                        if i.left() != 1.0 || i.right() != 1.0 {
+                            graded_and_agreeing += 1;
+                        }
+                        continue;
+                    }
+                    println!(
+                        "{name} staff {staff} x {x} ours {ours:.6} java {:.6} delta {delta:.6} \
+                         ctx {:.6}/{:.6} | core {:.6} gap {:.6} startDeriv {:.6} \
+                         stopDeriv {:.6} leftChunk {:.6} rightChunk {:.6}",
+                        expected.grade,
+                        contextual_grade.unwrap_or(f64::NAN),
+                        expected.ctx_grade,
+                        i.core(),
+                        i.gap(),
+                        i.start(),
+                        i.stop(),
+                        i.left(),
+                        i.right()
+                    );
+                }
+            }
+        }
+        // The number that matters: barlines whose chunk grade is in the graded
+        // band rather than saturated, and which agree with Java anyway.
+        println!("{graded_and_agreeing} barlines are chunk-graded and agree");
+    }
+
     #[test]
     fn sheet_sig_matches_the_java_oracle_across_the_example_corpus() {
         let oracle = java_sig_oracle();

@@ -189,14 +189,55 @@ carmen.png          staff 10 x 2412.5   bars  173..2412 (8)  RIGHTMOST
 cucaracha.png       staff  6 x  156.0   bars  156..2399 (7)  LEFTMOST
 ```
 
-Each is an intrinsic-grade difference with the contextual grade following it, so
-there is one cause: something in the staff-vertical impacts measures differently
-at a staff's extreme abscissa. The prime suspect is the chunk or serif lookup,
-which is the one part of the peak measurement reaching past the staff's own line
-data into extrapolated geometry -- the same family as the bug above, via a
-different consumer. `bars_logic.rs` around the `half_line` serif bounds is where
-to start, and `AUDIVERIS_DEBUG_PURGE`-style per-impact tracing on both runtimes
-is the way to close it.
+#### What the impacts say, and the two suspects it clears
+
+`diagnose_sig_grade_residuals` (an `#[ignore]`d test in `recognize.rs`) prints
+the six staff-vertical impacts behind each of these, because the grade is a
+weighted geometric mean -- weights `[1, 1, 1, 1, 0.5, 0.5]` over core, gap,
+start derivative, stop derivative, left chunk, right chunk, times
+`Grades.intrinsicRatio` at 0.8 -- and the oracle records only the product.
+
+```
+BachInvention5 st 1  x1917.0  ours .758153 java .754  core .923 gap 1 sd .867 pd 1     lc .913 rc 1
+D0392410       st 8  x 269.5  ours .744216 java .749  core .967 gap .833 sd 1   pd .865 lc 1    rc 1
+D0392410       st10  x2773.0  ours .576560 java .573  core .500 gap .500 sd .838 pd .946 lc .963 rc 1
+carmen         st 3  x2402.5  ours .793622 java .790  core 1    gap 1    sd 1    pd 1    lc .923 rc 1
+carmen         st10  x2412.5  ours .789388 java .793  core 1    gap 1    sd 1    pd 1    lc .875 rc 1
+cucaracha      st 6  x 156.0  ours .786173 java .790  core 1    gap 1    sd 1    pd 1    lc 1    rc .840
+```
+
+Three things follow, and two of them clear a suspect the previous note named.
+
+**It is not the chunk thresholds.** The obvious theory was that
+`computeCoreLinesThickness` differs by a sub-pixel, moving the integer
+`linesThreshold` by one and shifting every chunk grade on that staff. The
+diagnostic counts the barlines whose chunk grade is in the graded band rather
+than saturated at 1.0: **140 of them, and all 140 agree with Java**. A wrong
+threshold would break a staff's worth, not one barline.
+
+**It is not `getChunk`'s out-of-image guard.** Java bounds the chunk window
+against `sheet.getWidth() - 1` and returns 0 outside it, and the natural worry
+was that the port bounds it against the staff's own range instead. It does not:
+`Projection.Short(0, sheet.getWidth() - 1)` and `Self::new(0, last_x)` describe
+the same span, populated over the staff's range in both, so the branch is
+identical.
+
+**And "one cause" is not established.** On carmen 3, carmen 10, cucaracha 6 and
+BachInvention5 1 every impact except one *inward* chunk grade is exactly 1.0, so
+for those four the divergence can only be the chunk. But D0392410 staff 8 has
+**both** chunks at 1.0, and its non-unit terms are core, gap and the stop
+derivative -- a different term entirely. The deltas are not one-signed either:
+we are low on D0392410 staff 8 and high on staff 10. What the six share is only
+their position.
+
+#### What would close it
+
+Java's per-impact values, which no oracle records. `StaffProjector.createPeak`
+builds `StaffVerticalImpacts` from six locals; a probe that prints them
+alongside `linesThreshold`, `chunkThreshold`, and `getChunk`'s raw return for
+the peaks listed above would settle it in one run, and the Rust side already
+prints its half. That needs a JDK, which the machine this was last worked on
+does not have.
 
 ### 2. PDF ingest (reading is done; rendering is what is left)
 
