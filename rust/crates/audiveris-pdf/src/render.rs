@@ -73,7 +73,7 @@ use crate::error::{Error, Result};
 use crate::object::Object;
 use crate::raster;
 use crate::scaledblit;
-use crate::transform::{GrayImage, Placement, draw_bicubic_into};
+use crate::transform::{GrayImage, Placement, RgbImage, draw_bicubic_into, draw_bicubic_rgb_into};
 
 /// Audiveris's `pdfResolution` default.
 pub const AUDIVERIS_DPI: f32 = 300.0;
@@ -134,18 +134,37 @@ pub fn page(document: &Document, page: &Page, dpi: f32) -> Result<Rendered> {
                 ),
             })?;
         let decoded = raster::decode(document, stream)?;
-        if decoded.bands != 1 {
-            // A three-band source draws through a different set of Java2D
-            // loops, and the gray destination then applies a colour reduction
-            // that has its own parity question. One corpus page is like this.
+        if decoded.bands != 1 && decoded.bands != 3 {
             return Err(Error::UnsupportedImage {
                 reason: format!("a {}-band source into a gray destination", decoded.bands),
             });
         }
-        let source = GrayImage {
-            width: decoded.width,
-            height: decoded.height,
-            samples: decoded.samples,
+        // The dispatch and the placement need only the geometry, so `source`
+        // always carries that; the samples go to whichever of the two draw
+        // paths will read them.
+        let (width, height) = (decoded.width, decoded.height);
+        let (source, rgb) = if decoded.bands == 1 {
+            (
+                GrayImage {
+                    width,
+                    height,
+                    samples: decoded.samples,
+                },
+                None,
+            )
+        } else {
+            (
+                GrayImage {
+                    width,
+                    height,
+                    samples: Vec::new(),
+                },
+                Some(RgbImage {
+                    width,
+                    height,
+                    samples: decoded.samples,
+                }),
+            )
         };
 
         let interpolation = interpolation(&device.transform, draw.ctm, &source);
@@ -156,18 +175,28 @@ pub fn page(document: &Document, page: &Page, dpi: f32) -> Result<Rendered> {
         let [scale_x, shear_y, shear_x, scale_y, left, top] = composed.matrix();
 
         match primitive(&composed, &source, interpolation) {
-            Primitive::Transform => draw_bicubic_into(
-                &mut image,
-                &source,
-                Placement {
+            Primitive::Transform => {
+                let placement = Placement {
                     scale_x,
                     shear_y,
                     shear_x,
                     scale_y,
                     left,
                     top,
-                },
-            ),
+                };
+                if let Some(rgb) = &rgb {
+                    draw_bicubic_rgb_into(&mut image, rgb, placement);
+                } else {
+                    draw_bicubic_into(&mut image, &source, placement);
+                }
+            }
+            Primitive::Scale(_) if rgb.is_some() => {
+                return Err(Error::UnsupportedImage {
+                    reason: "a scaled-up three-band draw, which blits through a colour \
+                             conversion rather than an isomorphic copy"
+                        .to_owned(),
+                });
+            }
             Primitive::Scale(rect) => scaledblit::scale(
                 &mut image.samples,
                 device.width as usize,

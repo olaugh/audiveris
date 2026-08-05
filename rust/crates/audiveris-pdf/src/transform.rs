@@ -48,70 +48,33 @@
 //!
 //! # Status against whole pages
 //!
-//! [`draw_bicubic`] has been run against PDFBox's own renders of twelve real
-//! IMSLP pages, each fed the exact `AffineTransform` PDFBox composed for that
-//! draw, read out of a `PageDrawer` subclass. **Eight are bit-exact**, including
-//! every case the corpus actually turns on:
-//!
-//! ```text
-//! 2315x2848 -> 2479x3299   offset placement, upscale      exact
-//! 2292x2921 -> 2479x3299   offset placement, upscale      exact
-//! 2256x2985 -> 2479x3299   offset placement, upscale      exact
-//! 6109x7676 -> 3106x3903   origin, 0.508 downscale        exact
-//! 5867x7372 -> 3104x3900   origin, 0.529 downscale        exact
-//! 6109x7676 -> 3106x3903   origin, 0.508 downscale        exact
-//! 4960x7015 -> 2480x3507   origin, 0.500 downscale        exact  (x2)
-//! ```
+//! Settled. [`draw_bicubic_into`] is one of the three primitives a page render
+//! reaches, and all 189 corpus pages now reproduce PDFBox's rendered raster bit
+//! for bit. See [`crate::render`] for how the primitive is chosen and
+//! [`crate::scaledblit`] for the other one.
 //!
 //! Reading PDFBox's transform rather than reconstructing it is what closed the
-//! last gap. Composed in closed form from the page box, the DPI and the content
-//! stream's `cm`, the horizontal terms came out bit-identical but the vertical
-//! ones did not -- `scale_y` differed in its last bits -- and that alone put 924
-//! samples wrong, confined to 13 destination rows. With PDFBox's own numbers the
-//! same page is exact.
+//! last gap here. Composed in closed form from the page box, the DPI and the
+//! content stream's `cm`, the horizontal terms came out bit-identical but the
+//! vertical ones did not -- `scale_y` differed in its last bits -- and that
+//! alone put 924 samples wrong, confined to 13 destination rows. The cause is
+//! now understood and ported: `java.awt.geom.AffineTransform` is a state
+//! machine whose branches drop terms known to be zero, and `crate::affine`
+//! reproduces it.
 //!
-//! Sheared placements are reproduced too. Surveying all 189 pages of the seven
-//! sampled sources found that **70 draws carry a shear** -- the scans were
-//! deskewed by baking a rotation of up to 1.2e-2, about 0.7 degrees, into the
-//! content stream's `cm`. An axis-aligned placement cannot express those, and
-//! twelve pages of testing had missed the regime entirely. With the full affine
-//! form both sheared SIBLEY pages are exact, and the axis-aligned pages did not
-//! regress.
+//! Sheared placements matter more than they look. Surveying all 189 pages found
+//! that **70 draws carry a shear** -- the scans were deskewed by baking a
+//! rotation of up to 1.2e-2, about 0.7 degrees, into the content stream's `cm`.
+//! An axis-aligned placement cannot express those, and twelve pages of testing
+//! had missed the regime entirely.
 //!
-//! One page of the twelve is still not reproduced, and it is not a transform
-//! problem: it decodes to `TYPE_INT_RGB` with three bands, and this crate is
-//! single-band so far.
-//!
-//! Three others are open, and instrumentation has now identified *what* happens
-//! even though the trigger is not yet reproducible. `-Dsun.java2d.trace=count`
-//! reports the primitive each render actually invokes:
-//!
-//! ```text
-//! near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
-//! ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
-//! ```
-//!
-//! So Java2D does not reach this code at all on those pages. It picks a
-//! `ScaledBlit`, which is nearest-neighbour, and the render comes out
-//! byte-identical to the source with zero greys in 7.5M samples.
-//!
-//! The trigger is **not** the transform in isolation. Sweeping scale from 0.5 to
-//! 1.1 and offsets 0/0.1249/0.5 through `Graphics2D.drawImage` with the same
-//! hints interpolates in every case except an exact identity -- it never
-//! reproduces what the real page does. Nor is it PDFBox: the interpolation hint
-//! is `Bicubic` before and after the draw, the images are not stencils, carry no
-//! `/Interpolate`, and are 1-bit `DeviceGray` exactly like the pages that do
-//! reproduce. What differs is the *draw context* -- PDFBox draws through a
-//! `Graphics2D` that already carries the page transform and a clip, and
-//! `DrawImage` dispatches on `sg.transformState` and the composed result, not on
-//! the transform handed to `drawImage`.
-//!
-//! That is a scoping fact worth more than the three pages: a faithful PDF ingest
-//! has to reproduce Java2D's **primitive selection**, not only
-//! `TransformHelper`'s arithmetic -- the same shape as libjpeg choosing between
-//! its fancy and box upsamplers. About 10 of 189 surveyed draws land here, and
-//! since Audiveris renders at a fixed 300 DPI, any scan whose page box makes the
-//! image roughly 1:1 at 300 DPI will.
+//! An earlier note here recorded that `-Dsun.java2d.trace=count` showed some
+//! pages reaching `ScaledBlit(ByteGray, SrcNoEa, ByteGray)` instead of this
+//! code, and guessed that `DrawImage` was dispatching on `sg.transformState`.
+//! That guess was wrong, and the answer is in PDFBox rather than Java2D:
+//! `PageDrawer.drawImage` flips the interpolation hint to nearest-neighbour for
+//! a scaled-up image, which is the only thing that lets a `ScaledBlit` be
+//! reached at all. [`crate::render`] carries the detail.
 //!
 
 /// Mitchell-Netravali coefficient for the shipping build's integer math.
@@ -391,7 +354,33 @@ const fn fraction(value: i64) -> i32 {
 /// to match, and rewriting it as `min`/`max` invites getting one of those wrong.
 #[must_use]
 fn neighbourhood(source: &GrayImage, at_x: i64, at_y: i64) -> [i32; 16] {
-    let (source_width, source_height) = (source.width as i32, source.height as i32);
+    neighbourhood_band(
+        &source.samples,
+        source.width,
+        source.height,
+        1,
+        0,
+        at_x,
+        at_y,
+    )
+}
+
+/// The same window, for one band of an interleaved source.
+///
+/// Split out rather than duplicated so the single-band path -- the one pinned
+/// by 112 cases in `oracle/java2d-bicubic.txt` -- keeps running exactly this
+/// code with `bands` at one.
+#[must_use]
+fn neighbourhood_band(
+    samples: &[u8],
+    width: usize,
+    height: usize,
+    bands: usize,
+    band: usize,
+    at_x: i64,
+    at_y: i64,
+) -> [i32; 16] {
+    let (source_width, source_height) = (width as i32, height as i32);
     let (mut column, mut row) = (whole(at_x), whole(at_y));
 
     let column_before = (-column) >> 31;
@@ -426,9 +415,106 @@ fn neighbourhood(source: &GrayImage, at_x: i64, at_y: i64) -> [i32; 16] {
         rows.iter()
             .flat_map(|r| columns.iter().map(move |c| (r, c))),
     ) {
-        *slot = i32::from(source.samples[(down * source_width + across) as usize]);
+        *slot = i32::from(samples[(down * source_width + across) as usize * bands + band]);
     }
     window
+}
+
+/// A three-band 8-bit image, samples interleaved as `PDIndexed.toRGBImage`
+/// leaves them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RgbImage {
+    /// Width in pixels.
+    pub width: usize,
+    /// Height in pixels.
+    pub height: usize,
+    /// `width * height * 3` samples, band-interleaved and row-major.
+    pub samples: Vec<u8>,
+}
+
+/// Draws a three-band source into a gray destination, as Java2D does it.
+///
+/// The order matters and is not the obvious one. `renderImageXform` transforms
+/// into an `IntArgbPre` intermediate and only then blits that to `ByteGray`, so
+/// **each channel is interpolated in colour and the reduction to gray happens
+/// afterwards** -- not the other way round. The reduction is OpenJDK's
+/// fixed-point luma from `ByteGray.h`:
+///
+/// ```text
+/// #define ComposeByteGrayFrom3ByteRgb(r, g, b) \
+///     (ByteGrayDataType)(((77*(r)) + (150*(g)) + (29*(b)) + 128) / 256)
+/// ```
+///
+/// which is also why a gray source survives the same round trip untouched: at
+/// `r == g == b == v` it is `(256v + 128) / 256`, and that is `v` for every
+/// byte.
+///
+/// # Panics
+///
+/// Panics if either image's samples are shorter than its declared geometry.
+pub fn draw_bicubic_rgb_into(destination: &mut GrayImage, source: &RgbImage, placement: Placement) {
+    assert!(
+        source.samples.len() >= source.width * source.height * 3,
+        "source samples are shorter than its geometry"
+    );
+    assert!(
+        destination.samples.len() >= destination.width * destination.height,
+        "destination samples are shorter than its geometry"
+    );
+    let (width, height) = (destination.width, destination.height);
+    let table = coefficients(-0.5);
+    let (source_width, source_height) = (source.width as i32, source.height as i32);
+    let Some(inverse) = placement.inverse() else {
+        return;
+    };
+    let base_x = fixed(inverse[0].mul_add(0.5, inverse[2] * 0.5) + inverse[4]);
+    let base_y = fixed(inverse[1].mul_add(0.5, inverse[3] * 0.5) + inverse[5]);
+    let step_x_across = fixed(inverse[0]);
+    let step_y_across = fixed(inverse[1]);
+    let step_x_down = fixed(inverse[2]);
+    let step_y_down = fixed(inverse[3]);
+
+    for down in 0..height {
+        let row_x = base_x + down as i64 * step_x_down;
+        let row_y = base_y + down as i64 * step_y_down;
+        for across in 0..width {
+            let at_x = row_x + across as i64 * step_x_across;
+            let at_y = row_y + across as i64 * step_y_across;
+            if whole(at_x) < 0
+                || whole(at_x) >= source_width
+                || whole(at_y) < 0
+                || whole(at_y) >= source_height
+            {
+                continue;
+            }
+            let mut channels = [0i32; 3];
+            for (band, channel) in channels.iter_mut().enumerate() {
+                let gathered = neighbourhood_band(
+                    &source.samples,
+                    source.width,
+                    source.height,
+                    3,
+                    band,
+                    at_x - ONE_HALF,
+                    at_y - ONE_HALF,
+                );
+                *channel = i32::from(interpolate(
+                    &table,
+                    &gathered,
+                    at_x - ONE_HALF,
+                    at_y - ONE_HALF,
+                ));
+            }
+            destination.samples[down * width + across] =
+                compose_gray(channels[0], channels[1], channels[2]);
+        }
+    }
+}
+
+/// `ComposeByteGrayFrom3ByteRgb`.
+#[must_use]
+const fn compose_gray(red: i32, green: i32, blue: i32) -> u8 {
+    ((77 * red + 150 * green + 29 * blue + 128) / 256) as u8
 }
 
 /// `BicubicInterp` with `BICUBIC_USE_INT_MATH`.
@@ -446,4 +532,31 @@ fn interpolate(table: &[i32; 513], window: &[i32; 16], at_x: i64, at_y: i64) -> 
         accumulator = accumulator.wrapping_add(sample.wrapping_mul(factor));
     }
     (accumulator >> 16).clamp(0, 255) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_gray_reduction_leaves_a_neutral_pixel_alone() {
+        // `(256v + 128) / 256` is `v` for every byte, which is why a gray
+        // source survives the IntArgbPre round trip Java2D puts it through and
+        // why 188 of the corpus's pages never needed this path at all.
+        for value in 0..=255i32 {
+            assert_eq!(compose_gray(value, value, value), value as u8);
+        }
+    }
+
+    #[test]
+    fn the_gray_reduction_weights_the_channels_as_openjdk_does() {
+        // The weights are 77/150/29, but the division truncates, so a fully
+        // saturated channel does not come back as its own weight: green is
+        // (150 * 255 + 128) / 256 == 149, not 150.
+        assert_eq!(compose_gray(255, 0, 0), 77);
+        assert_eq!(compose_gray(0, 255, 0), 149);
+        assert_eq!(compose_gray(0, 0, 255), 29);
+        // The three weights sum to exactly 256, so white is exactly white.
+        assert_eq!(compose_gray(255, 255, 255), 255);
+    }
 }

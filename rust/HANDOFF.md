@@ -56,8 +56,8 @@ AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- 
 ```
 
 It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters,
-189 draws, 188 renders`, with the one it refuses named in the
-`unimplemented` map. Without the variable it prints that it skipped, so a
+189 draws, 189 renders; still unimplemented: {}`. Without the variable it
+prints that it skipped, so a green run that says nothing is not evidence. Without the variable it prints that it skipped, so a
 green run that says nothing is not evidence.
 
 **PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
@@ -261,7 +261,7 @@ which is why a page render has a black margin rather than an extrapolated one.
 | Image samples, by hash | **189/189 exact** (188 one-band gray, 1 three-band RGB) |
 | Rendered page size in pixels | 189/189 exact |
 | The transform Java2D receives, all six terms | **189/189 exact**, sign of zero included |
-| The rendered page, by hash | **188/189 exact**; one refused by name, below |
+| The rendered page, by hash | **189/189 exact** |
 
 Everything is ported from PDFBox's and jbig2-imageio's own source, fetched as
 `-sources.jar` from Maven Central, rather than from the specifications. Same
@@ -368,10 +368,11 @@ already cost a debugging round:
   state machine rather than the algebra for exactly this reason, and its tests
   pin both the `-0.0` and the closed-form counter-case.
 
-#### Composing the page: 188 of 189, and the primitive question is answered
+#### Composing the page: done, 189 of 189
 
-`render.rs` runs the whole chain and 188 pages reproduce Java's rendered raster
-bit for bit. The destination is the easy half: `ImageType.GRAY` is
+`render.rs` runs the whole chain and **every** page reproduces Java's rendered
+raster bit for bit. That closes PDF ingest: all four depths the oracle records
+are now graded, and all four are exact on all 189 pages. The destination is the easy half: `ImageType.GRAY` is
 `TYPE_BYTE_GRAY`, one band, and `renderImage` clears it to `Color.WHITE` first,
 so an unwritten pixel is 255 and the margins stay white.
 
@@ -434,17 +435,32 @@ three source corners and decides from those rather than from the matrix. The
 plain-`Blit` case and the sheared-nearest case are refused by name; no corpus
 draw reaches either.
 
-#### What is left: one page
+The corpus's one three-band page is done too, and its order is the part worth
+remembering: `renderImageXform` transforms into an `IntArgbPre` intermediate and
+only then blits that to `ByteGray`, so **each channel is interpolated in colour
+and the reduction to gray happens after**, not before. The reduction is
+OpenJDK's fixed-point luma from `ByteGray.h`,
+`(77r + 150g + 29b + 128) / 256` -- not a colour-space conversion. That formula
+is also why a gray source survives the same round trip untouched: at
+`r == g == b == v` it is `(256v + 128) / 256`, which is `v` for every byte.
 
-`IMSLP254387-PMLP0765.pdf` page 0, the corpus's only `Indexed` over `DeviceRGB`
-image. Its samples already decode exactly; what is missing is the draw. The
-source is three-band and `transform.rs` is single-band, and the path is
-`TransformHelper` into an `IntArgbPre` intermediate followed by a
-`Blit(IntArgbPre, SrcNoEa, ByteGray)` -- so the interpolation happens per
-channel in colour and the reduction to gray happens *after* it. The reduction
-itself is in OpenJDK's `ByteGray.h` and is a fixed-point luma rather than a
-colour-space conversion, which is its own parity question and the reason this
-one is not guessed at.
+#### What is left
+
+Nothing, for the corpus. Three sensible next steps, none of them blocking:
+
+1. **Wire the render into `audiveris-omr`'s load path**, so `-batch` accepts a
+   PDF where it currently accepts a PNG or JPEG. The output is a `GrayImage` of
+   exactly the geometry Audiveris expects, so this is plumbing rather than
+   parity work -- but it is the first time the PDF path would feed BINARY and
+   GRID, and that is where a one-count difference starts mattering.
+2. **Widen the corpus.** Everything here is graded against seven IMSLP sources
+   whose 189 pages contain exactly four image shapes and four content-stream
+   operators. Every refusal is by name, so a new source fails loudly rather than
+   silently, but the honest description of the current state is "exact on what
+   was measured", not "complete".
+3. **Regenerating the oracle needs a JDK**, and this machine has none. The
+   checked-in `oracle/pdf-pages.txt` is enough to run the test, but if the
+   probe ever changes, that has to happen where Java is.
 
 Use `-Dsun.java2d.trace=count` first for anything of this kind. It answered in
 one run what two rounds of source reading did not.
