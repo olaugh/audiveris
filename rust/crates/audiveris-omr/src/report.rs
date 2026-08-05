@@ -181,6 +181,7 @@ pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
     inters(&mut json, recognition);
+    candidates(&mut json, recognition);
     relations(&mut json, recognition);
 
     json.close('}');
@@ -329,6 +330,7 @@ fn inters(json: &mut Json, recognition: &GridLinesRecognition) {
             json.open('{');
             json.field_integer("id", id.value() as i64);
             json.field_integer("system", system.system_id as i64);
+            json.field_string("status", "accepted");
             match node {
                 GridSigNode::Vertical {
                     plan,
@@ -415,6 +417,42 @@ fn inters(json: &mut Json, recognition: &GridLinesRecognition) {
             }
             json.close('}');
         }
+    }
+    json.close(']');
+}
+
+/// The candidates that lost, and which stage rejected them.
+///
+/// A recogniser that emits only its answer cannot be judged on what it missed.
+/// Every barline in `inters` beat some number of these, and a consumer asking
+/// "should there have been a barline here?" needs the near-miss and the reason
+/// it was dropped -- `Unaligned` and `CClef` are very different claims about
+/// the same missing barline.
+///
+/// These are rejections from the `BarsRetriever` purges specifically. They are
+/// not a complete n-best list: a peak that never reached the purges, because it
+/// failed core validation or graded below `Grades.minInterGrade`, is not here.
+/// That is a real limit of this schema version, not an assertion that no other
+/// candidates existed.
+fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("candidates");
+    json.open('[');
+    for rejection in &recognition.peak_graph.rejections {
+        json.open('{');
+        json.field_string("kind", "BARLINE");
+        json.field_string("status", "rejected");
+        json.field_integer("system", rejection.system as i64);
+        json.field_integer("staff", rejection.staff as i64);
+        json.key("span");
+        json.open('{');
+        json.field_integer("start", i64::from(rejection.start));
+        json.field_integer("stop", i64::from(rejection.stop));
+        json.close('}');
+        json.key("evidence");
+        json.open('{');
+        json.field_string("rejected_by", &format!("{:?}", rejection.stage));
+        json.close('}');
+        json.close('}');
     }
     json.close(']');
 }

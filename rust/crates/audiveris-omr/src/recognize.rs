@@ -27,6 +27,7 @@ use audiveris_image::bar_connections::{
 use audiveris_image::bar_sticks::{BarStickBuildState, BarStickParameters, build_bar_sticks};
 use audiveris_image::bars_coordinator::{
     BarsPurgeParameters, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
+    PeakRemovalStage,
 };
 use audiveris_image::grid_lifecycle::{GridStepExecutor, GridStepStage};
 
@@ -220,6 +221,13 @@ pub struct PeakGraphReport {
     pub stick_count: usize,
     /// Peaks Java drops because no acceptable bar filament could be built.
     pub stickless_peak_count: usize,
+    /// Candidate peaks a `BarsRetriever` purge removed, each with the stage
+    /// that removed it.
+    ///
+    /// These are the barlines that *nearly* existed. A judge deciding whether
+    /// the port missed a barline needs the near-misses and the reason they
+    /// lost, not only the survivors.
+    pub rejections: Vec<PeakRejection>,
     /// Peaks surviving the `BarsRetriever` purges, i.e. real barlines.
     pub retained_peaks: usize,
     pub purged_peaks: usize,
@@ -307,6 +315,16 @@ pub struct GridLinesRecognition {
     pub discarded_filament_count: usize,
     pub staves: Vec<StaffCandidateReport>,
     pub peak_graph: PeakGraphReport,
+}
+
+/// One candidate peak that a purge removed, and which purge removed it.
+#[derive(Debug, Clone)]
+pub struct PeakRejection {
+    pub system: usize,
+    pub staff: usize,
+    pub start: i32,
+    pub stop: i32,
+    pub stage: PeakRemovalStage,
 }
 
 /// Failure of the native GRID staff-line slice.
@@ -746,11 +764,28 @@ fn build_peak_graph(
         .map_err(grid_stage("grid build"))?;
     let builder = &mut executor.builder;
 
+    // The purges are where a barline candidate dies, so the removals are
+    // retained rather than printed behind an environment variable: they are
+    // the near-misses, and a consumer judging whether a barline was missed
+    // needs them and the stage that rejected them.
+    let rejections: Vec<PeakRejection> = builder
+        .stages()
+        .upstream()
+        .removals()
+        .iter()
+        .map(|(system, removed)| PeakRejection {
+            system: *system,
+            staff: removed.peak.staff_id().value(),
+            start: removed.peak.start(),
+            stop: removed.peak.stop(),
+            stage: removed.stage,
+        })
+        .collect();
     if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
-        for (system_id, removed) in builder.stages().upstream().removals() {
+        for rejection in &rejections {
             eprintln!(
-                "purge system={system_id} peak={:?} stage={:?}",
-                removed.peak, removed.stage
+                "purge system={} staff={} x={}..{} stage={:?}",
+                rejection.system, rejection.staff, rejection.start, rejection.stop, rejection.stage
             );
         }
     }
@@ -794,6 +829,7 @@ fn build_peak_graph(
         stickless_peak_count,
         retained_peaks,
         purged_peaks,
+        rejections,
         surviving_barlines: surviving,
         systems,
         completion,
@@ -2112,6 +2148,7 @@ mod tests {
             "\"contextual_grade\"",
             "\"impacts\"",
             "\"left_chunk\"",
+            "\"candidates\"",
         ] {
             assert!(json.contains(key), "the report should carry {key}");
         }
@@ -2120,6 +2157,13 @@ mod tests {
         assert!(
             json.matches("\"core\":").count() >= 50,
             "every promoted barline should carry its impacts"
+        );
+        // Every rejected candidate must name the stage that rejected it, or a
+        // judge cannot tell a deliberate purge from a miss.
+        assert_eq!(
+            json.matches("\"rejected_by\":").count(),
+            recognition.peak_graph.rejections.len(),
+            "each rejection should carry its stage"
         );
     }
 

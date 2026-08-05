@@ -167,6 +167,20 @@ Three decisions worth keeping:
   producers' outputs can be checked for having seen the same pixels before
   their disagreements are attributed to recognition.
 
+**Candidates, not just answers.** `inters` are what survived, each with its
+grade, contextual grade and six impacts. `candidates` are what did not: every
+peak a `BarsRetriever` purge removed, with its span and the named stage that
+removed it -- `PartialColumn`, `Unaligned`, `CClef`, `ExtendingBottom` and the
+rest. A recogniser that emits only its answer cannot be judged on what it
+missed, and `Unaligned` versus `CClef` are very different claims about the same
+absent barline. Carmen, for instance, promotes 109 inters over 70 rejected
+candidates.
+
+That list is deliberately *not* advertised as a complete n-best: a peak that
+never reached the purges, because it failed core validation or graded below
+`Grades.minInterGrade`, is not in it. Widening it is a schema change, not a bug
+fix.
+
 Numbers are emitted at full `f64` precision, since exactness against Java is
 the only property that makes them checkable. `-json` is a port extension and is
 stripped before `Parameters` parsing, which mirrors Java's CLI and is pinned by
