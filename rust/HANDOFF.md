@@ -176,14 +176,25 @@ destination rows. `oracle/java/` has no probe for this yet; the one used was a
 **Promote that probe into `oracle/java/` and pin these pages** -- it is the only
 way this stays honest once decoders start landing.
 
-The four remaining pages are not transform problems:
+**Surveying the whole corpus is what caught the real gap.** Across all 189 pages
+of the seven sampled sources: every page has `rot=0` and exactly one image draw,
+scales run 0.5 to 1.0, and 188 of 189 sources are single-band gray -- but **70
+draws carry a shear**, up to 1.2e-2 or about 0.7 degrees, because the scans were
+deskewed by baking a rotation into the content stream's `cm`. Twelve pages of
+spot-testing had missed that regime completely, and the axis-aligned `Placement`
+could not express it at all. `Placement` is now a full six-term affine and both
+sheared SIBLEY pages are exact.
 
-- One decodes to `TYPE_INT_RGB`, three bands. The crate is single-band so far.
-- Three share a signature: near-identity scale (0.99996), sub-pixel vertical
-  offset, destination a pixel smaller than the source. Java2D's `DrawImage`
-  dispatches by transform type -- identity, integer translate, general scale,
-  general transform each take a different loop -- so the suspicion is that these
-  never reach `TransformHelper` at all. Confirm that before touching this code.
+Two things still open, neither a transform problem:
+
+- One page decodes to `TYPE_INT_RGB`, three bands; the crate is single-band.
+  Only 1 of 189 draws is colour, so this is low priority but real.
+- Three pages share a signature: near-identity scale (0.99996), sub-pixel
+  vertical offset, destination a pixel smaller than the source. Java2D's
+  `DrawImage` dispatches by transform type -- identity, integer translate,
+  general scale, general transform each take a different loop -- so the
+  suspicion is that these never reach `TransformHelper`. Confirm before touching
+  this code. About 10 of 189 draws are in that regime.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.

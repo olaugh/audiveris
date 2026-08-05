@@ -72,18 +72,23 @@
 //! samples wrong, confined to 13 destination rows. With PDFBox's own numbers the
 //! same page is exact.
 //!
-//! Four pages are not yet reproduced, and neither reason is the transform:
+//! Sheared placements are reproduced too. Surveying all 189 pages of the seven
+//! sampled sources found that **70 draws carry a shear** -- the scans were
+//! deskewed by baking a rotation of up to 1.2e-2, about 0.7 degrees, into the
+//! content stream's `cm`. An axis-aligned placement cannot express those, and
+//! twelve pages of testing had missed the regime entirely. With the full affine
+//! form both sheared SIBLEY pages are exact, and the axis-aligned pages did not
+//! regress.
 //!
-//! - One decodes to `TYPE_INT_RGB` with three bands. This crate is single-band
-//!   so far, so there is nothing to compare; colour sources need the band
-//!   handling before they mean anything.
-//! - Three share one signature: a near-identity scale (0.99996) with a
-//!   sub-pixel vertical offset and a destination a pixel smaller than the
-//!   source. Java2D's `DrawImage` dispatches by transform type -- identity,
-//!   integer translate, general scale, general transform each take a different
-//!   loop -- so a transform this close to identity is the prime suspect for
-//!   reaching something other than `TransformHelper`. Worth confirming before
-//!   assuming this code is wrong.
+//! One page of the twelve is still not reproduced, and it is not a transform
+//! problem: it decodes to `TYPE_INT_RGB` with three bands, and this crate is
+//! single-band so far.
+//!
+//! Three others share a signature worth recording -- a near-identity scale
+//! (0.99996) with a sub-pixel vertical offset and a destination a pixel smaller
+//! than the source. Java2D's `DrawImage` dispatches by transform type, so the
+//! suspicion is that they never reach `TransformHelper` at all. Confirm that
+//! before assuming this code is wrong.
 //!
 #![forbid(unsafe_code)]
 
@@ -186,22 +191,68 @@ pub fn scale_bicubic(
     }
 }
 
-/// Where a source image lands in the destination, in device pixels.
+/// Where a source image lands in the destination: a full affine placement.
 ///
-/// PDF pages do not place their image at the origin at scale one: a real IMSLP
-/// page carries `515 0 0 633.5724 45 74.2138 cm`, so the image occupies part of
-/// the page with margins around it. This is that placement, already composed
-/// down to a scale and a translation.
+/// The six terms are the *forward* transform, device from source, in the order
+/// `AffineTransform.getMatrix` reports them, which is also what PDFBox hands
+/// Java2D. Java2D itself receives the inverse; this type inverts internally so
+/// a caller can pass what it read.
+///
+/// A scale and a translation are not enough. Across 189 real IMSLP pages, **70
+/// carry a shear** of up to 1.2e-2 -- about 0.7 degrees -- because the scans
+/// were deskewed by baking a small rotation into the content stream's `cm`
+/// rather than re-rasterizing. An axis-aligned placement cannot express those at
+/// all. OpenJDK's loop was general here; this port had simplified it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Placement {
-    /// Device x of the image's left edge.
-    pub left: f64,
-    /// Device y of the image's top edge.
-    pub top: f64,
-    /// Device pixels per source pixel, horizontally.
+    /// `m00`: device x per source x.
     pub scale_x: f64,
-    /// Device pixels per source pixel, vertically.
+    /// `m10`: device y per source x.
+    pub shear_y: f64,
+    /// `m01`: device x per source y.
+    pub shear_x: f64,
+    /// `m11`: device y per source y.
     pub scale_y: f64,
+    /// `m02`: device x translation.
+    pub left: f64,
+    /// `m12`: device y translation.
+    pub top: f64,
+}
+
+impl Placement {
+    /// An axis-aligned placement, the common case.
+    #[must_use]
+    pub const fn axis_aligned(left: f64, top: f64, scale_x: f64, scale_y: f64) -> Self {
+        Self {
+            scale_x,
+            shear_y: 0.0,
+            shear_x: 0.0,
+            scale_y,
+            left,
+            top,
+        }
+    }
+
+    /// The inverse transform, source from device, as Java2D receives it.
+    ///
+    /// `None` for a singular placement, which draws nothing.
+    #[must_use]
+    fn inverse(self) -> Option<[f64; 6]> {
+        let determinant = self
+            .scale_x
+            .mul_add(self.scale_y, -(self.shear_y * self.shear_x));
+        if determinant == 0.0 || !determinant.is_finite() {
+            return None;
+        }
+        Some([
+            self.scale_y / determinant,
+            -self.shear_y / determinant,
+            -self.shear_x / determinant,
+            self.scale_x / determinant,
+            self.shear_x.mul_add(self.top, -(self.scale_y * self.left)) / determinant,
+            self.shear_y.mul_add(self.left, -(self.scale_x * self.top)) / determinant,
+        ])
+    }
 }
 
 /// Draws `source` into a `width` by `height` destination at `placement`.
@@ -230,35 +281,42 @@ pub fn draw_bicubic(
     // destination pixel, then a constant per-pixel step. Accumulating from a
     // base rather than inverting per pixel is what keeps the fixed-point
     // arithmetic identical.
-    //
-    // The base is taken at the first pixel of the *drawn region*, not of the
-    // destination. Java2D transforms the image's corners, takes the enclosing
-    // integer rectangle, and bases its accumulation there; starting from the
-    // destination origin instead accumulates a different number of fixed-point
-    // steps and lands a handful of samples one count out.
-    let origin_x = placement.left.floor();
-    let origin_y = placement.top.floor();
-    let base_x = fixed((origin_x + 0.5 - placement.left) / placement.scale_x);
-    let base_y = fixed((origin_y + 0.5 - placement.top) / placement.scale_y);
-    let step_x = fixed(1.0 / placement.scale_x);
-    let step_y = fixed(1.0 / placement.scale_y);
-    let (origin_x, origin_y) = (origin_x as i64, origin_y as i64);
-
     let mut samples = vec![background; width * height];
+    let Some(inverse) = placement.inverse() else {
+        return GrayImage {
+            width,
+            height,
+            samples,
+        };
+    };
+    // Java2D steps in both axes on both loops, because a sheared placement moves
+    // the source y as the destination x advances. `xbase`/`ybase` are the
+    // inverse transform of the first destination pixel's centre and everything
+    // after is accumulation: inverting per pixel instead drifts in the low bits
+    // of the fixed-point coordinate.
+    let base_x = fixed(inverse[0].mul_add(0.5, inverse[2] * 0.5) + inverse[4]);
+    let base_y = fixed(inverse[1].mul_add(0.5, inverse[3] * 0.5) + inverse[5]);
+    let step_x_across = fixed(inverse[0]);
+    let step_y_across = fixed(inverse[1]);
+    let step_x_down = fixed(inverse[2]);
+    let step_y_down = fixed(inverse[3]);
+
     for down in 0..height {
-        let row_y = base_y + (down as i64 - origin_y) * step_y;
+        let row_x = base_x + down as i64 * step_x_down;
+        let row_y = base_y + down as i64 * step_y_down;
         for across in 0..width {
-            let at_x = base_x + (across as i64 - origin_x) * step_x;
+            let at_x = row_x + across as i64 * step_x_across;
+            let at_y = row_y + across as i64 * step_y_across;
             if whole(at_x) < 0
                 || whole(at_x) >= source_width
-                || whole(row_y) < 0
-                || whole(row_y) >= source_height
+                || whole(at_y) < 0
+                || whole(at_y) >= source_height
             {
                 continue;
             }
-            let gathered = neighbourhood(source, at_x - ONE_HALF, row_y - ONE_HALF);
+            let gathered = neighbourhood(source, at_x - ONE_HALF, at_y - ONE_HALF);
             samples[down * width + across] =
-                interpolate(&table, &gathered, at_x - ONE_HALF, row_y - ONE_HALF);
+                interpolate(&table, &gathered, at_x - ONE_HALF, at_y - ONE_HALF);
         }
     }
     GrayImage {

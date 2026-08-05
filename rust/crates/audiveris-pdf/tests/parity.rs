@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use audiveris_pdf::{GrayImage, scale_bicubic};
+use audiveris_pdf::{GrayImage, Placement, draw_bicubic, scale_bicubic};
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -93,4 +93,34 @@ fn scaling_matches_java2d_across_geometries_and_ratios() {
         checked += 1;
     }
     assert_eq!(checked, 112, "the oracle lost cases");
+}
+
+/// The general form must agree with the special one where they overlap.
+///
+/// `scale_bicubic` is `draw_bicubic` at the origin with no shear, so any
+/// divergence means the affine path has drifted from the one the 112-case
+/// oracle above pins.
+#[test]
+fn the_affine_form_agrees_with_the_scale_form() {
+    for (width, height) in [(8usize, 8usize), (12, 6), (37, 41)] {
+        for scale in [0.51f64, 1.07, 0.508, 3.3] {
+            let source = pattern(width, height);
+            let (out_width, out_height) = (
+                (width as f64 * scale).ceil() as usize,
+                (height as f64 * scale).ceil() as usize,
+            );
+            let scaled = scale_bicubic(&source, out_width, out_height, scale, scale, 0);
+            let drawn = draw_bicubic(
+                &source,
+                out_width,
+                out_height,
+                Placement::axis_aligned(0.0, 0.0, scale, scale),
+                0,
+            );
+            assert_eq!(
+                scaled, drawn,
+                "{width}x{height} at {scale}: affine and scale forms disagree"
+            );
+        }
+    }
 }
