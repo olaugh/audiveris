@@ -144,6 +144,34 @@ Bump the channel in its own commit, with the lint fallout in that same commit.
 Non-rustup installations ignore the file, so it binds CI and rustup users
 without disturbing a Homebrew or distribution `cargo`.
 
+## Structured output
+
+`audiveris-cli -batch -step GRID -json <input>` emits one JSON document per
+sheet, one per line. This is the interchange format, not a debug dump, and it
+is shaped for two consumers that do not exist yet: an evaluation harness
+comparing several OMR systems, and a repair loop that proposes corrections.
+
+Three decisions worth keeping:
+
+- **The envelope names its producer and schema.** A consensus front end diffing
+  Audiveris against another system needs to know whose output it holds. The
+  geometry and labels are meant to be comparable across producers; everything
+  Audiveris-shaped sits under each inter's `evidence`, where a reader can
+  consume it per-producer or ignore it.
+- **`evidence.impacts` is the reason this exists.** A grade is a weighted
+  geometric mean of six terms and the product alone is not diagnosable. Those
+  six terms are what located the `rint`/`round` divergence that three rounds of
+  source reading missed; a consumer can only use them if they are emitted.
+- **`image.gray_digest` is a provenance stamp.** For a PDF it equals the
+  FNV-1a-64 of the page PDFBox rendered, which the ingest test asserts, so two
+  producers' outputs can be checked for having seen the same pixels before
+  their disagreements are attributed to recognition.
+
+Numbers are emitted at full `f64` precision, since exactness against Java is
+the only property that makes them checkable. `-json` is a port extension and is
+stripped before `Parameters` parsing, which mirrors Java's CLI and is pinned by
+tests against it.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)

@@ -6,6 +6,7 @@ use audiveris_image::ingest::Loader;
 use audiveris_omr::recognize::{
     grid_lines_report, recognize_grid_lines_raster, recognize_scale_raster, scale_report,
 };
+use audiveris_omr::report::grid_json;
 
 fn usage() {
     println!(
@@ -25,7 +26,7 @@ fn usage() {
 ///
 /// Returns `Ok(true)` when the requested step was handled natively; `Ok(false)`
 /// hands off to the parameter dump for still-unported requests.
-fn run_native(parameters: &Parameters) -> Result<bool, String> {
+fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
     let Some(step) = parameters.step else {
         return Ok(false);
     };
@@ -56,6 +57,16 @@ fn run_native(parameters: &Parameters) -> Result<bool, String> {
             let report = if step == OmrStep::Grid {
                 let recognition = recognize_grid_lines_raster(&raster)
                     .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
+                if json {
+                    // One JSON document per sheet, one per line: a consensus
+                    // front end reading several producers wants a stream it can
+                    // consume incrementally, not one array it must buffer.
+                    print!(
+                        "{}",
+                        grid_json(&recognition, &input.display().to_string(), sheet)
+                    );
+                    continue;
+                }
                 grid_lines_report(&recognition)
             } else {
                 let recognition = recognize_scale_raster(&raster)
@@ -84,11 +95,23 @@ fn sheets_to_process(selected: &[i32], count: usize) -> Vec<usize> {
         .collect()
 }
 
+/// `-json` is a port extension, not one of Audiveris's options.
+///
+/// It is stripped here rather than added to `Parameters`, because that parser
+/// mirrors Java's CLI exactly and is pinned by tests against it. A flag Java
+/// does not have does not belong in it.
+fn take_json_flag(args: &mut Vec<String>) -> bool {
+    let before = args.len();
+    args.retain(|argument| argument != "-json");
+    args.len() != before
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let json = take_json_flag(&mut args);
     match parse(&args) {
         Ok(parameters) if parameters.help => usage(),
-        Ok(parameters) => match run_native(&parameters) {
+        Ok(parameters) => match run_native(&parameters, json) {
             Ok(true) => {}
             Ok(false) => println!("{parameters:#?}"),
             Err(error) => {

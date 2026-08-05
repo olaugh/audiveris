@@ -2087,6 +2087,42 @@ mod tests {
         assert!(checked_sheets > 0, "the corpus directory held none of it");
     }
 
+    /// The structured report is well formed and carries the evidence.
+    ///
+    /// The JSON writer is stateful, so the risk is not a wrong number but a
+    /// malformed document, and the assembly has more states than the writer's
+    /// own unit tests reach. This runs the real thing over a real page.
+    #[test]
+    fn grid_json_is_well_formed_and_carries_the_evidence() {
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let json = crate::report::grid_json(&recognition, "chula.png", 1);
+
+        let faults = crate::report::tests::structural_faults(&json);
+        assert!(faults.is_empty(), "malformed JSON: {faults:?}");
+
+        for key in [
+            "\"schema\"",
+            "\"producer\"",
+            "\"gray_digest\"",
+            "\"systems\"",
+            "\"staves\"",
+            "\"inters\"",
+            "\"relations\"",
+            "\"contextual_grade\"",
+            "\"impacts\"",
+            "\"left_chunk\"",
+        ] {
+            assert!(json.contains(key), "the report should carry {key}");
+        }
+        // The evidence is the reason this exists; an empty impacts block would
+        // be well formed and useless.
+        assert!(
+            json.matches("\"core\":").count() >= 50,
+            "every promoted barline should carry its impacts"
+        );
+    }
+
     /// Diffs the sheet SIG the GRID step promotes against Java's persisted
     /// `sheet#1.xml` on every example page.
     ///

@@ -41,7 +41,8 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Live Java/Rust vectors | 73 canonical fixtures, including composed StaffProjector, recursive clusters, bar-column construction/start selection, production `LagManager.dispatchRuns`, `Book.updateScores` regrouping, live `SystemInfo.buildRef` ownership, a composed GRID output boundary, production SIG contextual grading, exact sheet-skew transforms, raw-raster `retrieveLines`, raster-fitted mutable endpoints, raw alignment/connection discovery, exact `StaffFilament.fillHoles` mutation, all 149 raw grades for a fixed classifier feature vector, an asymmetric point-list MixGlyphDescriptor feature vector, and Java-order RunTable coordinate/feature extraction with absolute offset |
 | Oracle asset manifest | classifier, 6 fonts, and 8 image fixtures SHA-256-frozen |
 | Differential testkit | deterministic sorted vectors and first-difference diagnostics used by `xtask`; bounded fixture roots |
-| Rust workspace | 972 tests green: image 510, OMR 326, core 38, PDF 58, jpeg 14, classifier 9, testkit 6, CLI 6, xtask 5. Counted on macOS/aarch64, and green on both matrix legs in CI |
+| Structured output | `-json` emits one JSON document per sheet: geometry and labels in a producer-neutral core, Audiveris-shaped grading under each inter's `evidence` (the six staff-vertical impacts, not just their product), relations, and an `image.gray_digest` provenance stamp that equals the rendered page's hash for a PDF. Hand-written writer; the workspace carries no serialization dependency |
+| Rust workspace | 978 tests green: image 510, OMR 332, core 38, PDF 58, jpeg 14, classifier 9, testkit 6, CLI 6, xtask 5. Counted on macOS/aarch64, and green on both matrix legs in CI |
 | Core utility slice | implemented with parity tests |
 | Histogram, grades, injection solver | implemented with parity tests |
 | Least-squares line geometry | implemented with parity tests |
