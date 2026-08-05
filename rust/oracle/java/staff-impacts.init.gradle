@@ -42,4 +42,26 @@ gradle.projectsEvaluated {
         args = (app.findProperty('gridPdfPages') ?: '').toString().split(/\s+/)
                 .findAll { !it.isEmpty() }
     }
+
+    app.tasks.register('sigProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.SigProbe'
+        // Audiveris running from .class files resolves its read-only resources
+        // as `Paths.get("res")`, relative to the process working directory, and
+        // they live in app/. Anything from HEADERS onward needs the bundled
+        // classifier from there, so the working directory is app/ and the page
+        // arguments are absolutised against the project root to compensate.
+        workingDir = app.projectDir
+        // -PsigTargets="data/examples/chula.png:1:GRID other.pdf:2:HEADS"
+        args = (app.findProperty('sigTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def bits = target.split(':')
+                    def file = new File(bits[0])
+                    def resolved = file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, bits[0])
+                    ([resolved.absolutePath] + bits[1..-1]).join(':')
+                }
+    }
 }

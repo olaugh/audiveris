@@ -186,6 +186,58 @@ the only property that makes them checkable. `-json` is a port extension and is
 stripped before `Parameters` parsing, which mirrors Java's CLI and is pinned by
 tests against it.
 
+## The stage oracle, and how to grade a stage you have not ported yet
+
+`oracle/java/SigProbe.java` prints every inter and relation a step leaves in
+Java's SIG: identity, class, shape, staff, bounds, intrinsic and contextual
+grade, frozen flag, and the impacts, with impact *names* taken from the inter's
+own `GradeImpacts` so a head's terms and a barline's terms both print without
+the probe knowing either. Output is sorted by inter id, so two runs diff
+cleanly.
+
+This exists because every stage so far got a bespoke probe, which is fine once
+and a tax every time after. It is shape-agnostic: **a stage nobody has started
+porting already has a parity gate waiting**, which is what lets several people
+take different stages without each first building a way to check their work.
+
+```sh
+unset JAVA_TOOL_OPTIONS
+JAVA_HOME=/path/to/jdk25/Contents/Home ./gradlew --no-daemon -q \
+  -I rust/oracle/java/staff-impacts.init.gradle :app:sigProbe \
+  -PsigTargets="data/examples/chula.png:1:LEDGERS"
+```
+
+Arguments are `<path>:<sheet>:<STEP>`, the sheet counted from one.
+
+**Two things that will bite you.** `JAVA_TOOL_OPTIONS` must be cleared or a
+proxy banner on stdout corrupts every parsed line. And Audiveris running from
+`.class` files resolves its read-only resources as `Paths.get("res")`, relative
+to the *process working directory*, while they live in `app/res/` -- so the
+task runs from `app/` and absolutises the page arguments against the project
+root to compensate. Without that, anything from HEADERS onward dies on a
+missing `basic-classifier.zip` with an error that does not mention paths.
+
+**How far it reaches, measured on chula:**
+
+| Step | Inters in Java's SIG |
+| --- | --- |
+| GRID | 84 |
+| HEADERS | 113 |
+| STEM_SEEDS | 113 |
+| BEAMS | 295 |
+| LEDGERS | 313 |
+| HEADS | fails: `ShapeSymbol.getParams` on a null symbol |
+
+So every stage the port is next to work on is gradeable today. HEADS is not,
+and the reason is the MusicFont seam PORTING.md already lists as unported:
+head recognition template-matches against font-derived symbols, so the port
+needs MusicFont metrics before HEADS means anything -- in Java *or* in Rust.
+That is a real ordering constraint, not a probe defect.
+
+The narrower probes stay: `GridPdfProbe` generates the committed
+`oracle/grid-pdf.txt`, and `StaffImpactsProbe` is the one that found the
+`rint` bug.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)
