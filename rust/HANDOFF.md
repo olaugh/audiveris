@@ -161,12 +161,26 @@ own:
   identity for this image in a naive subclass. Read the content stream, or
   verify the engine subclass against it, before trusting a CTM.
 
-So `scale_bicubic` needs generalizing from "scale into a destination of this
-size" to "draw with this affine placement into this destination". The change is
-small and follows OpenJDK directly -- `xbase`/`ybase` are the inverse transform
-of the first destination pixel's centre, and `dxdx`/`dydy` the per-pixel step --
-but it should be verified against a real page before the decoders are written,
-since it is the last thing between the verified kernel and a full render.
+`draw_bicubic` is that generalization and it is **verified to 99.9887% against a
+whole real page**: PDFBox's decoded 2315x2848 source drawn into its 2479x3299
+render reproduces 8177297 of 8178221 samples. Reconstructing the placement from
+the page box, the DPI and the content stream's `cm` took that from 22.5% wrong
+to 0.0113% wrong.
+
+The remaining 924 samples are confined to **13 destination rows** out of 3299,
+thinly spread over 778 columns, almost all one count out. That shape rules out a
+structural error and points at `scale_y` differing from PDFBox's in its last
+bits: the placement here is composed in closed form, while PDFBox concatenates
+`AffineTransform`s, and those agree to about fifteen digits rather than to the
+bit.
+
+**Next step, and it is small:** stop deriving the transform and read it. Subclass
+`PageDrawer`, intercept the image draw, and print
+`graphics.getTransform()` composed with the image transform PDFBox builds
+(`new AffineTransform(ctm)`, then `scale(1.0/w, -1.0/h)`, then
+`translate(0, -h)`). Feed those six doubles into `Placement` and the 13 rows
+should go. Only then are the decoders worth writing.
+
 `oracle/java/` has probes for dumping PDFBox's decoded source and rendered page
 as raw gray for exactly that comparison.
 
