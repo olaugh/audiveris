@@ -132,8 +132,43 @@ a black margin rather than an extrapolated one.
 5. The page-render plumbing: content-stream CTM, `ImageType.GRAY` conversion,
    and the destination's initial state.
 
-Still unresolved and worth settling early, because it changes the transform's
-input: whether PDFBox subsamples large images before drawing.
+**Subsampling: answered, and the page composition with it.** PDFBox does not
+subsample -- `PDImageXObject.getImage()` on a real IMSLP page returns the full
+2315x2848 raster and the render is 2479x3299. But the naive model, "scale the
+source to fill the destination", is wrong by 22.5% of pixels, and the reason is
+worth knowing before writing any of the above. The page content stream is:
+
+```
+q
+515 0 0 633.5724 45 74.2138 cm
+/Im0 Do
+Q
+```
+
+The image occupies 515 x 633.5724 pt at offset (45, 74.2138) on a 595 x 792 pt
+page -- it does *not* fill it, and the render carries white margins. So the
+transform handed to Java2D is a scale *and* a translate, and the scale is a
+**downscale** of about 0.927, not the 1.07 the page-to-image ratio suggests.
+
+Two further details, each of which would break every sample comparison on its
+own:
+
+- **PDFBox computes the DPI scale in `float`.** `792 * (300/72f)` is
+  `3299.999874`, so the page floors to 3299 pixels; in `double` it is exactly
+  3300. The observed render is 3299. A one-pixel page changes every destination
+  coordinate.
+- `PDFStreamEngine.getGraphicsState().getCurrentTransformationMatrix()` reported
+  identity for this image in a naive subclass. Read the content stream, or
+  verify the engine subclass against it, before trusting a CTM.
+
+So `scale_bicubic` needs generalizing from "scale into a destination of this
+size" to "draw with this affine placement into this destination". The change is
+small and follows OpenJDK directly -- `xbase`/`ybase` are the inverse transform
+of the first destination pixel's centre, and `dxdx`/`dydy` the per-pixel step --
+but it should be verified against a real page before the decoders are written,
+since it is the last thing between the verified kernel and a full render.
+`oracle/java/` has probes for dumping PDFBox's decoded source and rendered page
+as raw gray for exactly that comparison.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.
