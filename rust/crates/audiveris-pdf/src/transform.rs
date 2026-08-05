@@ -293,23 +293,45 @@ pub fn draw_bicubic(
     placement: Placement,
     background: u8,
 ) -> GrayImage {
+    let mut destination = GrayImage {
+        width,
+        height,
+        samples: vec![background; width * height],
+    };
+    draw_bicubic_into(&mut destination, source, placement);
+    destination
+}
+
+/// Draws `source` into an existing destination, writing only the pixels Java2D
+/// writes.
+///
+/// A page can carry more than one draw, and each lands on whatever the previous
+/// ones left. Pixels whose centre maps outside the source keep the destination's
+/// current value, which is how a page render ends up with margins holding the
+/// background rather than an extrapolated edge.
+///
+/// # Panics
+///
+/// Panics if either image's samples are shorter than its declared geometry.
+pub fn draw_bicubic_into(destination: &mut GrayImage, source: &GrayImage, placement: Placement) {
     assert!(
         source.samples.len() >= source.width * source.height,
         "source samples are shorter than its geometry"
     );
+    assert!(
+        destination.samples.len() >= destination.width * destination.height,
+        "destination samples are shorter than its geometry"
+    );
+    let (width, height) = (destination.width, destination.height);
+    let samples = &mut destination.samples;
     let table = coefficients(-0.5);
     let (source_width, source_height) = (source.width as i32, source.height as i32);
     // Java2D's `xorig`: the inverse transform of the centre of the first
     // destination pixel, then a constant per-pixel step. Accumulating from a
     // base rather than inverting per pixel is what keeps the fixed-point
     // arithmetic identical.
-    let mut samples = vec![background; width * height];
     let Some(inverse) = placement.inverse() else {
-        return GrayImage {
-            width,
-            height,
-            samples,
-        };
+        return;
     };
     // Java2D steps in both axes on both loops, because a sheared placement moves
     // the source y as the destination x advances. `xbase`/`ybase` are the
@@ -340,11 +362,6 @@ pub fn draw_bicubic(
             samples[down * width + across] =
                 interpolate(&table, &gathered, at_x - ONE_HALF, at_y - ONE_HALF);
         }
-    }
-    GrayImage {
-        width,
-        height,
-        samples,
     }
 }
 

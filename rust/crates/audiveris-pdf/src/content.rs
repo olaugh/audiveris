@@ -94,6 +94,39 @@ impl Matrix {
         self.values = result;
     }
 
+    /// `new Matrix(AffineTransform)`, narrowing each term back to `float`.
+    #[must_use]
+    pub fn from_affine(transform: Affine) -> Self {
+        let [m00, m10, m01, m11, m02, m12] = transform.matrix();
+        Self::new(
+            m00 as f32, m10 as f32, m01 as f32, m11 as f32, m02 as f32, m12 as f32,
+        )
+    }
+
+    /// `Matrix.getScalingFactorX`.
+    ///
+    /// The guard is `Float.compare(single[1], 0.0f) != 0`, not `!= 0.0f`, and
+    /// the difference is real: `Float.compare` orders `-0.0` below `+0.0`, so a
+    /// shear term of `-0.0` takes the square-root branch rather than the plain
+    /// one. `total_cmp` is Rust's spelling of the same ordering.
+    #[must_use]
+    pub fn scaling_factor_x(&self) -> f32 {
+        if self.values[1].total_cmp(&0.0f32) == std::cmp::Ordering::Equal {
+            return self.values[0];
+        }
+        hypotenuse(self.values[0], self.values[1])
+    }
+
+    /// `Matrix.getScalingFactorY`, which reads the *other* diagonal's pair:
+    /// `single[3]` is the x shear and `single[4]` the y scale.
+    #[must_use]
+    pub fn scaling_factor_y(&self) -> f32 {
+        if self.values[3].total_cmp(&0.0f32) == std::cmp::Ordering::Equal {
+            return self.values[4];
+        }
+        hypotenuse(self.values[4], self.values[3])
+    }
+
     /// `Matrix.createAffineTransform`, widening each term to `double`.
     #[must_use]
     pub fn to_affine(self) -> Affine {
@@ -106,6 +139,16 @@ impl Matrix {
             f64::from(self.values[7]),
         )
     }
+}
+
+/// `(float) Math.sqrt(Math.pow(a, 2) + Math.pow(b, 2))`.
+///
+/// Written as Java writes it: both terms widen to `double`, the sum and root
+/// happen there, and only the result narrows back to `float`. Not `f32::hypot`,
+/// which is a different computation with different rounding.
+fn hypotenuse(a: f32, b: f32) -> f32 {
+    let (a, b) = (f64::from(a), f64::from(b));
+    (a * a + b * b).sqrt() as f32
 }
 
 /// One `Do` of an image XObject, and the CTM it draws under.

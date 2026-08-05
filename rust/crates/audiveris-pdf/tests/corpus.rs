@@ -26,6 +26,7 @@ use audiveris_pdf::content;
 use audiveris_pdf::document::Document;
 use audiveris_pdf::filter;
 use audiveris_pdf::object::{Name, Object};
+use audiveris_pdf::render;
 
 /// One `image` record: what PDFBox found behind a draw.
 #[derive(Debug, Clone)]
@@ -50,6 +51,8 @@ struct PageRecord {
     media: [f64; 4],
     crop: [f64; 4],
     rotation: i64,
+    /// FNV-1a-64 over the rendered page's samples. The end of the chain.
+    fnv: String,
 }
 
 /// Everything the oracle says about one page.
@@ -162,6 +165,7 @@ fn read_oracle(path: &Path) -> BTreeMap<(String, usize), Expected> {
                         .expect("rot")
                         .parse()
                         .expect("a rotation"),
+                    fnv: field(&parts, "fnv").expect("fnv").to_owned(),
                 });
             }
             _ => {}
@@ -217,6 +221,7 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     let mut checked_filters = 0usize;
     let mut checked_rasters = 0usize;
     let mut checked_draws = 0usize;
+    let mut checked_renders = 0usize;
     let mut unimplemented: BTreeMap<String, usize> = BTreeMap::new();
     let mut missing = Vec::new();
 
@@ -428,6 +433,24 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
                 }
                 Err(error) => panic!("{file} page {index}: device: {error}"),
             }
+
+            // The end of the chain: the rendered page Audiveris binarizes.
+            match audiveris_pdf::render::page(&document, &page, render::AUDIVERIS_DPI) {
+                Ok(rendered) => {
+                    assert_eq!(
+                        fnv(&rendered.image.samples),
+                        record.fnv,
+                        "{file} page {index}: rendered page"
+                    );
+                    checked_renders += 1;
+                }
+                Err(audiveris_pdf::Error::UnsupportedImage { reason }) => {
+                    *unimplemented
+                        .entry(format!("render: {reason}"))
+                        .or_default() += 1;
+                }
+                Err(error) => panic!("{file} page {index}: render: {error}"),
+            }
         }
     }
 
@@ -439,8 +462,8 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     // should shrink to nothing as the image filters land.
     eprintln!(
         "checked {checked_pages} pages, {checked_images} images, {checked_filters} filter chains, \
-         {checked_rasters} rasters, {checked_draws} draws; still unimplemented: \
-         {unimplemented:?}"
+         {checked_rasters} rasters, {checked_draws} draws, {checked_renders} renders; \
+         still unimplemented: {unimplemented:?}"
     );
     assert!(checked_pages > 0, "no page was checked");
 }

@@ -54,6 +54,7 @@ pub mod jbig2;
 pub mod lexer;
 pub mod object;
 pub mod raster;
+pub mod render;
 pub mod transform;
 
 pub use affine::Affine;

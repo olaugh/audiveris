@@ -56,7 +56,8 @@ AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- 
 ```
 
 It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters,
-189 draws; still unimplemented: {}`. Without the variable it prints that it skipped, so a
+189 draws, 178 renders`, with the eleven it refuses named in the
+`unimplemented` map. Without the variable it prints that it skipped, so a
 green run that says nothing is not evidence.
 
 **PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
@@ -260,6 +261,7 @@ which is why a page render has a black margin rather than an extrapolated one.
 | Image samples, by hash | **189/189 exact** (188 one-band gray, 1 three-band RGB) |
 | Rendered page size in pixels | 189/189 exact |
 | The transform Java2D receives, all six terms | **189/189 exact**, sign of zero included |
+| The rendered page, by hash | **178/189 exact**; 11 refused by name, below |
 
 Everything is ported from PDFBox's and jbig2-imageio's own source, fetched as
 `-sources.jar` from Maven Central, rather than from the specifications. Same
@@ -366,39 +368,69 @@ already cost a debugging round:
   state machine rather than the algebra for exactly this reason, and its tests
   pin both the `-0.0` and the closed-form counter-case.
 
-#### What is left: composing the page
+#### Composing the page: 178 of 189, and the primitive question is answered
 
-1. **The `ImageType.GRAY` destination** and its initial state. The sample
-   conversion this used to also cover is done -- see "Samples" above -- so what
-   is left here is the destination itself: what a `BufferedImage` of that type
-   holds before anything is drawn, and how the draw lands in it. The `page`
-   records grade this.
-2. **Java2D's primitive selection.** This is the one genuinely open question,
-   and it is worth reading `crates/audiveris-pdf/src/transform.rs` on it before
-   starting. `-Dsun.java2d.trace=count` reports the primitive each render
-   invokes:
+`render.rs` runs the whole chain and 178 pages reproduce Java's rendered raster
+bit for bit. The destination is the easy half: `ImageType.GRAY` is
+`TYPE_BYTE_GRAY`, one band, and `renderImage` clears it to `Color.WHITE` first,
+so an unwritten pixel is 255 and the margins stay white.
 
-   ```
-   near-identity page:  ScaledBlit(ByteGray, SrcNoEa, ByteGray)
-   ordinary page:       TransformHelper(ByteGray, SrcNoEa, IntArgbPre)
-   ```
+**Java2D's primitive selection was the open question, and the answer is not in
+Java2D.** The note here previously pointed at `DrawImage`'s `transformState`
+ladder. That ladder is a dead end: `DrawImage.renderImageScale`, the only route
+to a `ScaledBlit`, opens with
 
-   `ScaledBlit` is nearest-neighbour and ignores the interpolation hint, so on
-   about 10 of 189 draws Java2D never reaches the bicubic path at all. The
-   trigger is not the transform in isolation -- sweeping scale 0.5 to 1.1
-   against offsets 0/0.1249/0.5 through `Graphics2D.drawImage` interpolates in
-   every case but exact identity -- and it is not PDFBox, whose hint reads
-   `Bicubic` before and after the draw. What differs is the *draw context*:
-   PDFBox draws through a `Graphics2D` already carrying the page transform and a
-   clip, and `DrawImage` dispatches on `sg.transformState` and the composed
-   result rather than on the transform passed to `drawImage`. Read
-   `DrawImage.java`'s `transformState` ladder, then confirm against a real page
-   trace. Since Audiveris renders at a fixed 300 DPI, any scan whose page box
-   makes its image roughly 1:1 at 300 DPI lands here.
-3. **Colour.** One page of 189 is `TYPE_INT_RGB`, three bands, `Indexed` colour
-   space over `FlateDecode`. Its *samples* now decode exactly, so what remains
-   is the composition path: `transform.rs` is single-band, and that page needs a
-   three-band draw and a gray destination to land in.
+```
+// Currently only NEAREST_NEIGHBOR interpolation is implemented
+// for ScaledBlit operations.
+if (interpType != AffineTransformOp.TYPE_NEAREST_NEIGHBOR) return false;
+```
+
+so under a bicubic hint no transform whatsoever reaches a `ScaledBlit`. What
+changes is the hint, and **PDFBox changes it**, per draw, in
+`PageDrawer.drawImage`:
+
+```
+boolean isScaledUp =
+    bim.getWidth()  <= abs(round(ctm.getScalingFactorX() * xformScalingFactorX)) ||
+    bim.getHeight() <= abs(round(ctm.getScalingFactorY() * xformScalingFactorY));
+if (isScaledUp) graphics.setRenderingHint(KEY_INTERPOLATION, NEAREST_NEIGHBOR);
+```
+
+and restores the hints straight after, which is exactly why the earlier probe
+found the hint reading `Bicubic` both before and after. The port computes the
+same predicate and it selects **exactly 10 of 189 draws**, independently
+matching what `-Dsun.java2d.trace=count` counted. That agreement is the
+evidence; the rule was derived from source and the count was measured before
+the two were compared.
+
+**A second PDFBox path has to stay switched off, and it is fragile.**
+`drawBufferedImage` abandons `drawImage` entirely and pre-scales through
+`Image.getScaledInstance(w, h, SCALE_SMOOTH)` -- a different resampler --
+when a scale falls below `imageDownscalingOptimizationThreshold`, which
+defaults to **0.5**. Corpus pages scale by about 0.93, so the threshold is not
+what saves us; the branch also demands
+`VALUE_RENDER_QUALITY.equals(getRenderingHint(KEY_RENDERING))`, and Audiveris's
+hints carry only `ANTIALIASING` and `INTERPOLATION`. If Audiveris ever sets
+`KEY_RENDERING`, or renders where a scale drops under 0.5 with that hint
+present, the resampler changes and none of `transform.rs` describes the output.
+`render::hints_reach_the_downscaling_workaround` states the condition so it can
+be checked rather than remembered.
+
+#### What is left: eleven pages
+
+1. **Ten scaled-up draws**, which take PDFBox's nearest-neighbour flip and so
+   land on a `ScaledBlit(ByteGray, SrcNoEa, ByteGray)` rather than the bicubic
+   `TransformHelper`. The port refuses them by name today. What is needed is
+   OpenJDK's scaled-blit loop -- the fixed-point source stepping in
+   `LoopMacros.h`'s `DEFINE_SCALED_BLIT`, driven by the shift/increment setup in
+   the native `ScaledBlit` entry point -- not a general nearest-neighbour
+   resampler, because the rounding of the source coordinate is the whole
+   question.
+2. **One three-band page.** `IMSLP254387-PMLP0765.pdf` page 0 is `Indexed` over
+   `DeviceRGB`. Its samples already decode exactly; what is missing is the draw
+   itself, since `transform.rs` is single-band and the gray destination applies
+   a colour reduction whose parity is its own question.
 
 Use `-Dsun.java2d.trace=count` first for anything of this kind. It answered in
 one run what two rounds of source reading did not.
