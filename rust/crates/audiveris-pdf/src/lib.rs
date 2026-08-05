@@ -55,6 +55,7 @@ pub mod lexer;
 pub mod object;
 pub mod raster;
 pub mod render;
+pub mod scaledblit;
 pub mod transform;
 
 pub use affine::Affine;

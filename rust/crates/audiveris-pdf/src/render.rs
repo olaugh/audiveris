@@ -72,6 +72,7 @@ use crate::document::{Document, Page};
 use crate::error::{Error, Result};
 use crate::object::Object;
 use crate::raster;
+use crate::scaledblit;
 use crate::transform::{GrayImage, Placement, draw_bicubic_into};
 
 /// Audiveris's `pdfResolution` default.
@@ -149,35 +150,127 @@ pub fn page(document: &Document, page: &Page, dpi: f32) -> Result<Rendered> {
 
         let interpolation = interpolation(&device.transform, draw.ctm, &source);
         interpolations.push(interpolation);
-        if interpolation == Interpolation::NearestNeighbour {
-            return Err(Error::UnsupportedImage {
-                reason: "a scaled-up draw, which PDFBox resamples with a nearest-neighbour \
-                         ScaledBlit"
-                    .to_owned(),
-            });
-        }
 
         let composed =
             content::draw_transform(&device.transform, draw.ctm, source.width, source.height);
         let [scale_x, shear_y, shear_x, scale_y, left, top] = composed.matrix();
-        draw_bicubic_into(
-            &mut image,
-            &source,
-            Placement {
-                scale_x,
-                shear_y,
-                shear_x,
-                scale_y,
-                left,
-                top,
-            },
-        );
+
+        match primitive(&composed, &source, interpolation) {
+            Primitive::Transform => draw_bicubic_into(
+                &mut image,
+                &source,
+                Placement {
+                    scale_x,
+                    shear_y,
+                    shear_x,
+                    scale_y,
+                    left,
+                    top,
+                },
+            ),
+            Primitive::Scale(rect) => scaledblit::scale(
+                &mut image.samples,
+                device.width as usize,
+                device.height as usize,
+                &scaledblit::Surface {
+                    samples: &source.samples,
+                    width: source.width,
+                    height: source.height,
+                },
+                rect,
+            ),
+            Primitive::Copy => {
+                // A destination rectangle within MAX_TX_ERROR of the source's
+                // own size *and* at an integer offset. No corpus draw is, and a
+                // plain Blit is a different loop again, so it is refused rather
+                // than approximated.
+                return Err(Error::UnsupportedImage {
+                    reason: "a draw Java2D would satisfy with a plain Blit".to_owned(),
+                });
+            }
+            Primitive::NearestTransform => {
+                return Err(Error::UnsupportedImage {
+                    reason: "a sheared scaled-up draw, which transforms with nearest-neighbour \
+                             sampling rather than blitting"
+                        .to_owned(),
+                });
+            }
+        }
     }
 
     Ok(Rendered {
         image,
         interpolations,
     })
+}
+
+/// Which Java2D loop a draw resolves to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Primitive {
+    /// `renderImageXform` with a bicubic `TransformHelper`.
+    Transform,
+    /// `renderImageScale`, a `ScaledBlit`, carrying the destination rectangle.
+    Scale([f64; 4]),
+    /// `renderImageCopy`, a plain `Blit`.
+    Copy,
+    /// `renderImageXform` with nearest-neighbour sampling.
+    NearestTransform,
+}
+
+/// `DrawImage.transformImage`'s final tests, then `tryCopyOrScale`.
+///
+/// Java2D transforms three source corners -- `(0,0)`, `(w,h)`, `(0,h)` -- and
+/// decides from those rather than from the matrix, so that a transform carrying
+/// a tiny rotation still degenerates to a blit if its corners land square.
+fn primitive(
+    composed: &crate::affine::Affine,
+    source: &GrayImage,
+    interpolation: Interpolation,
+) -> Primitive {
+    let nearest = interpolation == Interpolation::NearestNeighbour;
+    let [m00, m10, m01, m11, m02, m12] = composed.matrix();
+    let (w, h) = (source.width as f64, source.height as f64);
+    // (0,0), (w,h), (0,h) through the transform.
+    let corner = |x: f64, y: f64| [m00.mul_add(x, m01 * y) + m02, m10.mul_add(x, m11 * y) + m12];
+    let [x0, y0] = corner(0.0, 0.0);
+    let [x1, y1] = corner(w, h);
+    let [x2, y2] = corner(0.0, h);
+
+    // Rectilinear: the upper-left and lower-left share an x, and the
+    // lower-right and lower-left share a y.
+    if (x0 - x2).abs() >= MAX_TX_ERROR || (y1 - y2).abs() >= MAX_TX_ERROR {
+        return if nearest {
+            Primitive::NearestTransform
+        } else {
+            Primitive::Transform
+        };
+    }
+
+    let (dw, dh) = (x1 - x0, y1 - y0);
+    if close_to_integer(source.width as i32, dw) && close_to_integer(source.height as i32, dh) {
+        let idx = (x0 + 0.5).floor() as i32;
+        let idy = (y0 + 0.5).floor() as i32;
+        if nearest || (close_to_integer(idx, x0) && close_to_integer(idy, y0)) {
+            return Primitive::Copy;
+        }
+    }
+    // "(For now) We can only use our ScaledBlits if the image is upright."
+    if dw > 0.0 && dh > 0.0 && nearest {
+        return Primitive::Scale([x0, y0, x1, y1]);
+    }
+    if nearest {
+        Primitive::NearestTransform
+    } else {
+        Primitive::Transform
+    }
+}
+
+/// `DrawImage.MAX_TX_ERROR`.
+const MAX_TX_ERROR: f64 = 0.0001;
+
+/// `DrawImage.closeToInteger`.
+fn close_to_integer(whole: i32, value: f64) -> bool {
+    (value - f64::from(whole)).abs() < MAX_TX_ERROR
 }
 
 /// `PageDrawer.drawImage`'s per-draw interpolation decision.
