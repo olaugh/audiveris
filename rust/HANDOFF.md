@@ -41,92 +41,34 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
 ## Open threads, in the order worth taking them
 
-### 1. Staff-line filament assembly loses sections (diagnosed, not fixed)
+### 1. Staff-line filament assembly (FIXED)
 
-This is the whole of the remaining SIG residual, and the diagnosis is finished --
-what is left is the fix.
+Closed. Every median residual in the SIG is gone -- seven across the corpus,
+including chula's -- and the grade residuals dropped from 21 to 6 with
+`BachInvention5.jpg`'s worst falling from 0.18 to 0.004.
 
-The residual is **not** in `createInters`, which an earlier note claimed. Java
-builds a barline median as `peak.getTop() - halfLine + 0.5` to
-`peak.getBottom() + halfLine + 0.5`, which the port reproduces exactly, and
-`StaffPeak`'s top and bottom are `final`, set once from
-`staff.getFirstLine().yAt(xMid)` and `getLastLine().yAt(xMid)`. So every median
-residual is a staff *line* residual.
+The cause was not where two earlier notes put it. `createInters` reproduces
+Java's median formula exactly, and `StaffPeak`'s top and bottom are `final`, so
+the residual had to be a staff *line* residual -- and it was: staff 11 carried
+two single-section stubs where Java had full-width lines.
 
-Instrumenting both runtimes to print each staff's line extents at `createInters`
-time localizes it exactly. On `BachInvention5.jpg`:
+But the ink was present and correctly clustered the whole time. `StaffCandidate`
+recorded only each line's *primary* filament id, and the projector resolved that
+id against the filament factory map, which returns the filament as it was
+**before** any cluster merge. When a cluster absorbs another, the resident line
+keeps its primary id and gains the incoming sections, so a line seeded by a short
+fragment resolved back to that fragment alone and the projector read a flat line.
+Staff abscissae were unaffected because `left`/`right` were already computed from
+the merged geometry, which is why nothing else caught it.
 
-```
-staff 11   Java: 47-1903  47-1903  94-1903  47-1903  48-1903
-staff 11   ours: 47-1903  47-1903  94-1903  47-55    48-62     <- 1-section stubs
-staff  3   Java: 50-1918  50-1918  50-1918  50-1918  50-1919
-staff  3   ours: 50-1853  50-1918  50-1918  50-1918  50-1919   <- short by 65 px
-```
+`StaffCandidate` now carries `line_filaments`, the cluster's merged line
+filaments, and both consumers in `recognize.rs` use them instead of resolving
+ids. `StaffCandidate`'s `PartialEq` is hand-written to skip the new field, which
+is derived data rather than identity.
 
-Every other staff on the page agrees extent for extent. The port's
-`FilamentGeometry::position_at` then extrapolates along the endpoint chord --
-faithfully; `CurvedFilament.getPositionAt` does the same -- which for a flat stub
-is a constant, so staff 11's four barline bottoms all come out 2236.5 where Java
-follows the real curve (2236, 2248, 2255, 2252).
-
-So the bug is in filament assembly during `retrieveLines`, upstream of everything
-GRID currently asserts. The completed-line endpoint oracle cannot see it because
-`completeLines` later pins both ends at `staff.getAbscissa(side)`, repairing the
-endpoints it compares while leaving the interior short.
-
-**That question is now answered, and the fault is narrower than it looked.**
-The ink exists, as full-width filaments, and they are correctly clustered. Tracing
-the filaments in the band where staff 11's bottom two lines belong:
-
-```
-FIL id 3042 x   47-55   y 2220.0        sections   1   <- what our staff line 3 uses
-FIL id 3098 x   99-1903 y 2220.5-2235.0 sections 107   <- the real line 3
-FIL id 3107 x   48-62   y 2236.5        sections   1   <- what our staff line 4 uses
-FIL id 3190 x   95-1903 y 2237.5-2252.0 sections  97   <- the real line 4
-```
-
-3098 and 3190 are both members of cluster 2956, at relative positions 2 and 3.
-Cluster 2956's bounds are `x 47 y 2169 w 1857 h 90` -- the whole of staff 11. So
-clustering is right; `LineCluster::include_line` merges sections into an occupied
-position exactly as Java's does; and the pipeline runs Java's `retrieveClusters`
-stages in Java's order.
-
-The divergence is a **single merge**. A two-line cluster of just the stubs,
-bounds `x 47 y 2219 w 16 h 20`, is found compatible with 2956 and merged at
-`delta_position: -3`. After it, staff 11's lines 0-2 are the full-width filaments
-and lines 3-4 are the stubs -- so the merge places the stub lines at positions
-that do not collide with 3098 and 3190, and the long filaments end up displaced
-rather than absorbed.
-
-**Where to look, in order.** Java's `mergeClusters` does
-`candidate.mergeWith(head, deltaPos)`, where `candidate` is the cluster currently
-being grown and `head` runs over clusters *earlier* in ordinate order -- so the
-later cluster absorbs the earlier one. Check that
-`merge_cluster_pair_if_compatible(.., head, current, ..)` merges in that
-direction, and check the sign convention of `delta_position` against Java's
-`canMerge` output. `LineCluster::merge_with` documents its delta as being between
-zero-based line indices rather than raw relative-position keys, which is exactly
-the kind of place a sign or origin can flip without any test noticing.
-
-Then: is staff 3's line 0 stopping 65 px early the same defect in milder form?
-Confirm they share a cause before fixing either.
-
-**Reproducing the traces.** All three were reverted. `FIL_TRACE` dumped filaments
-by y-band after `build_primary_cluster_pass` in `recognize.rs`; `EXP_TRACE`
-logged membership and dy in `cluster_expand::expand_one`; `MRG_TRACE` logged
-bounds, intersection, and the compatibility decision in
-`cluster_merge::merge_clusters_in_order`. Each is a handful of `eprintln!` lines
-keyed on the ids above.
-
-**How to reproduce the diff.** Both instrumentations were reverted; reapply them:
-
-- Rust: in `recognize.rs`, the closure `let ordinate = |geometry, x|` and the
-  three `geometry_of(...)` bindings just above it. Print `staff.id()` with each
-  line's `geometry.start()`, `geometry.stop()`, and `filament.sections().len()`.
-- Java: `BarsRetriever.createInters`, inside the per-staff loop, walk
-  `staff.getLines()` and print each `LineInfo.getEndPoint(LEFT/RIGHT).getX()`.
-  Building and running the Java side is described under "Running the Java app"
-  in `LINUX-SETUP.md`.
+What is left is 6 grade residuals across four pages, every one at most 0.0048.
+Those read as threshold effects rather than a structural divergence; they are
+recorded as exact equalities in `SIG_PAGE_LEDGER`, so any movement shows.
 
 ### 2. PDF ingest (measured and sequenced, not started)
 

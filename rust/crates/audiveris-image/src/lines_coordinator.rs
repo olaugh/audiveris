@@ -112,7 +112,7 @@ pub enum StaffCandidateKind {
 }
 
 /// Preliminary Java `Staff` allocation before barlines refine side limits.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct StaffCandidate {
     id: usize,
     source: LocatedClusterId,
@@ -121,8 +121,36 @@ pub struct StaffCandidate {
     right: f64,
     interline: usize,
     line_ids: Vec<FilamentId>,
+    /// The cluster's line filaments, each already carrying every section the
+    /// cluster merged into it.
+    ///
+    /// `line_ids` names only each line's *primary* filament, and looking that id
+    /// back up in the factory map returns the filament as it was before any
+    /// merge. That is not the staff's line: when a cluster absorbs another, the
+    /// resident line keeps its primary id and gains the incoming sections, so on
+    /// a staff whose line was seeded by a short fragment the pristine filament is
+    /// that fragment and nothing else.
+    line_filaments: Vec<StaffFilament>,
     small: bool,
     short: bool,
+}
+
+/// Equality ignores [`Self::line_filaments`], which is derived rather than
+/// independent: `source` names the cluster the candidate came from, and that
+/// cluster determines its lines. `StaffFilament` has no `PartialEq` of its own,
+/// and giving it one for this would mean comparing cached spline geometry.
+impl PartialEq for StaffCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.source == other.source
+            && self.kind == other.kind
+            && self.left == other.left
+            && self.right == other.right
+            && self.interline == other.interline
+            && self.line_ids == other.line_ids
+            && self.small == other.small
+            && self.short == other.short
+    }
 }
 
 impl StaffCandidate {
@@ -159,6 +187,15 @@ impl StaffCandidate {
     #[must_use]
     pub fn line_ids(&self) -> &[FilamentId] {
         &self.line_ids
+    }
+
+    /// The staff's line filaments, merged sections included.
+    ///
+    /// Prefer this over resolving [`Self::line_ids`] against the filament
+    /// factory map: the ids name pre-merge filaments, these are the lines.
+    #[must_use]
+    pub fn line_filaments(&self) -> &[StaffFilament] {
+        &self.line_filaments
     }
 
     #[must_use]
@@ -587,11 +624,13 @@ fn allocate_staffs(
             let mut starts = Vec::with_capacity(cluster.value.size());
             let mut stops = Vec::with_capacity(cluster.value.size());
             let mut line_ids = Vec::with_capacity(cluster.value.size());
+            let mut line_filaments = Vec::with_capacity(cluster.value.size());
             for (_, line) in cluster.value.lines() {
                 let geometry = line.filament().geometry()?;
                 starts.push(geometry.start().0);
                 stops.push(geometry.stop().0);
                 line_ids.push(line.primary_id());
+                line_filaments.push(line.filament().clone());
             }
             starts.sort_by(|one, two| one.partial_cmp(two).unwrap_or(Ordering::Equal));
             stops.sort_by(|one, two| one.partial_cmp(two).unwrap_or(Ordering::Equal));
@@ -608,6 +647,7 @@ fn allocate_staffs(
                 right: stops[stops.len() / 2],
                 interline: cluster.value.interline(),
                 line_ids,
+                line_filaments,
                 small: small_interline == Some(cluster.value.interline()),
                 short: false,
             })

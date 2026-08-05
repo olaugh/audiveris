@@ -37,9 +37,7 @@ use crate::grid_executor::{
 use audiveris_image::ingest::{self, LoadError};
 use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
-use audiveris_image::lines_coordinator::{
-    ClusterPassState, StaffCandidate, retrieve_staff_candidates,
-};
+use audiveris_image::lines_coordinator::{StaffCandidate, retrieve_staff_candidates};
 use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::prepared_bars::ProductionProcessBars;
 use audiveris_image::prepared_completion::{ProductionCompleteLines, production_line_completion};
@@ -322,22 +320,14 @@ fn project_staff_peaks(
     recognition: &ScaleRecognition,
     projector_pixels: &[u8],
     staff: &StaffCandidate,
-    primary: &ClusterPassState,
     scale_parameters: &StaffProjectorScaleParameters,
 ) -> Result<(Vec<StaffPeak>, Vec<ProjectionBlank>, i32, i32), GridRecognitionError> {
-    let lines: Vec<_> = staff
-        .line_ids()
-        .iter()
-        .map(|id| {
-            primary
-                .filaments()
-                .get(id)
-                .ok_or_else(|| GridRecognitionError::Stage {
-                    stage: "projector",
-                    message: format!("staff line {} is missing", id.value()),
-                })
-        })
-        .collect::<Result<_, _>>()?;
+    // The cluster's own line filaments, not the factory's pre-merge ones: a
+    // line seeded by a short fragment keeps that fragment's id after absorbing
+    // the full-width filament, so resolving the id here would return the
+    // fragment and the projector would read a flat line.
+    let lines: Vec<&audiveris_image::filament::StaffFilament> =
+        staff.line_filaments().iter().collect();
     let Some((first, last)) = lines.first().zip(lines.last()) else {
         return Ok((
             Vec::new(),
@@ -970,7 +960,6 @@ pub fn recognize_grid_lines(
             &scale_recognition,
             projector_pixels,
             staff,
-            &primary,
             &projector_scale,
         )?;
         let peaks = projected
@@ -986,10 +975,9 @@ pub fn recognize_grid_lines(
         // Java `AlignmentStaff` top/bottom are the first and last line
         // ordinates taken at the staff's left end.
         let line_ordinate = |index: usize| -> Result<f64, GridRecognitionError> {
-            let id = staff.line_ids()[index];
-            primary
-                .filaments()
-                .get(&id)
+            staff
+                .line_filaments()
+                .get(index)
                 .and_then(|filament| filament.geometry().ok())
                 .and_then(|geometry| geometry.position_at(staff.left()).ok())
                 .ok_or_else(|| GridRecognitionError::Stage {
@@ -1719,12 +1707,12 @@ mod tests {
     /// the bottom, which does not: that is structural and is the thread to pull
     /// next.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
-        ("BachInvention5.jpg", 0, 6, 18.0, 13, 0.18),
+        ("BachInvention5.jpg", 0, 0, 0.0, 1, 0.005),
         ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),
         ("allegretto.png", 0, 0, 0.0, 0, 0.0),
         ("batuque.png", 0, 0, 0.0, 0, 0.0),
         ("carmen.png", 0, 0, 0.0, 2, 0.004),
-        ("chula.png", 0, 1, 1.0, 0, 0.0),
+        ("chula.png", 0, 0, 0.0, 0, 0.0),
         ("cucaracha.png", 0, 0, 0.0, 1, 0.004),
         ("hove.png", 0, 0, 0.0, 0, 0.0),
         ("zizi.png", 0, 0, 0.0, 0, 0.0),
