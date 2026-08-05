@@ -1706,6 +1706,23 @@ mod tests {
     /// `BachInvention5.jpg` still carries three medians 11 to 18 pixels short at
     /// the bottom, which does not: that is structural and is the thread to pull
     /// next.
+    /// Per-page residuals, as exact equalities.
+    ///
+    /// Medians are all zero: every barline inter reproduces Java's median on
+    /// every page. What is left is six intrinsic grades, each between 0.0036 and
+    /// 0.0048 -- and that is not the oracle's own precision. Java persists
+    /// grades to three decimals, which `SIG_GRADE_PRECISION` already absorbs at
+    /// 5e-4, so these sit an order of magnitude above the artifact floor and are
+    /// a real divergence.
+    ///
+    /// They are also not scattered. Of 420 barlines across 65 staves, the six
+    /// that differ are **every one of them the leftmost or rightmost barline of
+    /// its staff**, and no interior barline differs anywhere in the corpus. The
+    /// contextual grades follow their intrinsic ones, so there is one cause, in
+    /// whatever the staff-vertical impacts measure differently at a staff's
+    /// extreme abscissa -- most likely the chunk or serif lookup, which is the
+    /// one part of the peak measurement that reaches past the staff's own line
+    /// data and into extrapolated geometry.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
         ("BachInvention5.jpg", 0, 0, 0.0, 1, 0.005),
         ("D0392410-1.256.png", 0, 0, 0.0, 2, 0.005),

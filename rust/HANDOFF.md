@@ -66,9 +66,32 @@ filaments, and both consumers in `recognize.rs` use them instead of resolving
 ids. `StaffCandidate`'s `PartialEq` is hand-written to skip the new field, which
 is derived data rather than identity.
 
-What is left is 6 grade residuals across four pages, every one at most 0.0048.
-Those read as threshold effects rather than a structural divergence; they are
-recorded as exact equalities in `SIG_PAGE_LEDGER`, so any movement shows.
+What is left is 6 grade residuals across four pages, and they are **not** the
+oracle's own precision -- Java persists grades to three decimals, which
+`SIG_GRADE_PRECISION` already absorbs at 5e-4, so a 0.0036-0.0048 delta sits an
+order of magnitude above the artifact floor.
+
+They are also not scattered. Of 420 barlines across 65 staves, the six that
+differ are **every one of them the leftmost or rightmost barline of its staff**,
+and no interior barline differs anywhere in the corpus:
+
+```
+BachInvention5.jpg  staff  1 x 1917.0   bars  194..1917 (3)  RIGHTMOST
+D0392410-1.256.png  staff  8 x  269.5   bars  270..2774 (6)  LEFTMOST
+D0392410-1.256.png  staff 10 x 2773.0   bars  268..2773 (6)  RIGHTMOST
+carmen.png          staff  3 x 2402.5   bars  166..2402 (7)  RIGHTMOST
+carmen.png          staff 10 x 2412.5   bars  173..2412 (8)  RIGHTMOST
+cucaracha.png       staff  6 x  156.0   bars  156..2399 (7)  LEFTMOST
+```
+
+Each is an intrinsic-grade difference with the contextual grade following it, so
+there is one cause: something in the staff-vertical impacts measures differently
+at a staff's extreme abscissa. The prime suspect is the chunk or serif lookup,
+which is the one part of the peak measurement reaching past the staff's own line
+data into extrapolated geometry -- the same family as the bug above, via a
+different consumer. `bars_logic.rs` around the `half_line` serif bounds is where
+to start, and `AUDIVERIS_DEBUG_PURGE`-style per-impact tracing on both runtimes
+is the way to close it.
 
 ### 2. PDF ingest (measured and sequenced, not started)
 
