@@ -43,7 +43,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod affine;
 pub mod ccitt;
+pub mod content;
 pub mod document;
 pub mod error;
 pub mod filter;
@@ -54,6 +56,7 @@ pub mod object;
 pub mod raster;
 pub mod transform;
 
+pub use affine::Affine;
 pub use document::{Document, Page, Rectangle};
 pub use error::{Error, Result};
 pub use object::{Dictionary, Name, Object, Reference, Stream};

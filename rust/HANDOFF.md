@@ -55,8 +55,8 @@ basename of the URL. `oracle/pdf-pages.txt` records which seven by name. Then:
 AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- --nocapture
 ```
 
-It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters;
-still unimplemented: {}`. Without the variable it prints that it skipped, so a
+It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters,
+189 draws; still unimplemented: {}`. Without the variable it prints that it skipped, so a
 green run that says nothing is not evidence.
 
 **PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
@@ -258,6 +258,8 @@ which is why a page render has a black margin rather than an extrapolated one.
 | Raw stream bytes, by hash | 189/189 exact |
 | Decoded stream bytes, by hash | **189/189 exact** (93 CCITT G4, 95 JBIG2, 1 Flate) |
 | Image samples, by hash | **189/189 exact** (188 one-band gray, 1 three-band RGB) |
+| Rendered page size in pixels | 189/189 exact |
+| The transform Java2D receives, all six terms | **189/189 exact**, sign of zero included |
 
 Everything is ported from PDFBox's and jbig2-imageio's own source, fetched as
 `-sources.jar` from Maven Central, rather than from the specifications. Same
@@ -323,25 +325,55 @@ Three things in it are load-bearing and none is implied by "unpack the bits":
   entry through `byte / 255f` and back through `(int)(x * 255f)`, in `float`
   with a truncating cast. It is written the long way for that reason.
 
+#### The content stream and the draw transform: done, 189 of 189
+
+`content.rs` and `affine.rs`. Every one of the 189 draws now reproduces the
+six-term transform Java2D receives, exactly, at the oracle's full 17
+significant digits -- **and the sign of every zero**, which is checked
+separately because `-0.0 == 0.0` would let a wrong answer pass.
+
+The operator set was probed rather than assumed, and the probe paid for itself
+twice. There are exactly four operators and exactly two page shapes:
+
+```
+  36 x  cm Do
+ 153 x  q cm Do Q
+```
+
+So 36 pages never push a graphics state at all: they concatenate straight onto
+the initial CTM. Anything outside that set is refused by name, because
+silently skipping an operator that moves the CTM would misplace the image and
+read like a rasterizer bug.
+
+Three float questions decide the answer, and the third was the one that had
+already cost a debugging round:
+
+- **The CTM is a `float` matrix.** PDFBox's `Matrix` holds `float[9]` and `cm`
+  multiplies in `float`, so a `cm` operand of `633.5724` is really
+  `633.57238769531250`. `content::Matrix` is `f32` for that reason and widens
+  only where `createAffineTransform` does.
+- **The DPI scale is a `float` division.** `renderImageWithDPI` passes
+  `dpi / 72f`, so a 792 pt page renders **3299** pixels tall, not 3300. The
+  `page` records' `render` size now grades this on every page.
+- **`AffineTransform` is a state machine, and it is load-bearing.** Every
+  mutator dispatches on cached bits describing which of translate, scale and
+  shear are present, and the branches are not algebraically identical -- they
+  drop terms known to be zero. Dropping `+ 0.0` is a no-op for every double
+  except `-0.0`. The page transform reaches `concatenate`'s scale-only case,
+  which computes `m10 = T10 * m11` with `T10` at `+0.0` and `m11` negative from
+  the y flip, giving **`-0.0`** -- which is what the oracle records on all 189
+  draws, and what a closed-form composition gets wrong. `affine.rs` ports the
+  state machine rather than the algebra for exactly this reason, and its tests
+  pin both the `-0.0` and the closed-form counter-case.
+
 #### What is left: composing the page
 
-1. **The content stream.** Interpret enough of it to find each `Do` and the CTM
-   it draws under. The corpus needs `q`/`Q`/`cm`/`Do` and nothing else, but
-   check that with a probe rather than assuming it.
-2. **Compose the transform PDFBox composes.** Reading it out of PDFBox rather
-   than deriving it is what closed the last gap once already: composed in closed
-   form the horizontal terms were bit-identical and `m11` was wrong in its last
-   bits, which alone put 924 samples wrong across 13 destination rows. Two traps
-   that are already known -- PDFBox computes the DPI scale in **`float`**, so a
-   792 pt page is 3299.999874 and floors to 3299 rather than 3300; and
-   `PDRectangle` holds **floats**, which is why `document.rs` does too. The
-   `draw` records in `oracle/pdf-pages.txt` are the grader.
-3. **The `ImageType.GRAY` destination** and its initial state. The sample
+1. **The `ImageType.GRAY` destination** and its initial state. The sample
    conversion this used to also cover is done -- see "Samples" above -- so what
    is left here is the destination itself: what a `BufferedImage` of that type
    holds before anything is drawn, and how the draw lands in it. The `page`
    records grade this.
-4. **Java2D's primitive selection.** This is the one genuinely open question,
+2. **Java2D's primitive selection.** This is the one genuinely open question,
    and it is worth reading `crates/audiveris-pdf/src/transform.rs` on it before
    starting. `-Dsun.java2d.trace=count` reports the primitive each render
    invokes:
@@ -363,7 +395,7 @@ Three things in it are load-bearing and none is implied by "unpack the bits":
    `DrawImage.java`'s `transformState` ladder, then confirm against a real page
    trace. Since Audiveris renders at a fixed 300 DPI, any scan whose page box
    makes its image roughly 1:1 at 300 DPI lands here.
-5. **Colour.** One page of 189 is `TYPE_INT_RGB`, three bands, `Indexed` colour
+3. **Colour.** One page of 189 is `TYPE_INT_RGB`, three bands, `Indexed` colour
    space over `FlateDecode`. Its *samples* now decode exactly, so what remains
    is the composition path: `transform.rs` is single-band, and that page needs a
    three-band draw and a gray destination to land in.

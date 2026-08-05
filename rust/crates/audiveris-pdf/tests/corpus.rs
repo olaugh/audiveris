@@ -22,6 +22,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use audiveris_pdf::content;
 use audiveris_pdf::document::Document;
 use audiveris_pdf::filter;
 use audiveris_pdf::object::{Name, Object};
@@ -56,6 +57,11 @@ struct PageRecord {
 struct Expected {
     images: Vec<ImageRecord>,
     page: Option<PageRecord>,
+    /// The six-term transform Java2D receives per draw, at 17 significant
+    /// digits, read out of a `PageDrawer` subclass.
+    draws: Vec<[f64; 6]>,
+    /// The rendered page's size in pixels.
+    render: Option<(u32, u32)>,
 }
 
 /// FNV-1a-64, the hash the probe writes.
@@ -129,7 +135,26 @@ fn read_oracle(path: &Path) -> BTreeMap<(String, usize), Expected> {
                     }),
                 });
             }
+            "draw" => {
+                let mut terms = [0f64; 6];
+                for (index, key) in ["m00", "m10", "m01", "m11", "m02", "m12"]
+                    .iter()
+                    .enumerate()
+                {
+                    terms[index] = field(&parts, key)
+                        .expect("a transform term")
+                        .parse()
+                        .expect("a finite term");
+                }
+                entry.draws.push(terms);
+            }
             "page" => {
+                entry.render = parts.iter().position(|p| *p == "render").map(|at| {
+                    (
+                        parts[at + 1].parse().expect("a render width"),
+                        parts[at + 2].parse().expect("a render height"),
+                    )
+                });
                 entry.page = Some(PageRecord {
                     media: numbers(&parts, "media").expect("a media box"),
                     crop: numbers(&parts, "crop").expect("a crop box"),
@@ -191,6 +216,7 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     let mut checked_images = 0usize;
     let mut checked_filters = 0usize;
     let mut checked_rasters = 0usize;
+    let mut checked_draws = 0usize;
     let mut unimplemented: BTreeMap<String, usize> = BTreeMap::new();
     let mut missing = Vec::new();
 
@@ -347,6 +373,61 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
                     Err(error) => panic!("{file} page {index}: raster: {error}"),
                 }
             }
+
+            // The transform each `Do` draws under: the device transform
+            // `PDFRenderer` and `PageDrawer` install, composed with the CTM the
+            // content stream built. Compared exactly, not approximately -- the
+            // oracle stores 17 significant digits precisely so that the last
+            // bits, which are where composing this wrongly goes wrong, are
+            // visible.
+            match content::device(&page, 300f32 / 72f32) {
+                Ok(device) => {
+                    if let Some((width, height)) = expected.render {
+                        assert_eq!(
+                            (device.width, device.height),
+                            (width, height),
+                            "{file} page {index}: rendered page size"
+                        );
+                    }
+                    let draws = content::image_draws(&document, &page)
+                        .unwrap_or_else(|error| panic!("{file} page {index}: {error}"));
+                    assert_eq!(
+                        draws.len(),
+                        expected.draws.len(),
+                        "{file} page {index}: draw count"
+                    );
+                    for (ordinal, (draw, record)) in draws.iter().zip(&expected.draws).enumerate() {
+                        let image = &expected.images[ordinal];
+                        let composed = content::draw_transform(
+                            &device.transform,
+                            draw.ctm,
+                            image.width as usize,
+                            image.height as usize,
+                        );
+                        for (term, (mine, theirs)) in
+                            composed.matrix().iter().zip(record).enumerate()
+                        {
+                            assert_eq!(
+                                mine, theirs,
+                                "{file} page {index} draw {ordinal}: term {term}"
+                            );
+                            // `-0.0 == 0.0`, and the sign of zero is exactly
+                            // what the state machine decides, so it is checked
+                            // separately or it is not checked at all.
+                            assert_eq!(
+                                mine.is_sign_negative(),
+                                theirs.is_sign_negative(),
+                                "{file} page {index} draw {ordinal}: term {term} sign of zero"
+                            );
+                        }
+                        checked_draws += 1;
+                    }
+                }
+                Err(audiveris_pdf::Error::UnsupportedImage { reason }) => {
+                    *unimplemented.entry(format!("page: {reason}")).or_default() += 1;
+                }
+                Err(error) => panic!("{file} page {index}: device: {error}"),
+            }
         }
     }
 
@@ -358,7 +439,8 @@ fn reads_the_structure_pdfbox_reads_on_every_corpus_page() {
     // should shrink to nothing as the image filters land.
     eprintln!(
         "checked {checked_pages} pages, {checked_images} images, {checked_filters} filter chains, \
-         {checked_rasters} rasters; still unimplemented: {unimplemented:?}"
+         {checked_rasters} rasters, {checked_draws} draws; still unimplemented: \
+         {unimplemented:?}"
     );
     assert!(checked_pages > 0, "no page was checked");
 }
