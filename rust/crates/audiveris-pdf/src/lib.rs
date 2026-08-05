@@ -48,27 +48,43 @@
 //! scales, including the three real IMSLP ratios, upscale and downscale,
 //! identity, and 1x1. All 112 agree bit for bit.
 //!
-//! # Status against a whole page
+//! # Status against whole pages
 //!
-//! [`draw_bicubic`] has been run against PDFBox's own render of a real IMSLP
-//! page -- its decoded 2315x2848 source, its 2479x3299 output -- and reproduces
-//! **8177297 of 8178221 samples**, or 99.9887%. The 924 that differ are
-//! confined to **13 destination rows**, spread thinly across 778 columns, and
-//! are almost all one count out.
+//! [`draw_bicubic`] has been run against PDFBox's own renders of twelve real
+//! IMSLP pages, each fed the exact `AffineTransform` PDFBox composed for that
+//! draw, read out of a `PageDrawer` subclass. **Eight are bit-exact**, including
+//! every case the corpus actually turns on:
 //!
-//! That shape is diagnostic: a structural error would spread over the whole
-//! page, and a wrong kernel would not respect row boundaries. Thirteen bad rows
-//! out of 3299 is the vertical coordinate landing on the far side of a
-//! coefficient-table boundary, which means `scale_y` differs from PDFBox's in
-//! its last few bits.
+//! ```text
+//! 2315x2848 -> 2479x3299   offset placement, upscale      exact
+//! 2292x2921 -> 2479x3299   offset placement, upscale      exact
+//! 2256x2985 -> 2479x3299   offset placement, upscale      exact
+//! 6109x7676 -> 3106x3903   origin, 0.508 downscale        exact
+//! 5867x7372 -> 3104x3900   origin, 0.529 downscale        exact
+//! 6109x7676 -> 3106x3903   origin, 0.508 downscale        exact
+//! 4960x7015 -> 2480x3507   origin, 0.500 downscale        exact  (x2)
+//! ```
 //!
-//! The cause is that the placement here is *reconstructed* -- page box, DPI,
-//! and the content stream's `cm` composed in closed form -- while PDFBox
-//! composes a chain of `AffineTransform` concatenations. Those agree to about
-//! fifteen digits, not to the bit. Closing it means reading PDFBox's final
-//! `AffineTransform` for the image draw rather than deriving it, which is a
-//! `PageDrawer` subclass and a print statement, not new arithmetic here.
-
+//! Reading PDFBox's transform rather than reconstructing it is what closed the
+//! last gap. Composed in closed form from the page box, the DPI and the content
+//! stream's `cm`, the horizontal terms came out bit-identical but the vertical
+//! ones did not -- `scale_y` differed in its last bits -- and that alone put 924
+//! samples wrong, confined to 13 destination rows. With PDFBox's own numbers the
+//! same page is exact.
+//!
+//! Four pages are not yet reproduced, and neither reason is the transform:
+//!
+//! - One decodes to `TYPE_INT_RGB` with three bands. This crate is single-band
+//!   so far, so there is nothing to compare; colour sources need the band
+//!   handling before they mean anything.
+//! - Three share one signature: a near-identity scale (0.99996) with a
+//!   sub-pixel vertical offset and a destination a pixel smaller than the
+//!   source. Java2D's `DrawImage` dispatches by transform type -- identity,
+//!   integer translate, general scale, general transform each take a different
+//!   loop -- so a transform this close to identity is the prime suspect for
+//!   reaching something other than `TransformHelper`. Worth confirming before
+//!   assuming this code is wrong.
+//!
 #![forbid(unsafe_code)]
 
 /// Mitchell-Netravali coefficient for the shipping build's integer math.

@@ -161,28 +161,29 @@ own:
   identity for this image in a naive subclass. Read the content stream, or
   verify the engine subclass against it, before trusting a CTM.
 
-`draw_bicubic` is that generalization and it is **verified to 99.9887% against a
-whole real page**: PDFBox's decoded 2315x2848 source drawn into its 2479x3299
-render reproduces 8177297 of 8178221 samples. Reconstructing the placement from
-the page box, the DPI and the content stream's `cm` took that from 22.5% wrong
-to 0.0113% wrong.
+`draw_bicubic` is that generalization, and fed PDFBox's own composed
+`AffineTransform` it reproduces **eight of twelve real IMSLP pages bit-exactly**,
+covering every case the corpus turns on: offset placements with upscale, and
+0.5-0.53 downscales of 6109x7676 G4 scans.
 
-The remaining 924 samples are confined to **13 destination rows** out of 3299,
-thinly spread over 778 columns, almost all one count out. That shape rules out a
-structural error and points at `scale_y` differing from PDFBox's in its last
-bits: the placement here is composed in closed form, while PDFBox concatenates
-`AffineTransform`s, and those agree to about fifteen digits rather than to the
-bit.
+Reading the transform rather than deriving it is what closed it. Composed in
+closed form the horizontal terms were already bit-identical, but `scale_y`
+differed in its last bits, which alone put 924 samples wrong across 13
+destination rows. `oracle/java/` has no probe for this yet; the one used was a
+`PageDrawer` subclass overriding `drawImage`, printing
+`getGraphics().getTransform()` concatenated with
+`new AffineTransform(ctm)` -> `scale(1.0/w, -1.0/h)` -> `translate(0, -h)`.
+**Promote that probe into `oracle/java/` and pin these pages** -- it is the only
+way this stays honest once decoders start landing.
 
-**Next step, and it is small:** stop deriving the transform and read it. Subclass
-`PageDrawer`, intercept the image draw, and print
-`graphics.getTransform()` composed with the image transform PDFBox builds
-(`new AffineTransform(ctm)`, then `scale(1.0/w, -1.0/h)`, then
-`translate(0, -h)`). Feed those six doubles into `Placement` and the 13 rows
-should go. Only then are the decoders worth writing.
+The four remaining pages are not transform problems:
 
-`oracle/java/` has probes for dumping PDFBox's decoded source and rendered page
-as raw gray for exactly that comparison.
+- One decodes to `TYPE_INT_RGB`, three bands. The crate is single-band so far.
+- Three share a signature: near-identity scale (0.99996), sub-pixel vertical
+  offset, destination a pixel smaller than the source. Java2D's `DrawImage`
+  dispatches by transform type -- identity, integer translate, general scale,
+  general transform each take a different loop -- so the suspicion is that these
+  never reach `TransformHelper` at all. Confirm that before touching this code.
 
 Test sources are the twelve PDFs in the `imslp-pseudo` repo's
 `manifests/acquired_scans.json`, each with a download URL.
