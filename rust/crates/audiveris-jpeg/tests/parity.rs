@@ -134,6 +134,117 @@ fn decodes_generated_jpegs_exactly_across_sampling_factors() {
     assert!(checked >= 8, "expected the full fixture set, ran {checked}");
 }
 
+/// Encodes with libjpeg at the given sampling factors, baseline sequential.
+///
+/// Encoding here rather than checking in fixtures is deliberate: the sweep
+/// below covers 140 combinations, and 140 committed files would cost a reviewer
+/// more than the coverage is worth while being no easier to reproduce.
+#[allow(
+    unsafe_code,
+    reason = "the reference encoder is a C library; this is test-only FFI"
+)]
+fn libjpeg_encode(width: usize, height: usize, factors: [(i32, i32); 3], rgb: &[u8]) -> Vec<u8> {
+    use mozjpeg_sys::{
+        J_COLOR_SPACE, boolean, jpeg_compress_struct, jpeg_create_compress, jpeg_destroy_compress,
+        jpeg_error_mgr, jpeg_finish_compress, jpeg_mem_dest, jpeg_set_defaults, jpeg_set_quality,
+        jpeg_start_compress, jpeg_std_error, jpeg_write_scanlines,
+    };
+    // SAFETY: every pointer refers to a live local or to `rgb`, which outlives
+    // the compress object; the object is destroyed before return.
+    unsafe {
+        let mut error: jpeg_error_mgr = mem::zeroed();
+        let mut cinfo: jpeg_compress_struct = mem::zeroed();
+        cinfo.common.err = jpeg_std_error(&mut error);
+        jpeg_create_compress(&mut cinfo);
+        let mut buffer: *mut u8 = std::ptr::null_mut();
+        let mut length: std::os::raw::c_ulong = 0;
+        jpeg_mem_dest(&mut cinfo, &mut buffer, &mut length);
+        cinfo.image_width = width as u32;
+        cinfo.image_height = height as u32;
+        cinfo.input_components = 3;
+        cinfo.in_color_space = J_COLOR_SPACE::JCS_RGB;
+        jpeg_set_defaults(&mut cinfo);
+        jpeg_set_quality(&mut cinfo, 80, boolean::from(true));
+        // mozjpeg's defaults are progressive; this decoder is baseline only.
+        cinfo.scan_info = std::ptr::null();
+        cinfo.num_scans = 0;
+        for (index, (horizontal, vertical)) in factors.iter().enumerate() {
+            let component = cinfo.comp_info.add(index);
+            (*component).h_samp_factor = *horizontal;
+            (*component).v_samp_factor = *vertical;
+        }
+        jpeg_start_compress(&mut cinfo, boolean::from(true));
+        let stride = width * 3;
+        while cinfo.next_scanline < cinfo.image_height {
+            let rows = [rgb.as_ptr().add(cinfo.next_scanline as usize * stride)];
+            jpeg_write_scanlines(&mut cinfo, rows.as_ptr(), 1);
+        }
+        jpeg_finish_compress(&mut cinfo);
+        let encoded = std::slice::from_raw_parts(buffer, length as usize).to_vec();
+        jpeg_destroy_compress(&mut cinfo);
+        encoded
+    }
+}
+
+/// Every sampling combination libjpeg will decode, at several geometries.
+///
+/// The committed fixtures cover 4:4:4, 4:2:2, and 4:2:0, which is what real
+/// encoders emit. libjpeg decodes far more than that, and Audiveris therefore
+/// accepts far more than that: any factor from one to four, in any combination
+/// whose ratios divide evenly and whose MCU holds at most ten blocks. Three
+/// upsampling paths live only outside the common three -- the vertical-only
+/// triangle filter for 4:4:0, and plain replication for every other whole
+/// ratio -- and both were wrong here until this sweep ran.
+///
+/// The vertical filter is the reason to sweep rather than spot-check: its two
+/// halves round with *different* biases, one and two, where the corresponding
+/// horizontal filter's asymmetry is easy to notice and this one is not. Using a
+/// single bias was off by one on about an eighth of the samples, which is
+/// invisible in anything but an exact comparison.
+#[test]
+fn decodes_every_sampling_combination_exactly_as_libjpeg_does() {
+    // Odd sizes put partial MCUs and one-sample planes in play; 1x9 in
+    // particular leaves chroma planes too narrow for the fancy filters.
+    const GEOMETRY: &[(usize, usize)] =
+        &[(1, 1), (1, 9), (3, 5), (7, 7), (17, 9), (32, 24), (33, 25)];
+    let mut checked = 0usize;
+    for &(width, height) in GEOMETRY {
+        // Detail at every scale, and deterministic.
+        let rgb: Vec<u8> = (0..width * height * 3)
+            .map(|index| {
+                let (x, y, channel) = ((index / 3) % width, (index / 3) / width, index % 3);
+                ((x * 37 + y * 91 + channel * 53) % 256) as u8
+            })
+            .collect();
+        for luma_h in 1..=4i32 {
+            for luma_v in 1..=4i32 {
+                for chroma in [(1, 1), (2, 1), (1, 2), (2, 2)] {
+                    // libjpeg refuses fractional ratios, and its decompressor
+                    // refuses an MCU of more than ten blocks.
+                    if luma_h % chroma.0 != 0 || luma_v % chroma.1 != 0 {
+                        continue;
+                    }
+                    if luma_h * luma_v + 2 * chroma.0 * chroma.1 > 10 {
+                        continue;
+                    }
+                    let factors = [(luma_h, luma_v), chroma, chroma];
+                    let bytes = libjpeg_encode(width, height, factors, &rgb);
+                    let (out_width, _, components, reference) = libjpeg_decode(&bytes);
+                    let name = format!(
+                        "{width}x{height} luma {luma_h}x{luma_v} chroma {}x{}",
+                        chroma.0, chroma.1
+                    );
+                    let decoded = audiveris_jpeg::decode(&bytes)
+                        .unwrap_or_else(|error| panic!("{name}: decode failed: {error}"));
+                    assert_identical(&name, &decoded.samples, &reference, out_width, components);
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 140, "the sweep lost combinations");
+}
+
 #[test]
 fn rejects_processes_it_cannot_reproduce() {
     let path = repo_path("rust/crates/audiveris-jpeg/tests/data/unsupported-progressive.bin");
@@ -218,20 +329,54 @@ const DELIBERATE_REFUSALS: &[(&str, &str)] = &[(
     "progressive JPEG is refused rather than approximated; see the crate docs",
 )];
 
-/// Accept or reject must match Java's, file for file.
+/// Damaged files where Java's libjpeg and libjpeg-turbo disagree with each
+/// other, with how many of Java's samples this decoder does not reproduce.
 ///
-/// This is the half of parity that `assert_identical` cannot reach. A decoder
-/// that accepts a file Audiveris rejects produces an image where Audiveris
-/// produces an error, and there are no samples to compare because one side has
-/// none. Four such files came out of differential fuzzing, each of them a check
-/// libjpeg makes and this decoder did not: a scan naming a component the frame
-/// never declared, a trailing marker with an impossible length, a Huffman table
-/// whose DC symbols exceed the magnitude range, and a second start-of-image.
+/// This is a real gap, recorded rather than hidden. Every well-formed fixture,
+/// every combination in the sampling sweep, and the corpus page all reproduce
+/// Java exactly -- and so does truncation, which is the damage a scan corpus
+/// actually contains. What remains is mid-scan corruption and the extreme
+/// coefficients a fuzzer synthesises, where the two libjpegs part company:
+/// measured three ways, this decoder agrees with libjpeg-turbo to the sample on
+/// all three files, and turbo differs from Java by exactly the counts below.
 ///
-/// Geometry is compared too, so a file that decodes to the wrong size fails here
-/// rather than silently downstream.
+/// Chasing Java here means reproducing libjpeg 6b's corrupt-data path
+/// specifically, against an oracle (turbo) that pulls the other way. The counts
+/// are exact so that any movement, in either direction, shows up.
+const JAVA_DIVERGENCES: &[(&str, usize)] = &[
+    ("corrupt-resync-80x80-420.jpg", 1032),
+    ("crash-2b5f8084239508d1445bd3726c13bad02e7b4a5b", 41),
+    ("wide-coefficients-1x9-422.jpg", 20),
+];
+
+/// FNV-1a-64, as the other oracles in `rust/oracle` use.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    hash
+}
+
+/// Java is the authority, on both what decodes and what it decodes to.
+///
+/// The rest of this file compares against libjpeg-turbo, which is faster and
+/// points at the offending sample. But Audiveris reads JPEGs through Java's
+/// ImageIO, and that is a *different* libjpeg -- 6b rather than turbo. On
+/// well-formed input the two agree and either will do; on damaged input they do
+/// not, and then only this test is measuring the thing that matters.
+///
+/// It also covers the half of parity no sample comparison can reach: whether a
+/// file decodes at all. A decoder that accepts one Audiveris rejects produces an
+/// image where Audiveris produces an error, and there are no samples to compare
+/// because one side has none. Five such files came out of differential fuzzing,
+/// each a check libjpeg makes and this decoder did not: a scan naming a
+/// component the frame never declared, a trailing marker with an impossible
+/// length, a Huffman table whose DC symbols exceed the magnitude range, a second
+/// start-of-image, and a frame header shorter than its own fixed fields.
 #[test]
-fn accepts_and_refuses_the_same_files_java_does() {
+fn matches_java_on_every_fixture_it_accepts_and_refuses() {
     let oracle = repo_path("rust/oracle/jpeg-verdicts.txt");
     let text = std::fs::read_to_string(&oracle)
         .unwrap_or_else(|error| panic!("{}: {error}", oracle.display()));
@@ -257,9 +402,10 @@ fn accepts_and_refuses_the_same_files_java_does() {
         }
 
         match (verdict.split_once(' '), &ours) {
-            (Some(("accept", geometry)), Ok(decoded)) => {
-                let expected: Vec<usize> = geometry
-                    .split_whitespace()
+            (Some(("accept", fields)), Ok(decoded)) => {
+                let fields: Vec<&str> = fields.split_whitespace().collect();
+                let expected: Vec<usize> = fields[..3]
+                    .iter()
                     .map(|field| field.parse().expect("geometry field"))
                     .collect();
                 assert_eq!(
@@ -267,6 +413,18 @@ fn accepts_and_refuses_the_same_files_java_does() {
                     expected,
                     "{name}: geometry"
                 );
+                let java = u64::from_str_radix(fields[3], 16).expect("raster hash");
+                let matches = fnv1a64(&decoded.samples) == java;
+                match JAVA_DIVERGENCES.iter().find(|(file, _)| *file == name) {
+                    // A listed divergence must still diverge: if it stops, the
+                    // ledger is stale and should shrink.
+                    Some((_, count)) => assert!(
+                        !matches,
+                        "{name} now reproduces Java; drop it from JAVA_DIVERGENCES \
+                         (it was {count} samples short)"
+                    ),
+                    None => assert!(matches, "{name}: raster differs from Java's"),
+                }
             }
             (Some(("reject", _)), Err(_)) => {}
             (Some(("accept", _)), Err(error)) => {

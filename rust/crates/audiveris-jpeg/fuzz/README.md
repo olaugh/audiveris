@@ -105,6 +105,21 @@ symbols exceed the magnitude range, and a second start-of-image. All four were
 confirmed against Java's ImageIO, which raises `IIOException` on every one, and
 are now pinned by `../../../oracle/jpeg-verdicts.txt`.
 
+## The oracle is not the target
+
+`matches_libjpeg` runs libjpeg-turbo. Audiveris runs Java's `ImageIO`, which
+carries libjpeg 6b. On well-formed input the two agree and the distinction does
+not matter; on damaged input they disagree with each other, and then this target
+is chasing the wrong decoder.
+
+Measured three ways across the fixture set: this decoder matches libjpeg-turbo
+to the sample everywhere, and matches Java everywhere except three damaged files
+-- on which turbo differs from Java by exactly the same samples. Before treating
+a divergence this target reports on a corrupt input as a bug, check it against
+`../../../oracle/jpeg-verdicts.txt`, which records Java's raster hash. The
+sampling factors, the marker dispatch, and every well-formed fixture were worth
+chasing here. A corrupt file's last MCU row may not be.
+
 Two lessons worth keeping:
 
 - A bitstream desync makes a local mistake look global. Sample diffs will not

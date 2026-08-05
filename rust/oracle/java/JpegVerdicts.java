@@ -7,10 +7,12 @@ import javax.imageio.ImageIO;
 /**
  * Prints what Java's ImageIO makes of each file named on the command line.
  *
- * <p>This generates {@code rust/oracle/jpeg-verdicts.txt}, which pins the other
- * half of JPEG parity: not what the samples are, but which files decode at all.
- * A port that accepts a file Audiveris rejects produces an image where Audiveris
- * produces an error, and no sample comparison can see that.
+ * <p>This generates {@code rust/oracle/jpeg-verdicts.txt}, which pins the two
+ * halves of JPEG parity that libjpeg-turbo cannot pin on its own: which files
+ * decode at all, and -- via an FNV-1a-64 of the raster -- what they decode to.
+ * Audiveris reads JPEGs through this reader, so it is the authority; the
+ * differential test against libjpeg-turbo is a faster, finer-grained proxy that
+ * happens to disagree on some damaged input.
  *
  * <p>Run from the repository root, with paths relative to it:
  *
@@ -27,8 +29,19 @@ public class JpegVerdicts {
             String verdict;
             try {
                 BufferedImage image = ImageIO.read(new File(arg));
-                verdict = "accept " + image.getWidth() + " " + image.getHeight() + " "
-                    + image.getRaster().getNumBands();
+                int w = image.getWidth(), h = image.getHeight();
+                int bands = image.getRaster().getNumBands();
+                long hash = 0xcbf29ce484222325L;
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        for (int b = 0; b < bands; b++) {
+                            hash ^= image.getRaster().getSample(x, y, b) & 0xff;
+                            hash *= 0x100000001b3L;
+                        }
+                    }
+                }
+                verdict = "accept " + w + " " + h + " " + bands + " "
+                    + String.format("%016x", hash);
             } catch (Throwable t) {
                 String message = t.getMessage();
                 verdict = "reject " + (message == null ? t.getClass().getSimpleName() : message);

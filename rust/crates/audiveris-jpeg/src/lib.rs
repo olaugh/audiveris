@@ -46,7 +46,24 @@
 //!
 //! This was the long tail called out when the decoder was proposed: matching
 //! libjpeg on clean input is mechanical, matching its error recovery is not.
-//! It is nonetheless matched, on every input the fuzzer has produced.
+//!
+//! # Which libjpeg
+//!
+//! There are two, and on damaged input they are not the same decoder. The
+//! differential test runs libjpeg-turbo, because it is fast and points straight
+//! at the offending sample. Audiveris reads JPEGs through Java's `ImageIO`,
+//! which carries libjpeg 6b. Measured three ways across the fixture set, this
+//! decoder agrees with libjpeg-turbo everywhere, and with Java everywhere except
+//! three damaged files -- on which turbo differs from Java by exactly the same
+//! samples. So the remaining gap is not a mistake in this decoder so much as a
+//! choice of which libjpeg to reproduce, and the one it currently reproduces is
+//! not the one Audiveris uses.
+//!
+//! `oracle/jpeg-verdicts.txt` records Java's verdict and raster hash for every
+//! fixture, and `tests/parity.rs` pins the three divergences by exact sample
+//! count. Everything else -- every well-formed fixture, every combination in the
+//! sampling sweep, the corpus page, and truncation, which is the damage a scan
+//! corpus actually contains -- reproduces Java exactly.
 //!
 //! # What parity turned out to mean
 //!
@@ -63,10 +80,9 @@
 //!   file whose coefficients approach the coding limit that is the difference
 //!   between agreement and 496 wrong samples.
 //! - **Which files are accepted at all.** libjpeg validates scan components,
-//!   segment lengths, Huffman tables, and duplicate markers, and a decoder that
-//!   skips those checks produces an image where Audiveris produces an error. No
-//!   sample comparison can see that, so `oracle/jpeg-verdicts.txt` pins it
-//!   separately, against Java rather than against libjpeg.
+//!   segment lengths, Huffman tables, duplicate markers, and frame headers, and
+//!   a decoder that skips those checks produces an image where Audiveris
+//!   produces an error. No sample comparison can see that.
 //!
 //! # Scope
 //!
@@ -117,6 +133,14 @@ pub enum JpegError {
     /// only a corrupt Huffman table can produce.
     InvalidMagnitudeCategory(u8),
     ZeroDimension,
+    /// A dimension above libjpeg's `JPEG_MAX_DIMENSION`, which is a tad under
+    /// 64K so its own arithmetic cannot overflow.
+    ImageTooBig {
+        width: usize,
+        height: usize,
+    },
+    /// More blocks in one MCU than libjpeg's decompressor will assemble.
+    TooManyBlocksPerMcu(usize),
     /// A scan selected a component the frame never declared, or selected one
     /// twice. libjpeg treats this as fatal.
     UnknownScanComponent(u8),
@@ -132,6 +156,9 @@ pub enum JpegError {
     DuplicateStartOfImage,
     /// A second scan in a sequential file, where libjpeg expects end-of-image.
     ExpectedEndOfImage,
+    /// A `DAC` segment libjpeg would reject. Arithmetic coding is refused at the
+    /// frame header, but a stray conditioning table still has to fail here.
+    BadArithmeticTable,
 }
 
 impl fmt::Display for JpegError {
@@ -170,6 +197,15 @@ impl fmt::Display for JpegError {
                 )
             }
             Self::ZeroDimension => f.write_str("frame declared a zero dimension"),
+            Self::ImageTooBig { width, height } => write!(
+                f,
+                "image {width}x{height} exceeds the maximum supported dimension of {}",
+                MAXIMUM_DIMENSION
+            ),
+            Self::TooManyBlocksPerMcu(blocks) => write!(
+                f,
+                "{blocks} blocks in one MCU, above the decoder's limit of {MAXIMUM_BLOCKS_PER_MCU}"
+            ),
             Self::UnknownScanComponent(id) => {
                 write!(
                     f,
@@ -183,6 +219,7 @@ impl fmt::Display for JpegError {
             ),
             Self::DuplicateFrame => f.write_str("a second frame header"),
             Self::DuplicateStartOfImage => f.write_str("a second start-of-image marker"),
+            Self::BadArithmeticTable => f.write_str("bogus arithmetic conditioning table"),
             Self::ExpectedEndOfImage => {
                 f.write_str("a second scan where end-of-image was expected")
             }
@@ -252,6 +289,19 @@ fn range_limit_idct(value: i32) -> u8 {
 // ---------------------------------------------------------------------------
 // Inverse DCT
 // ---------------------------------------------------------------------------
+
+/// libjpeg's `JPEG_MAX_DIMENSION`, "a tad under 64K to prevent overflows".
+///
+/// A frame header can declare up to 65535, so the range between the two is a
+/// real set of files that libjpeg -- and therefore Audiveris -- refuses.
+const MAXIMUM_DIMENSION: usize = 65500;
+
+/// libjpeg's `D_MAX_BLOCKS_IN_MCU`: the decompressor's limit on how many blocks
+/// an interleaved MCU may contain.
+const MAXIMUM_BLOCKS_PER_MCU: usize = 10;
+
+/// libjpeg's `MAX_SAMP_FACTOR`, which is also the standard's.
+const MAXIMUM_SAMPLING_FACTOR: usize = 4;
 
 /// Widest plane for which libjpeg declines the fancy upsamplers.
 ///
@@ -755,20 +805,27 @@ impl<'a> BitReader<'a> {
         value
     }
 
-    fn decode(&mut self, table: &HuffmanTable) -> Result<u8, JpegError> {
+    /// Decodes one Huffman symbol, faking a zero where libjpeg fakes one.
+    ///
+    /// A code that does not resolve within sixteen bits is not an error: both
+    /// libjpeg 6b and libjpeg-turbo warn and return symbol zero, "the safest
+    /// result", and carry on. Returning an error instead would refuse files
+    /// Audiveris decodes -- and on a corrupt scan, which is the only place this
+    /// arises, it would refuse them after having already produced most of an
+    /// image.
+    fn decode(&mut self, table: &HuffmanTable) -> u8 {
         let mut code = self.bit() as i32;
         for length in 1..=16usize {
             if table.max_code[length] >= code && code >= table.min_code[length] {
                 let index = code + table.value_offset[length];
-                return table
-                    .values
-                    .get(usize::try_from(index).map_err(|_| JpegError::BadHuffmanCode)?)
-                    .copied()
-                    .ok_or(JpegError::BadHuffmanCode);
+                return usize::try_from(index)
+                    .ok()
+                    .and_then(|index| table.values.get(index).copied())
+                    .unwrap_or(0);
             }
             code = code.wrapping_shl(1) | self.bit() as i32;
         }
-        Err(JpegError::BadHuffmanCode)
+        0
     }
 
     /// Scans forward to the next marker, as libjpeg's `next_marker` does.
@@ -1087,6 +1144,9 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                 if width == 0 || height == 0 {
                     return Err(JpegError::ZeroDimension);
                 }
+                if width > MAXIMUM_DIMENSION || height > MAXIMUM_DIMENSION {
+                    return Err(JpegError::ImageTooBig { width, height });
+                }
                 let count = usize::from(header[5]);
                 if count != 1 && count != 3 {
                     return Err(JpegError::UnsupportedComponentCount(count));
@@ -1109,7 +1169,12 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                 frame = Some((width, height, components));
             }
             // Any other frame marker is a process this decoder will not fake.
-            0xC2 | 0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF => {
+            //
+            // `0xC8` is in the list because libjpeg puts it there: it is the
+            // reserved `JPG` marker, which libjpeg groups with the unsupported
+            // frame types and rejects. Skipping it as an unknown segment would
+            // decode a file Audiveris refuses.
+            0xC2 | 0xC3 | 0xC5..=0xC9 | 0xCA | 0xCB | 0xCD..=0xCF => {
                 return Err(JpegError::UnsupportedProcess(marker));
             }
             // SOS
@@ -1170,8 +1235,28 @@ fn decode_inner(bytes: &[u8], keep_planes: bool) -> Result<DecodedInner, JpegErr
                 scanned = Some(planes);
                 at = end;
             }
-            // APPn, COM, and other skippable segments.
-            0xC8 | 0xCC | 0xDC | 0xDE | 0xDF | 0xE0..=0xEF | 0xFE => {}
+            // DAC. Arithmetic coding is refused at the frame header, so these
+            // tables are never used -- but libjpeg still validates the segment,
+            // and a stray DAC in a Huffman file has to fail the same way.
+            0xCC => {
+                if segment.len() % 2 != 0 {
+                    return Err(JpegError::BadSegmentLength(marker));
+                }
+                for entry in segment.chunks_exact(2) {
+                    let (index, value) = (entry[0], entry[1]);
+                    // Sixteen DC conditioning tables, then sixteen AC.
+                    if index >= 32 {
+                        return Err(JpegError::BadArithmeticTable);
+                    }
+                    // A DC entry packs a lower and upper bound into the two
+                    // nibbles, and libjpeg requires them in order.
+                    if index < 16 && (value & 15) > (value >> 4) {
+                        return Err(JpegError::BadArithmeticTable);
+                    }
+                }
+            }
+            // APPn, COM, and DNL: skipped without inspection, as libjpeg does.
+            0xDC | 0xE0..=0xEF | 0xFE => {}
             _ => return Err(JpegError::UnsupportedMarker(marker)),
         }
     }
@@ -1235,13 +1320,26 @@ fn decode_scan(
         .map(|component| component.vertical)
         .max()
         .unwrap_or(1);
+    let mut blocks_per_mcu = 0usize;
     for component in components {
-        if !matches!(component.horizontal, 1 | 2) || !matches!(component.vertical, 1 | 2) {
+        let (horizontal, vertical) = (component.horizontal, component.vertical);
+        // The standard's range, which libjpeg shares.
+        if !(1..=MAXIMUM_SAMPLING_FACTOR).contains(&horizontal)
+            || !(1..=MAXIMUM_SAMPLING_FACTOR).contains(&vertical)
+            // A component whose factor does not divide the maximum would need
+            // fractional upsampling, which libjpeg refuses outright.
+            || max_h % horizontal != 0
+            || max_v % vertical != 0
+        {
             return Err(JpegError::UnsupportedSampling {
-                horizontal: component.horizontal,
-                vertical: component.vertical,
+                horizontal,
+                vertical,
             });
         }
+        blocks_per_mcu += horizontal * vertical;
+    }
+    if blocks_per_mcu > MAXIMUM_BLOCKS_PER_MCU {
+        return Err(JpegError::TooManyBlocksPerMcu(blocks_per_mcu));
     }
 
     // Resolved and checked once, before any MCU, because that is when libjpeg
@@ -1333,7 +1431,7 @@ fn decode_scan(
                             continue;
                         }
 
-                        let symbol = reader.decode(dc)?;
+                        let symbol = reader.decode(dc);
                         // The standard caps a DC magnitude category at 15; a
                         // corrupt Huffman table can hand back any byte.
                         if symbol > 15 {
@@ -1346,7 +1444,7 @@ fn decode_scan(
 
                         let mut position = 1usize;
                         while position < 64 {
-                            let symbol = reader.decode(ac)?;
+                            let symbol = reader.decode(ac);
                             let run = usize::from(symbol >> 4);
                             let size = u32::from(symbol & 15);
                             if size == 0 {
@@ -1365,11 +1463,28 @@ fn decode_scan(
                             // one field out of step with libjpeg's for the rest
                             // of the scan.
                             let value = extend(reader.receive(size), size);
+                            if std::env::var_os("JPEG_TRACE_AC").is_some()
+                                && mcu_y * mcus_across + mcu_x == 12
+                            {
+                                eprintln!(
+                                    "RUSTAC k={position} run={run} size={size} value={value} short={}",
+                                    reader.insufficient
+                                );
+                            }
                             let target = NATURAL_ORDER.get(position).copied().unwrap_or(63);
                             coefficients[target] = value as i16;
                             position += 1;
                         }
 
+                        if std::env::var_os("JPEG_TRACE_COEF").is_some() {
+                            let list: Vec<String> =
+                                coefficients.iter().map(i16::to_string).collect();
+                            eprintln!(
+                                "RUSTCOEF mcu={} blk=0: {}",
+                                mcu_y * mcus_across + mcu_x,
+                                list.join(" ")
+                            );
+                        }
                         let mut block = [0u8; 64];
                         inverse_dct(&coefficients, quantizer, &mut block);
                         write_block(
@@ -1536,6 +1651,43 @@ fn upsample_plane(
                 let target = &mut output[row * width..row * width + width];
                 let take = width.min(expanded.len());
                 target[..take].copy_from_slice(&expanded[..take]);
+            }
+            Ok(output)
+        }
+        (1, 2) => {
+            let mut output = vec![0u8; width * height];
+            for row in 0..height {
+                // The vertical triangle filter has no narrow-plane fallback:
+                // libjpeg selects it on `do_fancy` alone, unlike its two
+                // horizontal cousins, which also require a plane wider than two.
+                let source_row = row / 2;
+                // The two halves of a row group round differently: the upper
+                // half biases by one and the lower by two. Using the same bias
+                // for both is off by one wherever the sum lands on a boundary.
+                let (neighbour, bias) = if row % 2 == 0 {
+                    (source_row.saturating_sub(1), 1)
+                } else {
+                    ((source_row + 1).min(plane.height - 1), 2)
+                };
+                let (near, far) = (row_of(source_row), row_of(neighbour));
+                let target = &mut output[row * width..row * width + width];
+                for (column, sample) in target.iter_mut().enumerate() {
+                    let column = column.min(plane.width - 1);
+                    *sample =
+                        ((i32::from(near[column]) * 3 + i32::from(far[column]) + bias) >> 2) as u8;
+                }
+            }
+            Ok(output)
+        }
+        // Any other whole-number ratio: libjpeg replicates rather than filters.
+        (horizontal, vertical) if horizontal >= 1 && vertical >= 1 => {
+            let mut output = vec![0u8; width * height];
+            for row in 0..height {
+                let source = row_of(row / vertical);
+                let target = &mut output[row * width..row * width + width];
+                for (column, sample) in target.iter_mut().enumerate() {
+                    *sample = source[(column / horizontal).min(plane.width - 1)];
+                }
             }
             Ok(output)
         }
