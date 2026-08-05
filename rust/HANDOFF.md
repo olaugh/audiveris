@@ -38,7 +38,10 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 | PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
-`cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green.
+`cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green,
+on both `ubuntu-latest` and `macos-latest`, under the toolchain pinned in
+`rust-toolchain.toml`. See "Continuous integration" below for what that pin is
+for and what CI deliberately does not cover.
 
 ### Reproducing the PDF work on a fresh machine
 
@@ -107,7 +110,38 @@ break }; }`, which is the shape three ported decoder loops use -- two in
 `ccitt.rs`, one in `jbig2/text.rs`. They are `while let` loops now; the
 behaviour is unchanged and the corpus still reads 189/189. The rewrite is not
 the point. The point is that a gate of `-D warnings` makes every Clippy release
-a potential source of red on unchanged code, and nothing here pins a Clippy.
+a potential source of red on unchanged code, which is what the toolchain pin
+below is for.
+
+## Continuous integration
+
+`.github/workflows/rust-port.yml` runs formatting, Clippy with `-D warnings`,
+and `cargo test --workspace` on `ubuntu-latest` and `macos-latest`, on pushes
+and pull requests that touch `rust/**` or `data/**`. It is separate from the
+Gradle `build-and-test.yml`, which builds the untouched Java tree.
+
+Two operating systems is not box-ticking. The matrix also spans two
+architectures -- `macos-latest` is aarch64, `ubuntu-latest` x86_64 -- and that
+is the axis the libjpeg divergence above sits on.
+
+**What CI does not cover, and why.** The PDF corpus test needs 20 MB of
+third-party IMSLP scans, so CI leaves `AUDIVERIS_PDF_CORPUS` unset and the test
+skips. Making CI depend on a scan host's availability would buy coverage with
+flakiness. The last workflow step therefore re-runs that one test with
+`--nocapture`, so the log states which of the two it did rather than letting a
+silent skip read as a pass. Nothing Java-backed runs in CI either: `xtask
+baseline` and `xtask vectors` need JDK 25 and the parent OMR checkout, and the
+oracle files they produce are checked in.
+
+### The toolchain is pinned, deliberately
+
+`rust/rust-toolchain.toml` pins the channel, for the reason the three rewritten
+loops demonstrate: with `-D warnings` as a gate, an unpinned toolchain means a
+commit that was green when written fails later with no change to the code.
+
+Bump the channel in its own commit, with the lint fallout in that same commit.
+Non-rustup installations ignore the file, so it binds CI and rustup users
+without disturbing a Homebrew or distribution `cargo`.
 
 ## Open threads, in the order worth taking them
 

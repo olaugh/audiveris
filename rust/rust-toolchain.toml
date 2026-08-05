@@ -1,0 +1,17 @@
+# Pinned deliberately, and worth a word on why.
+#
+# This workspace runs `cargo clippy -- -D warnings` as a gate. Clippy gains and
+# widens lints between releases, so an unpinned toolchain means a commit that
+# was green when it was written fails later on someone else's machine, with no
+# change to the code. That is not hypothetical here: three ported decoder loops
+# in `audiveris-pdf` passed the gate when written and failed it at 1.96.0, where
+# `clippy::while_let_loop` began firing on `loop { let ... else { break }; }`.
+#
+# Bump the channel in its own commit, together with whatever lint fallout it
+# brings, so the bump and the fixes are reviewable as one thing.
+#
+# Non-rustup installations (Homebrew's `rust`, distribution packages) ignore
+# this file, so it constrains CI and rustup users without breaking anyone else.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

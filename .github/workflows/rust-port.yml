@@ -1,0 +1,98 @@
+name: Rust port
+
+# The Rust workspace under `rust/` is a parallel tree: it shares no build with
+# the Gradle job in `build-and-test.yml` and is not part of the Java artifact.
+# It therefore gets its own workflow, running only when something it depends on
+# moves -- the workspace itself, or the image fixtures under `data/` that its
+# tests decode.
+#
+# Two operating systems on purpose. The port's whole claim is bit-exact
+# reproduction of what Java produces, and "bit-exact" is a claim about every
+# host or it is not a claim. The matrix also covers two architectures, since
+# `macos-latest` is aarch64 and `ubuntu-latest` is x86_64 -- which is the axis
+# that actually caught something: `mozjpeg-sys`, the differential reference for
+# `audiveris-jpeg`, enables SIMD whenever the host allows it (always on aarch64,
+# only with nasm installed on x86), and its SIMD routines disagree with its own
+# scalar C on damaged input. The dev-dependency now pins the scalar build, both
+# because libjpeg 6b -- the library Audiveris actually reads through -- has no
+# SIMD at all, and so that this matrix compares the same reference on both legs.
+
+on:
+  push:
+    paths:
+      - "rust/**"
+      - "data/**"
+      - ".github/workflows/rust-port.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - "data/**"
+      - ".github/workflows/rust-port.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-port-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # Report both legs. A divergence that appears on one host and not the
+      # other is the most interesting result this workflow can produce, and
+      # cancelling the other leg would hide half of it.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      # `rust/rust-toolchain.toml` pins the channel and names the components;
+      # rustup installs exactly that on the first command that needs it. Asking
+      # for versions is both the trigger and a record in the log of what the
+      # rest of the run was graded by.
+      - name: Install the pinned toolchain
+        run: |
+          rustc --version
+          cargo fmt --version
+          cargo clippy --version
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      # `cargo test` captures the output of tests that pass, and the PDF corpus
+      # test passes by *skipping* when `AUDIVERIS_PDF_CORPUS` is unset -- which
+      # it is here, because the corpus is 20 MB of third-party IMSLP scans that
+      # this workflow deliberately does not fetch. Re-run it visibly so the log
+      # says which of the two it did. See `rust/HANDOFF.md` for running it with
+      # the corpus present.
+      - name: Report the PDF corpus test's coverage
+        run: cargo test -p audiveris-pdf --test corpus -- --nocapture
