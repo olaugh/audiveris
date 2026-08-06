@@ -64,8 +64,9 @@ use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
 use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
 use audiveris_image::system_population::{
-    PopulationStaffArea, PopulationStaffGeometry, SystemStaffBoundaries, boundary_from_points,
-    build_population_staff_areas,
+    PopulationStaffArea, PopulationStaffGeometry, PopulationSystemArea, PopulationSystemGeometry,
+    StaffBoundary, SystemStaffBoundaries, boundary_from_points, build_population_staff_areas,
+    build_population_system_areas,
 };
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
@@ -333,6 +334,12 @@ pub struct GridLinesRecognition {
     /// Java `Staff.area` per staff, which is what `getClosestStaff` tests a
     /// point against before comparing distances.
     pub staff_areas: Vec<PopulationStaffArea>,
+    /// Java `SystemInfo.area` per system, as `SystemManager.computeSystemAreas`
+    /// leaves it at the end of GRID. `getSystemsOf` tests a point against these.
+    pub system_areas: Vec<PopulationSystemArea>,
+    /// Each system's own staff extremes, which `dispatchSheetSpots` tests as
+    /// well as the area.
+    pub system_bounds: Vec<SystemBounds>,
 }
 
 /// One candidate peak that a purge removed, and which purge removed it.
@@ -1208,6 +1215,9 @@ pub fn recognize_grid_lines_raster(
     // as a polyline through the same points.
     let mut staff_geometries = Vec::new();
     let mut staff_boundaries = Vec::new();
+    // Kept alongside, because the *system* areas below need each staff's own
+    // line endpoints and abscissae, and `PopulationStaffGeometry` rounds them.
+    let mut staff_details: Vec<StaffDetail> = Vec::new();
     for staff in &peak_graph.sheet_staffs {
         let points = |index: usize| -> Option<Vec<(f64, f64)>> {
             staff.lines.get(index).and_then(|line| match line {
@@ -1234,11 +1244,81 @@ pub fn recognize_grid_lines_raster(
             top: top.round() as i32,
             bottom: bottom.round() as i32,
         });
+        staff_details.push(StaffDetail {
+            system_id: system_of_staff(&peak_graph.systems, staff.id),
+            left: staff.left.round() as i32,
+            right: staff.right.round() as i32,
+            // Java's `SystemInfo.updateCoordinates` reads the *left endpoint*
+            // of a line, not the extreme of its points. On a sloped staff those
+            // are different pixels.
+            first_line_left_y: first.first().map_or(top, |(_, y)| *y),
+            last_line_left_y: last.first().map_or(bottom, |(_, y)| *y),
+            first_line: first_line.clone(),
+            last_line: last_line.clone(),
+        });
         staff_boundaries.push(SystemStaffBoundaries {
             first_line,
             last_line,
         });
     }
+
+    // Java `SystemManager.computeSystemAreas`, which GRID runs once the systems
+    // are known. BEAMS' `dispatchSheetSpots` needs it: a spot goes to a system
+    // when `getSystemsOf` puts its centroid inside that system's area *and* the
+    // centroid's abscissa lies within the system's own bounds. Those are two
+    // different left/right pairs -- the area's are midpoints to its neighbours,
+    // the system's are its staves' extremes -- so both are reported.
+    let mut system_geometries: Vec<PopulationSystemGeometry> = Vec::new();
+    let mut system_boundaries: Vec<SystemStaffBoundaries> = Vec::new();
+    let mut system_bounds: Vec<SystemBounds> = Vec::new();
+    for (index, staff_ids) in peak_graph.systems.iter().enumerate() {
+        let system_id = index + 1;
+        let members: Vec<&StaffDetail> = staff_details
+            .iter()
+            .filter(|detail| detail.system_id == system_id)
+            .collect();
+        let (Some(first), Some(last)) = (members.first(), members.last()) else {
+            continue;
+        };
+        debug_assert_eq!(members.len(), staff_ids.len(), "every staff kept a detail");
+
+        let left = members.iter().map(|detail| detail.left).min().unwrap_or(0);
+        let right = members.iter().map(|detail| detail.right).max().unwrap_or(0);
+        let top = first.first_line_left_y.round_ties_even() as i32;
+        let bottom = last.last_line_left_y.round_ties_even() as i32;
+
+        system_geometries.push(PopulationSystemGeometry {
+            system_id,
+            left,
+            // Java: `width = right - left + 1`, and the neighbour tests below
+            // read `left + width - 1` back, so the +1 is load-bearing.
+            width: right - left + 1,
+            top,
+            bottom,
+            // Neither is read when building areas; both belong to the
+            // indentation check, which this entry point does not run.
+            area_left: 0,
+            deskewed_upper_left_x: 0.0,
+        });
+        system_boundaries.push(SystemStaffBoundaries {
+            first_line: first.first_line.clone(),
+            last_line: last.last_line.clone(),
+        });
+        system_bounds.push(SystemBounds {
+            system_id,
+            left,
+            right,
+            top,
+            bottom,
+        });
+    }
+    let system_areas = build_population_system_areas(
+        &system_geometries,
+        &system_boundaries,
+        i32::try_from(scale_recognition.width).unwrap_or(i32::MAX),
+        i32::try_from(scale_recognition.height).unwrap_or(i32::MAX),
+        vertical_area_margin(scale_recognition.scale.interline.main),
+    );
     // Java reads `SystemInfo.getAreaEnd(LEFT/RIGHT)` here and notes that it
     // "may not be known yet", in which case it is zero and `computeStaffArea`
     // skips the intersection entirely, leaving the staff spanning the sheet.
@@ -1276,7 +1356,38 @@ pub fn recognize_grid_lines_raster(
         no_staff,
         no_staff_digest,
         staff_areas,
+        system_areas,
+        system_bounds,
     })
+}
+
+/// One staff's geometry at full precision, for building system areas.
+struct StaffDetail {
+    system_id: usize,
+    left: i32,
+    right: i32,
+    first_line_left_y: f64,
+    last_line_left_y: f64,
+    first_line: StaffBoundary,
+    last_line: StaffBoundary,
+}
+
+/// Java `SystemInfo`'s own bounds: the extremes of its staves.
+///
+/// Distinct from its area, whose left and right are midpoints to the systems
+/// beside it. `dispatchSheetSpots` tests a spot against both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemBounds {
+    pub system_id: usize,
+    pub left: i32,
+    pub right: i32,
+    pub top: i32,
+    pub bottom: i32,
+}
+
+/// Java `StaffManager.constants.verticalAreaMargin`, 0.9 interline.
+fn vertical_area_margin(interline: i32) -> i32 {
+    (0.9 * f64::from(interline)).round_ties_even() as i32
 }
 
 /// The system a staff belongs to, from the peak graph's grouping.
@@ -2838,6 +2949,177 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join("\n")
+        );
+    }
+
+    /// Java's spot-to-system dispatch, over every spot centroid on every sheet.
+    ///
+    /// `SpotsBuilder.dispatchSheetSpots` gives a spot to a system when the
+    /// centroid is inside that system's *area* and its abscissa is within the
+    /// system's own bounds. Both were previously oracle inputs, and the second
+    /// is easy to forget -- omitting it invents a beam in carmen's top-right
+    /// corner, where a spot sits inside a system's area but outside its
+    /// abscissa range, so Java gives it to nobody.
+    ///
+    /// Graded as a pure function of the centroid rather than through the spot
+    /// chain, because the chain still needs HEADERS. The oracle's `dispatch`
+    /// records carry the coordinates, so the dispatch can be graded exactly
+    /// while the thing that feeds it cannot yet be run.
+    #[test]
+    fn spot_dispatch_matches_the_java_oracle_on_every_sheet() {
+        let spots = oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
+        assert_eq!(spots.len(), 8, "eight sheets are pinned");
+
+        let mut checked = 0;
+        let mut failures: Vec<String> = Vec::new();
+        for (page, records) in &spots {
+            let file = page.split('#').next().expect("a file name");
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{file}")))
+                .unwrap_or_else(|error| panic!("{page}: {error}"));
+
+            for fields in records
+                .iter()
+                .filter(|fields| fields.first() == Some(&"dispatch"))
+            {
+                let index = fields[1];
+                let x: i32 = fields[2].parse().expect("a centroid abscissa");
+                let y: i32 = fields[3].parse().expect("a centroid ordinate");
+                let expected: Vec<usize> = fields[4..]
+                    .iter()
+                    .map(|field| field.parse().expect("a system id"))
+                    .collect();
+
+                let produced: Vec<usize> = recognition
+                    .system_areas
+                    .iter()
+                    .filter(|area| area.contains(f64::from(x), f64::from(y)))
+                    .filter(|area| {
+                        recognition
+                            .system_bounds
+                            .iter()
+                            .find(|bounds| bounds.system_id == area.system_id)
+                            .is_some_and(|bounds| x >= bounds.left && x <= bounds.right)
+                    })
+                    .map(|area| area.system_id)
+                    .collect();
+
+                checked += 1;
+                if produced != expected {
+                    failures.push(format!(
+                        "{page} spot {index} at ({x},{y}): port {produced:?}, java {expected:?}"
+                    ));
+                }
+            }
+        }
+
+        assert!(checked > 1000, "only {checked} centroids were graded");
+        assert!(
+            failures.is_empty(),
+            "{} of {checked} centroids dispatch differently:\n{}",
+            failures.len(),
+            failures
+                .iter()
+                .take(30)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// What `scale.getMaxStem()` costs, measured rather than assumed.
+    ///
+    /// BEAMS opens by removing stem-width runs, and the width it removes is
+    /// `Scale.getMaxStem()`, set by STEM_SEEDS' `StemScaler`. The histogram and
+    /// peak finder behind it are already ported -- `compute_stem_scale` is
+    /// graded against Java. What is *not* ported is the buffer it counts runs
+    /// in. `StemScaler.getBuffer` takes NO_STAFF and then
+    ///
+    ///   1. erases every THICK_BARLINE, THICK_CONNECTOR, THIN_BARLINE and
+    ///      THIN_CONNECTOR inter that `canHide` accepts, which needs barline
+    ///      inters carrying contextual grades;
+    ///   2. erases each system's header, since `useHeader` defaults to true --
+    ///      and `eraseSystemHeader` reads `Staff.getHeaderStop()`, so this is
+    ///      the *same* HEADERS dependency that blocks the spot chain's own
+    ///      header erase;
+    ///   3. paints white everything outside the union of the core staff paths.
+    ///
+    /// So the interesting question is not how to port those three, but whether
+    /// they move the answer at all. The peak is a mode over some 10^5 runs and
+    /// the result is a single small integer -- Java reports 4 on six of these
+    /// sheets and 5 on the other two. Cleaning removes a tail; a mode is exactly
+    /// the statistic a tail does not move.
+    ///
+    /// This test therefore computes the stem scale from the *uncleaned*
+    /// NO_STAFF raster and records, per sheet, what that costs against Java's
+    /// value. It is a measurement, not a parity claim: if a sheet ever diverges
+    /// the assertion names it, and the three stages above become required
+    /// rather than skippable.
+    #[test]
+    fn stem_scale_from_the_uncleaned_no_staff_is_measured_not_assumed() {
+        use crate::stem_seeds_step::{StemScaleComputation, compute_stem_scale};
+        use audiveris_image::run_table::{Orientation, RunTable};
+
+        let spots = oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
+        assert_eq!(spots.len(), 8, "eight sheets are pinned");
+
+        let mut rows: Vec<String> = Vec::new();
+        let mut divergences: Vec<String> = Vec::new();
+        for (page, records) in &spots {
+            let scale_row = records
+                .iter()
+                .find(|fields| fields.first() == Some(&"scale"))
+                .unwrap_or_else(|| panic!("no scale record for {page}"));
+            let expected: i32 = scale_row[8].parse().expect("a stem width");
+
+            let file = page.split('#').next().expect("a file name");
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{file}")))
+                .unwrap_or_else(|error| panic!("{page}: {error}"));
+
+            // Java counts horizontal runs; the port's NO_STAFF is stored
+            // vertically, so it is re-cut rather than re-derived.
+            let horizontal = RunTable::from_pixels(
+                Orientation::Horizontal,
+                recognition.scale.width,
+                recognition.scale.height,
+                &recognition.no_staff.to_pixels(),
+            )
+            .unwrap_or_else(|error| panic!("{page}: horizontal runs: {error:?}"));
+            let lengths: Vec<i32> = (0..horizontal.sequence_count())
+                .filter_map(|index| horizontal.sequence(index))
+                .flat_map(|runs| runs.iter().map(|run| run.length as i32))
+                .collect();
+
+            let line = recognition.scale.scale.line;
+            let measured = compute_stem_scale(
+                &lengths,
+                StemScaleComputation {
+                    interline: recognition.scale.scale.interline.main,
+                    foreground_main: line.main,
+                    foreground_maximum: line.max,
+                    minimum_value_ratio: 0.1,
+                    minimum_derivative_ratio: 0.05,
+                    minimum_gain_ratio: 0.1,
+                    stem_as_foreground_ratio: 1.0,
+                },
+            );
+
+            rows.push(format!(
+                "{page}: max {} (java {expected}), main {}",
+                measured.maximum, measured.main
+            ));
+            if measured.maximum != expected {
+                divergences.push(format!(
+                    "{page}: uncleaned NO_STAFF gives maxStem {}, Java gives {expected}",
+                    measured.maximum
+                ));
+            }
+        }
+
+        assert!(
+            divergences.is_empty(),
+            "the cleaning stages of StemScaler.getBuffer are not skippable after all:\n{}\n\nall sheets:\n{}",
+            divergences.join("\n"),
+            rows.join("\n")
         );
     }
 
