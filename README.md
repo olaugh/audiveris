@@ -78,6 +78,8 @@ rust/
   oracle/       pinned Java output, and the probes that generate it
   HANDOFF.md    current state, open threads, and what bit whom
   PORTING.md    the porting contract and a per-area status table
+tools/omrscope/ a Qt6 window over both engines: run them on the same sheet,
+                see where they differ, and see how much is actually ported
 ```
 
 Start with [`rust/HANDOFF.md`](rust/HANDOFF.md), then

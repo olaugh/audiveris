@@ -89,6 +89,7 @@ public class SigProbe
 
                 System.out.println("sheet " + path.getFileName() + "#" + wanted + " " + step);
 
+                final long startedAt = System.nanoTime();
                 try {
                     stub.reachStep(step, false);
                 } catch (Exception ex) {
@@ -100,6 +101,12 @@ public class SigProbe
                     System.out.println("failed " + cause.getMessage());
                     continue;
                 }
+
+                // Recognition only. A caller timing the whole process measures
+                // Gradle and JVM startup, which dwarfs the work and makes any
+                // comparison against a native binary meaningless.
+                System.out.println(String.format(
+                        "timing %.3f", (System.nanoTime() - startedAt) / 1_000_000.0));
 
                 final Sheet sheet = stub.getSheet();
 
@@ -116,6 +123,14 @@ public class SigProbe
                     }
                     System.out.println(String.format("nostaff %d %d %016x",
                             noStaff.getWidth(), noStaff.getHeight(), hash));
+                }
+
+                for (org.audiveris.omr.sheet.Staff staff :
+                        sheet.getStaffManager().getStaves()) {
+                    System.out.println("staff " + staff.getId() + " "
+                            + staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT) + " "
+                            + staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.RIGHT) + " "
+                            + staff.getLines().size());
                 }
 
                 // Staff areas decide which staff a run belongs to, and the
