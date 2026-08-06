@@ -428,6 +428,50 @@ of Java, and at the time the port had no morphology module at all.
 impacts each grade is built from (`wdth`, `minH`, `maxH`, `core`, `belt`,
 `jit`), and remains the gate for the recogniser above the closing.
 
+## MusicFont: deferred with a price, not dropped
+
+The port targets full parity -- every stage, including this one. What follows
+is an ordering argument, not a scope cut.
+
+**It is the geometry that needs the font, not the classifier.** `ClefBuilder`
+calls the classifier with a null `ShapeChecker`, and both the bundled model and
+`rank_evaluations` are already ported. Two font calls are the blocker:
+
+- `getSymbolBounds` needs `TextLayout.getBounds()`, the glyph outline at a
+  point size;
+- placing that box needs `ShapeSymbol.computeCentroidOffset`, which rasterises
+  the glyph to an **antialiased alpha image** and takes an alpha-weighted
+  centroid.
+
+That is Java2D's font rasteriser: native, hinted. Unlike the bicubic image
+transform -- which was ported bit-exact because OpenJDK's `ScaledBlit` and
+`TransformHelper` fully specify it in Java -- this one hands off to native
+code, so bit-exactness is not something a reimplementation can promise up
+front. Expect to need differential probing against the live JVM, and expect
+the honest answer to possibly be a stated tolerance rather than a hash.
+
+**What sits on it.** `header.stop` comes from `maxClefOffset`, which comes from
+`staff.setClefStop`, which comes from that font-derived box. So MusicFont is
+under HEADERS' clef geometry *and* under all of HEADS, where Java itself cannot
+reach the step without it.
+
+**What it is worth to BEAMS, measured rather than assumed.**
+`header_erase_cost_is_measured_not_assumed` runs chula's whole spot chain both
+ways:
+
+```
+header erase: 305 spots /  95 accepted
+without:      333 spots / 100 accepted
+only with erase (lost without it): []
+only without erase (spurious):     5, at x=111..232, sized 33x16, 34x17, 32x16
+```
+
+Five clef-sized false positives in the header region, and zero real beams. That
+is why BEAMS goes first -- not because the erase does not matter. The ratio is
+pinned by that test, and the test fails if the erase ever becomes load-bearing
+for a real beam. It should be re-measured on other pages rather than assumed to
+hold.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)
