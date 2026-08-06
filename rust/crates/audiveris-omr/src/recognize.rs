@@ -63,6 +63,10 @@ use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
 use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
+use audiveris_image::system_population::{
+    PopulationStaffArea, PopulationStaffGeometry, SystemStaffBoundaries, boundary_from_points,
+    build_population_staff_areas,
+};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
 #[derive(Debug, Clone)]
@@ -326,6 +330,9 @@ pub struct GridLinesRecognition {
     pub no_staff: RunTable,
     /// FNV-1a-64 of the staff-free buffer, which is what an oracle compares.
     pub no_staff_digest: u64,
+    /// Java `Staff.area` per staff, which is what `getClosestStaff` tests a
+    /// point against before comparing distances.
+    pub staff_areas: Vec<PopulationStaffArea>,
 }
 
 /// One candidate peak that a purge removed, and which purge removed it.
@@ -1195,6 +1202,58 @@ pub fn recognize_grid_lines_raster(
         message: error.to_string(),
     })?;
     let no_staff_digest = fnv1a64_bytes(&no_staff_pixels);
+
+    // Java `StaffManager.computeStaffArea`. The boundaries are each staff's
+    // own first and last line, taken as the spline path Java walks rather than
+    // as a polyline through the same points.
+    let mut staff_geometries = Vec::new();
+    let mut staff_boundaries = Vec::new();
+    for staff in &peak_graph.sheet_staffs {
+        let points = |index: usize| -> Option<Vec<(f64, f64)>> {
+            staff.lines.get(index).and_then(|line| match line {
+                HeadlessStaffLine::Persistent { line, .. } => Some(line.points.clone()),
+                HeadlessStaffLine::Filament { .. } => None,
+            })
+        };
+        let (Some(first), Some(last)) = (points(0), points(staff.lines.len().saturating_sub(1)))
+        else {
+            continue;
+        };
+        let (Ok(first_line), Ok(last_line)) =
+            (boundary_from_points(&first), boundary_from_points(&last))
+        else {
+            continue;
+        };
+        let top = first.iter().map(|(_, y)| *y).fold(f64::MAX, f64::min);
+        let bottom = last.iter().map(|(_, y)| *y).fold(f64::MIN, f64::max);
+        staff_geometries.push(PopulationStaffGeometry {
+            staff_id: staff.id,
+            system_id: system_of_staff(&peak_graph.systems, staff.id),
+            left: staff.left.round() as i32,
+            width: (staff.right - staff.left).round() as i32,
+            top: top.round() as i32,
+            bottom: bottom.round() as i32,
+        });
+        staff_boundaries.push(SystemStaffBoundaries {
+            first_line,
+            last_line,
+        });
+    }
+    // Java reads `SystemInfo.getAreaEnd(LEFT/RIGHT)` here and notes that it
+    // "may not be known yet", in which case it is zero and `computeStaffArea`
+    // skips the intersection entirely, leaving the staff spanning the sheet.
+    // This port never computes system area ends, so zero is the honest answer
+    // rather than a stand-in: substituting the staff's own limits would clip
+    // the area to the notated width and lose every point outside it, which is
+    // most of the margin.
+    let system_ends = |_system_id: usize| -> (i32, i32) { (0, 0) };
+    let staff_areas = build_population_staff_areas(
+        &staff_geometries,
+        &staff_boundaries,
+        &system_ends,
+        i32::try_from(scale_recognition.width).unwrap_or(i32::MAX),
+        i32::try_from(scale_recognition.height).unwrap_or(i32::MAX),
+    );
     let no_staff = RunTable::from_pixels(
         Orientation::Vertical,
         scale_recognition.width,
@@ -1216,7 +1275,16 @@ pub fn recognize_grid_lines_raster(
         peak_graph,
         no_staff,
         no_staff_digest,
+        staff_areas,
     })
+}
+
+/// The system a staff belongs to, from the peak graph's grouping.
+fn system_of_staff(systems: &[Vec<usize>], staff_id: usize) -> usize {
+    systems
+        .iter()
+        .position(|staves| staves.contains(&staff_id))
+        .map_or(0, |index| index + 1)
 }
 
 /// Renders the GRID staff-line outcome as stable, line-oriented text.
@@ -2286,6 +2354,133 @@ mod tests {
             );
         }
         pages
+    }
+
+    /// Staff areas agree with Java, judged the way their only consumer judges
+    /// them.
+    ///
+    /// A `java.awt.geom.Area` is not worth serialising, and nothing reads one
+    /// directly: `StaffManager.getClosestStaff` tests whether an area
+    /// *contains* a point and then breaks ties by distance, and that is what
+    /// `LedgersFilter` uses to decide which staff a run belongs to. So the gate
+    /// is behavioural -- a lattice of points, and which staff each lands in --
+    /// which exercises containment and the tie-break together and would catch a
+    /// boundary that is subtly the wrong curve.
+    ///
+    /// The boundaries are each staff's own first and last line taken as the
+    /// spline path Java walks, not a polyline through the same points: a
+    /// natural cubic and a polyline through identical points are different
+    /// paths, and containment can differ near a join.
+    #[test]
+    fn staff_areas_agree_with_java_on_a_lattice() {
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+
+        let text = include_str!("../../../oracle/grid-closest-staff.txt");
+        let mut checked = 0usize;
+        let mut disagreements = Vec::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let (x, y): (f64, f64) = (
+                fields[1].parse().expect("an x"),
+                fields[2].parse().expect("a y"),
+            );
+            let expected: usize = fields[3].parse().expect("a staff id");
+
+            // `getClosestStaff`: among the staves whose area contains the
+            // point, the nearest one.
+            let mut best: Option<(usize, f64)> = None;
+            for staff in &recognition.staff_areas {
+                if !staff.area.contains(x, y) {
+                    continue;
+                }
+                let distance = staff_distance(&recognition, staff.staff_id, x, y);
+                if best.is_none_or(|(_, current)| distance < current) {
+                    best = Some((staff.staff_id, distance));
+                }
+            }
+            let produced = best.map_or(0, |(id, _)| id);
+            if produced != expected {
+                disagreements.push(format!("({x}, {y}): {produced} against Java's {expected}"));
+            }
+            checked += 1;
+        }
+        assert!(checked > 1000, "the lattice should cover the sheet");
+        assert!(
+            disagreements.is_empty(),
+            "{} of {checked} lattice points disagree:\n{}",
+            disagreements.len(),
+            disagreements
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// Java `StaffLine.yAt(double)`.
+    ///
+    /// Inside the line's own abscissa range this is the spline. Outside it,
+    /// Java does **not** extrapolate the spline -- it extrapolates along the
+    /// straight chord between the line's two endpoints:
+    ///
+    /// ```text
+    /// slope = (stop.y - start.y) / (stop.x - start.x)
+    /// return start.y + slope * (x - start.x)
+    /// ```
+    ///
+    /// The difference only shows beyond the notated staff, which is exactly
+    /// where a lattice covering the whole sheet looks and where two staff areas
+    /// both contain the point, so the distance tie-break decides.
+    fn staff_line_ordinate(points: &[(f64, f64)], x: f64) -> Option<f64> {
+        let start = *points.first()?;
+        let stop = *points.last()?;
+        if x < start.0 || x > stop.0 {
+            let run = stop.0 - start.0;
+            if run == 0.0 {
+                return Some(start.1);
+            }
+            let slope = (stop.1 - start.1) / run;
+            return Some(slope.mul_add(x - start.0, start.1));
+        }
+        audiveris_core::natural_spline::NaturalSpline::interpolate(points)
+            .ok()?
+            .y_at_x(x)
+            .ok()
+    }
+
+    /// Java `Staff.distanceTo`: how far a point is outside the staff's own
+    /// first and last lines, negative when between them.
+    fn staff_distance(recognition: &GridLinesRecognition, staff_id: usize, x: f64, y: f64) -> f64 {
+        let Some(staff) = recognition
+            .peak_graph
+            .sheet_staffs
+            .iter()
+            .find(|staff| staff.id == staff_id)
+        else {
+            return f64::MAX;
+        };
+        let ordinate = |index: usize| -> Option<f64> {
+            match staff.lines.get(index)? {
+                HeadlessStaffLine::Persistent { line, .. } => staff_line_ordinate(&line.points, x),
+                HeadlessStaffLine::Filament { .. } => None,
+            }
+        };
+        let (Some(first), Some(last)) = (ordinate(0), ordinate(staff.lines.len() - 1)) else {
+            return f64::MAX;
+        };
+        // `getClosestStaff` compares `Staff.distanceTo`, which is
+        // `(int) doubleDistanceTo(point)` -- truncated toward zero. So two
+        // staves whose real distances differ by less than a pixel *tie*, and
+        // the strict `<` leaves the earlier one holding it. Comparing full
+        // precision here picks a different staff in the margin beyond the
+        // notated width, where both areas contain the point.
+        (first - y).max(y - last).trunc()
     }
 
     /// Diffs the sheet SIG the GRID step promotes against Java's persisted

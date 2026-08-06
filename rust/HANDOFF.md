@@ -263,7 +263,54 @@ returning its input. It is not. `oracle/grid-binary.txt` records the same
 `2179468ede9f7ec6` for Java's BINARY raster, because chula.png is already
 bilevel.
 
-### Staff areas: the builder is done, the wiring is not
+### Staff areas: done, and they exposed a containment bug
+
+Every one of the 1209 lattice points on chula now agrees with Java's
+`getClosestStaff`. `oracle/grid-closest-staff.txt` holds them.
+
+The gate is behavioural on purpose: a `java.awt.geom.Area` is not worth
+serialising, and nothing reads one directly -- `getClosestStaff` asks whether an
+area *contains* a point and then breaks ties by distance. Grading that exercises
+containment and the tie-break together, and it found three real divergences that
+a structural comparison would have missed entirely.
+
+**`Area.contains` is half-open, and the port had it exclusive.** `java.awt.Shape`
+defines insideness so that a point on the boundary is inside when the space
+immediately adjacent in the increasing-x direction is -- so the **left and north**
+edges belong to the area and the **right and south** edges do not. The port
+excluded all four. Two existing tests asserted the exclusive behaviour as though
+it were Java's; both were wrong. Settled with a five-line `jshell` script rather
+than by argument:
+
+```
+new Area(new Rectangle2D.Double(0, 0, 100, 100))
+  contains(0,0) true   contains(50,0) true    contains(0,50) true
+  contains(100,50) false   contains(50,100) false
+```
+
+No system test caught it because system areas are sampled well inside their
+bounds. Staff areas reach the sheet edge -- a staff's north boundary is `y = 0`
+when nothing is above it -- and there the exclusive rule assigned the point to
+no staff at all.
+
+**`StaffLine.yAt` does not extrapolate the spline.** Outside the line's own
+abscissa range Java extrapolates along the straight chord between the line's two
+endpoints, and uses the spline only inside. That difference only shows beyond
+the notated staff, which is where two staff areas both contain a point and the
+distance decides. Using spline extrapolation there was worth 14 of the 1209.
+
+**`Staff.distanceTo` returns an `int`.** `getClosestStaff` compares
+`(int) doubleDistanceTo(point)`, so distances within a pixel of each other tie
+and the strict `<` leaves the earlier staff holding the point.
+
+One thing is deliberately not reproduced. Java reads
+`SystemInfo.getAreaEnd(LEFT/RIGHT)` and notes it "may not be known yet"; this
+port never computes system area ends, so it passes zero and the intersection is
+skipped, leaving each staff spanning the sheet. That is what Java does with
+unknown ends, and it is what the lattice confirms -- but if system area ends are
+ever computed, this has to start reading them.
+
+### The builder
 
 `build_population_staff_areas` is Java's `StaffManager.computeStaffArea`: a
 horizontal slice between the staves above and below, intersected with the

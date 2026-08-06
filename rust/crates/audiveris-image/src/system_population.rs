@@ -395,6 +395,18 @@ pub struct StaffBoundary {
 }
 
 impl StaffBoundary {
+    /// The boundary's ordinate at `x`, evaluating the actual spline segment
+    /// rather than interpolating between its endpoints.
+    ///
+    /// `Staff.distanceTo` calls `LineInfo.yAt(x)`, which walks the spline, and
+    /// a polyline through the same points answers differently mid-segment --
+    /// enough to pick the wrong staff where two areas overlap and the distance
+    /// is the tie-break.
+    #[must_use]
+    pub fn y_at_x(&self, x: f64) -> Option<f64> {
+        boundary_y_at_x(self, x)
+    }
+
     fn first_point(&self) -> (f64, f64) {
         self.segments
             .first()
@@ -443,11 +455,22 @@ pub struct PopulationSystemArea {
 }
 
 impl PopulationSystemArea {
-    /// Java `Area.contains(Point2D)` behavior for the x-monotone system path.
-    /// Boundary points are excluded, including the vertical slice boundaries.
+    /// Java `Area.contains(Point2D)` for the x-monotone path.
+    ///
+    /// `java.awt.Shape` defines insideness as half-open, not exclusive: a point
+    /// exactly on the boundary is inside when the space immediately adjacent in
+    /// the increasing-x direction is inside, and for a horizontal segment when
+    /// the space in the increasing-y direction is. So the **left and north**
+    /// edges belong to the area and the **right and south** edges do not.
+    ///
+    /// This previously excluded all four, which no system test caught because
+    /// system areas are sampled well inside their bounds. Staff areas reach the
+    /// sheet edge -- a staff's north boundary is `y = 0` when nothing is above
+    /// it -- and there Java assigns the point to the staff while an exclusive
+    /// rule assigns it to nothing at all.
     #[must_use]
     pub fn contains(&self, x: f64, y: f64) -> bool {
-        if x <= f64::from(self.left) || x >= f64::from(self.right) {
+        if x < f64::from(self.left) || x >= f64::from(self.right) {
             return false;
         }
         let Some(north) = boundary_y_at_x(&self.north, x) else {
@@ -456,7 +479,7 @@ impl PopulationSystemArea {
         let Some(south) = boundary_y_at_x(&self.south, x) else {
             return false;
         };
-        y > north && y < south
+        y >= north && y < south
     }
 
     #[must_use]
@@ -552,6 +575,53 @@ pub fn build_population_system_areas(
             }
         })
         .collect()
+}
+
+/// A staff line's path, as an area boundary.
+///
+/// Java walks `LineInfo.getSpline()`'s `PathIterator` to build an area, so the
+/// boundary has to be the same segments rather than a resampling of the curve:
+/// a natural cubic through the same points is not the same path as a polyline
+/// through them, and `Area.contains` can differ near a segment join.
+///
+/// # Errors
+///
+/// Whatever `NaturalSpline::interpolate` raises for a degenerate point list.
+pub fn boundary_from_points(
+    points: &[(f64, f64)],
+) -> Result<StaffBoundary, audiveris_core::natural_spline::SplineError> {
+    use audiveris_core::natural_spline::{NaturalSpline, Segment};
+
+    let spline = NaturalSpline::interpolate(points)?;
+    Ok(StaffBoundary {
+        segments: spline
+            .segments()
+            .iter()
+            .map(|segment| match *segment {
+                Segment::Line { start, end } => BoundarySegment::Line { start, end },
+                Segment::Quadratic {
+                    start,
+                    control,
+                    end,
+                } => BoundarySegment::Quadratic {
+                    start,
+                    control,
+                    end,
+                },
+                Segment::Cubic {
+                    start,
+                    control1,
+                    control2,
+                    end,
+                } => BoundarySegment::Cubic {
+                    start,
+                    control1,
+                    control2,
+                    end,
+                },
+            })
+            .collect(),
+    })
 }
 
 /// One staff's placement, for `StaffManager.computeStaffArea`.
@@ -1751,7 +1821,8 @@ mod tests {
         assert_eq!(boundary_y_at_x(lower.north(), 50.0), Some(25.0));
         assert_eq!(boundary_y_at_x(lower.north(), 150.0), Some(35.0));
         assert!(lower.contains(50.0, 25.1));
-        assert!(!lower.contains(50.0, 25.0));
+        // On the north boundary is inside, per Java's half-open insideness.
+        assert!(lower.contains(50.0, 25.0));
     }
 
     #[test]
@@ -1790,9 +1861,14 @@ mod tests {
         // Java getRight() is left + width, so (90 + 111) / 2 truncates to 100.
         assert_eq!((areas[0].left, areas[0].right), (0, 100));
         assert_eq!((areas[1].left, areas[1].right), (100, 200));
+        // The divider belongs to the right-hand system, not to neither: a
+        // point on a left edge is inside and on a right edge is outside, so
+        // exactly one of the two claims it. This previously asserted that
+        // neither did, which would leave a one-pixel column assigned to
+        // nothing.
         assert!(areas[0].contains(99.999, 50.0));
         assert!(!areas[0].contains(100.0, 50.0));
-        assert!(!areas[1].contains(100.0, 50.0));
+        assert!(areas[1].contains(100.0, 50.0));
         assert!(areas[1].contains(100.001, 50.0));
     }
 
@@ -1817,7 +1893,11 @@ mod tests {
             north: curved,
             south: straight_boundary(0.0, 80.0, 100.0, 80.0),
         };
-        assert!(!area.contains(50.0, north));
+        // The north edge belongs to the area and the south edge does not.
+        // This previously asserted the opposite for the north; checked against
+        // Java, `new Area(new Rectangle2D.Double(0, 0, 100, 100))` answers
+        // contains(50, 0) true and contains(50, 100) false.
+        assert!(area.contains(50.0, north));
         assert!(area.contains(50.0, north + 0.001));
         assert!(!area.contains(50.0, 80.0));
     }

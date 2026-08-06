@@ -20,6 +20,16 @@ pub struct NaturalSpline {
 }
 
 impl NaturalSpline {
+    /// The interpolated segments, in order.
+    ///
+    /// Exposed because a staff line's path is what Java's `getGlobalLine`
+    /// walks to build a system or staff area, and the port needs the same
+    /// segments rather than a resampling of the curve.
+    #[must_use]
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
+    }
+
     /// Interpolate two or more `(x, y)` points.
     ///
     /// Two points produce a line, three produce one quadratic, and four or
@@ -140,7 +150,7 @@ impl NaturalSpline {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Segment {
+pub enum Segment {
     Line {
         start: (f64, f64),
         end: (f64, f64),
@@ -159,7 +169,8 @@ enum Segment {
 }
 
 impl Segment {
-    const fn start(self) -> (f64, f64) {
+    #[must_use]
+    pub const fn start(self) -> (f64, f64) {
         match self {
             Self::Line { start, .. }
             | Self::Quadratic { start, .. }
