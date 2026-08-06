@@ -3003,12 +3003,18 @@ mod tests {
         // only one whose *count* is off. That points at extension rather than
         // at the mask, and extension is the one stage running without stem
         // seeds.
+        // Down from 8 residuals across three sheets to 4 on one. Seven of the
+        // eight sheets are now exact end to end.
+        //
+        // What is left is on BachInvention5, the one page where `extendBeams`
+        // fires -- its sixth system merges a pair -- and the port's extension
+        // runs without stem seeds because STEM_SEEDS' vertical geometry is not
+        // ported. Java's own post-extension dump *contains* these beams while
+        // its final SIG does not, so something after extension drops them, and
+        // that is where to look next rather than at the mask.
         let known = [
-            "carmen.png#1: BeamInter -- 1 of 121 differ",
-            "carmen.png#1: BeamHookInter -- 1 of 36 differ",
-            "hove.png#1: BeamInter -- 1 of 28 differ",
             "BachInvention5.jpg#1: BeamInter count 190 vs Java 189",
-            "BachInvention5.jpg#1: BeamInter -- 5 of 189 differ",
+            "BachInvention5.jpg#1: BeamInter -- 4 of 189 differ",
         ];
         let unexpected: Vec<&String> = failures
             .iter()
@@ -3135,6 +3141,21 @@ mod tests {
 
         let pixels = recognition.no_staff.to_pixels();
         let (width, height) = (recognition.scale.width, recognition.scale.height);
+
+        // The chain's input, before anything beam-shaped happens. Everything
+        // downstream reads this raster, so a page whose NO_STAFF differed would
+        // surface as a scattering of impacts wrong in the last decimal --
+        // exactly what the surviving residuals look like.
+        let sheet_spots = one(spot_records, "sheet");
+        assert_eq!(
+            [
+                width.to_string(),
+                height.to_string(),
+                audiveris_image::morphology::digest(&pixels)
+            ],
+            [sheet_spots[2], sheet_spots[3], sheet_spots[4]].map(str::to_owned),
+            "NO_STAFF for this page"
+        );
 
         let margin: i32 = one(spot_records, "verticalmargin")[1]
             .parse()

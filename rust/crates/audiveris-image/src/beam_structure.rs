@@ -966,19 +966,22 @@ impl Parallelogram {
         // and differ in the last bits. On batuque one beam's core and belt
         // counts each moved by a single pixel because of it, which is enough to
         // change two of its six impacts.
-        let top = Segment {
-            x1: self.median.x1,
-            y1: self.median.y1 - self.half_height,
-            x2: self.median.x2,
-            y2: self.median.y2 - self.half_height,
+        // ...and interpolated the way Java2D interpolates them, which is not
+        // the way Audiveris does. `Segment::y_at_x` is `LineUtil.yAtX`, a
+        // determinant, because that is what Audiveris calls. This shape is
+        // tested by `java.awt.geom.Area.contains`, which walks its own edges
+        // parametrically, so the plain point-slope form is the faithful one
+        // here. The two differ in the last bits, and on carmen that difference
+        // put one extra pixel inside a beam's core: 307/322 where Java had
+        // 306/321.
+        let edge = |offset: f64| {
+            let (ey1, ey2) = (self.median.y1 + offset, self.median.y2 + offset);
+            ey1 + (x - self.median.x1) * ((ey2 - ey1) / (self.median.x2 - self.median.x1))
         };
-        let bottom = Segment {
-            x1: self.median.x1,
-            y1: self.median.y1 + self.half_height,
-            x2: self.median.x2,
-            y2: self.median.y2 + self.half_height,
-        };
-        x >= self.median.x1 && x < self.median.x2 && y >= top.y_at_x(x) && y < bottom.y_at_x(x)
+        x >= self.median.x1
+            && x < self.median.x2
+            && y >= edge(-self.half_height)
+            && y < edge(self.half_height)
     }
 
     fn integer_bounds(self) -> (i32, i32, i32, i32) {
