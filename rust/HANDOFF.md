@@ -607,6 +607,67 @@ function of the centroid -- which keeps it independent of the spot chain that
 cannot yet produce those centroids natively. Dropping the abscissa test alone
 moves 5 of the 2739, one being the carmen top-right spot that invents a beam.
 
+## HEADERS: what it actually needs (scouted 2026-08-06, not started)
+
+Scouted before starting, because the shape of this was wrong in two directions
+at once -- one dependency is far smaller than assumed, the other is larger.
+
+`HeadersStep.doSystem` is one line: `new HeaderBuilder(system).processHeader()`,
+producing clef, key and time per staff. `getHeaderStop()` -- the thing beams and
+`StemScaler` both want -- falls out of that.
+
+### The classifier is a 110-149-149 MLP in plain XML, not a deep net
+
+`ClefBuilder` evaluates candidate glyphs with `ShapeClassifier.getInstance()`,
+which is `BasicClassifier`, and the earlier assumption that this meant a
+DL4J-format model was wrong. `app/res/basic-classifier.zip` contains three XML
+files and nothing else:
+
+- `model.xml`, 1.5 MB: `<neural-network input-size="110" hidden-size="149"
+  output-size="149">` with explicit `input-labels` and `output-labels`;
+- `means.xml` and `stds.xml`, the per-feature normalisation.
+
+One hidden layer. The forward pass is a matrix multiply, an activation and a
+softmax -- an afternoon, not a project. The real work is the **feature vector**:
+the 110 labels are a 20x5 grid of ART moments (`F001`..`F194`) plus `weight`,
+`width`, `height`, the central moments `n20 n11 n02 n30 n21 n12 n03` and
+`aspect`. That is `MixGlyphDescriptor` = `ArtGlyphDescriptor` +
+`GeoGlyphDescriptor`, and those are ordinary geometry over a `ScaledBuffer`.
+Grade this against Java feature by feature before ever running the network; a
+wrong feature and a wrong weight look identical at the output.
+
+### MusicFont is the harder one, and the risk is Java2D's rasteriser
+
+Two font-derived quantities reach the SIG:
+
+1. `getSymbolBounds` -> `TextLayout.getBounds()`, the outline bounding box at a
+   given point size. Needs a real CFF/OTF outline parser and Java2D's TextLayout
+   bounds semantics, but no rasterisation.
+2. `ShapeSymbol.getCentroid` -> `computeCentroidOffset`, which walks the
+   **alpha channel of a rendered glyph image** and takes an alpha-weighted
+   centroid. This is antialiasing coverage, per pixel, from Marlin. Reproducing
+   it exactly means reproducing Java2D's rasteriser.
+
+Before attempting (2), note what it actually is: `centroidOffset` is a
+normalised ratio that depends only on `(family, shape, point size)` -- never on
+the page. `MusicFont.getPointSize(interline)` gives one size per sheet, so a
+corpus touches very few. So these are **font constants, not sheet data**, and
+pinning them from Java as an oracle table is the same kind of move as shipping
+the classifier's trained weights: data rather than logic. The offset is also
+multiplied by a box dimension and `rint`ed to an integer, so sub-pixel coverage
+differences may round away entirely -- which is measurable exactly the way
+`maxStem` was, and should be measured before any rasteriser is written.
+
+Default family is `Bravura` (`Bravura.otf`); the fonts live in `app/res/`.
+
+### Suggested order
+
+1. `MixGlyphDescriptor`'s 110 features, graded against Java on real glyphs.
+2. The MLP forward pass and `basic-classifier.zip` parsing.
+3. Measure how much the centroid offset's precision actually matters, then
+   decide between a pinned constant table and an outline/rasteriser port.
+4. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)
