@@ -2888,7 +2888,7 @@ mod tests {
             let mut java_raw: Vec<String> = records
                 .iter()
                 .filter(|fields| fields.first() == Some(&"rawbeam"))
-                .map(|fields| fields[2..9].join(" "))
+                .map(|fields| fields[2..].join(" "))
                 .collect();
             let mut mine_raw = produced.raw.clone();
             java_raw.sort();
@@ -2921,6 +2921,7 @@ mod tests {
                 );
             }
             if !differing.is_empty() {
+                println!("{page} raw beam differences:\n{}", differing.join("\n\n"));
                 failures.push(format!(
                     "{page}: {} of {} raw beams differ",
                     differing.len(),
@@ -3003,16 +3004,25 @@ mod tests {
         // only one whose *count* is off. That points at extension rather than
         // at the mask, and extension is the one stage running without stem
         // seeds.
-        // Down from 8 residuals across three sheets to 4 on one. Seven of the
-        // eight sheets are now exact end to end.
+        // Down from 8 residuals across three sheets to 3 beams on one, and
+        // seven of the eight sheets are now exact end to end.
         //
-        // What is left is on BachInvention5, the one page where `extendBeams`
-        // fires -- its sixth system merges a pair -- and the port's extension
-        // runs without stem seeds because STEM_SEEDS' vertical geometry is not
-        // ported. Java's own post-extension dump *contains* these beams while
-        // its final SIG does not, so something after extension drops them, and
-        // that is where to look next rather than at the mask.
+        // All three are on BachInvention5 and they are two families, not one.
+        // Two differ only in `jit` -- one by a single ulp, one by 0.008, which
+        // is a real difference in `computeJitter`'s fitted line and so a
+        // section included or excluded. The third differs in `core` and `belt`,
+        // by roughly one pixel each.
+        //
+        // The obvious suspect for the third is ruled out: jshell says the core
+        // mask agrees with Java's `Area` pixel for pixel on that beam's exact
+        // geometry (979 points either way), and NO_STAFF is asserted exact on
+        // every page above. So it is neither the mask nor the raster.
+        //
+        // BachInvention5 is also the one page where `extendBeams` fires, and
+        // the port's extension runs without stem seeds; `beam_extension` has
+        // its own core sampling, which is where to look next.
         let known = [
+            "BachInvention5.jpg#1: 3 of 194 raw beams differ",
             "BachInvention5.jpg#1: BeamInter count 190 vs Java 189",
             "BachInvention5.jpg#1: BeamInter -- 4 of 189 differ",
         ];
@@ -3334,7 +3344,8 @@ mod tests {
                 .iter()
                 .map(|(_, raw)| {
                     format!(
-                        "{} {} {:.9} {:.9} {:.9} {:.9} {:.9}",
+                        "{} {} {:.9} {:.9} {:.9} {:.9} {:.9} grade {:.9} impacts \
+                         wdth {:.9} minH {:.9} maxH {:.9} core {:.9} belt {:.9} jit {:.9}",
                         raw.kind.class_name(),
                         raw.kind.shape(),
                         raw.item.median.x1,
@@ -3342,6 +3353,13 @@ mod tests {
                         raw.item.median.x2,
                         raw.item.median.y2,
                         raw.item.height,
+                        raw.grade,
+                        raw.impacts.width,
+                        raw.impacts.min_height,
+                        raw.impacts.max_height,
+                        raw.impacts.core,
+                        raw.impacts.belt,
+                        raw.impacts.distance,
                     )
                 })
                 .collect(),
