@@ -121,17 +121,32 @@ void PageView::paintEvent(QPaintEvent *)
     if (showRust_) {
         for (const Inter &inter : rust_.inters) {
             if (inter.rejected) {
-                if (!showRejected_) {
+                if (!showRejected_ || !inter.bounds) {
                     continue;
                 }
                 QPen dashed(kRejected, pen * 1.5);
                 dashed.setStyle(Qt::DashLine);
                 painter.setPen(dashed);
-                if (inter.bounds) {
-                    const QRectF &span = *inter.bounds;
-                    painter.drawRect(QRectF(span.left(), 0, span.width(),
-                                            std::max(24.0, double(rust_.image.height()) * 0.02)));
+
+                // A rejected candidate carries an abscissa span and a staff id
+                // but no ordinates, so it is drawn over the staff it belongs
+                // to. Drawing it at the top of the sheet instead -- which this
+                // did -- put every rejection in one band and made a page dense
+                // with note stems look like a page of failures at the margin.
+                const QRectF &span = *inter.bounds;
+                double top = 0.0;
+                double bottom = std::max(24.0, double(rust_.image.height()) * 0.02);
+                for (const Staff &staff : rust_.staves) {
+                    if (staff.id != inter.staff) {
+                        continue;
+                    }
+                    if (const auto extent = staff.verticalExtent()) {
+                        top = extent->first;
+                        bottom = extent->second;
+                    }
+                    break;
                 }
+                painter.drawRect(QRectF(span.left(), top, span.width(), bottom - top));
                 continue;
             }
 

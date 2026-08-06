@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <cmath>
+#include <limits>
 
 namespace omrscope {
 
@@ -26,6 +27,25 @@ QString formatMissing()
 QString describe(const std::optional<double> &value)
 {
     return value ? QString::number(*value, 'f', 6) : formatMissing();
+}
+
+std::optional<QPair<double, double>> Staff::verticalExtent() const
+{
+    if (lines.isEmpty()) {
+        return std::nullopt;
+    }
+    double top = std::numeric_limits<double>::max();
+    double bottom = std::numeric_limits<double>::lowest();
+    for (const QPolygonF &line : lines) {
+        for (const QPointF &point : line) {
+            top = std::min(top, point.y());
+            bottom = std::max(bottom, point.y());
+        }
+    }
+    if (top > bottom) {
+        return std::nullopt;
+    }
+    return QPair<double, double>{top, bottom};
 }
 
 bool Pairing::agrees() const

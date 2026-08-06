@@ -6,6 +6,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QComboBox>
 #include <QFile>
 #include <QFileInfo>
@@ -16,6 +17,7 @@
 #include <QPdfDocument>
 #include <QPdfDocumentRenderOptions>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QSplitter>
@@ -45,11 +47,11 @@ constexpr StageStatus kStages[] = {
     {"BINARY", "native", "adaptive threshold; 9/9 example rasters bit-identical"},
     {"SCALE", "native", "line, interline and beam estimates exact on 4 pages and the branch cases"},
     {"GRID", "native", "staves, lines, barlines, systems, SIG; 420/420 barlines, all grades exact"},
-    {"HEADERS", "lifecycle", "clef/key/time candidate sourcing native; blocked on MusicFont"},
+    {"HEADERS", "lifecycle", "candidate sourcing, classifier ranking and glyph components all native; needs them wired to the clef/key/time recognizers"},
     {"STEM_SEEDS", "lifecycle", "stem scale and checker native; raw StickFactory geometry is a seam"},
     {"BEAMS", "lifecycle", "6613 lines ported; blocked on grayscale morphology (no module yet)"},
     {"LEDGERS", "lifecycle", "filter, candidates and all seven impacts ported; blocked on BEAMS"},
-    {"HEADS", "lifecycle", "blocked on MusicFont template matching"},
+    {"HEADS", "lifecycle", "blocked on MusicFont: head recognition template-matches font-derived symbols, and Java itself cannot reach HEADS without them"},
     {"STEMS", "lifecycle", ""},
     {"REDUCTION", "lifecycle", ""},
     {"CUE_BEAMS", "lifecycle", ""},
@@ -86,6 +88,11 @@ MainWindow::MainWindow(QDir repository, QWidget *parent)
     buildUi();
     loadInputs();
     loadStatus();
+
+    connect(&rustWatcher_, &QFutureWatcher<EngineResult>::finished, this,
+            &MainWindow::rustFinished);
+    connect(&javaWatcher_, &QFutureWatcher<EngineResult>::finished, this,
+            &MainWindow::javaFinished);
 }
 
 void MainWindow::buildUi()
@@ -108,7 +115,7 @@ void MainWindow::buildUi()
     withRust_->setChecked(true);
     withJava_ = new QCheckBox(tr("Java"));
     withJava_->setChecked(true);
-    auto *runButton = new QPushButton(tr("Run"));
+    runButton_ = new QPushButton(tr("Run"));
 
     controls->addWidget(new QLabel(tr("Sheet:")));
     controls->addWidget(input_, 1);
@@ -117,8 +124,14 @@ void MainWindow::buildUi()
     controls->addWidget(step_);
     controls->addWidget(withRust_);
     controls->addWidget(withJava_);
-    controls->addWidget(runButton);
+    controls->addWidget(runButton_);
     outer->addLayout(controls);
+
+    progress_ = new QProgressBar;
+    progress_->setRange(0, 0); // Indeterminate: neither engine reports progress.
+    progress_->setTextVisible(true);
+    progress_->hide();
+    outer->addWidget(progress_);
 
     summary_ = new QLabel(tr("Nothing run yet."));
     summary_->setTextFormat(Qt::RichText);
@@ -193,7 +206,7 @@ void MainWindow::buildUi()
     outer->addWidget(tabs, 1);
     setCentralWidget(central);
 
-    connect(runButton, &QPushButton::clicked, this, &MainWindow::run);
+    connect(runButton_, &QPushButton::clicked, this, &MainWindow::run);
 }
 
 void MainWindow::loadInputs()
@@ -285,29 +298,80 @@ QImage MainWindow::renderInput(const QString &input, int sheet) const
                                         qRound(points.height() * scale)));
 }
 
+void MainWindow::setBusy(bool busy, const QString &what)
+{
+    runButton_->setEnabled(!busy);
+    input_->setEnabled(!busy);
+    sheet_->setEnabled(!busy);
+    step_->setEnabled(!busy);
+    withRust_->setEnabled(!busy);
+    withJava_->setEnabled(!busy);
+    progress_->setVisible(busy);
+    if (busy) {
+        progress_->setFormat(what);
+    }
+}
+
 void MainWindow::run()
 {
-    const QString input = input_->currentText();
-    const int sheet = sheet_->value();
-    if (input.isEmpty()) {
+    if (rustWatcher_.isRunning() || javaWatcher_.isRunning()) {
+        return;
+    }
+    pendingInput_ = input_->currentText();
+    pendingSheet_ = sheet_->value();
+    pendingStep_ = step_->currentText();
+    if (pendingInput_.isEmpty()) {
         return;
     }
 
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    summary_->setText(tr("Running…"));
-    QApplication::processEvents();
-
     rust_ = EngineResult{};
     java_ = EngineResult{};
-    if (withRust_->isChecked()) {
-        rust_ = runner_.runRust(input, sheet);
-    }
-    if (withJava_->isChecked()) {
-        java_ = runner_.runJava(input, sheet, step_->currentText());
-    }
-    QApplication::restoreOverrideCursor();
+    // The sheet is rasterised on the UI thread on purpose: it is Qt decoding an
+    // image, it takes milliseconds, and having the page appear immediately is
+    // most of what makes the wait for the engines tolerable.
+    page_->setImage(renderInput(pendingInput_, pendingSheet_));
+    page_->setResults(rust_, java_);
+    table_->setRowCount(0);
 
-    page_->setImage(renderInput(input, sheet));
+    if (withRust_->isChecked()) {
+        setBusy(true, tr("Running Rust…"));
+        summary_->setText(tr("Running Rust…"));
+        rustWatcher_.setFuture(QtConcurrent::run([this] {
+            // Only reads immutable state on the runner, so it is safe off the
+            // UI thread; the QProcess it creates lives entirely in this task.
+            return runner_.runRust(pendingInput_, pendingSheet_);
+        }));
+        return;
+    }
+    startJava();
+}
+
+void MainWindow::rustFinished()
+{
+    rust_ = rustWatcher_.result();
+    // Show the Rust half at once rather than making it wait on Gradle, which
+    // can take a minute and has nothing to do with it.
+    showResults();
+    startJava();
+}
+
+void MainWindow::startJava()
+{
+    if (!withJava_->isChecked()) {
+        setBusy(false);
+        showResults();
+        return;
+    }
+    setBusy(true, tr("Running Java (Gradle startup dominates this)…"));
+    javaWatcher_.setFuture(QtConcurrent::run([this] {
+        return runner_.runJava(pendingInput_, pendingSheet_, pendingStep_);
+    }));
+}
+
+void MainWindow::javaFinished()
+{
+    java_ = javaWatcher_.result();
+    setBusy(false);
     showResults();
 }
 
@@ -327,11 +391,18 @@ void MainWindow::showResults()
         for (const Inter &inter : result.inters) {
             rejected += inter.rejected ? 1 : 0;
         }
-        return QStringLiteral("<b>%1</b>: %2 inters (%3 rejected), %4 relations, "
+        // Java purges the same candidates -- the port's rejection reasons are
+        // Java's own stage names -- but by the time a SIG exists the purged
+        // peaks are gone, so there is nothing to report. Printing "0 rejected"
+        // would read as "rejected nothing", which is a different claim.
+        const QString rejectedText = result.engine == QLatin1String("java")
+            ? QStringLiteral("rejections not reported")
+            : QStringLiteral("%1 rejected").arg(rejected);
+        return QStringLiteral("<b>%1</b>: %2 inters (%3), %4 relations, "
                               "%5 staves &mdash; <b>%6 ms</b> <i>(%7)</i>")
             .arg(label)
             .arg(result.inters.size() - rejected)
-            .arg(rejected)
+            .arg(rejectedText)
             .arg(result.relationCount)
             .arg(result.staves.size())
             .arg(QString::number(result.millis, 'f', 1), result.timingNote);

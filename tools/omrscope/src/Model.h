@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QLineF>
+#include <QPair>
 #include <QPolygonF>
 #include <QRectF>
 #include <QString>
@@ -49,6 +50,11 @@ struct Staff
     double right = 0.0;
     int lineCount = 0;
     QVector<QPolygonF> lines;       ///< Empty until lines are persistent.
+
+    /// The staff's vertical extent, or nothing if its lines are still
+    /// filaments. A rejected candidate has no ordinates of its own -- it is a
+    /// span and a staff id -- so this is what gives it somewhere to be drawn.
+    std::optional<QPair<double, double>> verticalExtent() const;
 };
 
 /// What one engine made of one sheet.

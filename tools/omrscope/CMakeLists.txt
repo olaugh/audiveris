@@ -17,7 +17,7 @@ if(APPLE AND NOT DEFINED CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Pdf)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Pdf Concurrent)
 
 add_executable(omrscope
     src/main.cpp
@@ -27,5 +27,5 @@ add_executable(omrscope
     src/EngineRunner.cpp
 )
 
-target_link_libraries(omrscope PRIVATE Qt6::Widgets Qt6::Pdf)
+target_link_libraries(omrscope PRIVATE Qt6::Widgets Qt6::Pdf Qt6::Concurrent)
 target_compile_options(omrscope PRIVATE -Wall -Wextra)

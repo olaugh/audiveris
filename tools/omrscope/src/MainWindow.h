@@ -5,12 +5,15 @@
 #include "Model.h"
 
 #include <QDir>
+#include <QFutureWatcher>
 #include <QMainWindow>
 
 class QCheckBox;
 class QComboBox;
 class QLabel;
 class QPlainTextEdit;
+class QProgressBar;
+class QPushButton;
 class QSpinBox;
 class QTableWidget;
 class QTextBrowser;
@@ -34,9 +37,17 @@ public:
 private slots:
     void run();
     void refreshFilter();
+    void rustFinished();
+    void javaFinished();
 
 private:
     void buildUi();
+    /// Engines run on a worker thread. They take between a hundred
+    /// milliseconds and a minute -- Gradle dominates the Java side -- and
+    /// blocking the UI thread for that turns a slow tool into a broken-looking
+    /// one.
+    void startJava();
+    void setBusy(bool busy, const QString &what = {});
     void loadInputs();
     void loadStatus();
     void showResults();
@@ -59,6 +70,14 @@ private:
     QTextBrowser *status_ = nullptr;
     QPlainTextEdit *log_ = nullptr;
     QLabel *summary_ = nullptr;
+    QProgressBar *progress_ = nullptr;
+    QPushButton *runButton_ = nullptr;
+
+    QFutureWatcher<EngineResult> rustWatcher_;
+    QFutureWatcher<EngineResult> javaWatcher_;
+    QString pendingInput_;
+    int pendingSheet_ = 1;
+    QString pendingStep_;
 };
 
 } // namespace omrscope
