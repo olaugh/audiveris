@@ -762,6 +762,9 @@ fn build_peak_graph(
                 sheet_height: i32::try_from(height).unwrap_or(i32::MAX),
                 ..HeadlessPopulationState::default()
             },
+            // The staff-free image is erased from this, once CleanStaffLines
+            // has registered the staff-line glyphs.
+            binary: Some(raster_pixels.to_vec()),
             ..HeadlessGridSheet::default()
         },
         HeadlessGridBook::default(),
@@ -773,6 +776,15 @@ fn build_peak_graph(
     executor
         .run_grid_step_stage(GridStepStage::BuildGrid)
         .map_err(grid_stage("grid build"))?;
+    // GRID does not end at BuildGrid. `StaffLineCleaner` converts each staff
+    // line filament into a persistent line with a registered glyph, removes
+    // those sections from the horizontal lag, and rebuilds the lag from the
+    // staff-free image -- which is built from exactly those glyphs. Everything
+    // downstream that reads ink rather than geometry depends on this having
+    // run.
+    executor
+        .run_grid_step_stage(GridStepStage::CleanStaffLines)
+        .map_err(grid_stage("clean staff lines"))?;
     let builder = &mut executor.builder;
 
     // The purges are where a barline candidate dies, so the removals are
@@ -2228,22 +2240,11 @@ mod tests {
     /// Painting white over black has no thresholds and no floating point, so
     /// the comparison is an exact hash rather than a tolerance.
     ///
-    /// **Ignored, and the reason is the next slice.** `recognize_grid_lines`
-    /// runs only `GridStepStage::BuildGrid`; GRID's own `CleanStaffLines` stage
-    /// never runs, so every staff line is still a `Filament` and no glyph has
-    /// been registered to erase. The port currently produces the binary raster
-    /// unchanged -- for chula that is `2179468ede9f7ec6`, which is also its
-    /// binary digest in `oracle/grid-binary.txt`, because chula.png is already
-    /// bilevel -- against Java's `8951314e66665884`.
-    ///
-    /// The fix is not to erase harder. In Java `rebuildHLag()` reads
-    /// `Picture.getSource(NO_STAFF)`, which is built *lazily at that moment*
-    /// from the glyphs `simplifyLines` created earlier in the same method, so
-    /// the port's `rebuild_horizontal_lag` should build the table from the
-    /// sheet's persistent glyphs rather than read a field only tests populate.
-    /// Then the driver can run `CleanStaffLines` and this passes.
+    /// Getting here needed GRID's own `CleanStaffLines` stage to run, which
+    /// the driver had never invoked -- it stopped at `BuildGrid`, so every
+    /// staff line was still a `Filament` with no registered glyph and the port
+    /// erased nothing. The erasing was never the hard part.
     #[test]
-    #[ignore = "needs GRID's CleanStaffLines stage to run; see the doc comment"]
     fn no_staff_buffer_matches_the_java_oracle() {
         let oracle = java_no_staff_oracle();
         let mut checked = 0usize;

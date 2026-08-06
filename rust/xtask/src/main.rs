@@ -1346,6 +1346,8 @@ fn output_boundary_vector() -> Result<String, Box<dyn Error>> {
     let mut executor = HeadlessGridExecutor::new(
         OutputBoundaryBuilder::default(),
         HeadlessGridSheet {
+            // The vector supplies `no_staff_table` directly.
+            binary: None,
             sheet_number: 1,
             staffs,
             glyphs: HeadlessGlyphRegistry::default(),

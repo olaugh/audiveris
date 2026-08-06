@@ -27,6 +27,7 @@ use audiveris_image::{
     lag_rebuild::{RebuildHorizontalLagError, RegisteredHorizontalLag, rebuild_horizontal_lag},
     line_short_sections::NoopVipSectionHook,
     lines_coordinator::{LinesCoordinatorParameters, StaffCandidateKind},
+    no_staff::build_no_staff_table,
     peak_graph::{PeakEdgeId, PeakGraph},
     prepared_bars::{
         PreparedBarsHandoff, PreparedBarsHandoffSource, ProductionProcessBars,
@@ -358,7 +359,14 @@ pub struct HeadlessGridSheet {
     pub glyphs: HeadlessGlyphRegistry,
     pub sig: HeadlessGridSigState,
     pub promotion_failure: Option<HeadlessGridPromotionError>,
+    /// Java `Picture.getSource(NO_STAFF)`, built lazily rather than supplied.
+    ///
+    /// `rebuildHLag` is the first thing that asks for it, and by then
+    /// `simplifyLines` has registered the staff-line glyphs it is made from.
+    /// A caller may still supply one -- tests do -- and then it is used as is.
     pub no_staff_table: Option<RunTable>,
+    /// The binary raster, which the staff-free image is erased from.
+    pub binary: Option<Vec<u8>>,
     pub max_fore: Option<usize>,
     pub ledger_thickness: f64,
     pub vertical_lag: Option<HeadlessVerticalLag>,
@@ -472,11 +480,16 @@ pub struct HeadlessGridBook {
 pub enum HeadlessGridError<StepError> {
     Build(StepError),
     MissingStaff(usize),
-    PersistentStaffLine { staff_id: usize, line_id: usize },
+    PersistentStaffLine {
+        staff_id: usize,
+        line_id: usize,
+    },
     StaffLineConversion(StaffLineConversionError<Infallible>),
     MissingHorizontalLag,
     RemoveStaffSections(RunTableError),
     RebuildHorizontalLag(RebuildHorizontalLagError),
+    /// The staff-free image could not be built from the binary raster.
+    NoStaffTable(RunTableError),
     ScoreUpdate(ScoreUpdateError),
 }
 
@@ -1127,6 +1140,34 @@ where
     }
 
     fn rebuild_horizontal_lag(&mut self) -> Result<(), Self::Error> {
+        // Java's `rebuildHLag` reads `Picture.getSource(NO_STAFF)`, and
+        // `Picture` builds that lazily, on this first request, by painting the
+        // staff-line glyphs white over the binary raster. Those glyphs exist by
+        // now because `simplifyLines` ran earlier in the same cleaner. Doing it
+        // here rather than expecting the caller to have supplied a table is
+        // what makes the order match.
+        if self.sheet.no_staff_table.is_none()
+            && let Some(binary) = self.sheet.binary.as_ref()
+        {
+            let glyphs: Vec<StaffGlyph> = self
+                .sheet
+                .staffs
+                .iter()
+                .flat_map(|staff| staff.lines.iter())
+                .filter_map(|line| match line {
+                    HeadlessStaffLine::Persistent { line, .. } => Some(line.glyph.clone()),
+                    // Java logs "no glyph for line" and paints nothing.
+                    HeadlessStaffLine::Filament { .. } => None,
+                })
+                .collect();
+            let (width, height) = (
+                usize::try_from(self.sheet.population.sheet_width).unwrap_or(0),
+                usize::try_from(self.sheet.population.sheet_height).unwrap_or(0),
+            );
+            let table = build_no_staff_table(binary, width, height, &glyphs)
+                .map_err(HeadlessGridError::NoStaffTable)?;
+            self.sheet.no_staff_table = Some(table);
+        }
         rebuild_horizontal_lag(
             self.sheet.no_staff_table.as_ref(),
             self.sheet.max_fore,
@@ -2010,6 +2051,9 @@ mod tests {
             SuccessfulBuilder::default(),
             HeadlessGridSheet {
                 sheet_number: 1,
+                // This fixture supplies `no_staff_table` directly, so the
+                // lazy build has nothing to do and needs no raster.
+                binary: None,
                 staffs: vec![HeadlessStaff {
                     id: 1,
                     kind: StaffCandidateKind::OneLine,
