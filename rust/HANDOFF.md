@@ -40,20 +40,23 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 | PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
-Beams run only in tests, fed by the oracle -- see "Beams cannot yet run as a
-production path" for the three inputs missing before `-json` can emit them, and
-which one is cheap.
+| Spot-to-system dispatch | 2739/2739 spot centroids on 8 sheets, exact |
+| Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
+
+Beams run only in tests, fed by the oracle. Two of the three inputs that kept
+them there are now native -- see "Next session: start here". The third is the
+header erase, which is HEADERS, which is MusicFont.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
 seconds since the dev profile went to `opt-level = 2`.
 
-**Two changes are unverified by CI**: that profile change and the second
-`java_hypot` fix in `beam_structure`. GitHub Actions was in a major outage when
-they landed (2026-08-06, incident from 15:22 UTC), and six consecutive runs died
-in *Set up job* before checkout. The hypot one specifically needs the
-`ubuntu-latest` leg, because it exists to fix a divergence macOS cannot see.
-Re-run before trusting either.
+**One change is unverified by CI**: that profile change. GitHub Actions was in a
+major outage when it landed (2026-08-06, incident from 15:22 UTC) and both its
+runs died in *Set up job* before checkout. The second `java_hypot` fix in
+`beam_structure` was also unverified for a while and no longer is -- run
+`31116910296` went green on both legs, including the `ubuntu-latest` one it
+exists for, since it fixes a divergence macOS cannot see.
 
 ### Reproducing the PDF work on a fresh machine
 
@@ -472,28 +475,26 @@ sheets -- but it only runs *in tests*, fed by the oracle. Emitting it from
 `-json` needs three inputs the port does not compute, and shipping
 oracle-derived values in a production report would be dishonest output:
 
-1. **`scale.getMaxStem()`**, for the stem-run removal that opens the spot
-   chain. This is the cheap one: `stem_seeds_step::compute_stem_scale` is
-   already ported and returns it; it needs the binary image's horizontal run
-   lengths and a `StemScaleComputation`, both derivable from what
-   `recognize_grid_lines` already has.
+1. ~~**`scale.getMaxStem()`**~~ **(closed, `2982cef69`)**, for the stem-run
+   removal that opens the spot chain. Not cheap for the reason first given --
+   `StemScaler.getBuffer` cleans the raster before counting -- but the cleaning
+   turned out not to move the mode on any of the eight sheets. See "Next
+   session: start here".
 2. **`Staff.getHeaderStop()`**, for `eraseHeaderAreas`. This is HEADERS, and so
    MusicFont. Measured cost of omitting it: five spurious clef-sized candidates
-   out of 100 on chula, and zero real beams.
-3. **System areas**, for `dispatchSheetSpots`. `recognize_grid_lines` passes
-   `system_ends = (0, 0)` and says so in a comment: the port never computes
-   `SystemInfo.getAreaEnd`. Without them a spot cannot be assigned to a system,
-   and the system decides which spots each `BeamsBuilder` sees, what
-   `buildHooks` searches, and how `BeamGroupInter.populateSystem` partitions --
-   grouping run sheet-wide instead of per system turns chula's 60 groups into
-   48.
+   out of 100 on chula, and zero real beams. **This is now the only one left**,
+   and it appears twice -- here and inside `StemScaler.getBuffer`.
+3. ~~**System areas**~~ **(closed, `2982cef69`)**, for `dispatchSheetSpots`.
+   `GridLinesRecognition` now carries `system_areas` and `system_bounds`, graded
+   over 2739 centroids. Wiring rather than a port, as predicted, with one
+   correction: the dispatch reads two different left/right pairs, not one.
+   Without it a spot cannot be assigned to a system, and the system decides
+   which spots each `BeamsBuilder` sees, what `buildHooks` searches, and how
+   `BeamGroupInter.populateSystem` partitions -- grouping run sheet-wide instead
+   of per system turns chula's 60 groups into 48.
 
-`PopulationSystemArea` already exists and has `contains`, `left`, `right` and
-`system_id`, so (3) is wiring rather than a port: what is missing is the area
-*ends*, which Java sets in `SystemManager` during GRID.
-
-Order worth taking them: (1), then (3), after which the report becomes honest
-with (2) still open and its cost stated in the output.
+With (1) and (3) closed, the report can be made honest with (2) still open,
+provided the output states its cost rather than hiding it.
 
 ## Push to `master` only
 
@@ -559,15 +560,52 @@ hold.
 
 ## Next session: start here
 
-1. **Confirm CI.** `gh run list --workflow "Rust port" --limit 4`, then re-run
-   if the outage above left it red. Read the step list, not the duration.
-2. **`scale.getMaxStem()` natively** -- `compute_stem_scale` is already ported.
-3. **System area ends**, which unblocks the spot dispatch and therefore the
-   whole beam pipeline as a production path.
-4. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
+Two of the three inputs that kept beams out of the production path are closed
+(`2982cef69`). What is left is the one that was always the hard one.
+
+1. **Confirm CI.** `gh run list --workflow "Rust port" --limit 4`. Read the step
+   list, not the duration -- a run that dies in *Set up job* is infrastructure.
+   Still unverified by CI: the `opt-level = 2` dev profile, whose two runs both
+   died in setup during the outage. The second `java_hypot` fix **is** verified;
+   run `31116910296` went green on both legs.
+2. **The header erase**, which is now the *only* thing between the beam pipeline
+   and running natively end to end. It is `Staff.getHeaderStop()`, so it is
+   HEADERS, so it is MusicFont -- see the MusicFont thread below. It shows up
+   twice, in `SpotsBuilder.eraseHeaderAreas` and again inside
+   `StemScaler.getBuffer`, and both are the same dependency.
+3. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
    currently show GRID-level inters only and so cannot display any beam work.
-5. **LEDGERS**, which is unblocked by BEAMS but likely shares the system-area
-   dependency through `LedgersFilter`.
+   This can proceed ahead of item 2 if the header erase is left out and the cost
+   is stated: 5 spurious candidates and 0 real beams on chula, already pinned by
+   `header_erase_cost_is_measured_not_assumed`.
+4. **LEDGERS**, which is unblocked by BEAMS and no longer blocked on system
+   areas either, since `LedgersFilter` reads the same ones item 2 below closed.
+
+### Closed here: `scale.getMaxStem()`
+
+Not cheap for the reason previously given, and the previous note was wrong about
+why. `compute_stem_scale` was indeed already graded -- but `StemScaler.getBuffer`
+does not count runs in NO_STAFF. It erases barline and connector inters, erases
+each system header (`useHeader` defaults to **true**, and `eraseSystemHeader`
+reads `getHeaderStop`), and paints white outside the core staff paths.
+
+Rather than port all three, it was measured: the uncleaned NO_STAFF raster
+reproduces Java's `maxStem` on all eight sheets, including the two where Java
+says 5 rather than 4. A mode over ~10^5 runs is not a statistic a tail moves.
+`stem_scale_from_the_uncleaned_no_staff_is_measured_not_assumed` asserts it per
+sheet, so the first page that needs the cleaning names itself.
+
+### Closed here: system areas
+
+`GridLinesRecognition` now carries `system_areas` and `system_bounds`.
+`build_population_system_areas` was already written and graded; what was missing
+was that `dispatchSheetSpots` reads **two** left/right pairs -- the area's, which
+are midpoints to its neighbours, and the system's own staff extremes.
+
+Graded over all **2739 spot centroids on all eight sheets**, exact, as a pure
+function of the centroid -- which keeps it independent of the spot chain that
+cannot yet produce those centroids natively. Dropping the abscissa test alone
+moves 5 of the 2739, one being the carmen top-right spot that invents a beam.
 
 ## Open threads, in the order worth taking them
 
