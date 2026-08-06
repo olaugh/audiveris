@@ -47,6 +47,7 @@ pub mod line_short_sections;
 pub mod lines_coordinator;
 pub mod mask;
 pub mod median;
+pub mod morphology;
 pub mod multiple_rest_serifs;
 pub mod no_staff;
 pub mod part_group;

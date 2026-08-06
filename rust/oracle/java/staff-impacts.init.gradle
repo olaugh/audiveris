@@ -43,6 +43,30 @@ gradle.projectsEvaluated {
                 .findAll { !it.isEmpty() }
     }
 
+    // Morphology is a unit probe: with no arguments it needs no sheet at all,
+    // because the structuring element and the closing arithmetic do not depend
+    // on one. Arguments add the real-page cases.
+    app.tasks.register('morphoProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.MorphoProbe'
+        workingDir = app.projectDir
+        // Audiveris logs at DEBUG to stdout by default, which buries the
+        // records under a hundred times their number in noise.
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        // -PmorphoTargets="data/examples/chula.png:1"
+        args = (app.findProperty('morphoTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def bits = target.split(':')
+                    def file = new File(bits[0])
+                    def resolved = file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, bits[0])
+                    ([resolved.absolutePath] + bits[1..-1]).join(':')
+                }
+    }
+
     app.tasks.register('sigProbe', JavaExec) {
         dependsOn 'compileStaffImpactsProbe'
         classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath

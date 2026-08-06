@@ -1,0 +1,875 @@
+# Java Audiveris 5.11 (JDK 25) grayscale morphology, from
+# oracle/java/MorphoProbe.java.
+#
+# A unit oracle rather than an end-to-end one. oracle/beams-chula.txt grades the
+# closing only through the beams it eventually produces, because Audiveris
+# caches the closed buffer nowhere; that makes a wrong structuring element and a
+# wrong beam recogniser look alike. These records call MorphoProcessor.close
+# directly, so each layer answers for itself.
+#
+#   se     <radius> <width> <height> <area> <cells>
+#   semask <row> <picture>        -- the mask, as characters
+#   sevect <i> <dy> <dx> <value> <distance>
+#   synthsrc <buffer> <w> <h> <digest>   -- the generated input, before closing
+#   synth  <buffer> <w> <h> <radius> <digest>
+#   synthpix.<buffer>.<radius> <row> <hex>   -- every pixel, for the small pair
+#   sheet  <file>#<sheet> <w> <h> <digest>   -- the NO_STAFF buffer closed below
+#   radius beam <b> smallBeam <s> used <u> diameter <d> radius <r>
+#   closed <radius> <digest>      -- close() over that NO_STAFF buffer
+#
+# The last four records are what BEAMS feeds the closing rather than what
+# morphology needs -- stem-run removal, median, gaussian, and then the closing
+# of all three -- and are pinned here so the step around this one already has
+# its gate.
+#
+# The two generated buffers come from formulas, not fixtures, so a port can
+# rebuild them: `noise` is a Java int LCG (state = state * 1103515245 + 12345,
+# byte = (state >>> 16) & 0xff), and `shapes` is white with bars and a blob in
+# it. See the probe.
+#
+# Regenerate:
+#   unset JAVA_TOOL_OPTIONS
+#   JAVA_HOME=/path/to/jdk25/Contents/Home ./gradlew --no-daemon -q \
+#     -I rust/oracle/java/staff-impacts.init.gradle :app:morphoProbe \
+#     -PmorphoTargets="data/examples/chula.png:1"
+se 0.5000 5 5 5 5
+semask 0 .....
+semask 1 ..#..
+semask 2 .###.
+semask 3 ..#..
+semask 4 .....
+sevect 0 -1 0 255 1
+sevect 1 0 -1 255 1
+sevect 2 0 0 255 1
+sevect 3 0 1 255 1
+sevect 4 1 0 255 1
+se 1.0000 5 5 5 5
+semask 0 .....
+semask 1 ..#..
+semask 2 .###.
+semask 3 ..#..
+semask 4 .....
+sevect 0 -1 0 255 1
+sevect 1 0 -1 255 1
+sevect 2 0 0 255 1
+sevect 3 0 1 255 1
+sevect 4 1 0 255 1
+se 1.5000 7 7 9 9
+semask 0 .......
+semask 1 .......
+semask 2 ..###..
+semask 3 ..###..
+semask 4 ..###..
+semask 5 .......
+semask 6 .......
+sevect 0 -1 -1 255 2
+sevect 1 -1 0 255 1
+sevect 2 -1 1 255 2
+sevect 3 0 -1 255 1
+sevect 4 0 0 255 1
+sevect 5 0 1 255 1
+sevect 6 1 -1 255 2
+sevect 7 1 0 255 1
+sevect 8 1 1 255 2
+se 2.0000 7 7 13 13
+semask 0 .......
+semask 1 ...#...
+semask 2 ..###..
+semask 3 .#####.
+semask 4 ..###..
+semask 5 ...#...
+semask 6 .......
+sevect 0 -2 0 255 2
+sevect 1 -1 -1 255 2
+sevect 2 -1 0 255 1
+sevect 3 -1 1 255 2
+sevect 4 0 -2 255 2
+sevect 5 0 -1 255 1
+sevect 6 0 0 255 1
+sevect 7 0 1 255 1
+sevect 8 0 2 255 2
+sevect 9 1 -1 255 2
+sevect 10 1 0 255 1
+sevect 11 1 1 255 2
+sevect 12 2 0 255 2
+se 2.5000 9 9 21 21
+semask 0 .........
+semask 1 .........
+semask 2 ...###...
+semask 3 ..#####..
+semask 4 ..#####..
+semask 5 ..#####..
+semask 6 ...###...
+semask 7 .........
+semask 8 .........
+sevect 0 -2 -1 255 2
+sevect 1 -2 0 255 2
+sevect 2 -2 1 255 2
+sevect 3 -1 -2 255 2
+sevect 4 -1 -1 255 2
+sevect 5 -1 0 255 1
+sevect 6 -1 1 255 2
+sevect 7 -1 2 255 2
+sevect 8 0 -2 255 2
+sevect 9 0 -1 255 1
+sevect 10 0 0 255 1
+sevect 11 0 1 255 1
+sevect 12 0 2 255 2
+sevect 13 1 -2 255 2
+sevect 14 1 -1 255 2
+sevect 15 1 0 255 1
+sevect 16 1 1 255 2
+sevect 17 1 2 255 2
+sevect 18 2 -1 255 2
+sevect 19 2 0 255 2
+sevect 20 2 1 255 2
+se 3.0000 9 9 29 29
+semask 0 .........
+semask 1 ....#....
+semask 2 ..#####..
+semask 3 ..#####..
+semask 4 .#######.
+semask 5 ..#####..
+semask 6 ..#####..
+semask 7 ....#....
+semask 8 .........
+sevect 0 -3 0 255 3
+sevect 1 -2 -2 255 3
+sevect 2 -2 -1 255 2
+sevect 3 -2 0 255 2
+sevect 4 -2 1 255 2
+sevect 5 -2 2 255 3
+sevect 6 -1 -2 255 2
+sevect 7 -1 -1 255 2
+sevect 8 -1 0 255 1
+sevect 9 -1 1 255 2
+sevect 10 -1 2 255 2
+sevect 11 0 -3 255 3
+sevect 12 0 -2 255 2
+sevect 13 0 -1 255 1
+sevect 14 0 0 255 1
+sevect 15 0 1 255 1
+sevect 16 0 2 255 2
+sevect 17 0 3 255 3
+sevect 18 1 -2 255 2
+sevect 19 1 -1 255 2
+sevect 20 1 0 255 1
+sevect 21 1 1 255 2
+sevect 22 1 2 255 2
+sevect 23 2 -2 255 3
+sevect 24 2 -1 255 2
+sevect 25 2 0 255 2
+sevect 26 2 1 255 2
+sevect 27 2 2 255 3
+sevect 28 3 0 255 3
+se 3.5000 11 11 45 45
+semask 0 ...........
+semask 1 ...........
+semask 2 ...#####...
+semask 3 ..#######..
+semask 4 ..#######..
+semask 5 ..#######..
+semask 6 ..#######..
+semask 7 ..#######..
+semask 8 ...#####...
+semask 9 ...........
+semask 10 ...........
+sevect 0 -3 -2 255 4
+sevect 1 -3 -1 255 3
+sevect 2 -3 0 255 3
+sevect 3 -3 1 255 3
+sevect 4 -3 2 255 4
+sevect 5 -2 -3 255 4
+sevect 6 -2 -2 255 3
+sevect 7 -2 -1 255 2
+sevect 8 -2 0 255 2
+sevect 9 -2 1 255 2
+sevect 10 -2 2 255 3
+sevect 11 -2 3 255 4
+sevect 12 -1 -3 255 3
+sevect 13 -1 -2 255 2
+sevect 14 -1 -1 255 2
+sevect 15 -1 0 255 1
+sevect 16 -1 1 255 2
+sevect 17 -1 2 255 2
+sevect 18 -1 3 255 3
+sevect 19 0 -3 255 3
+sevect 20 0 -2 255 2
+sevect 21 0 -1 255 1
+sevect 22 0 0 255 1
+sevect 23 0 1 255 1
+sevect 24 0 2 255 2
+sevect 25 0 3 255 3
+sevect 26 1 -3 255 3
+sevect 27 1 -2 255 2
+sevect 28 1 -1 255 2
+sevect 29 1 0 255 1
+sevect 30 1 1 255 2
+sevect 31 1 2 255 2
+sevect 32 1 3 255 3
+sevect 33 2 -3 255 4
+sevect 34 2 -2 255 3
+sevect 35 2 -1 255 2
+sevect 36 2 0 255 2
+sevect 37 2 1 255 2
+sevect 38 2 2 255 3
+sevect 39 2 3 255 4
+sevect 40 3 -2 255 4
+sevect 41 3 -1 255 3
+sevect 42 3 0 255 3
+sevect 43 3 1 255 3
+sevect 44 3 2 255 4
+se 4.0000 11 11 49 49
+semask 0 ...........
+semask 1 .....#.....
+semask 2 ...#####...
+semask 3 ..#######..
+semask 4 ..#######..
+semask 5 .#########.
+semask 6 ..#######..
+semask 7 ..#######..
+semask 8 ...#####...
+semask 9 .....#.....
+semask 10 ...........
+sevect 0 -4 0 255 4
+sevect 1 -3 -2 255 4
+sevect 2 -3 -1 255 3
+sevect 3 -3 0 255 3
+sevect 4 -3 1 255 3
+sevect 5 -3 2 255 4
+sevect 6 -2 -3 255 4
+sevect 7 -2 -2 255 3
+sevect 8 -2 -1 255 2
+sevect 9 -2 0 255 2
+sevect 10 -2 1 255 2
+sevect 11 -2 2 255 3
+sevect 12 -2 3 255 4
+sevect 13 -1 -3 255 3
+sevect 14 -1 -2 255 2
+sevect 15 -1 -1 255 2
+sevect 16 -1 0 255 1
+sevect 17 -1 1 255 2
+sevect 18 -1 2 255 2
+sevect 19 -1 3 255 3
+sevect 20 0 -4 255 4
+sevect 21 0 -3 255 3
+sevect 22 0 -2 255 2
+sevect 23 0 -1 255 1
+sevect 24 0 0 255 1
+sevect 25 0 1 255 1
+sevect 26 0 2 255 2
+sevect 27 0 3 255 3
+sevect 28 0 4 255 4
+sevect 29 1 -3 255 3
+sevect 30 1 -2 255 2
+sevect 31 1 -1 255 2
+sevect 32 1 0 255 1
+sevect 33 1 1 255 2
+sevect 34 1 2 255 2
+sevect 35 1 3 255 3
+sevect 36 2 -3 255 4
+sevect 37 2 -2 255 3
+sevect 38 2 -1 255 2
+sevect 39 2 0 255 2
+sevect 40 2 1 255 2
+sevect 41 2 2 255 3
+sevect 42 2 3 255 4
+sevect 43 3 -2 255 4
+sevect 44 3 -1 255 3
+sevect 45 3 0 255 3
+sevect 46 3 1 255 3
+sevect 47 3 2 255 4
+sevect 48 4 0 255 4
+se 4.5000 13 13 69 69
+semask 0 .............
+semask 1 .............
+semask 2 ....#####....
+semask 3 ...#######...
+semask 4 ..#########..
+semask 5 ..#########..
+semask 6 ..#########..
+semask 7 ..#########..
+semask 8 ..#########..
+semask 9 ...#######...
+semask 10 ....#####....
+semask 11 .............
+semask 12 .............
+sevect 0 -4 -2 255 4
+sevect 1 -4 -1 255 4
+sevect 2 -4 0 255 4
+sevect 3 -4 1 255 4
+sevect 4 -4 2 255 4
+sevect 5 -3 -3 255 4
+sevect 6 -3 -2 255 4
+sevect 7 -3 -1 255 3
+sevect 8 -3 0 255 3
+sevect 9 -3 1 255 3
+sevect 10 -3 2 255 4
+sevect 11 -3 3 255 4
+sevect 12 -2 -4 255 4
+sevect 13 -2 -3 255 4
+sevect 14 -2 -2 255 3
+sevect 15 -2 -1 255 2
+sevect 16 -2 0 255 2
+sevect 17 -2 1 255 2
+sevect 18 -2 2 255 3
+sevect 19 -2 3 255 4
+sevect 20 -2 4 255 4
+sevect 21 -1 -4 255 4
+sevect 22 -1 -3 255 3
+sevect 23 -1 -2 255 2
+sevect 24 -1 -1 255 2
+sevect 25 -1 0 255 1
+sevect 26 -1 1 255 2
+sevect 27 -1 2 255 2
+sevect 28 -1 3 255 3
+sevect 29 -1 4 255 4
+sevect 30 0 -4 255 4
+sevect 31 0 -3 255 3
+sevect 32 0 -2 255 2
+sevect 33 0 -1 255 1
+sevect 34 0 0 255 1
+sevect 35 0 1 255 1
+sevect 36 0 2 255 2
+sevect 37 0 3 255 3
+sevect 38 0 4 255 4
+sevect 39 1 -4 255 4
+sevect 40 1 -3 255 3
+sevect 41 1 -2 255 2
+sevect 42 1 -1 255 2
+sevect 43 1 0 255 1
+sevect 44 1 1 255 2
+sevect 45 1 2 255 2
+sevect 46 1 3 255 3
+sevect 47 1 4 255 4
+sevect 48 2 -4 255 4
+sevect 49 2 -3 255 4
+sevect 50 2 -2 255 3
+sevect 51 2 -1 255 2
+sevect 52 2 0 255 2
+sevect 53 2 1 255 2
+sevect 54 2 2 255 3
+sevect 55 2 3 255 4
+sevect 56 2 4 255 4
+sevect 57 3 -3 255 4
+sevect 58 3 -2 255 4
+sevect 59 3 -1 255 3
+sevect 60 3 0 255 3
+sevect 61 3 1 255 3
+sevect 62 3 2 255 4
+sevect 63 3 3 255 4
+sevect 64 4 -2 255 4
+sevect 65 4 -1 255 4
+sevect 66 4 0 255 4
+sevect 67 4 1 255 4
+sevect 68 4 2 255 4
+se 5.0000 13 13 81 81
+semask 0 .............
+semask 1 ......#......
+semask 2 ...#######...
+semask 3 ..#########..
+semask 4 ..#########..
+semask 5 ..#########..
+semask 6 .###########.
+semask 7 ..#########..
+semask 8 ..#########..
+semask 9 ..#########..
+semask 10 ...#######...
+semask 11 ......#......
+semask 12 .............
+sevect 0 -5 0 255 5
+sevect 1 -4 -3 255 5
+sevect 2 -4 -2 255 4
+sevect 3 -4 -1 255 4
+sevect 4 -4 0 255 4
+sevect 5 -4 1 255 4
+sevect 6 -4 2 255 4
+sevect 7 -4 3 255 5
+sevect 8 -3 -4 255 5
+sevect 9 -3 -3 255 4
+sevect 10 -3 -2 255 4
+sevect 11 -3 -1 255 3
+sevect 12 -3 0 255 3
+sevect 13 -3 1 255 3
+sevect 14 -3 2 255 4
+sevect 15 -3 3 255 4
+sevect 16 -3 4 255 5
+sevect 17 -2 -4 255 4
+sevect 18 -2 -3 255 4
+sevect 19 -2 -2 255 3
+sevect 20 -2 -1 255 2
+sevect 21 -2 0 255 2
+sevect 22 -2 1 255 2
+sevect 23 -2 2 255 3
+sevect 24 -2 3 255 4
+sevect 25 -2 4 255 4
+sevect 26 -1 -4 255 4
+sevect 27 -1 -3 255 3
+sevect 28 -1 -2 255 2
+sevect 29 -1 -1 255 2
+sevect 30 -1 0 255 1
+sevect 31 -1 1 255 2
+sevect 32 -1 2 255 2
+sevect 33 -1 3 255 3
+sevect 34 -1 4 255 4
+sevect 35 0 -5 255 5
+sevect 36 0 -4 255 4
+sevect 37 0 -3 255 3
+sevect 38 0 -2 255 2
+sevect 39 0 -1 255 1
+sevect 40 0 0 255 1
+sevect 41 0 1 255 1
+sevect 42 0 2 255 2
+sevect 43 0 3 255 3
+sevect 44 0 4 255 4
+sevect 45 0 5 255 5
+sevect 46 1 -4 255 4
+sevect 47 1 -3 255 3
+sevect 48 1 -2 255 2
+sevect 49 1 -1 255 2
+sevect 50 1 0 255 1
+sevect 51 1 1 255 2
+sevect 52 1 2 255 2
+sevect 53 1 3 255 3
+sevect 54 1 4 255 4
+sevect 55 2 -4 255 4
+sevect 56 2 -3 255 4
+sevect 57 2 -2 255 3
+sevect 58 2 -1 255 2
+sevect 59 2 0 255 2
+sevect 60 2 1 255 2
+sevect 61 2 2 255 3
+sevect 62 2 3 255 4
+sevect 63 2 4 255 4
+sevect 64 3 -4 255 5
+sevect 65 3 -3 255 4
+sevect 66 3 -2 255 4
+sevect 67 3 -1 255 3
+sevect 68 3 0 255 3
+sevect 69 3 1 255 3
+sevect 70 3 2 255 4
+sevect 71 3 3 255 4
+sevect 72 3 4 255 5
+sevect 73 4 -3 255 5
+sevect 74 4 -2 255 4
+sevect 75 4 -1 255 4
+sevect 76 4 0 255 4
+sevect 77 4 1 255 4
+sevect 78 4 2 255 4
+sevect 79 4 3 255 5
+sevect 80 5 0 255 5
+se 6.0000 15 15 113 113
+semask 0 ...............
+semask 1 .......#.......
+semask 2 ....#######....
+semask 3 ...#########...
+semask 4 ..###########..
+semask 5 ..###########..
+semask 6 ..###########..
+semask 7 .#############.
+semask 8 ..###########..
+semask 9 ..###########..
+semask 10 ..###########..
+semask 11 ...#########...
+semask 12 ....#######....
+semask 13 .......#.......
+semask 14 ...............
+sevect 0 -6 0 255 6
+sevect 1 -5 -3 255 6
+sevect 2 -5 -2 255 5
+sevect 3 -5 -1 255 5
+sevect 4 -5 0 255 5
+sevect 5 -5 1 255 5
+sevect 6 -5 2 255 5
+sevect 7 -5 3 255 6
+sevect 8 -4 -4 255 6
+sevect 9 -4 -3 255 5
+sevect 10 -4 -2 255 4
+sevect 11 -4 -1 255 4
+sevect 12 -4 0 255 4
+sevect 13 -4 1 255 4
+sevect 14 -4 2 255 4
+sevect 15 -4 3 255 5
+sevect 16 -4 4 255 6
+sevect 17 -3 -5 255 6
+sevect 18 -3 -4 255 5
+sevect 19 -3 -3 255 4
+sevect 20 -3 -2 255 4
+sevect 21 -3 -1 255 3
+sevect 22 -3 0 255 3
+sevect 23 -3 1 255 3
+sevect 24 -3 2 255 4
+sevect 25 -3 3 255 4
+sevect 26 -3 4 255 5
+sevect 27 -3 5 255 6
+sevect 28 -2 -5 255 5
+sevect 29 -2 -4 255 4
+sevect 30 -2 -3 255 4
+sevect 31 -2 -2 255 3
+sevect 32 -2 -1 255 2
+sevect 33 -2 0 255 2
+sevect 34 -2 1 255 2
+sevect 35 -2 2 255 3
+sevect 36 -2 3 255 4
+sevect 37 -2 4 255 4
+sevect 38 -2 5 255 5
+sevect 39 -1 -5 255 5
+sevect 40 -1 -4 255 4
+sevect 41 -1 -3 255 3
+sevect 42 -1 -2 255 2
+sevect 43 -1 -1 255 2
+sevect 44 -1 0 255 1
+sevect 45 -1 1 255 2
+sevect 46 -1 2 255 2
+sevect 47 -1 3 255 3
+sevect 48 -1 4 255 4
+sevect 49 -1 5 255 5
+sevect 50 0 -6 255 6
+sevect 51 0 -5 255 5
+sevect 52 0 -4 255 4
+sevect 53 0 -3 255 3
+sevect 54 0 -2 255 2
+sevect 55 0 -1 255 1
+sevect 56 0 0 255 1
+sevect 57 0 1 255 1
+sevect 58 0 2 255 2
+sevect 59 0 3 255 3
+sevect 60 0 4 255 4
+sevect 61 0 5 255 5
+sevect 62 0 6 255 6
+sevect 63 1 -5 255 5
+sevect 64 1 -4 255 4
+sevect 65 1 -3 255 3
+sevect 66 1 -2 255 2
+sevect 67 1 -1 255 2
+sevect 68 1 0 255 1
+sevect 69 1 1 255 2
+sevect 70 1 2 255 2
+sevect 71 1 3 255 3
+sevect 72 1 4 255 4
+sevect 73 1 5 255 5
+sevect 74 2 -5 255 5
+sevect 75 2 -4 255 4
+sevect 76 2 -3 255 4
+sevect 77 2 -2 255 3
+sevect 78 2 -1 255 2
+sevect 79 2 0 255 2
+sevect 80 2 1 255 2
+sevect 81 2 2 255 3
+sevect 82 2 3 255 4
+sevect 83 2 4 255 4
+sevect 84 2 5 255 5
+sevect 85 3 -5 255 6
+sevect 86 3 -4 255 5
+sevect 87 3 -3 255 4
+sevect 88 3 -2 255 4
+sevect 89 3 -1 255 3
+sevect 90 3 0 255 3
+sevect 91 3 1 255 3
+sevect 92 3 2 255 4
+sevect 93 3 3 255 4
+sevect 94 3 4 255 5
+sevect 95 3 5 255 6
+sevect 96 4 -4 255 6
+sevect 97 4 -3 255 5
+sevect 98 4 -2 255 4
+sevect 99 4 -1 255 4
+sevect 100 4 0 255 4
+sevect 101 4 1 255 4
+sevect 102 4 2 255 4
+sevect 103 4 3 255 5
+sevect 104 4 4 255 6
+sevect 105 5 -3 255 6
+sevect 106 5 -2 255 5
+sevect 107 5 -1 255 5
+sevect 108 5 0 255 5
+sevect 109 5 1 255 5
+sevect 110 5 2 255 5
+sevect 111 5 3 255 6
+sevect 112 6 0 255 6
+se 7.5000 19 19 177 177
+semask 0 ...................
+semask 1 ...................
+semask 2 .......#####.......
+semask 3 .....#########.....
+semask 4 ....###########....
+semask 5 ...#############...
+semask 6 ...#############...
+semask 7 ..###############..
+semask 8 ..###############..
+semask 9 ..###############..
+semask 10 ..###############..
+semask 11 ..###############..
+semask 12 ...#############...
+semask 13 ...#############...
+semask 14 ....###########....
+semask 15 .....#########.....
+semask 16 .......#####.......
+semask 17 ...................
+semask 18 ...................
+sevect 0 -7 -2 255 7
+sevect 1 -7 -1 255 7
+sevect 2 -7 0 255 7
+sevect 3 -7 1 255 7
+sevect 4 -7 2 255 7
+sevect 5 -6 -4 255 7
+sevect 6 -6 -3 255 7
+sevect 7 -6 -2 255 6
+sevect 8 -6 -1 255 6
+sevect 9 -6 0 255 6
+sevect 10 -6 1 255 6
+sevect 11 -6 2 255 6
+sevect 12 -6 3 255 7
+sevect 13 -6 4 255 7
+sevect 14 -5 -5 255 7
+sevect 15 -5 -4 255 6
+sevect 16 -5 -3 255 6
+sevect 17 -5 -2 255 5
+sevect 18 -5 -1 255 5
+sevect 19 -5 0 255 5
+sevect 20 -5 1 255 5
+sevect 21 -5 2 255 5
+sevect 22 -5 3 255 6
+sevect 23 -5 4 255 6
+sevect 24 -5 5 255 7
+sevect 25 -4 -6 255 7
+sevect 26 -4 -5 255 6
+sevect 27 -4 -4 255 6
+sevect 28 -4 -3 255 5
+sevect 29 -4 -2 255 4
+sevect 30 -4 -1 255 4
+sevect 31 -4 0 255 4
+sevect 32 -4 1 255 4
+sevect 33 -4 2 255 4
+sevect 34 -4 3 255 5
+sevect 35 -4 4 255 6
+sevect 36 -4 5 255 6
+sevect 37 -4 6 255 7
+sevect 38 -3 -6 255 7
+sevect 39 -3 -5 255 6
+sevect 40 -3 -4 255 5
+sevect 41 -3 -3 255 4
+sevect 42 -3 -2 255 4
+sevect 43 -3 -1 255 3
+sevect 44 -3 0 255 3
+sevect 45 -3 1 255 3
+sevect 46 -3 2 255 4
+sevect 47 -3 3 255 4
+sevect 48 -3 4 255 5
+sevect 49 -3 5 255 6
+sevect 50 -3 6 255 7
+sevect 51 -2 -7 255 7
+sevect 52 -2 -6 255 6
+sevect 53 -2 -5 255 5
+sevect 54 -2 -4 255 4
+sevect 55 -2 -3 255 4
+sevect 56 -2 -2 255 3
+sevect 57 -2 -1 255 2
+sevect 58 -2 0 255 2
+sevect 59 -2 1 255 2
+sevect 60 -2 2 255 3
+sevect 61 -2 3 255 4
+sevect 62 -2 4 255 4
+sevect 63 -2 5 255 5
+sevect 64 -2 6 255 6
+sevect 65 -2 7 255 7
+sevect 66 -1 -7 255 7
+sevect 67 -1 -6 255 6
+sevect 68 -1 -5 255 5
+sevect 69 -1 -4 255 4
+sevect 70 -1 -3 255 3
+sevect 71 -1 -2 255 2
+sevect 72 -1 -1 255 2
+sevect 73 -1 0 255 1
+sevect 74 -1 1 255 2
+sevect 75 -1 2 255 2
+sevect 76 -1 3 255 3
+sevect 77 -1 4 255 4
+sevect 78 -1 5 255 5
+sevect 79 -1 6 255 6
+sevect 80 -1 7 255 7
+sevect 81 0 -7 255 7
+sevect 82 0 -6 255 6
+sevect 83 0 -5 255 5
+sevect 84 0 -4 255 4
+sevect 85 0 -3 255 3
+sevect 86 0 -2 255 2
+sevect 87 0 -1 255 1
+sevect 88 0 0 255 1
+sevect 89 0 1 255 1
+sevect 90 0 2 255 2
+sevect 91 0 3 255 3
+sevect 92 0 4 255 4
+sevect 93 0 5 255 5
+sevect 94 0 6 255 6
+sevect 95 0 7 255 7
+sevect 96 1 -7 255 7
+sevect 97 1 -6 255 6
+sevect 98 1 -5 255 5
+sevect 99 1 -4 255 4
+sevect 100 1 -3 255 3
+sevect 101 1 -2 255 2
+sevect 102 1 -1 255 2
+sevect 103 1 0 255 1
+sevect 104 1 1 255 2
+sevect 105 1 2 255 2
+sevect 106 1 3 255 3
+sevect 107 1 4 255 4
+sevect 108 1 5 255 5
+sevect 109 1 6 255 6
+sevect 110 1 7 255 7
+sevect 111 2 -7 255 7
+sevect 112 2 -6 255 6
+sevect 113 2 -5 255 5
+sevect 114 2 -4 255 4
+sevect 115 2 -3 255 4
+sevect 116 2 -2 255 3
+sevect 117 2 -1 255 2
+sevect 118 2 0 255 2
+sevect 119 2 1 255 2
+sevect 120 2 2 255 3
+sevect 121 2 3 255 4
+sevect 122 2 4 255 4
+sevect 123 2 5 255 5
+sevect 124 2 6 255 6
+sevect 125 2 7 255 7
+sevect 126 3 -6 255 7
+sevect 127 3 -5 255 6
+sevect 128 3 -4 255 5
+sevect 129 3 -3 255 4
+sevect 130 3 -2 255 4
+sevect 131 3 -1 255 3
+sevect 132 3 0 255 3
+sevect 133 3 1 255 3
+sevect 134 3 2 255 4
+sevect 135 3 3 255 4
+sevect 136 3 4 255 5
+sevect 137 3 5 255 6
+sevect 138 3 6 255 7
+sevect 139 4 -6 255 7
+sevect 140 4 -5 255 6
+sevect 141 4 -4 255 6
+sevect 142 4 -3 255 5
+sevect 143 4 -2 255 4
+sevect 144 4 -1 255 4
+sevect 145 4 0 255 4
+sevect 146 4 1 255 4
+sevect 147 4 2 255 4
+sevect 148 4 3 255 5
+sevect 149 4 4 255 6
+sevect 150 4 5 255 6
+sevect 151 4 6 255 7
+sevect 152 5 -5 255 7
+sevect 153 5 -4 255 6
+sevect 154 5 -3 255 6
+sevect 155 5 -2 255 5
+sevect 156 5 -1 255 5
+sevect 157 5 0 255 5
+sevect 158 5 1 255 5
+sevect 159 5 2 255 5
+sevect 160 5 3 255 6
+sevect 161 5 4 255 6
+sevect 162 5 5 255 7
+sevect 163 6 -4 255 7
+sevect 164 6 -3 255 7
+sevect 165 6 -2 255 6
+sevect 166 6 -1 255 6
+sevect 167 6 0 255 6
+sevect 168 6 1 255 6
+sevect 169 6 2 255 6
+sevect 170 6 3 255 7
+sevect 171 6 4 255 7
+sevect 172 7 -2 255 7
+sevect 173 7 -1 255 7
+sevect 174 7 0 255 7
+sevect 175 7 1 255 7
+sevect 176 7 2 255 7
+synthsrc noise 24 16 80c7b6e466163aed
+synthsrc shapes 24 16 97889509263e1e79
+synthsrc noise 201 97 572e7b12e34fe3f5
+synthsrc shapes 201 97 820d7f88890bb78d
+synth noise 24 16 1.5000 4852b8bb0bf0f8a8
+synthpix.noise.1.5 0 dcb4b4b4adadadaddae5e5f2dfb7b7b7b7b7fdfdffcbcbcb
+synthpix.noise.1.5 1 b5b4b4b4adadadadd4d4d4f2dfb7b7b7b7b7d1eee7cbcbcb
+synthpix.noise.1.5 2 b5b5ccb4b4b4ffd4d4d4d4e4e4f9f9fdcbcbcbcbe7cbb3b3
+synthpix.noise.1.5 3 b5b5c9cccceaf6d4d4d4d4e4e4e6e6e6cbcbcbcbe7d2b3b3
+synthpix.noise.1.5 4 b5b5c9eaf4f4f6ebebebe4e4e4e6e6e6cbcbcbcbe7d2b3b3
+synthpix.noise.1.5 5 babac9dbcbc5c5c5f3ebebebf8e6e6e6e6f8f8faf2f2f2fc
+synthpix.noise.1.5 6 9494fbcbcbc5c5c5ceceebd4d4d4d7f7d6d6d6e2e2f8f1f1
+synthpix.noise.1.5 7 9494cfcbcbc5c5c5cecef1d4d4d4d7d3d3d3d3e2e2f8f1f1
+synthpix.noise.1.5 8 9494cfcbcbc5c5c5cecec7c7c7cfd7d3d3d3d3e2e2fcebeb
+synthpix.noise.1.5 9 decfcfcfe0d6d6d6d6d6c7c7c7cfd7d3d3d3d3fce4e4e4e5
+synthpix.noise.1.5 10 decfcfcfebddd6d6d6ffc7c7c7cff7eeeee9e9e9e4e4e4e5
+synthpix.noise.1.5 11 decfcfcfbebebed7d7f6e7e7e2d9d9d9d9e6dfdfd6d6d6e2
+synthpix.noise.1.5 12 dcd1d1d1bebebed6d6f6909090d9d9d9d9e6dfdfd1d1d1e2
+synthpix.noise.1.5 13 dcc3bbbbbbbebed6d6f6909090d9d9d9d9e6ded6d1d1d1e2
+synthpix.noise.1.5 14 dcc3b2b2b2bebe9a9a9a909090ddd9d9d9f5ded6d1d1d1d1
+synthpix.noise.1.5 15 e9c3b2b2b2d3dd9a9a9a909090ddddddfaf5ded6d1d1d1d1
+synth shapes 24 16 1.5000 72d07281a284baa6
+synthpix.shapes.1.5 0 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 1 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 2 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 3 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 4 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.1.5 5 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.1.5 6 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.1.5 7 ffffffffffffffffffffffffffffffffffff3e1313131aff
+synthpix.shapes.1.5 8 ffffffffffffffffffffffffffffffffff3e3e1313131a21
+synthpix.shapes.1.5 9 ffffffffffffffffffffffffffffffff3e3e3e1313131a21
+synthpix.shapes.1.5 10 ffffffffffffffffffffffffffffff3737373e1313131a21
+synthpix.shapes.1.5 11 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 12 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 13 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 14 ff1515151c232a31383f141414ff303030373e1313131a21
+synthpix.shapes.1.5 15 ffffffffffffffffffffffffffffffff3e3e3e1313131a21
+synth noise 24 16 3.5000 7082968b7a357ede
+synthpix.noise.3.5 0 dcdcdcdcdcdcfff9f9f9f9f9f9f9f9fdfdfdfdfdfffcfcfc
+synthpix.noise.3.5 1 dcdcdcdcdcdcfff9f9f9f9f9f9f9f9fdfdfafafafafafcfc
+synthpix.noise.3.5 2 dcdcdcdcdcdcfff8f8f8f8f8f8f9f9fdfafafafafafafafc
+synthpix.noise.3.5 3 dcdcdcdcdcf4f6f6f6f6f6f8f8f8f8f8f8f8fafafafafafc
+synthpix.noise.3.5 4 dcdcdceaf4f4f6f6f6f6f6f6f8f8f8f8f8f8f8fafafafafc
+synthpix.noise.3.5 5 eaeaeaf4f4f6f6f6f6f6f6f6f8f8f8f8f8f8f8fafafafafc
+synthpix.noise.3.5 6 fbfbfbebebebebebf6f6f6f6f7f7f7f7f7f7f8fafafafafc
+synthpix.noise.3.5 7 dededeebebebebebebf6f6f6f7f7f7f7f7f7f7fafafafcfc
+synthpix.noise.3.5 8 dedededeebebebebebf6f6f6f7f7f7f7f7f7f7fafafcfcfc
+synthpix.noise.3.5 9 dedededeebebebebebf6f6f7f7f7f7f7f7f7f7fce9e5e5e5
+synthpix.noise.3.5 10 dedededeebebebebebfff7f7f7f7f7f7f7f7f5e9e5e5e5e5
+synthpix.noise.3.5 11 dededdddddddddddebf6f6f6f6f6f6f7f7f5e9e2e2e2e2e2
+synthpix.noise.3.5 12 deddddddddddddddddf6f6f6f6f6f6f6f7f5e2e2e2e2e2e2
+synthpix.noise.3.5 13 deddddddddddddddddf6f6f6f6f6f6f6f7f5e2e2e2e2e2e2
+synthpix.noise.3.5 14 deddddddddddddddddf6f6f6f6f6f6f6f7f5e2e2e2e2e2e2
+synthpix.noise.3.5 15 e9ddddddddddddddddf6f6f6f6f6f6f6faf5e2e2e2e2e2e2
+synth shapes 24 16 3.5000 ff7664e389f1459d
+synthpix.shapes.3.5 0 ff31313131313131383f3f3f3fff3e3e3e3e3e2121212121
+synthpix.shapes.3.5 1 ff31313131313131383f3f3f3fff3e3e3e3e3e2121212121
+synthpix.shapes.3.5 2 ff31313131313131383f3f3f3fff3e3e3e3e3e2121212121
+synthpix.shapes.3.5 3 ffff3131313131383f3f3f3fffffff3e3e3e3e3e21212121
+synthpix.shapes.3.5 4 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.3.5 5 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.3.5 6 ffffffffffffffffffffffffffffffffffffffffffffffff
+synthpix.shapes.3.5 7 ffffffffffffffffffffffffffffffffffff3e3e3e3e3eff
+synthpix.shapes.3.5 8 ffffffffffffffffffffffffffffffffff3e3e3e21212121
+synthpix.shapes.3.5 9 ffffffffffffffffffffffffffffffff3e3e3e2121212121
+synthpix.shapes.3.5 10 ffffffffffffffffffffffffffffff3e3e3e3e2121212121
+synthpix.shapes.3.5 11 ffffffffffffffffffffffffffffff3e3e3e3e2121212121
+synthpix.shapes.3.5 12 ffffffffffffffffffffffffffffff3e3e3e3e2121212121
+synthpix.shapes.3.5 13 ffffffffffffffffffffffffffffff3e3e3e3e2121212121
+synthpix.shapes.3.5 14 ffffffffffffffffffffffffffffff3e3e3e3e2121212121
+synthpix.shapes.3.5 15 ffffffffffffffffffffffffffffffff3e3e3e2121212121
+synth noise 201 97 0.5000 c6d0a9c340ed7915
+synth shapes 201 97 0.5000 50fe59744d608e48
+synth noise 201 97 2.0000 f3958b4f928cf38b
+synth shapes 201 97 2.0000 bf32a157b376e152
+synth noise 201 97 3.5000 68b1fc58d826e0e0
+synth shapes 201 97 3.5000 4935b52a825f5e1c
+synth noise 201 97 7.5000 63b9b403b7701938
+synth shapes 201 97 7.5000 94ad92886a902086
+sheet chula.png#1 2450 1954 8951314e66665884
+radius beam 12 smallBeam null used 12 diameter 9.600000 radius 4.300000
+closed 4.300000 b6d00a93cc3f2c81
+closed 1.500000 147718cdf9a7fdb7
+closed 3.500000 f1ab16b5e65398ef
+destemmed 4 48e5dd6f2bfe6e91
+median e454eeb568e98f2b
+gaussian cf8eaf3348955e22
+spots 51039d31f0b6a48b

@@ -2334,6 +2334,62 @@ mod tests {
         assert_eq!(checked, oracle.len(), "every pinned page should run");
     }
 
+    /// Grayscale closing over a real page, at the radius BEAMS would use.
+    ///
+    /// The unit tests in `audiveris_image::morphology` grade the operator on
+    /// generated buffers, where a wrong pixel can be pointed at. This grades it
+    /// on 4.8 million real ones, which is the case that would expose anything
+    /// only a page can produce -- a window straddling a border, a run of
+    /// saturated ink long enough for the +/-255 masking to matter.
+    ///
+    /// The buffer closed here is NO_STAFF itself, not what `SpotsBuilder`
+    /// actually feeds the closing. Java reaches it through stem-run removal, a
+    /// median and a gaussian, none of which is ported; putting those in the way
+    /// would mean a failure here could belong to any of four things. NO_STAFF
+    /// is already pinned exact by the test above, so this isolates morphology.
+    #[test]
+    fn closing_a_real_page_matches_the_java_oracle() {
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let pixels = recognition.no_staff.to_pixels();
+        let (width, height) = (recognition.scale.width, recognition.scale.height);
+
+        let text = include_str!("../../../oracle/morphology.txt");
+        let fields = |kind: &str| -> Vec<Vec<&str>> {
+            text.lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .filter(|fields| fields.first() == Some(&kind))
+                .collect()
+        };
+
+        // The probe closes its own copy of NO_STAFF, so a mismatch here would
+        // otherwise be ambiguous between the input and the operator.
+        let sheet = &fields("sheet")[0];
+        assert_eq!(
+            [
+                width.to_string(),
+                height.to_string(),
+                audiveris_image::morphology::digest(&pixels)
+            ],
+            [sheet[2], sheet[3], sheet[4]].map(str::to_owned),
+            "the page the oracle closed"
+        );
+
+        let rows = fields("closed");
+        assert_eq!(rows.len(), 3);
+        for row in rows {
+            let radius: f32 = row[1].parse().expect("a radius");
+            let mut buffer = pixels.clone();
+            audiveris_image::morphology::close_with_disk(&mut buffer, width, height, radius);
+            assert_eq!(
+                audiveris_image::morphology::digest(&buffer),
+                row[2],
+                "closing chula at radius {radius}"
+            );
+        }
+    }
+
     /// Parses `oracle/grid-nostaff.txt`.
     fn java_no_staff_oracle() -> BTreeMap<String, (usize, usize, String)> {
         let text = include_str!("../../../oracle/grid-nostaff.txt");

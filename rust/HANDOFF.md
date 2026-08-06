@@ -363,7 +363,40 @@ are the smaller of the two and are pure geometry; BEAMS is a stage in its own
 right and now has both its input (the staff-free image) and a parity gate
 (`SigProbe` at `BEAMS`, 295 inters on chula) waiting for it.
 
-## BEAMS: scoped, and its first seam is grayscale morphology
+## BEAMS: scoped, and its first seam is grayscale morphology (CLOSED)
+
+Closed. `audiveris_image::morphology` ports `StructureElement`'s circular
+element and `MorphoProcessor::close`, and both are bit-exact against Java --
+every structuring element cell for cell, and the closing digest for digest,
+including on chula's 4.8-million-pixel staff-free page at the radius BEAMS
+would actually use.
+
+The end-to-end gate the section below anticipated turned out not to be needed.
+`oracle/java/MorphoProbe.java` calls `MorphoProcessor.close` directly instead of
+going through `SpotsBuilder`, so the closing is graded on its own rather than
+through the beams it eventually produces, and `oracle/morphology.txt` pins:
+
+- twelve structuring elements as pictures and offset vectors, not digests, so a
+  disk that is one cell wrong says which cell;
+- the closing over two generated buffers -- formulas rather than fixtures, so a
+  port rebuilds the inputs -- at six radii, with the 24x16 pair dumped pixel for
+  pixel;
+- the closing over chula's NO_STAFF buffer at three radii, including 4.3, the
+  one `SpotsBuilder` derives from its beam thickness of 12.
+
+It also pins the four buffers `SpotsBuilder.getBuffer` passes through --
+stem-run removal, median, gaussian, and the closing of all three -- which
+morphology does not need but the rest of the step does. **That is the next
+slice**: `RunTableFactory.LengthFilter`, then `Picture.medianFiltered` and
+`gaussianFiltered`, each already having a digest to answer to.
+
+Only the circular element and `close` are ported. The other element shapes and
+the histogram-based `fclose`/`fopen` are unreachable from Audiveris and were
+deliberately left out.
+
+What follows is the scoping that led here, kept for the parts still true.
+
+### The original scoping
 
 LEDGERS' three inputs are now NO_STAFF (done), staff areas (done), and BEAMS.
 BEAMS is a stage rather than an input, and it is largely ported already --
@@ -389,21 +422,11 @@ new MorphoProcessor(se).close(buffer);
 
 a grayscale closing with a circular structuring element sized from the measured
 beam thickness. `StructureElement` and `MorphoProcessor` are 717 and 446 lines
-of Java, and **the port has no morphology module at all** -- no dilate, no
-erode, no structuring element. That is the next slice, and it is a port rather
-than a wiring job.
+of Java, and at the time the port had no morphology module at all.
 
-**Its gate is already checked in, and is end-to-end by necessity.** Audiveris
-does not cache the closed buffer anywhere: `Picture.SourceKey` has no spot
-entry and the image is a local in `buildSheetSpots`. So there is nothing to
-hash directly, and `oracle/beams-chula.txt` pins the consequence instead --
-Java's 91 beams and 31 hooks with the six impacts each grade is built from
-(`wdth`, `minH`, `maxH`, `core`, `belt`, `jit`). If the structuring element or
-the closing is wrong, those move.
-
-A unit gate could still be had by instrumenting `SpotsBuilder` temporarily, the
-way `StaffProjector.removePeak` was instrumented before, and that is worth
-doing first if the end-to-end comparison fails in a way that is hard to read.
+`oracle/beams-chula.txt` still pins Java's 91 beams and 31 hooks with the six
+impacts each grade is built from (`wdth`, `minH`, `maxH`, `core`, `belt`,
+`jit`), and remains the gate for the recogniser above the closing.
 
 ## Open threads, in the order worth taking them
 
