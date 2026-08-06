@@ -76,7 +76,12 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          # `rust/Cargo.toml` is in the key because it carries the build
+          # profile. `actions/cache` does not re-save on an exact key hit, so a
+          # key that ignores the profile would keep serving dependency objects
+          # built at the *old* opt-level indefinitely, and every run would pay
+          # to rebuild them.
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/rust-toolchain.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Formatting
@@ -85,6 +90,12 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Over 95% of this workflow's wall clock is here, and it is compute, not
+      # compilation: the corpus tests run the real pipeline over
+      # multi-megapixel pages. `rust/Cargo.toml` raises the dev profile to
+      # `opt-level = 2` for that reason, which cut the run from roughly six
+      # minutes to well under one while keeping debug assertions and overflow
+      # checks live.
       - name: Tests
         run: cargo test --workspace
 
