@@ -263,6 +263,37 @@ returning its input. It is not. `oracle/grid-binary.txt` records the same
 `2179468ede9f7ec6` for Java's BINARY raster, because chula.png is already
 bilevel.
 
+### Staff areas: the builder is done, the wiring is not
+
+`build_population_staff_areas` is Java's `StaffManager.computeStaffArea`: a
+horizontal slice between the staves above and below, intersected with the
+containing system's area ends. Two things in it are Java's rather than
+simplifications, and both are pinned by tests -- there is **no vertical
+margin**, unlike a system area, and Java's guard
+`(left != 0) || ((right != 0) && (right != sheetWidth))` means an unknown pair
+of ends leaves the staff spanning the sheet while a left without a right yields
+a *negative-width* slice and therefore an empty area. That last one is left to
+fall out of `contains` rather than special-cased, because it is what Java does.
+
+The neighbour walks are now shared. `SystemManager.vertNeighbors` and
+`StaffManager.vertNeighbors` have identical bodies in Java, so the port's
+`vertical_neighbors`/`horizontal_neighbor` are generic over a small `Placed`
+trait rather than transcribed twice, which is one fewer place to drift.
+
+**What is left is the wiring, and it needs one thing that does not exist yet.**
+The builder wants each staff's own first and last line boundary, but
+`HeadlessPopulationState.staff_boundaries` is per *system*, not per staff. The
+data is available -- after `CleanStaffLines` every staff carries persistent
+lines with their points -- so the remaining work is to build
+`PopulationStaffGeometry` and per-staff `SystemStaffBoundaries` from
+`sheet.staffs`, call the builder, and publish the result.
+
+The gate is already generated and is behavioural rather than structural, since
+a `java.awt.geom.Area` is not worth serialising and the only consumer is
+`getClosestStaff`. `SigProbe` emits a `closest <x> <y> <staff>` record over a
+64-pixel lattice; chula gives 1209 points across its six staves, every one
+assigned. Compare the port's `closest_staff` against that.
+
 ### What LEDGERS still needs
 
 

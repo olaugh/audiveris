@@ -162,8 +162,35 @@ pub fn check_population_indentation(
     false
 }
 
-fn vertical_neighbors(
-    systems: &[PopulationSystemGeometry],
+/// What the neighbour walks need of a placed rectangle.
+///
+/// Java runs the same search twice over different collections:
+/// `SystemManager.vertNeighbors` over systems and `StaffManager.vertNeighbors`
+/// over staves, with identical bodies. This is that shape, so the two callers
+/// share one implementation rather than one being a transcription of the other
+/// that can drift.
+trait Placed: Copy {
+    fn sort_key(self) -> usize;
+    fn x_overlaps(self, other: Self) -> bool;
+    fn y_overlaps(self, other: Self) -> bool;
+}
+
+impl Placed for PopulationSystemGeometry {
+    fn sort_key(self) -> usize {
+        self.system_id
+    }
+
+    fn x_overlaps(self, other: Self) -> bool {
+        Self::x_overlaps(self, other)
+    }
+
+    fn y_overlaps(self, other: Self) -> bool {
+        Self::y_overlaps(self, other)
+    }
+}
+
+fn vertical_neighbors<P: Placed>(
+    systems: &[P],
     current_index: usize,
     direction: isize,
 ) -> Vec<usize> {
@@ -191,12 +218,12 @@ fn vertical_neighbors(
     }
     // Java sorts the collected row by SystemInfo.byId, and callers use the
     // first item rather than necessarily the initially intersecting item.
-    neighbors.sort_by_key(|index| systems[*index].system_id);
+    neighbors.sort_by_key(|index| systems[*index].sort_key());
     neighbors
 }
 
-fn horizontal_neighbor(
-    systems: &[PopulationSystemGeometry],
+fn horizontal_neighbor<P: Placed>(
+    systems: &[P],
     current_index: usize,
     direction: isize,
 ) -> Option<usize> {
@@ -522,6 +549,109 @@ pub fn build_population_system_areas(
                 right,
                 north,
                 south,
+            }
+        })
+        .collect()
+}
+
+/// One staff's placement, for `StaffManager.computeStaffArea`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopulationStaffGeometry {
+    pub staff_id: usize,
+    pub system_id: SystemId,
+    pub left: i32,
+    pub width: i32,
+    pub top: i32,
+    pub bottom: i32,
+}
+
+impl Placed for PopulationStaffGeometry {
+    fn sort_key(self) -> usize {
+        self.staff_id
+    }
+
+    fn x_overlaps(self, other: Self) -> bool {
+        let common_left = self.left.max(other.left);
+        let common_right = (self.left + self.width - 1).min(other.left + other.width - 1);
+        common_right > common_left
+    }
+
+    fn y_overlaps(self, other: Self) -> bool {
+        self.top.max(other.top) < self.bottom.min(other.bottom)
+    }
+}
+
+/// One staff's area, as `StaffManager.getClosestStaff` uses it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopulationStaffArea {
+    pub staff_id: usize,
+    pub area: PopulationSystemArea,
+}
+
+/// Java `StaffManager.computeStaffArea`, for every staff.
+///
+/// A horizontal slice between the staves above and below, intersected with the
+/// containing system's area ends. Two differences from
+/// [`build_population_system_areas`] are Java's rather than simplifications:
+/// there is **no vertical margin** -- the slice runs to the neighbours' own
+/// lines -- and the horizontal extent comes from the system rather than from
+/// midpoints between horizontal neighbours.
+///
+/// `system_area_ends` maps a system id to its `getAreaEnd(LEFT/RIGHT)`. Java
+/// notes those "may not be known yet", in which case they are zero, and guards
+/// the intersection with
+/// `(left != 0) || ((right != 0) && (right != sheetWidth))`. That guard is
+/// reproduced: an unknown pair leaves the staff spanning the sheet. A left
+/// without a right yields a negative-width slice and therefore an empty area,
+/// which is also Java's outcome and is left to fall out of `contains` rather
+/// than special-cased.
+///
+/// # Panics
+///
+/// If `staves` and `staff_lines` differ in length.
+#[must_use]
+pub fn build_population_staff_areas(
+    staves: &[PopulationStaffGeometry],
+    staff_lines: &[SystemStaffBoundaries],
+    system_area_ends: &dyn Fn(SystemId) -> (i32, i32),
+    sheet_width: i32,
+    sheet_height: i32,
+) -> Vec<PopulationStaffArea> {
+    assert_eq!(staves.len(), staff_lines.len());
+    staves
+        .iter()
+        .enumerate()
+        .map(|(index, staff)| {
+            let aboves = vertical_neighbors(staves, index, -1);
+            let north = if aboves.is_empty() {
+                horizontal_boundary(0, sheet_width, 0)
+            } else {
+                global_boundary(&aboves, staff_lines, false, sheet_width, 0)
+            };
+            let belows = vertical_neighbors(staves, index, 1);
+            let south = if belows.is_empty() {
+                horizontal_boundary(0, sheet_width, sheet_height)
+            } else {
+                global_boundary(&belows, staff_lines, true, sheet_width, 0)
+            };
+
+            let (system_left, system_right) = system_area_ends(staff.system_id);
+            let (left, right) =
+                if system_left != 0 || (system_right != 0 && system_right != sheet_width) {
+                    (system_left, system_right)
+                } else {
+                    (0, sheet_width)
+                };
+
+            PopulationStaffArea {
+                staff_id: staff.staff_id,
+                area: PopulationSystemArea {
+                    system_id: staff.system_id,
+                    left,
+                    right,
+                    north,
+                    south,
+                },
             }
         })
         .collect()
@@ -983,6 +1113,121 @@ pub fn population_page_report(
         part_count,
         system_count: page.system_ids.len(),
         tablature_count,
+    }
+}
+
+#[cfg(test)]
+mod staff_area_tests {
+    use super::*;
+
+    fn boundary(y: f64, width: i32) -> StaffBoundary {
+        StaffBoundary {
+            segments: vec![BoundarySegment::Line {
+                start: (0.0, y),
+                end: (f64::from(width), y),
+            }],
+        }
+    }
+
+    fn staff(id: usize, system: usize, top: i32, bottom: i32) -> PopulationStaffGeometry {
+        PopulationStaffGeometry {
+            staff_id: id,
+            system_id: system,
+            left: 0,
+            width: 1000,
+            top,
+            bottom,
+        }
+    }
+
+    fn lines(top: f64, bottom: f64) -> SystemStaffBoundaries {
+        SystemStaffBoundaries {
+            first_line: boundary(top, 1000),
+            last_line: boundary(bottom, 1000),
+        }
+    }
+
+    #[test]
+    fn a_lone_staff_spans_the_sheet() {
+        let areas = build_population_staff_areas(
+            &[staff(1, 1, 100, 200)],
+            &[lines(100.0, 200.0)],
+            &|_| (0, 0),
+            1000,
+            800,
+        );
+        assert_eq!(areas.len(), 1);
+        let area = &areas[0].area;
+        assert!(
+            area.contains(500.0, 50.0),
+            "above the staff is still its own"
+        );
+        assert!(area.contains(500.0, 700.0), "and so is below it");
+    }
+
+    #[test]
+    fn neighbours_split_the_sheet_at_their_own_lines() {
+        // Two staves, one under the other. The boundary between them is the
+        // upper staff's last line and the lower staff's first line, with no
+        // margin -- that is the difference from a system area.
+        let areas = build_population_staff_areas(
+            &[staff(1, 1, 100, 200), staff(2, 1, 400, 500)],
+            &[lines(100.0, 200.0), lines(400.0, 500.0)],
+            &|_| (0, 0),
+            1000,
+            800,
+        );
+        let (upper, lower) = (&areas[0].area, &areas[1].area);
+        assert!(upper.contains(500.0, 300.0), "just under its last line");
+        assert!(!upper.contains(500.0, 450.0), "not past the staff below");
+        assert!(lower.contains(500.0, 450.0));
+        assert!(!lower.contains(500.0, 150.0), "not up into the staff above");
+    }
+
+    #[test]
+    fn unknown_system_ends_leave_the_staff_spanning_the_sheet() {
+        // Java: `if ((left != 0) || ((right != 0) && (right != sheetWidth)))`.
+        // Both unknown means no intersection at all.
+        let areas = build_population_staff_areas(
+            &[staff(1, 1, 100, 200)],
+            &[lines(100.0, 200.0)],
+            &|_| (0, 0),
+            1000,
+            800,
+        );
+        assert!(areas[0].area.contains(5.0, 150.0));
+        assert!(areas[0].area.contains(995.0, 150.0));
+    }
+
+    #[test]
+    fn known_system_ends_clip_the_staff() {
+        let areas = build_population_staff_areas(
+            &[staff(1, 1, 100, 200)],
+            &[lines(100.0, 200.0)],
+            &|_| (200, 800),
+            1000,
+            800,
+        );
+        assert!(!areas[0].area.contains(100.0, 150.0), "left of the system");
+        assert!(areas[0].area.contains(500.0, 150.0));
+        assert!(!areas[0].area.contains(900.0, 150.0), "right of the system");
+    }
+
+    #[test]
+    fn a_left_end_without_a_right_end_yields_an_empty_area() {
+        // Java intersects with `Rectangle(left, 0, right - left, height)`, and a
+        // right of zero makes that width negative, so the area is empty. Left
+        // to fall out of `contains` rather than special-cased, because that is
+        // what Java does.
+        let areas = build_population_staff_areas(
+            &[staff(1, 1, 100, 200)],
+            &[lines(100.0, 200.0)],
+            &|_| (200, 0),
+            1000,
+            800,
+        );
+        assert!(!areas[0].area.contains(500.0, 150.0));
+        assert!(!areas[0].area.contains(250.0, 150.0));
     }
 }
 

@@ -118,6 +118,22 @@ public class SigProbe
                             noStaff.getWidth(), noStaff.getHeight(), hash));
                 }
 
+                // Staff areas decide which staff a run belongs to, and the
+                // only thing that consumes them is getClosestStaff. So they are
+                // graded behaviourally, over a lattice, rather than by trying
+                // to serialise a java.awt.geom.Area.
+                final java.util.List<org.audiveris.omr.sheet.Staff> allStaves =
+                        sheet.getStaffManager().getStaves();
+                for (int y = 0; y < sheet.getHeight(); y += 64) {
+                    for (int x = 0; x < sheet.getWidth(); x += 64) {
+                        final org.audiveris.omr.sheet.Staff closest =
+                                org.audiveris.omr.sheet.StaffManager.getClosestStaff(
+                                        new java.awt.geom.Point2D.Double(x, y), allStaves);
+                        System.out.println("closest " + x + " " + y + " "
+                                + ((closest != null) ? closest.getId() : 0));
+                    }
+                }
+
                 for (SystemInfo system : sheet.getSystems()) {
                     final SIGraph sig = system.getSig();
 
