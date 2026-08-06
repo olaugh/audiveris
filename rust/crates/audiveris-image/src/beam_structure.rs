@@ -958,10 +958,27 @@ impl Parallelogram {
     fn contains(self, x: f64, y: f64) -> bool {
         // Path2D/Area uses a half-open right/bottom convention for this convex
         // four-edge shape; integer points on left/top are included.
-        x >= self.median.x1
-            && x < self.median.x2
-            && y >= self.median.y_at_x(x) - self.half_height
-            && y < self.median.y_at_x(x) + self.half_height
+        //
+        // The two sloped edges are interpolated from their *own* endpoints --
+        // the median's, each shifted by half the height -- rather than from the
+        // median's ordinate shifted afterwards. Java builds the parallelogram
+        // that way, as four corner points, and the two are algebraically equal
+        // and differ in the last bits. On batuque one beam's core and belt
+        // counts each moved by a single pixel because of it, which is enough to
+        // change two of its six impacts.
+        let top = Segment {
+            x1: self.median.x1,
+            y1: self.median.y1 - self.half_height,
+            x2: self.median.x2,
+            y2: self.median.y2 - self.half_height,
+        };
+        let bottom = Segment {
+            x1: self.median.x1,
+            y1: self.median.y1 + self.half_height,
+            x2: self.median.x2,
+            y2: self.median.y2 + self.half_height,
+        };
+        x >= self.median.x1 && x < self.median.x2 && y >= top.y_at_x(x) && y < bottom.y_at_x(x)
     }
 
     fn integer_bounds(self) -> (i32, i32, i32, i32) {

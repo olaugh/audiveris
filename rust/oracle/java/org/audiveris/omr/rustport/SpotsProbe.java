@@ -263,7 +263,15 @@ public class SpotsProbe
                     final List<SystemInfo> relevants = new ArrayList<>();
                     sheet.getSystemManager().getSystemsOf(center, relevants);
                     for (SystemInfo system : relevants) {
-                        line.append(' ').append(system.getId());
+                        // dispatchSheetSpots applies an abscissa test *as well
+                        // as* the area containment getSystemsOf does, and
+                        // reporting only the latter overstates the dispatch: a
+                        // spot in the top-right corner of carmen is inside a
+                        // system's area and outside its abscissa range, so Java
+                        // gives it to nobody and never recognises it.
+                        if ((center.x >= system.getLeft()) && (center.x <= system.getRight())) {
+                            line.append(' ').append(system.getId());
+                        }
                     }
                     System.out.println(line);
                 }
