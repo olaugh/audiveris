@@ -2849,6 +2849,131 @@ mod tests {
         );
     }
 
+    /// What the header erase is actually worth to BEAMS.
+    ///
+    /// The erase is the one rung of the spot chain that needs HEADERS, which
+    /// needs MusicFont, which needs Java2D's font rasteriser. Before paying for
+    /// that, it is worth knowing what it buys: this runs the whole chain both
+    /// ways and reports how many spots and how many *accepted* spots differ.
+    #[test]
+    fn header_erase_cost_is_measured_not_assumed() {
+        use audiveris_image::spots::{BEAM_BINARIZATION_THRESHOLD, spot_chain, spot_runs};
+
+        use crate::beam_parameters::{ItemParameters, SheetParameters};
+        use crate::beam_recognizer::check_beam_glyph;
+
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let pixels = recognition.no_staff.to_pixels();
+        let (width, height) = (recognition.scale.width, recognition.scale.height);
+
+        let spots_text = include_str!("../../../oracle/beam-spots.txt");
+        let field = |kind: &str| -> Vec<&str> {
+            spots_text
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|fields| fields.first() == Some(&kind))
+                .expect("a record")
+        };
+        let margin: i32 = field("verticalmargin")[1].parse().expect("a margin");
+        let erases: Vec<audiveris_image::spots::HeaderErase> = spots_text
+            .lines()
+            .filter(|line| line.starts_with("erase "))
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                audiveris_image::spots::HeaderErase {
+                    x: f[4].parse().expect("an x"),
+                    stop: f[6].parse().expect("a stop"),
+                    top: f[8].parse::<i32>().expect("a top") - margin,
+                    bottom: f[10].parse::<i32>().expect("a bottom") + margin,
+                }
+            })
+            .collect();
+
+        let max_stem: usize = field("scale")[8].parse().expect("a stem width");
+        let beam: i32 = field("scale")[6].parse().expect("a beam");
+        let item = ItemParameters::new(21, f64::from(beam), false);
+        let sheet = SheetParameters::new(21);
+
+        let accepted = |with_erase: bool| -> (usize, Vec<(i32, i32, i32, i32)>) {
+            let mut parameters = audiveris_image::spots::SpotParameters::new(max_stem, beam);
+            if with_erase {
+                parameters.header_erases = erases.clone();
+            }
+            let chain = spot_chain(&pixels, width, height, &parameters).expect("a chain");
+            let table =
+                spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD).expect("runs");
+            let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+            let total = components.len();
+            let mut kept = Vec::new();
+            for component in &components {
+                let raster =
+                    crate::beams_step::component_vertical_raster(component).expect("a spot raster");
+                if check_beam_glyph(component, &raster, &item, &sheet)
+                    .structure
+                    .is_some()
+                {
+                    kept.push((
+                        component.left,
+                        component.top,
+                        component.width as i32,
+                        component.height as i32,
+                    ));
+                }
+            }
+            (total, kept)
+        };
+
+        let (with_total, with_kept) = accepted(true);
+        let (without_total, without_kept) = accepted(false);
+
+        // Printed rather than merely asserted: the number is the argument for
+        // or against porting a font rasteriser, and it should be readable.
+        println!(
+            "header erase: {with_total} spots / {} accepted, without: {without_total} / {}",
+            with_kept.len(),
+            without_kept.len()
+        );
+
+        let lost: Vec<_> = with_kept
+            .iter()
+            .filter(|k| !without_kept.contains(k))
+            .collect();
+        let extra: Vec<_> = without_kept
+            .iter()
+            .filter(|k| !with_kept.contains(k))
+            .collect();
+        println!("only with erase (lost without it): {lost:?}");
+        println!("only without erase (spurious):     {extra:?}");
+
+        // The answer, pinned. The erase costs nothing and buys the suppression
+        // of five candidates, all of them in the header region and all of them
+        // clef-sized -- 33x16, 34x17, 32x16 at abscissae 111 to 232. Not one of
+        // the 95 real beams depends on it.
+        //
+        // That is what decides the order of work. Reaching the erase means
+        // HEADERS, and HEADERS means MusicFont: `getSymbolBounds` needs
+        // `TextLayout.getBounds()` and the clef's placement needs
+        // `computeCentroidOffset`, which rasterises the glyph to an
+        // *antialiased* alpha image and takes an alpha-weighted centroid. That
+        // is Java2D's font rasteriser -- native, hinted -- and unlike the
+        // bicubic transform already ported, it is not fully specified in Java
+        // source. Paying that to remove five false positives is the wrong
+        // trade while the rest of BEAMS is still unported and font-free.
+        assert!(
+            lost.is_empty(),
+            "the erase is now load-bearing for {} real beams, which changes the trade",
+            lost.len()
+        );
+        assert_eq!(
+            extra.len(),
+            5,
+            "the erase's whole contribution on this page"
+        );
+        assert_eq!((with_kept.len(), without_kept.len()), (95, 100));
+    }
+
     /// Parses `oracle/grid-nostaff.txt`.
     fn java_no_staff_oracle() -> BTreeMap<String, (usize, usize, String)> {
         let text = include_str!("../../../oracle/grid-nostaff.txt");
