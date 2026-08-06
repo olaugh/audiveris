@@ -34,14 +34,26 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Staff abscissae | 65/65 exact |
 | Barline abscissae | 420/420 exact |
 | Completed staff-line endpoints | 1300/1300 exact |
-| Sheet SIG | all 420 barline inters and 184 connectors promoted; 7 median and 21 grade residuals remain, diagnosed below |
+| Sheet SIG | all 420 barline inters and 184 connectors promoted; every median and every intrinsic and contextual grade exact on every page |
+| Beam spot chain | all 8 transforms bit-identical, and all 305 of chula's spot glyphs by bounds, weight and centroid |
+| Beam recognition | **787/787 raw beams across 8 sheets** -- geometry, all six impacts, grade. 7 of 8 sheets exact through the end of BEAMS |
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 | PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
-`cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green,
-on both `ubuntu-latest` and `macos-latest`, under the toolchain pinned in
-`rust-toolchain.toml`. See "Continuous integration" below for what that pin is
-for and what CI deliberately does not cover.
+Beams run only in tests, fed by the oracle -- see "Beams cannot yet run as a
+production path" for the three inputs missing before `-json` can emit them, and
+which one is cheap.
+
+`cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
+locally under the pinned toolchain, and the whole workspace runs in about 45
+seconds since the dev profile went to `opt-level = 2`.
+
+**Two changes are unverified by CI**: that profile change and the second
+`java_hypot` fix in `beam_structure`. GitHub Actions was in a major outage when
+they landed (2026-08-06, incident from 15:22 UTC), and six consecutive runs died
+in *Set up job* before checkout. The hypot one specifically needs the
+`ubuntu-latest` leg, because it exists to fix a divergence macOS cannot see.
+Re-run before trusting either.
 
 ### Reproducing the PDF work on a fresh machine
 
@@ -544,6 +556,18 @@ is why BEAMS goes first -- not because the erase does not matter. The ratio is
 pinned by that test, and the test fails if the erase ever becomes load-bearing
 for a real beam. It should be re-measured on other pages rather than assumed to
 hold.
+
+## Next session: start here
+
+1. **Confirm CI.** `gh run list --workflow "Rust port" --limit 4`, then re-run
+   if the outage above left it red. Read the step list, not the duration.
+2. **`scale.getMaxStem()` natively** -- `compute_stem_scale` is already ported.
+3. **System area ends**, which unblocks the spot dispatch and therefore the
+   whole beam pipeline as a production path.
+4. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
+   currently show GRID-level inters only and so cannot display any beam work.
+5. **LEDGERS**, which is unblocked by BEAMS but likely shares the system-area
+   dependency through `LedgersFilter`.
 
 ## Open threads, in the order worth taking them
 
