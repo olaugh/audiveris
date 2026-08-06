@@ -1,0 +1,675 @@
+# Java Audiveris 5.11 (JDK 25) beam-spot chain for chula.png, sheet 1, from
+# oracle/java/SpotsProbe.java.
+#
+# SpotsBuilder.buildSheetSpots is eight transforms deep before a single beam is
+# considered, and Audiveris caches only the last. Graded end to end, any one of
+# the eight failing looks exactly like the other seven failing, so each is
+# pinned here as it comes out. The private stages are driven through reflection
+# rather than reimplemented: a probe that reimplements what it grades grades the
+# reimplementation.
+#
+#   sheet <file>#<n> <w> <h> <digest>       -- NO_STAFF, the chain's input
+#   scale beam <b> smallBeam <s> used <u> maxStem <m> interline <i>
+#   verticalmargin <pixels>                 -- staffVerticalMargin, in pixels
+#   header system <s> staff <t> stop <x>    -- Staff.getHeaderStop, or none
+#   erase system <s> x <x> stop <x2> firstline <y1> lastline <y2>
+#   destemmed <maxStem> <digest>            -- horizontal runs >= maxStem
+#   median <digest>                         -- radius 1
+#   gaussian <digest>                       -- radius 1
+#   getbuffer <digest>                      -- SpotsBuilder.getBuffer, whole
+#   closednoerase <digest>                  -- closing without the header erase
+#   erased <digest>                         -- after eraseHeaderAreas
+#   closed <digest>                         -- the buffer both thresholds read
+#   headthreshold <digest>  / headruns <n> <digest>    -- at 170, kept for HEADS
+#   beamthreshold <digest>  / spotruns <n> <digest>    -- at 140, for BEAMS
+#   spotcount <n>
+#   spot <i> <x> <y> <w> <h> <weight>       -- sorted by y, x, w, h
+#   dispatch <i> <cx> <cy> <system>...      -- systems containing the centroid
+#
+# `getbuffer` and `gaussian` agreeing is the probe checking itself: the first is
+# Java's own chain, the second is the same three stages driven one at a time.
+#
+# The header erase is the one rung that reaches outside BEAMS. It needs
+# Staff.getHeaderStop, which HEADERS produces, so `closednoerase` is pinned
+# beside `closed` -- a port with no HEADERS can be graded on the seven stages
+# that do not need one, and can see exactly what the eighth is worth.
+#
+# Regenerate:
+#   unset JAVA_TOOL_OPTIONS
+#   JAVA_HOME=/path/to/jdk25/Contents/Home ./gradlew --no-daemon -q \
+#     -I rust/oracle/java/staff-impacts.init.gradle :app:spotsProbe \
+#     -PspotsTargets="data/examples/chula.png:1"
+sheet chula.png#1 2450 1954 8951314e66665884
+scale beam 12 smallBeam null used 12 maxStem 4 interline 21
+verticalmargin 42
+header system 1 staff 1 stop 363
+header system 1 staff 2 stop 362
+erase system 1 x 0 stop 363 firstline 352 lastline 679
+header system 2 staff 3 stop 204
+header system 2 staff 4 stop 202
+erase system 2 x 0 stop 204 firstline 935 lastline 1268
+header system 3 staff 5 stop 198
+header system 3 staff 6 stop 197
+erase system 3 x 0 stop 198 firstline 1522 lastline 1852
+destemmed 4 48e5dd6f2bfe6e91
+median e454eeb568e98f2b
+gaussian cf8eaf3348955e22
+getbuffer cf8eaf3348955e22
+closednoerase 51039d31f0b6a48b
+erased 66329ac42b7261b5
+closed f646e28702d82c1b
+headthreshold 4a28ffe69e16534e
+headruns 2450 4a28ffe69e16534e
+beamthreshold e457a3e9d13fa448
+spotruns 2450 e457a3e9d13fa448
+spotcount 305
+spot 0 1028 123 10 40 345
+spot 1 1081 124 9 34 286
+spot 2 1131 124 9 40 340
+spot 3 1270 125 10 40 344
+spot 4 1486 125 10 40 345
+spot 5 1354 126 10 39 336
+spot 6 1505 129 9 14 106
+spot 7 1290 130 9 12 88
+spot 8 1373 130 9 13 97
+spot 9 1181 131 9 9 61
+spot 10 1449 131 10 11 82
+spot 11 978 132 10 23 198
+spot 12 1314 132 10 9 70
+spot 13 1543 132 9 10 70
+spot 14 1391 133 11 26 226
+spot 15 1421 133 11 23 198
+spot 16 1052 137 9 11 79
+spot 17 1320 144 10 11 82
+spot 18 1366 144 9 9 61
+spot 19 1187 145 9 9 61
+spot 20 1455 145 9 9 61
+spot 21 1549 146 9 10 70
+spot 22 1053 152 9 11 79
+spot 23 1192 156 9 9 61
+spot 24 1141 328 10 10 74
+spot 25 649 343 26 21 401
+spot 26 1363 346 26 21 411
+spot 27 1141 351 10 9 70
+spot 28 692 353 26 24 446
+spot 29 1405 357 26 25 470
+spot 30 1811 360 12 331 3407
+spot 31 497 363 26 21 394
+spot 32 1086 363 12 12 118
+spot 33 601 364 27 20 405
+spot 34 869 365 26 20 393
+spot 35 779 366 26 20 396
+spot 36 2037 368 9 9 61
+spot 37 1575 370 26 20 397
+spot 38 1728 370 26 21 402
+spot 39 1995 373 26 21 393
+spot 40 2096 374 26 20 401
+spot 41 2143 374 26 21 400
+spot 42 1020 376 25 25 456
+spot 43 1211 378 26 24 447
+spot 44 1316 378 26 25 467
+spot 45 1486 379 26 25 462
+spot 46 1908 381 26 25 479
+spot 47 394 383 25 20 381
+spot 48 2184 383 25 25 471
+spot 49 1252 384 10 9 70
+spot 50 1081 385 12 12 114
+spot 51 1788 387 9 9 61
+spot 52 1838 388 9 10 70
+spot 53 1860 393 27 20 396
+spot 54 2272 396 25 21 388
+spot 55 1117 398 26 24 480
+spot 56 1838 411 9 9 61
+spot 57 649 425 25 16 365
+spot 58 754 427 27 15 358
+spot 59 1362 428 24 13 272
+spot 60 578 429 26 12 289
+spot 61 1463 434 25 13 285
+spot 62 1728 437 15 14 136
+spot 63 1293 442 25 13 291
+spot 64 647 445 133 15 1537
+spot 65 2073 445 25 12 277
+spot 66 2142 448 19 16 267
+spot 67 497 449 106 13 1217
+spot 68 1361 449 127 19 1490
+spot 69 2251 453 23 13 269
+spot 70 393 456 14 14 129
+spot 71 1020 457 10 10 74
+spot 72 1860 461 50 13 578
+spot 73 1210 463 108 12 1273
+spot 74 1994 466 103 12 1216
+spot 75 2141 470 132 16 1562
+spot 76 1859 481 50 12 524
+spot 77 498 555 26 22 423
+spot 78 1575 559 26 23 399
+spot 79 1729 560 26 24 453
+spot 80 2142 565 26 22 424
+spot 81 869 567 26 20 380
+spot 82 1211 569 26 20 384
+spot 83 544 574 26 23 437
+spot 84 912 578 25 22 417
+spot 85 1259 580 26 22 416
+spot 86 1619 581 24 24 398
+spot 87 2224 585 26 24 446
+spot 88 602 586 27 20 403
+spot 89 738 586 26 20 388
+spot 90 971 589 25 20 382
+spot 91 1081 589 26 20 391
+spot 92 1317 591 26 20 383
+spot 93 1447 591 26 21 402
+spot 94 1685 593 26 19 376
+spot 95 1020 598 26 24 448
+spot 96 1363 600 26 24 450
+spot 97 650 607 26 20 392
+spot 98 2056 616 26 20 384
+spot 99 392 619 12 13 117
+spot 100 1788 630 9 9 61
+spot 101 1859 630 12 13 120
+spot 102 1728 636 12 13 118
+spot 103 1995 638 25 20 386
+spot 104 1574 644 22 16 306
+spot 105 497 646 23 15 292
+spot 106 581 650 23 12 256
+spot 107 868 650 22 13 254
+spot 108 1665 650 22 12 239
+spot 109 950 651 23 13 269
+spot 110 1788 651 9 9 61
+spot 111 1211 652 22 14 267
+spot 112 1296 654 22 13 266
+spot 113 1574 666 113 17 1456
+spot 114 496 667 109 16 1403
+spot 115 2141 668 84 14 983
+spot 116 868 669 105 17 1517
+spot 117 1210 672 108 16 1506
+spot 118 1019 679 63 14 732
+spot 119 1362 680 86 15 1011
+spot 120 649 681 91 17 1167
+spot 121 1993 720 64 15 759
+spot 122 406 899 120 14 1385
+spot 123 626 907 121 12 1426
+spot 124 1510 907 154 13 1814
+spot 125 803 908 146 17 1693
+spot 126 499 919 27 12 298
+spot 127 1365 920 52 12 604
+spot 128 1511 926 153 13 1776
+spot 129 803 928 25 14 317
+spot 130 924 932 25 12 280
+spot 131 1219 932 13 13 131
+spot 132 1365 939 52 12 562
+spot 133 1289 943 15 335 4200
+spot 134 458 945 14 15 151
+spot 135 236 955 25 25 456
+spot 136 2123 956 12 11 106
+spot 137 2169 961 25 20 390
+spot 138 2219 962 26 20 384
+spot 139 2266 962 25 20 392
+spot 140 454 967 14 15 153
+spot 141 1694 967 26 24 449
+spot 142 1739 967 26 25 459
+spot 143 382 978 25 24 449
+spot 144 2119 978 12 12 116
+spot 145 500 979 26 24 458
+spot 146 601 980 27 24 479
+spot 147 1789 980 26 20 392
+spot 148 1943 980 25 21 395
+spot 149 663 981 26 24 474
+spot 150 720 981 25 24 449
+spot 151 779 982 25 24 435
+spot 152 1486 987 26 24 456
+spot 153 1540 987 26 24 453
+spot 154 1588 987 26 25 463
+spot 155 1638 988 25 24 438
+spot 156 1841 989 26 25 484
+spot 157 827 994 25 20 383
+spot 158 1022 994 25 21 387
+spot 159 1195 998 26 20 391
+spot 160 1341 998 26 21 397
+spot 161 1390 999 26 20 394
+spot 162 910 1000 9 9 61
+spot 163 898 1003 12 10 92
+spot 164 923 1004 25 24 453
+spot 165 898 1023 21 13 182
+spot 166 2168 1034 100 14 1262
+spot 167 1694 1049 149 15 1740
+spot 168 2167 1056 101 12 1182
+spot 169 1694 1069 149 15 1746
+spot 170 381 1162 26 23 426
+spot 171 429 1168 20 13 154
+spot 172 454 1174 25 20 377
+spot 173 1996 1176 26 22 436
+spot 174 309 1182 26 24 469
+spot 175 1638 1183 25 21 391
+spot 176 601 1184 26 25 477
+spot 177 1841 1184 26 21 398
+spot 178 2068 1187 26 20 393
+spot 179 429 1190 21 14 160
+spot 180 1486 1191 26 25 471
+spot 181 1694 1193 27 24 451
+spot 182 690 1197 26 20 388
+spot 183 874 1198 26 20 387
+spot 184 1145 1200 27 21 401
+spot 185 235 1203 25 24 435
+spot 186 1539 1204 26 21 399
+spot 187 1740 1205 25 21 387
+spot 188 778 1207 26 25 461
+spot 189 1942 1207 26 20 397
+spot 190 1074 1210 26 24 455
+spot 191 1587 1214 26 24 452
+spot 192 1789 1215 27 24 453
+spot 193 1339 1218 12 11 100
+spot 194 1021 1221 25 21 377
+spot 195 1194 1223 26 20 393
+spot 196 2119 1229 26 20 382
+spot 197 380 1255 74 16 1082
+spot 198 2046 1259 24 17 304
+spot 199 599 1270 93 18 1162
+spot 200 1942 1272 24 12 256
+spot 201 1121 1274 26 13 301
+spot 202 1485 1276 154 13 1790
+spot 203 1020 1282 24 13 275
+spot 204 234 1283 76 15 887
+spot 205 1694 1283 149 13 1749
+spot 206 1942 1286 128 20 1516
+spot 207 777 1287 98 16 1128
+spot 208 1019 1294 127 20 1475
+spot 209 1194 1296 13 13 122
+spot 210 1485 1297 154 12 1828
+spot 211 1694 1303 149 12 1689
+spot 212 1512 1489 112 16 1308
+spot 213 1863 1504 137 19 1605
+spot 214 413 1522 25 25 439
+spot 215 461 1523 25 24 447
+spot 216 1863 1524 23 13 255
+spot 217 1972 1529 28 13 321
+spot 218 229 1532 25 20 373
+spot 219 508 1535 26 21 387
+spot 220 642 1536 26 20 402
+spot 221 1012 1539 26 20 397
+spot 222 277 1543 26 24 461
+spot 223 322 1543 25 24 444
+spot 224 363 1543 25 25 457
+spot 225 549 1545 25 24 443
+spot 226 1702 1545 25 20 389
+spot 227 911 1548 26 24 474
+spot 228 1117 1550 26 24 466
+spot 229 1171 1550 25 25 453
+spot 230 1772 1554 26 25 476
+spot 231 807 1559 25 21 394
+spot 232 860 1559 25 21 393
+spot 233 2271 1559 13 15 146
+spot 234 1376 1562 26 21 406
+spot 235 1229 1563 25 20 385
+spot 236 1598 1565 25 21 392
+spot 237 1285 1572 25 25 458
+spot 238 1839 1576 26 25 466
+spot 239 1488 1587 25 20 383
+spot 240 1546 1587 25 20 386
+spot 241 1884 1589 25 20 387
+spot 242 2065 1590 26 20 397
+spot 243 2228 1592 25 21 392
+spot 244 1960 1594 11 10 80
+spot 245 1951 1598 9 9 61
+spot 246 1973 1599 26 24 461
+spot 247 412 1607 139 17 1774
+spot 248 1094 1613 25 12 275
+spot 249 228 1616 136 15 1558
+spot 250 1950 1616 21 13 165
+spot 251 411 1627 139 17 1588
+spot 252 1011 1632 108 14 1230
+spot 253 228 1636 136 14 1553
+spot 254 1700 1636 74 15 880
+spot 255 805 1639 108 17 1259
+spot 256 1169 1646 116 16 1355
+spot 257 642 1731 26 21 430
+spot 258 1012 1734 26 22 427
+spot 259 322 1737 26 20 377
+spot 260 507 1738 26 20 381
+spot 261 1701 1738 26 23 430
+spot 262 757 1739 27 21 401
+spot 263 691 1740 26 21 389
+spot 264 277 1747 26 22 432
+spot 265 460 1748 25 22 412
+spot 266 806 1752 26 22 420
+spot 267 1376 1754 26 24 427
+spot 268 228 1755 26 21 383
+spot 269 362 1758 26 20 384
+spot 270 413 1758 25 20 379
+spot 271 548 1759 27 20 392
+spot 272 1171 1763 25 21 383
+spot 273 1816 1763 17 11 121
+spot 274 1839 1770 25 21 388
+spot 275 1147 1780 20 13 154
+spot 276 1076 1784 26 20 399
+spot 277 1815 1784 21 13 164
+spot 278 1255 1786 26 21 402
+spot 279 1597 1789 26 20 389
+spot 280 1772 1791 26 21 394
+spot 281 1927 1792 26 20 394
+spot 282 2175 1793 26 21 398
+spot 283 2115 1803 26 24 458
+spot 284 2268 1808 12 13 119
+spot 285 1487 1810 26 20 387
+spot 286 641 1811 26 12 292
+spot 287 737 1811 23 12 256
+spot 288 1545 1811 26 20 388
+spot 289 2064 1815 27 20 401
+spot 290 2227 1816 26 21 403
+spot 291 228 1825 136 12 1605
+spot 292 412 1827 138 13 1642
+spot 293 641 1831 119 13 1362
+spot 294 227 1845 137 13 1615
+spot 295 412 1848 138 12 1636
+spot 296 1010 1855 68 15 806
+spot 297 1170 1859 86 15 1106
+spot 298 1836 1864 93 17 1270
+spot 299 1700 1871 74 15 888
+spot 300 2153 1872 24 13 273
+spot 301 2064 1878 22 12 244
+spot 302 1486 1891 112 15 1332
+spot 303 2226 1892 14 15 140
+spot 304 2063 1893 114 18 1375
+dispatch 0 1032 142 1
+dispatch 1 1085 140 1
+dispatch 2 1135 144 1
+dispatch 3 1274 145 1
+dispatch 4 1490 145 1
+dispatch 5 1358 145 1
+dispatch 6 1509 136 1
+dispatch 7 1294 136 1
+dispatch 8 1377 136 1
+dispatch 9 1185 135 1
+dispatch 10 1453 136 1
+dispatch 11 983 143 1
+dispatch 12 1318 136 1
+dispatch 13 1547 136 1
+dispatch 14 1396 146 1
+dispatch 15 1426 144 1
+dispatch 16 1056 142 1
+dispatch 17 1324 149 1
+dispatch 18 1370 148 1
+dispatch 19 1191 149 1
+dispatch 20 1459 149 1
+dispatch 21 1553 150 1
+dispatch 22 1057 157 1
+dispatch 23 1196 160 1
+dispatch 24 1146 332 1
+dispatch 25 662 353 1
+dispatch 26 1375 356 1
+dispatch 27 1146 355 1
+dispatch 28 705 365 1
+dispatch 29 1418 369 1
+dispatch 30 1817 523 1
+dispatch 31 510 373 1
+dispatch 32 1092 368 1
+dispatch 33 615 374 1
+dispatch 34 882 375 1
+dispatch 35 791 375 1
+dispatch 36 2041 372 1
+dispatch 37 1587 380 1
+dispatch 38 1740 380 1
+dispatch 39 2007 383 1
+dispatch 40 2108 384 1
+dispatch 41 2155 384 1
+dispatch 42 1032 388 1
+dispatch 43 1224 390 1
+dispatch 44 1328 391 1
+dispatch 45 1499 391 1
+dispatch 46 1921 394 1
+dispatch 47 406 393 1
+dispatch 48 2196 396 1
+dispatch 49 1256 388 1
+dispatch 50 1087 390 1
+dispatch 51 1792 391 1
+dispatch 52 1842 392 1
+dispatch 53 1873 402 1
+dispatch 54 2284 406 1
+dispatch 55 1130 409 1
+dispatch 56 1842 415 1
+dispatch 57 661 433 1
+dispatch 58 767 434 1
+dispatch 59 1373 434 1
+dispatch 60 590 435 1
+dispatch 61 1475 440 1
+dispatch 62 1735 444 1
+dispatch 63 1305 448 1
+dispatch 64 713 452 1
+dispatch 65 2085 450 1
+dispatch 66 2151 455 1
+dispatch 67 549 455 1
+dispatch 68 1425 458 1
+dispatch 69 2262 459 1
+dispatch 70 399 462 1
+dispatch 71 1024 462 1
+dispatch 72 1885 467 1
+dispatch 73 1264 468 1
+dispatch 74 2045 472 1
+dispatch 75 2206 478 1
+dispatch 76 1883 487 1
+dispatch 77 510 566 1
+dispatch 78 1588 569 1
+dispatch 79 1741 571 1
+dispatch 80 2155 576 1
+dispatch 81 882 577 1
+dispatch 82 1224 578 1
+dispatch 83 556 585 1
+dispatch 84 924 589 1
+dispatch 85 1271 591 1
+dispatch 86 1630 591 1
+dispatch 87 2236 596 1
+dispatch 88 615 595 1
+dispatch 89 751 595 1
+dispatch 90 983 598 1
+dispatch 91 1094 599 1
+dispatch 92 1330 601 1
+dispatch 93 1460 601 1
+dispatch 94 1698 602 1
+dispatch 95 1032 609 1
+dispatch 96 1376 612 1
+dispatch 97 662 617 1
+dispatch 98 2069 625 1
+dispatch 99 398 625 1
+dispatch 100 1792 634 1
+dispatch 101 1865 636 1
+dispatch 102 1733 642 1
+dispatch 103 2007 648 1
+dispatch 104 1584 652 1
+dispatch 105 508 653 1
+dispatch 106 592 656 1
+dispatch 107 878 656 1
+dispatch 108 1676 655 1
+dispatch 109 961 657 1
+dispatch 110 1792 655 1
+dispatch 111 1221 659 1
+dispatch 112 1306 660 1
+dispatch 113 1627 675 1
+dispatch 114 548 675 1
+dispatch 115 2182 674 1
+dispatch 116 919 677 1
+dispatch 117 1263 680 1
+dispatch 118 1050 685 1
+dispatch 119 1404 687 1
+dispatch 120 694 689 1
+dispatch 121 2024 727 1 2
+dispatch 122 466 905 1 2
+dispatch 123 686 913 1 2
+dispatch 124 1587 913 1 2
+dispatch 125 876 916 1 2
+dispatch 126 512 924 2
+dispatch 127 1390 926 2
+dispatch 128 1587 932 2
+dispatch 129 815 935 2
+dispatch 130 936 938 2
+dispatch 131 1224 939 2
+dispatch 132 1391 945 2
+dispatch 133 1296 1112 2
+dispatch 134 465 952 2
+dispatch 135 247 967 2
+dispatch 136 2129 961 2
+dispatch 137 2181 971 2
+dispatch 138 2231 971 2
+dispatch 139 2278 972 2
+dispatch 140 460 974 2
+dispatch 141 1707 979 2
+dispatch 142 1752 980 2
+dispatch 143 394 990 2
+dispatch 144 2125 983 2
+dispatch 145 513 990 2
+dispatch 146 614 991 2
+dispatch 147 1802 990 2
+dispatch 148 1955 990 2
+dispatch 149 675 992 2
+dispatch 150 732 992 2
+dispatch 151 791 993 2
+dispatch 152 1499 998 2
+dispatch 153 1553 999 2
+dispatch 154 1601 999 2
+dispatch 155 1650 1000 2
+dispatch 156 1853 1002 2
+dispatch 157 839 1003 2
+dispatch 158 1034 1004 2
+dispatch 159 1207 1007 2
+dispatch 160 1353 1008 2
+dispatch 161 1403 1008 2
+dispatch 162 914 1004 2
+dispatch 163 903 1007 2
+dispatch 164 935 1015 2
+dispatch 165 907 1029 2
+dispatch 166 2218 1041 2
+dispatch 167 1768 1056 2
+dispatch 168 2217 1061 2
+dispatch 169 1768 1076 2
+dispatch 170 393 1173 2
+dispatch 171 438 1174 2
+dispatch 172 466 1183 2
+dispatch 173 2008 1187 2
+dispatch 174 321 1193 2
+dispatch 175 1650 1193 2
+dispatch 176 613 1197 2
+dispatch 177 1854 1194 2
+dispatch 178 2081 1197 2
+dispatch 179 439 1196 2
+dispatch 180 1499 1204 2
+dispatch 181 1707 1206 2
+dispatch 182 703 1207 2
+dispatch 183 886 1208 2
+dispatch 184 1158 1210 2
+dispatch 185 247 1215 2
+dispatch 186 1552 1214 2
+dispatch 187 1752 1215 2
+dispatch 188 791 1219 2
+dispatch 189 1955 1217 2
+dispatch 190 1087 1222 2
+dispatch 191 1600 1226 2
+dispatch 192 1802 1228 2
+dispatch 193 1344 1223 2
+dispatch 194 1033 1231 2
+dispatch 195 1207 1233 2
+dispatch 196 2131 1239 2
+dispatch 197 416 1263 2
+dispatch 198 2058 1268 2
+dispatch 199 643 1279 2
+dispatch 200 1954 1278 2
+dispatch 201 1133 1280 2
+dispatch 202 1562 1282 2
+dispatch 203 1031 1288 2
+dispatch 204 272 1290 2 3
+dispatch 205 1769 1289 2
+dispatch 206 2005 1296 2
+dispatch 207 825 1294 2 3
+dispatch 208 1082 1303 2 3
+dispatch 209 1200 1302 2 3
+dispatch 210 1562 1302 2 3
+dispatch 211 1769 1309 2 3
+dispatch 212 1568 1496 2 3
+dispatch 213 1931 1513 2 3
+dispatch 214 425 1534 3
+dispatch 215 473 1535 3
+dispatch 216 1874 1530 3
+dispatch 217 1986 1535 3
+dispatch 218 241 1542 3
+dispatch 219 521 1545 3
+dispatch 220 655 1546 3
+dispatch 221 1024 1549 3
+dispatch 222 290 1555 3
+dispatch 223 334 1555 3
+dispatch 224 375 1555 3
+dispatch 225 561 1557 3
+dispatch 226 1714 1555 3
+dispatch 227 924 1560 3
+dispatch 228 1130 1562 3
+dispatch 229 1183 1561 3
+dispatch 230 1785 1567 3
+dispatch 231 819 1569 3
+dispatch 232 872 1569 3
+dispatch 233 2277 1566 3
+dispatch 234 1389 1572 3
+dispatch 235 1241 1573 3
+dispatch 236 1610 1575 3
+dispatch 237 1297 1584 3
+dispatch 238 1851 1589 3
+dispatch 239 1500 1597 3
+dispatch 240 1558 1597 3
+dispatch 241 1896 1598 3
+dispatch 242 2077 1599 3
+dispatch 243 2240 1602 3
+dispatch 244 1965 1598 3
+dispatch 245 1955 1602 3
+dispatch 246 1986 1611 3
+dispatch 247 484 1615 3
+dispatch 248 1106 1618 3
+dispatch 249 296 1623 3
+dispatch 250 1960 1622 3
+dispatch 251 480 1635 3
+dispatch 252 1064 1639 3
+dispatch 253 296 1642 3
+dispatch 254 1737 1643 3
+dispatch 255 859 1647 3
+dispatch 256 1227 1653 3
+dispatch 257 654 1741 3
+dispatch 258 1024 1745 3
+dispatch 259 334 1746 3
+dispatch 260 520 1747 3
+dispatch 261 1713 1749 3
+dispatch 262 770 1749 3
+dispatch 263 704 1750 3
+dispatch 264 289 1758 3
+dispatch 265 472 1758 3
+dispatch 266 819 1763 3
+dispatch 267 1389 1765 3
+dispatch 268 241 1765 3
+dispatch 269 375 1768 3
+dispatch 270 425 1768 3
+dispatch 271 561 1769 3
+dispatch 272 1183 1773 3
+dispatch 273 1824 1768 3
+dispatch 274 1851 1780 3
+dispatch 275 1156 1786 3
+dispatch 276 1089 1794 3
+dispatch 277 1825 1790 3
+dispatch 278 1268 1796 3
+dispatch 279 1610 1798 3
+dispatch 280 1784 1801 3
+dispatch 281 1940 1802 3
+dispatch 282 2188 1803 3
+dispatch 283 2128 1815 3
+dispatch 284 2274 1814 3
+dispatch 285 1500 1819 3
+dispatch 286 654 1816 3
+dispatch 287 748 1816 3
+dispatch 288 1557 1820 3
+dispatch 289 2077 1825 3
+dispatch 290 2239 1826 3
+dispatch 291 296 1831 3
+dispatch 292 480 1833 3
+dispatch 293 700 1837 3
+dispatch 294 296 1851 3
+dispatch 295 480 1854 3
+dispatch 296 1044 1862 3
+dispatch 297 1213 1866 3
+dispatch 298 1884 1871 3
+dispatch 299 1736 1878 3
+dispatch 300 2165 1878 3
+dispatch 301 2074 1884 3
+dispatch 302 1542 1898 3
+dispatch 303 2232 1899 3
+dispatch 304 2120 1902 3

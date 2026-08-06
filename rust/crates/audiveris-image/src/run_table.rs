@@ -105,6 +105,22 @@ impl RunTable {
         height: usize,
         pixels: &[u8],
     ) -> Result<Self, RunTableError> {
+        Self::from_pixels_with_min_length(orientation, width, height, pixels, 0)
+    }
+
+    /// As `from_pixels`, but keeping only runs at least `min_length` long.
+    ///
+    /// Java's `RunTableFactory.LengthFilter`, which `SpotsBuilder.getBuffer`
+    /// uses at the stem width to drop stems before looking for beams. The
+    /// filter runs *after* a run is complete, so a rejected run leaves
+    /// background behind rather than splitting its neighbours.
+    pub fn from_pixels_with_min_length(
+        orientation: Orientation,
+        width: usize,
+        height: usize,
+        pixels: &[u8],
+        min_length: usize,
+    ) -> Result<Self, RunTableError> {
         if pixels.len()
             != width
                 .checked_mul(height)
@@ -143,7 +159,10 @@ impl RunTable {
                     }
                     coordinate += 1;
                 }
-                table.sequences[sequence].push(Run::new(start, coordinate - start));
+                let length = coordinate - start;
+                if length >= min_length {
+                    table.sequences[sequence].push(Run::new(start, length));
+                }
             }
         }
         Ok(table)

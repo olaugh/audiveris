@@ -2390,6 +2390,162 @@ mod tests {
         }
     }
 
+    /// The eight transforms between the staff-free page and the beam spots.
+    ///
+    /// Each is compared as it comes out rather than only at the end, because
+    /// end to end any one of them failing looks exactly like the other seven
+    /// failing. The header erase is fed from the oracle's own rectangles: it
+    /// needs `Staff.getHeaderStop`, which HEADERS produces and the port does
+    /// not have yet, and pretending otherwise would either hide the dependency
+    /// or fail the six stages that do not share it.
+    #[test]
+    fn beam_spot_chain_matches_the_java_oracle() {
+        use audiveris_image::spots::{
+            BEAM_BINARIZATION_THRESHOLD, HEAD_BINARIZATION_THRESHOLD, HeaderErase, SpotParameters,
+            spot_chain, spot_runs,
+        };
+
+        let text = include_str!("../../../oracle/beam-spots.txt");
+        let rows = |kind: &str| -> Vec<Vec<&str>> {
+            text.lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .filter(|fields| fields.first() == Some(&kind))
+                .collect()
+        };
+        let one = |kind: &str| -> Vec<&str> { rows(kind).remove(0) };
+
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let pixels = recognition.no_staff.to_pixels();
+        let (width, height) = (recognition.scale.width, recognition.scale.height);
+        let digest = audiveris_image::morphology::digest;
+
+        let sheet = one("sheet");
+        assert_eq!(
+            [width.to_string(), height.to_string(), digest(&pixels)],
+            [sheet[2], sheet[3], sheet[4]].map(str::to_owned),
+            "the page the oracle started from"
+        );
+
+        // Java erases from the system's left bound to the header stop, over the
+        // first staff's top line down to the last staff's bottom line, each
+        // pushed out by staffVerticalMargin.
+        let margin: i32 = one("verticalmargin")[1].parse().expect("a margin");
+        let erases: Vec<HeaderErase> = rows("erase")
+            .iter()
+            .map(|row| HeaderErase {
+                x: row[4].parse().expect("an x"),
+                stop: row[6].parse().expect("a stop"),
+                top: row[8].parse::<i32>().expect("a first line") - margin,
+                bottom: row[10].parse::<i32>().expect("a last line") + margin,
+            })
+            .collect();
+        assert_eq!(erases.len(), 3, "chula has three systems with headers");
+
+        let scale = one("scale");
+        // `used`, not `beam`: Java takes the smaller of the main and small beam
+        // scales, and on a page with cue beams those differ.
+        let mut parameters = SpotParameters::new(
+            scale[8].parse().expect("a stem width"),
+            scale[6].parse().expect("a beam thickness"),
+        );
+        parameters.header_erases = erases;
+
+        let chain = spot_chain(&pixels, width, height, &parameters).expect("a spot chain");
+        for (stage, actual) in [
+            ("destemmed", &chain.destemmed),
+            ("median", &chain.median),
+            ("gaussian", &chain.gaussian),
+            ("erased", &chain.erased),
+            ("closed", &chain.closed),
+        ] {
+            let row = one(stage);
+            assert_eq!(digest(actual), row[row.len() - 1], "{stage}");
+        }
+
+        // The closing without the erase, so the two stages answer separately.
+        let mut unerased = SpotParameters::new(parameters.max_stem, parameters.beam);
+        unerased.header_erases = Vec::new();
+        assert_eq!(
+            digest(
+                &spot_chain(&pixels, width, height, &unerased)
+                    .expect("a chain")
+                    .closed
+            ),
+            one("closednoerase")[1],
+            "closing without the header erase"
+        );
+
+        for (stage, level) in [
+            ("beamthreshold", BEAM_BINARIZATION_THRESHOLD),
+            ("headthreshold", HEAD_BINARIZATION_THRESHOLD),
+        ] {
+            let thresholded = audiveris_image::spots::threshold(&chain.closed, level);
+            assert_eq!(digest(&thresholded), one(stage)[1], "{stage}");
+        }
+
+        // The run table is vertical here and horizontal in the stem filter
+        // above; swapping them is a silent way to get plausible garbage.
+        let table =
+            spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD).expect("runs");
+        let spotruns = one("spotruns");
+        assert_eq!(
+            [
+                table.sequence_count().to_string(),
+                digest(&table.to_pixels())
+            ],
+            [spotruns[1], spotruns[2]].map(str::to_owned),
+            "the spot run table"
+        );
+
+        // The connected components BEAMS actually looks at. Compared sorted by
+        // position rather than in discovery order: the component walk's own
+        // order is an artefact, and comparing it would turn a reordering into
+        // 305 failures that all say the same thing.
+        let mut spots = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+        assert_eq!(spots.len(), one("spotcount")[1].parse().expect("a count"));
+        spots.sort_by_key(|spot| (spot.top, spot.left, spot.width, spot.height));
+
+        let expected = rows("spot");
+        assert_eq!(spots.len(), expected.len());
+        let mut wrong = Vec::new();
+        for (index, (spot, row)) in spots.iter().zip(&expected).enumerate() {
+            let actual = [
+                spot.left.to_string(),
+                spot.top.to_string(),
+                spot.width.to_string(),
+                spot.height.to_string(),
+                spot.weight.to_string(),
+            ];
+            if actual != [row[2], row[3], row[4], row[5], row[6]].map(str::to_owned) {
+                wrong.push(format!("spot {index}: {actual:?} vs {:?}", &row[2..7]));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "{} of {} spots differ:\n{}",
+            wrong.len(),
+            spots.len(),
+            wrong.join("\n")
+        );
+
+        // Java dispatches each spot by its rounded centroid, so that is pinned
+        // alongside the bounds: two components with identical bounds and
+        // different ink would land in different systems.
+        let centroids = rows("dispatch");
+        for (index, (spot, row)) in spots.iter().zip(&centroids).enumerate() {
+            assert_eq!(
+                [
+                    spot.rounded_centroid_x.to_string(),
+                    spot.rounded_centroid_y.to_string()
+                ],
+                [row[2], row[3]].map(str::to_owned),
+                "spot {index} centroid"
+            );
+        }
+    }
+
     /// Parses `oracle/grid-nostaff.txt`.
     fn java_no_staff_oracle() -> BTreeMap<String, (usize, usize, String)> {
         let text = include_str!("../../../oracle/grid-nostaff.txt");
