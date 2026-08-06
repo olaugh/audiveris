@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::grid_executor::HeadlessSkew;
+use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::production_stages::TerminalRasterStages;
 use audiveris_image::adaptive;
 use audiveris_image::bar_alignment::BarAlignment;
@@ -35,10 +35,11 @@ use crate::grid_executor::{
     HeadlessGridBook, HeadlessGridExecutor, HeadlessGridSheet, HeadlessGridSigState,
     HeadlessPopulationState, HeadlessStaff,
 };
-use audiveris_image::ingest::{self, LoadError};
+use audiveris_image::ingest::{self, LoadError, fnv1a64_bytes};
 use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{StaffCandidate, retrieve_staff_candidates};
+use audiveris_image::no_staff::erase_staff_glyphs;
 use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::prepared_bars::ProductionProcessBars;
 use audiveris_image::prepared_completion::{ProductionCompleteLines, production_line_completion};
@@ -60,6 +61,7 @@ use audiveris_image::scale_estimate::{
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
+use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
 
 /// Result of running `LOAD -> BINARY -> SCALE` natively on one raster page.
@@ -315,6 +317,15 @@ pub struct GridLinesRecognition {
     pub discarded_filament_count: usize,
     pub staves: Vec<StaffCandidateReport>,
     pub peak_graph: PeakGraphReport,
+    /// Java `Picture.getSource(NO_STAFF)`: the binary raster with every staff
+    /// line's glyph painted white.
+    ///
+    /// Everything downstream of GRID that reads ink rather than geometry --
+    /// LEDGERS, BEAMS, the text scanner, the key extractor -- starts from this
+    /// rather than from the binary raster.
+    pub no_staff: RunTable,
+    /// FNV-1a-64 of the staff-free buffer, which is what an oracle compares.
+    pub no_staff_digest: u64,
 }
 
 /// One candidate peak that a purge removed, and which purge removed it.
@@ -1147,6 +1158,42 @@ pub fn recognize_grid_lines_raster(
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
+    // Java builds NO_STAFF by painting each staff line's glyph white over the
+    // binary raster, so it erases exactly the ink GRID assigned to a line and
+    // leaves everything it could not explain.
+    let staff_glyphs: Vec<StaffGlyph> = peak_graph
+        .sheet_staffs
+        .iter()
+        .flat_map(|staff| staff.lines.iter())
+        .filter_map(|line| match line {
+            HeadlessStaffLine::Persistent { line, .. } => Some(line.glyph.clone()),
+            // A line still held as a filament has not been converted, so it has
+            // no glyph to erase. Java warns and paints nothing.
+            HeadlessStaffLine::Filament { .. } => None,
+        })
+        .collect();
+    let no_staff_pixels = erase_staff_glyphs(
+        &scale_recognition.binary,
+        scale_recognition.width,
+        scale_recognition.height,
+        &staff_glyphs,
+    )
+    .map_err(|error| GridRecognitionError::Stage {
+        stage: "no-staff buffer",
+        message: error.to_string(),
+    })?;
+    let no_staff_digest = fnv1a64_bytes(&no_staff_pixels);
+    let no_staff = RunTable::from_pixels(
+        Orientation::Vertical,
+        scale_recognition.width,
+        scale_recognition.height,
+        &no_staff_pixels,
+    )
+    .map_err(|error| GridRecognitionError::Stage {
+        stage: "no-staff table",
+        message: error.to_string(),
+    })?;
+
     Ok(GridLinesRecognition {
         scale: scale_recognition,
         global_slope,
@@ -1155,6 +1202,8 @@ pub fn recognize_grid_lines_raster(
         discarded_filament_count,
         staves,
         peak_graph,
+        no_staff,
+        no_staff_digest,
     })
 }
 
@@ -2165,6 +2214,77 @@ mod tests {
             recognition.peak_graph.rejections.len(),
             "each rejection should carry its stage"
         );
+    }
+
+    /// The staff-free image matches Java's, bit for bit.
+    ///
+    /// Java builds NO_STAFF by painting each staff line's glyph white over the
+    /// binary raster, so this compares the ink GRID could *not* explain as a
+    /// staff line. It is the input every later stage that reads pixels rather
+    /// than geometry starts from -- LEDGERS, BEAMS, the text scanner, the key
+    /// extractor -- so a divergence here would surface as an unexplainable bug
+    /// in whichever of those was ported first.
+    ///
+    /// Painting white over black has no thresholds and no floating point, so
+    /// the comparison is an exact hash rather than a tolerance.
+    ///
+    /// **Ignored, and the reason is the next slice.** `recognize_grid_lines`
+    /// runs only `GridStepStage::BuildGrid`; GRID's own `CleanStaffLines` stage
+    /// never runs, so every staff line is still a `Filament` and no glyph has
+    /// been registered to erase. The port currently produces the binary raster
+    /// unchanged -- for chula that is `2179468ede9f7ec6`, which is also its
+    /// binary digest in `oracle/grid-binary.txt`, because chula.png is already
+    /// bilevel -- against Java's `8951314e66665884`.
+    ///
+    /// The fix is not to erase harder. In Java `rebuildHLag()` reads
+    /// `Picture.getSource(NO_STAFF)`, which is built *lazily at that moment*
+    /// from the glyphs `simplifyLines` created earlier in the same method, so
+    /// the port's `rebuild_horizontal_lag` should build the table from the
+    /// sheet's persistent glyphs rather than read a field only tests populate.
+    /// Then the driver can run `CleanStaffLines` and this passes.
+    #[test]
+    #[ignore = "needs GRID's CleanStaffLines stage to run; see the doc comment"]
+    fn no_staff_buffer_matches_the_java_oracle() {
+        let oracle = java_no_staff_oracle();
+        let mut checked = 0usize;
+        for (name, (width, height, digest)) in &oracle {
+            let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                (recognition.scale.width, recognition.scale.height),
+                (*width, *height),
+                "{name}: raster size"
+            );
+            assert_eq!(
+                format!("{:016x}", recognition.no_staff_digest),
+                *digest,
+                "{name}: staff-free buffer"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, oracle.len(), "every pinned page should run");
+    }
+
+    /// Parses `oracle/grid-nostaff.txt`.
+    fn java_no_staff_oracle() -> BTreeMap<String, (usize, usize, String)> {
+        let text = include_str!("../../../oracle/grid-nostaff.txt");
+        let mut pages = BTreeMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            pages.insert(
+                fields[0].to_owned(),
+                (
+                    fields[1].parse().expect("a width"),
+                    fields[2].parse().expect("a height"),
+                    fields[3].to_owned(),
+                ),
+            );
+        }
+        pages
     }
 
     /// Diffs the sheet SIG the GRID step promotes against Java's persisted

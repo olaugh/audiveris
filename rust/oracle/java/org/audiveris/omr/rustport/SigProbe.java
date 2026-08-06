@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package org.audiveris.omr.rustport;
 
+import ij.process.ByteProcessor;
+
 import java.awt.Rectangle;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
@@ -13,6 +15,7 @@ import org.audiveris.omr.CLI;
 import org.audiveris.omr.Main;
 import org.audiveris.omr.WellKnowns;
 import org.audiveris.omr.sheet.Book;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.SystemInfo;
@@ -99,6 +102,21 @@ public class SigProbe
                 }
 
                 final Sheet sheet = stub.getSheet();
+
+                // The staff-free image, which everything downstream of GRID
+                // that reads ink rather than geometry starts from. Hashed
+                // rather than dumped: it is a full-page buffer, and the only
+                // question worth asking of it is whether it is identical.
+                final ByteProcessor noStaff = sheet.getPicture().getSource(
+                        Picture.SourceKey.NO_STAFF);
+                if (noStaff != null) {
+                    long hash = 0xcbf29ce484222325L;
+                    for (int i = 0, n = noStaff.getWidth() * noStaff.getHeight(); i < n; i++) {
+                        hash = (hash ^ (noStaff.get(i) & 0xff)) * 0x100000001b3L;
+                    }
+                    System.out.println(String.format("nostaff %d %d %016x",
+                            noStaff.getWidth(), noStaff.getHeight(), hash));
+                }
 
                 for (SystemInfo system : sheet.getSystems()) {
                     final SIGraph sig = system.getSig();
