@@ -1,108 +1,124 @@
-# WARNING
-### Beware of site [audiveris.com](https://audiveris.com/)!
-
-```diff
-- The site https://audiveris.com  (note the `.com` extension)
--  has nothing to do with Audiveris and seems to be a fraudulent site.
-```
-
-![](https://github.com/Audiveris/audiveris.github.io/blob/master/assets/images/audiveris.com.png)
-
-```diff
-- The site is aesthetically pleasing
--  and looks like an advertisement for Audiveris software.
-- However, users report that links redirect to pages
--  dedicated to cryptocurrencies, sports betting, etc.
-- It has all the hallmarks of a phishing site…
-```
-
 ![](https://github.com/Audiveris/docs/blob/master/images/SplashLogo.png)
-Logo crafted by [Katka](https://www.facebook.com/katkastreetart/)
 
-# Audiveris - Open-source Optical Music Recognition
+# Audiveris, with a Rust port of the recognition engine
 
-The goal of an OMR application is to allow the end-user to transcribe a score image into
-its symbolic counterpart.
-This opens the door to its further use by many kinds of digital processing such as
-playback, music edition, searching, republishing, etc.
+This is a fork of [Audiveris][upstream], the open-source Optical Music Recognition
+application. The Java tree is unchanged and still builds and runs exactly as upstream's
+does. Alongside it, under [`rust/`](rust/), is a port of the recognition engine to Rust.
 
-The Audiveris application is built around the tight integration of two main components:
-an OMR engine and an OMR editor.
-- The OMR engine combines many techniques, depending on the type of entities to be recognized
--- *ad-hoc* methods for lines, image morphological closing for beams, external OCR for texts,
-template matching for heads, neural network for all other fixed-size shapes.   
-Significant progresses have been made, especially regarding poor-quality scores,
-but experience tells us that a 100% recognition ratio is simply out of reach in many cases.
-- The OMR editor thus comes into play to overcome engine weaknesses in convenient ways.
-The user can preselect processing switches to adapt the OMR engine before launching the
-transcription of the current score.
-Then the remaining mistakes can generally be quickly fixed
-via the manual editing of a few music symbols.
+The port's rule is **parity before progress**: every stage is checked against the
+Java it replaces, running live, and a stage is not "done" because it produces
+plausible output — it is done when it produces *the same* output.
 
-## Key characteristics
+## Status
 
-* Good recognition efficiency on real-world quality scores (as those seen on the [IMSLP][imslp] site)
-* Effective support for large scores (with up to hundreds of pages)
-* Convenient user-oriented interface to detect and correct most OMR errors
-* Available on Windows, Linux and macOS
-* Open source
+Honest version: the port covers **4 of the 20 pipeline stages** and cannot yet
+transcribe a note. What it does cover, it reproduces exactly.
 
-The core of engine music information (OMR data) is fully documented and made publicly available,
-either directly via XML-based `.omr` project files or via the Java API of this software.   
-Audiveris comes with an integrated exporter to write (a subset of) this OMR data into
-[MusicXML][musicxml] 4.0 format.
-In the future, other exporters are expected to build upon OMR data to support other target formats.
+| Working | |
+| --- | --- |
+| `LOAD` → `BINARY` → `SCALE` → `GRID` | staves, systems, staff lines, barlines, skew, scale |
+| PNG, JPEG, PDF input | including multi-sheet PDFs |
+| Structured JSON output | geometry, confidences, rejected candidates, and the evidence behind each grade |
 
-## Stable releases
+| Not working | |
+| --- | --- |
+| `HEADERS` onward | the step lifecycles are ported; the recognition inside them is not |
+| MusicXML export | absent, not stubbed |
+| Notes, beams, stems, chords, rhythm, text | use the Java application |
 
-On a rather regular basis, typically every 6 to 12 months, a new release is made available
-on the dedicated [Audiveris Releases][releases] page.
+Throughput is about **2.3 s per sheet** single-threaded, from PDF bytes to JSON.
 
-The goal of a release is to provide significant improvements, well tested and integrated,
-resulting in a software as easy as possible to install and use.
+## What "exact" means here
 
-Since the release 5.5, an installer is provided for each of the main OSes
-(**Windows**, **Linux** and **macOS**) and comes with a pre-installed Java Runtime Environment (JRE).
-You can download any installer file from the **Assets** section, at the end of the chosen release:
+Not a tolerance — a hash, or a value-for-value comparison against a live Java run.
 
-| OS name | Installer file extension |
-| :---    | :---   |
-| Windows | `.msi` |
-| Linux   | `.deb` |
-| macOS   | `.dmg` |
+- **PDF ingest**: all 189 pages of a seven-source IMSLP corpus, at four depths — raw
+  stream bytes, filtered bytes, decoded samples, and the rendered page — reproduce
+  PDFBox byte for byte. That includes a from-scratch CCITT G4 and JBIG2 decoder, and
+  Java2D's bicubic transform and `ScaledBlit` reproduced from OpenJDK's own loops.
+- **JPEG**: sample for sample against libjpeg **6b**, the one Audiveris actually bundles,
+  which differs from libjpeg-turbo on damaged input and on 4:4:0.
+- **GRID**: 9/9 binary rasters bit-identical, 420/420 barline abscissae, 1300/1300
+  completed staff-line endpoints, every SIG grade and contextual grade, and the
+  staff-free image on all nine example pages.
+- **Recognition on PDF sheets**: 392 promoted barlines across eleven corpus sheets,
+  grades compared at 1e-9.
 
-Additionally for **Linux**, a _flatpak_ package, also with a suitable JRE included,
-can be installed from the [Flathub] site.
+Some of that precision was earned the hard way. Six barline grades were wrong by 0.004
+for three sessions; the cause was `Math.rint` rounding a half to even where Rust's
+`f64::round` rounds it away from zero, in the one place a staff line is extrapolated
+past its own ink.
 
-See installers details in the handbook [installation] section.
+## Quick start
 
-## Development versions
+```sh
+cd rust
+cargo test --workspace
+cargo run --release -p audiveris-cli -- -batch -step GRID ../data/examples/chula.png
+```
 
-The Audiveris project is developed on GitHub, the site you are reading.  
-Any one can clone, build and run this software. 
-The needed tools are `git`, `gradle` and a Java Development Kit (`jdk`),
-as described in the handbook [sources section][sources].
+Structured output, one JSON document per sheet:
 
-There are two main branches in the Audiveris project:
-- the `master` branch is the GitHub default branch;
-we use it for releases, and only for them.
-- the `development` branch is the one where all developments continuously take place;
-Periodically, when a release is to be made, we merge the development branch into the master branch.
+```sh
+cargo run --release -p audiveris-cli -- -batch -step GRID -json score.pdf
+```
 
-See details in the [Wiki article][workflow] dedicated to the chosen development workflow.
+Each promoted inter carries its grade, its contextual grade, and the impacts the grade
+is a weighted geometric mean of — plus the candidates that were rejected and the named
+purge that rejected each. A recogniser that emits only its answer cannot be judged on
+what it missed.
 
-## Further Information
+## Layout
 
-- For users: the Audiveris [User Handbook][handbook].
-- For developers: the [Project Structure][project] and the [Wiki][audiveris-wiki] set of articles.
+```
+app/            the upstream Java application, unchanged
+rust/
+  crates/       core, image, omr, cli, pdf, jpeg, classifier, testkit
+  oracle/       pinned Java output, and the probes that generate it
+  HANDOFF.md    current state, open threads, and what bit whom
+  PORTING.md    the porting contract and a per-area status table
+```
 
-[audiveris-wiki]: https://github.com/Audiveris/audiveris/wiki
-[Flathub]:        https://flathub.org/apps/org.audiveris.audiveris
-[handbook]:       https://audiveris.github.io/audiveris/
-[imslp]:          https://imslp.org/
-[installation]:   https://audiveris.github.io/audiveris/_pages/tutorials/install/binaries/
-[musicxml]:       http://www.musicxml.com/
-[project]:        project-structure.md
-[releases]:       https://github.com/Audiveris/audiveris/releases
-[sources]:        https://audiveris.github.io/audiveris/_pages/tutorials/install/sources/
-[workflow]:       https://github.com/Audiveris/audiveris/wiki/Git-Workflow
+Start with [`rust/HANDOFF.md`](rust/HANDOFF.md), then
+[`rust/PORTING.md`](rust/PORTING.md).
+
+## Verifying against Java
+
+`rust/oracle/` holds Java's answers and the probes that produce them.
+`oracle/java/org/audiveris/omr/rustport/SigProbe.java` will dump every inter and
+relation any pipeline stage leaves in the SIG, so **a stage nobody has started
+porting already has a parity gate waiting**:
+
+```sh
+unset JAVA_TOOL_OPTIONS   # a proxy banner on stdout corrupts every parsed line
+JAVA_HOME=/path/to/jdk25 ./gradlew --no-daemon -q \
+  -I rust/oracle/java/staff-impacts.init.gradle :app:sigProbe \
+  -PsigTargets="data/examples/chula.png:1:LEDGERS"
+```
+
+Two test suites need data that is not in the repository: the PDF corpus is 20 MB of
+third-party IMSLP scans, and the Java oracles need a JDK 25. Both skip loudly rather
+than passing quietly when their inputs are absent — a green run that says nothing is
+not evidence.
+
+CI runs formatting, Clippy with `-D warnings`, and the full test suite on both
+`ubuntu-latest` and `macos-latest`. Two hosts because "bit-exact" is a claim about
+every host or it is not a claim.
+
+## Relationship to upstream
+
+The Java tree here is Audiveris 5.11.0 at commit `9e1e55cd`, unmodified. All credit for
+the application, the engine and its design belongs to the
+[Audiveris project][upstream] and its authors, led by Hervé Bitteur.
+
+This fork adds the Rust port and nothing else. It is not a release channel, it is not
+affiliated with the Audiveris project, and if you want to *use* Audiveris you should go
+[upstream][upstream] and install a real release.
+
+## License
+
+AGPL-3.0-or-later, the same as upstream Audiveris. The Rust port is a derivative work of
+the Java application and is licensed identically; see [LICENSE](LICENSE).
+
+[upstream]: https://github.com/Audiveris/audiveris
