@@ -38,7 +38,7 @@ impl Segment {
 
     #[must_use]
     pub fn y_at_x(self, x: f64) -> f64 {
-        self.y1 + ((x - self.x1) * self.slope())
+        line_util_y_at_x(self.x1, self.y1, self.x2, self.y2, x)
     }
 
     #[must_use]
@@ -605,8 +605,48 @@ fn glyph_centroid(glyph: &RunTable, offset_x: i32, offset_y: i32) -> (f64, f64) 
     (sum_x / weight as f64, sum_y / weight as f64)
 }
 
+/// Java `LineUtil.yAtX(Point2D p1, double slope, double x)`.
+///
+/// Java does not evaluate the point-slope form either. It manufactures a second
+/// point a thousand units along -- `(x1 + 1000, y1 + 1000 * slope)` -- and
+/// intersects, so the multiplication by a thousand and the division back out
+/// are both in the answer's last bits.
 fn reference_y(center: (f64, f64), slope: f64, x: f64) -> f64 {
-    center.1 + ((x - center.0) * slope)
+    line_util_y_at_x(
+        center.0,
+        center.1,
+        center.0 + 1_000.0,
+        center.1 + (1_000.0 * slope),
+        x,
+    )
+}
+
+/// Java `LineUtil.yAtX(Line2D, double)`, term for term.
+///
+/// Not the point-slope form, which is what it looks like it should be and what
+/// this used to be. Java computes a general line-line intersection against the
+/// vertical segment from `(x, 0)` to `(x, 1000)`, via a determinant:
+///
+/// ```text
+/// den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+/// v12 = x1 * y2 - y1 * x2
+/// v34 = x3 * y4 - y3 * x4
+/// y   = (v12 * (y3 - y4) - (y1 - y2) * v34) / den
+/// ```
+///
+/// The two forms are algebraically identical and differ in the last bits, and
+/// the last bits are load-bearing here. A beam item's left edge is decided by
+/// whether a section's centre lies *on* the median, and that containment test
+/// is half-open: for one spot on chula the two forms give 924.9999999999998 and
+/// 925.0 for the same query, a run ends at 924, and so the item starts a whole
+/// section late. Three other medians differed in their ninth decimal for the
+/// same reason.
+fn line_util_y_at_x(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64 {
+    let (x3, y3, x4, y4) = (x, 0.0, x, 1_000.0);
+    let den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4));
+    let v12 = (x1 * y2) - (y1 * x2);
+    let v34 = (x3 * y4) - (y3 * x4);
+    ((v12 * (y3 - y4)) - ((y1 - y2) * v34)) / den
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

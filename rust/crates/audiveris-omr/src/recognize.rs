@@ -2799,53 +2799,36 @@ mod tests {
             }
         }
 
-        // Four residuals on three spots, out of 305 verdicts, 305 sets of
-        // measurements and 107 structures. Pinned exactly rather than
-        // tolerated: any new divergence fails, and so does fixing one of these
-        // without saying so.
+        // Exact, all of it: 305 verdicts, 305 sets of measurements, and every
+        // border line and item of the 107 structures.
         //
-        // They are one bug, not four. Three are a last-digit difference in a
-        // border line's median, and the fourth is that same difference
-        // deciding a containment test: `retrieveItems` asks whether a
-        // section's centre lies on the median, and Java's polygon test at
-        // (499.5, y) passes because its y is a hair under 925 where the port's
-        // is a hair over. So the port's item starts one section later, at 500
-        // rather than 499.
+        // The four residuals this used to carry were one bug, and not the one
+        // the arithmetic suggested. Java's `LineUtil.yAtX` does not evaluate
+        // the point-slope form -- it computes a general line-line intersection
+        // against the vertical segment from (x, 0) to (x, 1000), by
+        // determinant. The two are algebraically identical and differ in the
+        // last bits, and the last bits decide a half-open containment test:
+        // for spot (499, 919) the two forms give 924.9999999999998 and 925.0
+        // for the same query, the run ends at 924, and so the beam item began
+        // a whole section late at x=500 instead of 499. Three other medians
+        // differed in their ninth decimal for the same reason.
         //
-        // The arithmetic is not the cause. Java's sums are over integer border
-        // points, so they are exact in f64 regardless of order, and the
-        // remaining `hypot` and division are worth a couple of ulps -- three
-        // orders of magnitude below what is seen here. A difference this size
-        // means the *point set* differs by a point, which puts it in
-        // `border_lines` and its section purge rather than in `BasicLine`.
-        // That is the next thing to probe.
-        let known = [
-            "spot (499, 919, 27, 12) line 0 item 0",
-            "spot (1094, 1613, 25, 12) line 0 item 0",
-            "spot (1363, 346, 26, 21) line 0",
-            "spot (1363, 346, 26, 21) line 0 item 0",
-        ];
-        let unexpected: Vec<&String> = disagreements
-            .iter()
-            .filter(|line| !known.iter().any(|prefix| line.starts_with(prefix)))
-            .collect();
+        // What settled it was measurement, twice. `jshell` showed
+        // `Polygon.contains(499.5, 925.0)` is false, clearing the containment
+        // port and pointing at the median; then the probe printed the
+        // pre-adjustment median at full precision instead of nine decimals,
+        // which is where 924.9999999999999 became visible at all.
         assert!(
-            unexpected.is_empty(),
-            "{} new disagreements among {} spots:\n{}",
-            unexpected.len(),
+            disagreements.is_empty(),
+            "{} of {} spots differ:\n{}",
+            disagreements.len(),
             components.len(),
-            unexpected
+            disagreements
                 .iter()
                 .take(20)
-                .map(|line| line.as_str())
+                .map(String::as_str)
                 .collect::<Vec<_>>()
                 .join("\n")
-        );
-        assert_eq!(
-            disagreements.len(),
-            known.len(),
-            "a known residual disappeared; if that was deliberate, remove it from the list:\n{}",
-            disagreements.join("\n")
         );
     }
 

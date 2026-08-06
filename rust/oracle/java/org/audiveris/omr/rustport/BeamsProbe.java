@@ -277,60 +277,45 @@ public class BeamsProbe
             return "diverging beams";
         }
 
-        structure.adjustSides();
-        structure.extendMiddleLines();
-        structure.splitLines();
-
-        // The sections retrieveItems walks, with the containment test that
-        // decides where an item starts. Java tests a *double* centre against
-        // the section's polygon; picking the run under floor(x) instead is
-        // close enough to agree almost always, which is the dangerous kind of
-        // close enough.
+        // The sections retrieveItems walks, dumped against the median it
+        // actually used -- the one from computeLines, *before* adjustSides.
+        // Dumping the adjusted median instead answers a question nobody asked.
+        //
+        // y is printed at full precision because that is the whole point: the
+        // containment test is half-open, so a y of 924.9999999999 is inside a
+        // run ending at 924 and a y of exactly 925.0 is not, and %.9f prints
+        // both as 925.000000000.
         @SuppressWarnings("unchecked")
         final List<org.audiveris.omr.lag.Section> sections =
                 (List<org.audiveris.omr.lag.Section>) call(
                         structure, "getGlyphSections", new Class<?>[] {});
-        final List<?> lines = structure.getLines();
+        final List<?> preLines = structure.getLines();
 
-        if (!lines.isEmpty()) {
-            final Line2D firstMedian = (Line2D) field(lines.get(0), "median");
+        for (int l = 0; l < preLines.size(); l++) {
+            final Line2D preMedian = (Line2D) field(preLines.get(l), "median");
+            System.out.println("premedian " + index + " " + l + " "
+                    + preMedian.getX1() + " " + preMedian.getY1() + " "
+                    + preMedian.getX2() + " " + preMedian.getY2());
+
             for (int si = 0; si < sections.size(); si++) {
                 final org.audiveris.omr.lag.Section section = sections.get(si);
                 final Rectangle sctBox = section.getBounds();
                 final java.awt.geom.Point2D sctCenter =
                         org.audiveris.omr.math.GeoUtil.center2D(sctBox);
                 final double y = org.audiveris.omr.math.LineUtil.yAtX(
-                        firstMedian, sctCenter.getX());
-                System.out.println(String.format(
-                        "section %d %d %d %d %d %d %.9f %.9f %b",
-                        index,
-                        si,
-                        sctBox.x,
-                        sctBox.y,
-                        sctBox.width,
-                        sctBox.height,
-                        sctCenter.getX(),
-                        y,
-                        section.contains(sctCenter.getX(), y)));
-
-                // The polygon the containment test actually runs against.
-                // Its outline is not the bounding box: a run contributes
-                // vertices at start and stop+1, so where the two disagree is
-                // exactly where a port that tests the box gets it wrong.
-                final java.awt.Polygon poly = section.getPolygon();
-                final StringBuilder points = new StringBuilder("polygon ")
-                        .append(index).append(' ').append(si).append(' ')
-                        .append(poly.getBounds().x).append(' ')
-                        .append(poly.getBounds().y).append(' ')
-                        .append(poly.getBounds().width).append(' ')
-                        .append(poly.getBounds().height);
-                for (int pi = 0; pi < poly.npoints; pi++) {
-                    points.append(' ').append(poly.xpoints[pi])
-                            .append(',').append(poly.ypoints[pi]);
-                }
-                System.out.println(points);
+                        preMedian, sctCenter.getX());
+                System.out.println("section " + index + " " + l + " " + si + " "
+                        + sctBox.x + " " + sctBox.y + " " + sctBox.width + " "
+                        + sctBox.height + " " + sctCenter.getX() + " " + y + " "
+                        + section.contains(sctCenter.getX(), y));
             }
         }
+
+        structure.adjustSides();
+        structure.extendMiddleLines();
+        structure.splitLines();
+
+        final List<?> lines = structure.getLines();
         for (int l = 0; l < lines.size(); l++) {
             final Object beamLine = lines.get(l);
             System.out.println(String.format(
