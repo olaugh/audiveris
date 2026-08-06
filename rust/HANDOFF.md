@@ -636,21 +636,42 @@ the classifier with a null `ShapeChecker`, so nothing more is needed from it.
 
 Two font-derived quantities reach the SIG, and they are *not* the same problem.
 
-**1. `getSymbolBounds` -> `TextLayout.getBounds()`: derivable, no rasteriser.**
-The measured values are clean multiples of 1/32 px and scale linearly with point
-size, consistent with an outline bbox in font units quantized to a 1/32 subpixel
-grid at `unitsPerEm = 1000`. F_CLEF is the worked example: a bbox of ~689 units
-reproduces all seven measured widths exactly --
+**1. `getSymbolBounds` -> `TextLayout.getBounds()`: no rasteriser, but no
+shortcut either.** `MusicFont.getPointSize(interline)` is exactly
+`4 * interline`, so the point size is not a source of slop. The law, recovered
+from a 116-interline sweep of all six clefs (`rust/oracle/music-font.txt`):
+
+> each *edge* of the box is independently rounded to a 1/64 px grid, after
+> scaling a per-shape em-unit outline extreme by the point size.
+
+Per-edge, not per-dimension -- the width is `right - left` **after** both have
+been quantized, which is why widths alone never fit a clean law. The grid is
+**1/64**, not 1/32: at 1/32, 924 of the 2784 swept values are off-grid; at 1/64,
+none are.
+
+An earlier note here claimed the em constants looked like integers over
+`unitsPerEm = 1000`, so the whole thing could be pinned as four numbers per
+shape. **That is wrong and the sweep is what caught it.** The fitted constants
+are near-integers but not integers (F_CLEF's right edge is 684.00025/1000), as
+they must be: a glyph bbox includes cubic Bezier *extrema*, which are irrational
+in general even when every control point is on the grid. Fitting them from
+measurements leaves an interval about 1e-6 em wide, and that is not tight
+enough. Concretely, 22 of the 24 clef edges are reproduced exactly at all 116
+sizes, and the other two fail identically:
 
 ```
-pointSize 40: 689*40/1000 = 27.560  -> *32 = 881.92  -> 882  -> 27.5625   (measured 27.5625)
-pointSize 64: 689*64/1000 = 44.096  -> *32 = 1411.07 -> 1411 -> 44.09375  (measured 44.09375)
-pointSize 80: 689*80/1000 = 55.120  -> *32 = 1763.84 -> 1764 -> 55.125    (measured 55.125)
+G_CLEF / G_CLEF_8VB, top edge, interline 17 (point size 68):
+  fitted em constant   -1097.99961/1000
+  law predicts         -74.65625
+  Java gives           -74.671875     (off by exactly 1/64)
+  the product lands at -4778.4943, which is 0.006 from the -4778.5 tie boundary
 ```
 
-So this needs a CFF/OTF outline parser and `TextLayout`'s bounds and quantization
-semantics -- real work, but specified work, and no pixels are ever painted.
-`MusicFont.getPointSize(interline)` is `4 * interline` (measured: 20 -> 80).
+So the failure is not the law, it is the precision of a *fitted* constant near a
+rounding tie -- and interline 17 is an ordinary sheet, not a contrived one. The
+exact constants have to come from the font. That means a real CFF/OTF outline
+parser with correct Bezier extrema: specified work, no pixels painted, but not
+avoidable by pinning.
 
 **2. `ShapeSymbol.getCentroid` -> `computeCentroidOffset`: pin it, do not port
 it.** This walks the alpha channel of a *rendered* glyph and takes an
@@ -688,9 +709,22 @@ retrieves is sized wrongly; it does not matter, because the offset ignores the
 size entirely.
 
 Re-measure with `./gradlew -I rust/oracle/parity.init.gradle :app:musicFontScout`
-(`MusicFontScout.java`). It needs `workingDir = app/`, since `WellKnowns.RES_URI`
-is `Paths.get("res")` outside a jar. Default family is `Bravura` (`Bravura.otf`),
-in `app/res/`.
+(`MusicFontScout.java`), which writes the rows in `rust/oracle/music-font.txt`.
+It needs `workingDir = app/`, since `WellKnowns.RES_URI` is `Paths.get("res")`
+outside a jar. Default family is `Bravura` (`Bravura.otf`), in `app/res/`.
+
+**One caveat on that file, and it is the reason the first row of it is the JDK.**
+Every other oracle here is Java arithmetic, which is specified and portable.
+These values are not: they come out of Java2D's font machinery. The checked-in
+sweep was produced by **OpenJDK 26.0.1** (Homebrew), while `manifest.sha256`
+pins the rest of the baseline to **Temurin 25.0.3+9** -- no JDK 25 was installed
+on the machine that measured it. Nothing structural depends on that (the 1/64
+grid, the per-edge rounding, the size-independence of the offset, the interline
+17 tie), because those are all shape facts rather than value facts. But **do not
+pin the twelve centroid offsets from this file** without first regenerating it
+under the baseline JDK and diffing. If they move, the offsets are a JDK
+compatibility surface and need saying so out loud; if they do not, that is worth
+one line in this document and the shortcut is safe.
 
 ### The tolerance, if a rasteriser is ever wanted anyway
 
@@ -706,10 +740,14 @@ a `.5` boundary has no margin at all. Pinning avoids the question.
 
 ### Order from here
 
-1. `TextLayout.getBounds()` for the six header clefs: CFF outline parsing plus
-   the 1/32 quantization, graded per (shape, interline) against the scout.
-2. The pinned `(family, shape) -> centroidOffset` table, with the scout promoted
-   to a checked-in oracle so it regenerates rather than being hand-copied.
+0. **Regenerate `music-font.txt` under Temurin 25.0.3+9** and diff. This gates
+   everything below, and it is ten minutes.
+1. `TextLayout.getBounds()` for the six header clefs: a CFF/OTF outline parser
+   with exact Bezier extrema, then per-edge 1/64 rounding. `music-font.txt` is
+   already the grading oracle -- 6 shapes x 116 interlines x 4 edges, and the
+   interline 17 row is the one that fails if the extrema are approximated.
+2. The pinned `(family, shape) -> centroidOffset` table, once step 0 says the
+   values are JDK-stable.
 3. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
 4. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
 
