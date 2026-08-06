@@ -2916,7 +2916,7 @@ mod tests {
         // become 318 recognitions, and 99 distinct beams become Java's 111.
         let mut ordered = components.clone();
         ordered.sort_by_key(|spot| (spot.top, spot.left, spot.width, spot.height));
-        let dispatch: std::collections::BTreeMap<(i32, i32, i32, i32), usize> = ordered
+        let dispatch: std::collections::BTreeMap<(i32, i32, i32, i32), Vec<usize>> = ordered
             .iter()
             .zip(
                 spots_text
@@ -2924,9 +2924,13 @@ mod tests {
                     .filter(|line| line.starts_with("dispatch ")),
             )
             .map(|(spot, line)| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
                 (
                     (spot.left, spot.top, spot.width as i32, spot.height as i32),
-                    line.split_whitespace().count() - 4,
+                    fields[4..]
+                        .iter()
+                        .map(|id| id.parse().expect("a system id"))
+                        .collect(),
                 )
             })
             .collect();
@@ -2938,7 +2942,8 @@ mod tests {
                 component.top,
                 component.width as i32,
                 component.height as i32,
-            )];
+            )]
+                .len();
             let raster =
                 crate::beams_step::component_vertical_raster(component).expect("a spot raster");
             let check = check_beam_glyph(component, &raster, &item, &sheet);
@@ -3083,14 +3088,232 @@ mod tests {
             missing_beams.iter().take(3).collect::<Vec<_>>()
         );
 
-        // The hooks are the honest gap, and it is exactly buildHooks' size:
-        // 20 of Java's 31 come from here and the other 11 are added later.
-        let missing_hooks = final_hooks.difference(&produced).count();
+        // And buildHooks over the spots that produced no beam, which is what
+        // closes the rest. A spot checkBeamGlyph refused is still a hook
+        // candidate, which is where Java's remaining hooks come from.
+        // Java recognises per system, so both the hook search and the grouping
+        // see only that system's beams and spots. Running either globally
+        // merges things across a system boundary that Java never compares.
+        let mut all: Vec<(usize, crate::beam_inters::RawBeam)> = Vec::new();
+        let mut leftover: Vec<(usize, audiveris_image::beam_hooks::HookGlyph)> = Vec::new();
+        for component in &components {
+            let systems = &dispatch[&(
+                component.left,
+                component.top,
+                component.width as i32,
+                component.height as i32,
+            )];
+            let raster =
+                crate::beams_step::component_vertical_raster(component).expect("a spot raster");
+            let check = check_beam_glyph(component, &raster, &item, &sheet);
+            let Some(structure) = check.structure else {
+                for system in systems {
+                    leftover.push((*system, hook_glyph(component)));
+                }
+                continue;
+            };
+            let created = create_beam_inters(
+                &structure,
+                &raster,
+                component.left,
+                component.top,
+                BeamRaster {
+                    table: filter,
+                    offset_x: 0,
+                    offset_y: 0,
+                },
+                &item,
+                &sheet,
+            );
+            for system in systems {
+                if created.is_empty() {
+                    leftover.push((*system, hook_glyph(component)));
+                }
+                for raw in &created {
+                    all.push((*system, *raw));
+                }
+            }
+        }
+
+        let system_ids: std::collections::BTreeSet<usize> =
+            all.iter().map(|(system, _)| *system).collect();
+
+        // extendBeams, between createBeams and buildHooks as Java runs it. No
+        // stem seeds: STEM_SEEDS' vertical geometry is not ported, which
+        // disables extendToStem specifically -- measured across the eight
+        // example sheets to never fire, where the merge it leaves working fires
+        // once. On chula the whole stage is a no-op, which this asserts.
+        let mut extended: Vec<(usize, crate::beam_inters::RawBeam)> = Vec::new();
+        for system in &system_ids {
+            let beams: Vec<crate::beam_inters::RawBeam> = all
+                .iter()
+                .filter(|(id, _)| id == system)
+                .map(|(_, raw)| *raw)
+                .collect();
+            let spots: Vec<audiveris_image::beam_extension::ExtensionGlyph> = leftover
+                .iter()
+                .filter(|(id, _)| id == system)
+                .map(
+                    |(_, glyph)| audiveris_image::beam_extension::ExtensionGlyph {
+                        id: glyph.id,
+                        left: glyph.left,
+                        top: glyph.top,
+                        width: glyph.width,
+                        height: glyph.height,
+                        vertical_median: None,
+                    },
+                )
+                .collect();
+            for raw in crate::beam_inters::extend_beams(
+                &beams,
+                crate::beam_inters::ExtensionSources {
+                    spots: &spots,
+                    seeds: &[],
+                },
+                BeamRaster {
+                    table: filter,
+                    offset_x: 0,
+                    offset_y: 0,
+                },
+                &crate::beam_inters::BeamScaling {
+                    item_parameters: &item,
+                    sheet: &sheet,
+                    interline,
+                },
+                |point, _| {
+                    point.0 >= 0.0
+                        && point.1 >= 0.0
+                        && point.0 < width as f64
+                        && point.1 < height as f64
+                },
+            ) {
+                extended.push((*system, raw));
+            }
+        }
         assert_eq!(
-            (final_hooks.len(), missing_hooks),
-            (31, 11),
-            "the hook gap changed; buildHooks is what closes it"
+            extended.len(),
+            all.len(),
+            "extendBeams is a no-op on chula; it changed the beam count"
         );
+        let all = extended;
+        let mut hooks: Vec<(usize, crate::beam_inters::RawBeam)> = Vec::new();
+        for system in &system_ids {
+            let beams: Vec<crate::beam_inters::RawBeam> = all
+                .iter()
+                .filter(|(id, _)| id == system)
+                .map(|(_, raw)| *raw)
+                .collect();
+            let spots: Vec<audiveris_image::beam_hooks::HookGlyph> = leftover
+                .iter()
+                .filter(|(id, _)| id == system)
+                .map(|(_, glyph)| *glyph)
+                .collect();
+            for hook in crate::beam_inters::build_hooks(
+                &beams,
+                &spots,
+                BeamRaster {
+                    table: filter,
+                    offset_x: 0,
+                    offset_y: 0,
+                },
+                &item,
+                &sheet,
+            ) {
+                hooks.push((*system, hook));
+            }
+        }
+
+        let produced_with_hooks: std::collections::BTreeSet<(String, Vec<String>)> = all
+            .iter()
+            .chain(&hooks)
+            .map(|(_, raw)| {
+                (
+                    raw.kind.class_name().to_owned(),
+                    vec![
+                        "wdth".to_owned(),
+                        format!("{:.9}", raw.impacts.width),
+                        "minH".to_owned(),
+                        format!("{:.9}", raw.impacts.min_height),
+                        "maxH".to_owned(),
+                        format!("{:.9}", raw.impacts.max_height),
+                        "core".to_owned(),
+                        format!("{:.9}", raw.impacts.core),
+                        "belt".to_owned(),
+                        format!("{:.9}", raw.impacts.belt),
+                        "jit".to_owned(),
+                        format!("{:.9}", raw.impacts.distance),
+                    ],
+                )
+            })
+            .collect();
+
+        // Both directions. Producing every hook Java has is half the claim;
+        // producing no hook Java does not is the other half, and a recogniser
+        // that over-fires is the easier mistake to make here because every
+        // rejected spot is a candidate.
+        let from_items = all
+            .iter()
+            .filter(|(_, raw)| raw.kind == crate::beam_inters::BeamKind::Hook)
+            .count();
+        assert_eq!(
+            (from_items, hooks.len(), final_hooks.len()),
+            (20, 11, 31),
+            "hook counts: {from_items} from createBeamInters, {} from buildHooks",
+            hooks.len()
+        );
+
+        let missing: Vec<_> = final_hooks.difference(&produced_with_hooks).collect();
+        assert!(
+            missing.is_empty(),
+            "{} of {} final hooks missing: {:?}",
+            missing.len(),
+            final_hooks.len(),
+            missing.iter().take(3).collect::<Vec<_>>()
+        );
+
+        let expected_all: std::collections::BTreeSet<_> =
+            final_beams.union(&final_hooks).cloned().collect();
+        let spurious: Vec<_> = produced_with_hooks.difference(&expected_all).collect();
+        assert!(
+            spurious.is_empty(),
+            "{} beams or hooks Java does not have: {:?}",
+            spurious.len(),
+            spurious.iter().take(3).collect::<Vec<_>>()
+        );
+
+        // Finally the grouping, which is the last thing BEAMS does. The SIG at
+        // the end of the step holds 60 BeamGroupInter and 95 BeamBeamRelation
+        // beside its 122 beams and hooks.
+        let mut groups = 0;
+        for system in &system_ids {
+            let members: Vec<crate::beam_inters::RawBeam> = all
+                .iter()
+                .chain(&hooks)
+                .filter(|(id, _)| id == system)
+                .map(|(_, raw)| *raw)
+                .collect();
+            groups += crate::beam_inters::group_beams(&members, interline)
+                .groups
+                .len();
+        }
+        println!("groups: {groups} across {} systems", system_ids.len());
+        assert_eq!(groups, 60, "beam groups; Java's SIG has 60 BeamGroupInter");
+    }
+
+    /// A spot as `buildHooks` wants it.
+    fn hook_glyph(
+        component: &audiveris_image::glyph_factory::GlyphComponent,
+    ) -> audiveris_image::beam_hooks::HookGlyph {
+        audiveris_image::beam_hooks::HookGlyph {
+            id: component.ancestor_mark,
+            left: component.left,
+            top: component.top,
+            width: component.width,
+            height: component.height,
+            weight: component.weight,
+            centroid_x: component.centroid_x,
+            centroid_y: component.centroid_y,
+        }
     }
 
     /// What the header erase is actually worth to BEAMS.

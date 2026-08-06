@@ -238,6 +238,33 @@ public class BeamsProbe
                     set(builder, "sortedBeamSpots", ordered);
                     call(builder, "createBeams", new Class<?>[] {});
 
+                    // How much extendBeams actually does. It is the one stage
+                    // between createBeams and buildHooks, it needs STEM_SEEDS'
+                    // vertical seeds to work fully, and whether it is worth
+                    // wiring is a question about pages rather than about source.
+                    // A count cannot see a *modification*: extendToStem and
+                    // extendToSpot lengthen a beam in place. So the medians are
+                    // compared, not the cardinality.
+                    final java.util.Set<String> before = new java.util.TreeSet<>();
+                    for (org.audiveris.omr.sig.inter.Inter b : system.getSig().inters(
+                            org.audiveris.omr.sig.inter.AbstractBeamInter.class)) {
+                        before.add(line((Line2D) field(b, "median")));
+                    }
+                    call(builder, "extendBeams", new Class<?>[] {});
+                    final java.util.Set<String> after = new java.util.TreeSet<>();
+                    for (org.audiveris.omr.sig.inter.Inter b : system.getSig().inters(
+                            org.audiveris.omr.sig.inter.AbstractBeamInter.class)) {
+                        after.add(line((Line2D) field(b, "median")));
+                    }
+                    final java.util.Set<String> gone = new java.util.TreeSet<>(before);
+                    gone.removeAll(after);
+                    final java.util.Set<String> added = new java.util.TreeSet<>(after);
+                    added.removeAll(before);
+                    System.out.println("extend " + path.getFileName() + " system "
+                            + system.getId() + " before " + before.size() + " after "
+                            + after.size() + " removed " + gone.size() + " added "
+                            + added.size());
+
                     final List<org.audiveris.omr.sig.inter.Inter> raw = system.getSig().inters(
                             org.audiveris.omr.sig.inter.AbstractBeamInter.class);
                     raw.sort(org.audiveris.omr.sig.inter.Inters.byFullAbscissa);

@@ -612,13 +612,94 @@ fn glyph_centroid(glyph: &RunTable, offset_x: i32, offset_y: i32) -> (f64, f64) 
 /// intersects, so the multiplication by a thousand and the division back out
 /// are both in the answer's last bits.
 fn reference_y(center: (f64, f64), slope: f64, x: f64) -> f64 {
-    line_util_y_at_x(
-        center.0,
-        center.1,
-        center.0 + 1_000.0,
-        center.1 + (1_000.0 * slope),
+    intersection_at_x_from_slope(center, slope, x).1
+}
+
+/// Java `LineUtil.intersectionAtX(Point2D p1, double slope, double x)`.
+///
+/// Returns both coordinates, because the abscissa is not exactly `x`: Java
+/// divides one rounded product by another, and the quotient is only
+/// algebraically the query abscissa. Callers that use `p.getX()` get that
+/// value, not their own.
+#[must_use]
+pub fn intersection_at_x_from_slope(point: (f64, f64), slope: f64, x: f64) -> (f64, f64) {
+    line_util_intersection(
+        point.0,
+        point.1,
+        point.0 + 1_000.0,
+        point.1 + (1_000.0 * slope),
         x,
     )
+}
+
+/// Java `LineUtil.intersection`, specialised to the vertical query line every
+/// `yAtX` and `intersectionAtX` in `LineUtil` uses: `(x, 0)` to `(x, 1000)`.
+#[must_use]
+pub fn line_util_intersection(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> (f64, f64) {
+    let (x3, y3, x4, y4) = (x, 0.0, x, 1_000.0);
+    let den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4));
+    let v12 = (x1 * y2) - (y1 * x2);
+    let v34 = (x3 * y4) - (y3 * x4);
+    (
+        ((v12 * (x3 - x4)) - ((x1 - x2) * v34)) / den,
+        ((v12 * (y3 - y4)) - ((y1 - y2) * v34)) / den,
+    )
+}
+
+/// Java `GradeUtil.clamp`: every impact is squeezed into `[0, 1]`.
+///
+/// `GradeImpacts.setImpact` applies this to each term before any grade is
+/// taken. A width impact of 1.79 is entirely normal -- it happens whenever an
+/// item is wider than the *hook* thresholds expect -- and leaving it unclamped
+/// inflates the geometric mean.
+#[must_use]
+pub fn clamp_impact(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
+/// Applies Java's clamp to all six terms, as `Impacts`' constructor does.
+#[must_use]
+pub fn clamped(impacts: BeamImpacts) -> BeamImpacts {
+    BeamImpacts {
+        width: clamp_impact(impacts.width),
+        min_height: clamp_impact(impacts.min_height),
+        max_height: clamp_impact(impacts.max_height),
+        core: clamp_impact(impacts.core),
+        belt: clamp_impact(impacts.belt),
+        distance: clamp_impact(impacts.distance),
+        raster: impacts.raster,
+    }
+}
+
+/// `GradeImpacts.getGrade` for a beam: the weighted geometric mean, clamped
+/// term by term first, times `Grades.intrinsicRatio`.
+///
+/// The clamp is part of this and not the caller's business. Three copies of
+/// this function existed without it, which made every grade above a saturating
+/// term plausible and too high.
+#[must_use]
+pub fn beam_grade(impacts: BeamImpacts) -> f64 {
+    const WEIGHTS: [f64; 6] = [0.5, 1.0, 1.0, 2.0, 2.0, 2.0];
+    let impacts = clamped(impacts);
+    let values = [
+        impacts.width,
+        impacts.min_height,
+        impacts.max_height,
+        impacts.core,
+        impacts.belt,
+        impacts.distance,
+    ];
+    let mut product = 1.0;
+    let mut total = 0.0;
+    for (value, weight) in values.into_iter().zip(WEIGHTS) {
+        total += weight;
+        if value == 0.0 {
+            product = 0.0;
+        } else if weight != 0.0 {
+            product *= value.powf(weight);
+        }
+    }
+    0.8 * product.powf(1.0 / total)
 }
 
 /// Which border of a beam line the jitter is measured against.
@@ -718,11 +799,7 @@ pub fn compute_jitter(
 /// section late. Three other medians differed in their ninth decimal for the
 /// same reason.
 fn line_util_y_at_x(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64 {
-    let (x3, y3, x4, y4) = (x, 0.0, x, 1_000.0);
-    let den = ((x1 - x2) * (y3 - y4)) - ((y1 - y2) * (x3 - x4));
-    let v12 = (x1 * y2) - (y1 * x2);
-    let v34 = (x3 * y4) - (y3 * x4);
-    ((v12 * (y3 - y4)) - ((y1 - y2) * v34)) / den
+    line_util_intersection(x1, y1, x2, y2, x).1
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

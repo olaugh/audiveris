@@ -7,7 +7,7 @@
 //! beam/side pair using the Java order: side beam/merge, stem, spot, parallel.
 
 use crate::beam_structure::{
-    BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster, Segment,
+    BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster, Segment, beam_grade,
     compute_beam_impacts, sample_beam_core,
 };
 
@@ -698,29 +698,6 @@ fn convex_polygons_intersect(one: &[(f64, f64)], two: &[(f64, f64)]) -> bool {
             let two_range = project(two);
             one_range.0 <= two_range.1 && two_range.0 <= one_range.1
         })
-}
-
-fn beam_grade(impacts: BeamImpacts) -> f64 {
-    let values = [
-        impacts.width,
-        impacts.min_height,
-        impacts.max_height,
-        impacts.core,
-        impacts.belt,
-        impacts.distance,
-    ];
-    let weights = [0.5, 1.0, 1.0, 2.0, 2.0, 2.0];
-    let mut product = 1.0;
-    let mut total = 0.0;
-    for (value, weight) in values.into_iter().zip(weights) {
-        total += weight;
-        if value == 0.0 {
-            product = 0.0;
-        } else {
-            product *= value.powf(weight);
-        }
-    }
-    0.8 * product.powf(1.0 / total)
 }
 
 #[allow(clippy::too_many_arguments)]

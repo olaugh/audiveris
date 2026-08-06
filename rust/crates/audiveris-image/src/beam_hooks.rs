@@ -7,7 +7,7 @@ use crate::{
     beam_extension::{BeamExtensionClass, ExtensionBeam},
     beam_structure::{
         BeamBeltSides, BeamImpactParameters, BeamImpacts, BeamItem, BeamRaster, Segment,
-        compute_beam_impacts,
+        beam_grade, compute_beam_impacts, intersection_at_x_from_slope,
     },
 };
 
@@ -128,16 +128,22 @@ fn check_hook(input: HookSearchInput<'_>, side: HookSide, glyph: HookGlyph) -> H
             HookRejection::TooThick,
         );
     }
-    let x1 = f64::from(glyph.left);
-    let x2 = x1 + glyph.width as f64;
+    // Java takes the glyph's *double* centroid and the base beam's slope, and
+    // intersects that line with the verticals at the glyph's own box edges. The
+    // resulting abscissae are what Java stores -- `p1.getX()`, not `box.x` --
+    // because the intersection divides one rounded product by another and is
+    // only algebraically the query abscissa.
     let slope = input.base.median.slope();
-    let y_at = |x: f64| glyph.centroid_y + ((x - glyph.centroid_x) * slope) + 0.5;
+    let centroid = (glyph.centroid_x, glyph.centroid_y);
+    let (x1, y1) = intersection_at_x_from_slope(centroid, slope, f64::from(glyph.left));
+    let (x2, y2) =
+        intersection_at_x_from_slope(centroid, slope, f64::from(glyph.left) + glyph.width as f64);
     let item = BeamItem {
         median: Segment {
             x1,
-            y1: y_at(x1),
+            y1: y1 + 0.5,
             x2,
-            y2: y_at(x2),
+            y2: y2 + 0.5,
         },
         height: input.base.height,
     };
@@ -266,29 +272,6 @@ fn convex_intersects(one: &[(f64, f64)], two: &[(f64, f64)]) -> bool {
             let two = range(two);
             one.0 < two.1 && two.0 < one.1
         })
-}
-
-fn beam_grade(impacts: BeamImpacts) -> f64 {
-    let values = [
-        impacts.width,
-        impacts.min_height,
-        impacts.max_height,
-        impacts.core,
-        impacts.belt,
-        impacts.distance,
-    ];
-    let weights = [0.5, 1.0, 1.0, 2.0, 2.0, 2.0];
-    let mut product = 1.0;
-    let mut total = 0.0;
-    for (value, weight) in values.into_iter().zip(weights) {
-        total += weight;
-        if value == 0.0 {
-            product = 0.0;
-        } else {
-            product *= value.powf(weight);
-        }
-    }
-    0.8 * product.powf(1.0 / total)
 }
 
 fn rejected(

@@ -18,6 +18,7 @@ use audiveris_image::beam_structure::{
     BeamBeltSides, BeamImpacts, BeamItem, BeamRaster, BeamStructureAnalysis, JitterSide,
     compute_jitter,
 };
+pub use audiveris_image::beam_structure::{beam_grade, clamp_impact, clamped};
 use audiveris_image::run_table::RunTable;
 
 use crate::beam_parameters::{ItemParameters, SheetParameters};
@@ -62,35 +63,6 @@ impl BeamKind {
     }
 }
 
-/// Java `GradeUtil.clamp`: every impact is squeezed into `[0, 1]` on the way in.
-///
-/// `GradeImpacts.setImpact` applies this to each term, so a width impact of
-/// 1.79 -- which happens whenever an item is wider than the *hook* thresholds
-/// expect -- is stored as 1, not as itself. Skipping the clamp leaves the
-/// grades plausible and wrong: on chula it moved 110 of 111 of them, always
-/// upward, because a term above one inflates the geometric mean.
-#[must_use]
-pub fn clamp_impact(value: f64) -> f64 {
-    // `f64::clamp` panics on a NaN bound and returns NaN for a NaN value, which
-    // is Java's behaviour here too: its two comparisons both fail, so a NaN
-    // falls through unchanged.
-    value.clamp(0.0, 1.0)
-}
-
-/// Applies Java's clamp to all six terms, as `Impacts`' constructor does.
-#[must_use]
-pub fn clamped(impacts: BeamImpacts) -> BeamImpacts {
-    BeamImpacts {
-        width: clamp_impact(impacts.width),
-        min_height: clamp_impact(impacts.min_height),
-        max_height: clamp_impact(impacts.max_height),
-        core: clamp_impact(impacts.core),
-        belt: clamp_impact(impacts.belt),
-        distance: clamp_impact(impacts.distance),
-        raster: impacts.raster,
-    }
-}
-
 /// One graded interpretation of one beam item.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RawBeam {
@@ -98,35 +70,6 @@ pub struct RawBeam {
     pub item: BeamItem,
     pub impacts: BeamImpacts,
     pub grade: f64,
-}
-
-/// `GradeImpacts.getGrade`: the weighted geometric mean, times the ratio.
-///
-/// A zero impact zeroes the product outright rather than contributing
-/// `0^weight`, which is Java's own short-circuit and matters because `powf`
-/// would otherwise be asked for `0.0_f64.powf(0.5)`.
-#[must_use]
-pub fn beam_grade(impacts: BeamImpacts) -> f64 {
-    const WEIGHTS: [f64; 6] = [0.5, 1.0, 1.0, 2.0, 2.0, 2.0];
-    let values = [
-        impacts.width,
-        impacts.min_height,
-        impacts.max_height,
-        impacts.core,
-        impacts.belt,
-        impacts.distance,
-    ];
-    let mut product = 1.0;
-    let mut total_weight = 0.0;
-    for (impact, weight) in values.into_iter().zip(WEIGHTS) {
-        total_weight += weight;
-        if impact == 0.0 {
-            product = 0.0;
-        } else if weight != 0.0 {
-            product *= impact.powf(weight);
-        }
-    }
-    INTRINSIC_RATIO * product.powf(1.0 / total_weight)
 }
 
 /// The jitter impact one structure contributes to all of its items.
@@ -207,6 +150,8 @@ pub fn create_beam_inters(
                     distance,
                     item_parameters.hook_impacts(sheet),
                 ) {
+                    // Java stores the clamped terms, not the raw ones, so the
+                    // impacts a reader sees are the impacts that were graded.
                     let impacts = clamped(impacts);
                     let grade = beam_grade(impacts);
                     if grade >= MIN_INTER_GRADE {
@@ -253,6 +198,306 @@ pub fn create_beam_inters(
     }
 
     beams
+}
+
+/// `buildHooks`: a second pass over the spots that produced no beam.
+///
+/// Java runs this after `createBeams` and `extendBeams`, over `sortedBeamSpots`
+/// with every spot that produced a beam removed -- so a spot `checkBeamGlyph`
+/// refused is still a hook candidate, which is where 11 of chula's 31 hooks
+/// come from.
+///
+/// Each beam is browsed above and below at 1.5 heights away, and a candidate
+/// must clear a width floor, a mean-height band, and an overlap test against
+/// every beam found so far before its impacts are computed. The base beam's own
+/// jitter impact is reused rather than measured again.
+#[must_use]
+pub fn build_hooks(
+    beams: &[RawBeam],
+    spots: &[audiveris_image::beam_hooks::HookGlyph],
+    pixels: BeamRaster<'_>,
+    item_parameters: &ItemParameters,
+    sheet: &SheetParameters,
+) -> Vec<RawBeam> {
+    use audiveris_image::beam_extension::{BeamExtensionClass, ExtensionBeam};
+    use audiveris_image::beam_hooks::{
+        HookParameters, HookSearchInput, HookSide, hook_search_evidence,
+    };
+
+    // Java browses `sig.inters(BeamInter.class)`, which excludes hooks: a hook
+    // is never a base for another hook.
+    let bases: Vec<ExtensionBeam> = beams
+        .iter()
+        .enumerate()
+        .filter(|(_, raw)| raw.kind == BeamKind::Beam)
+        .map(|(index, raw)| ExtensionBeam {
+            id: index,
+            median: raw.item.median,
+            height: raw.item.height,
+            distance_impact: raw.impacts.distance,
+            class: BeamExtensionClass::Standard,
+            glyph_id: None,
+            removed: false,
+        })
+        .collect();
+
+    // The overlap test runs against `rawSystemBeams`, which is every beam and
+    // hook created so far -- including hooks added earlier in this very pass,
+    // so the list grows as it goes.
+    let mut raw_beams: Vec<ExtensionBeam> = beams
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| ExtensionBeam {
+            id: index,
+            median: raw.item.median,
+            height: raw.item.height,
+            distance_impact: raw.impacts.distance,
+            class: BeamExtensionClass::Standard,
+            glyph_id: None,
+            removed: false,
+        })
+        .collect();
+
+    let parameters = HookParameters {
+        min_hook_width_low: item_parameters.min_hook_width_low,
+        minimum_grade: MIN_INTER_GRADE,
+        impacts: item_parameters.hook_impacts(sheet),
+    };
+
+    let mut hooks = Vec::new();
+    let mut remaining: Vec<audiveris_image::beam_hooks::HookGlyph> = spots.to_vec();
+
+    for base in &bases {
+        for side in [HookSide::Top, HookSide::Bottom] {
+            let evidence = hook_search_evidence(
+                HookSearchInput {
+                    base: *base,
+                    spots: &remaining,
+                    raw_beams: &raw_beams,
+                    raster: pixels,
+                    parameters,
+                },
+                side,
+            );
+            for found in evidence {
+                let (Some(item), Some(impacts), Some(grade)) =
+                    (found.item, found.impacts, found.grade)
+                else {
+                    continue;
+                };
+                if found.rejection.is_some() {
+                    continue;
+                }
+                let impacts = clamped(impacts);
+                hooks.push(RawBeam {
+                    kind: BeamKind::Hook,
+                    item,
+                    impacts,
+                    grade,
+                });
+                raw_beams.push(ExtensionBeam {
+                    id: raw_beams.len(),
+                    median: item.median,
+                    height: item.height,
+                    distance_impact: impacts.distance,
+                    class: BeamExtensionClass::Standard,
+                    glyph_id: None,
+                    removed: false,
+                });
+                // A spot that became a hook is assigned and cannot become
+                // another one.
+                remaining.retain(|spot| spot.id != found.glyph_id);
+            }
+        }
+    }
+
+    hooks
+}
+
+/// Java `Area.getBounds()` for a beam: the integer box enclosing its
+/// parallelogram.
+///
+/// `floor` on the near edges and `ceil` on the far ones, which is what
+/// `Rectangle` does and not what rounding would do. The grouping lookup grows
+/// and intersects these as integers, so being half a pixel out changes which
+/// beams are considered neighbours at all.
+#[must_use]
+pub fn beam_bounds(item: BeamItem) -> audiveris_image::beam_groups::BeamBounds {
+    let half = item.height / 2.0;
+    let left = item.median.x1.floor();
+    let right = item.median.x2.ceil();
+    let top = (item.median.y1.min(item.median.y2) - half).floor();
+    let bottom = (item.median.y1.max(item.median.y2) + half).ceil();
+    audiveris_image::beam_groups::BeamBounds {
+        x: left as i32,
+        y: top as i32,
+        width: (right - left) as i32,
+        height: (bottom - top) as i32,
+    }
+}
+
+/// `BeamGroupInter.populateSystem`: gather beams into groups.
+///
+/// The parameters are Java's own defaults, scaled: a horizontal overlap of 0.7
+/// interlines, a vertical distance of 1.2, and a slope difference of 0.065 --
+/// the last a bare ratio rather than a scaled length.
+#[must_use]
+pub fn group_beams(
+    beams: &[RawBeam],
+    interline: i32,
+) -> audiveris_image::beam_groups::BeamGroupEvidence {
+    use audiveris_image::beam_groups::{BeamGroupParameters, GroupingBeam, group_beam_evidence};
+
+    let members: Vec<GroupingBeam> = beams
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| GroupingBeam {
+            id: index,
+            median: raw.item.median,
+            height: raw.item.height,
+            bounds: beam_bounds(raw.item),
+        })
+        .collect();
+
+    group_beam_evidence(
+        &members,
+        BeamGroupParameters {
+            min_x_overlap: f64::from(interline) * 0.7,
+            max_y_distance: f64::from(interline) * 1.2,
+            max_slope_diff: 0.065,
+        },
+    )
+}
+
+/// The two glyph pools `extendBeams` may extend a beam into.
+///
+/// Separate from the beams themselves because they come from different places:
+/// spots are what `createBeams` left over, seeds are STEM_SEEDS' vertical
+/// geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct ExtensionSources<'a> {
+    pub spots: &'a [audiveris_image::beam_extension::ExtensionGlyph],
+    /// Empty disables `extendToStem`, which is the port's current state.
+    pub seeds: &'a [audiveris_image::beam_extension::ExtensionGlyph],
+}
+
+/// The scaled parameters every beam stage needs, gathered.
+#[derive(Clone, Copy, Debug)]
+pub struct BeamScaling<'a> {
+    pub item_parameters: &'a ItemParameters,
+    pub sheet: &'a SheetParameters,
+    pub interline: i32,
+}
+
+/// `extendBeams`: merge, or lengthen towards a stem seed or a leftover spot.
+///
+/// Java runs this between `createBeams` and `buildHooks`, and it is the one
+/// stage of BEAMS whose worth is a question about pages rather than about
+/// source. Measured across the eight example sheets -- 30 systems, by comparing
+/// the beam medians before and after -- it fires exactly **once**, merging two
+/// beams into one on BachInvention5's sixth system. `extendToStem` and
+/// `extendToSpot` never fire at all.
+///
+/// That matters because `extendToStem` needs `GlyphGroup.VERTICAL_SEED`, which
+/// STEM_SEEDS produces and the port does not have yet. Passing no seeds
+/// disables exactly that mode and leaves the merge -- the one that was measured
+/// to matter -- working. The limitation is therefore measured rather than
+/// silent, and it closes when STEM_SEEDS' vertical geometry lands.
+///
+/// Returns the surviving beams, with merged pairs replaced by their merger.
+#[must_use]
+pub fn extend_beams(
+    beams: &[RawBeam],
+    sources: ExtensionSources<'_>,
+    pixels: BeamRaster<'_>,
+    scaling: &BeamScaling<'_>,
+    mut in_system: impl FnMut((f64, f64), f64) -> bool,
+) -> Vec<RawBeam> {
+    let ExtensionSources { spots, seeds } = sources;
+    let &BeamScaling {
+        item_parameters,
+        sheet,
+        interline,
+    } = scaling;
+    use audiveris_image::beam_extension::{
+        BeamExtensionClass, BeamExtensionInput, BeamExtensionMode, BeamExtensionParameters,
+        ExtensionBeam, ExtensionClassParameters, beam_extension_evidence,
+    };
+
+    let members: Vec<ExtensionBeam> = beams
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| ExtensionBeam {
+            id: index,
+            median: raw.item.median,
+            height: raw.item.height,
+            distance_impact: raw.impacts.distance,
+            class: BeamExtensionClass::Standard,
+            glyph_id: None,
+            removed: false,
+        })
+        .collect();
+
+    let parameters = BeamExtensionParameters {
+        standard: ExtensionClassParameters {
+            impacts: item_parameters.impacts(sheet),
+            minimum_grade: MIN_INTER_GRADE,
+        },
+        small: None,
+        max_side_beam_dx: f64::from(sheet.max_side_beam_dx),
+        min_beams_gap_x: f64::from(sheet.min_beams_gap_x),
+        max_beams_gap_y: f64::from(sheet.max_beams_gap_y),
+        beams_x_margin: f64::from(sheet.beams_x_margin),
+        max_extension_to_stem: f64::from(sheet.max_extension_to_stem),
+        max_extension_to_spot: f64::from(sheet.max_extension_to_spot),
+        max_stem_beam_gap_x: f64::from(sheet.max_stem_beam_gap_x),
+        max_stem_beam_gap_y: f64::from(sheet.max_stem_beam_gap_y),
+        min_extension_black_ratio: sheet.min_ext_black_ratio,
+        min_neighbor_x_overlap: f64::from(interline) * 0.7,
+        max_neighbor_y_distance: f64::from(interline) * 1.2,
+        max_neighbor_slope_diff: 0.065,
+    };
+
+    let evidence = beam_extension_evidence(
+        BeamExtensionInput {
+            beams: &members,
+            seeds,
+            spots,
+            raster: pixels,
+            parameters,
+        },
+        &mut in_system,
+    );
+
+    let mut survivors: Vec<RawBeam> = beams.to_vec();
+    let mut removed = vec![false; beams.len()];
+    for found in &evidence {
+        if found.rejection.is_some() {
+            continue;
+        }
+        let (Some(item), Some(impacts), Some(grade)) =
+            (found.resulting_item, found.impacts, found.grade)
+        else {
+            continue;
+        };
+        removed[found.beam_id] = true;
+        if let BeamExtensionMode::Merge { other_beam_id } = found.mode {
+            removed[other_beam_id] = true;
+        }
+        survivors.push(RawBeam {
+            kind: BeamKind::Beam,
+            item,
+            impacts: clamped(impacts),
+            grade,
+        });
+    }
+
+    survivors
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| *index >= removed.len() || !removed[*index])
+        .map(|(_, raw)| raw)
+        .collect()
 }
 
 #[cfg(test)]

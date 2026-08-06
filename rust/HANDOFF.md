@@ -428,6 +428,31 @@ of Java, and at the time the port had no morphology module at all.
 impacts each grade is built from (`wdth`, `minH`, `maxH`, `core`, `belt`,
 `jit`), and remains the gate for the recogniser above the closing.
 
+## BEAMS (CLOSED)
+
+The step's whole output is reproduced exactly on chula -- **91/91 beams, 31/31
+hooks, 60/60 beam groups, nothing spurious** -- graded against Java's own SIG at
+the end of the step, not against an intermediate.
+
+All four stages are wired: `createBeams`, `extendBeams`, `buildHooks`,
+`BeamGroupInter.populateSystem`. Two things about the last two are worth
+carrying forward. `buildHooks` runs over the spots that produced *no* beam, so a
+spot `checkBeamGlyph` refused is still a hook candidate -- that is where 11 of
+the 31 hooks come from -- and its overlap test runs against a list that grows as
+the pass adds to it. Grouping is **per system**: run globally over the page it
+merges beams across a boundary Java never compares, and 60 groups become 48.
+
+One measured limitation. `extendBeams` is wired with no stem seeds, which
+disables `extendToStem`, because STEM_SEEDS' vertical geometry is not ported.
+Comparing beam medians before and after the stage across the eight example
+sheets and 30 systems, `extendBeams` fires **once** -- a merge on
+BachInvention5's sixth system, which is `extendToBeam` and is wired --
+and `extendToStem` and `extendToSpot` never fire at all. It closes when
+STEM_SEEDS lands.
+
+The header erase remains the other open input, and it is priced in the section
+below: five spurious clef-sized candidates out of 100 on chula, zero real beams.
+
 ## MusicFont: deferred with a price, not dropped
 
 The port targets full parity -- every stage, including this one. What follows
