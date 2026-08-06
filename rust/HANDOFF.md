@@ -607,66 +607,111 @@ function of the centroid -- which keeps it independent of the spot chain that
 cannot yet produce those centroids natively. Dropping the abscissa test alone
 moves 5 of the 2739, one being the carmen top-right spot that invents a beam.
 
-## HEADERS: what it actually needs (scouted 2026-08-06, not started)
-
-Scouted before starting, because the shape of this was wrong in two directions
-at once -- one dependency is far smaller than assumed, the other is larger.
+## HEADERS: what it actually needs (measured 2026-08-06)
 
 `HeadersStep.doSystem` is one line: `new HeaderBuilder(system).processHeader()`,
 producing clef, key and time per staff. `getHeaderStop()` -- the thing beams and
 `StemScaler` both want -- falls out of that.
 
-### The classifier is a 110-149-149 MLP in plain XML, not a deep net
+### The classifier is not a blocker: it is already ported and graded
 
-`ClefBuilder` evaluates candidate glyphs with `ShapeClassifier.getInstance()`,
-which is `BasicClassifier`, and the earlier assumption that this meant a
-DL4J-format model was wrong. `app/res/basic-classifier.zip` contains three XML
-files and nothing else:
+An earlier note here listed the classifier as the first two items of work. That
+was wrong -- `crates/audiveris-classifier` already carries all of it:
 
-- `model.xml`, 1.5 MB: `<neural-network input-size="110" hidden-size="149"
-  output-size="149">` with explicit `input-labels` and `output-labels`;
-- `means.xml` and `stds.xml`, the per-feature normalisation.
+- `mix_glyph_features`, the 110-value `MixGlyphDescriptor`: the 20x5 ART moment
+  grid (`F001`..`F194`) from `BasicARTExtractor` with its LUT and bilinear
+  interpolation, plus `weight width height n20 n11 n02 n30 n21 n12 n03 aspect`
+  from `GeometricMoments`. Java's traversal orders are preserved deliberately,
+  including the backwards two-pass accumulation and `coeffImag -=`;
+- `BasicClassifier`, parsing `app/res/basic-classifier.zip` (a 110-149-149
+  single-hidden-layer MLP in plain XML, *not* a deep net) and running
+  `NeuralNetwork.forward`'s last-index-down accumulation order;
+- `rank_evaluations`, Java's `byReverseGrade` sort with `Double.compare` NaN
+  canonicalization, the min-grade break and duplicate-shape suppression.
 
-One hidden layer. The forward pass is a matrix multiply, an activation and a
-softmax -- an afternoon, not a project. The real work is the **feature vector**:
-the 110 labels are a 20x5 grid of ART moments (`F001`..`F194`) plus `weight`,
-`width`, `height`, the central moments `n20 n11 n02 n30 n21 n12 n03` and
-`aspect`. That is `MixGlyphDescriptor` = `ArtGlyphDescriptor` +
-`GeoGlyphDescriptor`, and those are ordinary geometry over a `ScaledBuffer`.
-Grade this against Java feature by feature before ever running the network; a
-wrong feature and a wrong weight look identical at the output.
+Graded against the live Java oracle in `RustParityProbe`. `ClefBuilder` calls
+the classifier with a null `ShapeChecker`, so nothing more is needed from it.
 
-### MusicFont is the harder one, and the risk is Java2D's rasteriser
+### MusicFont is the whole of what is left, and it splits in two
 
-Two font-derived quantities reach the SIG:
+Two font-derived quantities reach the SIG, and they are *not* the same problem.
 
-1. `getSymbolBounds` -> `TextLayout.getBounds()`, the outline bounding box at a
-   given point size. Needs a real CFF/OTF outline parser and Java2D's TextLayout
-   bounds semantics, but no rasterisation.
-2. `ShapeSymbol.getCentroid` -> `computeCentroidOffset`, which walks the
-   **alpha channel of a rendered glyph image** and takes an alpha-weighted
-   centroid. This is antialiasing coverage, per pixel, from Marlin. Reproducing
-   it exactly means reproducing Java2D's rasteriser.
+**1. `getSymbolBounds` -> `TextLayout.getBounds()`: derivable, no rasteriser.**
+The measured values are clean multiples of 1/32 px and scale linearly with point
+size, consistent with an outline bbox in font units quantized to a 1/32 subpixel
+grid at `unitsPerEm = 1000`. F_CLEF is the worked example: a bbox of ~689 units
+reproduces all seven measured widths exactly --
 
-Before attempting (2), note what it actually is: `centroidOffset` is a
-normalised ratio that depends only on `(family, shape, point size)` -- never on
-the page. `MusicFont.getPointSize(interline)` gives one size per sheet, so a
-corpus touches very few. So these are **font constants, not sheet data**, and
-pinning them from Java as an oracle table is the same kind of move as shipping
-the classifier's trained weights: data rather than logic. The offset is also
-multiplied by a box dimension and `rint`ed to an integer, so sub-pixel coverage
-differences may round away entirely -- which is measurable exactly the way
-`maxStem` was, and should be measured before any rasteriser is written.
+```
+pointSize 40: 689*40/1000 = 27.560  -> *32 = 881.92  -> 882  -> 27.5625   (measured 27.5625)
+pointSize 64: 689*64/1000 = 44.096  -> *32 = 1411.07 -> 1411 -> 44.09375  (measured 44.09375)
+pointSize 80: 689*80/1000 = 55.120  -> *32 = 1763.84 -> 1764 -> 55.125    (measured 55.125)
+```
 
-Default family is `Bravura` (`Bravura.otf`); the fonts live in `app/res/`.
+So this needs a CFF/OTF outline parser and `TextLayout`'s bounds and quantization
+semantics -- real work, but specified work, and no pixels are ever painted.
+`MusicFont.getPointSize(interline)` is `4 * interline` (measured: 20 -> 80).
 
-### Suggested order
+**2. `ShapeSymbol.getCentroid` -> `computeCentroidOffset`: pin it, do not port
+it.** This walks the alpha channel of a *rendered* glyph and takes an
+alpha-weighted centroid.
 
-1. `MixGlyphDescriptor`'s 110 features, graded against Java on real glyphs.
-2. The MLP forward pass and `basic-classifier.zip` parsing.
-3. Measure how much the centroid offset's precision actually matters, then
-   decide between a pinned constant table and an outline/rasteriser port.
-4. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
+A hypothesis worth recording as refuted, because it looks right in the source:
+`buildImage` sets `KEY_ANTIALIASING` to `VALUE_ANTIALIAS_OFF`, which suggests
+the alpha channel is binary and the centroid is just a coverage-mask mean. It is
+not. The measurement found **~200 distinct alpha values** in each rendered clef.
+`KEY_ANTIALIASING` governs *shape* rendering, while the symbol is drawn via
+`TextLayout.draw`, which obeys `KEY_TEXT_ANTIALIASING` -- left at the platform
+default, and on. This is antialiasing coverage, and reproducing it exactly does
+mean reproducing Java2D's text rasteriser.
+
+What makes that not matter: **the offset is a constant, not sheet data.**
+`computeImage` renders at the fixed `SampleRepository.STANDARD_INTERLINE = 20`
+regardless of the font it was asked for, so the offset depends on
+`(family, shape)` and on nothing else. Measured at seven interlines from 10 to
+48, the returned offsets are bit-identical:
+
+```
+F_CLEF          -0.03884001107392759, -0.13394309933117415
+G_CLEF           0.00205725082845354,  0.01888306366816295
+G_CLEF_8VA       0.01336868758375387,  0.04381791002555180
+G_CLEF_8VB       0.00052491308994185, -0.01328569918562944
+C_CLEF          -0.06580471127152870, -0.01731409766015940
+PERCUSSION_CLEF -0.02309224973860641, -0.01249250593760271
+```
+
+Six numbers per shape-set for Bravura, and that is the entire header-clef table.
+Pinning them is the same move as shipping the classifier's trained weights: data
+rather than logic. Note the quirk that makes this safe -- `ClefBuilder` passes
+`MusicFont.getPointSize(...)` where an *interline* is expected, so the symbol it
+retrieves is sized wrongly; it does not matter, because the offset ignores the
+size entirely.
+
+Re-measure with `./gradlew -I rust/oracle/parity.init.gradle :app:musicFontScout`
+(`MusicFontScout.java`). It needs `workingDir = app/`, since `WellKnowns.RES_URI`
+is `Paths.get("res")` outside a jar. Default family is `Bravura` (`Bravura.otf`),
+in `app/res/`.
+
+### The tolerance, if a rasteriser is ever wanted anyway
+
+`ClefBuilder` uses the offset only as
+`rint(box.getCenterX() + box.getWidth() * offsetX)`, so an error in `offsetX`
+smaller than `0.5 / box.width` rounds away. Measured over the clef shapes at
+interlines 10..48 that budget is 0.0037 (widest, interline 48) to 0.033
+(narrowest, PERCUSSION at interline 10), typically ~0.008 at corpus interlines.
+Since the offset is a mean over 1300-2900 covered pixels normalised by a ~55px
+image width, that is roughly half a pixel of allowed centroid drift -- a loose
+budget for a rasteriser, though not a guaranteed one, since a value landing near
+a `.5` boundary has no margin at all. Pinning avoids the question.
+
+### Order from here
+
+1. `TextLayout.getBounds()` for the six header clefs: CFF outline parsing plus
+   the 1/32 quantization, graded per (shape, interline) against the scout.
+2. The pinned `(family, shape) -> centroidOffset` table, with the scout promoted
+   to a checked-in oracle so it regenerates rather than being hand-copied.
+3. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
+4. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
 
 ## Open threads, in the order worth taking them
 

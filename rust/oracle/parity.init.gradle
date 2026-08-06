@@ -22,4 +22,18 @@ gradle.projectsEvaluated {
         mainClass = 'org.audiveris.omr.rustport.RustParityProbe'
         workingDir = gradle.rootProject.projectDir
     }
+
+    // A measurement rather than a parity vector, so it is a separate task: it
+    // answers what MusicFont actually costs before any of it is ported, and its
+    // output is read by a human, not diffed. Note the working directory --
+    // `WellKnowns.RES_URI` is `Paths.get("res")` when not running from a jar, so
+    // the fonts resolve only from app/, unlike the probe which reads app/res and
+    // data/ by explicit path from the root.
+    app.tasks.register('musicFontScout', JavaExec) {
+        dependsOn 'compileRustParityProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.MusicFontScout'
+        workingDir = app.projectDir
+        systemProperty 'java.awt.headless', 'true'
+    }
 }
