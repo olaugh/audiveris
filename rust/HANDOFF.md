@@ -453,6 +453,36 @@ STEM_SEEDS lands.
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.
 
+## Beams cannot yet run as a production path
+
+The beam pipeline is exact -- 787 of 787 raw beams across the eight example
+sheets -- but it only runs *in tests*, fed by the oracle. Emitting it from
+`-json` needs three inputs the port does not compute, and shipping
+oracle-derived values in a production report would be dishonest output:
+
+1. **`scale.getMaxStem()`**, for the stem-run removal that opens the spot
+   chain. This is the cheap one: `stem_seeds_step::compute_stem_scale` is
+   already ported and returns it; it needs the binary image's horizontal run
+   lengths and a `StemScaleComputation`, both derivable from what
+   `recognize_grid_lines` already has.
+2. **`Staff.getHeaderStop()`**, for `eraseHeaderAreas`. This is HEADERS, and so
+   MusicFont. Measured cost of omitting it: five spurious clef-sized candidates
+   out of 100 on chula, and zero real beams.
+3. **System areas**, for `dispatchSheetSpots`. `recognize_grid_lines` passes
+   `system_ends = (0, 0)` and says so in a comment: the port never computes
+   `SystemInfo.getAreaEnd`. Without them a spot cannot be assigned to a system,
+   and the system decides which spots each `BeamsBuilder` sees, what
+   `buildHooks` searches, and how `BeamGroupInter.populateSystem` partitions --
+   grouping run sheet-wide instead of per system turns chula's 60 groups into
+   48.
+
+`PopulationSystemArea` already exists and has `contains`, `left`, `right` and
+`system_id`, so (3) is wiring rather than a port: what is missing is the area
+*ends*, which Java sets in `SystemManager` during GRID.
+
+Order worth taking them: (1), then (3), after which the report becomes honest
+with (2) still open and its cost stated in the output.
+
 ## Push to `master` only
 
 `claude/rust-port-takeover` was merged into `master` and the two have been
