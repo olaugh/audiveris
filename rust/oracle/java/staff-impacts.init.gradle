@@ -86,6 +86,25 @@ gradle.projectsEvaluated {
                 }
     }
 
+    app.tasks.register('beamsProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.BeamsProbe'
+        workingDir = app.projectDir
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        // -PbeamsTargets="data/examples/chula.png:1"
+        args = (app.findProperty('beamsTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def bits = target.split(':')
+                    def file = new File(bits[0])
+                    def resolved = file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, bits[0])
+                    ([resolved.absolutePath] + bits[1..-1]).join(':')
+                }
+    }
+
     app.tasks.register('sigProbe', JavaExec) {
         dependsOn 'compileStaffImpactsProbe'
         classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath

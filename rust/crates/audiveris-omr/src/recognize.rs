@@ -2546,6 +2546,309 @@ mod tests {
         }
     }
 
+    /// What Java made of every beam spot, spot by spot.
+    ///
+    /// `oracle/beams-chula.txt` pins the SIG at the *end* of BEAMS, three
+    /// stages downstream of this: extension, hooks and grouping all add and
+    /// remove beams afterwards. Compared only there, a port whose per-spot
+    /// recognition is perfect and whose extension is missing is
+    /// indistinguishable from one that cannot recognise beams at all. So this
+    /// compares at `createBeamInters`, where the kernel's own answer is.
+    ///
+    /// The refusals are half of it. On this page Java refuses 211 of 318
+    /// dispatched spots, for five distinct named reasons, before any structure
+    /// exists -- and a port that accepts a spot Java refused is wrong in a way
+    /// that comparing accepted beams would never show.
+    #[test]
+    fn beam_spot_verdicts_match_the_java_oracle() {
+        use audiveris_image::spots::{BEAM_BINARIZATION_THRESHOLD, spot_chain, spot_runs};
+
+        use crate::beam_parameters::{ItemParameters, SheetParameters};
+        use crate::beam_recognizer::check_beam_glyph;
+
+        let text = include_str!("../../../oracle/beam-structures.txt");
+        let rows = |kind: &str| -> Vec<Vec<&str>> {
+            text.lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .filter(|fields| fields.first() == Some(&kind))
+                .collect()
+        };
+
+        let sheet_row = rows("sheet").remove(0);
+        let interline: i32 = sheet_row[3].parse().expect("an interline");
+        let beam: i32 = sheet_row[5].parse().expect("a beam height");
+
+        // The same chain the test above grades, rebuilt so this one stands on
+        // the port's own spots rather than on the oracle's.
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let pixels = recognition.no_staff.to_pixels();
+        let (width, height) = (recognition.scale.width, recognition.scale.height);
+
+        let spots_text = include_str!("../../../oracle/beam-spots.txt");
+        let spot_field = |kind: &str| -> Vec<&str> {
+            spots_text
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|fields| fields.first() == Some(&kind))
+                .expect("a record")
+        };
+        let margin: i32 = spot_field("verticalmargin")[1].parse().expect("a margin");
+        let erases: Vec<audiveris_image::spots::HeaderErase> = spots_text
+            .lines()
+            .filter(|line| line.starts_with("erase "))
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                audiveris_image::spots::HeaderErase {
+                    x: f[4].parse().expect("an x"),
+                    stop: f[6].parse().expect("a stop"),
+                    top: f[8].parse::<i32>().expect("a top") - margin,
+                    bottom: f[10].parse::<i32>().expect("a bottom") + margin,
+                }
+            })
+            .collect();
+
+        let mut parameters = audiveris_image::spots::SpotParameters::new(
+            spot_field("scale")[8].parse().expect("a stem width"),
+            beam,
+        );
+        parameters.header_erases = erases;
+        let chain = spot_chain(&pixels, width, height, &parameters).expect("a chain");
+        let table =
+            spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD).expect("runs");
+        let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+
+        let item = ItemParameters::new(interline, f64::from(beam), false);
+        let sheet = SheetParameters::new(interline);
+
+        // Keyed by bounds rather than by index: Java's spot order is
+        // per-system and a spot straddling two systems appears twice, so the
+        // oracle has 318 entries for 305 components. Matching on position keeps
+        // the comparison about verdicts rather than about ordering.
+        let mut verdicts = std::collections::BTreeMap::new();
+        for row in rows("spot") {
+            // spot <i> system <s> <x> <y> <w> <h> <weight>
+            let key: (i32, i32, i32, i32) = (
+                row[4].parse().expect("an x"),
+                row[5].parse().expect("a y"),
+                row[6].parse().expect("a width"),
+                row[7].parse().expect("a height"),
+            );
+            let index = row[1];
+            let reason = rows("reject")
+                .into_iter()
+                .find(|reject| reject[1] == index)
+                .map(|reject| reject[2..].join(" "));
+            // A straddling spot is checked twice by Java and must agree with
+            // itself; if it ever did not, this would catch that too.
+            if let Some(previous) = verdicts.insert(key, reason.clone()) {
+                assert_eq!(previous, reason, "spot {key:?} judged twice, differently");
+            }
+        }
+        assert_eq!(verdicts.len(), components.len(), "spot count");
+
+        // Java's intermediates, keyed by the same spot index the verdicts use.
+        // A verdict that agrees for the wrong reason is one page away from
+        // disagreeing, so the measurements each threshold tests are compared
+        // too, not just which side of them Java landed.
+        let mut measured = std::collections::BTreeMap::new();
+        let mut geometry_index = std::collections::BTreeMap::new();
+        for row in rows("spot") {
+            let key: (i32, i32, i32, i32) = (
+                row[4].parse().expect("an x"),
+                row[5].parse().expect("a y"),
+                row[6].parse().expect("a width"),
+                row[7].parse().expect("a height"),
+            );
+            let index = row[1];
+            let of = |kind: &str| -> Option<f64> {
+                rows(kind)
+                    .into_iter()
+                    .find(|fields| fields[1] == index)
+                    .and_then(|fields| fields[2].parse().ok())
+            };
+            measured.insert(
+                key,
+                [
+                    of("meanheight"),
+                    of("meandist"),
+                    of("structwidth"),
+                    of("slopegap"),
+                ],
+            );
+            // A straddling spot is judged under two indices with identical
+            // geometry; either will do to look its lines up by.
+            geometry_index.insert(key, index.to_owned());
+        }
+
+        let mut disagreements = Vec::new();
+        for component in &components {
+            let key = (
+                component.left,
+                component.top,
+                component.width as i32,
+                component.height as i32,
+            );
+            let expected = verdicts
+                .get(&key)
+                .unwrap_or_else(|| panic!("no spot at {key:?}"));
+
+            let raster =
+                crate::beams_step::component_vertical_raster(component).expect("a spot raster");
+            let check = check_beam_glyph(component, &raster, &item, &sheet);
+            let actual = check
+                .rejection
+                .map(|rejection| rejection.reason().to_owned());
+
+            if actual.as_deref() != expected.as_deref() {
+                disagreements.push(format!(
+                    "spot {key:?}: {:?} vs Java {:?}",
+                    actual.as_deref(),
+                    expected.as_deref()
+                ));
+                continue;
+            }
+
+            // Nine decimals is what the probe prints, not a tolerance the port
+            // needs: every one of these is a quotient of exactly representable
+            // integers or a least-squares fit over them.
+            let printed = |value: Option<f64>| value.map(|value| format!("{value:.9}"));
+            let java = measured[&key];
+            for (name, actual, expected) in [
+                ("meanheight", check.mean_height, java[0]),
+                ("meandist", check.mean_distance, java[1]),
+                ("structwidth", check.structure_width, java[2]),
+                ("slopegap", check.slope_gap, java[3]),
+            ] {
+                if printed(actual) != printed(expected) {
+                    disagreements.push(format!(
+                        "spot {key:?} {name}: {actual:?} vs Java {expected:?}"
+                    ));
+                }
+            }
+
+            // The structure itself: the border medians and the items cut from
+            // them, which are what become beams.
+            let Some(structure) = &check.structure else {
+                continue;
+            };
+            let index = geometry_index[&key].as_str();
+            let segment = |fields: &[&str], at: usize| -> [String; 5] {
+                [
+                    fields[at].to_owned(),
+                    fields[at + 1].to_owned(),
+                    fields[at + 2].to_owned(),
+                    fields[at + 3].to_owned(),
+                    fields[at + 4].to_owned(),
+                ]
+            };
+            let shown = |median: audiveris_image::beam_structure::Segment, height: f64| {
+                [
+                    format!("{:.9}", median.x1),
+                    format!("{:.9}", median.y1),
+                    format!("{:.9}", median.x2),
+                    format!("{:.9}", median.y2),
+                    format!("{height:.9}"),
+                ]
+            };
+
+            let java_lines: Vec<Vec<&str>> = rows("line")
+                .into_iter()
+                .filter(|fields| fields[1] == index)
+                .collect();
+            if java_lines.len() != structure.lines.len() {
+                disagreements.push(format!(
+                    "spot {key:?}: {} lines vs Java {}",
+                    structure.lines.len(),
+                    java_lines.len()
+                ));
+                continue;
+            }
+            for (at, (line, expected)) in structure.lines.iter().zip(&java_lines).enumerate() {
+                if shown(line.median, line.height) != segment(expected, 3) {
+                    disagreements.push(format!(
+                        "spot {key:?} line {at}: {:?} vs Java {:?}",
+                        shown(line.median, line.height),
+                        segment(expected, 3)
+                    ));
+                }
+
+                let java_items: Vec<Vec<&str>> = rows("item")
+                    .into_iter()
+                    .filter(|fields| fields[1] == index && fields[2] == at.to_string())
+                    .collect();
+                if java_items.len() != line.items.len() {
+                    disagreements.push(format!(
+                        "spot {key:?} line {at}: {} items vs Java {}",
+                        line.items.len(),
+                        java_items.len()
+                    ));
+                    continue;
+                }
+                for (i, (found, expected)) in line.items.iter().zip(&java_items).enumerate() {
+                    if shown(found.median, found.height) != segment(expected, 4) {
+                        disagreements.push(format!(
+                            "spot {key:?} line {at} item {i}: {:?} vs Java {:?}",
+                            shown(found.median, found.height),
+                            segment(expected, 4)
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Four residuals on three spots, out of 305 verdicts, 305 sets of
+        // measurements and 107 structures. Pinned exactly rather than
+        // tolerated: any new divergence fails, and so does fixing one of these
+        // without saying so.
+        //
+        // They are one bug, not four. Three are a last-digit difference in a
+        // border line's median, and the fourth is that same difference
+        // deciding a containment test: `retrieveItems` asks whether a
+        // section's centre lies on the median, and Java's polygon test at
+        // (499.5, y) passes because its y is a hair under 925 where the port's
+        // is a hair over. So the port's item starts one section later, at 500
+        // rather than 499.
+        //
+        // The arithmetic is not the cause. Java's sums are over integer border
+        // points, so they are exact in f64 regardless of order, and the
+        // remaining `hypot` and division are worth a couple of ulps -- three
+        // orders of magnitude below what is seen here. A difference this size
+        // means the *point set* differs by a point, which puts it in
+        // `border_lines` and its section purge rather than in `BasicLine`.
+        // That is the next thing to probe.
+        let known = [
+            "spot (499, 919, 27, 12) line 0 item 0",
+            "spot (1094, 1613, 25, 12) line 0 item 0",
+            "spot (1363, 346, 26, 21) line 0",
+            "spot (1363, 346, 26, 21) line 0 item 0",
+        ];
+        let unexpected: Vec<&String> = disagreements
+            .iter()
+            .filter(|line| !known.iter().any(|prefix| line.starts_with(prefix)))
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "{} new disagreements among {} spots:\n{}",
+            unexpected.len(),
+            components.len(),
+            unexpected
+                .iter()
+                .take(20)
+                .map(|line| line.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert_eq!(
+            disagreements.len(),
+            known.len(),
+            "a known residual disappeared; if that was deliberate, remove it from the list:\n{}",
+            disagreements.join("\n")
+        );
+    }
+
     /// Parses `oracle/grid-nostaff.txt`.
     fn java_no_staff_oracle() -> BTreeMap<String, (usize, usize, String)> {
         let text = include_str!("../../../oracle/grid-nostaff.txt");

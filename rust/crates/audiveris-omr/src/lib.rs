@@ -19,6 +19,8 @@ use std::path::Path;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub mod beam_parameters;
+pub mod beam_recognizer;
 pub mod beams_step;
 pub mod brace_filament;
 pub mod brace_portions;

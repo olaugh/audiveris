@@ -1324,7 +1324,13 @@ fn native_beam_grade(impacts: BeamImpacts) -> f64 {
     0.8 * product.powf(1.0 / total_weight)
 }
 
-fn component_vertical_raster(component: &GlyphComponent) -> Result<RunTable, BeamsContractError> {
+/// A spot's own tight vertical run table, as the beam kernel wants it.
+///
+/// Public because the recogniser needs the same view of a spot that the step
+/// does, and two constructions of it would be two chances to disagree.
+pub fn component_vertical_raster(
+    component: &GlyphComponent,
+) -> Result<RunTable, BeamsContractError> {
     let mut pixels = vec![BACKGROUND; component.width * component.height];
     let minimum_sequence = component
         .runs
