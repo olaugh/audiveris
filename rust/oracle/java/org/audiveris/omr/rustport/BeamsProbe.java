@@ -320,14 +320,16 @@ public class BeamsProbe
                                 + coreFore.value + " " + coreCount);
                     }
 
-                    // NOTE: this replay of buildBeams is faithful through
-                    // extendBeams and not beyond. Driving buildHooks and
-                    // grouping here leaves 195 beams where the real step ends
-                    // with 194, and the surplus survives every stage, so the
-                    // real step drops it somewhere this replay does not
-                    // reproduce. The `rawbeam` records above are therefore
-                    // trustworthy and anything past them is not, which is why
-                    // the stage dumps that established this are not kept.
+                    // This replay covers BeamsBuilder.buildBeams and stops
+                    // there, which is deliberate but not the whole step:
+                    // BeamsStep.doSystem also runs MultipleRestsBuilder, and
+                    // that replaces a long horizontal beam with a
+                    // MultipleRestInter, removing the beam. On BachInvention5
+                    // that is exactly one beam, and it is why driving
+                    // buildHooks and grouping here leaves 195 where the step
+                    // ends with 194. The `rawbeam` records are the beams
+                    // buildBeams produces; the step's final SIG is one fewer
+                    // wherever a multiple rest was found.
                 }
             }
         }

@@ -49,7 +49,7 @@ constexpr StageStatus kStages[] = {
     {"GRID", "native", "staves, lines, barlines, systems, SIG; 420/420 barlines, all grades exact"},
     {"HEADERS", "lifecycle", "candidate sourcing, classifier ranking and glyph components all native; needs them wired to the clef/key/time recognizers"},
     {"STEM_SEEDS", "lifecycle", "stem scale and checker native; raw StickFactory geometry is a seam"},
-    {"BEAMS", "native", "every raw beam on all 8 sheets exact -- geometry, six impacts, grade; 7 of 8 exact through end of step. One BeamInter that Java drops after extension remains. extendToStem awaits STEM_SEEDS"},
+    {"BEAMS", "native", "beam recognition exact on all 8 sheets: 787/787 raw beams, geometry and six impacts and grade. The only end-of-step gap is multiple-rest detection, a separate recogniser that consumes one beam. extendToStem awaits STEM_SEEDS"},
     {"LEDGERS", "lifecycle", "filter, candidates and all seven impacts ported; blocked on BEAMS"},
     {"HEADS", "lifecycle", "blocked on MusicFont: head recognition template-matches font-derived symbols, and Java itself cannot reach HEADS without them"},
     {"STEMS", "lifecycle", ""},
