@@ -3031,10 +3031,15 @@ mod tests {
         //
         // The single remaining difference is one BeamInter that the port keeps
         // and Java's final SIG does not. Nothing is *missing*, and the raw
-        // comparison above passes, so this is not a recognition difference: it
-        // is a beam Java still holds when the probe dumps -- after extendBeams
-        // -- and has dropped by the end of the step. Finding it means probing
-        // between buildHooks and grouping rather than anywhere in recognition.
+        // comparison above passes, so it is not a recognition difference.
+        //
+        // Chasing it moved the question off the port entirely. Driving Java's
+        // own buildHooks and grouping in the probe, and dumping the beam set
+        // after each, leaves 195 beams where the real step ends with 194 -- and
+        // the surplus survives every stage. So the real step drops it somewhere
+        // the probe's replay of `buildBeams` does not reproduce, and the next
+        // move is to make that replay faithful past extendBeams, not to change
+        // anything here. See the note in BeamsProbe.
         let known = [
             "BachInvention5.jpg#1: BeamInter count 190 vs Java 189",
             "BachInvention5.jpg#1: BeamInter -- 1 of 189 differ",

@@ -240,6 +240,16 @@ public class BeamsProbe
                     set(builder, "sortedBeamSpots", ordered);
                     call(builder, "createBeams", new Class<?>[] {});
 
+                    // buildBeams drops the assigned spots *between* createBeams
+                    // and extendBeams. Skipping that lets extendToSpot reach a
+                    // spot that already became a beam, and invents one the real
+                    // step never makes.
+                    final List<Glyph> unassigned = new ArrayList<>(ordered);
+                    @SuppressWarnings("unchecked")
+                    final List<Glyph> alreadyUsed = (List<Glyph>) field(builder, "assignedSpots");
+                    unassigned.removeAll(alreadyUsed);
+                    set(builder, "sortedBeamSpots", unassigned);
+
                     // How much extendBeams actually does. It is the one stage
                     // between createBeams and buildHooks, it needs STEM_SEEDS'
                     // vertical seeds to work fully, and whether it is worth
@@ -309,6 +319,15 @@ public class BeamsProbe
                                 + median.getY2() + " " + height + " "
                                 + coreFore.value + " " + coreCount);
                     }
+
+                    // NOTE: this replay of buildBeams is faithful through
+                    // extendBeams and not beyond. Driving buildHooks and
+                    // grouping here leaves 195 beams where the real step ends
+                    // with 194, and the surplus survives every stage, so the
+                    // real step drops it somewhere this replay does not
+                    // reproduce. The `rawbeam` records above are therefore
+                    // trustworthy and anything past them is not, which is why
+                    // the stage dumps that established this are not kept.
                 }
             }
         }
