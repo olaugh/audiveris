@@ -233,7 +233,9 @@ public class BeamsProbe
                             .getDeclaredConstructor(SystemInfo.class, org.audiveris.omr.lag.Lag.class)
                             .newInstance(system, spotLag);
                     set(builder, "stdParams", itemParams);
-                    set(builder, "pixelFilter", picture.getSource(Picture.SourceKey.NO_STAFF));
+                    final ij.process.ByteProcessor pixelFilter =
+                            picture.getSource(Picture.SourceKey.NO_STAFF);
+                    set(builder, "pixelFilter", pixelFilter);
                     final List<Glyph> ordered = new ArrayList<>(spots);
                     set(builder, "sortedBeamSpots", ordered);
                     call(builder, "createBeams", new Class<?>[] {});
@@ -287,6 +289,25 @@ public class BeamsProbe
                             }
                         }
                         System.out.println(row);
+
+                        // The raster evidence behind `core` and `belt`, so a
+                        // ratio that differs says which of its two numbers did.
+                        final org.audiveris.omr.sheet.beam.BeamItem probeItem =
+                                new org.audiveris.omr.sheet.beam.BeamItem(median, height);
+                        final java.awt.geom.Area coreArea = probeItem.getCoreArea();
+                        final org.audiveris.omr.image.AreaMask coreMask =
+                                new org.audiveris.omr.image.AreaMask(coreArea);
+                        final org.audiveris.omr.util.Wrapper<Integer> coreFore =
+                                new org.audiveris.omr.util.Wrapper<>(0);
+                        final int coreCount = coreMask.fore(coreFore, pixelFilter);
+                        // Full precision, not %.9f: a median that differs in
+                        // its twelfth decimal still moves a pixel across the
+                        // mask boundary, and a nine-decimal comparison calls
+                        // the two identical.
+                        System.out.println("coresample " + median.getX1() + " "
+                                + median.getY1() + " " + median.getX2() + " "
+                                + median.getY2() + " " + height + " "
+                                + coreFore.value + " " + coreCount);
                     }
                 }
             }
@@ -444,6 +465,49 @@ public class BeamsProbe
                     topJitter,
                     botJitter,
                     1 - (meanJitter / maxJitterRatio)));
+
+            // computeJitter's internals, reimplemented here over the same
+            // public pieces, so a jitter that differs says whether the window,
+            // the point set or the fit is responsible. The reimplementation is
+            // checked against Java's own answer on the line above: if `mine`
+            // disagrees with `topJitter`, this record is describing something
+            // other than what Java computed.
+            for (int li = 0; li < lines.size(); li++) {
+                if (li != 0 && li != lines.size() - 1) {
+                    continue;
+                }
+                final boolean isTop = (li == 0);
+                final Line2D med = (Line2D) field(lines.get(li), "median");
+                final double cornerMargin = (Double) field(itemParams, "cornerMargin");
+                final int jdx = (int) Math.rint(cornerMargin);
+                final int jx1 = (int) Math.rint(med.getX1() + jdx);
+                final int jx2 = (int) Math.rint(med.getX2() - jdx);
+                final org.audiveris.omr.math.BasicLine fit =
+                        new org.audiveris.omr.math.BasicLine();
+                int used = 0;
+                for (org.audiveris.omr.lag.Section section : sections) {
+                    final Rectangle sb = section.getBounds();
+                    final java.awt.Point sc = org.audiveris.omr.math.GeoUtil.center(sb);
+                    final int sy = (int) Math.rint(
+                            org.audiveris.omr.math.LineUtil.yAtX(med, sc.x));
+                    if (!section.contains(sc.x, sy)) {
+                        continue;
+                    }
+                    int sx = section.getFirstPos();
+                    for (org.audiveris.omr.run.Run run : section.getRuns()) {
+                        if ((sx >= jx1) && (sx <= jx2)) {
+                            fit.includePoint(sx, isTop ? run.getStart() : run.getStop());
+                            used++;
+                        }
+                        sx++;
+                    }
+                }
+                System.out.println("jitterdetail " + index + " " + li + " side "
+                        + (isTop ? "top" : "bottom") + " dx " + jdx + " x1 " + jx1
+                        + " x2 " + jx2 + " points " + used + " glyphwidth "
+                        + glyph.getWidth() + " meandist "
+                        + (used >= 2 ? fit.getMeanDistance() : -1.0));
+            }
         } catch (Exception ex) {
             System.out.println("jitter " + index + " failed");
         }

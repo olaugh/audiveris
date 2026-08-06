@@ -490,6 +490,22 @@ fn evaluate_item(
     input: BeamExtensionInput<'_>,
 ) -> BeamExtensionEvidence {
     let class = class_parameters(beam, input.parameters);
+    // A merge inherits the *mean* of the two beams' jitter impacts, where a
+    // one-sided extension inherits its single beam's. Java's `mergeOf` averages
+    // them, and using only the base beam's leaves the merged beam graded on
+    // half the evidence -- on BachInvention5 that moved `jit` from 0.7349 to
+    // 0.7431 and the grade with it.
+    let distance_impact = match mode {
+        BeamExtensionMode::Merge { other_beam_id }
+        | BeamExtensionMode::Parallel { other_beam_id } => input
+            .beams
+            .iter()
+            .find(|other| other.id == other_beam_id)
+            .map_or(beam.distance_impact, |other| {
+                (beam.distance_impact + other.distance_impact) / 2.0
+            }),
+        _ => beam.distance_impact,
+    };
     let impacts = compute_beam_impacts(
         item,
         BeamBeltSides {
@@ -497,7 +513,7 @@ fn evaluate_item(
             below: true,
         },
         input.raster,
-        beam.distance_impact,
+        distance_impact,
         class.impacts,
     )
     .ok();

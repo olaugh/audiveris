@@ -151,7 +151,7 @@ impl BasicLine {
                     true,
                 )
             };
-        let norm = a.hypot(b);
+        let norm = java_hypot(a, b);
         a /= norm;
         b /= norm;
         c /= norm;
@@ -245,6 +245,94 @@ impl BasicLine {
     #[must_use]
     pub fn extents(&self) -> Option<(f64, f64, f64, f64)> {
         (self.count > 0).then_some((self.x_min, self.x_max, self.y_min, self.y_max))
+    }
+}
+
+/// `Math.hypot`, as OpenJDK computes it.
+///
+/// Not `f64::hypot`. HotSpot does not intrinsify `hypot` the way it does `sin`,
+/// `cos`, `log`, `exp` and `pow`, so `Math.hypot` is `StrictMath.hypot`, which
+/// is fdlibm's `__ieee754_hypot` -- a specific algorithm, not merely a
+/// correctly-rounded one. Rust's `f64::hypot` calls the platform libm and
+/// differs from it by an ulp often enough to matter here: `BasicLine`
+/// normalises its coefficients by this, and one ulp in the norm is one ulp in
+/// every distance measured from the line. It was the last residual between the
+/// port's beams and Java's, showing up as a beam whose jitter impact read
+/// 0.847273069 against Java's 0.847273070.
+///
+/// Ported from fdlibm rather than reimplemented: the point is to be bit-equal
+/// to Java, and any independently "better" formulation would not be.
+#[must_use]
+pub fn java_hypot(x: f64, y: f64) -> f64 {
+    let mut ha = (x.to_bits() >> 32) as u32 & 0x7fff_ffff;
+    let mut hb = (y.to_bits() >> 32) as u32 & 0x7fff_ffff;
+    let (mut a, mut b) = if hb > ha {
+        std::mem::swap(&mut ha, &mut hb);
+        (y, x)
+    } else {
+        (x, y)
+    };
+    a = f64::from_bits((a.to_bits() & 0x0000_0000_ffff_ffff) | (u64::from(ha) << 32));
+    b = f64::from_bits((b.to_bits() & 0x0000_0000_ffff_ffff) | (u64::from(hb) << 32));
+
+    // x/y greater than 2^60: the smaller operand cannot affect the result.
+    if ha.wrapping_sub(hb) > 0x03c0_0000 {
+        return a + b;
+    }
+
+    let mut k = 0_i32;
+    if ha > 0x5f30_0000 {
+        if ha >= 0x7ff0_0000 {
+            let mut w = a + b;
+            if (ha & 0xf_ffff) | (a.to_bits() as u32) == 0 {
+                w = a;
+            }
+            if (hb ^ 0x7ff0_0000) | (b.to_bits() as u32) == 0 {
+                w = b;
+            }
+            return w;
+        }
+        ha -= 0x2580_0000;
+        hb -= 0x2580_0000;
+        k += 600;
+        a = f64::from_bits((a.to_bits() & 0xffff_ffff) | (u64::from(ha) << 32));
+        b = f64::from_bits((b.to_bits() & 0xffff_ffff) | (u64::from(hb) << 32));
+    }
+    if hb < 0x20b0_0000 {
+        if hb <= 0x000f_ffff {
+            if hb | (b.to_bits() as u32) == 0 {
+                return a;
+            }
+            let tiny = f64::from_bits(0x7fd0_0000_u64 << 32);
+            b *= tiny;
+            a *= tiny;
+            k -= 1022;
+        } else {
+            ha += 0x2580_0000;
+            hb += 0x2580_0000;
+            k -= 600;
+            a = f64::from_bits((a.to_bits() & 0xffff_ffff) | (u64::from(ha) << 32));
+            b = f64::from_bits((b.to_bits() & 0xffff_ffff) | (u64::from(hb) << 32));
+        }
+    }
+
+    let mut w = a - b;
+    if w > b {
+        let t1 = f64::from_bits(u64::from(ha) << 32);
+        let t2 = a - t1;
+        w = (t1 * t1 - (b * (-b) - t2 * (a + t1))).sqrt();
+    } else {
+        a += a;
+        let y1 = f64::from_bits(u64::from(hb) << 32);
+        let y2 = b - y1;
+        let t1 = f64::from_bits(u64::from(ha + 0x0010_0000) << 32);
+        let t2 = a - t1;
+        w = (t1 * y1 - (w * (-w) - (t1 * y2 + t2 * b))).sqrt();
+    }
+    if k != 0 {
+        f64::from_bits(((1.0_f64).to_bits() as i64 + (i64::from(k) << 52)) as u64) * w
+    } else {
+        w
     }
 }
 

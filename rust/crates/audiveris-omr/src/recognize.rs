@@ -2922,6 +2922,27 @@ mod tests {
             }
             if !differing.is_empty() {
                 println!("{page} raw beam differences:\n{}", differing.join("\n\n"));
+                for (_, raw) in &produced.full {
+                    if (raw.item.median.x1 - 931.0).abs() < 0.5
+                        && (raw.item.median.y1 - 1144.45).abs() < 0.5
+                    {
+                        println!(
+                            "  port median {:?} {:?} {:?} {:?} h {:?}",
+                            raw.item.median.x1,
+                            raw.item.median.y1,
+                            raw.item.median.x2,
+                            raw.item.median.y2,
+                            raw.item.height
+                        );
+                        println!(
+                            "  port core {}/{} belt {}/{}",
+                            raw.impacts.raster.core_foreground,
+                            raw.impacts.raster.core_count,
+                            raw.impacts.raster.belt_foreground,
+                            raw.impacts.raster.belt_count
+                        );
+                    }
+                }
                 failures.push(format!(
                     "{page}: {} of {} raw beams differ",
                     differing.len(),
@@ -3004,27 +3025,19 @@ mod tests {
         // only one whose *count* is off. That points at extension rather than
         // at the mask, and extension is the one stage running without stem
         // seeds.
-        // Down from 8 residuals across three sheets to 3 beams on one, and
-        // seven of the eight sheets are now exact end to end.
+        // Every raw beam on every sheet now matches Java exactly -- geometry,
+        // all six impacts and the grade -- and seven of the eight sheets match
+        // through to the end of the step.
         //
-        // All three are on BachInvention5 and they are two families, not one.
-        // Two differ only in `jit` -- one by a single ulp, one by 0.008, which
-        // is a real difference in `computeJitter`'s fitted line and so a
-        // section included or excluded. The third differs in `core` and `belt`,
-        // by roughly one pixel each.
-        //
-        // The obvious suspect for the third is ruled out: jshell says the core
-        // mask agrees with Java's `Area` pixel for pixel on that beam's exact
-        // geometry (979 points either way), and NO_STAFF is asserted exact on
-        // every page above. So it is neither the mask nor the raster.
-        //
-        // BachInvention5 is also the one page where `extendBeams` fires, and
-        // the port's extension runs without stem seeds; `beam_extension` has
-        // its own core sampling, which is where to look next.
+        // The single remaining difference is one BeamInter that the port keeps
+        // and Java's final SIG does not. Nothing is *missing*, and the raw
+        // comparison above passes, so this is not a recognition difference: it
+        // is a beam Java still holds when the probe dumps -- after extendBeams
+        // -- and has dropped by the end of the step. Finding it means probing
+        // between buildHooks and grouping rather than anywhere in recognition.
         let known = [
-            "BachInvention5.jpg#1: 3 of 194 raw beams differ",
             "BachInvention5.jpg#1: BeamInter count 190 vs Java 189",
-            "BachInvention5.jpg#1: BeamInter -- 4 of 189 differ",
+            "BachInvention5.jpg#1: BeamInter -- 1 of 189 differ",
         ];
         let unexpected: Vec<&String> = failures
             .iter()
@@ -3111,6 +3124,7 @@ mod tests {
         /// `wdth` clamps at 1, so a median that is a pixel wide of Java's still
         /// grades identically on that term.
         raw: Vec<String>,
+        full: Vec<(usize, crate::beam_inters::RawBeam)>,
         medians: Vec<String>,
         groups: usize,
     }
@@ -3363,6 +3377,7 @@ mod tests {
                     )
                 })
                 .collect(),
+            full: extended.iter().chain(&hooks).copied().collect(),
             medians: extended
                 .iter()
                 .chain(&hooks)

@@ -955,33 +955,44 @@ impl Parallelogram {
         }
     }
 
+    /// `java.awt.geom.Area.contains(x, y)` for this parallelogram.
+    ///
+    /// Even-odd crossings, which is what Java2D's `Crossings` computes, and it
+    /// is not the same as testing the point against the two sloped edges as
+    /// functions of `x`. Each edge is taken over a half-open range in `y`, and
+    /// the crossing abscissa is interpolated as **x at y**. Asking instead for
+    /// y at x -- the obvious formulation, and what this used to do -- disagrees
+    /// wherever an edge passes exactly through a pixel centre, and disagrees in
+    /// *both* directions: on one beam Java included the point and on another it
+    /// excluded an identical-looking one, which is why no open/closed
+    /// convention could be made to fit. Measured over all 194 beams of
+    /// BachInvention5, this rule reproduces Java exactly and each of the four
+    /// obvious conventions gets one wrong.
     fn contains(self, x: f64, y: f64) -> bool {
-        // Path2D/Area uses a half-open right/bottom convention for this convex
-        // four-edge shape; integer points on left/top are included.
-        //
-        // The two sloped edges are interpolated from their *own* endpoints --
-        // the median's, each shifted by half the height -- rather than from the
-        // median's ordinate shifted afterwards. Java builds the parallelogram
-        // that way, as four corner points, and the two are algebraically equal
-        // and differ in the last bits. On batuque one beam's core and belt
-        // counts each moved by a single pixel because of it, which is enough to
-        // change two of its six impacts.
-        // ...and interpolated the way Java2D interpolates them, which is not
-        // the way Audiveris does. `Segment::y_at_x` is `LineUtil.yAtX`, a
-        // determinant, because that is what Audiveris calls. This shape is
-        // tested by `java.awt.geom.Area.contains`, which walks its own edges
-        // parametrically, so the plain point-slope form is the faithful one
-        // here. The two differ in the last bits, and on carmen that difference
-        // put one extra pixel inside a beam's core: 307/322 where Java had
-        // 306/321.
-        let edge = |offset: f64| {
-            let (ey1, ey2) = (self.median.y1 + offset, self.median.y2 + offset);
-            ey1 + (x - self.median.x1) * ((ey2 - ey1) / (self.median.x2 - self.median.x1))
-        };
-        x >= self.median.x1
-            && x < self.median.x2
-            && y >= edge(-self.half_height)
-            && y < edge(self.half_height)
+        let corners = self.corners();
+        let mut crossings = 0;
+        for index in 0..4 {
+            let (ax, ay) = corners[index];
+            let (bx, by) = corners[(index + 1) % 4];
+            if (ay <= y) == (by <= y) {
+                continue;
+            }
+            if ax + (y - ay) * ((bx - ax) / (by - ay)) > x {
+                crossings += 1;
+            }
+        }
+        crossings % 2 == 1
+    }
+
+    /// The four defining points, in `AreaUtil.horizontalParallelogramPath`
+    /// order: upper left, upper right, lower right, lower left.
+    fn corners(self) -> [(f64, f64); 4] {
+        [
+            (self.median.x1, self.median.y1 - self.half_height),
+            (self.median.x2, self.median.y2 - self.half_height),
+            (self.median.x2, self.median.y2 + self.half_height),
+            (self.median.x1, self.median.y1 + self.half_height),
+        ]
     }
 
     fn integer_bounds(self) -> (i32, i32, i32, i32) {
