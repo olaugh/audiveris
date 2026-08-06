@@ -363,6 +363,48 @@ are the smaller of the two and are pure geometry; BEAMS is a stage in its own
 right and now has both its input (the staff-free image) and a parity gate
 (`SigProbe` at `BEAMS`, 295 inters on chula) waiting for it.
 
+## BEAMS: scoped, and its first seam is grayscale morphology
+
+LEDGERS' three inputs are now NO_STAFF (done), staff areas (done), and BEAMS.
+BEAMS is a stage rather than an input, and it is largely ported already --
+6613 lines across `beams_step.rs`, `beam_structure.rs`, `beam_extension.rs`,
+`beam_hooks.rs` and `beam_groups.rs`, covering candidate ordering, the
+border/core/belt impacts, hooks, grouping and multiple rests.
+
+It is driven through a `VisualBeams` trait with eight methods, and the native
+kernel behind most of them already exists. Encouragingly,
+`NativeBeamKernelConfig.pixel_filter` is documented as "Java
+`Picture.SourceKey.NO_STAFF`, not the morphologically closed spot image" -- so
+the piece finished two commits ago is exactly what it wants.
+
+**The seam that is genuinely missing is morphology.** `close_beam_spots` is
+Java's `SpotsBuilder.close`:
+
+```java
+final double diameter = beam * constants.beamCircleDiameterRatio.getValue();
+final float radius = (float) (diameter - 1) / 2;
+final StructureElement se = new StructureElement(0, 1, radius, new int[]{0, 0});
+new MorphoProcessor(se).close(buffer);
+```
+
+a grayscale closing with a circular structuring element sized from the measured
+beam thickness. `StructureElement` and `MorphoProcessor` are 717 and 446 lines
+of Java, and **the port has no morphology module at all** -- no dilate, no
+erode, no structuring element. That is the next slice, and it is a port rather
+than a wiring job.
+
+**Its gate is already checked in, and is end-to-end by necessity.** Audiveris
+does not cache the closed buffer anywhere: `Picture.SourceKey` has no spot
+entry and the image is a local in `buildSheetSpots`. So there is nothing to
+hash directly, and `oracle/beams-chula.txt` pins the consequence instead --
+Java's 91 beams and 31 hooks with the six impacts each grade is built from
+(`wdth`, `minH`, `maxH`, `core`, `belt`, `jit`). If the structuring element or
+the closing is wrong, those move.
+
+A unit gate could still be had by instrumenting `SpotsBuilder` temporarily, the
+way `StaffProjector.removePeak` was instrumented before, and that is worth
+doing first if the end-to-end comparison fails in a way that is hard to read.
+
 ## Open threads, in the order worth taking them
 
 ### 1. Staff-line filament assembly and SIG grades (CLOSED)
