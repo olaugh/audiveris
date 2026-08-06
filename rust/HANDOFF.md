@@ -453,6 +453,24 @@ STEM_SEEDS lands.
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.
 
+## Push to `master` only
+
+`claude/rust-port-takeover` was merged into `master` and the two have been
+identical since. Pushing every commit to both fired **four** CI runs per commit
+-- two of them on `ubuntu-latest`, competing for the same hosted runners -- and
+half of it was duplicated work on an identical tree.
+
+So: push to `master`. The branch is left where it is rather than deleted, and
+can be fast-forwarded when it is actually wanted.
+
+This is worth knowing when reading a red run, too. Three consecutive `ubuntu`
+failures during this work were GitHub infrastructure rather than code --
+`Service Unavailable` resolving the actions, an HTTP timeout, and "the job was
+not acquired by Runner of type hosted" -- each failing in *Set up job*, before
+checkout. The `macos` leg of the same runs passed. A short run duration used to
+be the tell; once the dev profile went to `opt-level = 2` a genuine full run is
+only two or three minutes, so read the step list instead.
+
 ## MusicFont: deferred with a price, not dropped
 
 The port targets full parity -- every stage, including this one. What follows
