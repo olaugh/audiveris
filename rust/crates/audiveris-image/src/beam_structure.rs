@@ -350,7 +350,13 @@ impl BasicLine {
                 ((self.sum_x * self.sum_y2) - (self.sum_y * self.sum_xy)) / vertical,
             )
         };
-        let norm = a.hypot(b);
+        // `java_hypot`, not `f64::hypot`: this is a second copy of
+        // `BasicLine.normalize`, and the platform libm's answer differs from
+        // Java's fdlibm one by an ulp. `mean_distance` below subtracts
+        // near-equal terms, which amplifies that ulp to about 1e-9 -- enough to
+        // move the ninth decimal, and enough to differ between macOS and Linux.
+        // CI caught this on its ubuntu leg while every local run was green.
+        let norm = audiveris_core::basic_line::java_hypot(a, b);
         a /= norm;
         b /= norm;
         c /= norm;
