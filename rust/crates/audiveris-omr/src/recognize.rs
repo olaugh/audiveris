@@ -2832,6 +2832,267 @@ mod tests {
         );
     }
 
+    /// The graded beams and hooks `createBeamInters` produces.
+    ///
+    /// This is where BEAMS' output actually comes from: on chula all 91 of the
+    /// page's final beams are created here, and `extendBeams` adds none, so the
+    /// stages after this only grow the hook count from 20 to 31.
+    ///
+    /// Compared as whole records -- class, median, height, six impacts and
+    /// grade -- because the impacts are the point. A grade that matches while
+    /// its terms do not is a coincidence with a short shelf life, and the terms
+    /// are what an LLM-facing repair layer would read.
+    #[test]
+    fn raw_beams_match_the_java_oracle() {
+        use audiveris_image::beam_structure::BeamRaster;
+        use audiveris_image::spots::{BEAM_BINARIZATION_THRESHOLD, spot_chain, spot_runs};
+
+        use crate::beam_inters::create_beam_inters;
+        use crate::beam_parameters::{ItemParameters, SheetParameters};
+        use crate::beam_recognizer::check_beam_glyph;
+
+        let text = include_str!("../../../oracle/beam-structures.txt");
+        let rows = |kind: &str| -> Vec<Vec<&str>> {
+            text.lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .filter(|fields| fields.first() == Some(&kind))
+                .collect()
+        };
+        let sheet_row = rows("sheet").remove(0);
+        let interline: i32 = sheet_row[3].parse().expect("an interline");
+        let beam: i32 = sheet_row[5].parse().expect("a beam height");
+
+        let recognition =
+            recognize_grid_lines(repo_path("data/examples/chula.png")).expect("chula recognises");
+        let pixels = recognition.no_staff.to_pixels();
+        let (width, height) = (recognition.scale.width, recognition.scale.height);
+
+        let spots_text = include_str!("../../../oracle/beam-spots.txt");
+        let field = |kind: &str| -> Vec<&str> {
+            spots_text
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|fields| fields.first() == Some(&kind))
+                .expect("a record")
+        };
+        let margin: i32 = field("verticalmargin")[1].parse().expect("a margin");
+        let mut parameters = audiveris_image::spots::SpotParameters::new(
+            field("scale")[8].parse().expect("a stem width"),
+            beam,
+        );
+        parameters.header_erases = spots_text
+            .lines()
+            .filter(|line| line.starts_with("erase "))
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                audiveris_image::spots::HeaderErase {
+                    x: f[4].parse().expect("an x"),
+                    stop: f[6].parse().expect("a stop"),
+                    top: f[8].parse::<i32>().expect("a top") - margin,
+                    bottom: f[10].parse::<i32>().expect("a bottom") + margin,
+                }
+            })
+            .collect();
+
+        let chain = spot_chain(&pixels, width, height, &parameters).expect("a chain");
+        let table =
+            spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD).expect("runs");
+        let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+
+        let item = ItemParameters::new(interline, f64::from(beam), false);
+        let sheet = SheetParameters::new(interline);
+
+        // The belt and core ratios are read from NO_STAFF, not from the closed
+        // spot image -- Java caches `pixelFilter` as the staff-free source, and
+        // reading the closed buffer instead would make every core ratio 1.
+        let filter = &recognition.no_staff;
+
+        // Java runs createBeams once per system, over that system's own spot
+        // group, so a spot straddling two systems is recognised twice and lands
+        // in two SIGs. The geometry is identical both times, so its beams are
+        // simply emitted once per system it was dispatched to -- 305 spots
+        // become 318 recognitions, and 99 distinct beams become Java's 111.
+        let mut ordered = components.clone();
+        ordered.sort_by_key(|spot| (spot.top, spot.left, spot.width, spot.height));
+        let dispatch: std::collections::BTreeMap<(i32, i32, i32, i32), usize> = ordered
+            .iter()
+            .zip(
+                spots_text
+                    .lines()
+                    .filter(|line| line.starts_with("dispatch ")),
+            )
+            .map(|(spot, line)| {
+                (
+                    (spot.left, spot.top, spot.width as i32, spot.height as i32),
+                    line.split_whitespace().count() - 4,
+                )
+            })
+            .collect();
+
+        let mut found = Vec::new();
+        for component in &components {
+            let systems = dispatch[&(
+                component.left,
+                component.top,
+                component.width as i32,
+                component.height as i32,
+            )];
+            let raster =
+                crate::beams_step::component_vertical_raster(component).expect("a spot raster");
+            let check = check_beam_glyph(component, &raster, &item, &sheet);
+            let Some(structure) = check.structure else {
+                continue;
+            };
+            for raw in create_beam_inters(
+                &structure,
+                &raster,
+                component.left,
+                component.top,
+                BeamRaster {
+                    table: filter,
+                    offset_x: 0,
+                    offset_y: 0,
+                },
+                &item,
+                &sheet,
+            ) {
+                let record = format!(
+                    "{} {} {:.9} {:.9} {:.9} {:.9} {:.9} grade {:.9} impacts \
+                     wdth {:.9} minH {:.9} maxH {:.9} core {:.9} belt {:.9} jit {:.9}",
+                    raw.kind.class_name(),
+                    raw.kind.shape(),
+                    raw.item.median.x1,
+                    raw.item.median.y1,
+                    raw.item.median.x2,
+                    raw.item.median.y2,
+                    raw.item.height,
+                    raw.grade,
+                    raw.impacts.width,
+                    raw.impacts.min_height,
+                    raw.impacts.max_height,
+                    raw.impacts.core,
+                    raw.impacts.belt,
+                    raw.impacts.distance,
+                );
+                for _ in 0..systems {
+                    found.push(record.clone());
+                }
+            }
+        }
+
+        // Java's order is per system then by full abscissa; the port walks
+        // components in raster order. Sorting both keeps the comparison about
+        // the beams rather than about the walk.
+        let mut expected: Vec<String> = rows("rawbeam")
+            .into_iter()
+            .map(|fields| fields[2..].join(" "))
+            .collect();
+        expected.sort();
+        found.sort();
+
+        assert_eq!(
+            found.len(),
+            expected.len(),
+            "{} raw beams vs Java {}",
+            found.len(),
+            expected.len()
+        );
+        let differing: Vec<String> = found
+            .iter()
+            .zip(&expected)
+            .filter(|(actual, expected)| actual != expected)
+            .map(|(actual, expected)| format!("  {actual}\n  {expected}"))
+            .collect();
+        assert!(
+            differing.is_empty(),
+            "{} of {} raw beams differ:\n{}",
+            differing.len(),
+            expected.len(),
+            differing
+                .iter()
+                .take(6)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        );
+
+        // And the end-to-end claim: every beam Java's BEAMS *step* finishes
+        // with is one of these. oracle/beams-chula.txt is the SIG three stages
+        // later, after extension, hooks and grouping, so agreeing with it from
+        // here is the real test of whether per-spot recognition is enough.
+        //
+        // Compared by class and impacts rather than by bounds: the final oracle
+        // records a bounding box where this records a median and a height, and
+        // the impacts identify a beam at least as tightly -- six independent
+        // measurements agreeing to nine decimals is not a collision.
+        let key_of = |fields: &[&str]| -> (String, Vec<String>) {
+            let at = fields
+                .iter()
+                .position(|f| *f == "impacts")
+                .expect("impacts");
+            (
+                fields[1].to_owned(),
+                fields[at + 1..at + 13]
+                    .iter()
+                    .map(|f| (*f).to_owned())
+                    .collect(),
+            )
+        };
+        let final_text = include_str!("../../../oracle/beams-chula.txt");
+        let mut final_beams = std::collections::BTreeSet::new();
+        let mut final_hooks = std::collections::BTreeSet::new();
+        for line in final_text.lines() {
+            if line.starts_with('#') || line.trim().is_empty() {
+                continue;
+            }
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let key = key_of(&fields);
+            if key.0 == "BeamInter" {
+                final_beams.insert(key);
+            } else {
+                final_hooks.insert(key);
+            }
+        }
+
+        let produced: std::collections::BTreeSet<(String, Vec<String>)> = found
+            .iter()
+            .map(|record| {
+                let fields: Vec<&str> = record.split_whitespace().collect();
+                let at = fields
+                    .iter()
+                    .position(|f| *f == "impacts")
+                    .expect("impacts");
+                (
+                    fields[0].to_owned(),
+                    fields[at + 1..at + 13]
+                        .iter()
+                        .map(|f| (*f).to_owned())
+                        .collect(),
+                )
+            })
+            .collect();
+
+        let missing_beams: Vec<_> = final_beams.difference(&produced).collect();
+        assert!(
+            missing_beams.is_empty(),
+            "{} of {} final beams are not produced by per-spot recognition: {:?}",
+            missing_beams.len(),
+            final_beams.len(),
+            missing_beams.iter().take(3).collect::<Vec<_>>()
+        );
+
+        // The hooks are the honest gap, and it is exactly buildHooks' size:
+        // 20 of Java's 31 come from here and the other 11 are added later.
+        let missing_hooks = final_hooks.difference(&produced).count();
+        assert_eq!(
+            (final_hooks.len(), missing_hooks),
+            (31, 11),
+            "the hook gap changed; buildHooks is what closes it"
+        );
+    }
+
     /// What the header erase is actually worth to BEAMS.
     ///
     /// The erase is the one rung of the spot chain that needs HEADERS, which

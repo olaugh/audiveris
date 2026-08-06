@@ -621,6 +621,82 @@ fn reference_y(center: (f64, f64), slope: f64, x: f64) -> f64 {
     )
 }
 
+/// Which border of a beam line the jitter is measured against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JitterSide {
+    Top,
+    Bottom,
+}
+
+/// Java `BeamStructure.computeJitter`: how ragged one border of a line is.
+///
+/// This becomes the sixth beam impact, `jit`, and Java computes it once per
+/// structure from the outermost lines rather than once per item. It is a
+/// least-squares fit through one endpoint of every run in every section whose
+/// centre lies on the median, divided by the glyph's width, so a straight
+/// border scores near zero and a stepped one does not.
+///
+/// Two details are Java's and neither is what a rewrite would pick. The section
+/// centre here is the *integer* one -- `GeoUtil.center`, with integer division,
+/// where `retrieveItems` uses the `double` `center2D` -- and the abscissa
+/// window is inset by the corner margin at both ends, so a beam's own tapered
+/// corners do not count against it.
+///
+/// # Panics
+///
+/// Panics if the run table is not the vertical spot raster.
+#[must_use]
+pub fn compute_jitter(
+    glyph: &RunTable,
+    offset_x: i32,
+    offset_y: i32,
+    median: Segment,
+    side: JitterSide,
+    corner_margin: f64,
+) -> f64 {
+    assert_eq!(
+        glyph.orientation(),
+        Orientation::Vertical,
+        "jitter needs the vertical spot raster"
+    );
+    let sections = build_sections(glyph, JunctionPolicy::DEFAULT_RATIO);
+
+    let dx = corner_margin.round_ties_even() as i32;
+    let x1 = (median.x1 + f64::from(dx)).round_ties_even() as i32;
+    let x2 = (median.x2 - f64::from(dx)).round_ties_even() as i32;
+
+    let mut line = audiveris_core::basic_line::BasicLine::default();
+    for section in &sections {
+        let bounds = section.bounds();
+        let center_x = offset_x + bounds.x as i32 + (bounds.width as i32) / 2;
+        let y = median.y_at_x(f64::from(center_x)).round_ties_even() as i32;
+
+        if !section_contains(
+            section,
+            f64::from(center_x - offset_x),
+            f64::from(y - offset_y),
+        ) {
+            continue;
+        }
+
+        // Java walks a counter alongside the runs because a section's runs are
+        // consecutive positions from `firstPos`; enumerate says the same thing.
+        let first = offset_x + section.first_pos() as i32;
+        for (index, run) in section.runs().iter().enumerate() {
+            let x = first + index as i32;
+            if x >= x1 && x <= x2 {
+                let end = match side {
+                    JitterSide::Top => run.start,
+                    JitterSide::Bottom => run.stop(),
+                };
+                line.include_point(f64::from(x), f64::from(offset_y + end as i32));
+            }
+        }
+    }
+
+    line.mean_distance().unwrap_or(0.0) / glyph.width() as f64
+}
+
 /// Java `LineUtil.yAtX(Line2D, double)`, term for term.
 ///
 /// Not the point-slope form, which is what it looks like it should be and what

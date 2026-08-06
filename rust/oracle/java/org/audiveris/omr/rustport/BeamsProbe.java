@@ -21,6 +21,7 @@ import org.audiveris.omr.lag.Lags;
 import org.audiveris.omr.math.LineUtil;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.sheet.Book;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
@@ -72,6 +73,27 @@ public class BeamsProbe
                 found.setAccessible(true);
 
                 return found.get(target);
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            }
+        }
+
+        throw new NoSuchFieldException(name);
+    }
+
+    private static void set (Object target,
+                             String name,
+                             Object value)
+        throws Exception
+    {
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                final java.lang.reflect.Field found = type.getDeclaredField(name);
+                found.setAccessible(true);
+                found.set(target, value);
+
+                return;
             } catch (NoSuchFieldException ignored) {
                 type = type.getSuperclass();
             }
@@ -132,6 +154,7 @@ public class BeamsProbe
 
                 final Sheet sheet = stub.getSheet();
                 final Scale scale = sheet.getScale();
+                final Picture picture = sheet.getPicture();
 
                 // BeamsStep's prolog, run here instead: it builds the spots,
                 // fills the lag, and dispatches to systems.
@@ -199,6 +222,44 @@ public class BeamsProbe
                         }
 
                         index++;
+                    }
+
+                    // The raw beams createBeams produces, before extendBeams,
+                    // buildHooks or grouping touch them. Driven by replaying
+                    // buildBeams' own prefix and then calling createBeams
+                    // reflectively, so the impacts are Java's own rather than
+                    // this probe's idea of them.
+                    final Object builder = builderClass
+                            .getDeclaredConstructor(SystemInfo.class, org.audiveris.omr.lag.Lag.class)
+                            .newInstance(system, spotLag);
+                    set(builder, "stdParams", itemParams);
+                    set(builder, "pixelFilter", picture.getSource(Picture.SourceKey.NO_STAFF));
+                    final List<Glyph> ordered = new ArrayList<>(spots);
+                    set(builder, "sortedBeamSpots", ordered);
+                    call(builder, "createBeams", new Class<?>[] {});
+
+                    final List<org.audiveris.omr.sig.inter.Inter> raw = system.getSig().inters(
+                            org.audiveris.omr.sig.inter.AbstractBeamInter.class);
+                    raw.sort(org.audiveris.omr.sig.inter.Inters.byFullAbscissa);
+                    for (org.audiveris.omr.sig.inter.Inter inter : raw) {
+                        final Line2D median = (Line2D) field(inter, "median");
+                        final double height = (Double) field(inter, "height");
+                        final org.audiveris.omr.sig.GradeImpacts impacts = inter.getImpacts();
+                        final StringBuilder row = new StringBuilder("rawbeam ")
+                                .append(system.getId()).append(' ')
+                                .append(inter.getClass().getSimpleName()).append(' ')
+                                .append(inter.getShape()).append(' ')
+                                .append(line(median)).append(' ')
+                                .append(String.format("%.9f", height)).append(" grade ")
+                                .append(String.format("%.9f", inter.getGrade()));
+                        if (impacts != null) {
+                            row.append(" impacts");
+                            for (int i = 0; i < impacts.getImpactCount(); i++) {
+                                row.append(' ').append(impacts.getName(i)).append(' ')
+                                        .append(String.format("%.9f", impacts.getImpact(i)));
+                            }
+                        }
+                        System.out.println(row);
                     }
                 }
             }

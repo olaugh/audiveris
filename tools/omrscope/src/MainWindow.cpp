@@ -49,7 +49,7 @@ constexpr StageStatus kStages[] = {
     {"GRID", "native", "staves, lines, barlines, systems, SIG; 420/420 barlines, all grades exact"},
     {"HEADERS", "lifecycle", "candidate sourcing, classifier ranking and glyph components all native; needs them wired to the clef/key/time recognizers"},
     {"STEM_SEEDS", "lifecycle", "stem scale and checker native; raw StickFactory geometry is a seam"},
-    {"BEAMS", "recognition", "spots and per-spot verdicts exact on all 305 of chula's: 5 refusal reasons, 107 structures. Left: 4 residuals in one border line, then impacts, extension, hooks, grouping"},
+    {"BEAMS", "recognition", "all 91 of chula's beams reproduced exactly, impacts and grades included; 20 of 31 hooks. Left: buildHooks, extendBeams, grouping"},
     {"LEDGERS", "lifecycle", "filter, candidates and all seven impacts ported; blocked on BEAMS"},
     {"HEADS", "lifecycle", "blocked on MusicFont: head recognition template-matches font-derived symbols, and Java itself cannot reach HEADS without them"},
     {"STEMS", "lifecycle", ""},
