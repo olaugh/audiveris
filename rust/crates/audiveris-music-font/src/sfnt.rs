@@ -22,6 +22,8 @@ pub enum FontError {
     Cff(&'static str),
     /// A charstring did something the Type 2 interpreter cannot represent.
     Charstring(&'static str),
+    /// A multi-digit time number, whose multi-glyph advances are not yet swept or graded.
+    UnsupportedNumber,
     /// The glyph's box is set by a curve interior, a case the swept oracle does not grade.
     ///
     /// Java's scaler quantizes outline points to 26.6 and solves for extrema in that space, which
@@ -40,6 +42,9 @@ impl core::fmt::Display for FontError {
             Self::UnsupportedCmap => formatter.write_str("font has no readable cmap subtable"),
             Self::Cff(what) => write!(formatter, "malformed CFF: {what}"),
             Self::Charstring(what) => write!(formatter, "malformed charstring: {what}"),
+            Self::UnsupportedNumber => {
+                formatter.write_str("multi-digit time numbers need ungraded glyph advances")
+            }
             Self::UngradedOutline => {
                 formatter.write_str("glyph box is set by a curve interior, which is not graded")
             }

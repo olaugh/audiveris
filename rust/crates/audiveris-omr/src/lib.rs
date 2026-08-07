@@ -62,6 +62,7 @@ pub mod stems_step;
 pub mod symbols_step;
 pub mod system_grouping;
 pub mod texts_step;
+pub mod time_classifier;
 pub mod xml;
 
 use sheet_xml::{SheetXml, SheetXmlError};

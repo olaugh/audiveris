@@ -118,6 +118,9 @@ pub fn centroid_offset(family: MusicFamily, shape: &str) -> Option<CentroidOffse
         "SHARP" => (-0.027_324_019_122_980_99, -0.012_605_241_156_798_785),
         "COMMON_TIME" => (-0.078_741_903_680_102_81, -0.046_499_610_814_653_7),
         "CUT_TIME" => (-0.085_979_469_418_984_77, -0.022_231_619_145_085_146),
+        "TIME_TWO" => (-0.033_012_494_753_659_805, -0.025_986_954_549_849_84),
+        "TIME_THREE" => (-0.038_714_658_758_456_755, -0.003_265_495_319_516_753_5),
+        "TIME_FOUR" => (-0.006_907_040_244_451_879, 4.711_093_707_945_313e-4),
         _ => return None,
     };
     Some(CentroidOffset { x, y })
@@ -156,6 +159,17 @@ pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
         "PERCUSSION_CLEF" => Some(0xE069),
         "COMMON_TIME" => Some(0xE08A),
         "CUT_TIME" => Some(0xE08B),
+        // `MusicFont.layoutNumberByCode`: digit d is TIME_ZERO's code plus d.
+        "TIME_ZERO" => Some(0xE080),
+        "TIME_ONE" => Some(0xE081),
+        "TIME_TWO" => Some(0xE082),
+        "TIME_THREE" => Some(0xE083),
+        "TIME_FOUR" => Some(0xE084),
+        "TIME_FIVE" => Some(0xE085),
+        "TIME_SIX" => Some(0xE086),
+        "TIME_SEVEN" => Some(0xE087),
+        "TIME_EIGHT" => Some(0xE088),
+        "TIME_NINE" => Some(0xE089),
         "FLAT" => Some(0xE260),
         "NATURAL" => Some(0xE261),
         "SHARP" => Some(0xE262),
@@ -317,6 +331,63 @@ pub fn area_pitch_offset(family: MusicFamily, shape: &str) -> Result<f64, FontEr
 /// Java `AlterInter.constants.flatMassPitchOffset`, the heuristic applied to a flat's mass pitch.
 pub const FLAT_MASS_PITCH_OFFSET: f64 = 0.65;
 
+/// Java `MusicFont.getStaffInterline`: the interline a font of a given point size "belongs to".
+///
+/// Note the `+ 2`: Java computes `rint((size + 2) / 4.0)`, not `size / 4`. For the usual
+/// `size = 4 * interline` the two agree only because `rint((4i + 2)/4) = rint(i + 0.5)` lands on
+/// ties — and ties go to even, so odd interlines round *up* through the tie and even ones stay.
+/// At point size 84 (interline 21) this gives 22, not 21, and the num/den gap inherits the
+/// difference. Faithful, not tidy.
+#[must_use]
+pub fn staff_interline_of_point_size(point_size: i32) -> i32 {
+    (f64::from(point_size + 2) / 4.0).round_ties_even() as i32
+}
+
+/// Java `NumDenSymbol.getParams` + `ShapeSymbol.getDimension`: the drawn size of a stacked
+/// numerator-over-denominator time signature at a staff interline.
+///
+/// The two digit layouts are measured with the ported [`layout_bounds`]; the vertical gap between
+/// their centres is `2 * getStaffInterline(font)`; and `getDimension` `rint`s the *raw* composite
+/// rectangle, so the rounding happens once at the end, not per digit.
+///
+/// Only single-digit numerator and denominator are supported: `layoutNumberByCode` builds a
+/// multi-codepoint string for numbers >= 10, whose bounds need glyph *advances* — swept and graded
+/// nowhere yet. [`FontError::UnsupportedNumber`] keeps that an explicit gap rather than a wrong
+/// box.
+pub fn num_den_dimension(
+    family: MusicFamily,
+    numerator: i32,
+    denominator: i32,
+    staff_interline: i32,
+) -> Result<(i32, i32), FontError> {
+    let digit_shape = |digit: i32| -> Result<&'static str, FontError> {
+        match digit {
+            0 => Ok("TIME_ZERO"),
+            1 => Ok("TIME_ONE"),
+            2 => Ok("TIME_TWO"),
+            3 => Ok("TIME_THREE"),
+            4 => Ok("TIME_FOUR"),
+            5 => Ok("TIME_FIVE"),
+            6 => Ok("TIME_SIX"),
+            7 => Ok("TIME_SEVEN"),
+            8 => Ok("TIME_EIGHT"),
+            9 => Ok("TIME_NINE"),
+            _ => Err(FontError::UnsupportedNumber),
+        }
+    };
+    let bounds_of = |digit: i32| -> Result<Bounds, FontError> {
+        layout_bounds(family, digit_shape(digit)?, staff_interline)?
+            .ok_or(FontError::MissingTable("digit glyph"))
+    };
+    let numerator = bounds_of(numerator)?;
+    let denominator = bounds_of(denominator)?;
+    let dy = 2 * staff_interline_of_point_size(point_size(staff_interline));
+    let width = numerator.width.max(denominator.width).round_ties_even() as i32;
+    let height =
+        (f64::from(dy) + numerator.height.max(denominator.height)).round_ties_even() as i32;
+    Ok((width, height))
+}
+
 /// Java's `(int) Math.rint(value)`.
 ///
 /// `Math.rint` is ties-to-even, matching `f64::round_ties_even`. The narrowing cast then clamps to
@@ -344,7 +415,7 @@ mod tests {
     use super::*;
 
     /// Every shape the scout sweeps, which is every single-glyph shape the header stages need.
-    const SHAPES: [&str; 11] = [
+    const SHAPES: [&str; 14] = [
         "F_CLEF",
         "G_CLEF",
         "G_CLEF_8VA",
@@ -356,6 +427,9 @@ mod tests {
         "SHARP",
         "COMMON_TIME",
         "CUT_TIME",
+        "TIME_TWO",
+        "TIME_THREE",
+        "TIME_FOUR",
     ];
 
     #[test]
@@ -532,6 +606,34 @@ mod tests {
                 },
             ),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod num_den_tests {
+    use super::*;
+
+    #[test]
+    fn num_den_dimension_matches_the_corpus_observed_time_box() {
+        // Cross-checked three ways: the digit boxes come from the 116-size sweep (graded), the
+        // gap is 2 * rint((84 + 2) / 4) = 44 -- note the `+ 2` and the tie at 21.5 going to the
+        // even 22 -- and the result equals the (36, 87) box Java's HEADERS stores for every
+        // TIME_TWO_FOUR staff on the corpus.
+        assert_eq!(staff_interline_of_point_size(84), 22, "rint(21.5) is even");
+        assert_eq!(
+            staff_interline_of_point_size(80),
+            20,
+            "rint(20.5) goes to the even 20"
+        );
+        assert_eq!(
+            num_den_dimension(MusicFamily::Bravura, 2, 4, 21).expect("digits exist"),
+            (36, 87)
+        );
+        assert_eq!(
+            num_den_dimension(MusicFamily::Bravura, 12, 8, 21),
+            Err(FontError::UnsupportedNumber),
+            "multi-digit numbers refuse rather than guess"
         );
     }
 }

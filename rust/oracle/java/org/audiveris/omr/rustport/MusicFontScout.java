@@ -63,7 +63,14 @@ public class MusicFontScout
         Shape.NATURAL,
         Shape.SHARP,
         Shape.COMMON_TIME,
-        Shape.CUT_TIME
+        Shape.CUT_TIME,
+        // The time-signature digits the corpus uses (2/4, 3/4). Each is one codepoint
+        // (TIME_ZERO + d); composite shapes such as TIME_TWO_FOUR are *drawn* by stacking two of
+        // these via NumDenSymbol, so the digits' boxes are what the composite dimension is built
+        // from.
+        Shape.TIME_TWO,
+        Shape.TIME_THREE,
+        Shape.TIME_FOUR
     };
 
     /**
