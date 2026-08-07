@@ -73,6 +73,10 @@ public class SigProbe
         field.setAccessible(true);
         field.set(null, cli);
 
+        // TEMPORARY (ocr-risk scouting): Main.main does this before any step;
+        // without it HEADS template building NPEs on small-head symbols.
+        org.audiveris.omr.ui.symbol.MusicFont.checkMusicFont();
+
         for (String arg : args) {
             final String[] parts = arg.split(":");
             final Path path = Paths.get(parts[0]).toAbsolutePath();

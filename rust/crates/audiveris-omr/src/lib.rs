@@ -42,6 +42,7 @@ pub mod heads_step;
 pub mod key_classifier;
 pub mod key_column;
 pub mod key_parameters;
+pub mod key_peaks;
 pub mod ledgers_step;
 pub mod links_step;
 pub mod measures_step;
