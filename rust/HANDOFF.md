@@ -1066,7 +1066,29 @@ invented box. Three distinct pieces of work, in order:
 2. `NumDenSymbol` stacking, for the num-over-den shapes the corpus actually uses;
 3. `TimeBuilder` itself.
 
-`KeyBuilder` has no such blocker and should go first.
+`KeyBuilder` has no such blocker and goes first.
+
+### KEY: the classifier seam is filled
+
+`key_classifier.rs` implements `KeyShapeClassifier` -- the noise gate, the 110
+features, the bundled MLP and Java's ranking, filtered to the two alteration
+shapes. It is **simpler than its clef counterpart**: `KeyShapeEvaluation` carries
+no bounds, so this seam touches no font at all; `KeyBuilder` places alterations
+from slice geometry it already has.
+
+Two details worth not copying wrong:
+
+- `KeyExtractor` hands the classifier **`sheet.getInterline()`**, where
+  `ClefBuilder` hands it `staff.getSpecificInterline()`. Both feed the same
+  descriptor, so on a mixed-size sheet the two stages normalize the *same glyph*
+  differently. That is Java's behaviour, not a tidy-up opportunity.
+- `NATURAL` is not an alteration here. A key is built from sharps or flats;
+  naturals appear only as a *cancel*, on `KeyBuilder`'s own path. Mapping it
+  would let a cancel be counted as a key member.
+
+What is left for KEY is the driver and the corpus comparison, exactly as for
+clefs: assemble `NativeKeyProposalRecognizer` over this classifier and grade the
+34 key-bearing staves in `clef-headers.txt` on fifths, box and `keyStop`.
 
 ## Open threads, in the order worth taking them
 
