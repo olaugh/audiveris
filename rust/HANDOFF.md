@@ -42,7 +42,8 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
 | Spot-to-system dispatch | 2739/2739 spot centroids on 8 sheets, exact |
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
-| Symbol centroids | 6 header clefs, pinned bit-exact; `getSymbolBounds` still open |
+| Symbol centroids | 6 header clefs, pinned bit-exact |
+| Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -662,8 +663,8 @@ the classifier with a null `ShapeChecker`, so nothing more is needed from it.
 
 Two font-derived quantities reach the SIG, and they are *not* the same problem.
 
-**1. `getSymbolBounds` -> `TextLayout.getBounds()`: no rasteriser, but no
-shortcut either.** `MusicFont.getPointSize(interline)` is exactly
+**1. `getSymbolBounds` -> `TextLayout.getBounds()`: ported, and the arithmetic
+is not what it looked like.** `MusicFont.getPointSize(interline)` is exactly
 `4 * interline`, so the point size is not a source of slop. The law, recovered
 from a 116-interline sweep of all six clefs (`rust/oracle/music-font.txt`):
 
@@ -770,6 +771,52 @@ there. If the offsets ever need to hold on Linux, that has to be measured on
 Linux. Until then, treat them as macOS-derived constants that happen to be
 JDK-stable.
 
+### Java's font scaler is fixed-point, and that is the whole story
+
+The last four of the 696 swept values refused every floating-point model, and
+chasing them turned out to be the most useful thing in this thread.
+
+Scaling the exact font-unit box by `pointSize / unitsPerEm` in `f64` and
+rounding each edge to 1/64 gets **692 of 696**. The four misses are G_CLEF and
+G_CLEF_8VB -- the two glyphs whose top is at 1098 font units -- at interlines 17
+and 108. They cannot be fixed by a better constant: interline 17 needs
+`max_y >= 1098.0018` and interline 108 needs `max_y < 1097.9999`, so no single
+value satisfies both, and Java is therefore not linear in size here.
+
+Things ruled out by measuring rather than by argument:
+
+- *A bad outline.* Asked at point size 1000 (scale exactly 1), Java's own
+  `getGlyphOutline` returns integer coordinates that match the Rust parse
+  segment for segment, including the `(455, -1098)` endpoint that sets the top.
+- *Hinting.* The deviation is 1/128 of a pixel. A hint snap moves an edge by a
+  half or whole pixel, not by 0.008.
+- *`float` arithmetic.* Five different f32 orderings were tried; every one
+  reproduces the f64 answer, because the gap needed is ~14 float ulps.
+- *Control-point pre-quantization.* All six clef extremes are at *on-curve*
+  points, which round identically either way.
+
+What it is: Java's scaler does FreeType's integer fixed-point arithmetic, and
+rounds **twice**.
+
+```
+scale_16_16 = FT_DivFix(pointSize * 64, unitsPerEm)   // = (a<<16 + b/2) / b
+coord_26_6  = FT_MulFix(font_units, scale_16_16)      // = (a*b + 0x8000) >> 16
+```
+
+Two roundings can land one 1/64 step away from a single rounding of the exact
+product, and those four rows are exactly that. This model reproduces **696 of
+696** with no exceptions. The lesson generalises: any other Java2D font quantity
+this port needs is likely fixed-point too, so reach for `FT_MulFix` before
+reaching for a tolerance.
+
+**One deliberate gap.** Every clef box is set by an on-curve point, so all six
+are whole font units. A box set by a curve *interior* would expose an ordering
+question -- Java quantizes points to 26.6 and solves for extrema there, which is
+not the same as solving in font units and scaling after -- and nothing in the
+sweep grades it. `layout_bounds` returns `FontError::UngradedOutline` rather
+than guessing. The first shape that needs it (heads, most likely) has to extend
+the sweep first.
+
 ### The tolerance, if a rasteriser is ever wanted anyway
 
 `ClefBuilder` uses the offset only as
@@ -784,10 +831,10 @@ a `.5` boundary has no margin at all. Pinning avoids the question.
 
 ### Order from here
 
-1. `TextLayout.getBounds()` for the six header clefs: a CFF/OTF outline parser
-   with exact Bezier extrema, then per-edge 1/64 rounding. `music-font.txt` is
-   already the grading oracle -- 6 shapes x 116 interlines x 4 edges, and the
-   interline 17 row is the one that fails if the extrema are approximated.
+1. ~~`TextLayout.getBounds()` for the six header clefs.~~ **Done** -- a CFF/OTF
+   parser in `crates/audiveris-music-font`, graded 696/696 against the sweep.
+   The interline 17 row was indeed the one that discriminated, but not for the
+   reason predicted; see below.
 2. ~~The pinned `(family, shape) -> centroidOffset` table.~~ **Done** --
    `crates/audiveris-music-font`, which also carries `getCentroid`'s
    `rint(centre + size * offset)` and `getPointSize`. The offsets are compared

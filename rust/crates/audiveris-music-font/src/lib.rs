@@ -7,11 +7,17 @@
 //!
 //! 1. `ShapeSymbol.getCentroid`, whose per-shape offset is **pinned data** — see
 //!    [`centroid_offset`] for why it cannot be computed here;
-//! 2. `AbstractInter.getSymbolBounds`, which needs `TextLayout.getBounds()` — an outline box, and
-//!    not yet ported.
+//! 2. `AbstractInter.getSymbolBounds`, which needs `TextLayout.getBounds()` — an outline box,
+//!    computed here from the font's own CFF outlines by [`layout_bounds`].
 //!
 //! Everything here is graded against `rust/oracle/music-font.txt`, captured from the live JVM by
 //! `MusicFontScout`.
+
+pub mod cff;
+pub mod sfnt;
+
+use cff::Cff;
+use sfnt::{FontError, Sfnt};
 
 #[cfg(test)]
 use std::collections::HashMap;
@@ -123,6 +129,131 @@ pub fn symbol_centroid(family: MusicFamily, shape: &str, box_: Rectangle) -> Opt
         java_rint_to_int(box_.center_x() + f64::from(box_.width) * offset.x),
         java_rint_to_int(box_.center_y() + f64::from(box_.height) * offset.y),
     ))
+}
+
+/// The SMuFL codepoint Audiveris' `BravuraSymbols` assigns to a shape.
+///
+/// Only the `ClefBuilder.HEADER_CLEF_SHAPES` set is present so far. Each is a single codepoint, so
+/// a layout is one glyph and [`layout_bounds`] does not have to compose advances.
+#[must_use]
+pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
+    let MusicFamily::Bravura = family;
+    match shape {
+        "G_CLEF" => Some(0xE050),
+        "G_CLEF_8VB" => Some(0xE052),
+        "G_CLEF_8VA" => Some(0xE053),
+        "C_CLEF" => Some(0xE05C),
+        "F_CLEF" => Some(0xE062),
+        "PERCUSSION_CLEF" => Some(0xE069),
+        _ => None,
+    }
+}
+
+/// The bytes of a family's font file.
+fn font_bytes(family: MusicFamily) -> &'static [u8] {
+    match family {
+        MusicFamily::Bravura => include_bytes!("../../../../app/res/Bravura.otf"),
+    }
+}
+
+/// A `Rectangle2D` in user space, as `TextLayout.getBounds()` returns one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds {
+    /// Left edge, relative to the layout origin.
+    pub x: f64,
+    /// Top edge. Positive y is *down*, so this is normally negative for a glyph above the
+    /// baseline.
+    pub y: f64,
+    /// Right edge minus left edge, both already quantized.
+    pub width: f64,
+    /// Bottom edge minus top edge, both already quantized.
+    pub height: f64,
+}
+
+/// Ports `TextLayout.getBounds()` for a single-glyph music symbol at a staff interline.
+///
+/// The model, recovered by sweeping 116 interlines against the live JVM and checked by
+/// `layout_bounds_match_the_java_sweep_on_every_shape_and_size`:
+///
+/// 1. take the glyph's **exact** outline box in font units, interior curve extrema included;
+/// 2. scale each edge with [`mul_fix`], flipping y because font units point up and layout
+///    coordinates point down;
+/// 3. the result is already on the 1/64 grid, so the width is `right - left` *after* scaling.
+///
+/// Step 2 is **integer fixed-point arithmetic, not floating point**, and that is the whole
+/// subtlety. Scaling by `pointSize / unitsPerEm` in `f64` and rounding to 1/64 reproduces 692 of
+/// the 696 swept values and misses four — and no floating-point model fixes them, because Java's
+/// scaler rounds twice: once building a 16.16 scale factor, once applying it. The two roundings
+/// can disagree with a single rounding of the exact product by one 1/64 step, which is exactly
+/// what those four rows are. `f32` does not explain it either; only the fixed-point pipeline does.
+///
+/// Rounding per-edge rather than per-dimension also matters: the widths alone fit no clean law,
+/// because they are differences of two independently rounded edges.
+pub fn layout_bounds(
+    family: MusicFamily,
+    shape: &str,
+    staff_interline: i32,
+) -> Result<Option<Bounds>, FontError> {
+    let Some(codepoint) = codepoint(family, shape) else {
+        return Ok(None);
+    };
+    let data = font_bytes(family);
+    let sfnt = Sfnt::parse(data)?;
+    let units_per_em = i64::from(sfnt.units_per_em()?);
+    let Some(glyph) = sfnt.glyph_index(codepoint)? else {
+        return Ok(None);
+    };
+    let table = sfnt
+        .table(b"CFF ")
+        .ok_or(sfnt::FontError::MissingTable("CFF "))?;
+    let Some(box_) = Cff::parse(table)?.outline(glyph)?.bounds() else {
+        return Ok(None);
+    };
+
+    let scale = div_fix(i64::from(point_size(staff_interline)) * 64, units_per_em);
+    // Every edge of every clef box lands on an on-curve point, so all six are whole font units.
+    // A fractional edge would mean a curve *interior* sets the box, and then the order of
+    // operations becomes observable — Java's scaler quantizes points to 26.6 first and solves for
+    // extrema in that space, which is not the same as solving in font units and scaling after.
+    // Nothing in the swept oracle exercises that, so refuse it rather than pick an order and hope.
+    let units = |value: f64| -> Result<i64, FontError> {
+        if value.fract() == 0.0 {
+            Ok(value as i64)
+        } else {
+            Err(FontError::UngradedOutline)
+        }
+    };
+    let left = mul_fix(units(box_.min_x)?, scale);
+    let right = mul_fix(units(box_.max_x)?, scale);
+    // Font y points up, layout y points down, so the outline's max becomes the box's top.
+    let top = -mul_fix(units(box_.max_y)?, scale);
+    let bottom = -mul_fix(units(box_.min_y)?, scale);
+
+    let grid = |value: i64| value as f64 / 64.0;
+    Ok(Some(Bounds {
+        x: grid(left),
+        y: grid(top),
+        width: grid(right - left),
+        height: grid(bottom - top),
+    }))
+}
+
+/// FreeType's `FT_DivFix`: `a / b` as a 16.16 fixed-point value, rounded to nearest.
+///
+/// Used once per size to turn a 26.6 point size and the font's units-per-em into the scale factor
+/// [`mul_fix`] applies. Both arguments are positive here.
+fn div_fix(a: i64, b: i64) -> i64 {
+    (a * 65536 + b / 2) / b
+}
+
+/// FreeType's `FT_MulFix`: `a * b / 65536`, rounded half away from zero.
+///
+/// Rounding is applied to the magnitude and the sign restored, which is what makes a coordinate
+/// and its negation round symmetrically — the reason this must be applied to the font-space value
+/// *before* the y flip rather than after.
+fn mul_fix(a: i64, b: i64) -> i64 {
+    let sign = if (a < 0) != (b < 0) { -1 } else { 1 };
+    sign * ((a.abs() * b.abs() + 0x8000) >> 16)
 }
 
 /// Java's `(int) Math.rint(value)`.
@@ -267,6 +398,53 @@ mod tests {
         assert_eq!(java_rint_to_int(126.5), 126);
         assert_eq!(java_rint_to_int(127.5), 128);
         assert_eq!(java_rint_to_int(-126.5), -126);
+    }
+
+    #[test]
+    fn layout_bounds_match_the_java_sweep_on_every_shape_and_size() {
+        // The end-to-end grade: 6 shapes x 116 interlines x 4 numbers, every one from the live
+        // JVM. Nothing intermediate is pinned, so this simultaneously grades the cmap lookup, the
+        // Type 2 interpreter, the exact-extrema box and the 1/64 quantization -- if the outline
+        // were the control box instead of the true box, the curved clefs would miss here.
+        let oracle = oracle();
+        let mut checked = 0;
+        for shape in CLEFS {
+            for interline in 5..=120 {
+                let Some(row) = oracle.get(&format!("musicfont.bounds.{shape}.{interline}")) else {
+                    continue;
+                };
+                let expected: Vec<f64> = row
+                    .split(' ')
+                    .map(|value| value.parse().expect("finite bound"))
+                    .collect();
+                let actual = layout_bounds(MusicFamily::Bravura, shape, interline)
+                    .expect("Bravura parses")
+                    .expect("clef has an outline");
+                assert_eq!(
+                    [actual.x, actual.y, actual.width, actual.height],
+                    [expected[0], expected[1], expected[2], expected[3]],
+                    "{shape} at interline {interline}"
+                );
+                checked += 1;
+            }
+        }
+        // Guards against the whole loop silently grading nothing, which a key-format slip would
+        // otherwise turn into a green run.
+        assert_eq!(checked, 6 * 116, "swept rows actually compared");
+    }
+
+    #[test]
+    fn the_font_is_the_one_the_oracle_was_captured_from() {
+        let sfnt = Sfnt::parse(font_bytes(MusicFamily::Bravura)).expect("Bravura parses");
+        assert_eq!(sfnt.units_per_em().expect("head table"), 1000);
+        assert_eq!(
+            sfnt.glyph_index(0xE050).expect("cmap is readable"),
+            sfnt.glyph_index(u32::from('\u{E050}'))
+                .expect("same lookup")
+        );
+        assert!(sfnt.glyph_index(0xE050).expect("cmap").is_some(), "G clef");
+        // A codepoint outside SMuFL's private-use block must report absence, not glyph 0.
+        assert_eq!(sfnt.glyph_index(0x0041_0000).ok(), None);
     }
 
     #[test]
