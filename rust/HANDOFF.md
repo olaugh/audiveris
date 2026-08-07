@@ -51,12 +51,20 @@ header erase, which is HEADERS, which is MusicFont.
 locally under the pinned toolchain, and the whole workspace runs in about 45
 seconds since the dev profile went to `opt-level = 2`.
 
-**One change is unverified by CI**: that profile change. GitHub Actions was in a
-major outage when it landed (2026-08-06, incident from 15:22 UTC) and both its
-runs died in *Set up job* before checkout. The second `java_hypot` fix in
-`beam_structure` was also unverified for a while and no longer is -- run
-`31116910296` went green on both legs, including the `ubuntu-latest` one it
-exists for, since it fixes a divergence macOS cannot see.
+**Nothing is unverified by CI as of run `31130993732`**, which went green on
+both legs with a full step list. That closes the `opt-level = 2` dev profile,
+which spent a day unverified: GitHub Actions was in a major outage when it
+landed (2026-08-06, incident from 15:22 UTC) and both its runs died in *Set up
+job* before checkout. The second `java_hypot` fix in `beam_structure` was
+likewise unverified for a while and was closed by run `31116910296`, green on
+both legs including the `ubuntu-latest` one it exists for, since it fixes a
+divergence macOS cannot see.
+
+A note on reading Actions during that outage, since it cost time twice: runs
+were being *created late*, not skipped. Two pushes appeared to trigger nothing
+for over an hour, then both runs turned up at once and one immediately cancelled
+the other by concurrency group -- which is correct behaviour, not a failure.
+Wait and re-list before concluding a push did not trigger CI.
 
 ### Reproducing the PDF work on a fresh machine
 
@@ -563,11 +571,11 @@ hold.
 Two of the three inputs that kept beams out of the production path are closed
 (`2982cef69`). What is left is the one that was always the hard one.
 
-1. **Confirm CI.** `gh run list --workflow "Rust port" --limit 4`. Read the step
-   list, not the duration -- a run that dies in *Set up job* is infrastructure.
-   Still unverified by CI: the `opt-level = 2` dev profile, whose two runs both
-   died in setup during the outage. The second `java_hypot` fix **is** verified;
-   run `31116910296` went green on both legs.
+1. **Regenerate `rust/oracle/music-font.txt` under Temurin 25.0.3+9** and diff
+   it. It is the only oracle here produced by Java2D rather than by specified
+   arithmetic, it was captured on OpenJDK 26.0.1, and pinning the centroid
+   offsets is gated on it. See the MusicFont thread below.
+   (CI itself is clean -- run `31130993732`, both legs, full step list.)
 2. **The header erase**, which is now the *only* thing between the beam pipeline
    and running natively end to end. It is `Staff.getHeaderStop()`, so it is
    HEADERS, so it is MusicFont -- see the MusicFont thread below. It shows up
