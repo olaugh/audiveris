@@ -5,6 +5,7 @@ members = [
     "crates/audiveris-cli",
     "crates/audiveris-image",
     "crates/audiveris-jpeg",
+    "crates/audiveris-music-font",
     "crates/audiveris-omr",
     "crates/audiveris-pdf",
     "crates/audiveris-testkit",

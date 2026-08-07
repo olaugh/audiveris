@@ -58,6 +58,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "audiveris-music-font"
+version = "0.1.0"
+
+[[package]]
 name = "audiveris-omr"
 version = "0.1.0"
 dependencies = [

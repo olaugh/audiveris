@@ -42,6 +42,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
 | Spot-to-system dispatch | 2739/2739 spot centroids on 8 sheets, exact |
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
+| Symbol centroids | 6 header clefs, pinned bit-exact; `getSymbolBounds` still open |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -750,6 +751,13 @@ checked-in copy is the Temurin one. So the twelve centroid offsets are safe to
 pin, and `getPointSize`, the 1/64 grid and the per-edge rounding do not move
 across a major JDK version.
 
+*Print the values with `Double.toString`, never `%.17f`.* The first capture used
+`%.17f`, which is seventeen digits **after the point** -- only sixteen
+significant digits at these magnitudes, one short of what a `double` can need.
+It silently truncated: G_CLEF's x read `0.00205725082845354` where the value is
+`0.0020572508284535385`. Harmless to the eventual pixel, and exactly the kind of
+thing a port graded on bit-exactness should not be quietly carrying.
+
 *Platform axis: not checked, and CI will not check it for you.* This was
 measured on macOS/aarch64 only. `TextLayout.getBounds()` is outline-derived and
 ought to be portable, but `centroidOffset` comes from **glyph rasterisation**,
@@ -780,8 +788,13 @@ a `.5` boundary has no margin at all. Pinning avoids the question.
    with exact Bezier extrema, then per-edge 1/64 rounding. `music-font.txt` is
    already the grading oracle -- 6 shapes x 116 interlines x 4 edges, and the
    interline 17 row is the one that fails if the extrema are approximated.
-2. The pinned `(family, shape) -> centroidOffset` table, straight out of
-   `music-font.txt`. The JDK gate that used to sit in front of this is cleared.
+2. ~~The pinned `(family, shape) -> centroidOffset` table.~~ **Done** --
+   `crates/audiveris-music-font`, which also carries `getCentroid`'s
+   `rint(centre + size * offset)` and `getPointSize`. The offsets are compared
+   to `music-font.txt` **by bit pattern**, not by tolerance: `Double.toString`
+   and Rust's `f64` parser both guarantee shortest-round-trip, so an exact match
+   is available and anything weaker would hide a transcription slip. Perturbing
+   one constant's last decimal digit fails that test and only that test.
 3. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
 4. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
 

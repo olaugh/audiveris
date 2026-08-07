@@ -144,12 +144,17 @@ public class MusicFontScout
                 }
             }
 
+            // `Double.toString`, not `%.17f`. These values get pinned as Rust
+            // constants, so the text has to round-trip the exact bits, and 17
+            // digits *after the point* is only 16 significant digits at this
+            // magnitude -- one short of what a double can need. Java's
+            // `Double.toString` emits the shortest string that reparses to the
+            // same value, and Rust's `f64` parser honours the same guarantee.
             System.out.printf(
-                    Locale.ROOT,
-                    "musicfont.offset.%s=%.17f %.17f%n",
+                    "musicfont.offset.%s=%s %s%n",
                     shape,
-                    agreed.getX(),
-                    agreed.getY());
+                    Double.toString(agreed.getX()),
+                    Double.toString(agreed.getY()));
         }
 
         for (Shape shape : HEADER_CLEF_SHAPES) {
@@ -163,14 +168,13 @@ public class MusicFontScout
 
                 final Rectangle2D box = fs.getLayout().getBounds();
                 System.out.printf(
-                        Locale.ROOT,
-                        "musicfont.bounds.%s.%d=%.17f %.17f %.17f %.17f%n",
+                        "musicfont.bounds.%s.%d=%s %s %s %s%n",
                         shape,
                         interline,
-                        box.getX(),
-                        box.getY(),
-                        box.getWidth(),
-                        box.getHeight());
+                        Double.toString(box.getX()),
+                        Double.toString(box.getY()),
+                        Double.toString(box.getWidth()),
+                        Double.toString(box.getHeight()));
             }
         }
     }
