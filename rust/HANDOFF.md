@@ -1109,9 +1109,56 @@ exposes a field through a getter that does anything other than return it, the
 port must call the getter everywhere Java does, not just where the difference
 was first noticed.
 
-What is left for KEY is the driver and the corpus comparison, exactly as for
-clefs: assemble `NativeKeyProposalRecognizer` over this classifier and grade the
-34 key-bearing staves in `clef-headers.txt` on fifths, box and `keyStop`.
+### Two divergences to fix *before* the driver, both found by reading Java
+
+Building the driver means filling `NativeKeyStaffContext`, and two of its fields
+turn out not to mean what the Rust code assumes.
+
+**1. `interline` is doing the work of two different Java values.** It is read in
+two places: at the classifier call, where Java uses `sheet.getInterline()`, and
+in the pitch computation, where Java uses the staff's own geometry. One field
+cannot be both on a mixed-size sheet. It should be split into a
+`classifier_interline` and whatever the pitch needs -- see below -- rather than
+having the driver pick one and be wrong somewhere.
+
+**2. The measured pitch is not an interline formula in Java.** The native code
+computes
+
+```
+measured_pitch = 2 * (centroid_y - staff_mid_y) / interline
+```
+
+whereas `Staff.pitchPositionOf` computes, for a point inside the staff,
+
+```
+((lines - 1) * (2y - bottom - top)) / (bottom - top)
+```
+
+with `top` and `bottom` being `getFirstLine().yAt(x)` and `getLastLine().yAt(x)`
+-- the *measured* line ordinates at that abscissa. The two agree exactly when
+`bottom - top == 4 * interline`, and a real staff's lines are never separated by
+exactly four nominal interlines at every x. So the native formula is an
+approximation of Java's, and the error grows with how far the staff departs from
+nominal -- precisely the sloped and warped staves where a key alteration's pitch
+is most likely to sit near a boundary.
+
+This is the same shape as the clef gutter bug: a scalar standing in for a value
+Java evaluates from the splines at a given abscissa. The fix is the same too --
+`StaffLineGeometry` is already published and already carries `first_line_y_at`
+and `last_line_y_at`, so the key context should take the ordinates rather than
+an interline.
+
+Neither is visible on this corpus, since every staff has the sheet interline and
+the pitch differences are sub-boundary. That is an argument for fixing them now
+rather than after a green run makes them look settled.
+
+### Then the driver and the grading
+
+Assemble `NativeKeyProposalRecognizer` over `BundledKeyClassifier` and grade the
+34 key-bearing staves on fifths, box and `keyStop`. Unlike the clef test this one
+can **chain** rather than supply its input: `browseStart` is `clefStop + 1`, and
+the clef stage now produces `clefStop` correctly, so running clefs then keys
+grades the join as well as the parts.
 
 ## Open threads, in the order worth taking them
 
