@@ -44,7 +44,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
-| Clef classification | wired end to end; **not yet graded against Java** |
+| Clef classification | wired; oracle captured (65 staves); **comparison not written** |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -864,21 +864,49 @@ roundings in `getSymbolBounds` (`rint(w/2)` is not `rint(w)/2`; C_CLEF at
 interline 23 is the case that separates them). None of that is evidence that
 Rust picks the same clef as Java on a real page.
 
-What would be: a Java oracle emitting, per staff on the eight-sheet corpus, the
-clef shape, its grade, and `clefStop`. Three specific risks it would catch, none
-visible to a unit test:
+That oracle now exists: `rust/oracle/clef-headers.txt`, 65 staves across the
+nine corpus pages, every one of them carrying a clef (52 `G_CLEF`, 10 `F_CLEF`,
+3 `G_CLEF_8VB`). Each line has the staff's specific interline, the header start
+and stop, `clefStop`, the shape, the raw grade, the symbol box, and the glyph
+box and weight -- the last so that a shape disagreement can be told apart from a
+part-assembly disagreement.
+
+`ClefProbe` drives each sheet to HEADERS **in-process** rather than parsing a
+saved `.omr`, which is what lets it read live `StaffHeader` objects. Getting
+there needs three things that are not obvious and cost most of the time:
+
+- `new Book(inputPath)`, not `Book.createBook(path)` -- the latter treats the
+  path as a *target* `.omr` and makes stub creation try to browse a PNG as a zip;
+- a stub built directly (`new SheetStub(book, 1)`), since `book.createStubs()`
+  reaches for `Main.getCli()`;
+- a batch `CLI` installed into `Main`'s private static field by reflection,
+  because `reachStep` consults it for `isSave()` and the output folder.
+
+It runs from `app/` (fonts) and reads the corpus as `../data/examples`.
+
+**One of the three risks turned out not to be gradeable here.** The claim above
+that the corpus contains sheets with two staff sizes is wrong: on all 65 staves
+`getSpecificInterline()` equals the sheet interline, so the
+specific-versus-sheet interline split that `ClefBuilder` and
+`MusicFont.getPointSize` disagree about is *never exercised*. A Rust port that
+used the wrong one of the two would pass this oracle. That needs either a sheet
+with small staves added to the corpus or a targeted synthetic case; until then
+it is an untested divergence, not a covered one.
+
+The two remaining risks the oracle does cover:
 
 1. **The glyph the classifier is handed.** Java classifies a `Glyph` assembled
    from header parts, and the descriptor reads its `RunTable` with the glyph's
-   own origin. If part assembly differs at all, every feature differs.
-2. **`getSpecificInterline` versus the sheet interline.** `ClefBuilder` passes
-   the *staff's* interline to the classifier, and `getPointSize` reads the
-   sheet's. On a sheet with two staff sizes these differ, and the corpus has
-   such sheets.
-3. **`ClefInter.kindOf`,** which maps shape plus glyph centre to a `ClefKind`,
+   own origin. If part assembly differs at all, every feature differs -- which
+   is why the glyph box and weight are in the oracle.
+2. **`ClefInter.kindOf`,** which maps shape plus glyph centre to a `ClefKind`,
    and which `clef_column` reimplements as `clef_kind` + `target_pitch`.
 
-Do not report clefs as ported until that oracle is green.
+**What is still missing is the comparison, not the oracle.** Nothing reads this
+file yet. Doing so needs the Rust pipeline to reach HEADERS natively and produce
+clefs end to end, which is the next task and a larger one than the probe was.
+Do not report clefs as ported until a Rust test reads `clef-headers.txt` and
+matches all 65 staves.
 
 ## Open threads, in the order worth taking them
 

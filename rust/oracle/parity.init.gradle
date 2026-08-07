@@ -36,4 +36,15 @@ gradle.projectsEvaluated {
         workingDir = app.projectDir
         systemProperty 'java.awt.headless', 'true'
     }
+
+    // The clef oracle drives the real pipeline to HEADERS, so unlike the scout it needs both the
+    // fonts (relative to app/) and the corpus (at the repository root, reached as ../data).
+    app.tasks.register('clefProbe', JavaExec) {
+        dependsOn 'compileRustParityProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.ClefProbe'
+        workingDir = app.projectDir
+        systemProperty 'java.awt.headless', 'true'
+        maxHeapSize = '4g'
+    }
 }
