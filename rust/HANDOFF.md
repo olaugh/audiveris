@@ -45,7 +45,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
-| Key classification | 3 divergences found by instrumentation, 2 fixed; 1 open |
+| Key classification | 45/65 staves match; 3 divergences fixed, 2 residuals characterised |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -1233,7 +1233,40 @@ Note the two points are read differently on purpose: `glyph.getCentroid()`
 returns a **rounded** `Point`, so the mass pitch is taken at integer
 coordinates, while `getCenter2D()` is exact.
 
-**Third finding, open: one alteration per slice.** This is what instrumentation
+**Third finding, fixed: the candidate purge.** Enumerating subsets without
+Java's `KeyExtractor.purgeCandidates` defeats itself. Java sorts candidates by
+decreasing grade and drops every *later* one that shares a part, so the best
+reading of a piece of ink wins outright. Without it, carmen staff 1 kept both
+the correct flat at grade 0.97 **and** an overlapping subset of the same ink at
+0.147, forming a two-flat signature whose second alteration sat at pitch 0.113
+where -3 was expected -- and the whole key died. Enumerating subsets and purging
+them are two halves of one mechanism; porting either alone is worse than porting
+neither.
+
+The count cap and the purge must also run in Java's order: purge first, then
+truncate. Capping during collection keeps whichever overlapping subsets happened
+to be enumerated first, which is exactly what the purge exists to decide.
+
+**Progress: `34/34 key-bearing failing -> 29 -> 28 -> 20 of 65 disagreeing`**, so
+45 staves now match Java outright.
+
+**Two residuals, and they are different problems.**
+
+1. *Seven boxes one pixel wide on the left* -- `x - 1`, `width + 1`, identical
+   right edge, ordinate and height. The key itself is correct. A stray
+   low-weight component joining the compound on its left is the obvious suspect:
+   `minPartWeight` is only 4 px at interline 21.
+2. *Eleven staves on BachInvention5 where the port finds one alteration and Java
+   finds three.* Java reads 46x76 boxes; the port reads about 17x46 -- one flat,
+   not a three-flat signature. This is the corpus' only 17-interline sheet. The
+   likely mechanism is the purge over-reaching: a subset spanning two adjacent
+   flats can outscore either flat alone, and keeping it removes both
+   individuals. If so, Java is protected by something the port still lacks --
+   most plausibly `KeyRoi`'s slice structure, which constrains where an
+   alteration may begin, so a two-flat subset never competes as a single
+   alteration at all.
+
+**Superseded, for the record: one alteration per slice.** This is what instrumentation
 was for, and it answered cleanly. On carmen staff 1 the classifier identifies
 the flat correctly -- box (358,451,21,51) at grade 0.97, against Java's
 (359,451,20,51) -- and the pitch check now passes it at 0.631 against an

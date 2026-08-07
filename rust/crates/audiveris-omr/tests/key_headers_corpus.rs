@@ -138,33 +138,37 @@ impl StaffPitchGeometry for GridPitch {
 }
 
 #[test]
-#[ignore = "alters are not reduced to one per slice; see the note below"]
+#[ignore = "two residual box divergences remain; see the note below"]
 fn native_keys_match_java_on_every_corpus_staff() {
-    // WHERE THIS STANDS. Two divergences found and fixed so far, one still open.
+    // WHERE THIS STANDS. Three divergences found and fixed; two residuals characterised.
+    //
+    //   34/34 key-bearing failing  ->  29  ->  28  ->  20 of 65 disagreeing
     //
     // **Fixed: subset enumeration.** `group_key_parts` merged nearby parts into one compound
-    // where Java's `GlyphCluster.decompose()` enumerates subsets. A whole key signature collapsed
-    // into a single over-wide glyph and every key on the corpus was rejected. 34 of 34 failing
-    // became 29 of 65 disagreeing.
+    // where Java's `GlyphCluster.decompose()` enumerates subsets, so a whole signature collapsed
+    // into one over-wide glyph and every key was rejected.
     //
-    // **Fixed: the flat pitch.** `AlterInter.computePitch` treats flats unlike sharps — a flat's
-    // pitch is the average of its mass-centroid pitch plus 0.65 and its *area-centre* pitch plus a
-    // font-derived offset, because a flat's bowl hangs below the line it belongs to. Without it a
-    // flat missed its expected pitch by about one, against a tolerance of 0.5 for a lone
-    // alteration.
+    // **Fixed: the flat pitch.** `AlterInter.computePitch` averages two heuristics for flats and
+    // uses a plain mass pitch for sharps; the port used one formula for both.
     //
-    // **Open: one alteration per slice.** Instrumenting carmen staff 1 showed the classifier
-    // identifying the flat correctly — box (358,451,21,51), grade 0.97, against Java's
-    // (359,451,20,51) — and the pitch check then passing it at 0.631 against an expected 0. The
-    // key is still rejected, because a *second* alter is also proposed: an overlapping larger
-    // subset, (349,451,30,65), which the classifier also calls a flat at grade 0.147. The two
-    // together make a 2-flat signature whose second alteration sits at pitch 0.113 where the
-    // second flat is expected at -3, so the whole candidate is thrown out.
+    // **Fixed: candidate purge.** Enumerating subsets without Java's `purgeCandidates` defeated
+    // itself — the correct flat at grade 0.97 came with an overlapping subset of the same ink at
+    // 0.147, and the pair made a two-flat signature that failed the pitch check. Java sorts by
+    // decreasing grade and drops every later candidate sharing a part.
     //
-    // Java does not accumulate every accepted subset. `KeyRoi` divides the browse range into
-    // slices and `keepCandidate` retains only the **best glyph per slice**, so two overlapping
-    // subsets of the same ink compete and one wins. The native code appends both. Porting that
-    // reduction is the next step; `NeutralKeySlice` already exists to hang it on.
+    // Two residuals, and they are different problems:
+    //
+    // 1. **Seven boxes one pixel wide on the left** — `x - 1`, `width + 1`, identical right edge,
+    //    ordinate and height. The key itself is right. A stray low-weight component joining the
+    //    compound on its left is the obvious suspect: `minPartWeight` is only 4 px at interline 21.
+    //
+    // 2. **Eleven staves on BachInvention5 where the port finds one alteration and Java finds
+    //    three.** Java reads 46x76 boxes there; the port reads about 17x46 — one flat, not a
+    //    three-flat signature. This is the corpus' only 17-interline sheet. The likely mechanism
+    //    is the purge over-reaching: a subset spanning two adjacent flats can outscore either flat
+    //    alone, and keeping it removes both individuals. If so, Java is protected by something the
+    //    port lacks — most likely `KeyRoi`'s slice structure, which constrains where an alteration
+    //    may start, so a two-flat subset never competes as one alteration in the first place.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;

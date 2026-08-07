@@ -1078,6 +1078,38 @@ struct NativeKeyPart {
 
 /// Concrete staff envelope → projection range → connected glyphs → accidental
 /// proposals. Hypotheses are evaluated in Java `Shape` order: FLAT, then SHARP.
+/// Java `KeyExtractor.purgeCandidates`: no part may be shared by two surviving candidates.
+///
+/// Sort by decreasing grade, then walk in that order and drop every *later* candidate that shares
+/// any part with the current one. The best reading of a piece of ink therefore wins outright and
+/// every overlapping alternative built from the same components disappears.
+///
+/// Without this the enumeration's own output defeats it. On carmen staff 1 the flat is recognised
+/// at grade 0.97, and a larger overlapping subset of the same ink is also called a flat at 0.147;
+/// keeping both makes a two-flat signature whose second alteration is nowhere near where a second
+/// flat belongs, and the whole key is discarded. Enumerating subsets and purging them are two
+/// halves of one mechanism.
+///
+/// Ties keep their enumeration order: Java sorts with `Double.compare` through
+/// `Collections.sort`, which is stable.
+fn purge_key_candidates(
+    candidates: Vec<(Vec<usize>, KeyAlterClassifierProposal)>,
+) -> Vec<KeyAlterClassifierProposal> {
+    let mut candidates = candidates;
+    candidates.sort_by(|one, two| two.1.classifier_grade.total_cmp(&one.1.classifier_grade));
+    let mut kept: Vec<(Vec<usize>, KeyAlterClassifierProposal)> = Vec::new();
+    for (parts, proposal) in candidates {
+        if kept
+            .iter()
+            .any(|(taken, _)| taken.iter().any(|part| parts.contains(part)))
+        {
+            continue;
+        }
+        kept.push((parts, proposal));
+    }
+    kept.into_iter().map(|(_, proposal)| proposal).collect()
+}
+
 /// Java `AlterInter.computePitch`, whose flat branch is nothing like its sharp branch.
 ///
 /// A sharp is simply the pitch of its **mass centroid**. A flat is the average of two heuristics:
@@ -1310,24 +1342,24 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     })
                 {
                     let id = self.inter_id()?;
-                    alters.push(KeyAlterClassifierProposal {
-                        id,
-                        start: glyph.bounds.x,
-                        width: glyph.bounds.width,
-                        bounds: glyph.bounds,
-                        classifier_grade: evaluation.grade,
-                        measured_pitch: measured_alter_pitch(
-                            &self.lines,
-                            input.staff_id,
-                            context,
-                            shape,
-                            &glyph,
-                            flat_area_offset,
-                        ),
-                    });
-                    if alters.len() == parameters.maximum_alters.min(7) {
-                        break;
-                    }
+                    alters.push((
+                        group.clone(),
+                        KeyAlterClassifierProposal {
+                            id,
+                            start: glyph.bounds.x,
+                            width: glyph.bounds.width,
+                            bounds: glyph.bounds,
+                            classifier_grade: evaluation.grade,
+                            measured_pitch: measured_alter_pitch(
+                                &self.lines,
+                                input.staff_id,
+                                context,
+                                shape,
+                                &glyph,
+                                flat_area_offset,
+                            ),
+                        },
+                    ));
                 } else {
                     self.mutations.push(NativeKeyMutation::ClassifierRejected {
                         staff_id: input.staff_id,
@@ -1336,6 +1368,13 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     });
                 }
             }
+            // Java `KeyExtractor.purgeCandidates`, then the count cap. Both must happen after
+            // the whole enumeration rather than during it: capping while collecting would keep
+            // whichever overlapping subsets happened to come first, and purging is what decides
+            // between them.
+            let mut alters = purge_key_candidates(alters);
+            alters.truncate(parameters.maximum_alters.min(7));
+            alters.sort_by_key(|alter| alter.start);
             if !alters.is_empty() {
                 let id = self.inter_id()?;
                 let left = alters.first().unwrap().bounds.x;
