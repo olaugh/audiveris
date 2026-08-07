@@ -159,6 +159,11 @@ pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
         "FLAT" => Some(0xE260),
         "NATURAL" => Some(0xE261),
         "SHARP" => Some(0xE262),
+        // `BravuraSymbols.LINE_CODE` and `STAFF_CODE`: a one-line and a five-line staff segment.
+        // Not musical symbols -- they exist so `AbstractPitchedInter` can measure how tall one
+        // pitch step is in a given font, which is what turns a glyph box into a pitch offset.
+        "STAFF_LINE" => Some(0xE010),
+        "STAFF_FIVE_LINES" => Some(0xE01A),
         _ => None,
     }
 }
@@ -269,6 +274,48 @@ fn mul_fix(a: i64, b: i64) -> i64 {
     let sign = if (a < 0) != (b < 0) { -1 } else { 1 };
     sign * ((a.abs() * b.abs() + 0x8000) >> 16)
 }
+
+/// The point size Java measures its pitch offsets at, via `MusicFont.getMusicFont(family, 200)`.
+///
+/// Java calls it "arbitrary", and it is -- but it is also load-bearing, because the offset is a
+/// ratio of two quantized boxes and the quantization does not cancel. Measuring at a different
+/// size gives a slightly different constant.
+const PITCH_OFFSET_INTERLINE: i32 = 200 / 4;
+
+/// Java `AbstractPitchedInter.getAreaPitchOffset`: a shape's pitch delta from area centre to focus
+/// line.
+///
+/// Derived from the font rather than tabulated, exactly as Java derives it:
+///
+/// 1. one pitch step is `(five-line staff height - one-line height) / 8`;
+/// 2. the shape's offset is `(-box.y - box.height / 2) / pitch step`.
+///
+/// Returns 0 for any shape Java does not populate the map for, which is its `default -> 0` branch
+/// rather than an absence — a shape with no entry genuinely has no offset.
+pub fn area_pitch_offset(family: MusicFamily, shape: &str) -> Result<f64, FontError> {
+    let offset_shapes = matches!(
+        shape,
+        "G_CLEF" | "G_CLEF_8VA" | "G_CLEF_8VB" | "F_CLEF" | "FLAT"
+    );
+    if !offset_shapes {
+        return Ok(0.0);
+    }
+    let height = |shape: &str| -> Result<f64, FontError> {
+        Ok(layout_bounds(family, shape, PITCH_OFFSET_INTERLINE)?
+            .map_or(0.0, |bounds| bounds.height))
+    };
+    let staff = height("STAFF_FIVE_LINES")?;
+    let line = height("STAFF_LINE")?;
+    // Four interlines span eight pitch steps.
+    let pitch_height = (staff - line) / 8.0;
+    let Some(bounds) = layout_bounds(family, shape, PITCH_OFFSET_INTERLINE)? else {
+        return Ok(0.0);
+    };
+    Ok((-bounds.y - bounds.height / 2.0) / pitch_height)
+}
+
+/// Java `AlterInter.constants.flatMassPitchOffset`, the heuristic applied to a flat's mass pitch.
+pub const FLAT_MASS_PITCH_OFFSET: f64 = 0.65;
 
 /// Java's `(int) Math.rint(value)`.
 ///
@@ -485,6 +532,33 @@ mod tests {
                 },
             ),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod pitch_offset_tests {
+    use super::*;
+
+    #[test]
+    fn the_flat_area_pitch_offset_is_derived_from_the_font() {
+        // Java measures this at point size 200 and uses it to correct a flat's pitch, which is why
+        // every flat key on the corpus was rejected while sharps passed: a flat's area centre sits
+        // well below its focus line, and without the correction the measured pitch misses the
+        // expected one by more than the 0.5 tolerance a single alteration allows.
+        let offset = area_pitch_offset(MusicFamily::Bravura, "FLAT").expect("Bravura parses");
+        assert!(
+            offset > 0.3 && offset < 1.5,
+            "flat offset {offset} should be a fraction of a pitch step, not zero or huge"
+        );
+        // Sharps and naturals are not in Java's map at all: their area centre *is* their focus.
+        assert_eq!(
+            area_pitch_offset(MusicFamily::Bravura, "SHARP").expect("Bravura parses"),
+            0.0
+        );
+        assert_eq!(
+            area_pitch_offset(MusicFamily::Bravura, "NATURAL").expect("Bravura parses"),
+            0.0
         );
     }
 }

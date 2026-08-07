@@ -45,7 +45,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
-| Key classification | sharps found; **flat keys systematically missing** (see below) |
+| Key classification | 3 divergences found by instrumentation, 2 fixed; 1 open |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -1214,7 +1214,42 @@ distance that Java compares in double.
 That took the grade from **34 of 34 key-bearing staves failing** to **29 of 65
 disagreeing**.
 
-**Second finding, open: flats.** The residue is not noise.
+**Second finding, fixed: the flat pitch.** `AlterInter.computePitch` treats
+flats unlike sharps, and the native code used one formula for both. A sharp's
+pitch is simply its mass centroid's. A flat's is the **average of two
+heuristics**: the mass-centroid pitch plus `flatMassPitchOffset` (0.65), and the
+**area-centre** pitch plus `getAreaPitchOffset(FLAT)`. Java's own comment calls
+both heuristic; they exist because a flat's bowl hangs below the line it belongs
+to while a sharp straddles it.
+
+`getAreaPitchOffset` is **font-derived**, not tabulated, and the ported font
+metrics compute it directly: one pitch step is
+`(five-line staff height - one-line height) / 8` measured at point size 200, and
+the offset is `(-box.y - box.height / 2)` over that. `STAFF_LINE` (U+E010) and
+`STAFF_FIVE_LINES` (U+E01A) are in the codepoint table for this reason -- they
+are not musical symbols, they are the font's own ruler.
+
+Note the two points are read differently on purpose: `glyph.getCentroid()`
+returns a **rounded** `Point`, so the mass pitch is taken at integer
+coordinates, while `getCenter2D()` is exact.
+
+**Third finding, open: one alteration per slice.** This is what instrumentation
+was for, and it answered cleanly. On carmen staff 1 the classifier identifies
+the flat correctly -- box (358,451,21,51) at grade 0.97, against Java's
+(359,451,20,51) -- and the pitch check now passes it at 0.631 against an
+expected 0. The key is *still* rejected, because a **second** alter is proposed:
+an overlapping larger subset, (349,451,30,65), which the classifier also calls a
+flat at grade 0.147. Together they form a 2-flat signature whose second
+alteration sits at pitch 0.113 where the second flat is expected at -3, so the
+whole candidate dies.
+
+Java does not accumulate every accepted subset. `KeyRoi` divides the browse
+range into slices and `keepCandidate` retains only the **best glyph per slice**,
+so two overlapping subsets of the same ink compete and one wins. The native code
+appends both. Porting that reduction is the next step, and `NeutralKeySlice`
+already exists to hang it on.
+
+The residue before that lands:
 
 ```
 24  no key where Java found one   -- of which 23 are FLAT keys (-1, -2, -3)

@@ -138,29 +138,33 @@ impl StaffPitchGeometry for GridPitch {
 }
 
 #[test]
-#[ignore = "flat keys are not found; see the note below"]
+#[ignore = "alters are not reduced to one per slice; see the note below"]
 fn native_keys_match_java_on_every_corpus_staff() {
-    // WHERE THIS STANDS, and why it is `#[ignore]` rather than deleted or left red.
+    // WHERE THIS STANDS. Two divergences found and fixed so far, one still open.
     //
-    // Porting `GlyphCluster.decompose`'s subset enumeration (it used to group parts instead) took
-    // this from **34 of 34 key-bearing staves failing** to **29 of 65 disagreeing**, and the
-    // residue is not noise:
+    // **Fixed: subset enumeration.** `group_key_parts` merged nearby parts into one compound
+    // where Java's `GlyphCluster.decompose()` enumerates subsets. A whole key signature collapsed
+    // into a single over-wide glyph and every key on the corpus was rejected. 34 of 34 failing
+    // became 29 of 65 disagreeing.
     //
-    //   24  no key where Java found one   -- of which 23 are FLAT keys (-1, -2, -3)
-    //    4  key found, box off by 1 px in x or width
-    //    1  key found where Java found none
+    // **Fixed: the flat pitch.** `AlterInter.computePitch` treats flats unlike sharps — a flat's
+    // pitch is the average of its mass-centroid pitch plus 0.65 and its *area-centre* pitch plus a
+    // font-derived offset, because a flat's bowl hangs below the line it belongs to. Without it a
+    // flat missed its expected pitch by about one, against a tolerance of 0.5 for a lone
+    // alteration.
     //
-    // **Flats are systematically missing and sharps are not.** 23 of the 24 absences are flat
-    // signatures; the single sharp absence is one staff of one page. Size is not the cause: a
-    // one-flat key measures 20 x 51 against bounds of 10.5..42 wide and up to 79.8 tall, so it
-    // clears the gate comfortably. The lead is therefore flat-specific -- the expected pitches a
-    // flat occupies differ from a sharp's, so `maximum_delta_pitch_one`/`_four` and the pitch the
-    // candidate is measured against are the first place to look, followed by whether the two
-    // `ShapeBuilder` passes Java runs (one per key shape, each with its own ROI and slices) are
-    // faithfully reproduced by iterating `[Flat, Sharp]` inside one pass.
+    // **Open: one alteration per slice.** Instrumenting carmen staff 1 showed the classifier
+    // identifying the flat correctly — box (358,451,21,51), grade 0.97, against Java's
+    // (359,451,20,51) — and the pitch check then passing it at 0.631 against an expected 0. The
+    // key is still rejected, because a *second* alter is also proposed: an overlapping larger
+    // subset, (349,451,30,65), which the classifier also calls a flat at grade 0.147. The two
+    // together make a 2-flat signature whose second alteration sits at pitch 0.113 where the
+    // second flat is expected at -3, so the whole candidate is thrown out.
     //
-    // The four 1-pixel box differences are a separate, smaller question and should be left until
-    // the flats are found, since a changed candidate set will move them anyway.
+    // Java does not accumulate every accepted subset. `KeyRoi` divides the browse range into
+    // slices and `keepCandidate` retains only the **best glyph per slice**, so two overlapping
+    // subsets of the same ink compete and one wins. The native code appends both. Porting that
+    // reduction is the next step; `NeutralKeySlice` already exists to hang it on.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;

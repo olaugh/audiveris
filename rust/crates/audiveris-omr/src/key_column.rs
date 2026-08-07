@@ -17,6 +17,8 @@ use audiveris_image::{
     run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
 };
 
+use audiveris_music_font::{FLAT_MASS_PITCH_OFFSET, MusicFamily, area_pitch_offset};
+
 use crate::clef_column::{chamfer_gap, component_pixels, push_unique};
 use crate::{
     clef_column::NeutralClefKind,
@@ -1076,6 +1078,48 @@ struct NativeKeyPart {
 
 /// Concrete staff envelope → projection range → connected glyphs → accidental
 /// proposals. Hypotheses are evaluated in Java `Shape` order: FLAT, then SHARP.
+/// Java `AlterInter.computePitch`, whose flat branch is nothing like its sharp branch.
+///
+/// A sharp is simply the pitch of its **mass centroid**. A flat is the average of two heuristics:
+///
+/// 1. the mass centroid's pitch plus `flatMassPitchOffset` (0.65);
+/// 2. the **area centre's** pitch plus the font-derived `getAreaPitchOffset(FLAT)`.
+///
+/// Java's comment calls both "heuristic", and they exist because a flat's ink sits well below the
+/// line it belongs to — its bowl hangs under the focus point while a sharp straddles it.
+///
+/// Omitting this is why every flat key on the corpus was rejected while sharps passed: a single
+/// alteration is allowed only 0.5 pitch of error, and the uncorrected flat pitch misses by about
+/// one. The classifier had already identified the flat at grade 0.97; it was the pitch check that
+/// threw it away.
+///
+/// Note the two points are read differently on purpose. `glyph.getCentroid()` returns a **rounded**
+/// `Point`, so the mass pitch is taken at integer coordinates, while `getCenter2D()` is exact.
+fn measured_alter_pitch<Lines: StaffPitchGeometry>(
+    lines: &Lines,
+    staff_id: usize,
+    context: NativeKeyStaffContext,
+    shape: NeutralKeyAlterShape,
+    glyph: &NativeKeyGlyph,
+    flat_area_offset: f64,
+) -> f64 {
+    let centroid_x = glyph.centroid_x.round_ties_even();
+    let centroid_y = glyph.centroid_y.round_ties_even();
+    let mass_pitch = pitch_position_of(
+        lines.line_span_at(staff_id, centroid_x),
+        context,
+        centroid_y,
+    );
+    if shape != NeutralKeyAlterShape::Flat {
+        return mass_pitch;
+    }
+    let center_x = f64::from(glyph.bounds.x) + f64::from(glyph.bounds.width) / 2.0;
+    let center_y = f64::from(glyph.bounds.y) + f64::from(glyph.bounds.height) / 2.0;
+    let geo_pitch = pitch_position_of(lines.line_span_at(staff_id, center_x), context, center_y)
+        + flat_area_offset;
+    0.5 * ((mass_pitch + FLAT_MASS_PITCH_OFFSET) + geo_pitch)
+}
+
 /// Java `Staff.pitchPositionOf`, for a point inside the staff.
 ///
 /// ```text
@@ -1217,6 +1261,8 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
         }
         parts.sort_by_key(|part| part.component.left);
         let groups = enumerate_key_subsets(&parts, parameters);
+        // Font-derived and constant per family, so it is fetched once rather than per glyph.
+        let flat_area_offset = area_pitch_offset(MusicFamily::Bravura, "FLAT").unwrap_or(0.0);
         let mut proposals = Vec::new();
         for shape in [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Sharp] {
             let mut alters = Vec::new();
@@ -1270,10 +1316,13 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                         width: glyph.bounds.width,
                         bounds: glyph.bounds,
                         classifier_grade: evaluation.grade,
-                        measured_pitch: pitch_position_of(
-                            self.lines.line_span_at(input.staff_id, glyph.centroid_x),
+                        measured_pitch: measured_alter_pitch(
+                            &self.lines,
+                            input.staff_id,
                             context,
-                            glyph.centroid_y,
+                            shape,
+                            &glyph,
+                            flat_area_offset,
                         ),
                     });
                     if alters.len() == parameters.maximum_alters.min(7) {
