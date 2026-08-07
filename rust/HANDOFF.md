@@ -66,6 +66,24 @@ for over an hour, then both runs turned up at once and one immediately cancelled
 the other by concurrency group -- which is correct behaviour, not a failure.
 Wait and re-list before concluding a push did not trigger CI.
 
+### The baseline JDK, which the repository does not carry either
+
+`manifest.sha256` pins **Temurin 25.0.3+9**, and `xtask` looks for it at
+`../jdk25/Contents/Home` relative to the repo -- i.e. a sibling of the checkout,
+outside it. A fresh machine will not have it, and `brew install --cask
+temurin@25` gives whatever 25.x is current (25.0.4 at time of writing), not the
+pinned build. Fetch the exact one:
+
+```sh
+curl -sSL -o /tmp/t25.tar.gz https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.3_9.tar.gz
+echo "7baab4d69a15554e119b86ff78d40e3fdc28819b5b322955c913cebfe3f6a37c  /tmp/t25.tar.gz" | shasum -a 256 -c -
+mkdir -p ../jdk25 && tar -xzf /tmp/t25.tar.gz -C ../jdk25 --strip-components=1
+```
+
+That is the aarch64 macOS build; swap the asset name for other hosts, and get
+the checksum from
+`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-25.0.3%2B9`.
+
 ### Reproducing the PDF work on a fresh machine
 
 The PDF parity test and its oracle need two things the repository does not carry.
@@ -80,8 +98,7 @@ AUDIVERIS_PDF_CORPUS=/path/to/pdfs cargo test -p audiveris-pdf --test corpus -- 
 
 It prints `checked 189 pages, 189 images, 189 filter chains, 189 rasters,
 189 draws, 189 renders; still unimplemented: {}`. Without the variable it
-prints that it skipped, so a green run that says nothing is not evidence. Without the variable it prints that it skipped, so a
-green run that says nothing is not evidence.
+prints that it skipped, so a green run that says nothing is not evidence.
 
 **PDFBox, only to regenerate the oracle.** It is not a Rust dependency; the
 checked-in `oracle/pdf-pages.txt` is enough to run the test. To regenerate, take
@@ -571,11 +588,11 @@ hold.
 Two of the three inputs that kept beams out of the production path are closed
 (`2982cef69`). What is left is the one that was always the hard one.
 
-1. **Regenerate `rust/oracle/music-font.txt` under Temurin 25.0.3+9** and diff
-   it. It is the only oracle here produced by Java2D rather than by specified
-   arithmetic, it was captured on OpenJDK 26.0.1, and pinning the centroid
-   offsets is gated on it. See the MusicFont thread below.
-   (CI itself is clean -- run `31130993732`, both legs, full step list.)
+1. **The CFF/OTF outline parser**, which the MusicFont thread below shows is the
+   one piece with no shortcut left. `rust/oracle/music-font.txt` is already its
+   grading oracle. The JDK question that used to head this list is answered: the
+   sweep is bit-identical under OpenJDK 26.0.1 and Temurin 25.0.3+9.
+   (CI is clean too -- run `31134170478`, both legs, full step list.)
 2. **The header erase**, which is now the *only* thing between the beam pipeline
    and running natively end to end. It is `Staff.getHeaderStop()`, so it is
    HEADERS, so it is MusicFont -- see the MusicFont thread below. It shows up
@@ -721,18 +738,29 @@ Re-measure with `./gradlew -I rust/oracle/parity.init.gradle :app:musicFontScout
 It needs `workingDir = app/`, since `WellKnowns.RES_URI` is `Paths.get("res")`
 outside a jar. Default family is `Bravura` (`Bravura.otf`), in `app/res/`.
 
-**One caveat on that file, and it is the reason the first row of it is the JDK.**
-Every other oracle here is Java arithmetic, which is specified and portable.
-These values are not: they come out of Java2D's font machinery. The checked-in
-sweep was produced by **OpenJDK 26.0.1** (Homebrew), while `manifest.sha256`
-pins the rest of the baseline to **Temurin 25.0.3+9** -- no JDK 25 was installed
-on the machine that measured it. Nothing structural depends on that (the 1/64
-grid, the per-edge rounding, the size-independence of the offset, the interline
-17 tie), because those are all shape facts rather than value facts. But **do not
-pin the twelve centroid offsets from this file** without first regenerating it
-under the baseline JDK and diffing. If they move, the offsets are a JDK
-compatibility surface and need saying so out loud; if they do not, that is worth
-one line in this document and the shortcut is safe.
+**On the first row of that file being the JDK.** Every other oracle here is Java
+arithmetic, which is specified and portable. These values are not: they come out
+of Java2D's font machinery, so they are only as portable as the runtime that
+made them, and that needs checking rather than assuming.
+
+*JDK axis: checked, and clean.* The sweep was captured under both **OpenJDK
+26.0.1** and the baseline **Temurin 25.0.3+9**. All 711 value rows are
+bit-identical; the only line that differs is the one naming the runtime. The
+checked-in copy is the Temurin one. So the twelve centroid offsets are safe to
+pin, and `getPointSize`, the 1/64 grid and the per-edge rounding do not move
+across a major JDK version.
+
+*Platform axis: not checked, and CI will not check it for you.* This was
+measured on macOS/aarch64 only. `TextLayout.getBounds()` is outline-derived and
+ought to be portable, but `centroidOffset` comes from **glyph rasterisation**,
+which does not go through Marlin -- it goes through the platform font scaler,
+FreeType on Linux against CoreText on macOS. That is exactly the axis the CI
+matrix exists for, and exactly the axis it cannot see here, because the Java
+oracle runs only locally: a Rust test asserting pinned constants compares them
+against themselves and passes on `ubuntu-latest` whatever Java would have said
+there. If the offsets ever need to hold on Linux, that has to be measured on
+Linux. Until then, treat them as macOS-derived constants that happen to be
+JDK-stable.
 
 ### The tolerance, if a rasteriser is ever wanted anyway
 
@@ -748,14 +776,12 @@ a `.5` boundary has no margin at all. Pinning avoids the question.
 
 ### Order from here
 
-0. **Regenerate `music-font.txt` under Temurin 25.0.3+9** and diff. This gates
-   everything below, and it is ten minutes.
 1. `TextLayout.getBounds()` for the six header clefs: a CFF/OTF outline parser
    with exact Bezier extrema, then per-edge 1/64 rounding. `music-font.txt` is
    already the grading oracle -- 6 shapes x 116 interlines x 4 edges, and the
    interline 17 row is the one that fails if the extrema are approximated.
-2. The pinned `(family, shape) -> centroidOffset` table, once step 0 says the
-   values are JDK-stable.
+2. The pinned `(family, shape) -> centroidOffset` table, straight out of
+   `music-font.txt`. The JDK gate that used to sit in front of this is cleared.
 3. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
 4. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
 
