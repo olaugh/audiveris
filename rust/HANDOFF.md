@@ -1133,12 +1133,36 @@ loudly (`FontError::UnsupportedNumber`) rather than guess: their boxes need
 glyph-advance composition that nothing grades yet, and a silent skip would
 consume rank slots differently from Java. None appear on the corpus.
 
-**Still open for TIME:** the driver and the corpus grading of the 17
-time-bearing staves, chained after clef and key exactly as keys chained after
-clefs. Note `Staff.getTimeStop()` recomputes `bounds.right - 1` from
-`header.time` and shadows the stored value -- the same getter trap as
-`getClefStop`, predicted this time instead of discovered (the oracle's stop
-column already confirms it: box 451+36 = 487, stop 486).
+**TIME is closed: 65/65** -- presence/absence on all staves, the agreed value
+(specific shape, numerator, denominator), the symbol box, and `timeStop`
+(recomputed from bounds, the predicted getter shadow confirmed).
+
+The driver taught three things worth keeping:
+
+1. **The header runs per real system, not per page.** TIME demands every staff
+   of a *system* agree on a value; modelling a page as one system let staves
+   without a time veto the ones with -- the first run found no time anywhere.
+   The test now iterates GRID's `peak_graph.systems` and scopes columns, clef
+   and key stop propagation, and grading to each system, which is also what
+   Java's `HeaderBuilder` does. Keys stayed 65/65 through the restructure.
+2. **Java's browse windows are barline-limited.** `getRoi` caps its stop with
+   `Staff.getBrowseStop`, the first *good, connected* barline. Without that cut
+   the ROI runs past the header into the first measure, and the classifier
+   happily called batuque's opening notes a 3/4 at grade 0.23 on both staves of
+   system 2 -- consistent, so the column accepted it. The oracle now emits
+   `bars` rows (good+connected barline abscissae per staff) and the driver
+   applies the cut; on batuque staff 3 the window shrinks to a 22 px sliver
+   with no viable start, exactly Java's outcome.
+3. **`selectClefs` runs after TIME**, so keys browse from the *stored* clef
+   range stop, not the recomputed getter value. The test now uses Java's true
+   order; keys still grade 65/65.
+
+The `pair_ids` seam (numerator x denominator pairing needs pre-allocated inter
+ids) is satisfied by a deterministic discovery pass that replays the exact
+classification sequence and harvests the ids -- documented in the test.
+
+`tests/header_corpus.rs` (renamed from `key_headers_corpus.rs`) now grades the
+complete header chain and is enforced by CI.
 
 
 ### KEY: the classifier seam is filled

@@ -70,6 +70,7 @@ public class ClefProbe
         System.out.println("# alter <staff-id> <index> <x> <y> <w> <h> <grade>");
         System.out.println("# time <staff-id> <shape|NONE> <rational> <grade> <x> <y> <w> <h>"
                 + " <time-stop>");
+        System.out.println("# bars <staff-id> <x...|-> (good, connected barlines only)");
 
         for (String name : SHEETS) {
             // The working directory is app/, because `WellKnowns.RES_URI` resolves the fonts
@@ -100,6 +101,7 @@ public class ClefProbe
                         emitStaff(staff);
                         emitCandidates(sheet, staff);
                         emitKeyAndTime(staff);
+                        emitBrowseBars(staff);
                     }
                 }
             }
@@ -113,6 +115,35 @@ public class ClefProbe
      * it is worth knowing how much of this corpus exercises them at all. A stage with two examples
      * on nine pages needs a different plan from one with sixty.
      */
+    /**
+     * Emits the abscissae `Staff.getBrowseStop` would cut at: every good barline of the staff
+     * carrying a `BarConnectionRelation`.
+     *
+     * <p>These exist because `HeaderTimeBuilder.getRoi` (and `KeyBuilder`'s browse stop) are
+     * barline-limited, and ignoring that limit lets a headless driver browse past the header into
+     * the first measure's notes -- which the classifier will then happily call a time signature.
+     * Measured, not hypothetical: the port produced a 3/4 on batuque's second system that way.
+     */
+    private static void emitBrowseBars (Staff staff)
+    {
+        final org.audiveris.omr.sig.SIGraph sig = staff.getSystem().getSig();
+        final StringBuilder xs = new StringBuilder();
+
+        for (org.audiveris.omr.sig.inter.BarlineInter bar : staff.getBarlines()) {
+            if (!bar.isGood()) {
+                continue;
+            }
+            if (!sig.hasRelation(bar, org.audiveris.omr.sig.relation.BarConnectionRelation.class)) {
+                continue;
+            }
+            if (xs.length() > 0) {
+                xs.append(' ');
+            }
+            xs.append(bar.getBounds().x);
+        }
+        System.out.printf("bars %d %s%n", staff.getId(), (xs.length() > 0) ? xs : "-");
+    }
+
     private static void emitKeyAndTime (Staff staff)
     {
         final StaffHeader header = staff.getHeader();
