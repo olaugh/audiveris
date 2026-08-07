@@ -15,7 +15,7 @@ use audiveris_classifier::{
     mix_glyph_features_from_run_table, rank_evaluations,
 };
 use audiveris_music_font::sfnt::FontError;
-use audiveris_music_font::{MusicFamily, layout_bounds};
+use audiveris_music_font::{MusicFamily, Rectangle, layout_bounds, symbol_centroid};
 
 use crate::clef_column::{
     ClefShapeClassifier, ClefShapeEvaluation, NativeClefGlyph, NeutralClefShape,
@@ -109,28 +109,49 @@ fn neutral_shape(shape: &str) -> Option<NeutralClefShape> {
     }
 }
 
-/// Ports `AbstractInter.getSymbolBounds`: the font's box for a shape, centred on the glyph.
+/// Ports `AbstractInter.getSymbolBounds` plus the abscissa correction `registerClefs` applies.
 ///
-/// Java takes the *area centre* of the inter — whose bounds are the glyph's — with integer
-/// division, then subtracts a separately rounded half-extent. The two roundings are independent:
-/// `rint(w / 2)` is not `rint(w) / 2`, and using the latter moves the box by a pixel on odd
-/// widths.
+/// Two centres are involved and they are not the same one, which is the whole subtlety:
+///
+/// 1. `getSymbolBounds` centres the font box on the inter's **area centre** — `x + width / 2` in
+///    integer division over the glyph's bounds — then subtracts a separately rounded half-extent.
+///    The two roundings are independent: `rint(w / 2)` is not `rint(w) / 2`, and using the latter
+///    moves the box by a pixel on odd widths.
+/// 2. `registerClefs` then slides the box horizontally by
+///    `dx = glyphCentroid.x - symbolCentroid.x`, where `glyphCentroid` is the glyph's **mass**
+///    centroid (`rint` of it) and `symbolCentroid` is the font symbol's, placed inside the box
+///    from step 1. Java's comment explains why: unerased staff-line chunks shift the ink
+///    sideways, so the mass centre positions the symbol better than the bounding box does.
+///
+/// Omitting step 2 is what a first version of this did, and the corpus caught it immediately —
+/// every shape, width, height and ordinate matched Java while 53 of 65 abscissae were 1 to 3
+/// pixels out.
 fn symbol_bounds(
     family: MusicFamily,
     shape: &str,
     staff_interline: i32,
     glyph: HeaderBounds,
+    glyph_centroid_x: f64,
 ) -> Result<HeaderBounds, ClefClassificationError> {
     let bounds = layout_bounds(family, shape, staff_interline)
         .map_err(ClefClassificationError::Font)?
         .ok_or(ClefClassificationError::MissingSymbol("clef shape"))?;
     let center_x = glyph.x + (glyph.width / 2);
     let center_y = glyph.y + (glyph.height / 2);
-    Ok(HeaderBounds {
+    let box_ = Rectangle {
         x: center_x - java_rint(bounds.width / 2.0),
         y: center_y - java_rint(bounds.height / 2.0),
         width: java_rint(bounds.width),
         height: java_rint(bounds.height),
+    };
+    let (symbol_centroid_x, _) = symbol_centroid(family, shape, box_)
+        .ok_or(ClefClassificationError::MissingSymbol("clef shape"))?;
+    let dx = java_rint(glyph_centroid_x) - symbol_centroid_x;
+    Ok(HeaderBounds {
+        x: box_.x + dx,
+        y: box_.y,
+        width: box_.width,
+        height: box_.height,
     })
 }
 
@@ -193,6 +214,7 @@ impl ClefShapeClassifier for BundledClefClassifier {
                     &evaluation.shape,
                     staff_interline,
                     glyph.bounds,
+                    glyph.centroid_x,
                 )?,
             });
         }
@@ -254,9 +276,11 @@ mod tests {
     #[test]
     fn symbol_bounds_centre_the_font_box_on_the_glyph_with_java_rounding() {
         // G_CLEF at interline 20 measures 53.6875 x 140.484375, so the box is 54 x 140 and the
-        // half-extents are rint(26.84375)=27 and rint(70.2421875)=70. Note 54/2 would give 27 too,
-        // but 140/2 = 70 only agrees by luck -- the widths that matter are the odd ones, covered
-        // below.
+        // half-extents are rint(26.84375) = 27 and rint(70.2421875) = 70. The glyph box below has
+        // area centre (120, 100), putting the pre-correction box at (93, 30).
+        //
+        // The symbol centroid then lands at rint(120.0 + 54 * 0.00205725) = 120, so passing a
+        // glyph centroid of 120 makes dx zero and isolates the centring from the correction.
         let bounds = symbol_bounds(
             MusicFamily::Bravura,
             "G_CLEF",
@@ -267,20 +291,44 @@ mod tests {
                 width: 40,
                 height: 120,
             },
+            120.0,
         )
         .expect("G clef has a symbol");
-        assert_eq!(bounds.width, 54);
-        assert_eq!(bounds.height, 140);
-        assert_eq!(bounds.x, 120 - 27);
-        assert_eq!(bounds.y, 100 - 70);
+        assert_eq!((bounds.width, bounds.height), (54, 140));
+        assert_eq!((bounds.x, bounds.y), (120 - 27, 100 - 70));
+    }
+
+    #[test]
+    fn the_glyph_centroid_slides_the_box_horizontally_and_only_horizontally() {
+        // Java translates by `(dx, 0)`: the ordinate must not move, however far the ink's mass
+        // centre is from its bounding box. This is the step whose absence left every shape,
+        // width, height and ordinate correct while 53 of 65 corpus abscissae were out.
+        let glyph = HeaderBounds {
+            x: 100,
+            y: 40,
+            width: 40,
+            height: 120,
+        };
+        let centred = symbol_bounds(MusicFamily::Bravura, "G_CLEF", 20, glyph, 120.0)
+            .expect("G clef has a symbol");
+        let shifted = symbol_bounds(MusicFamily::Bravura, "G_CLEF", 20, glyph, 125.4)
+            .expect("G clef has a symbol");
+        // rint(125.4) = 125, so dx = 125 - 120 = 5.
+        assert_eq!(shifted.x, centred.x + 5);
+        assert_eq!(shifted.y, centred.y, "the correction is abscissa-only");
+        assert_eq!(
+            (shifted.width, shifted.height),
+            (centred.width, centred.height)
+        );
     }
 
     #[test]
     fn the_half_extent_is_rounded_separately_from_the_width() {
-        // C_CLEF at interline 23 measures 64.3125 x 93.09375: width rints to 64 but the half
+        // C_CLEF at interline 23 measures 64.3125 x 93.09375: the width rints to 64 but the half
         // extent is rint(32.15625) = 32, and the height rints to 93 while rint(46.546875) = 47.
         // Halving the rounded height would give 46, one pixel off, which is the mistake this
-        // guards.
+        // guards. With an all-zero glyph box the symbol centroid is rint(0 + 64 * -0.0658047) =
+        // -4, so a glyph centroid of -4 again makes dx zero.
         let bounds = symbol_bounds(
             MusicFamily::Bravura,
             "C_CLEF",
@@ -291,6 +339,7 @@ mod tests {
                 width: 0,
                 height: 0,
             },
+            -4.0,
         )
         .expect("C clef has a symbol");
         assert_eq!((bounds.width, bounds.height), (64, 93));

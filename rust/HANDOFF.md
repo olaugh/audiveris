@@ -44,7 +44,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
-| Clef classification | wired; oracle captured (65 staves); driver blocked on staff-line geometry |
+| Clef classification | 65/65 corpus staves: shape and symbol box exact. `clefStop` open |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -946,9 +946,47 @@ neighbour's gutter binds *only once sloped* -- flat, it lands below the
 have hidden in production, and the first version of the test missed it for that
 reason.
 
-What remains is the driver itself: per-staff NO_STAFF crops into
-`NativeClefProposalRecognizer`, then the comparison against
-`clef-headers.txt`.
+**The driver and the comparison now exist**, in
+`crates/audiveris-omr/tests/clef_headers_corpus.rs`: it runs GRID on each of the
+nine pages, builds the lookup contexts from the published splines, assembles
+`NativeClefProposalRecognizer` over `BundledClefClassifier`, and compares. **All
+65 staves match Java on shape and on the symbol box.**
+
+It supplies Java's header start rather than computing it, and grades only what
+the clef stage does with it -- the same isolation the spot-dispatch test used.
+`compute_header_starts` needs its own oracle; grading it from this one would be
+circular, since it is an input here.
+
+### The missing centroid correction, which the corpus found immediately
+
+The first run failed on **53 of 65 staves with every shape, width, height and
+ordinate correct and only the abscissa out, by 1 to 3 pixels.** That is about as
+precise a diagnosis as a failure can hand you, and it pointed straight at the
+one step `clef_classifier` had left out: `registerClefs` slides the box by
+`dx = glyphCentroid.x - symbolCentroid.x` *after* `getSymbolBounds` has centred
+it. Two different centres are involved -- the glyph's **area** centre positions
+the box, then the glyph's **mass** centroid corrects it -- and Java's own
+comment explains why: unerased staff-line chunks shift the ink sideways.
+
+Note what this says about the unit tests. `clef_classifier` had tests for the
+noise gate, the rank-then-filter order, the drum shape set and the two
+independent roundings, and all of them passed against code missing an entire
+step. The corpus caught it on the first run.
+
+### `clefStop` is still open, and not for the reason it looks
+
+Computing it from the selected candidate reproduces **56 of 65**. The nine
+misses are *all* bass-clef staves, and Java's value is always the larger.
+
+The cause looks structural rather than arithmetic. `registerClefs` sets
+`clefStop` from the candidate at **index 0** -- the highest-graded at
+*registration* -- while `header.clef`, whose boxes the oracle prints, is
+whichever clef `selectClef` picked *afterwards*. Those need not be the same
+inter, so the oracle's `clefStop` column and its box columns can describe two
+different candidates, and comparing one against the other is not a parity test
+at all. Settling it needs `ClefProbe` to emit the whole registered candidate set
+per staff rather than just the survivor. `clef_stop` in the test file carries
+the intersection arithmetic ready for that.
 
 ## Open threads, in the order worth taking them
 
