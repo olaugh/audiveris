@@ -45,6 +45,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
+| Key classification | driver built and runs; blocked on subset enumeration (see below) |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -1188,13 +1189,35 @@ constants** -- `maxClefEnd` (94.5), `yCoreMargin` (10.5) and `maxSliceDist`
 (10.5). `Math.rint` sends all three to even. A port using `round()` fails all
 three, and I got the expected value wrong on two of them while writing the tests.
 
-### Then the driver and the grading
+### The driver is built, and it found the real blocker on its first run
 
-Assemble `NativeKeyProposalRecognizer` over `BundledKeyClassifier` and grade the
-34 key-bearing staves on fifths, box and `keyStop`. Unlike the clef test this one
-can **chain** rather than supply its input: `browseStart` is `clefStop + 1`, and
-the clef stage now produces `clefStop` correctly, so running clefs then keys
-grades the join as well as the parts.
+`tests/key_headers_corpus.rs` assembles the whole chain -- GRID, the clef stage,
+then `NativeKeyProposalRecognizer` over `BundledKeyClassifier` -- and **chains**
+rather than isolating: `browseStart` comes from the clef stage's own `clefStop`,
+as `KeyColumn` does, so the join is under test too. Only the header start is
+still supplied from the oracle.
+
+It runs end to end, reaches all 65 staves and all 34 key-bearing ones, and finds
+**no key at all**. A uniform failure is a structural answer, and it localises to
+one function.
+
+**`key_column::group_key_parts` is a single-grouping approximation of Java's
+subset enumeration.** It walks the parts left to right and merges everything
+within `maximum_component_gap` into one group. Java's `GlyphCluster.decompose()`
+enumerates *subsets* of each connected set, and `keepCandidate` keeps the best
+per slice. With `maxPartGap` at 1.5 interline -- 31.5 px at interline 21 -- and
+the sharps of a key signature roughly 20 px apart, every alteration merges into
+a single compound whose width then exceeds `maxGlyphWidth` (42 px) and is
+rejected outright.
+
+The clef side already has exactly the machinery this needs: `near_graph`,
+`connected_sets` and the subset walk behind `SubsetContext`. Porting the same
+enumeration for keys is the fix.
+
+The test is `#[ignore]`d rather than deleted or left red, with the diagnosis in
+the body. Un-ignore it after the enumeration lands; expect it to then find real
+per-staff disagreements rather than passing outright, since the clef equivalent
+did on its first honest run.
 
 ## Open threads, in the order worth taking them
 
