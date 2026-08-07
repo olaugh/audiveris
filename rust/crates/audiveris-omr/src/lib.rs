@@ -30,6 +30,7 @@ pub mod bracket_serif;
 pub mod chords_step;
 pub mod clef_classifier;
 pub mod clef_column;
+pub mod clef_parameters;
 pub mod cue_beams_step;
 pub mod curves_step;
 pub mod grid_executor;

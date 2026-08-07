@@ -44,7 +44,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
-| Clef classification | wired; oracle captured (65 staves); **comparison not written** |
+| Clef classification | wired; oracle captured (65 staves); driver blocked on staff-line geometry |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -903,10 +903,34 @@ The two remaining risks the oracle does cover:
    and which `clef_column` reimplements as `clef_kind` + `target_pitch`.
 
 **What is still missing is the comparison, not the oracle.** Nothing reads this
-file yet. Doing so needs the Rust pipeline to reach HEADERS natively and produce
-clefs end to end, which is the next task and a larger one than the probe was.
-Do not report clefs as ported until a Rust test reads `clef-headers.txt` and
-matches all 65 staves.
+file yet. Do not report clefs as ported until a Rust test reads
+`clef-headers.txt` and matches all 65 staves.
+
+#### Where that work actually stands, and the one thing blocking it
+
+More of it was already built than expected. `NativeClefProposalRecognizer`
+already takes `sources: BTreeMap<usize, RunTable>` -- per-staff NO_STAFF crops
+-- plus contexts and parameters, and is generic over `ClefShapeClassifier`, so
+`BundledClefClassifier` drops straight in. `build_clef_lookup_contexts` already
+ports `getOuterRect`/`getInnerRect`; `glyph_factory.rs` already ports
+`GlyphFactory.buildGlyphs`; `near_graph` and `connected_sets` already port
+`Glyphs.buildLinks` and the connectivity pass. So there is no missing algorithm,
+only a missing driver.
+
+`clef_parameters.rs` is the first piece of it and is done: `ClefBuilder.Parameters`
+with its two-interline split intact, `Scale.Fraction` as `rint(interline * v)`
+and `Scale.AreaFraction` as `rint(interline^2 * v)`. Interline 21 -- the corpus'
+most common -- lands on two rounding ties at once (94.5 and 10.5), and both go
+to even, so a port using `round()` fails rather than half-passes.
+
+**The blocker is staff-line geometry.** `getOuterRect` needs
+`staff.getFirstLine().yAt(xMid)` and `getLastLine().yAt(xMid)`. GRID computes
+exactly that internally -- `recognize.rs`'s local `StaffDetail` carries
+`first_line`/`last_line` as `StaffBoundary` -- but `GridLinesRecognition` does
+not publish it: `StaffCandidateReport` has `left`, `right` and `interline` only,
+and `PopulationStaffArea` holds the staff's *area polygon*, not its lines. So
+the next edit is to surface per-staff line geometry with a `yAt(x)` accessor,
+after which the driver is assembly rather than porting.
 
 ## Open threads, in the order worth taking them
 
