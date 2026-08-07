@@ -66,6 +66,9 @@ public class ClefProbe
         System.out.println("# candidate <staff-id> <shape> <grade> <ctx-grade> <removed>"
                 + " <symbol-x> <symbol-y> <symbol-w> <symbol-h>"
                 + " <glyph-x> <glyph-y> <glyph-w> <glyph-h>");
+        System.out.println("# key <staff-id> <fifths|NONE> <grade> <x> <y> <w> <h> <key-stop>");
+        System.out.println("# time <staff-id> <shape|NONE> <rational> <grade> <x> <y> <w> <h>"
+                + " <time-stop>");
 
         for (String name : SHEETS) {
             // The working directory is app/, because `WellKnowns.RES_URI` resolves the fonts
@@ -95,9 +98,59 @@ public class ClefProbe
                     for (Staff staff : system.getStaves()) {
                         emitStaff(staff);
                         emitCandidates(sheet, staff);
+                        emitKeyAndTime(staff);
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Emits the header's key and time, or their absence.
+     *
+     * <p>Absence is the point as much as presence: before porting `KeyBuilder` and `TimeBuilder`
+     * it is worth knowing how much of this corpus exercises them at all. A stage with two examples
+     * on nine pages needs a different plan from one with sixty.
+     */
+    private static void emitKeyAndTime (Staff staff)
+    {
+        final StaffHeader header = staff.getHeader();
+
+        if (header == null) {
+            return;
+        }
+
+        if (header.key != null) {
+            System.out.printf(
+                    Locale.ROOT,
+                    "key %d %s %s %s %s%n",
+                    staff.getId(),
+                    header.key.getFifths(),
+                    Double.toString(header.key.getGrade()),
+                    box(header.key.getBounds()),
+                    value(staff.getKeyStop()));
+        } else {
+            System.out.printf("key %d NONE - - - - - %s%n", staff.getId(), value(staff.getKeyStop()));
+        }
+
+        if (header.time != null) {
+            // A null shape is not an error: `TimePairInter` and `TimeCustomInter` carry no single
+            // Shape and are described only by their rational. Emitting both columns keeps those
+            // distinguishable from a shaped COMMON_TIME.
+            System.out.printf(
+                    Locale.ROOT,
+                    "time %d %s %s %s %s %s%n",
+                    staff.getId(),
+                    header.time.getShape(),
+                    header.time.getTimeRational(),
+                    Double.toString(header.time.getGrade()),
+                    box(header.time.getBounds()),
+                    value(staff.getTimeStop()));
+        } else {
+            System.out.printf(
+                    "time %d NONE - - - - - - %s%n",
+                    staff.getId(),
+                    value(staff.getTimeStop()));
         }
     }
 

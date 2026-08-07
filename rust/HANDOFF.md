@@ -43,7 +43,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Spot-to-system dispatch | 2739/2739 spot centroids on 8 sheets, exact |
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
-| Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
+| Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
@@ -1015,6 +1015,58 @@ both a setter and a getter, read the getter. And a hypothesis that explains the
 *pattern* of failures -- "all nine are bass clefs" -- can still be the wrong
 mechanism, so it is worth the ten minutes to test it before writing it down as
 fact.
+
+## KEY and TIME: measured before starting (2026-08-07)
+
+### How much of the corpus exercises them
+
+Worth knowing before planning: a stage with two examples on nine pages needs a
+different approach from one with sixty. `ClefProbe` now emits `key` and `time`
+rows per staff, absence included.
+
+```
+key:  34 of 65 staves     fifths -3 (x12), 2 (x10), -2 (x6), -1 (x6)
+time: 17 of 65 staves     COMMON_TIME (x7), TIME_TWO_FOUR (x7),
+                          TIME_THREE_FOUR (x2), one with a null Shape
+```
+
+Both are well exercised. The null-shape time is not a defect: `TimePairInter`
+and `TimeCustomInter` carry no single `Shape` and are described only by their
+rational, so the oracle emits `getTimeRational()` alongside the shape.
+
+### The font layer is already done for KEY, and half done for TIME
+
+The scout now sweeps eleven shapes rather than six -- the clefs plus `FLAT`,
+`NATURAL`, `SHARP`, `COMMON_TIME` and `CUT_TIME` -- and every one of them
+behaves exactly as the clefs did:
+
+- all eleven centroid offsets are size-independent, checked at seven interlines
+  and emitted only on agreement, so they are pinned as constants;
+- **1276 of 1276** swept outline boxes match, the same `FT_DivFix`/`FT_MulFix`
+  fixed-point law, no exceptions;
+- the `UngradedOutline` guard never fired, so every one of these boxes is set by
+  an on-curve point and the curve-interior ordering question stays theoretical.
+
+So `KeyBuilder` needs nothing further from the font.
+
+### What TIME still needs, and it is not a detail
+
+`TimeBuilder` cannot be finished with single-glyph layout, and the corpus proves
+it: seven staves carry `TIME_TWO_FOUR` and two `TIME_THREE_FOUR`, which are
+**numerator-over-denominator** symbols -- two separate `TextLayout`s stacked by
+`NumDenSymbol`, not one glyph. `TIME_TWELVE` and `TIME_SIXTEEN` are a second
+composite form again: two codepoints in a single string, so one layout but two
+glyphs, needing advance composition.
+
+`codepoint()` therefore returns `None` for every composite shape rather than
+pretending, and `layout_bounds` will report a missing symbol rather than an
+invented box. Three distinct pieces of work, in order:
+
+1. two-glyph layout within one string (advances), for `TIME_TWELVE`/`TIME_SIXTEEN`;
+2. `NumDenSymbol` stacking, for the num-over-den shapes the corpus actually uses;
+3. `TimeBuilder` itself.
+
+`KeyBuilder` has no such blocker and should go first.
 
 ## Open threads, in the order worth taking them
 

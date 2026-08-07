@@ -113,6 +113,11 @@ pub fn centroid_offset(family: MusicFamily, shape: &str) -> Option<CentroidOffse
         "G_CLEF_8VB" => (5.249_130_899_418_475e-4, -0.013_285_699_185_629_44),
         "C_CLEF" => (-0.065_804_711_271_528_7, -0.017_314_097_660_159_4),
         "PERCUSSION_CLEF" => (-0.023_092_249_738_606_407, -0.012_492_505_937_602_705),
+        "FLAT" => (-0.190_418_948_238_114_12, 0.045_228_146_163_764_915),
+        "NATURAL" => (-0.058_041_393_978_811_25, -0.014_796_444_578_689_172),
+        "SHARP" => (-0.027_324_019_122_980_99, -0.012_605_241_156_798_785),
+        "COMMON_TIME" => (-0.078_741_903_680_102_81, -0.046_499_610_814_653_7),
+        "CUT_TIME" => (-0.085_979_469_418_984_77, -0.022_231_619_145_085_146),
         _ => return None,
     };
     Some(CentroidOffset { x, y })
@@ -133,8 +138,12 @@ pub fn symbol_centroid(family: MusicFamily, shape: &str, box_: Rectangle) -> Opt
 
 /// The SMuFL codepoint Audiveris' `BravuraSymbols` assigns to a shape.
 ///
-/// Only the `ClefBuilder.HEADER_CLEF_SHAPES` set is present so far. Each is a single codepoint, so
-/// a layout is one glyph and [`layout_bounds`] does not have to compose advances.
+/// Every shape here is a **single** codepoint, so a layout is one glyph and [`layout_bounds`] does
+/// not have to compose advances. That is a real restriction rather than a stage of completeness:
+/// `TIME_TWELVE` and `TIME_SIXTEEN` are two codepoints in one string, and the num-over-den shapes
+/// such as `TIME_TWO_FOUR` are two separate layouts stacked by `NumDenSymbol`. Those need
+/// composition ported before they can appear here, and returning `None` keeps them from being
+/// silently mistaken for absent shapes.
 #[must_use]
 pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
     let MusicFamily::Bravura = family;
@@ -145,6 +154,11 @@ pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
         "C_CLEF" => Some(0xE05C),
         "F_CLEF" => Some(0xE062),
         "PERCUSSION_CLEF" => Some(0xE069),
+        "COMMON_TIME" => Some(0xE08A),
+        "CUT_TIME" => Some(0xE08B),
+        "FLAT" => Some(0xE260),
+        "NATURAL" => Some(0xE261),
+        "SHARP" => Some(0xE262),
         _ => None,
     }
 }
@@ -282,13 +296,19 @@ fn oracle() -> HashMap<String, String> {
 mod tests {
     use super::*;
 
-    const CLEFS: [&str; 6] = [
+    /// Every shape the scout sweeps, which is every single-glyph shape the header stages need.
+    const SHAPES: [&str; 11] = [
         "F_CLEF",
         "G_CLEF",
         "G_CLEF_8VA",
         "G_CLEF_8VB",
         "C_CLEF",
         "PERCUSSION_CLEF",
+        "FLAT",
+        "NATURAL",
+        "SHARP",
+        "COMMON_TIME",
+        "CUT_TIME",
     ];
 
     #[test]
@@ -298,7 +318,7 @@ mod tests {
         // both guarantee shortest-round-trip, so an exact match is available and anything less
         // would mean a transcription error had been rounded into invisibility.
         let oracle = oracle();
-        for shape in CLEFS {
+        for shape in SHAPES {
             let row = oracle
                 .get(&format!("musicfont.offset.{shape}"))
                 .unwrap_or_else(|| panic!("oracle has no offset for {shape}"));
@@ -349,7 +369,7 @@ mod tests {
         // as a claim in a doc comment: if a future capture ever reports two-valued alpha, the
         // rasteriser stops being the obstacle and this decision should be revisited.
         let oracle = oracle();
-        for shape in CLEFS {
+        for shape in SHAPES {
             let row = oracle
                 .get(&format!("musicfont.coverage.{shape}"))
                 .unwrap_or_else(|| panic!("oracle has no coverage for {shape}"));
@@ -408,7 +428,7 @@ mod tests {
         // were the control box instead of the true box, the curved clefs would miss here.
         let oracle = oracle();
         let mut checked = 0;
-        for shape in CLEFS {
+        for shape in SHAPES {
             for interline in 5..=120 {
                 let Some(row) = oracle.get(&format!("musicfont.bounds.{shape}.{interline}")) else {
                     continue;
@@ -430,7 +450,7 @@ mod tests {
         }
         // Guards against the whole loop silently grading nothing, which a key-format slip would
         // otherwise turn into a green run.
-        assert_eq!(checked, 6 * 116, "swept rows actually compared");
+        assert_eq!(checked, SHAPES.len() * 116, "swept rows actually compared");
     }
 
     #[test]

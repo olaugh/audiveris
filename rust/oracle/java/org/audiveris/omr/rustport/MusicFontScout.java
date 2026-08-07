@@ -40,14 +40,30 @@ import java.util.TreeSet;
 
 public class MusicFontScout
 {
-    /** `ClefBuilder.HEADER_CLEF_SHAPES`, the only shapes HEADERS' clef stage considers. */
+    /**
+     * Every single-glyph shape the header stages need.
+     *
+     * <p>The clefs are `ClefBuilder.HEADER_CLEF_SHAPES`. The three alterations are what
+     * `KeyBuilder` places, and `COMMON_TIME`/`CUT_TIME` are the two time signatures Bravura draws
+     * with one codepoint.
+     *
+     * <p>Deliberately absent are the composite time shapes. `TIME_TWO_FOUR` and friends are
+     * numerator-over-denominator symbols laid out from two `TextLayout`s, and `TIME_TWELVE` and
+     * `TIME_SIXTEEN` are two codepoints in one string; neither is a single glyph, so neither is
+     * measurable by the sweep below without first porting the composition.
+     */
     private static final Shape[] HEADER_CLEF_SHAPES = {
         Shape.F_CLEF,
         Shape.G_CLEF,
         Shape.G_CLEF_8VA,
         Shape.G_CLEF_8VB,
         Shape.C_CLEF,
-        Shape.PERCUSSION_CLEF
+        Shape.PERCUSSION_CLEF,
+        Shape.FLAT,
+        Shape.NATURAL,
+        Shape.SHARP,
+        Shape.COMMON_TIME,
+        Shape.CUT_TIME
     };
 
     /**
