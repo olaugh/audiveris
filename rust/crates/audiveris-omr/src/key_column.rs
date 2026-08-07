@@ -17,6 +17,7 @@ use audiveris_image::{
     run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
 };
 
+use crate::clef_column::{chamfer_gap, component_pixels, push_unique};
 use crate::{
     clef_column::NeutralClefKind,
     headers_step::HeadlessHeaderSystem,
@@ -949,7 +950,9 @@ pub trait StaffPitchGeometry {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeKeyParameters {
     pub minimum_component_weight: usize,
-    pub maximum_component_gap: i32,
+    /// Java `maxPartGap`, a `toPixelsDouble` distance. Kept fractional: it feeds a chamfer
+    /// distance comparison, which Java performs in double.
+    pub maximum_component_gap: f64,
     /// Java `isTooLight`.
     pub minimum_glyph_weight: usize,
     /// Java `isTooHeavy`. Previously absent, so an over-heavy compound was accepted.
@@ -1213,7 +1216,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
             parts.push(NativeKeyPart { id, component });
         }
         parts.sort_by_key(|part| part.component.left);
-        let groups = group_key_parts(&parts, parameters.maximum_component_gap);
+        let groups = enumerate_key_subsets(&parts, parameters);
         let mut proposals = Vec::new();
         for shape in [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Sharp] {
             let mut alters = Vec::new();
@@ -1336,25 +1339,140 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
     }
 }
 
-fn group_key_parts(parts: &[NativeKeyPart], maximum_gap: i32) -> Vec<Vec<usize>> {
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    for (index, part) in parts.iter().enumerate() {
-        let joins = groups
-            .last()
-            .and_then(|group| group.last())
-            .is_some_and(|previous| {
-                let right = parts[*previous].component.left
-                    + i32::try_from(parts[*previous].component.width).unwrap_or(i32::MAX)
-                    - 1;
-                part.component.left - right - 1 <= maximum_gap
-            });
-        if joins {
-            groups.last_mut().unwrap().push(index);
-        } else {
-            groups.push(vec![index]);
+/// Java `Glyphs.buildLinks` + `ConnectivityInspector` + `GlyphCluster.decompose`, for key parts.
+///
+/// This replaces a left-to-right grouping that merged every part within `maxPartGap` into one
+/// compound. Java does not group; it *enumerates subsets* of each connected set, so a run of six
+/// sharps yields each sharp alone, each adjacent pair, and so on -- and the classifier decides.
+/// Grouping instead collapsed a whole key signature into a single glyph whose width then exceeded
+/// `maxGlyphWidth`, so every key on the corpus was rejected outright.
+///
+/// The order matters and is Java's: connected sets in left-abscissa order, seeds within a set by
+/// **descending weight**, then depth-first growth through graph neighbours. Downstream keeps only
+/// the first `maximum_alters` results, so a different order would keep different alterations.
+fn enumerate_key_subsets(
+    parts: &[NativeKeyPart],
+    parameters: NativeKeyParameters,
+) -> Vec<Vec<usize>> {
+    let pixels: Vec<Vec<(i32, i32)>> = parts
+        .iter()
+        .map(|part| component_pixels(&part.component))
+        .collect();
+    let mut order = (0..parts.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&index| parts[index].component.left);
+
+    let mut graph = vec![Vec::new(); parts.len()];
+    for (position, &one) in order.iter().enumerate() {
+        for &two in &order[position + 1..] {
+            if chamfer_gap(&pixels[one], &pixels[two]) <= parameters.maximum_component_gap {
+                graph[one].push(two);
+                graph[two].push(one);
+            }
         }
     }
-    groups
+
+    let mut seen = vec![false; parts.len()];
+    let mut subsets = Vec::new();
+    for &root in &order {
+        if seen[root] {
+            continue;
+        }
+        let mut stack = vec![root];
+        let mut set = Vec::new();
+        seen[root] = true;
+        while let Some(current) = stack.pop() {
+            set.push(current);
+            for &neighbor in graph[current].iter().rev() {
+                if !seen[neighbor] {
+                    seen[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+        let mut seeds = set;
+        seeds.sort_by(|&one, &two| {
+            parts[two]
+                .component
+                .weight
+                .cmp(&parts[one].component.weight)
+        });
+        let mut considered = Vec::new();
+        for seed in seeds {
+            push_unique(&mut considered, seed);
+            grow_key_subset(
+                parts,
+                &graph,
+                parameters,
+                vec![seed],
+                considered.clone(),
+                &mut subsets,
+            );
+        }
+    }
+    subsets
+}
+
+/// The union box of a subset, in the same `(width, height)` terms Java's `isTooLarge` reads.
+fn key_subset_extent(parts: &[NativeKeyPart], subset: &[usize]) -> (f64, f64) {
+    let mut left = i32::MAX;
+    let mut top = i32::MAX;
+    let mut right = i32::MIN;
+    let mut bottom = i32::MIN;
+    for &index in subset {
+        let component = &parts[index].component;
+        left = left.min(component.left);
+        top = top.min(component.top);
+        right = right.max(component.left + i32::try_from(component.width).unwrap_or(i32::MAX));
+        bottom = bottom.max(component.top + i32::try_from(component.height).unwrap_or(i32::MAX));
+    }
+    (f64::from(right - left), f64::from(bottom - top))
+}
+
+/// Depth-first subset growth, Java `GlyphCluster.decompose`'s recursion.
+///
+/// Pruning uses **both** dimensions, because the key stage's `isTooLarge` tests width *and*
+/// height. The clef stage prunes on height alone, because its adapter only tests height -- the
+/// two adapters genuinely differ and the difference is not an oversight to harmonise.
+fn grow_key_subset(
+    parts: &[NativeKeyPart],
+    graph: &[Vec<usize>],
+    parameters: NativeKeyParameters,
+    subset: Vec<usize>,
+    seen: Vec<usize>,
+    subsets: &mut Vec<Vec<usize>>,
+) {
+    let (width, height) = key_subset_extent(parts, &subset);
+    if width > parameters.maximum_alter_width || height > parameters.maximum_alter_height {
+        return;
+    }
+    subsets.push(subset.clone());
+
+    let mut outliers = Vec::new();
+    for &part in &subset {
+        for &neighbor in &graph[part] {
+            if !subset.contains(&neighbor) {
+                push_unique(&mut outliers, neighbor);
+            }
+        }
+    }
+    outliers.retain(|part| !seen.contains(part));
+    let mut newly_seen = seen;
+    for outlier in outliers {
+        push_unique(&mut newly_seen, outlier);
+        let mut larger = subset.clone();
+        larger.push(outlier);
+        let (width, height) = key_subset_extent(parts, &larger);
+        if width <= parameters.maximum_alter_width && height <= parameters.maximum_alter_height {
+            grow_key_subset(
+                parts,
+                graph,
+                parameters,
+                larger,
+                newly_seen.clone(),
+                subsets,
+            );
+        }
+    }
 }
 
 fn native_key_range(
@@ -1607,7 +1725,7 @@ mod tests {
                 1,
                 NativeKeyParameters {
                     minimum_component_weight: 2,
-                    maximum_component_gap: 2,
+                    maximum_component_gap: 2.0,
                     minimum_glyph_weight: 4,
                     // Permissive bounds: this fixture exercises grouping and ranking, not the
                     // size gate, so the gate must not be what decides its outcome.

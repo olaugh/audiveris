@@ -45,7 +45,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
-| Key classification | driver built and runs; blocked on subset enumeration (see below) |
+| Key classification | sharps found; **flat keys systematically missing** (see below) |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -1189,35 +1189,54 @@ constants** -- `maxClefEnd` (94.5), `yCoreMargin` (10.5) and `maxSliceDist`
 (10.5). `Math.rint` sends all three to even. A port using `round()` fails all
 three, and I got the expected value wrong on two of them while writing the tests.
 
-### The driver is built, and it found the real blocker on its first run
+### The driver, and what it has found so far
 
 `tests/key_headers_corpus.rs` assembles the whole chain -- GRID, the clef stage,
-then `NativeKeyProposalRecognizer` over `BundledKeyClassifier` -- and **chains**
-rather than isolating: `browseStart` comes from the clef stage's own `clefStop`,
-as `KeyColumn` does, so the join is under test too. Only the header start is
-still supplied from the oracle.
+then the key stage -- and **chains** rather than isolating: `browseStart` comes
+from the clef stage's own `clefStop`, as `KeyColumn` does, so the join is under
+test too. Only the header start is still supplied from the oracle.
 
-It runs end to end, reaches all 65 staves and all 34 key-bearing ones, and finds
-**no key at all**. A uniform failure is a structural answer, and it localises to
-one function.
+**First finding, now fixed: subset enumeration.** `group_key_parts` merged every
+part within `maxPartGap` into one compound. Java's `GlyphCluster.decompose()`
+enumerates *subsets* of each connected set. At interline 21 the gap is 31.5 px
+and key sharps sit about 20 px apart, so a whole signature collapsed into one
+glyph whose width exceeded `maxGlyphWidth` (42 px) and was rejected -- **no key
+was found anywhere on the corpus.** `enumerate_key_subsets` now mirrors the clef
+side's walk: connected sets in left-abscissa order, seeds by descending weight,
+depth-first growth. Order matters, because downstream keeps only the first
+`maximum_alters` results.
 
-**`key_column::group_key_parts` is a single-grouping approximation of Java's
-subset enumeration.** It walks the parts left to right and merges everything
-within `maximum_component_gap` into one group. Java's `GlyphCluster.decompose()`
-enumerates *subsets* of each connected set, and `keepCandidate` keeps the best
-per slice. With `maxPartGap` at 1.5 interline -- 31.5 px at interline 21 -- and
-the sharps of a key signature roughly 20 px apart, every alteration merges into
-a single compound whose width then exceeds `maxGlyphWidth` (42 px) and is
-rejected outright.
+Two deliberate differences from the clef walk. It prunes on width *and* height,
+because the key adapter's `isTooLarge` tests both while the clef adapter tests
+only height. And `maximum_component_gap` is now `f64`: it feeds a chamfer
+distance that Java compares in double.
 
-The clef side already has exactly the machinery this needs: `near_graph`,
-`connected_sets` and the subset walk behind `SubsetContext`. Porting the same
-enumeration for keys is the fix.
+That took the grade from **34 of 34 key-bearing staves failing** to **29 of 65
+disagreeing**.
 
-The test is `#[ignore]`d rather than deleted or left red, with the diagnosis in
-the body. Un-ignore it after the enumeration lands; expect it to then find real
-per-staff disagreements rather than passing outright, since the clef equivalent
-did on its first honest run.
+**Second finding, open: flats.** The residue is not noise.
+
+```
+24  no key where Java found one   -- of which 23 are FLAT keys (-1, -2, -3)
+ 4  key found, box off by 1 px in x or width
+ 1  key found where Java found none
+```
+
+Flats are systematically missing and sharps are not: 23 of the 24 absences are
+flat signatures, and the single sharp absence is one staff of one page. Size is
+not the cause -- a one-flat key measures 20 x 51 against bounds of 10.5..42 wide
+and up to 79.8 tall.
+
+So the lead is flat-specific. First place to look is the pitch: the positions a
+flat occupies differ from a sharp's, so `maximum_delta_pitch_one`/`_four` and
+the pitch each candidate is measured against are the suspects. Second is
+structural -- Java runs **two `ShapeBuilder` passes**, one per key shape, each
+with its own ROI and slices, and the native code iterates `[Flat, Sharp]` inside
+a single pass. Whether that is faithful is worth checking directly rather than
+assumed.
+
+Leave the four 1-pixel box differences until the flats are found; a changed
+candidate set will move them anyway.
 
 ## Open threads, in the order worth taking them
 

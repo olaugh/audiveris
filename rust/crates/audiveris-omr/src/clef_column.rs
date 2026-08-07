@@ -602,7 +602,7 @@ fn bounds_intersect(one: HeaderBounds, two: ClefLookupRect) -> bool {
         && two.y < one.y + one.height
 }
 
-fn component_pixels(component: &GlyphComponent) -> Vec<(i32, i32)> {
+pub(crate) fn component_pixels(component: &GlyphComponent) -> Vec<(i32, i32)> {
     let mut pixels = Vec::with_capacity(component.weight);
     let min_sequence = component
         .runs
@@ -656,7 +656,10 @@ fn near_graph(parts: &[RegisteredPart], maximum_gap: f64) -> Vec<Vec<usize>> {
     graph
 }
 
-fn chamfer_gap(one: &[(i32, i32)], two: &[(i32, i32)]) -> f64 {
+/// Java `GlyphLink` distance: the chamfer metric `Glyphs.buildLinks` measures parts with.
+///
+/// Shared with the key stage, which links its alteration parts the same way.
+pub(crate) fn chamfer_gap(one: &[(i32, i32)], two: &[(i32, i32)]) -> f64 {
     one.iter()
         .flat_map(|&(one_x, one_y)| {
             two.iter().map(move |&(two_x, two_y)| {
@@ -697,7 +700,7 @@ fn connected_sets(graph: &[Vec<usize>], parts: &[RegisteredPart]) -> Vec<Vec<usi
     sets
 }
 
-fn push_unique(items: &mut Vec<usize>, item: usize) {
+pub(crate) fn push_unique(items: &mut Vec<usize>, item: usize) {
     if !items.contains(&item) {
         items.push(item);
     }

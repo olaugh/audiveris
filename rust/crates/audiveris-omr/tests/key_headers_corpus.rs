@@ -138,25 +138,29 @@ impl StaffPitchGeometry for GridPitch {
 }
 
 #[test]
-#[ignore = "key_column groups parts instead of enumerating subsets; see the note below"]
+#[ignore = "flat keys are not found; see the note below"]
 fn native_keys_match_java_on_every_corpus_staff() {
-    // WHAT THIS CURRENTLY SHOWS, and why it is `#[ignore]` rather than deleted or left red.
+    // WHERE THIS STANDS, and why it is `#[ignore]` rather than deleted or left red.
     //
-    // The driver runs end to end: all 65 staves are reached and all 34 key-bearing ones are
-    // compared. It produces **no key at all**, uniformly — which is a structural answer rather
-    // than per-staff drift, and it localises to one function.
+    // Porting `GlyphCluster.decompose`'s subset enumeration (it used to group parts instead) took
+    // this from **34 of 34 key-bearing staves failing** to **29 of 65 disagreeing**, and the
+    // residue is not noise:
     //
-    // `key_column::group_key_parts` walks the parts left to right and merges every part within
-    // `maximum_component_gap` into a *single* group. Java does not: `GlyphCluster.decompose()`
-    // enumerates **subsets** of each connected set and `keepCandidate` keeps the best per slice.
-    // With `maxPartGap` at 1.5 interline — 31.5 px at interline 21 — and the sharps of a key
-    // signature roughly 20 px apart, every alteration merges into one compound, whose width then
-    // exceeds `maxGlyphWidth` (2.0 interline = 42 px) and is rejected. Zero keys.
+    //   24  no key where Java found one   -- of which 23 are FLAT keys (-1, -2, -3)
+    //    4  key found, box off by 1 px in x or width
+    //    1  key found where Java found none
     //
-    // The clef side already has the machinery this needs: `near_graph`, `connected_sets` and the
-    // subset walk behind `SubsetContext`. Porting the same enumeration for keys is the fix, after
-    // which this test should be un-ignored and is expected to find real disagreements — the clef
-    // equivalent did on its first honest run.
+    // **Flats are systematically missing and sharps are not.** 23 of the 24 absences are flat
+    // signatures; the single sharp absence is one staff of one page. Size is not the cause: a
+    // one-flat key measures 20 x 51 against bounds of 10.5..42 wide and up to 79.8 tall, so it
+    // clears the gate comfortably. The lead is therefore flat-specific -- the expected pitches a
+    // flat occupies differ from a sharp's, so `maximum_delta_pitch_one`/`_four` and the pitch the
+    // candidate is measured against are the first place to look, followed by whether the two
+    // `ShapeBuilder` passes Java runs (one per key shape, each with its own ROI and slices) are
+    // faithfully reproduced by iterating `[Flat, Sharp]` inside one pass.
+    //
+    // The four 1-pixel box differences are a separate, smaller question and should be left until
+    // the flats are found, since a changed candidate set will move them anyway.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;
@@ -312,7 +316,7 @@ fn native_keys_match_java_on_every_corpus_staff() {
                 NativeKeyParameters {
                     minimum_component_weight: usize::try_from(extractor.minimum_part_weight)
                         .unwrap_or(0),
-                    maximum_component_gap: extractor.maximum_part_gap.round_ties_even() as i32,
+                    maximum_component_gap: extractor.maximum_part_gap,
                     minimum_glyph_weight: usize::try_from(extractor.minimum_glyph_weight)
                         .unwrap_or(0),
                     maximum_glyph_weight: usize::try_from(extractor.maximum_glyph_weight)
