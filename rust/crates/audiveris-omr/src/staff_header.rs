@@ -166,6 +166,28 @@ impl Default for StaffHeader {
 }
 
 impl StaffHeader {
+    /// Java `Staff.getClefStop()`.
+    ///
+    /// **Not** the value `setClefStop` stored, and the difference is load-bearing. `registerClefs`
+    /// computes an end from `glyph.getBounds().intersection(clefBox)` and stores it on the clef
+    /// range, but once a header clef exists Java never reads that back: the getter recomputes
+    /// `(clef.bounds.x + width) - 1` from the clef's own bounds and ignores the glyph entirely.
+    /// The stored value survives only as a fallback for a staff whose clef was never selected.
+    ///
+    /// The two agree whenever the glyph is at least as wide as its symbol, which was true on 56 of
+    /// the 65 corpus staves — so reading the stored value instead looks correct almost everywhere
+    /// and is wrong on bass clefs, whose ink is narrower than the `F_CLEF` symbol.
+    #[must_use]
+    pub fn clef_stop(&self) -> Option<i32> {
+        if let Some(clef) = self.clef.as_ref() {
+            return Some(clef.bounds.x + clef.bounds.width - 1);
+        }
+        self.clef_range
+            .as_ref()
+            .filter(|range| range.valid)
+            .and_then(StaffHeaderRange::precise_stop)
+    }
+
     /// Java's public constructor initializes `stop` to `start`.
     #[must_use]
     pub fn new(start: i32) -> Self {
@@ -270,5 +292,50 @@ mod tests {
             range.to_string(),
             "SUCCESS bStart=10 bStop=40 start=14 stop=31"
         );
+    }
+}
+#[cfg(test)]
+mod clef_stop_tests {
+    use super::*;
+
+    fn bounds(x: i32, width: i32) -> HeaderBounds {
+        HeaderBounds {
+            x,
+            y: 0,
+            width,
+            height: 10,
+        }
+    }
+
+    #[test]
+    fn a_present_clef_wins_over_whatever_the_range_stored() {
+        // The case that matters: `registerClefs` stored an intersection-derived stop on the range
+        // and Java then ignores it. A bass clef whose ink is narrower than its symbol is exactly
+        // where the two disagree, so the stored value here is deliberately the smaller one.
+        let mut header = StaffHeader::new(100);
+        let mut range = StaffHeaderRange::default();
+        range.set_stop(601);
+        range.valid = true;
+        header.clef_range = Some(range);
+        header.clef = Some(HeaderComponent::new(1, bounds(548, 55)));
+        assert_eq!(header.clef_stop(), Some(602));
+    }
+
+    #[test]
+    fn the_stored_stop_is_the_fallback_and_only_when_valid() {
+        let mut header = StaffHeader::new(100);
+        assert_eq!(header.clef_stop(), None, "no clef and no range");
+
+        let mut range = StaffHeaderRange::default();
+        range.set_stop(601);
+        header.clef_range = Some(range);
+        assert_eq!(
+            header.clef_stop(),
+            None,
+            "an invalid range is not a clef stop, as Java's getClefStop checks"
+        );
+
+        header.clef_range.as_mut().unwrap().valid = true;
+        assert_eq!(header.clef_stop(), Some(601));
     }
 }

@@ -1086,6 +1086,29 @@ Two details worth not copying wrong:
   naturals appear only as a *cancel*, on `KeyBuilder`'s own path. Mapping it
   would let a cancel be counted as a key member.
 
+### A latent divergence the clefStop finding predicted
+
+`getClefStop()` recomputing rather than returning the stored value is not a
+curiosity confined to the clef stage: `KeyColumn` uses it to pick the key's
+browse start, `browseStart = clefStop + 1`. Rust's `retrieve_keys` was reading
+`clef_range.precise_stop()` -- the *stored* value -- so on the nine bass-clef
+staves where the two forms differ, the key stage would have begun browsing one
+or two pixels off. Nothing had run far enough to notice.
+
+`StaffHeader::clef_stop()` now ports the getter, and `retrieve_keys` uses it.
+
+Fixing it exposed a second, smaller divergence. Java's `getClefStop()` reads the
+stored stop **only when `clefRange.valid`**, and `setClefStop` sets stop and
+valid together; the old Rust path ignored `valid` entirely. A `key_column`
+fixture had been constructing a range with a stop but no valid flag -- a state
+the pipeline cannot reach -- and passing because of that leniency. The fixture
+now mirrors `setClefStop`.
+
+Worth drawing the general lesson, since this is the third instance: when Java
+exposes a field through a getter that does anything other than return it, the
+port must call the getter everywhere Java does, not just where the difference
+was first noticed.
+
 What is left for KEY is the driver and the corpus comparison, exactly as for
 clefs: assemble `NativeKeyProposalRecognizer` over this classifier and grade the
 34 key-bearing staves in `clef-headers.txt` on fifths, box and `keyStop`.

@@ -520,10 +520,12 @@ where
                 .header
                 .as_ref()
                 .ok_or(KeyColumnError::MissingHeader { staff_id: staff.id })?;
+            // Java `KeyColumn`: `browseStart = (clefStop != null) ? clefStop + 1
+            // : staff.getHeaderStop() + 1`, where `clefStop` is `Staff.getClefStop()` — which
+            // recomputes from the clef's bounds rather than returning the stored range value. See
+            // `StaffHeader::clef_stop`; reading the stored value here was wrong on bass clefs.
             let browse_start = header
-                .clef_range
-                .as_ref()
-                .and_then(StaffHeaderRange::precise_stop)
+                .clef_stop()
                 .map_or_else(|| header.stop.wrapping_add(1), |stop| stop.wrapping_add(1));
             self.builders.insert(
                 staff.id,
@@ -1621,8 +1623,12 @@ mod tests {
         let mut header = StaffHeader::new(start);
         header.stop = start + 2;
         if let Some(stop) = clef_stop {
+            // Java `Staff.setClefStop` sets the stop *and* marks the range valid, and
+            // `getClefStop` reads the stop only when it is valid. Constructing one without the
+            // other produces a state the pipeline cannot reach.
             let mut range = StaffHeaderRange::default();
             range.set_stop(stop);
+            range.valid = true;
             header.clef_range = Some(range);
         }
         staff.header = Some(header);
