@@ -1099,24 +1099,47 @@ behaves exactly as the clefs did:
 
 So `KeyBuilder` needs nothing further from the font.
 
-### What TIME still needs, and it is not a detail
+### TIME: composite layout and classifier in place (updated 2026-08-08)
 
-`TimeBuilder` cannot be finished with single-glyph layout, and the corpus proves
-it: seven staves carry `TIME_TWO_FOUR` and two `TIME_THREE_FOUR`, which are
-**numerator-over-denominator** symbols -- two separate `TextLayout`s stacked by
-`NumDenSymbol`, not one glyph. `TIME_TWELVE` and `TIME_SIXTEEN` are a second
-composite form again: two codepoints in a single string, so one layout but two
-glyphs, needing advance composition.
+The num/den stacking is ported: `num_den_dimension` measures both digit layouts
+with the graded `layout_bounds`, separates their centres by
+`2 * getStaffInterline(font)`, and `rint`s the raw composite rectangle once at
+the end, as `ShapeSymbol.getDimension` does. Two quirks are load-bearing and
+pinned by tests:
 
-`codepoint()` therefore returns `None` for every composite shape rather than
-pretending, and `layout_bounds` will report a missing symbol rather than an
-invented box. Three distinct pieces of work, in order:
+- `getStaffInterline` is `rint((pointSize + 2) / 4.0)` -- the `+ 2` puts every
+  standard size on a rounding **tie**, so interline 21 answers 22 while 20
+  answers 20, and the num/den gap inherits the parity. The expected value was
+  written wrong on first try again; the tie table is not intuition-safe.
+- The composite box is centred with **integer-division** halves (`dim/2`), not
+  `rint(dim/2.0)` -- Java builds a `Dimension` first, so an odd height loses
+  its half downward.
 
-1. two-glyph layout within one string (advances), for `TIME_TWELVE`/`TIME_SIXTEEN`;
-2. `NumDenSymbol` stacking, for the num-over-den shapes the corpus actually uses;
-3. `TimeBuilder` itself.
+The result cross-checks against reality before any driver exists:
+`num_den_dimension(2, 4, il 21)` is exactly the `(36, 87)` box Java's HEADERS
+stores on every `TIME_TWO_FOUR` staff of the corpus.
 
-`KeyBuilder` has no such blocker and goes first.
+The sweep now grades **14 shapes x 116 sizes** (the three corpus digits joined
+it, centroid offsets pinned). `time_classifier.rs` fills the
+`HeaderTimeShapeClassifier` seam: noise gate, rank-then-filter over the full
+label set, `WholeTimes`/`PartialTimes` mappings, and the two symbol-bounds
+constructions -- `AbstractInter`'s rint-halved font box for COMMON/CUT, the
+int-halved composite dimension for num/den shapes. The time classifier reads
+the **staff-specific** interline, as clefs do; keys read the sheet's -- all
+three choices recorded at their seams.
+
+Multi-digit numbers (`TIME_TWELVE`, `TIME_SIXTEEN`, `TIME_TWELVE_EIGHT`) error
+loudly (`FontError::UnsupportedNumber`) rather than guess: their boxes need
+glyph-advance composition that nothing grades yet, and a silent skip would
+consume rank slots differently from Java. None appear on the corpus.
+
+**Still open for TIME:** the driver and the corpus grading of the 17
+time-bearing staves, chained after clef and key exactly as keys chained after
+clefs. Note `Staff.getTimeStop()` recomputes `bounds.right - 1` from
+`header.time` and shadows the stored value -- the same getter trap as
+`getClefStop`, predicted this time instead of discovered (the oracle's stop
+column already confirms it: box 451+36 = 487, stop 486).
+
 
 ### KEY: the classifier seam is filled
 
