@@ -1238,7 +1238,52 @@ constants** -- `maxClefEnd` (94.5), `yCoreMargin` (10.5) and `maxSliceDist`
 (10.5). `Math.rint` sends all three to even. A port using `round()` fails all
 three, and I got the expected value wrong on two of them while writing the tests.
 
-### The driver, and what it has found so far
+### The projection-peak port, which closed every catalogued residual at once
+
+The decisive structural fact, read out of `KeyBuilder.process` rather than
+guessed: **Java does not classify its way to a key signature, it counts its way
+there.** The staff-free projection is walked for stem-like peaks, the signature
+(count and shape family) is inferred from peak count and *spacing* -- sharps two
+stems per item, flats one, spacing thresholds deciding which -- and only then is
+one slice allocated per expected alteration. Classification happens inside that
+structure: candidates from subset enumeration are assigned **best-per-slice** by
+rounded centroid, and slices still empty get a second extraction pass at a lower
+grade floor with the neighbouring slices' chosen glyphs *erased from the crop*
+(`KeyRoi.getSlicePixels`, `cropNeighbors`).
+
+`key_peaks.rs` carries the pipeline as pure functions over `IntegerFunction` --
+browseArea, checkSpace, createPeak (with `isStemLike` injected, since it alone
+touches the raster), mergePeaks, purgeLightPeaks, inferSignature,
+checkPeakDeltas, refineSignature, refineShapeStop, computeStarts,
+allocateSlices -- reusing the HiLo finder audiveris-core already had from SCALE.
+`classify_key_shapes` was rewritten onto it, with Java's two grade floors
+(`keyAlterMinGrade1`/`2` over intrinsic: 0.125 and 0.0125), the `purgeParts`
+quirks (`bounds.x == xMax` drop, cap 8 by descending weight), the
+`embracesSlicePeaks` gate (half-open on the right, and peak centres are
+half-integers), and the trailing-space check for single-item candidates.
+
+Grade history: **34/34 key-bearing failing -> 29 -> 28 -> 20 -> 3 of 65.**
+The fixture lesson repeated twice while porting: bare synthetic stems fail
+`refineSignature`'s flat-trail requirement exactly as Java would fail them --
+the unit fixtures now draw bowls -- and `mergePeaks` joins only truly adjacent
+peaks (`min - prevMax <= 1` is zero blank columns).
+
+### What is left: three staves, all on the corpus' only JPEG
+
+```
+BachInvention5 staff 3:  (124,716,30,67)  vs (124,716,45,76)  third flat missing
+BachInvention5 staff 11: (121,2148,31,68) vs (121,2148,46,77) third flat missing
+BachInvention5 staff 12: (121,2324,46,77) vs (121,2324,46,70) same box, height +7
+```
+
+The first two point at Java's **third** extraction pass, `fillMissingAlters`:
+once a clef is known, each still-empty slice is hunted again with a theoretical
+pitch window. Not yet ported. The third is a different glyph winning one slice
+and needs instrumentation, not speculation.
+
+### Superseded record of the earlier findings
+
+### The driver, and what it found before the pipeline landed
 
 `tests/key_headers_corpus.rs` assembles the whole chain -- GRID, the clef stage,
 then the key stage -- and **chains** rather than isolating: `browseStart` comes

@@ -17,9 +17,16 @@ use audiveris_image::{
     run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
 };
 
+use audiveris_core::integer_function::IntegerFunction;
+use audiveris_core::peak_finder::{HiLoPeakFinder, Quorum};
 use audiveris_music_font::{FLAT_MASS_PITCH_OFFSET, MusicFamily, area_pitch_offset};
 
 use crate::clef_column::{chamfer_gap, component_pixels, push_unique};
+use crate::key_parameters::KeyPipelineParameters;
+use crate::key_peaks::{
+    KeyPeak, KeyShapeKind, allocate_slices, browse_area, compute_starts, infer_signature,
+    merge_peaks, purge_light_peaks, refine_signature,
+};
 use crate::{
     clef_column::NeutralClefKind,
     headers_step::HeadlessHeaderSystem,
@@ -933,6 +940,9 @@ pub struct NativeKeyStaffContext {
     pub classifier_interline: i32,
     /// Number of lines on this staff, Java's `lines.size()` in `pitchPositionOf`.
     pub line_count: usize,
+    /// The staff's specific interline, which scales `refineAreaStart`'s envelope and the
+    /// trailing-space rectangle. Distinct from `classifier_interline` on a mixed-size sheet.
+    pub staff_interline: i32,
 }
 
 /// The staff geometry `Staff.pitchPositionOf` reads, at a given abscissa.
@@ -973,6 +983,8 @@ pub struct NativeKeyParameters {
     pub maximum_alters: usize,
     pub maximum_rank: usize,
     pub minimum_classifier_grade: f64,
+    /// The projection-peak constants driving signature inference and slice allocation.
+    pub pipeline: KeyPipelineParameters,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1078,36 +1090,202 @@ struct NativeKeyPart {
 
 /// Concrete staff envelope → projection range → connected glyphs → accidental
 /// proposals. Hypotheses are evaluated in Java `Shape` order: FLAT, then SHARP.
+/// Raw classifier floors: `Grades.keyAlterMinGrade1 / intrinsicRatio` and the phase-2 twin.
+const PHASE_ONE_MINIMUM_GRADE: f64 = 0.1 / 0.8;
+const PHASE_TWO_MINIMUM_GRADE: f64 = 0.01 / 0.8;
+
+/// One slot of Java's `KeyRoi`: a slice with its best glyph so far.
+#[derive(Clone, Debug)]
+struct SliceState {
+    start: i32,
+    stop: i32,
+    glyph: Option<NativeKeyGlyph>,
+    grade: Option<f64>,
+}
+
+/// Black-pixel count for one column over `height` rows, Java's projection cell.
+fn column_cumul(source: &RunTable, x: i32, y_min: i32, height: i32) -> i32 {
+    let Ok(x) = usize::try_from(x) else { return 0 };
+    if x >= source.width() {
+        return 0;
+    }
+    let mut cumul = 0;
+    for y in y_min..y_min + height {
+        let Ok(y) = usize::try_from(y) else { continue };
+        if y < source.height() && source.get(x, y) == FOREGROUND {
+            cumul += 1;
+        }
+    }
+    cumul
+}
+
+/// Java `KeyExtractor.hasStem`: a sliding window of `core_length` rows must reach the black-row
+/// quorum somewhere under the peak.
+fn has_stem_under(
+    source: &RunTable,
+    x_min: i32,
+    width: i32,
+    y_min: i32,
+    height: i32,
+    core_length: i32,
+    min_black_ratio: f64,
+) -> bool {
+    let height = usize::try_from(height).unwrap_or(0);
+    let core = usize::try_from(core_length).unwrap_or(0);
+    if core == 0 || height < core {
+        return false;
+    }
+    let mut blacks = vec![false; height];
+    for (row, black) in blacks.iter_mut().enumerate() {
+        let y = y_min + i32::try_from(row).unwrap_or(0);
+        for x in x_min..x_min + width {
+            let (Ok(ux), Ok(uy)) = (usize::try_from(x), usize::try_from(y)) else {
+                continue;
+            };
+            if ux < source.width() && uy < source.height() && source.get(ux, uy) == FOREGROUND {
+                *black = true;
+                break;
+            }
+        }
+    }
+    let quorum = (f64::from(core_length) * min_black_ratio).round_ties_even() as usize;
+    let mut count = blacks[..core].iter().filter(|&&black| black).count();
+    if count >= quorum {
+        return true;
+    }
+    for y in 1..=(height - core) {
+        if blacks[y - 1] {
+            count -= 1;
+        }
+        if blacks[y + core - 1] {
+            count += 1;
+        }
+        if count >= quorum {
+            return true;
+        }
+    }
+    false
+}
+
+/// Java `KeyExtractor.isRatherEmpty`: a run of at least `min_width` consecutive near-empty
+/// columns inside the rectangle.
+fn is_rather_empty(source: &RunTable, rect: HeaderBounds, max_cumul: i32, min_width: i32) -> bool {
+    let mut space_start = None;
+    for x in rect.x..=rect.right() {
+        let cumul = column_cumul(source, x, rect.y, rect.height);
+        if cumul <= max_cumul {
+            match space_start {
+                None => space_start = Some(x),
+                Some(start) if (x - start + 1) >= min_width => return true,
+                Some(_) => {}
+            }
+        } else {
+            space_start = None;
+        }
+    }
+    false
+}
+
+/// Java `AbstractKeyAdapter.embracesSlicePeaks`: every peak centre inside the slice must fall
+/// within the glyph's abscissa span. The glyph test is `GeoUtil.xEmbraces(Rectangle, double)`,
+/// which is half-open on the right — and the centre is a half-integer whenever a peak has even
+/// width, so the open end is reachable.
+fn embraces_slice_peaks(
+    slice_start: i32,
+    slice_stop: i32,
+    glyph: HeaderBounds,
+    peaks: &[KeyPeak],
+) -> bool {
+    for peak in peaks {
+        let center = peak.center();
+        if f64::from(slice_start) <= center && center <= f64::from(slice_stop) {
+            let embraced =
+                center >= f64::from(glyph.x) && center < f64::from(glyph.x + glyph.width);
+            if !embraced {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Java's four `AbstractKeyAdapter` size/weight predicates, together.
+fn accepts_glyph(glyph: &NativeKeyGlyph, parameters: &NativeKeyParameters) -> bool {
+    let width = f64::from(glyph.bounds.width);
+    let height = f64::from(glyph.bounds.height);
+    width >= parameters.minimum_alter_width
+        && height >= parameters.minimum_alter_height
+        && width <= parameters.maximum_alter_width
+        && height <= parameters.maximum_alter_height
+        && glyph.weight >= parameters.minimum_glyph_weight
+        && glyph.weight <= parameters.maximum_glyph_weight
+}
+
+/// Java `KeyRoi.getSlicePixels`: the slice crop, with the chosen glyphs of adjacent slices
+/// erased so a shared edge does not re-enter the extraction.
+fn slice_crop(
+    source: &RunTable,
+    rect: HeaderBounds,
+    neighbours: &[NativeKeyGlyph],
+) -> Result<RunTable, RunTableError> {
+    let x = usize::try_from(rect.x).map_err(|_| RunTableError::OutOfBounds)?;
+    let y = usize::try_from(rect.y).map_err(|_| RunTableError::OutOfBounds)?;
+    let width = usize::try_from(rect.width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height = usize::try_from(rect.height).map_err(|_| RunTableError::InvalidDimensions)?;
+    if x + width > source.width() || y + height > source.height() {
+        return Err(RunTableError::OutOfBounds);
+    }
+    let mut pixels = vec![BACKGROUND; width * height];
+    for local_y in 0..height {
+        for local_x in 0..width {
+            pixels[local_y * width + local_x] = source.get(x + local_x, y + local_y);
+        }
+    }
+    for neighbour in neighbours {
+        for (px, py) in neighbour
+            .raster
+            .foreground_points((neighbour.bounds.x, neighbour.bounds.y))
+        {
+            let local_x = px - rect.x;
+            let local_y = py - rect.y;
+            if local_x >= 0
+                && local_y >= 0
+                && (local_x as usize) < width
+                && (local_y as usize) < height
+            {
+                pixels[local_y as usize * width + local_x as usize] = BACKGROUND;
+            }
+        }
+    }
+    RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)
+}
+
 /// Java `KeyExtractor.purgeCandidates`: no part may be shared by two surviving candidates.
 ///
 /// Sort by decreasing grade, then walk in that order and drop every *later* candidate that shares
 /// any part with the current one. The best reading of a piece of ink therefore wins outright and
 /// every overlapping alternative built from the same components disappears.
 ///
-/// Without this the enumeration's own output defeats it. On carmen staff 1 the flat is recognised
-/// at grade 0.97, and a larger overlapping subset of the same ink is also called a flat at 0.147;
-/// keeping both makes a two-flat signature whose second alteration is nowhere near where a second
-/// flat belongs, and the whole key is discarded. Enumerating subsets and purging them are two
-/// halves of one mechanism.
-///
 /// Ties keep their enumeration order: Java sorts with `Double.compare` through
 /// `Collections.sort`, which is stable.
 fn purge_key_candidates(
-    candidates: Vec<(Vec<usize>, KeyAlterClassifierProposal)>,
-) -> Vec<KeyAlterClassifierProposal> {
+    candidates: Vec<(Vec<usize>, NativeKeyGlyph, f64)>,
+) -> Vec<(NativeKeyGlyph, f64)> {
     let mut candidates = candidates;
-    candidates.sort_by(|one, two| two.1.classifier_grade.total_cmp(&one.1.classifier_grade));
-    let mut kept: Vec<(Vec<usize>, KeyAlterClassifierProposal)> = Vec::new();
-    for (parts, proposal) in candidates {
+    candidates.sort_by(|one, two| two.2.total_cmp(&one.2));
+    let mut kept: Vec<(Vec<usize>, NativeKeyGlyph, f64)> = Vec::new();
+    for (parts, glyph, grade) in candidates {
         if kept
             .iter()
-            .any(|(taken, _)| taken.iter().any(|part| parts.contains(part)))
+            .any(|(taken, _, _)| taken.iter().any(|part| parts.contains(part)))
         {
             continue;
         }
-        kept.push((parts, proposal));
+        kept.push((parts, glyph, grade));
     }
-    kept.into_iter().map(|(_, proposal)| proposal).collect()
+    kept.into_iter()
+        .map(|(_, glyph, grade)| (glyph, grade))
+        .collect()
 }
 
 /// Java `AlterInter.computePitch`, whose flat branch is nothing like its sharp branch.
@@ -1237,6 +1415,90 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
             .ok_or(NativeKeyError::InterIdExhausted)?;
         Ok(self.next_inter_id)
     }
+
+    /// Java `ShapeBuilder.refineAreaStart`: advance the range start to the first non-space
+    /// column of a *staff-band* projection (one interline above the first line, down to the
+    /// last line) between the current start and the first peak.
+    fn refine_area_start(
+        &mut self,
+        system_id: usize,
+        staff_id: usize,
+        context: NativeKeyStaffContext,
+        pipeline: &KeyPipelineParameters,
+        range: &mut StaffHeaderRange,
+        peaks: &[KeyPeak],
+    ) -> Result<(), NativeKeyError<Classifier::Error>> {
+        if peaks.is_empty() {
+            return Ok(());
+        }
+        let x_min = range
+            .start()
+            .map_err(|_| NativeKeyError::InvalidBrowseRange { staff_id })?;
+        let x_max = peaks[0].min - 1;
+        let Some((top, bottom)) = self.lines.line_span_at(staff_id, f64::from(x_min)) else {
+            return Ok(());
+        };
+        let y_min = (top.round_ties_even() as i32) - context.staff_interline;
+        let y_max = bottom.round_ties_even() as i32;
+        let source = self
+            .sources
+            .get(&system_id)
+            .ok_or(NativeKeyError::MissingSource(system_id))?;
+        let mut start = x_max + 1;
+        for x in x_min..=x_max {
+            if column_cumul(source, x, y_min, y_max - y_min + 1) > pipeline.max_space_cumul {
+                start = x;
+                break;
+            }
+        }
+        range.set_start(start);
+        Ok(())
+    }
+
+    /// Java `Staff.pitchToOrdinate`, the inverse of `pitchPositionOf` for a point inside the
+    /// staff, `rint`ed as the trailing-space check consumes it.
+    fn pitch_to_ordinate(
+        &self,
+        staff_id: usize,
+        context: NativeKeyStaffContext,
+        x: f64,
+        pitch: f64,
+    ) -> Option<i32> {
+        let (top, bottom) = self.lines.line_span_at(staff_id, x)?;
+        let lines = context.line_count.saturating_sub(1) as f64;
+        Some(((pitch * (bottom - top) / lines + top + bottom) / 2.0).round_ties_even() as i32)
+    }
+
+    /// Java `KeyExtractor.purgeParts` plus part registration: drop under-weight components and
+    /// the quirky `bounds.x == xMax` case, cap at `maxPartCount` by descending weight, then
+    /// register ids in left order.
+    fn register_parts(
+        &mut self,
+        staff_id: usize,
+        components: Vec<GlyphComponent>,
+        minimum_weight: usize,
+        x_max: i32,
+    ) -> Result<Vec<NativeKeyPart>, NativeKeyError<Classifier::Error>> {
+        let mut components: Vec<GlyphComponent> = components
+            .into_iter()
+            .filter(|component| component.weight >= minimum_weight && component.left != x_max)
+            .collect();
+        if components.len() > crate::key_parameters::max_part_count() {
+            components.sort_by_key(|component| std::cmp::Reverse(component.weight));
+            components.truncate(crate::key_parameters::max_part_count());
+        }
+        components.sort_by_key(|component| component.left);
+        let mut parts = Vec::with_capacity(components.len());
+        for component in components {
+            let id = self.glyph_id()?;
+            self.mutations.push(NativeKeyMutation::ComponentRegistered {
+                staff_id,
+                glyph_id: id,
+            });
+            parts.push(NativeKeyPart { id, component });
+        }
+        Ok(parts)
+    }
 }
 
 impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposalRecognizer
@@ -1248,10 +1510,6 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
         &mut self,
         input: KeyRecognitionInput,
     ) -> Result<Vec<KeyShapeClassifierProposal>, Self::Error> {
-        let source = self
-            .sources
-            .get(&input.system_id)
-            .ok_or(NativeKeyError::MissingSource(input.system_id))?;
         let context = *self
             .contexts
             .get(&input.staff_id)
@@ -1260,60 +1518,174 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
             .parameters
             .get(&input.staff_id)
             .ok_or(NativeKeyError::MissingParameters(input.staff_id))?;
-        let start = input.browse_start.max(input.measure_start);
-        let stop = context
+        let pipeline = parameters.pipeline;
+        let browse_start = input.browse_start.max(input.measure_start);
+        let browse_stop = context
             .browse_stop
             .min(input.measure_start + input.projection_width - 1);
-        if start > stop || context.envelope_top > context.envelope_bottom {
+        if browse_start > browse_stop || context.envelope_top > context.envelope_bottom {
             return Err(NativeKeyError::InvalidBrowseRange {
                 staff_id: input.staff_id,
             });
         }
-        let rect = HeaderBounds {
-            x: start,
-            y: context.envelope_top,
-            width: stop - start + 1,
-            height: context.envelope_bottom - context.envelope_top + 1,
+        let envelope_top = context.envelope_top;
+        let envelope_height = context.envelope_bottom - context.envelope_top + 1;
+
+        // Java `KeyExtractor.getProjection`: black count per column over the browse envelope,
+        // from `min(measureStart, browseRect.x)` so `refineAreaStart` can look left of the
+        // browse start.
+        let projection = {
+            let source = self
+                .sources
+                .get(&input.system_id)
+                .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+            let x_min = input.measure_start.min(browse_start);
+            let mut function = IntegerFunction::new(x_min, browse_stop);
+            for x in x_min..=browse_stop {
+                function.set_value(x, column_cumul(source, x, envelope_top, envelope_height));
+            }
+            function
         };
-        let crop = crop_key(source, rect).map_err(NativeKeyError::RunTable)?;
-        self.projections
-            .insert(input.staff_id, key_projection(&crop));
-        let components = build_glyph_components(&crop, rect.x, rect.y)
-            .into_iter()
-            .filter(|component| component.weight >= parameters.minimum_component_weight)
-            .collect::<Vec<_>>();
-        let mut parts = Vec::with_capacity(components.len());
-        for component in components {
-            let id = self.glyph_id()?;
-            self.mutations.push(NativeKeyMutation::ComponentRegistered {
-                staff_id: input.staff_id,
-                glyph_id: id,
-            });
-            parts.push(NativeKeyPart { id, component });
-        }
-        parts.sort_by_key(|part| part.component.left);
-        let groups = enumerate_key_subsets(&parts, parameters);
+        self.projections.insert(
+            input.staff_id,
+            (projection.x_min()..=projection.x_max())
+                .map(|x| usize::try_from(projection.value(x)).unwrap_or(0))
+                .collect(),
+        );
+
+        // Java `KeyBuilder.retrieveHiLoPeaks`, shared by both shape builders.
+        let hilos = {
+            let mut finder =
+                HiLoPeakFinder::with_domain("Key", &projection, browse_start, browse_stop);
+            finder.set_quorum(Quorum::new(pipeline.min_peak_cumul));
+            let mut hilos = finder
+                .find_peaks(
+                    pipeline.max_space_cumul + 1,
+                    pipeline.min_peak_derivative,
+                    pipeline.min_gain_ratio,
+                )
+                .to_vec();
+            hilos.sort_by_key(|hilo| hilo.main);
+            hilos
+        };
+
         // Font-derived and constant per family, so it is fetched once rather than per glyph.
         let flat_area_offset = area_pitch_offset(MusicFamily::Bravura, "FLAT").unwrap_or(0.0);
         let mut proposals = Vec::new();
         for shape in [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Sharp] {
-            let mut alters = Vec::new();
+            let kind = match shape {
+                NeutralKeyAlterShape::Flat => KeyShapeKind::Flat,
+                NeutralKeyAlterShape::Sharp => KeyShapeKind::Sharp,
+            };
+            // Each Java `ShapeBuilder` owns a fresh range over the shared browse window.
+            let mut range = StaffHeaderRange::default();
+            range.browse_start = browse_start;
+            range.browse_stop = browse_stop;
+            let mut peaks: Vec<KeyPeak> = Vec::new();
+            {
+                let source = self
+                    .sources
+                    .get(&input.system_id)
+                    .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+                let mut has_stem = |peak: &KeyPeak| {
+                    // Java `isStemLike`: a peak of width <= 2 grows one pixel on each side.
+                    let (x, width) = if peak.width() <= 2 {
+                        (peak.min - 1, peak.width() + 2)
+                    } else {
+                        (peak.min, peak.width())
+                    };
+                    has_stem_under(
+                        source,
+                        x,
+                        width,
+                        envelope_top,
+                        envelope_height,
+                        pipeline.core_stem_length,
+                        pipeline.min_black_ratio,
+                    )
+                };
+                browse_area(
+                    &hilos,
+                    &projection,
+                    &pipeline,
+                    &mut range,
+                    &mut peaks,
+                    &mut has_stem,
+                );
+            }
+            self.refine_area_start(
+                input.system_id,
+                input.staff_id,
+                context,
+                &pipeline,
+                &mut range,
+                &peaks,
+            )?;
+            merge_peaks(&mut peaks, &projection, &pipeline);
+            purge_light_peaks(&mut peaks, kind, &pipeline);
+            let signature = infer_signature(&mut peaks, &mut range, kind, &pipeline);
+            let signature = refine_signature(signature, &mut peaks, &mut range, &pipeline);
+            let starts = compute_starts(signature, &peaks, &projection, &pipeline, &mut range);
+            if starts.is_empty() {
+                continue;
+            }
+            let mut slices: Vec<SliceState> = allocate_slices(&starts, &range)
+                .into_iter()
+                .map(|(start, stop)| SliceState {
+                    start,
+                    stop,
+                    glyph: None,
+                    grade: None,
+                })
+                .collect();
+
+            // ---- Phase 1: Java `retrieveCandidates` over the whole key area ----
+            let area_start = range
+                .start()
+                .map_err(|_| NativeKeyError::InvalidBrowseRange {
+                    staff_id: input.staff_id,
+                })?;
+            let area_stop = range.stop();
+            if area_start > area_stop {
+                continue;
+            }
+            let area_rect = HeaderBounds {
+                x: area_start,
+                y: envelope_top,
+                width: area_stop - area_start + 1,
+                height: envelope_height,
+            };
+            let parts = {
+                let source = self
+                    .sources
+                    .get(&input.system_id)
+                    .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+                let crop = crop_key(source, area_rect).map_err(NativeKeyError::RunTable)?;
+                self.register_parts(
+                    input.staff_id,
+                    build_glyph_components(&crop, area_rect.x, area_rect.y),
+                    parameters.minimum_component_weight,
+                    area_stop,
+                )?
+            };
+            let groups = enumerate_key_subsets(&parts, parameters);
+            let mut candidates: Vec<(Vec<usize>, NativeKeyGlyph, f64)> = Vec::new();
             for group in &groups {
                 let glyph = self.compound(input.staff_id, &parts, group)?;
-                // Java's four `SingleAdapter` predicates, all of them: `isTooSmall`,
-                // `isTooLarge`, `isTooLight` and `isTooHeavy`. Only the upper size bounds and the
-                // lower weight bound used to be here, so an undersized or over-heavy compound was
-                // accepted. The size comparisons are in `f64` because Java's thresholds are.
-                let width = f64::from(glyph.bounds.width);
-                let height = f64::from(glyph.bounds.height);
-                if width < parameters.minimum_alter_width
-                    || height < parameters.minimum_alter_height
-                    || width > parameters.maximum_alter_width
-                    || height > parameters.maximum_alter_height
-                    || glyph.weight < parameters.minimum_glyph_weight
-                    || glyph.weight > parameters.maximum_glyph_weight
-                {
+                if !accepts_glyph(&glyph, &parameters) {
                     continue;
+                }
+                // Java `MultipleAdapter.evaluateGlyph` routes through the slice under the glyph's
+                // rounded centroid, and `evaluateSliceGlyph` requires the glyph to embrace every
+                // peak centre falling inside that slice.
+                let centroid_x = glyph.centroid_x.round_ties_even() as i32;
+                if let Some(slice) = slices
+                    .iter()
+                    .find(|slice| slice.start <= centroid_x && centroid_x <= slice.stop)
+                {
+                    if !embraces_slice_peaks(slice.start, slice.stop, glyph.bounds, &peaks) {
+                        continue;
+                    }
                 }
                 self.mutations.push(NativeKeyMutation::GlyphEvaluated {
                     staff_id: input.staff_id,
@@ -1326,7 +1698,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                         &glyph,
                         context.classifier_interline,
                         parameters.maximum_rank,
-                        parameters.minimum_classifier_grade,
+                        PHASE_ONE_MINIMUM_GRADE,
                     )
                     .map_err(|source| NativeKeyError::Classifier {
                         staff_id: input.staff_id,
@@ -1337,29 +1709,10 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     .into_iter()
                     .take(parameters.maximum_rank)
                     .find(|evaluation| {
-                        evaluation.shape == shape
-                            && evaluation.grade >= parameters.minimum_classifier_grade
+                        evaluation.shape == shape && evaluation.grade >= PHASE_ONE_MINIMUM_GRADE
                     })
                 {
-                    let id = self.inter_id()?;
-                    alters.push((
-                        group.clone(),
-                        KeyAlterClassifierProposal {
-                            id,
-                            start: glyph.bounds.x,
-                            width: glyph.bounds.width,
-                            bounds: glyph.bounds,
-                            classifier_grade: evaluation.grade,
-                            measured_pitch: measured_alter_pitch(
-                                &self.lines,
-                                input.staff_id,
-                                context,
-                                shape,
-                                &glyph,
-                                flat_area_offset,
-                            ),
-                        },
-                    ));
+                    candidates.push((group.clone(), glyph, evaluation.grade));
                 } else {
                     self.mutations.push(NativeKeyMutation::ClassifierRejected {
                         staff_id: input.staff_id,
@@ -1368,24 +1721,164 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     });
                 }
             }
-            // Java `KeyExtractor.purgeCandidates`, then the count cap. Both must happen after
-            // the whole enumeration rather than during it: capping while collecting would keep
-            // whichever overlapping subsets happened to come first, and purging is what decides
-            // between them.
-            let mut alters = purge_key_candidates(alters);
-            alters.truncate(parameters.maximum_alters.min(7));
-            alters.sort_by_key(|alter| alter.start);
-            if !alters.is_empty() {
+            // Java `purgeCandidates` (no part shared), then best-per-slice assignment in
+            // descending grade order.
+            let candidates = purge_key_candidates(candidates);
+            for (glyph, grade) in candidates {
+                let centroid_x = glyph.centroid_x.round_ties_even() as i32;
+                if let Some(slice) = slices
+                    .iter_mut()
+                    .find(|slice| slice.start <= centroid_x && centroid_x <= slice.stop)
+                {
+                    if slice.grade.is_none_or(|current| current < grade) {
+                        slice.grade = Some(grade);
+                        slice.glyph = Some(glyph);
+                    }
+                }
+            }
+
+            // ---- Phase 2: Java `extractEmptySlices`, with neighbours cropped away ----
+            for index in 0..slices.len() {
+                if slices[index].glyph.is_some() {
+                    continue;
+                }
+                let slice_rect = HeaderBounds {
+                    x: slices[index].start,
+                    y: envelope_top,
+                    width: slices[index].stop - slices[index].start + 1,
+                    height: envelope_height,
+                };
+                let neighbours: Vec<NativeKeyGlyph> = [index.checked_sub(1), Some(index + 1)]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|other| slices.get(other).and_then(|slice| slice.glyph.clone()))
+                    .collect();
+                let parts = {
+                    let source = self
+                        .sources
+                        .get(&input.system_id)
+                        .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+                    let crop = slice_crop(source, slice_rect, &neighbours)
+                        .map_err(NativeKeyError::RunTable)?;
+                    self.register_parts(
+                        input.staff_id,
+                        build_glyph_components(&crop, slice_rect.x, slice_rect.y),
+                        parameters.minimum_component_weight,
+                        slice_rect.right(),
+                    )?
+                };
+                let groups = enumerate_key_subsets(&parts, parameters);
+                for group in &groups {
+                    let glyph = self.compound(input.staff_id, &parts, group)?;
+                    if !accepts_glyph(&glyph, &parameters)
+                        || !embraces_slice_peaks(
+                            slices[index].start,
+                            slices[index].stop,
+                            glyph.bounds,
+                            &peaks,
+                        )
+                    {
+                        continue;
+                    }
+                    self.mutations.push(NativeKeyMutation::GlyphEvaluated {
+                        staff_id: input.staff_id,
+                        glyph_id: glyph.id,
+                        shape,
+                    });
+                    let evaluations = self
+                        .classifier
+                        .evaluate(
+                            &glyph,
+                            context.classifier_interline,
+                            parameters.maximum_rank,
+                            PHASE_TWO_MINIMUM_GRADE,
+                        )
+                        .map_err(|source| NativeKeyError::Classifier {
+                            staff_id: input.staff_id,
+                            glyph_id: glyph.id,
+                            source,
+                        })?;
+                    if let Some(evaluation) = evaluations
+                        .into_iter()
+                        .take(parameters.maximum_rank)
+                        .find(|evaluation| {
+                            evaluation.shape == shape && evaluation.grade >= PHASE_TWO_MINIMUM_GRADE
+                        })
+                    {
+                        let slice = &mut slices[index];
+                        if slice.grade.is_none_or(|current| current < evaluation.grade) {
+                            slice.grade = Some(evaluation.grade);
+                            slice.glyph = Some(glyph);
+                        }
+                    }
+                }
+            }
+
+            // ---- Alters in slice order ----
+            let mut alters = Vec::new();
+            for slice in &slices {
+                let (Some(glyph), Some(grade)) = (&slice.glyph, slice.grade) else {
+                    continue;
+                };
                 let id = self.inter_id()?;
-                let left = alters.first().unwrap().bounds.x;
-                let right = alters.last().unwrap().bounds.right();
-                proposals.push(KeyShapeClassifierProposal {
+                alters.push(KeyAlterClassifierProposal {
                     id,
-                    shape,
-                    range: native_key_range(start, stop, left, right),
-                    alters,
+                    start: slice.start,
+                    width: slice.stop - slice.start + 1,
+                    bounds: glyph.bounds,
+                    classifier_grade: grade,
+                    measured_pitch: measured_alter_pitch(
+                        &self.lines,
+                        input.staff_id,
+                        context,
+                        shape,
+                        glyph,
+                        flat_area_offset,
+                    ),
                 });
             }
+            if alters.is_empty() {
+                continue;
+            }
+
+            // Java: a one-item candidate must show trailing space right after its alter.
+            let last_valid = slices.iter().rposition(|slice| slice.glyph.is_some());
+            if last_valid == Some(0) {
+                let slice = &slices[0];
+                let glyph = slice.glyph.as_ref().expect("checked");
+                let pitch = alters[0].measured_pitch;
+                let x = glyph.bounds.x + glyph.bounds.width;
+                let Some(y) = self.pitch_to_ordinate(input.staff_id, context, f64::from(x), pitch)
+                else {
+                    continue;
+                };
+                let source = self
+                    .sources
+                    .get(&input.system_id)
+                    .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+                let rect = HeaderBounds {
+                    x,
+                    y: y - context.staff_interline / 2,
+                    width: context.classifier_interline,
+                    height: context.staff_interline,
+                };
+                if !is_rather_empty(
+                    source,
+                    rect,
+                    pipeline.max_trailing_cumul,
+                    pipeline.min_trailing_space,
+                ) {
+                    continue;
+                }
+            }
+
+            let id = self.inter_id()?;
+            proposals.push(KeyShapeClassifierProposal {
+                id,
+                shape,
+                range: range.clone(),
+                alters,
+            });
         }
         Ok(proposals)
     }
@@ -1563,21 +2056,6 @@ fn grow_key_subset(
     }
 }
 
-fn native_key_range(
-    browse_start: i32,
-    browse_stop: i32,
-    start: i32,
-    stop: i32,
-) -> StaffHeaderRange {
-    let mut range = StaffHeaderRange::default();
-    range.valid = true;
-    range.browse_start = browse_start;
-    range.browse_stop = browse_stop;
-    range.set_start(start);
-    range.set_stop(stop);
-    range
-}
-
 fn crop_key(source: &RunTable, rect: HeaderBounds) -> Result<RunTable, RunTableError> {
     let x = usize::try_from(rect.x).map_err(|_| RunTableError::OutOfBounds)?;
     let y = usize::try_from(rect.y).map_err(|_| RunTableError::OutOfBounds)?;
@@ -1593,16 +2071,6 @@ fn crop_key(source: &RunTable, rect: HeaderBounds) -> Result<RunTable, RunTableE
         }
     }
     RunTable::from_pixels(Orientation::Vertical, width, height, &pixels)
-}
-
-fn key_projection(source: &RunTable) -> Vec<usize> {
-    (0..source.width())
-        .map(|x| {
-            (0..source.height())
-                .filter(|y| source.get(x, *y) == FOREGROUND)
-                .count()
-        })
-        .collect()
 }
 
 fn native_key_glyph(
@@ -1751,6 +2219,7 @@ mod tests {
             staff_mid_y: 139.6,
             classifier_interline: 20,
             line_count: 5,
+            staff_interline: 20,
         };
         let (top, bottom) = (100.0, 179.2);
 
@@ -1772,28 +2241,42 @@ mod tests {
         assert!((exact - (2.0 * (120.0 - 140.0) / 20.0)).abs() < 1e-12);
     }
 
-    /// Pitch geometry that declines to answer, so the fixtures fall back to the interline form.
+    /// Pitch geometry with one flat span, rows 5..15, matching the fixture envelope.
     ///
-    /// These fixtures assert grouping, ranking and rejection, not pitch; giving them synthetic
-    /// spline ordinates would make their expected pitches depend on numbers they do not model.
+    /// It must answer rather than decline: a single-alteration candidate runs the trailing-space
+    /// check, which needs `pitchToOrdinate`, and a `None` there drops the proposal -- correctly in
+    /// production, fatally for a fixture that wants to observe the proposal.
     struct FlatPitchGeometry;
 
     impl StaffPitchGeometry for FlatPitchGeometry {
         fn line_span_at(&self, _staff_id: usize, _x: f64) -> Option<(f64, f64)> {
-            None
+            Some((5.0, 15.0))
         }
     }
 
     fn native_recognizer(
         classifier: FakeKeyClassifier,
     ) -> NativeKeyProposalRecognizer<FakeKeyClassifier, FlatPitchGeometry> {
-        let mut pixels = vec![BACKGROUND; 40 * 30];
-        for y in 7..11 {
-            for x in [12usize, 13, 18, 19] {
-                pixels[y * 40 + x] = FOREGROUND;
+        // Two flats, drawn the way the pipeline reads them: a tall stem (columns 12-13 and
+        // 22-23, rows 5-24, projection 20) plus a *bowl* to the right (rows 16-24, projection 9).
+        // The bowl is not decoration -- `refineSignature` demands `minFlatTrail` of ink after the
+        // last stem, and a bare stem fails it exactly as Java would fail it. At interline 8 the
+        // constants line up as: stem height 20 within quorum 10 .. maxPeakCumul 34; the 10 px stem
+        // spacing exceeds maxSharpDelta 5.6, so the sharp builder rejects the projection outright;
+        // and the four space columns between the flats stay under maxInnerSpace 6.
+        let mut pixels = vec![BACKGROUND; 60 * 40];
+        for (stem, bowl) in [(12usize, 14usize), (22, 24)] {
+            for y in 5..25 {
+                pixels[y * 60 + stem] = FOREGROUND;
+                pixels[y * 60 + stem + 1] = FOREGROUND;
+            }
+            for y in 16..25 {
+                for x in bowl..bowl + 4 {
+                    pixels[y * 60 + x] = FOREGROUND;
+                }
             }
         }
-        let source = RunTable::from_pixels(Orientation::Horizontal, 40, 30, &pixels).unwrap();
+        let source = RunTable::from_pixels(Orientation::Horizontal, 60, 40, &pixels).unwrap();
         NativeKeyProposalRecognizer::new(
             classifier,
             FlatPitchGeometry,
@@ -1801,12 +2284,13 @@ mod tests {
             BTreeMap::from([(
                 1,
                 NativeKeyStaffContext {
-                    browse_stop: 25,
+                    browse_stop: 35,
                     envelope_top: 5,
-                    envelope_bottom: 15,
-                    staff_mid_y: 10.0,
-                    classifier_interline: 4,
+                    envelope_bottom: 27,
+                    staff_mid_y: 16.0,
+                    classifier_interline: 8,
                     line_count: 5,
+                    staff_interline: 8,
                 },
             )]),
             BTreeMap::from([(
@@ -1819,11 +2303,12 @@ mod tests {
                     // size gate, so the gate must not be what decides its outcome.
                     minimum_alter_width: 0.0,
                     minimum_alter_height: 0.0,
-                    maximum_alter_width: 4.0,
-                    maximum_alter_height: 8.0,
+                    maximum_alter_width: 16.0,
+                    maximum_alter_height: 24.0,
                     maximum_glyph_weight: usize::MAX,
                     maximum_alters: 7,
                     maximum_rank: 3,
+                    pipeline: KeyPipelineParameters::new(8, 8),
                     minimum_classifier_grade: 0.5,
                 },
             )]),
@@ -2287,23 +2772,54 @@ mod tests {
 
         let proposals = recognizer.classify_key_shapes(native_input()).unwrap();
 
-        assert_eq!(proposals.len(), 2);
+        // Only the flat proposal survives: the 4 px peak spacing exceeds maxSharpDelta, so
+        // `inferSignature` returns 0 for the sharp builder before any glyph is classified. The
+        // previous enumeration-based flow produced a sharp hypothesis here too; the projection
+        // pipeline rejecting it from spacing alone is the point of the port.
+        assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].shape, NeutralKeyAlterShape::Flat);
-        assert_eq!(proposals[1].shape, NeutralKeyAlterShape::Sharp);
         assert_eq!(proposals[0].alters.len(), 2);
+        // Alter starts are *slice* starts (Java `roi.getStarts()`), not glyph abscissae.
         assert_eq!(
             proposals[0]
                 .alters
                 .iter()
-                .map(|alter| alter.start)
+                .map(|alter| (alter.start, alter.width))
                 .collect::<Vec<_>>(),
-            [12, 18]
+            [(12, 10), (22, 6)]
         );
+        assert_eq!(
+            proposals[0]
+                .alters
+                .iter()
+                .map(|alter| alter.bounds)
+                .collect::<Vec<_>>(),
+            [
+                HeaderBounds {
+                    x: 12,
+                    y: 5,
+                    width: 6,
+                    height: 20
+                },
+                HeaderBounds {
+                    x: 22,
+                    y: 5,
+                    width: 6,
+                    height: 20
+                },
+            ]
+        );
+        // Range start comes from the first space (columns 10-11), the stop from
+        // `refineShapeStop`'s projection minimum inside the flat trail window.
         assert_eq!(proposals[0].range.start(), Ok(12));
-        assert_eq!(proposals[0].range.stop(), 19);
-        assert_eq!(recognizer.projection(1).unwrap()[2], 4);
-        assert_eq!(recognizer.projection(1).unwrap()[8], 4);
-        assert_eq!(recognizer.classifier().calls.len(), 4);
+        assert_eq!(proposals[0].range.stop(), 27);
+        // The projection spans min(measureStart, browseStart) = 8, so x = 12 is index 4: the
+        // stem column counts 20 rows, the bowl column at x = 14 counts 9.
+        assert_eq!(recognizer.projection(1).unwrap()[4], 20);
+        assert_eq!(recognizer.projection(1).unwrap()[6], 9);
+        assert_eq!(recognizer.projection(1).unwrap()[0], 0);
+        // Two glyphs classified, both during the flat pass; the sharp pass never reaches ink.
+        assert_eq!(recognizer.classifier().calls.len(), 2);
         assert_eq!(
             recognizer
                 .mutations()
@@ -2313,12 +2829,7 @@ mod tests {
                     _ => None,
                 })
                 .collect::<Vec<_>>(),
-            [
-                NeutralKeyAlterShape::Flat,
-                NeutralKeyAlterShape::Flat,
-                NeutralKeyAlterShape::Sharp,
-                NeutralKeyAlterShape::Sharp,
-            ]
+            [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Flat]
         );
     }
 
@@ -2362,7 +2873,11 @@ mod tests {
         let proposals = recognizer.classify_key_shapes(input).unwrap();
 
         assert_eq!(proposals[0].alters.len(), 1);
-        assert_eq!(proposals[0].alters[0].start, 18);
+        // The first flat lies outside the clipped finder domain and must not contribute a peak;
+        // its bowl does poke into the domain, but at projection 9 it stays under the quorum (10),
+        // which is precisely the quorum doing its job.
+        assert_eq!(proposals[0].alters[0].start, 22);
+        assert_eq!(proposals[0].shape, NeutralKeyAlterShape::Flat);
         assert!(
             recognizer
                 .classifier()

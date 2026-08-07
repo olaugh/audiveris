@@ -28,8 +28,8 @@ use audiveris_omr::key_column::{
     NativeKeyProposalRecognizer, NativeKeyStaffContext, StaffPitchGeometry,
 };
 use audiveris_omr::key_parameters::{
-    KeyExtractorParameters, browse_envelope, max_eval_rank, max_header_width, max_part_count,
-    max_slice_distance,
+    KeyExtractorParameters, KeyPipelineParameters, browse_envelope, max_eval_rank,
+    max_header_width, max_part_count, max_slice_distance,
 };
 use audiveris_omr::recognize::{StaffLineGeometry, recognize_grid_lines};
 use audiveris_omr::staff_header::StaffHeader;
@@ -138,43 +138,27 @@ impl StaffPitchGeometry for GridPitch {
 }
 
 #[test]
-#[ignore = "two residual box divergences remain; see the note below"]
+#[ignore = "three staves on the roughest JPEG remain; see the note below"]
 fn native_keys_match_java_on_every_corpus_staff() {
-    // WHERE THIS STANDS. Three divergences found and fixed; two residuals characterised.
+    // WHERE THIS STANDS: 62 of 65 staves exact.
     //
-    //   34/34 key-bearing failing  ->  29  ->  28  ->  20 of 65 disagreeing
+    //   34/34 key-bearing failing -> 29 -> 28 -> 20 -> 3 of 65 disagreeing
     //
-    // **Fixed: subset enumeration.** `group_key_parts` merged nearby parts into one compound
-    // where Java's `GlyphCluster.decompose()` enumerates subsets, so a whole signature collapsed
-    // into one over-wide glyph and every key was rejected.
+    // The projection-peak pipeline (key_peaks.rs) replaced enumerate-everything candidate
+    // generation: signature count inferred from stem-like peaks before classification, one slice
+    // per expected alteration, best glyph per slice, then a second extraction pass over empty
+    // slices with neighbours cropped away. That closed every previously-catalogued category --
+    // the one-pixel-left boxes, the missing flats, the spurious key.
     //
-    // **Fixed: the flat pitch.** `AlterInter.computePitch` averages two heuristics for flats and
-    // uses a plain mass pitch for sharps; the port used one formula for both.
+    // The three residuals are all on BachInvention5, the corpus' only JPEG and only 17-interline
+    // sheet:
+    //   staff 3:  (124,716,30,67)  vs Java (124,716,45,76)  -- third flat missing
+    //   staff 11: (121,2148,31,68) vs Java (121,2148,46,77) -- third flat missing
+    //   staff 12: (121,2324,46,77) vs Java (121,2324,46,70) -- same box, height +7
     //
-    // **Fixed: candidate purge.** Enumerating subsets without Java's `purgeCandidates` defeated
-    // itself — the correct flat at grade 0.97 came with an overlapping subset of the same ink at
-    // 0.147, and the pair made a two-flat signature that failed the pitch check. Java sorts by
-    // decreasing grade and drops every later candidate sharing a part.
-    //
-    // Two residuals, and they are different problems:
-    //
-    // 1. **Seven boxes one pixel wide on the left** — `x - 1`, `width + 1`, identical right edge,
-    //    ordinate and height. The key itself is right. A stray low-weight component joining the
-    //    compound on its left is the obvious suspect: `minPartWeight` is only 4 px at interline 21.
-    //
-    // 2. **Eleven staves on BachInvention5 where the port finds one alteration and Java finds
-    //    three.** Debugged: the purge is *not* over-reaching — only one candidate is ever
-    //    produced. The ink is fragmented. Part 1 is a 7-pixel splinter, under `minGlyphWidth`
-    //    (8.5), and the subset reuniting it with its neighbour spans 76 px against a
-    //    `maxGlyphHeight` of 64.6, so both the port and Java prune it.
-    //
-    // Both residuals point at the same unported machinery: `KeyBuilder`'s slice phase. Java runs
-    // `extractAlter` a *second* time per slice, with a lower grade floor
-    // (`Grades.keyAlterMinGrade2`) and `cropNeighbors = true`, which strips pixels belonging to
-    // adjacent slices before rebuilding the glyph. That recovers a fragmented flat on a poor scan
-    // — BachInvention5 is the corpus' only JPEG and its only 17-interline sheet — and it is also
-    // what would shave one pixel off a glyph abutting its neighbour. `KeyRoi`, `KeySlice` and that
-    // second pass are the next step, not further tuning of the enumeration or the purge.
+    // The first two smell like Java's *third* extraction pass, `fillMissingAlters`, which runs
+    // once a clef is known and hunts each empty slice with a theoretical pitch window -- not yet
+    // ported. The third is a different glyph winning one slice. Not yet debugged.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;
@@ -323,6 +307,7 @@ fn native_keys_match_java_on_every_corpus_staff() {
                     // Java hands the classifier the *sheet* interline here, not the staff's.
                     classifier_interline: *sheet_interline,
                     line_count: 5,
+                    staff_interline: oracle.specific_interline,
                 },
             );
             key_parameters.insert(
@@ -342,6 +327,10 @@ fn native_keys_match_java_on_every_corpus_staff() {
                     maximum_alters: 7,
                     maximum_rank: max_eval_rank(),
                     minimum_classifier_grade: MINIMUM_KEY_GRADE,
+                    pipeline: KeyPipelineParameters::new(
+                        *sheet_interline,
+                        oracle.specific_interline,
+                    ),
                 },
             );
             let clefs = clef_column
