@@ -340,6 +340,11 @@ pub struct GridLinesRecognition {
     /// Each system's own staff extremes, which `dispatchSheetSpots` tests as
     /// well as the area.
     pub system_bounds: Vec<SystemBounds>,
+    /// Per-staff first and last line splines, in staff order.
+    ///
+    /// Everything in HEADERS that positions a lookup area against a staff reads
+    /// these; see [`StaffLineGeometry`].
+    pub staff_lines: Vec<StaffLineGeometry>,
 }
 
 /// One candidate peak that a purge removed, and which purge removed it.
@@ -1218,6 +1223,7 @@ pub fn recognize_grid_lines_raster(
     // Kept alongside, because the *system* areas below need each staff's own
     // line endpoints and abscissae, and `PopulationStaffGeometry` rounds them.
     let mut staff_details: Vec<StaffDetail> = Vec::new();
+    let mut staff_line_geometry: Vec<StaffLineGeometry> = Vec::new();
     for staff in &peak_graph.sheet_staffs {
         let points = |index: usize| -> Option<Vec<(f64, f64)>> {
             staff.lines.get(index).and_then(|line| match line {
@@ -1253,6 +1259,14 @@ pub fn recognize_grid_lines_raster(
             // are different pixels.
             first_line_left_y: first.first().map_or(top, |(_, y)| *y),
             last_line_left_y: last.first().map_or(bottom, |(_, y)| *y),
+            first_line: first_line.clone(),
+            last_line: last_line.clone(),
+        });
+        staff_line_geometry.push(StaffLineGeometry {
+            staff_id: staff.id,
+            left: staff.left.round() as i32,
+            right: staff.right.round() as i32,
+            interline: i32::try_from(staff.interline).unwrap_or(i32::MAX),
             first_line: first_line.clone(),
             last_line: last_line.clone(),
         });
@@ -1358,10 +1372,60 @@ pub fn recognize_grid_lines_raster(
         staff_areas,
         system_areas,
         system_bounds,
+        staff_lines: staff_line_geometry,
     })
 }
 
 /// One staff's geometry at full precision, for building system areas.
+/// One staff's first and last line, published so stages after GRID can ask
+/// `yAt(x)`.
+///
+/// `ClefBuilder.getOuterRect` needs `getFirstLine().yAt(xMid)` and
+/// `getLastLine().yAt(xMid)`, and neither was reachable from this report:
+/// [`StaffCandidateReport`] carries only the horizontal extent, and
+/// `PopulationStaffArea` carries the staff's *area polygon* rather than its
+/// lines. The splines themselves were being computed and then dropped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StaffLineGeometry {
+    /// Staff id, matching [`StaffCandidateReport::id`].
+    pub staff_id: usize,
+    /// Java `staff.getAbscissa(LEFT)`.
+    pub left: i32,
+    /// Java `staff.getAbscissa(RIGHT)`.
+    pub right: i32,
+    /// The staff's specific interline, which the clef stage scales its part and
+    /// glyph filters by -- as distinct from the sheet's.
+    pub interline: i32,
+    /// Java `staff.getFirstLine()`.
+    pub first_line: StaffBoundary,
+    /// Java `staff.getLastLine()`.
+    pub last_line: StaffBoundary,
+}
+
+impl StaffLineGeometry {
+    /// Java `LineInfo.yAt(int)`: the first line's ordinate, `rint`ed.
+    ///
+    /// `None` when `x` falls outside the spline's abscissa range. Java
+    /// extrapolates there using the filament's global slope; this deliberately
+    /// declines instead, so a caller that strays outside a staff names itself
+    /// rather than receiving an invented ordinate. Nothing in the header stage
+    /// should: its abscissae are the middle of a staff's own browse range.
+    #[must_use]
+    pub fn first_line_y_at(&self, x: i32) -> Option<i32> {
+        self.first_line
+            .y_at_x(f64::from(x))
+            .map(|y| y.round_ties_even() as i32)
+    }
+
+    /// Java `LineInfo.yAt(int)` for the last line. Same extrapolation caveat.
+    #[must_use]
+    pub fn last_line_y_at(&self, x: i32) -> Option<i32> {
+        self.last_line
+            .y_at_x(f64::from(x))
+            .map(|y| y.round_ties_even() as i32)
+    }
+}
+
 struct StaffDetail {
     system_id: usize,
     left: i32,

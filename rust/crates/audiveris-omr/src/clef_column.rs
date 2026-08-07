@@ -88,19 +88,64 @@ pub struct ClefLookupParameters {
     pub y_core_margin: i32,
 }
 
+/// A source of staff-line ordinates at a given abscissa, Java `LineInfo.yAt(int)`.
+///
+/// This exists because `getOuterRect` evaluates a *neighbour's* line at the **current** staff's
+/// `xMid`, not at the neighbour's own. With one scalar ordinate per staff those coincide only
+/// when the staves are parallel and aligned; on a sloped or horizontally offset neighbour they do
+/// not, and the gutter midpoint moves.
+pub trait StaffLineOrdinates {
+    /// `(first_line_y, last_line_y)` for `staff_id` at abscissa `x`.
+    ///
+    /// `None` when the staff has no line there, which suppresses that neighbour rather than
+    /// inventing a limit.
+    fn ordinates_at(&self, staff_id: usize, x: i32) -> Option<(i32, i32)>;
+}
+
+/// The flat approximation: one ordinate pair per staff, whatever the abscissa.
+///
+/// Exactly Java when every staff is horizontal, which is what the headless tests construct.
+struct FlatOrdinates<'a>(&'a [ClefLookupStaffGeometry]);
+
+impl StaffLineOrdinates for FlatOrdinates<'_> {
+    fn ordinates_at(&self, staff_id: usize, _x: i32) -> Option<(i32, i32)> {
+        self.0
+            .iter()
+            .find(|staff| staff.staff_id == staff_id)
+            .map(|staff| (staff.first_line_y, staff.last_line_y))
+    }
+}
+
 /// Java `getOuterRect` + `getInnerRect`, using the dependency-light constant
 /// staff-line geometry supplied by the headless system.
+///
+/// Treats every staff as horizontal; see [`build_clef_lookup_contexts_at`] for the exact form.
 #[must_use]
 pub fn build_clef_lookup_contexts(
     staffs: &[ClefLookupStaffGeometry],
     parameters: ClefLookupParameters,
 ) -> BTreeMap<usize, ClefLookupContext> {
+    build_clef_lookup_contexts_at(staffs, parameters, &FlatOrdinates(staffs))
+}
+
+/// Java `getOuterRect` + `getInnerRect`, evaluating every staff line at the abscissa Java uses.
+#[must_use]
+pub fn build_clef_lookup_contexts_at<Lines: StaffLineOrdinates + ?Sized>(
+    staffs: &[ClefLookupStaffGeometry],
+    parameters: ClefLookupParameters,
+    lines: &Lines,
+) -> BTreeMap<usize, ClefLookupContext> {
     let mut contexts = BTreeMap::new();
     for staff in staffs {
         let x_mid = staff.browse_start.wrapping_add(staff.browse_stop) / 2;
-        let mut y_min = 0.max(staff.first_line_y.wrapping_sub(parameters.above_staff));
-        let mut y_max = (parameters.sheet_height - 1)
-            .min(staff.last_line_y.wrapping_add(parameters.below_staff));
+        // Java reads the staff's own lines at this same `xMid`, so a caller supplying real
+        // splines gets the sloped ordinate here too, not just for the neighbours.
+        let (staff_first, staff_last) = lines
+            .ordinates_at(staff.staff_id, x_mid)
+            .unwrap_or((staff.first_line_y, staff.last_line_y));
+        let mut y_min = 0.max(staff_first.wrapping_sub(parameters.above_staff));
+        let mut y_max =
+            (parameters.sheet_height - 1).min(staff_last.wrapping_add(parameters.below_staff));
         for neighbor in staffs {
             if neighbor.staff_id == staff.staff_id
                 || neighbor.left_abscissa >= x_mid
@@ -108,10 +153,15 @@ pub fn build_clef_lookup_contexts(
             {
                 continue;
             }
-            if neighbor.last_line_y < staff.first_line_y {
-                y_min = y_min.max(div_ceil_two(neighbor.last_line_y + staff.first_line_y + 1));
-            } else if neighbor.first_line_y > staff.last_line_y {
-                y_max = y_max.min((staff.last_line_y + neighbor.first_line_y - 1) / 2);
+            let Some((neighbor_first, neighbor_last)) =
+                lines.ordinates_at(neighbor.staff_id, x_mid)
+            else {
+                continue;
+            };
+            if neighbor_last < staff_first {
+                y_min = y_min.max(div_ceil_two(neighbor_last + staff_first + 1));
+            } else if neighbor_first > staff_last {
+                y_max = y_max.min((staff_last + neighbor_first - 1) / 2);
             }
         }
         let outer = ClefLookupRect {
@@ -1214,6 +1264,91 @@ fn intersection(one: HeaderBounds, two: HeaderBounds) -> HeaderBounds {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ordinates from a straight line per staff: `y = intercept + slope * x`, rounded as
+    /// `LineInfo.yAt(int)` does.
+    struct SlopedOrdinates {
+        staves: Vec<(usize, f64, f64, f64)>,
+    }
+
+    impl StaffLineOrdinates for SlopedOrdinates {
+        fn ordinates_at(&self, staff_id: usize, x: i32) -> Option<(i32, i32)> {
+            self.staves
+                .iter()
+                .find(|(id, _, _, _)| *id == staff_id)
+                .map(|&(_, first, last, slope)| {
+                    let shift = slope * f64::from(x);
+                    (
+                        (first + shift).round_ties_even() as i32,
+                        (last + shift).round_ties_even() as i32,
+                    )
+                })
+        }
+    }
+
+    #[test]
+    fn a_sloped_neighbour_moves_the_gutter_that_a_flat_ordinate_misses() {
+        // Two staves, the lower one sloping down to the right. Java evaluates the neighbour's
+        // last line at *this* staff's xMid, so the gutter midpoint follows the slope. Carrying one
+        // scalar ordinate per staff cannot express that, which is the whole reason
+        // `build_clef_lookup_contexts_at` exists.
+        let staves = vec![
+            ClefLookupStaffGeometry {
+                staff_id: 1,
+                browse_start: 100,
+                browse_stop: 300,
+                left_abscissa: 0,
+                right_abscissa: 1000,
+                first_line_y: 400,
+                last_line_y: 480,
+                percussion_only: false,
+            },
+            ClefLookupStaffGeometry {
+                staff_id: 2,
+                browse_start: 100,
+                browse_stop: 300,
+                left_abscissa: 0,
+                right_abscissa: 1000,
+                first_line_y: 180,
+                last_line_y: 260,
+                percussion_only: false,
+            },
+        ];
+        let parameters = ClefLookupParameters {
+            sheet_height: 2000,
+            above_staff: 60,
+            below_staff: 65,
+            belt_margin: 3,
+            x_core_margin: 4,
+            y_core_margin: 10,
+        };
+
+        let flat = build_clef_lookup_contexts(&staves, parameters);
+        let sloped = build_clef_lookup_contexts_at(
+            &staves,
+            parameters,
+            &SlopedOrdinates {
+                // Staff 2 sits above staff 1 and slopes down to the right; at xMid = 200 its
+                // last line is 40 lower than its nominal ordinate, which lifts the gutter.
+                // The nominal values are chosen so the gutter *binds* only once sloped: flat it
+                // lands below the `aboveStaff` limit and is invisible, which is exactly how this
+                // divergence would hide in production.
+                staves: vec![(1, 400.0, 480.0, 0.0), (2, 180.0, 260.0, 0.2)],
+            },
+        );
+
+        let flat_top = flat[&1].outer.y;
+        let sloped_top = sloped[&1].outer.y;
+        assert_ne!(
+            flat_top, sloped_top,
+            "the slope must move staff 1's upper limit"
+        );
+        // Flat: aboveStaff wins, 400 - 60 = 340, since ceil(0.5 * (260 + 400 + 1)) = 331.
+        // Sloped: the neighbour's last line at x=200 is 260 + 40 = 300, so the gutter midpoint
+        // ceil(0.5 * (300 + 400 + 1)) = 351 takes over.
+        assert_eq!(flat_top, 340);
+        assert_eq!(sloped_top, 351);
+    }
     use crate::{headers_step::HeadlessHeaderStaff, staff_header::StaffHeader};
     use std::convert::Infallible;
 

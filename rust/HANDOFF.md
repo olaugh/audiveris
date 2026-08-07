@@ -923,14 +923,32 @@ and `Scale.AreaFraction` as `rint(interline^2 * v)`. Interline 21 -- the corpus'
 most common -- lands on two rounding ties at once (94.5 and 10.5), and both go
 to even, so a port using `round()` fails rather than half-passes.
 
-**The blocker is staff-line geometry.** `getOuterRect` needs
-`staff.getFirstLine().yAt(xMid)` and `getLastLine().yAt(xMid)`. GRID computes
-exactly that internally -- `recognize.rs`'s local `StaffDetail` carries
-`first_line`/`last_line` as `StaffBoundary` -- but `GridLinesRecognition` does
-not publish it: `StaffCandidateReport` has `left`, `right` and `interline` only,
-and `PopulationStaffArea` holds the staff's *area polygon*, not its lines. So
-the next edit is to surface per-staff line geometry with a `yAt(x)` accessor,
-after which the driver is assembly rather than porting.
+**Staff-line geometry: closed.** `GridLinesRecognition` now carries
+`staff_lines: Vec<StaffLineGeometry>`, each with the first and last line splines
+plus `first_line_y_at(x)` / `last_line_y_at(x)` (Java `LineInfo.yAt(int)`,
+`rint`ed). The splines were being computed inside GRID and dropped; nothing new
+is derived. Outside a spline's abscissa range these return `None` rather than
+extrapolating along the global slope as Java does -- deliberate, so a caller
+that strays outside a staff names itself instead of receiving an invented
+ordinate. Nothing in HEADERS should stray: its abscissae are the middle of a
+staff's own browse range.
+
+**A bug surfaced by doing that, now fixed.** `build_clef_lookup_contexts`
+evaluated each neighbour's gutter from *one scalar ordinate per staff*, but
+Java's `getOuterRect` reads a neighbour's line at the **current** staff's
+`xMid`. Those coincide only when staves are parallel and aligned. There is now
+`build_clef_lookup_contexts_at`, taking a `StaffLineOrdinates` resolver, with
+the old signature kept as the flat approximation the headless tests use.
+
+The regression test matters more than it looks: it is built so the sloped
+neighbour's gutter binds *only once sloped* -- flat, it lands below the
+`aboveStaff` limit and is invisible. That is exactly how this divergence would
+have hidden in production, and the first version of the test missed it for that
+reason.
+
+What remains is the driver itself: per-staff NO_STAFF crops into
+`NativeClefProposalRecognizer`, then the comparison against
+`clef-headers.txt`.
 
 ## Open threads, in the order worth taking them
 
