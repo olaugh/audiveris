@@ -44,6 +44,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
+| Clef classification | wired end to end; **not yet graded against Java** |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -842,8 +843,42 @@ a `.5` boundary has no margin at all. Pinning avoids the question.
    and Rust's `f64` parser both guarantee shortest-round-trip, so an exact match
    is available and anything weaker would hide a transcription slip. Perturbing
    one constant's last decimal digit fails that test and only that test.
-3. `ClefBuilder`, then `KeyBuilder` and `TimeBuilder`.
-4. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
+3. `ClefBuilder`. **Partly done**: `clef_classifier.rs` implements the
+   production `ClefShapeClassifier` -- noise gate, features, MLP, Java's
+   rank-then-filter order, and `getSymbolBounds`. What is *not* done is the
+   grading, and that is the next real task; see below.
+4. `KeyBuilder` and `TimeBuilder`, whose columns are also already written.
+5. `getHeaderStop()`, which closes the beam and `StemScaler` erase dependency.
+
+### `clef_classifier` is wired but ungraded, which is not the same as done
+
+`clef_column.rs` always had the `ClefShapeClassifier` seam; the only
+implementation was a test double returning `glyph.bounds` as the symbol box.
+That is now a real one, and every piece it composes is separately graded -- the
+110 features and the MLP against `RustParityProbe`, the font box 696/696 against
+the sweep.
+
+**The composition itself is not.** Its unit tests cover the noise gate, the
+rank-then-filter order, the drum-staff shape set, and the two independent
+roundings in `getSymbolBounds` (`rint(w/2)` is not `rint(w)/2`; C_CLEF at
+interline 23 is the case that separates them). None of that is evidence that
+Rust picks the same clef as Java on a real page.
+
+What would be: a Java oracle emitting, per staff on the eight-sheet corpus, the
+clef shape, its grade, and `clefStop`. Three specific risks it would catch, none
+visible to a unit test:
+
+1. **The glyph the classifier is handed.** Java classifies a `Glyph` assembled
+   from header parts, and the descriptor reads its `RunTable` with the glyph's
+   own origin. If part assembly differs at all, every feature differs.
+2. **`getSpecificInterline` versus the sheet interline.** `ClefBuilder` passes
+   the *staff's* interline to the classifier, and `getPointSize` reads the
+   sheet's. On a sheet with two staff sizes these differ, and the corpus has
+   such sheets.
+3. **`ClefInter.kindOf`,** which maps shape plus glyph centre to a `ClefKind`,
+   and which `clef_column` reimplements as `clef_kind` + `target_pitch`.
+
+Do not report clefs as ported until that oracle is green.
 
 ## Open threads, in the order worth taking them
 
