@@ -1017,6 +1017,55 @@ both a setter and a getter, read the getter. And a hypothesis that explains the
 mechanism, so it is worth the ten minutes to test it before writing it down as
 fact.
 
+## The two back-half risks, scouted (2026-08-07): neither blocks the project
+
+Both were investigated by dedicated scouts with file:line evidence; the full
+reports are `rust/scouting/heads-rasteriser.md` and `rust/scouting/texts-ocr.md`.
+Summary of what matters for planning:
+
+### HEADS templates: pinnable data, no rasteriser port needed
+
+Rendering enters template construction at exactly one point and is **binarised
+immediately** (alpha >= 140); graded coverage never survives, and the runtime
+match reads each keypoint only as a 3-way fore/back/hole class with integer
+weights. Templates depend on **(family, shape, integer pointSize) alone** --
+the pointSize is sheet-derived (measured black-head widths, secant interpolation
+over the already-ported `TextLayout.getBounds`) but collapses to one integer per
+staff. Whole-corpus template set: at most ~216 entries, under 1 MB -- dump them
+from a Java probe as oracle data, the classifier-weights move again. The
+sheet-side chamfer matching is pure integer arithmetic.
+
+**Carried risk, do not lose it:** `PageCleaner` (the SYMBOLS/TEXTS eraser base)
+paints font glyphs at *fractional* positions into the erase buffer. That is the
+one genuine rasteriser dependency left, it is downstream of HEADS, and it needs
+its own scout before SYMBOLS is attempted.
+
+### TEXTS OCR: fixture strategy confirmed by live measurement
+
+Java binds Tesseract **5.5.2 in-process** (bytedeco), legacy engine
+`OEM_TESSERACT_ONLY`, PSM_AUTO for the sheet scan; input is the NO_STAFF-derived
+buffer with good inters erased, round-tripped through in-memory TIFF at
+resolution 70. The narrowest clean seam is `OCR.recognize -> List<TextLine>`,
+and the **complete** call-site set is: the TEXTS sheet scan, CURVES'
+`RehearsalsBuilder` (a second batch stage the fixture must cover), and one
+GUI-only path. Rust already has the matching `ExternalTexts` seam; its
+`NeutralOcrWord` must grow baseline/font/char fields.
+
+Two live facts that settle the strategy. **Determinism:** the same sheet OCR'd
+in two JVM sessions produced bit-identical raw TextWords. **Feasibility:** with
+a legacy-capable `eng.traineddata` (23.5 MB, from `tesseract-ocr/tessdata`; not
+bundled with Audiveris, and Homebrew's is LSTM-only and useless to the legacy
+engine), all corpus sheets ran headless to end of TEXTS: ~134 sentences, ~252
+words, 262 lyric items.
+
+Plan as recommended: a recorder probe keyed by `(image-pixel SHA, langSpec,
+PSM) -> raw TextLines`, a Rust `FixtureOcr` that fails loudly on a key miss --
+which converts "fixture valid only if upstream stages are bit-identical" from an
+assumption into a checked invariant -- then the actual port is `TextBuilder`.
+Linking Tesseract from Rust would mean fighting a differently-compiled binary's
+float behaviour for zero port value, and the fixture seam is where a real
+binding would plug in later anyway.
+
 ## KEY and TIME: measured before starting (2026-08-07)
 
 ### How much of the corpus exercises them
