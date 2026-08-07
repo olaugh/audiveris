@@ -928,9 +928,21 @@ pub struct NativeKeyStaffContext {
 pub struct NativeKeyParameters {
     pub minimum_component_weight: usize,
     pub maximum_component_gap: i32,
+    /// Java `isTooLight`.
     pub minimum_glyph_weight: usize,
-    pub maximum_alter_width: i32,
-    pub maximum_alter_height: i32,
+    /// Java `isTooHeavy`. Previously absent, so an over-heavy compound was accepted.
+    pub maximum_glyph_weight: usize,
+    /// Java `isTooSmall`, width half. Previously absent.
+    ///
+    /// `f64` because Java compares the integer `Rectangle` dimension against an unrounded
+    /// `toPixelsDouble` threshold; rounding it first moves the boundary by up to half a pixel.
+    pub minimum_alter_width: f64,
+    /// Java `isTooSmall`, height half. Previously absent.
+    pub minimum_alter_height: f64,
+    /// Java `isTooLarge`, width half.
+    pub maximum_alter_width: f64,
+    /// Java `isTooLarge`, height half.
+    pub maximum_alter_height: f64,
     pub maximum_alters: usize,
     pub maximum_rank: usize,
     pub minimum_classifier_grade: f64,
@@ -1160,9 +1172,18 @@ impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
             let mut alters = Vec::new();
             for group in &groups {
                 let glyph = self.compound(input.staff_id, &parts, group)?;
-                if glyph.bounds.width > parameters.maximum_alter_width
-                    || glyph.bounds.height > parameters.maximum_alter_height
+                // Java's four `SingleAdapter` predicates, all of them: `isTooSmall`,
+                // `isTooLarge`, `isTooLight` and `isTooHeavy`. Only the upper size bounds and the
+                // lower weight bound used to be here, so an undersized or over-heavy compound was
+                // accepted. The size comparisons are in `f64` because Java's thresholds are.
+                let width = f64::from(glyph.bounds.width);
+                let height = f64::from(glyph.bounds.height);
+                if width < parameters.minimum_alter_width
+                    || height < parameters.minimum_alter_height
+                    || width > parameters.maximum_alter_width
+                    || height > parameters.maximum_alter_height
                     || glyph.weight < parameters.minimum_glyph_weight
+                    || glyph.weight > parameters.maximum_glyph_weight
                 {
                     continue;
                 }
@@ -1488,8 +1509,13 @@ mod tests {
                     minimum_component_weight: 2,
                     maximum_component_gap: 2,
                     minimum_glyph_weight: 4,
-                    maximum_alter_width: 4,
-                    maximum_alter_height: 8,
+                    // Permissive bounds: this fixture exercises grouping and ranking, not the
+                    // size gate, so the gate must not be what decides its outcome.
+                    minimum_alter_width: 0.0,
+                    minimum_alter_height: 0.0,
+                    maximum_alter_width: 4.0,
+                    maximum_alter_height: 8.0,
+                    maximum_glyph_weight: usize::MAX,
                     maximum_alters: 7,
                     maximum_rank: 3,
                     minimum_classifier_grade: 0.5,
