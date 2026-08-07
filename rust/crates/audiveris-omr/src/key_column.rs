@@ -921,7 +921,29 @@ pub struct NativeKeyStaffContext {
     pub envelope_top: i32,
     pub envelope_bottom: i32,
     pub staff_mid_y: f64,
-    pub interline: i32,
+    /// The interline handed to the **classifier**, which Java takes from the *sheet*.
+    ///
+    /// Named for its one use on purpose. A single `interline` field used to serve both this and
+    /// the pitch computation, but Java takes them from different places -- `sheet.getInterline()`
+    /// here, and the staff's own measured lines for the pitch -- so on a mixed-size sheet no
+    /// single value is right for both. The pitch now comes from [`StaffPitchGeometry`] instead.
+    pub classifier_interline: i32,
+    /// Number of lines on this staff, Java's `lines.size()` in `pitchPositionOf`.
+    pub line_count: usize,
+}
+
+/// The staff geometry `Staff.pitchPositionOf` reads, at a given abscissa.
+///
+/// Java evaluates `getFirstLine().yAt(x)` and `getLastLine().yAt(x)` as **doubles** from the
+/// splines, and derives the pitch from their separation rather than from any interline. Those
+/// agree only where a staff's lines happen to be exactly `(lines - 1)` nominal interlines apart,
+/// which no real staff is at every abscissa.
+pub trait StaffPitchGeometry {
+    /// `(first line y, last line y)` at `x`, unrounded.
+    ///
+    /// `None` suppresses the pitch rather than inventing one, matching the deliberate refusal to
+    /// extrapolate outside a spline's range.
+    fn line_span_at(&self, staff_id: usize, x: f64) -> Option<(f64, f64)>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1051,8 +1073,29 @@ struct NativeKeyPart {
 
 /// Concrete staff envelope → projection range → connected glyphs → accidental
 /// proposals. Hypotheses are evaluated in Java `Shape` order: FLAT, then SHARP.
-pub struct NativeKeyProposalRecognizer<Classifier> {
+/// Java `Staff.pitchPositionOf`, for a point inside the staff.
+///
+/// ```text
+/// ((lines - 1) * (2y - bottom - top)) / (bottom - top)
+/// ```
+///
+/// Falls back to the old interline approximation only when the splines cannot answer at this
+/// abscissa, which for a key alteration means the glyph sat outside its own staff's horizontal
+/// extent. That is degenerate rather than routine, and the fallback keeps it from becoming a hard
+/// failure.
+fn pitch_position_of(span: Option<(f64, f64)>, context: NativeKeyStaffContext, y: f64) -> f64 {
+    match span {
+        Some((top, bottom)) if bottom > top => {
+            (context.line_count.saturating_sub(1) as f64) * ((2.0 * y) - bottom - top)
+                / (bottom - top)
+        }
+        _ => (2.0 * (y - context.staff_mid_y)) / f64::from(context.classifier_interline),
+    }
+}
+
+pub struct NativeKeyProposalRecognizer<Classifier, Lines> {
     classifier: Classifier,
+    lines: Lines,
     sources: BTreeMap<usize, RunTable>,
     contexts: BTreeMap<usize, NativeKeyStaffContext>,
     parameters: BTreeMap<usize, NativeKeyParameters>,
@@ -1062,10 +1105,13 @@ pub struct NativeKeyProposalRecognizer<Classifier> {
     projections: BTreeMap<usize, Vec<usize>>,
 }
 
-impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
+impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
+    NativeKeyProposalRecognizer<Classifier, Lines>
+{
     #[must_use]
     pub fn new(
         classifier: Classifier,
+        lines: Lines,
         sources: BTreeMap<usize, RunTable>,
         contexts: BTreeMap<usize, NativeKeyStaffContext>,
         parameters: BTreeMap<usize, NativeKeyParameters>,
@@ -1074,6 +1120,7 @@ impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
     ) -> Self {
         Self {
             classifier,
+            lines,
             sources,
             contexts,
             parameters,
@@ -1113,8 +1160,8 @@ impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
     }
 }
 
-impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
-    for NativeKeyProposalRecognizer<Classifier>
+impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposalRecognizer
+    for NativeKeyProposalRecognizer<Classifier, Lines>
 {
     type Error = NativeKeyError<Classifier::Error>;
 
@@ -1196,7 +1243,7 @@ impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
                     .classifier
                     .evaluate(
                         &glyph,
-                        context.interline,
+                        context.classifier_interline,
                         parameters.maximum_rank,
                         parameters.minimum_classifier_grade,
                     )
@@ -1220,8 +1267,11 @@ impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
                         width: glyph.bounds.width,
                         bounds: glyph.bounds,
                         classifier_grade: evaluation.grade,
-                        measured_pitch: (2.0 * (glyph.centroid_y - context.staff_mid_y))
-                            / f64::from(context.interline),
+                        measured_pitch: pitch_position_of(
+                            self.lines.line_span_at(input.staff_id, glyph.centroid_x),
+                            context,
+                            glyph.centroid_y,
+                        ),
                     });
                     if alters.len() == parameters.maximum_alters.min(7) {
                         break;
@@ -1263,7 +1313,9 @@ impl<Classifier: KeyShapeClassifier> VisualKeyProposalRecognizer
     }
 }
 
-impl<Classifier: KeyShapeClassifier> NativeKeyProposalRecognizer<Classifier> {
+impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
+    NativeKeyProposalRecognizer<Classifier, Lines>
+{
     fn compound(
         &mut self,
         staff_id: usize,
@@ -1480,9 +1532,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_pitch_comes_from_the_measured_lines_not_the_nominal_interline() {
+        // A staff whose lines are 79.2 px apart where four nominal interlines would be 80: a
+        // 1% departure, which is unremarkable on a scanned page. Java divides by the *measured*
+        // separation, so the two formulas disagree, and they disagree more the further from the
+        // staff centre the alteration sits.
+        let context = NativeKeyStaffContext {
+            browse_stop: 0,
+            envelope_top: 0,
+            envelope_bottom: 0,
+            staff_mid_y: 139.6,
+            classifier_interline: 20,
+            line_count: 5,
+        };
+        let (top, bottom) = (100.0, 179.2);
+
+        // Java: ((5-1) * (2y - bottom - top)) / (bottom - top).
+        let measured = pitch_position_of(Some((top, bottom)), context, 120.0);
+        assert!((measured - (4.0 * ((2.0 * 120.0) - bottom - top) / (bottom - top))).abs() < 1e-12);
+
+        // The interline approximation this replaced, kept here as the thing being distinguished.
+        let approximated =
+            (2.0 * (120.0 - context.staff_mid_y)) / f64::from(context.classifier_interline);
+        assert!(
+            (measured - approximated).abs() > 0.01,
+            "measured {measured} vs approximated {approximated} must differ"
+        );
+
+        // Where the lines *are* exactly four interlines apart, the two agree -- which is why the
+        // approximation looked right for so long.
+        let exact = pitch_position_of(Some((100.0, 180.0)), context, 120.0);
+        assert!((exact - (2.0 * (120.0 - 140.0) / 20.0)).abs() < 1e-12);
+    }
+
+    /// Pitch geometry that declines to answer, so the fixtures fall back to the interline form.
+    ///
+    /// These fixtures assert grouping, ranking and rejection, not pitch; giving them synthetic
+    /// spline ordinates would make their expected pitches depend on numbers they do not model.
+    struct FlatPitchGeometry;
+
+    impl StaffPitchGeometry for FlatPitchGeometry {
+        fn line_span_at(&self, _staff_id: usize, _x: f64) -> Option<(f64, f64)> {
+            None
+        }
+    }
+
     fn native_recognizer(
         classifier: FakeKeyClassifier,
-    ) -> NativeKeyProposalRecognizer<FakeKeyClassifier> {
+    ) -> NativeKeyProposalRecognizer<FakeKeyClassifier, FlatPitchGeometry> {
         let mut pixels = vec![BACKGROUND; 40 * 30];
         for y in 7..11 {
             for x in [12usize, 13, 18, 19] {
@@ -1492,6 +1590,7 @@ mod tests {
         let source = RunTable::from_pixels(Orientation::Horizontal, 40, 30, &pixels).unwrap();
         NativeKeyProposalRecognizer::new(
             classifier,
+            FlatPitchGeometry,
             BTreeMap::from([(7, source)]),
             BTreeMap::from([(
                 1,
@@ -1500,7 +1599,8 @@ mod tests {
                     envelope_top: 5,
                     envelope_bottom: 15,
                     staff_mid_y: 10.0,
-                    interline: 4,
+                    classifier_interline: 4,
+                    line_count: 5,
                 },
             )]),
             BTreeMap::from([(

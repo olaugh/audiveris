@@ -1109,7 +1109,7 @@ exposes a field through a getter that does anything other than return it, the
 port must call the getter everywhere Java does, not just where the difference
 was first noticed.
 
-### Two divergences to fix *before* the driver, both found by reading Java
+### Two divergences fixed before the driver, both found by reading Java
 
 Building the driver means filling `NativeKeyStaffContext`, and two of its fields
 turn out not to mean what the Rust code assumes.
@@ -1151,6 +1151,21 @@ an interline.
 Neither is visible on this corpus, since every staff has the sheet interline and
 the pitch differences are sub-boundary. That is an argument for fixing them now
 rather than after a green run makes them look settled.
+
+**Both are now fixed.** `NativeKeyStaffContext.interline` became
+`classifier_interline`, named for its one remaining use, plus a `line_count`.
+The pitch comes from a new `StaffPitchGeometry` trait, threaded through
+`NativeKeyProposalRecognizer`, which answers `(first line y, last line y)` at an
+abscissa as *doubles* -- Java reads the spline with `yAt(double)`, not the
+`rint`ed `yAt(int)` that `getOuterRect` uses, so the clef-side
+`StaffLineOrdinates` would have been the wrong trait to reuse.
+
+`pitch_position_of` falls back to the old interline form only when the splines
+cannot answer at that abscissa, which for a key alteration means the glyph sat
+outside its own staff's horizontal extent -- degenerate rather than routine. The
+regression test uses lines 79.2 px apart where four nominal interlines would be
+80, a 1% departure that is unremarkable on a scan, and asserts the two formulas
+disagree there and agree at exactly 80.
 
 ### Then the driver and the grading
 
