@@ -30,6 +30,7 @@ import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.header.StaffHeader;
 import org.audiveris.omr.sig.inter.ClefInter;
+import org.audiveris.omr.sig.inter.Inter;
 import org.audiveris.omr.step.OmrStep;
 
 import java.awt.Rectangle;
@@ -62,6 +63,9 @@ public class ClefProbe
         System.out.println("# staff <id> <specific-interline> <header-start> <header-stop> <clef-stop>"
                 + " <shape> <grade> <symbol-x> <symbol-y> <symbol-w> <symbol-h>"
                 + " <glyph-x> <glyph-y> <glyph-w> <glyph-h> <glyph-weight>");
+        System.out.println("# candidate <staff-id> <shape> <grade> <ctx-grade> <removed>"
+                + " <symbol-x> <symbol-y> <symbol-w> <symbol-h>"
+                + " <glyph-x> <glyph-y> <glyph-w> <glyph-h>");
 
         for (String name : SHEETS) {
             // The working directory is app/, because `WellKnowns.RES_URI` resolves the fonts
@@ -90,9 +94,46 @@ public class ClefProbe
                 for (SystemInfo system : sheet.getSystems()) {
                     for (Staff staff : system.getStaves()) {
                         emitStaff(staff);
+                        emitCandidates(sheet, staff);
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Emits every clef candidate registered for a staff, survivor or not.
+     *
+     * <p>This exists because `clefStop` is <em>not</em> a property of the clef the header ends up
+     * with. `registerClefs` sets it from the candidate at index 0 of a list sorted by *intrinsic*
+     * grade, whereas `selectClef` later picks the header clef by *contextual* grade and deletes
+     * the rest. When those two orders disagree, the staff's `clefStop` describes an inter that no
+     * longer exists, and no amount of comparing against the survivor's box will reproduce it.
+     *
+     * <p>The deleted candidates are still reachable: `Inter.remove()` unlinks the vertex from the
+     * SIG but the sheet's `InterIndex` retains the object, so it can be read back with its grade,
+     * its contextual grade and its bounds.
+     */
+    private static void emitCandidates (Sheet sheet,
+                                        Staff staff)
+    {
+        for (Inter inter : sheet.getInterIndex().getEntities()) {
+            if (!(inter instanceof ClefInter clef) || (clef.getStaff() != staff)) {
+                continue;
+            }
+
+            final Rectangle box = clef.getBounds();
+            final Rectangle glyph = (clef.getGlyph() != null) ? clef.getGlyph().getBounds() : null;
+            System.out.printf(
+                    Locale.ROOT,
+                    "candidate %d %s %s %s %b %s %s%n",
+                    staff.getId(),
+                    clef.getShape(),
+                    Double.toString(clef.getGrade()),
+                    Double.toString(clef.getContextualGrade()),
+                    clef.isRemoved(),
+                    box(box),
+                    (glyph != null) ? box(glyph) : "- - - -");
         }
     }
 

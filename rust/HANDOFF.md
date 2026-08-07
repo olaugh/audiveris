@@ -44,7 +44,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
 | Symbol outline bounds | 696/696 swept values on 6 clefs x 116 sizes, exact |
-| Clef classification | 65/65 corpus staves: shape and symbol box exact. `clefStop` open |
+| Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
 
 Beams run only in tests, fed by the oracle. Two of the three inputs that kept
 them there are now native -- see "Next session: start here". The third is the
@@ -973,20 +973,48 @@ noise gate, the rank-then-filter order, the drum shape set and the two
 independent roundings, and all of them passed against code missing an entire
 step. The corpus caught it on the first run.
 
-### `clefStop` is still open, and not for the reason it looks
+### `clefStop`: closed, and the first explanation was wrong
 
-Computing it from the selected candidate reproduces **56 of 65**. The nine
-misses are *all* bass-clef staves, and Java's value is always the larger.
+Computing it as `glyph.getBounds().intersection(clefBox)` reproduced 56 of 65,
+with all nine misses on bass staves. The note here previously blamed that on
+`registerClefs` setting `clefStop` from the candidate at index 0 while
+`selectClef` later picks a different one by contextual grade. **That was wrong.**
+Extending `ClefProbe` to emit every registered candidate showed exactly one per
+staff, with contextual grade equal to intrinsic -- so there was never a
+competing candidate to disagree about.
 
-The cause looks structural rather than arithmetic. `registerClefs` sets
-`clefStop` from the candidate at **index 0** -- the highest-graded at
-*registration* -- while `header.clef`, whose boxes the oracle prints, is
-whichever clef `selectClef` picked *afterwards*. Those need not be the same
-inter, so the oracle's `clefStop` column and its box columns can describe two
-different candidates, and comparing one against the other is not a parity test
-at all. Settling it needs `ClefProbe` to emit the whole registered candidate set
-per staff rather than just the survivor. `clef_stop` in the test file carries
-the intersection arithmetic ready for that.
+The real cause is that `Staff.getClefStop()` does not return what
+`setClefStop` stored:
+
+```java
+public Integer getClefStop () {
+    if (header.clef != null) {
+        Rectangle bounds = header.clef.getBounds();
+        return (bounds.x + bounds.width) - 1;      // the glyph is not consulted
+    }
+    if ((header.clefRange != null) && header.clefRange.valid) {
+        return header.clefRange.getStop();          // the stored value, as fallback
+    }
+    return null;
+}
+```
+
+`registerClefs` does compute an intersection and store it on the clef *range*,
+but once a header clef exists that stored value is never read; the getter
+recomputes from the clef's own bounds and ignores the glyph. The stored form
+survives only for a staff whose clef was never selected.
+
+This is a quiet difference rather than a loud one: the two agree whenever the
+glyph is at least as wide as its symbol, which held on 56 of 65 staves. The nine
+that disagreed were all bass clefs, whose ink is narrower than the `F_CLEF`
+symbol. `clefStop` is now asserted on all 65.
+
+Two lessons worth carrying. A getter that recomputes rather than returning the
+stored field is exactly the kind of thing a port reads past; when a value has
+both a setter and a getter, read the getter. And a hypothesis that explains the
+*pattern* of failures -- "all nine are bass clefs" -- can still be the wrong
+mechanism, so it is worth the ten minutes to test it before writing it down as
+fact.
 
 ## Open threads, in the order worth taking them
 

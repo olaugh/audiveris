@@ -96,29 +96,19 @@ impl StaffLineOrdinates for GridOrdinates<'_> {
     }
 }
 
-/// Why `clefStop` is not asserted yet, recorded here rather than in the handoff alone.
+/// Java `Staff.getClefStop()`: the inclusive right edge of the header clef's own bounds.
 ///
-/// Java's `registerClefs` sets it from `glyph.getBounds().intersection(clefBox)` for the candidate
-/// at **index 0** — the highest-graded one at *registration* time — while `header.clef`, which the
-/// oracle prints the boxes of, is whichever clef `selectClef` chose *afterwards*. Those are not
-/// always the same inter, so the oracle's `clefStop` column and its box columns can legitimately
-/// describe two different candidates, and comparing one against the other is not a parity test.
+/// This is not the value `setClefStop` stored, and the difference matters. `registerClefs`
+/// computes an end from `glyph.getBounds().intersection(clefBox)` and stores it on the clef
+/// *range*; but `getClefStop` never reads that once a header clef exists — it recomputes from
+/// `header.clef.getBounds()` and ignores the glyph entirely. The stored value survives only as a
+/// fallback for a staff whose clef was never selected.
 ///
-/// Computing it from the selected candidate reproduces 56 of 65. All nine misses are bass-clef
-/// staves and Java's value is the larger, consistent with a wider competing candidate having
-/// ranked first at registration. Settling it needs the oracle to emit the whole registered
-/// candidate set per staff, not just the survivor.
-#[expect(
-    dead_code,
-    reason = "kept as the documented shape of the next increment"
-)]
-fn clef_stop(symbol: HeaderBounds, glyph: Option<HeaderBounds>) -> i32 {
-    let Some(glyph) = glyph else {
-        return symbol.x + symbol.width - 1;
-    };
-    let x = symbol.x.max(glyph.x);
-    let right = (symbol.x + symbol.width).min(glyph.x + glyph.width);
-    x + (right - x) - 1
+/// Getting this wrong is quiet rather than loud: the intersection form agrees with the box form
+/// whenever the glyph is at least as wide as its symbol, which was 56 of these 65 staves. The
+/// nine that disagreed were all bass clefs, whose ink is narrower than the F_CLEF symbol.
+fn clef_stop(symbol: HeaderBounds) -> i32 {
+    symbol.x + symbol.width - 1
 }
 
 #[test]
@@ -286,8 +276,14 @@ fn native_clefs_match_java_on_every_corpus_staff() {
                             oracle.id, oracle.shape, oracle.symbol
                         ));
                     }
-                    // `clefStop` is deliberately *not* compared here; see `clef_stop` below.
-                    let _ = (glyph_bounds, oracle.clef_stop);
+                    let stop = clef_stop(bounds);
+                    if Some(stop) != oracle.clef_stop {
+                        mismatches.push(format!(
+                            "{name} staff {}: clefStop {stop}, Java {:?}",
+                            oracle.id, oracle.clef_stop
+                        ));
+                    }
+                    let _ = glyph_bounds;
                 }
             }
         }
