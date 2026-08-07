@@ -120,6 +120,43 @@ pub const fn max_eval_rank() -> usize {
     constants::MAX_EVAL_RANK
 }
 
+/// Java `HeaderBuilder.constants.maxHeaderWidth`, scaled by the **sheet** interline.
+///
+/// This is the `projectionWidth` `KeyColumn.retrieveKeys` is called with.
+#[must_use]
+pub fn max_header_width(sheet_interline: i32) -> i32 {
+    (f64::from(sheet_interline) * 15.0).round_ties_even() as i32
+}
+
+/// Java `KeyColumn.constants.maxSliceDist`, the tolerance to a theoretical slice abscissa.
+#[must_use]
+pub fn max_slice_distance(sheet_interline: i32) -> i32 {
+    (f64::from(sheet_interline) * 0.5).round_ties_even() as i32
+}
+
+/// Java `KeyBuilder.getBrowseRect`, returning the vertical envelope `(yMin, yMax)`.
+///
+/// The area spans the staff's own lines, extended two interlines above and one below, so that it
+/// embraces any key signature whatever the clef.
+///
+/// **Reproduces a bug in Java deliberately.** The original loops `x` from `xMin` to `xMax` and then
+/// evaluates `staff.getFirstLine().yAt(xMin)` inside the loop -- `xMin`, not `x`. The loop
+/// therefore computes the same value every iteration and the sweep does nothing; the envelope is
+/// decided entirely by the ordinates at `xMin`. This takes those two ordinates as arguments rather
+/// than a range, so the signature states that fact instead of hiding a dead sweep. If Audiveris
+/// ever fixes it, the envelope will widen on sloped staves and this must change with it.
+#[must_use]
+pub fn browse_envelope(
+    first_line_y_at_x_min: i32,
+    last_line_y_at_x_min: i32,
+    staff_interline: i32,
+) -> (i32, i32) {
+    (
+        first_line_y_at_x_min - (2 * staff_interline),
+        last_line_y_at_x_min + staff_interline,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,5 +199,22 @@ mod tests {
         assert!(parameters.accepts_weight(parameters.minimum_glyph_weight));
         assert!(parameters.accepts_weight(parameters.maximum_glyph_weight));
         assert!(!parameters.accepts_weight(parameters.maximum_glyph_weight + 1));
+    }
+
+    #[test]
+    fn the_projection_width_and_slice_tolerance_scale_from_the_sheet() {
+        assert_eq!(max_header_width(21), 315);
+        // 21 * 0.5 = 10.5, a tie, and `Math.rint` sends it to the even 10 rather than 11. This is
+        // the third distinct constant in the header stages to land on a tie at interline 21, which
+        // is the corpus' most common value -- a port using `round()` fails on all three.
+        assert_eq!(max_slice_distance(21), 10);
+        assert_eq!(max_slice_distance(20), 10);
+        assert_eq!(max_slice_distance(23), 12); // 11.5 -> 12, the even side is up here
+    }
+
+    #[test]
+    fn the_browse_envelope_extends_two_interlines_above_and_one_below() {
+        // A staff whose first line is at 400 and last at 480, interline 20.
+        assert_eq!(browse_envelope(400, 480, 20), (360, 500));
     }
 }

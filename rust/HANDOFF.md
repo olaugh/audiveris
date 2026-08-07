@@ -1167,6 +1167,27 @@ regression test uses lines 79.2 px apart where four nominal interlines would be
 80, a 1% departure that is unremarkable on a scan, and asserts the two formulas
 disagree there and agree at exactly 80.
 
+### The driver's remaining inputs are now ported
+
+`key_parameters.rs` also carries the three values the driver needs beyond the
+extractor set: `max_header_width` (the `projectionWidth` Java passes to
+`retrieveKeys`, sheet-scaled 15.0), `max_slice_distance` (0.5), and
+`browse_envelope`.
+
+**`browse_envelope` reproduces a bug in Java on purpose.**
+`KeyBuilder.getBrowseRect` loops `x` from `xMin` to `xMax` and then evaluates
+`staff.getFirstLine().yAt(xMin)` *inside* the loop -- `xMin`, not `x`. The sweep
+does nothing; the envelope is decided entirely by the ordinates at `xMin`. The
+Rust signature takes those two ordinates rather than a range, so it states the
+fact instead of hiding a dead loop. If Audiveris ever fixes it the envelope
+widens on sloped staves, and this has to change with it.
+
+Also worth a note for whoever ports the next stage: **interline 21 is the
+corpus' most common value and it lands on a rounding tie for three separate
+constants** -- `maxClefEnd` (94.5), `yCoreMargin` (10.5) and `maxSliceDist`
+(10.5). `Math.rint` sends all three to even. A port using `round()` fails all
+three, and I got the expected value wrong on two of them while writing the tests.
+
 ### Then the driver and the grading
 
 Assemble `NativeKeyProposalRecognizer` over `BundledKeyClassifier` and grade the
