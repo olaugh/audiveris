@@ -105,6 +105,17 @@ public class MusicFontScout
         System.out.printf("musicfont.family=%s%n", family);
         System.out.printf("musicfont.standard-interline=%d%n", 20);
         System.out.printf("musicfont.pointsize-per-interline=%d%n", MusicFont.getPointSize(1000) / 1000);
+        System.out.printf(
+                "musicfont.area-pitch-offset.FLAT=%s%n",
+                Double.toString(
+                        org.audiveris.omr.sig.inter.AbstractPitchedInter.getAreaPitchOffset(
+                                org.audiveris.omr.glyph.Shape.FLAT)));
+        System.out.printf(
+                "musicfont.key-pitches.BASS-FLAT=%s%n",
+                java.util.Arrays.toString(
+                        org.audiveris.omr.sig.inter.KeyInter.getPitches(
+                                org.audiveris.omr.sig.inter.ClefInter.ClefKind.BASS,
+                                org.audiveris.omr.glyph.Shape.FLAT)));
 
         for (Shape shape : HEADER_CLEF_SHAPES) {
             final FontSymbol reference = shape.getFontSymbolByInterline(family, 20);

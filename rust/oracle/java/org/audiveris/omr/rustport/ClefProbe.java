@@ -67,6 +67,7 @@ public class ClefProbe
                 + " <symbol-x> <symbol-y> <symbol-w> <symbol-h>"
                 + " <glyph-x> <glyph-y> <glyph-w> <glyph-h>");
         System.out.println("# key <staff-id> <fifths|NONE> <grade> <x> <y> <w> <h> <key-stop>");
+        System.out.println("# alter <staff-id> <index> <x> <y> <w> <h> <grade>");
         System.out.println("# time <staff-id> <shape|NONE> <rational> <grade> <x> <y> <w> <h>"
                 + " <time-stop>");
 
@@ -129,6 +130,19 @@ public class ClefProbe
                     Double.toString(header.key.getGrade()),
                     box(header.key.getBounds()),
                     value(staff.getKeyStop()));
+
+            // Per-alteration boxes, so a one-member divergence in the union box can be
+            // attributed to the member rather than argued about.
+            int index = 0;
+            for (org.audiveris.omr.sig.inter.Inter member : header.key.getMembers()) {
+                System.out.printf(
+                        Locale.ROOT,
+                        "alter %d %d %s %s%n",
+                        staff.getId(),
+                        index++,
+                        box(member.getBounds()),
+                        Double.toString(member.getGrade()));
+            }
         } else {
             System.out.printf("key %d NONE - - - - - %s%n", staff.getId(), value(staff.getKeyStop()));
         }

@@ -1101,6 +1101,9 @@ struct SliceState {
     stop: i32,
     glyph: Option<NativeKeyGlyph>,
     grade: Option<f64>,
+    /// Measured pitch of the assigned glyph, captured at assignment so `checkWithClefs` can read
+    /// it without re-deriving.
+    pitch: Option<f64>,
 }
 
 /// Black-pixel count for one column over `height` rows, Java's projection cell.
@@ -1360,6 +1363,7 @@ pub struct NativeKeyProposalRecognizer<Classifier, Lines> {
     next_inter_id: usize,
     mutations: Vec<NativeKeyMutation>,
     projections: BTreeMap<usize, Vec<usize>>,
+    clef_supports: BTreeMap<usize, Vec<KeyClefSupport>>,
 }
 
 impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
@@ -1385,7 +1389,18 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
             next_inter_id,
             mutations: Vec::new(),
             projections: BTreeMap::new(),
+            clef_supports: BTreeMap::new(),
         }
+    }
+
+    /// Supplies the per-staff clef candidates Java reads via `staff.getCompetingClefs`.
+    ///
+    /// Without them the third extraction pass (`checkWithClefs` + `fillMissingAlters`) is
+    /// skipped, exactly as Java skips it when a staff has no competing clef.
+    #[must_use]
+    pub fn with_clef_supports(mut self, supports: BTreeMap<usize, Vec<KeyClefSupport>>) -> Self {
+        self.clef_supports = supports;
+        self
     }
 
     #[must_use]
@@ -1498,6 +1513,245 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>
             parts.push(NativeKeyPart { id, component });
         }
         Ok(parts)
+    }
+
+    /// Java `ShapeBuilder.checkWithClefs` followed by `fillMissingAlters`, phase 3 of the key
+    /// hunt.
+    ///
+    /// Selects the best *compatible* clef by contextual grade — a single alteration whose pitch
+    /// misses its expected position by more than the delta budget invalidates the whole clef, and
+    /// grades are read **intrinsic-scaled**, as `KeyAlterInter` stores them. If the best clef
+    /// overall is not the compatible one, the key is destroyed (`false`). Otherwise every slice
+    /// that is still empty, or whose pitched grade fell under `keyAlterMinGrade1`, is hunted once
+    /// more — this time in a **pitch window**: the slice rectangle is re-centred on the
+    /// alteration's theoretical ordinate for that clef, `stdGlyphHeight` tall, and the extraction
+    /// reruns with the phase-2 grade floor and neighbours cropped away.
+    #[expect(clippy::too_many_arguments, reason = "mirrors the Java method pair")]
+    fn check_with_clefs_and_fill(
+        &mut self,
+        input: &KeyRecognitionInput,
+        context: NativeKeyStaffContext,
+        parameters: &NativeKeyParameters,
+        pipeline: &KeyPipelineParameters,
+        shape: NeutralKeyAlterShape,
+        clefs: &[KeyClefSupport],
+        peaks: &[KeyPeak],
+        slices: &mut [SliceState],
+        flat_area_offset: f64,
+    ) -> Result<bool, NativeKeyError<Classifier::Error>> {
+        // Java `ClefKeyRelation().getSourceRatio()` and `KeyAltersRelation().getSourceRatio()`.
+        const CLEF_RATIO: f64 = 5.0;
+        const ALTERS_RATIO: f64 = 5.0;
+        // Java `Grades.intrinsicRatio` and the two alter grade floors.
+        const INTRINSIC: f64 = 0.8;
+        const MIN_GRADE_1: f64 = 0.1;
+
+        let pitched_for = |kind: NeutralClefKind| -> Option<(Vec<f64>, usize)> {
+            let expected = key_pitches(kind, shape)?;
+            let n = slices.len();
+            let max_delta = if n >= 4 {
+                2.0
+            } else {
+                0.5 + (2.0 - 0.5) * (n - 1) as f64 / 3.0
+            };
+            let mut grades = vec![0.0; n];
+            let mut count = 0;
+            for (index, slice) in slices.iter().enumerate() {
+                let (Some(_glyph), Some(grade)) = (&slice.glyph, slice.grade) else {
+                    continue;
+                };
+                count += 1;
+                let delta = (slice
+                    .pitch
+                    .expect("a graded slice carries its measured pitch")
+                    - f64::from(expected[index]))
+                .abs();
+                if delta > max_delta {
+                    return None;
+                }
+                grades[index] = INTRINSIC * grade * (1.0 - delta / max_delta);
+            }
+            (count > 0).then_some((grades, count))
+        };
+
+        let mut best_compatible: Option<(usize, Vec<f64>)> = None;
+        let mut best_compatible_ctx = 0.0;
+        for (clef_index, clef) in clefs.iter().enumerate() {
+            if clef.kind == NeutralClefKind::Percussion {
+                continue;
+            }
+            let Some((grades, count)) = pitched_for(clef.kind) else {
+                continue;
+            };
+            // Java `computeKeyGrade`: mean over present alters of each grade's contextual value
+            // against the sum of the *other* slices' contributions.
+            let contribs: Vec<f64> = grades
+                .iter()
+                .map(|&grade| contribution_of(grade, ALTERS_RATIO))
+                .collect();
+            let mut key_grade = 0.0;
+            for (index, &grade) in grades.iter().enumerate() {
+                let contribution: f64 = contribs
+                    .iter()
+                    .enumerate()
+                    .filter(|&(other, _)| other != index)
+                    .map(|(_, &value)| value)
+                    .sum();
+                key_grade += contextual(grade, contribution);
+            }
+            key_grade /= count as f64;
+            let clef_ctx = contextual(clef.grade, contribution_of(key_grade, CLEF_RATIO));
+            if clef_ctx > best_compatible_ctx {
+                best_compatible_ctx = clef_ctx;
+                best_compatible = Some((clef_index, grades));
+            }
+        }
+
+        let Some((compatible_index, pitched)) = best_compatible else {
+            // No compatible clef at all: Java stuffs every slice and reports failure.
+            return Ok(false);
+        };
+        let mut best_index = compatible_index;
+        let mut best_grade = -1.0;
+        for (clef_index, clef) in clefs.iter().enumerate() {
+            let grade = if clef_index == compatible_index {
+                best_compatible_ctx
+            } else {
+                clef.grade
+            };
+            if grade > best_grade {
+                best_grade = grade;
+                best_index = clef_index;
+            }
+        }
+        if best_index != compatible_index {
+            return Ok(false);
+        }
+
+        // ---- fillMissingAlters ----
+        let kind = clefs[compatible_index].kind;
+        let expected = key_pitches(kind, shape).expect("compatible clef has pitches");
+        for index in 0..slices.len() {
+            let needs = slices[index].glyph.is_none() || pitched[index] < MIN_GRADE_1;
+            if !needs {
+                continue;
+            }
+            // Java `KeySlice.setPitchRect`: centre the hunt on the theoretical ordinate. Two
+            // integer quirks are load-bearing. `typicalHeight / 2` is integer division. And the
+            // pitch itself is `int pitch = clefPitches[i]; pitch -= getAreaPitchOffset(shape);`
+            // -- a compound assignment on an `int`, which Java silently narrows back: the
+            // fractional area offset is applied and then *truncated toward zero*, so a bass-clef
+            // third flat hunts at pitch (int)(3 - 1.0559) = 1, not 1.944. Reproducing the
+            // truncation moved the window 7 px and closed the last corpus staff; "fixing" it
+            // would diverge from Java on every flat key.
+            let offset = match shape {
+                NeutralKeyAlterShape::Flat => flat_area_offset,
+                NeutralKeyAlterShape::Sharp => 0.0,
+            };
+            let pitch = f64::from((f64::from(expected[index]) - offset) as i32);
+            let Some(y_center) = self.pitch_to_ordinate_double(
+                input.staff_id,
+                context,
+                f64::from(slices[index].start),
+                pitch,
+            ) else {
+                continue;
+            };
+            let y = (y_center - f64::from(pipeline.std_glyph_height / 2)).round_ties_even() as i32;
+            let slice_rect = HeaderBounds {
+                x: slices[index].start,
+                y,
+                width: slices[index].stop - slices[index].start + 1,
+                height: pipeline.std_glyph_height,
+            };
+            let neighbours: Vec<NativeKeyGlyph> = [index.checked_sub(1), Some(index + 1)]
+                .into_iter()
+                .flatten()
+                .filter_map(|other| slices.get(other).and_then(|slice| slice.glyph.clone()))
+                .collect();
+            let parts = {
+                let source = self
+                    .sources
+                    .get(&input.system_id)
+                    .ok_or(NativeKeyError::MissingSource(input.system_id))?;
+                let crop = slice_crop(source, slice_rect, &neighbours)
+                    .map_err(NativeKeyError::RunTable)?;
+                self.register_parts(
+                    input.staff_id,
+                    build_glyph_components(&crop, slice_rect.x, slice_rect.y),
+                    parameters.minimum_component_weight,
+                    slice_rect.right(),
+                )?
+            };
+            let groups = enumerate_key_subsets(&parts, *parameters);
+            for group in &groups {
+                let glyph = self.compound(input.staff_id, &parts, group)?;
+                if !accepts_glyph(&glyph, parameters)
+                    || !embraces_slice_peaks(
+                        slices[index].start,
+                        slices[index].stop,
+                        glyph.bounds,
+                        peaks,
+                    )
+                {
+                    continue;
+                }
+                self.mutations.push(NativeKeyMutation::GlyphEvaluated {
+                    staff_id: input.staff_id,
+                    glyph_id: glyph.id,
+                    shape,
+                });
+                let evaluations = self
+                    .classifier
+                    .evaluate(
+                        &glyph,
+                        context.classifier_interline,
+                        parameters.maximum_rank,
+                        PHASE_TWO_MINIMUM_GRADE,
+                    )
+                    .map_err(|source| NativeKeyError::Classifier {
+                        staff_id: input.staff_id,
+                        glyph_id: glyph.id,
+                        source,
+                    })?;
+                if let Some(evaluation) = evaluations
+                    .into_iter()
+                    .take(parameters.maximum_rank)
+                    .find(|evaluation| {
+                        evaluation.shape == shape && evaluation.grade >= PHASE_TWO_MINIMUM_GRADE
+                    })
+                {
+                    let pitch = measured_alter_pitch(
+                        &self.lines,
+                        input.staff_id,
+                        context,
+                        shape,
+                        &glyph,
+                        flat_area_offset,
+                    );
+                    let slice = &mut slices[index];
+                    if slice.grade.is_none_or(|current| current < evaluation.grade) {
+                        slice.grade = Some(evaluation.grade);
+                        slice.glyph = Some(glyph);
+                        slice.pitch = Some(pitch);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// `pitch_to_ordinate` without the final `rint`, for callers that subtract first.
+    fn pitch_to_ordinate_double(
+        &self,
+        staff_id: usize,
+        context: NativeKeyStaffContext,
+        x: f64,
+        pitch: f64,
+    ) -> Option<f64> {
+        let (top, bottom) = self.lines.line_span_at(staff_id, x)?;
+        let lines = context.line_count.saturating_sub(1) as f64;
+        Some((pitch * (bottom - top) / lines + top + bottom) / 2.0)
     }
 }
 
@@ -1636,6 +1890,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     stop,
                     glyph: None,
                     grade: None,
+                    pitch: None,
                 })
                 .collect();
 
@@ -1726,6 +1981,14 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
             let candidates = purge_key_candidates(candidates);
             for (glyph, grade) in candidates {
                 let centroid_x = glyph.centroid_x.round_ties_even() as i32;
+                let pitch = measured_alter_pitch(
+                    &self.lines,
+                    input.staff_id,
+                    context,
+                    shape,
+                    &glyph,
+                    flat_area_offset,
+                );
                 if let Some(slice) = slices
                     .iter_mut()
                     .find(|slice| slice.start <= centroid_x && centroid_x <= slice.stop)
@@ -1733,6 +1996,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     if slice.grade.is_none_or(|current| current < grade) {
                         slice.grade = Some(grade);
                         slice.glyph = Some(glyph);
+                        slice.pitch = Some(pitch);
                     }
                 }
             }
@@ -1805,13 +2069,47 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                             evaluation.shape == shape && evaluation.grade >= PHASE_TWO_MINIMUM_GRADE
                         })
                     {
+                        let pitch = measured_alter_pitch(
+                            &self.lines,
+                            input.staff_id,
+                            context,
+                            shape,
+                            &glyph,
+                            flat_area_offset,
+                        );
                         let slice = &mut slices[index];
                         if slice.grade.is_none_or(|current| current < evaluation.grade) {
                             slice.grade = Some(evaluation.grade);
                             slice.glyph = Some(glyph);
+                            slice.pitch = Some(pitch);
                         }
                     }
                 }
+            }
+
+            // ---- Phase 3: Java `checkWithClefs` + `fillMissingAlters` ----
+            //
+            // Java runs this only when the staff has competing clefs; with none, the key is kept
+            // unchecked. A clef-incompatible key is destroyed outright (`stuffSlicesFrom(0)`).
+            let clefs = self
+                .clef_supports
+                .get(&input.staff_id)
+                .cloned()
+                .unwrap_or_default();
+            if !clefs.is_empty()
+                && !self.check_with_clefs_and_fill(
+                    &input,
+                    context,
+                    &parameters,
+                    &pipeline,
+                    shape,
+                    &clefs,
+                    &peaks,
+                    &mut slices,
+                    flat_area_offset,
+                )?
+            {
+                continue;
             }
 
             // ---- Alters in slice order ----
@@ -1827,14 +2125,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     width: slice.stop - slice.start + 1,
                     bounds: glyph.bounds,
                     classifier_grade: grade,
-                    measured_pitch: measured_alter_pitch(
-                        &self.lines,
-                        input.staff_id,
-                        context,
-                        shape,
-                        glyph,
-                        flat_area_offset,
-                    ),
+                    measured_pitch: slice.pitch.expect("assigned with its glyph"),
                 });
             }
             if alters.is_empty() {

@@ -138,27 +138,26 @@ impl StaffPitchGeometry for GridPitch {
 }
 
 #[test]
-#[ignore = "three staves on the roughest JPEG remain; see the note below"]
 fn native_keys_match_java_on_every_corpus_staff() {
-    // WHERE THIS STANDS: 62 of 65 staves exact.
+    // 65 of 65 staves exact -- shape presence/absence, fifths, union box and keyStop.
     //
-    //   34/34 key-bearing failing -> 29 -> 28 -> 20 -> 3 of 65 disagreeing
+    // The grade history is the record of what the port was missing, in order:
     //
-    // The projection-peak pipeline (key_peaks.rs) replaced enumerate-everything candidate
-    // generation: signature count inferred from stem-like peaks before classification, one slice
-    // per expected alteration, best glyph per slice, then a second extraction pass over empty
-    // slices with neighbours cropped away. That closed every previously-catalogued category --
-    // the one-pixel-left boxes, the missing flats, the spurious key.
+    //   34/34 key-bearing failing  subset enumeration (GlyphCluster.decompose) absent
+    //   -> 29                      flats' two-heuristic pitch (AlterInter.computePitch) absent
+    //   -> 28                      candidate purge (purgeCandidates) absent
+    //   -> 20                      the projection-peak pipeline itself absent: signature counted
+    //                              from stem peaks before classification, slices allocated per
+    //                              expected alteration, best-per-slice, neighbour-cropped second
+    //                              pass (key_peaks.rs + the classify_key_shapes rewiring)
+    //   -> 3                       the clef-guided third pass (fillMissingAlters) absent
+    //   -> 1                       Java's `KeySlice.setPitchRect` truncates its pitch: an `int`
+    //                              compound assignment narrows (int)(3 - 1.0559) to 1, placing
+    //                              the hunt window 7 px higher than the fractional formula would
+    //   -> 0
     //
-    // The three residuals are all on BachInvention5, the corpus' only JPEG and only 17-interline
-    // sheet:
-    //   staff 3:  (124,716,30,67)  vs Java (124,716,45,76)  -- third flat missing
-    //   staff 11: (121,2148,31,68) vs Java (121,2148,46,77) -- third flat missing
-    //   staff 12: (121,2324,46,77) vs Java (121,2324,46,70) -- same box, height +7
-    //
-    // The first two smell like Java's *third* extraction pass, `fillMissingAlters`, which runs
-    // once a clef is known and hunts each empty slice with a theoretical pitch window -- not yet
-    // ported. The third is a different glyph winning one slice. Not yet debugged.
+    // Every step was diagnosed by this test's failure pattern plus targeted instrumentation, and
+    // the last one by the per-alter boxes added to the oracle for exactly that purpose.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;
@@ -361,6 +360,11 @@ fn native_keys_match_java_on_every_corpus_staff() {
         }
 
         let _ = max_part_count();
+        let clef_supports: BTreeMap<usize, Vec<audiveris_omr::key_column::KeyClefSupport>> =
+            lifecycle_contexts
+                .iter()
+                .map(|(staff_id, context)| (*staff_id, context.clefs.clone()))
+                .collect();
         let mut key_column = HeadlessKeyColumn::new(
             KeyLifecycleRecognizer::new(
                 NativeKeyProposalRecognizer::new(
@@ -371,7 +375,8 @@ fn native_keys_match_java_on_every_corpus_staff() {
                     key_parameters,
                     10_000,
                     10_000,
-                ),
+                )
+                .with_clef_supports(clef_supports),
                 lifecycle_contexts,
             ),
             max_slice_distance(*sheet_interline),
@@ -419,6 +424,27 @@ fn native_keys_match_java_on_every_corpus_staff() {
                         mismatches.push(format!(
                             "{name} staff {}: key box {bounds:?}, Java {:?}",
                             oracle.id, expected.bounds
+                        ));
+                    }
+                    // Java `Staff.getKeyStop()` is the inclusive right edge of the key bounds.
+                    let stop = bounds.0 + bounds.2 - 1;
+                    if Some(stop) != expected.stop {
+                        mismatches.push(format!(
+                            "{name} staff {}: keyStop {stop}, Java {:?}",
+                            oracle.id, expected.stop
+                        ));
+                    }
+                    let fifths = key_column
+                        .builders()
+                        .get(&oracle.id)
+                        .and_then(|builder| {
+                            builder.candidates.iter().find(|candidate| candidate.frozen)
+                        })
+                        .map(|candidate| i32::from(candidate.fifths));
+                    if fifths != Some(expected.fifths) {
+                        mismatches.push(format!(
+                            "{name} staff {}: fifths {fifths:?}, Java {}",
+                            oracle.id, expected.fifths
                         ));
                     }
                 }

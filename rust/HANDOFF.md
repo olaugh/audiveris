@@ -1268,18 +1268,42 @@ The fixture lesson repeated twice while porting: bare synthetic stems fail
 the unit fixtures now draw bowls -- and `mergePeaks` joins only truly adjacent
 peaks (`min - prevMax <= 1` is zero blank columns).
 
-### What is left: three staves, all on the corpus' only JPEG
+### Closed: the last three staves, and the bug that hid in an `int`
 
-```
-BachInvention5 staff 3:  (124,716,30,67)  vs (124,716,45,76)  third flat missing
-BachInvention5 staff 11: (121,2148,31,68) vs (121,2148,46,77) third flat missing
-BachInvention5 staff 12: (121,2324,46,77) vs (121,2324,46,70) same box, height +7
+The first two were Java's **third** extraction pass, `fillMissingAlters`, now
+ported inside `check_with_clefs_and_fill`: once the best *compatible* clef is
+chosen (a single alteration whose pitch misses its expected position by more
+than the delta budget invalidates the whole clef, grades read intrinsic-scaled),
+every slice still empty -- or whose pitched grade fell under `keyAlterMinGrade1`
+-- is hunted once more in a **pitch window**: the slice rectangle re-centred on
+the alteration's theoretical ordinate, `stdGlyphHeight` tall, phase-2 grade
+floor, neighbours cropped. Clef supports reach the recognizer via
+`with_clef_supports`; with none supplied the pass is skipped, as Java skips it
+for a staff with no competing clef.
+
+The last staff was the best find of the stage. The port computed the window
+pitch as `expected - areaPitchOffset(FLAT)` = 3 - 1.0559 = 1.944, faithfully to
+the formula's *intent*. Java's `KeySlice.setPitchRect` writes it as
+
+```java
+int pitch = clefPitches[getId() - 1];
+pitch -= AbstractPitchedInter.getAreaPitchOffset(keyShape);
 ```
 
-The first two point at Java's **third** extraction pass, `fillMissingAlters`:
-once a clef is known, each still-empty slice is hunted again with a theoretical
-pitch window. Not yet ported. The third is a different glyph winning one slice
-and needs instrumentation, not speculation.
+-- a compound assignment on an `int`, which Java **silently narrows**: the
+result is `(int) 1.944 = 1`, truncated toward zero. The hunt window therefore
+sits a full fractional-offset higher than the arithmetic suggests, 7 px at
+interline 17. Reproducing the truncation closed the staff; "fixing" it would
+diverge on every flat key. This was pinned by measurement, not inspection: the
+per-alter boxes added to `ClefProbe` for the purpose showed Java's third alter
+at (152,2352,15,42) against the port's (152,2359,15,42) -- same window height,
+7 px placement difference -- and Java's `getAreaPitchOffset(FLAT)` probe value
+(1.0559375) matched the Rust font derivation **bit-exactly**, eliminating every
+suspect but the pitch itself.
+
+The corpus test now asserts presence/absence, fifths, the union box and
+`keyStop` on all 65 staves, and is no longer `#[ignore]`d -- it is CI's problem
+to keep it green from here.
 
 ### Superseded record of the earlier findings
 

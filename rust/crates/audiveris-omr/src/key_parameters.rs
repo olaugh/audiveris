@@ -224,6 +224,8 @@ pub struct KeyPipelineParameters {
     pub min_sharp_trail: i32,
     /// Maximum sharp trail.
     pub max_sharp_trail: i32,
+    /// `stdGlyphHeight`, the pitch-window height `fillMissingAlters` hunts in.
+    pub std_glyph_height: i32,
     /// `maxTrailingCumul` for the trailing-space check.
     pub max_trailing_cumul: i32,
     /// `minTrailingSpace` width for the trailing-space check.
@@ -260,6 +262,7 @@ impl KeyPipelineParameters {
             std_sharp_trail: fraction_int(staff_interline, 0.3),
             min_sharp_trail: fraction_int(staff_interline, 0.2),
             max_sharp_trail: fraction_int(staff_interline, 0.5),
+            std_glyph_height: fraction_int(staff_interline, 2.5),
             max_trailing_cumul: fraction_int(staff_interline, 0.25),
             min_trailing_space: fraction_int(staff_interline, 0.25),
         }
