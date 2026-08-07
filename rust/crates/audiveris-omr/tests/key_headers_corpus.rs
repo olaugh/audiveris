@@ -163,12 +163,18 @@ fn native_keys_match_java_on_every_corpus_staff() {
     //    compound on its left is the obvious suspect: `minPartWeight` is only 4 px at interline 21.
     //
     // 2. **Eleven staves on BachInvention5 where the port finds one alteration and Java finds
-    //    three.** Java reads 46x76 boxes there; the port reads about 17x46 — one flat, not a
-    //    three-flat signature. This is the corpus' only 17-interline sheet. The likely mechanism
-    //    is the purge over-reaching: a subset spanning two adjacent flats can outscore either flat
-    //    alone, and keeping it removes both individuals. If so, Java is protected by something the
-    //    port lacks — most likely `KeyRoi`'s slice structure, which constrains where an alteration
-    //    may start, so a two-flat subset never competes as one alteration in the first place.
+    //    three.** Debugged: the purge is *not* over-reaching — only one candidate is ever
+    //    produced. The ink is fragmented. Part 1 is a 7-pixel splinter, under `minGlyphWidth`
+    //    (8.5), and the subset reuniting it with its neighbour spans 76 px against a
+    //    `maxGlyphHeight` of 64.6, so both the port and Java prune it.
+    //
+    // Both residuals point at the same unported machinery: `KeyBuilder`'s slice phase. Java runs
+    // `extractAlter` a *second* time per slice, with a lower grade floor
+    // (`Grades.keyAlterMinGrade2`) and `cropNeighbors = true`, which strips pixels belonging to
+    // adjacent slices before rebuilding the glyph. That recovers a fragmented flat on a poor scan
+    // — BachInvention5 is the corpus' only JPEG and its only 17-interline sheet — and it is also
+    // what would shave one pixel off a glyph abutting its neighbour. `KeyRoi`, `KeySlice` and that
+    // second pass are the next step, not further tuning of the enumeration or the purge.
     let pages = parse_oracle();
     let mut checked = 0;
     let mut with_key = 0;

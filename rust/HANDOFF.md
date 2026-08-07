@@ -1250,7 +1250,47 @@ to be enumerated first, which is exactly what the purge exists to decide.
 **Progress: `34/34 key-bearing failing -> 29 -> 28 -> 20 of 65 disagreeing`**, so
 45 staves now match Java outright.
 
-**Two residuals, and they are different problems.**
+**Two residuals, debugged. They are the same missing machinery.**
+
+Instrumenting the extraction on both, and reading the component lists directly:
+
+*BachInvention5 staff 1.* Java's key is `(271, 359, 46, 76)` -- three flats. The
+port produces exactly **one candidate**, so the purge is not over-reaching after
+all; the other two flats never become candidates:
+
+```
+PART 0 left=271 top=381 w=17 h=45 weight=351   -> accepted, grade 0.767
+PART 1 left=286 top=359 w= 7 h=43 weight=201   -> GATE-REJECT: width 7 < minGlyphWidth 8.5
+PART 2 left=295 top=380 w=23 h=55 weight=454   -> passes the gate, never classified as FLAT
+```
+
+The ink is *fragmented*: part 1 is a 7-pixel-wide splinter. The subset `{1,2}`
+that would reunite it spans y 359..435, 76 px, over `maxGlyphHeight` (64.6), so
+the enumeration prunes it -- and Java's `isTooLarge` would prune it too. So Java
+is not finding these in the first pass either.
+
+*carmen staff 1.* The port's box is `(358,451,21,51)` against Java's
+`(359,451,20,51)` -- one pixel wider on the left, same right edge. The trace
+shows this is **the connected component itself**, `PART 1 left=358 w=21`, not a
+compounding artefact. So the difference is upstream of everything ported so far.
+
+**Both point at `KeyBuilder`'s slice phase, which is not ported.** After the
+first pass, Java builds `KeyRoi` slices from the candidates found and then calls
+`extractAlter` again per slice, with two things the first pass does not have: a
+*lower* grade floor (`Grades.keyAlterMinGrade2`) and `cropNeighbors = true`,
+which removes pixels belonging to adjacent slices before rebuilding the glyph.
+That is exactly the mechanism that would recover a fragmented flat on a poor
+scan, and exactly the mechanism that would shave one pixel off a glyph's left
+edge where it abuts its neighbour.
+
+Note BachInvention5 is the corpus' only JPEG and its only 17-interline sheet --
+the sheet where fragmentation is most likely, which is consistent.
+
+So the next step is not another tweak to the enumeration or the purge; it is
+`KeyRoi`, `KeySlice` and the second `extractAlter` pass. `NeutralKeySlice`
+already exists to hang them on.
+
+**The residuals as measured:**
 
 1. *Seven boxes one pixel wide on the left* -- `x - 1`, `width + 1`, identical
    right edge, ordinate and height. The key itself is correct. A stray
