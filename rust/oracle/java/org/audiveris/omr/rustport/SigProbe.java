@@ -73,8 +73,10 @@ public class SigProbe
         field.setAccessible(true);
         field.set(null, cli);
 
-        // TEMPORARY (ocr-risk scouting): Main.main does this before any step;
-        // without it HEADS template building NPEs on small-head symbols.
+        // Batch `Main.main` calls this before running any step, and the probe must too:
+        // it populates the symbol catalog, and without it HEADS' template building NPEs
+        // on the four *_SMALL head shapes, which exist only via `populateSymbols`. This
+        // was the "HEADS fails on a null symbol" entry in the handoff status table.
         org.audiveris.omr.ui.symbol.MusicFont.checkMusicFont();
 
         for (String arg : args) {

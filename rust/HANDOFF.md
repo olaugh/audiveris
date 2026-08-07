@@ -270,7 +270,7 @@ missing `basic-classifier.zip` with an error that does not mention paths.
 | STEM_SEEDS | 113 |
 | BEAMS | 295 |
 | LEDGERS | 313 |
-| HEADS | fails: `ShapeSymbol.getParams` on a null symbol |
+| HEADS | reachable: the null-symbol failure was the probe skipping `MusicFont.checkMusicFont()`, now fixed |
 
 So every stage the port is next to work on is gradeable today. HEADS is not,
 and the reason is the MusicFont seam PORTING.md already lists as unported:
