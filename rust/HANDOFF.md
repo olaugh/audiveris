@@ -593,15 +593,16 @@ exclusions, purge discarded tally entries, apply the zero-valued stemless boost,
 attach surviving notes, and run system small-beam arbitration. It then executes
 the actual `HeadsStep.doEpilog` image discard and `HeadSeedTally.analyze`; HEADS
 has no linking phase. Across eight pages it records 3,609 inputs, 62 duplicate
-removals, 2,725 overlap exclusions, 3,547 post-duplicate staff heads, zero beam
-removals, 26 head removals, 3,521 final heads, and 18 analyzed scale rows. The
-default 4,004,446-byte fixture retains decisions, survivors, and 1,451
-identity-free live scale inputs while hashing all ordered inputs, pair checks,
-tallies, and beam inputs; `--full-trace` exposes the remaining diagnostics. Two
-fresh-JVM generations are byte-identical at SHA-256
-`356cf1a0dfb677062ab52fa16f701229400621f7d32fcb2b0c8dccd9d017a6b3`,
+removals, 2,725 overlap exclusions, 3,547 post-duplicate staff heads, all 191
+small-beam inputs, 26 ordered arbitration decisions, zero beam removals, 26
+head removals, 3,521 final heads, and 18 analyzed scale rows. The default
+4,076,279-byte fixture retains those decisions and survivors plus 1,451
+identity-free live scale inputs. All 15,336 staff pair checks and 10,053 beam
+checks remain count/hash committed; `--full-trace` exposes them. Two fresh-JVM
+generations are byte-identical at SHA-256
+`e893c2327a9afa937035559f1a5be170a22148dd6655e8ffb6297c75bff5f6ba`,
 with emitted body SHA-256
-`2b70d5ec9289dfd8b942b9b246e743dfbdd0b74d3e8887c54a0bc8eea8dff3e7`.
+`1420841aaeaafecb07664acbc26b752f3c7154fec073d863170c9ed77a1628f7`.
 
 `head_seed_tally_analysis.rs` now ports the final sheet-scale computation over
 that retained stream. It ignores removed heads, groups by Java `Shape` enum and
@@ -621,9 +622,28 @@ head. Equal grades use the strict `EPSILON` branch and reproduce
 `purgedEquals`: prefer a head with seed tally, then shape/bounds identity, and
 replicate complementary LEFT/RIGHT tallies only between two good identical
 heads. Twelve adversarial tests include NaN, overflow, pre-removed inputs, and
-multi-decision overlap behavior. The caller must still provide the complete
-glyph-aware `isSameAs` and staff/pitch/ratio-aware `HeadInter.overlaps`
-predicates; keeping those explicit marks the actual remaining composition seam.
+multi-decision overlap behavior. `head_pair_predicates.rs` now supplies the
+complete caller context: shape/bounds and full positioned RunTable identity for
+`AbstractInter.isSameAs`/`Glyph.isIdentical`, plus staff reference identity,
+`Math.rint` integer pitch, OpenJDK long-edge Rectangle intersection, inclusive
+0.2/0.8 width gates, strict 0.25 area gate, wrapping products, and NaN behavior
+for `HeadInter.overlaps`. Nine adversarial tests pin those semantics.
+
+`head_small_beam_purge.rs` ports the remaining system-level arbitration as a
+pure kernel. It filters all Java beam shapes by the strict integer
+`minBeamWidth` gate, preserves beam SIG order and stable head ordinate order,
+uses the exact filled horizontal-parallelogram intersection, and reproduces
+wrapping beam bottoms, strict contextual-grade comparison, NaN/equality head
+removal, and both iterator-removal effects. Nine adversarial tests cover those
+branches. The production adapter must still provide each beam's live contextual
+grade and compose the retained head removals.
+
+`heads_post_range_corpus.rs` parses the compact fixture into typed staff,
+system, beam, head, and scale records. It validates both SHA-256 commitments,
+all reconstructible FNV streams, hierarchy/count arithmetic, ordinals, tally
+rows, and the identity-free staff-head to purged/final-head multiset. Five tests
+freeze that contract. Initial-head and pair-check streams remain deliberately
+compact, so the live compositor must recreate and match their summary hashes.
 
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on

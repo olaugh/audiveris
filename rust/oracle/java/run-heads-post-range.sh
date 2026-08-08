@@ -74,6 +74,9 @@ staffs=$(grep -c '^headpoststaffsummary ' "$probe_output")
 duplicates=$(grep -c '^headpostduplicate ' "$probe_output")
 overlaps=$(grep -c '^headpostoverlap ' "$probe_output")
 staff_heads=$(grep -c '^headpoststaffhead ' "$probe_output")
+beam_inputs=$(grep -c '^headpostbeaminput ' "$probe_output" || true)
+beam_checks=$(grep -c '^headpostbeamcheck ' "$probe_output" || true)
+beam_decisions=$(grep -c '^headpostbeamdecision ' "$probe_output" || true)
 beam_purges=$(grep -c '^headpostbeampurge ' "$probe_output" || true)
 head_purges=$(grep -c '^headpostheadpurge ' "$probe_output" || true)
 final_heads=$(grep -c '^headpostsystemhead ' "$probe_output")
@@ -94,14 +97,14 @@ totals=$(awk '
     END { printf "%d:%d:%d:%d:%d:%d:%d", inputs, duplicates, overlaps, staffHeads, beams, heads, finalHeads }
 ' "$probe_output")
 
-if [ "$pages:$systems:$staffs:$totals:$duplicates:$overlaps:$staff_heads:$beam_purges:$head_purges:$final_heads:$scale_inputs:$scale_rows" \
-        != "8:30:55:3609:62:2725:3547:0:26:3521:62:2725:3547:0:26:3521:1451:18" ]; then
+if [ "$pages:$systems:$staffs:$totals:$duplicates:$overlaps:$staff_heads:$beam_inputs:$beam_decisions:$beam_purges:$head_purges:$final_heads:$scale_inputs:$scale_rows" \
+        != "8:30:55:3609:62:2725:3547:0:26:3521:62:2725:3547:191:26:0:26:3521:1451:18" ]; then
     echo "unexpected post-range corpus totals " \
-        "$pages:$systems:$staffs:$totals:$duplicates:$overlaps:$staff_heads:$beam_purges:$head_purges:$final_heads:$scale_inputs:$scale_rows" >&2
+        "$pages:$systems:$staffs:$totals:$duplicates:$overlaps:$staff_heads:$beam_inputs:$beam_decisions:$beam_purges:$head_purges:$final_heads:$scale_inputs:$scale_rows" >&2
     exit 1
 fi
 
 body_sha256=$(shasum -a 256 "$probe_output" | awk '{print $1}')
 cat "$probe_output"
-printf 'headpostcorpussummary pages %d systems %d staffs %d totals:inputs:duplicates:overlaps:staffHeads:purgedBeams:purgedHeads:finalHeads %s decisionRows %d:%d staffHeadRows %d beamPurgeRows %d headPurgeRows %d finalHeadRows %d scaleInputRows %d scaleRows %d emittedBodySha256 %s\n' \
-    "$pages" "$systems" "$staffs" "$totals" "$duplicates" "$overlaps" "$staff_heads" "$beam_purges" "$head_purges" "$final_heads" "$scale_inputs" "$scale_rows" "$body_sha256"
+printf 'headpostcorpussummary pages %d systems %d staffs %d totals:inputs:duplicates:overlaps:staffHeads:purgedBeams:purgedHeads:finalHeads %s decisionRows %d:%d staffHeadRows %d beamInputRows %d beamChecks %d beamDecisionRows %d beamPurgeRows %d headPurgeRows %d finalHeadRows %d scaleInputRows %d scaleRows %d emittedBodySha256 %s\n' \
+    "$pages" "$systems" "$staffs" "$totals" "$duplicates" "$overlaps" "$staff_heads" "$beam_inputs" "$beam_checks" "$beam_decisions" "$beam_purges" "$head_purges" "$final_heads" "$scale_inputs" "$scale_rows" "$body_sha256"

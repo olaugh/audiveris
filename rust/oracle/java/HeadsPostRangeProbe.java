@@ -384,14 +384,30 @@ public class HeadsPostRangeProbe
                 pageHash.add(row);
                 systemHash.add(row);
                 beamInputHash.add(row);
+                System.out.println(row);
+            }
+            final BeamPurgeTrace beamTrace = traceSmallBeams(
+                    page,
+                    system,
+                    headsBeforeBeam,
+                    beamsBefore,
+                    headOrdinals,
+                    beamOrdinals);
+            final RowHasher beamCheckHash = new RowHasher();
+            final RowHasher beamDecisionHash = new RowHasher();
+            for (String row : beamTrace.checkRows) {
+                addSemantic(row, pageHash, systemHash, beamCheckHash);
                 if (fullTrace) {
                     System.out.println(row);
                 }
             }
+            for (String row : beamTrace.decisionRows) {
+                addSemantic(row, pageHash, systemHash, beamDecisionHash);
+                System.out.println(row);
+            }
             invoke(builder, "purgeSmallBeams");
             int purgedBeams = 0;
             int purgedHeads = 0;
-            final RowHasher beamDecisionHash = new RowHasher();
             for (Inter beam : beamsBefore) {
                 if (!beam.isRemoved()) {
                     continue;
@@ -425,6 +441,7 @@ public class HeadsPostRangeProbe
                 beamDecisionHash.add(row);
                 System.out.println(row);
             }
+            assertSmallBeamPurge(beamsBefore, headsBeforeBeam, beamTrace);
 
             final List<Inter> finalHeads = sig.inters(HeadInter.class);
             Collections.sort(finalHeads, Inters.byOrdinate);
@@ -444,7 +461,8 @@ public class HeadsPostRangeProbe
             final String summary = String.format(
                     "headpostsystemsummary %s system %d inputs %d duplicates %d overlaps %d "
                             + "staffHeads %d beamInputs %d purgedBeams %d purgedHeads %d "
-                            + "finalHeads %d beamInputHash %016x beamDecisionHash %016x "
+                            + "finalHeads %d beamInputHash %016x beamChecks %d:%016x "
+                            + "beamDecisionHash %016x "
                             + "finalHeadHash %016x hash %016x",
                     page,
                     system.getId(),
@@ -457,6 +475,8 @@ public class HeadsPostRangeProbe
                     purgedHeads,
                     finalHeads.size(),
                     beamInputHash.value(),
+                    beamTrace.checkRows.size(),
+                    beamCheckHash.value(),
                     beamDecisionHash.value(),
                     finalHeadHash.value(),
                     systemHash.value());
@@ -537,6 +557,92 @@ public class HeadsPostRangeProbe
                 scaleInputHash.value(),
                 scaleHash.value(),
                 pageHash.value());
+    }
+
+    private static BeamPurgeTrace traceSmallBeams (
+                                                   String page,
+                                                   SystemInfo system,
+                                                   List<Inter> inputHeads,
+                                                   List<Inter> inputBeams,
+                                                   IdentityHashMap<Inter, Integer> headOrdinals,
+                                                   IdentityHashMap<Inter, Integer> beamOrdinals)
+    {
+        final BeamPurgeTrace trace = new BeamPurgeTrace();
+        final List<Inter> heads = new ArrayList<>(inputHeads);
+        final List<Inter> beams = new ArrayList<>(inputBeams);
+
+        for (Iterator<Inter> beamIterator = beams.iterator(); beamIterator.hasNext();) {
+            final Inter beam = beamIterator.next();
+            final double beamGrade = system.getSig().computeContextualGrade(beam);
+            final Rectangle beamBox = beam.getBounds();
+            final int beamBottom = beamBox.y + beamBox.height - 1;
+
+            for (Iterator<Inter> headIterator = heads.iterator(); headIterator.hasNext();) {
+                final Inter head = headIterator.next();
+                final Rectangle headBox = head.getBounds();
+                final boolean intersects = beam.getArea().intersects(headBox);
+                final boolean breaks = !intersects && (headBox.y > beamBottom);
+                trace.checkRows.add(String.format(
+                        "headpostbeamcheck %s system %d ordinal %d beam %d head %d "
+                                + "intersects %s breaks %s headGrade %s beamGrade %s",
+                        page,
+                        system.getId(),
+                        trace.checkRows.size(),
+                        beamOrdinals.get(beam),
+                        headOrdinals.get(head),
+                        intersects,
+                        breaks,
+                        hexDouble(head.getGrade()),
+                        hexDouble(beamGrade)));
+
+                if (intersects) {
+                    if (head.getGrade() > beamGrade) {
+                        trace.removedBeams.put(beam, Boolean.TRUE);
+                        trace.decisionRows.add(String.format(
+                                "headpostbeamdecision %s system %d ordinal %d beam %d head %d "
+                                        + "purged beam",
+                                page,
+                                system.getId(),
+                                trace.decisionRows.size(),
+                                beamOrdinals.get(beam),
+                                headOrdinals.get(head)));
+                        beamIterator.remove();
+                        break;
+                    } else {
+                        trace.removedHeads.put(head, Boolean.TRUE);
+                        trace.decisionRows.add(String.format(
+                                "headpostbeamdecision %s system %d ordinal %d beam %d head %d "
+                                        + "purged head",
+                                page,
+                                system.getId(),
+                                trace.decisionRows.size(),
+                                beamOrdinals.get(beam),
+                                headOrdinals.get(head)));
+                        headIterator.remove();
+                    }
+                } else if (breaks) {
+                    break;
+                }
+            }
+        }
+
+        return trace;
+    }
+
+    private static void assertSmallBeamPurge (List<Inter> beams,
+                                              List<Inter> heads,
+                                              BeamPurgeTrace trace)
+    {
+        for (Inter beam : beams) {
+            if (beam.isRemoved() != trace.removedBeams.containsKey(beam)) {
+                throw new IllegalStateException("production small-beam removal differs from trace");
+            }
+        }
+        for (Inter head : heads) {
+            if (head.isRemoved() != trace.removedHeads.containsKey(head)) {
+                throw new IllegalStateException("production beam/head removal differs from trace");
+            }
+        }
     }
 
     private static PurgeTrace tracePurge (SystemInfo system,
@@ -1032,8 +1138,9 @@ public class HeadsPostRangeProbe
         System.out.println("# NoteHeadsBuilder.buildHeads order. HeadsStep image discard and tally analysis");
         System.out.println("# also run. HEADS performs no linking operation.");
         System.out.println("#");
-        System.out.println("# Default output retains purge decisions and boundary survivors while hashing");
-        System.out.println("# every ordered input and pair check. It also retains the identity-free surviving");
+        System.out.println("# Default output retains purge decisions, beam inputs/decisions, and boundary");
+        System.out.println("# survivors while hashing every ordered input and pair check. It also retains");
+        System.out.println("# the identity-free surviving");
         System.out.println("# tally stream consumed by HeadSeedTally.analyze. Pass --full-trace for verbose rows.");
         System.out.println("# All identities are per-boundary ordinals; doubles include hex text/raw bits.");
         System.out.println("# FNV-1a-64 hashes cover canonical UTF-8 rows with trailing newlines.");
@@ -1097,6 +1204,17 @@ public class HeadsPostRangeProbe
         {
             this.inputs = new ArrayList<>(inputs);
         }
+    }
+
+    private static final class BeamPurgeTrace
+    {
+        final IdentityHashMap<Inter, Boolean> removedBeams = new IdentityHashMap<>();
+
+        final IdentityHashMap<Inter, Boolean> removedHeads = new IdentityHashMap<>();
+
+        final List<String> checkRows = new ArrayList<>();
+
+        final List<String> decisionRows = new ArrayList<>();
     }
 
     private static final class RowHasher
