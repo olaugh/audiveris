@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Horizontal, dependency-light port of Java `StickFactory`.
+//! Dependency-light port of Java `StickFactory`.
 //!
-//! This is the section-to-`StraightFilament` geometry used by LEDGERS. It
-//! preserves graph/source ordering, core registration, side thickening and
-//! one-run sticker attachment. Glyph and SIG interpretation ownership belongs
-//! to the later OMR materializer.
+//! This is the section-to-`StraightFilament` geometry used by LEDGERS and raw
+//! STEM_SEEDS. It preserves graph/source ordering, core registration, side
+//! thickening and one-run sticker attachment. Glyph and SIG interpretation
+//! ownership belongs to the later OMR materializer.
 
-use std::{collections::BTreeSet, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use audiveris_core::basic_line::{BasicLine, LineError};
 
@@ -23,6 +27,78 @@ pub struct HorizontalStickParameters {
     pub maximum_stick_thickness: usize,
     pub minimum_core_section_length: usize,
     pub minimum_side_ratio: f64,
+}
+
+/// Parameters for Java `StickFactory(VERTICAL, ...)`, used by
+/// `VerticalsBuilder.retrieveCandidates`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalStickParameters {
+    pub interline: usize,
+    pub maximum_stick_thickness: usize,
+    pub minimum_core_section_length: usize,
+    pub minimum_side_ratio: f64,
+}
+
+/// One vertical `StraightFilament`, including the horizontal one-pixel
+/// stickers Java appends after thickening.
+#[derive(Clone, Debug)]
+pub struct IdentifiedVerticalStick {
+    id: u64,
+    sections: Vec<Section>,
+}
+
+impl IdentifiedVerticalStick {
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Java `SectionCompound.getMembers()` order: absolute x, y, then the
+    /// lag-local section id, even when orientations are mixed.
+    #[must_use]
+    pub fn sections(&self) -> &[Section] {
+        &self.sections
+    }
+
+    #[must_use]
+    pub fn weight(&self) -> usize {
+        self.sections.iter().map(Section::weight).sum()
+    }
+
+    pub fn straight_geometry(&self) -> Result<StraightStickGeometry, StraightStickError> {
+        vertical_straight_geometry(self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VerticalStickResult {
+    survivors: Vec<IdentifiedVerticalStick>,
+    creation_ids: Vec<u64>,
+    next_creation_id: u64,
+}
+
+impl VerticalStickResult {
+    #[must_use]
+    pub fn survivors(&self) -> &[IdentifiedVerticalStick] {
+        &self.survivors
+    }
+
+    #[must_use]
+    pub fn creation_ids(&self) -> &[u64] {
+        &self.creation_ids
+    }
+
+    #[must_use]
+    pub const fn next_creation_id(&self) -> u64 {
+        self.next_creation_id
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VerticalStickOutcome {
+    pub result: VerticalStickResult,
+    /// Java mutations completed before a checked geometry/identity failure.
+    pub error: Option<StraightStickError>,
 }
 
 #[derive(Clone, Debug)]
@@ -333,6 +409,425 @@ impl HorizontalStickFactory {
         }
         Ok(())
     }
+}
+
+pub struct VerticalStickFactory {
+    parameters: VerticalStickParameters,
+}
+
+impl VerticalStickFactory {
+    #[must_use]
+    pub const fn new(parameters: VerticalStickParameters) -> Self {
+        Self { parameters }
+    }
+
+    /// Java `retrieveSticks(verticals, horizontalStickers)`. The vertical
+    /// input must already be in lag/full-position order, as `SystemInfo`
+    /// exposes it.
+    #[must_use]
+    pub fn retrieve_sticks(
+        &self,
+        vertical_sections: &[Section],
+        horizontal_stickers: &[Section],
+        first_creation_id: u64,
+    ) -> VerticalStickOutcome {
+        let mut result = VerticalStickResult {
+            survivors: Vec::new(),
+            creation_ids: Vec::new(),
+            next_creation_id: first_creation_id,
+        };
+        if first_creation_id == 0 {
+            return VerticalStickOutcome {
+                result,
+                error: Some(StraightStickError::InvalidFirstId),
+            };
+        }
+        if self.parameters.interline == 0
+            || self.parameters.maximum_stick_thickness == 0
+            || self.parameters.minimum_core_section_length == 0
+            || !self.parameters.minimum_side_ratio.is_finite()
+            || self.parameters.minimum_side_ratio < 0.0
+            || vertical_sections
+                .iter()
+                .any(|section| section.orientation() != Orientation::Vertical)
+            || horizontal_stickers
+                .iter()
+                .any(|section| section.orientation() != Orientation::Horizontal)
+        {
+            return VerticalStickOutcome {
+                result,
+                error: Some(StraightStickError::InvalidParameters),
+            };
+        }
+
+        let mut linked = build_graph(vertical_sections);
+        let mut cores = linked
+            .iter()
+            .enumerate()
+            .filter(|(_, linked)| {
+                linked.section.run_count() <= self.parameters.maximum_stick_thickness
+                    && linked.section.length(Orientation::Vertical)
+                        >= self.parameters.minimum_core_section_length
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        // Java's object sort is stable and compares only decreasing length.
+        cores.sort_by_key(|index| {
+            std::cmp::Reverse(linked[*index].section.length(Orientation::Vertical))
+        });
+        let stickers_by_x = opposite_stickers(horizontal_stickers);
+
+        for core in cores {
+            if linked[core].processed {
+                continue;
+            }
+            let id = result.next_creation_id;
+            let Some(next) = id.checked_add(1) else {
+                return VerticalStickOutcome {
+                    result,
+                    error: Some(StraightStickError::IdentityOverflow),
+                };
+            };
+            result.next_creation_id = next;
+            result.creation_ids.push(id);
+            let mut sections = Vec::new();
+            add_vertical_member(&mut sections, linked[core].section.clone());
+            linked[core].processed = true;
+            linked[core].compound_id = Some(id);
+            thicken_vertical(&self.parameters, &mut sections, id, &mut linked);
+            add_vertical_stickers(
+                &mut sections,
+                id,
+                &mut linked,
+                horizontal_stickers,
+                &stickers_by_x,
+            );
+            result
+                .survivors
+                .push(IdentifiedVerticalStick { id, sections });
+        }
+
+        VerticalStickOutcome {
+            result,
+            error: None,
+        }
+    }
+}
+
+fn thicken_vertical(
+    parameters: &VerticalStickParameters,
+    sections: &mut Vec<Section>,
+    filament_id: u64,
+    linked: &mut [LinkedSection],
+) {
+    let mut finished = [false, false];
+    loop {
+        let mut grown = false;
+        for (side_index, reverse) in [true, false].into_iter().enumerate() {
+            if finished[side_index] {
+                continue;
+            }
+            let mean_thickness = java_rint(vertical_mean_thickness(sections)) as usize;
+            let sides = vertical_side_sections(sections, filament_id, linked, reverse);
+            // Java uses TreeSet(Section.byCoordinate). Equal start coordinates
+            // compare equal; the first encountered section survives.
+            let mut all_neighbors = BTreeMap::<usize, usize>::new();
+            let mut contributions = vec![0_usize; linked.len()];
+            let mut total = 0_usize;
+            let mut count = 0_usize;
+            for side in sides {
+                let side_run = if reverse {
+                    linked[side].section.first_run()
+                } else {
+                    linked[side].section.last_run()
+                };
+                let original = neighbors(linked, side, reverse).to_vec();
+                let mut retained = Vec::new();
+                for neighbor in original {
+                    let thickness = linked[neighbor].section.run_count();
+                    if linked[neighbor].processed
+                        || thickness + mean_thickness > parameters.maximum_stick_thickness
+                    {
+                        continue;
+                    }
+                    retained.push(neighbor);
+                    let length = linked[neighbor].section.length(Orientation::Vertical);
+                    count += length;
+                    total += thickness * length;
+                    let neighbor_run = if reverse {
+                        linked[neighbor].section.last_run()
+                    } else {
+                        linked[neighbor].section.first_run()
+                    };
+                    contributions[neighbor] +=
+                        usize::try_from(side_run.common_length(neighbor_run)).unwrap_or(0);
+                }
+                *neighbors_mut(linked, side, reverse) = retained.clone();
+                for neighbor in retained {
+                    all_neighbors
+                        .entry(linked[neighbor].section.start_coord())
+                        .or_insert(neighbor);
+                }
+            }
+
+            let mut accepted = all_neighbors.into_values().collect::<Vec<_>>();
+            let mut common_length = 0_usize;
+            if count != 0 {
+                let sibling_mean = java_rint(total as f64 / count as f64) as usize;
+                accepted.retain(|neighbor| {
+                    if linked[*neighbor].section.run_count() > sibling_mean {
+                        false
+                    } else {
+                        common_length += contributions[*neighbor];
+                        true
+                    }
+                });
+            }
+            let ratio = common_length as f64 / vertical_bounds(sections).height as f64;
+            if ratio >= parameters.minimum_side_ratio {
+                for neighbor in accepted {
+                    add_vertical_member(sections, linked[neighbor].section.clone());
+                    linked[neighbor].processed = true;
+                }
+                grown = true;
+            } else {
+                finished[side_index] = true;
+            }
+        }
+        if !grown
+            || java_rint(vertical_mean_thickness(sections)) as usize
+                >= parameters.maximum_stick_thickness
+        {
+            break;
+        }
+    }
+}
+
+fn vertical_side_sections(
+    sections: &[Section],
+    filament_id: u64,
+    linked: &[LinkedSection],
+    reverse: bool,
+) -> Vec<usize> {
+    sections
+        .iter()
+        .filter(|section| section.orientation() == Orientation::Vertical)
+        .filter_map(|section| {
+            let index = linked
+                .iter()
+                .position(|candidate| candidate.section == *section)?;
+            (!neighbors(linked, index, reverse)
+                .iter()
+                .any(|neighbor| linked[*neighbor].compound_id == Some(filament_id)))
+            .then_some(index)
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+enum VerticalSticker {
+    Main(usize),
+    Opposite(usize),
+}
+
+fn add_vertical_stickers(
+    sections: &mut Vec<Section>,
+    filament_id: u64,
+    linked: &mut [LinkedSection],
+    opposite: &[Section],
+    opposite_by_x: &BTreeMap<usize, Vec<usize>>,
+) {
+    let members = sections.clone();
+    let mut stickers = Vec::<VerticalSticker>::new();
+    for reverse in [true, false] {
+        for member in &members {
+            let Some(index) = linked
+                .iter()
+                .position(|candidate| candidate.section == *member)
+            else {
+                continue;
+            };
+            for neighbor in neighbors(linked, index, reverse).iter().copied() {
+                if !linked[neighbor].processed
+                    && linked[neighbor].section.run_count() == 1
+                    && neighbors(linked, neighbor, reverse).is_empty()
+                {
+                    push_vertical_sticker(
+                        &mut stickers,
+                        VerticalSticker::Main(neighbor),
+                        linked,
+                        opposite,
+                    );
+                }
+            }
+
+            let run = if reverse {
+                member.first_run()
+            } else {
+                member.last_run()
+            };
+            let x = if reverse {
+                member.first_pos().checked_sub(1)
+            } else {
+                member.last_pos().checked_add(1)
+            };
+            if let Some(indices) = x.and_then(|x| opposite_by_x.get(&x)) {
+                for &sticker in indices {
+                    if section_intersects_vertical_strip(&opposite[sticker], run.start, run.stop())
+                    {
+                        push_vertical_sticker(
+                            &mut stickers,
+                            VerticalSticker::Opposite(sticker),
+                            linked,
+                            opposite,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    for sticker in stickers {
+        match sticker {
+            VerticalSticker::Main(index) => {
+                add_vertical_member(sections, linked[index].section.clone());
+                linked[index].processed = true;
+                linked[index].compound_id = Some(filament_id);
+            }
+            VerticalSticker::Opposite(index) => {
+                add_vertical_member(sections, opposite[index].clone());
+            }
+        }
+    }
+}
+
+fn push_vertical_sticker(
+    stickers: &mut Vec<VerticalSticker>,
+    candidate: VerticalSticker,
+    linked: &[LinkedSection],
+    opposite: &[Section],
+) {
+    let section = |sticker: VerticalSticker| match sticker {
+        VerticalSticker::Main(index) => &linked[index].section,
+        VerticalSticker::Opposite(index) => &opposite[index],
+    };
+    let key = compound_member_key(section(candidate));
+    if !stickers
+        .iter()
+        .any(|existing| compound_member_key(section(*existing)) == key)
+    {
+        stickers.push(candidate);
+    }
+}
+
+fn opposite_stickers(sections: &[Section]) -> BTreeMap<usize, Vec<usize>> {
+    let mut indices = (0..sections.len()).collect::<Vec<_>>();
+    indices.sort_by_key(|index| sections[*index].start_coord());
+    let mut by_x = BTreeMap::<usize, Vec<usize>>::new();
+    for index in indices {
+        by_x.entry(sections[index].start_coord())
+            .or_default()
+            .push(index);
+    }
+    by_x
+}
+
+fn section_intersects_vertical_strip(section: &Section, y_start: usize, y_stop: usize) -> bool {
+    section.runs().iter().enumerate().any(|(offset, run)| {
+        let position = section.first_pos() + offset;
+        match section.orientation() {
+            Orientation::Horizontal => position >= y_start && position <= y_stop && run.length != 0,
+            Orientation::Vertical => {
+                run.start <= y_stop && run.stop() >= y_start && section.run_count() != 0
+            }
+        }
+    })
+}
+
+fn compound_member_key(section: &Section) -> (usize, usize, usize) {
+    let bounds = section.bounds();
+    (bounds.x, bounds.y, section.id())
+}
+
+fn add_vertical_member(sections: &mut Vec<Section>, section: Section) {
+    let key = compound_member_key(&section);
+    if !sections
+        .iter()
+        .any(|member| compound_member_key(member) == key)
+    {
+        sections.push(section);
+        sections.sort_by_key(compound_member_key);
+    }
+}
+
+fn vertical_bounds(sections: &[Section]) -> Bounds {
+    let first = sections
+        .first()
+        .expect("a vertical stick has a core")
+        .bounds();
+    let mut min_x = first.x;
+    let mut min_y = first.y;
+    let mut max_x = first.x + first.width - 1;
+    let mut max_y = first.y + first.height - 1;
+    for section in &sections[1..] {
+        let bounds = section.bounds();
+        min_x = min_x.min(bounds.x);
+        min_y = min_y.min(bounds.y);
+        max_x = max_x.max(bounds.x + bounds.width - 1);
+        max_y = max_y.max(bounds.y + bounds.height - 1);
+    }
+    Bounds {
+        x: min_x,
+        y: min_y,
+        width: max_x - min_x + 1,
+        height: max_y - min_y + 1,
+    }
+}
+
+fn vertical_mean_thickness(sections: &[Section]) -> f64 {
+    sections.iter().map(Section::weight).sum::<usize>() as f64
+        / vertical_bounds(sections).height as f64
+}
+
+fn vertical_straight_geometry(
+    filament: &IdentifiedVerticalStick,
+) -> Result<StraightStickGeometry, StraightStickError> {
+    let bounds = vertical_bounds(&filament.sections);
+    let mut line = BasicLine::default();
+    for section in &filament.sections {
+        for (offset, run) in section.runs().iter().enumerate() {
+            let position = section.first_pos() + offset;
+            for coordinate in run.start..=run.stop() {
+                let (x, y) = match section.orientation() {
+                    Orientation::Horizontal => (coordinate, position),
+                    Orientation::Vertical => (position, coordinate),
+                };
+                line.include_point(x as f64, y as f64);
+            }
+        }
+    }
+    let top = bounds.y as f64;
+    let bottom = (bounds.y + bounds.height - 1) as f64;
+    let start = if filament.weight() <= 1 {
+        (bounds.x as f64, top)
+    } else {
+        (line.x_at_y(top)?, top)
+    };
+    let stop = if filament.weight() <= 1 {
+        start
+    } else {
+        (line.x_at_y(bottom)?, bottom)
+    };
+    Ok(StraightStickGeometry {
+        bounds,
+        start,
+        stop,
+        mean_thickness: vertical_mean_thickness(&filament.sections),
+        mean_distance: if filament.weight() <= 1 {
+            0.0
+        } else {
+            line.mean_distance()?
+        },
+    })
 }
 
 fn build_graph(sections: &[Section]) -> Vec<LinkedSection> {

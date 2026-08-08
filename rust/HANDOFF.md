@@ -89,14 +89,21 @@ beyond the examples remain.
 locally under the pinned toolchain, and the whole workspace runs in about 45
 seconds since the dev profile went to `opt-level = 2`.
 
-The next STEM_SEEDS boundary is now frozen before Rust implementation.
+The first STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
 and reflectively invokes only `VerticalsBuilder.retrieveCandidates()` -- never
 `checkVerticals()`. `oracle/stem-seeds.txt` records exact system inputs and all
 2,425 raw `StickFactory` candidates across eight sheets and 30 systems, including
 mixed-orientation member order, bounds, weight, endpoints, thickness, and mean
-distance with hexadecimal doubles. Two pinned-JDK runs were byte-identical;
-the corpus FNV is `d6ac0c99a5093beb` and fixture SHA-256 is
+distance with hexadecimal doubles. `recognize_raw_stem_seed_candidates` now
+reproduces all 30 input section vectors by full digest and all 2,425 candidates
+bit-for-bit from completed GRID state. It retains GRID's original vertical lag
+and rebuilt NO_STAFF horizontal lag, dispatches original sections with Java's
+system-area/bounds tests, and ports vertical thickening and opposite stickers.
+One Java mutation was load-bearing: a side section accepted during thickening is
+marked processed but is not assigned the filament compound link; only cores and
+stickers receive that link. Two pinned-JDK oracle runs were byte-identical; the
+corpus FNV is `d6ac0c99a5093beb` and fixture SHA-256 is
 `c2ae9a9fe6a593072ede7f98de9073346ff006ccf48a8d5016c58ed4899cebd0`.
 The immediate boundary after it is frozen too. `StemSeedGlyphsProbe` invokes
 the actual private `checkVerticals(Collection)`, captures the private

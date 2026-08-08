@@ -36,6 +36,7 @@ use crate::grid_executor::{
     HeadlessPopulationState, HeadlessStaff,
 };
 use audiveris_image::ingest::{self, LoadError, fnv1a64_bytes};
+use audiveris_image::lag_rebuild::RegisteredHorizontalLag;
 use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
 use audiveris_image::lines_coordinator::{StaffCandidate, retrieve_staff_candidates};
@@ -60,7 +61,7 @@ use audiveris_image::scale_estimate::{
     ScaleEstimate, ScaleEstimateError, ScaleOptions, estimate_scale,
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
-use audiveris_image::section::{InitialGridLags, build_initial_grid_lags};
+use audiveris_image::section::{InitialGridLags, Section, build_initial_grid_lags};
 use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
 use audiveris_image::system_population::{
@@ -250,6 +251,12 @@ pub struct PeakGraphReport {
     /// Staffs the GRID step installed on the sheet, with their recorded
     /// barlines.
     pub sheet_staffs: Vec<HeadlessStaff>,
+    /// GRID's persistent vertical lag, in sheet entity order. STEM_SEEDS uses
+    /// these original sections rather than rebuilding them from a raster.
+    pub vertical_sections: Vec<Section>,
+    /// The horizontal lag after `StaffLineCleaner` rebuilt it from NO_STAFF.
+    /// `VerticalsBuilder` considers its one-pixel-wide members as stickers.
+    pub horizontal_sections: Vec<Section>,
 }
 
 /// Tallies from Java `LinesRetriever.completeLines`.
@@ -1083,6 +1090,12 @@ fn build_peak_graph(
             // The staff-free image is erased from this, once CleanStaffLines
             // has registered the staff-line glyphs.
             binary: Some(raster_pixels.to_vec()),
+            // `StaffLineCleaner.rebuildHLag` needs the same SCALE-derived
+            // dispatch parameters that `LagManager` retains on the sheet.
+            // Without them the cleaner intentionally resets the lag empty,
+            // which is observable as soon as STEM_SEEDS asks for stickers.
+            max_fore: Some(production.raster.max_fore),
+            ledger_thickness: production.raster.ledger_thickness,
             ..HeadlessGridSheet::default()
         },
         HeadlessGridBook::default(),
@@ -1159,6 +1172,15 @@ fn build_peak_graph(
     }
     let retained_peaks: usize = surviving.iter().map(|(_, peaks)| peaks.len()).sum();
     let purged_peaks = candidate_peaks.saturating_sub(retained_peaks);
+    let vertical_sections = executor
+        .sheet
+        .vertical_lag
+        .as_ref()
+        .map_or_else(Vec::new, |lag| lag.sections.clone());
+    let horizontal_sections = match executor.sheet.horizontal_lag.as_ref() {
+        Some(RegisteredHorizontalLag::Populated(lag)) => lag.sections().to_vec(),
+        Some(RegisteredHorizontalLag::Empty) | None => Vec::new(),
+    };
 
     Ok(PeakGraphReport {
         sig: executor.sheet.sig.clone(),
@@ -1174,6 +1196,8 @@ fn build_peak_graph(
         surviving_barlines: surviving,
         systems,
         completion,
+        vertical_sections,
+        horizontal_sections,
     })
 }
 
