@@ -81,6 +81,7 @@ pub mod native_stems_beam_builders;
 pub mod native_stems_beam_reachability;
 pub mod native_stems_beam_stumps;
 pub mod native_stems_beam_vlinkers;
+pub mod native_stems_head_corner_reachability;
 pub mod native_stems_head_corners;
 pub mod native_stems_head_seeds;
 pub mod native_stems_head_stumps;

@@ -77,6 +77,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS BeamLinker B/V-construction boundary | the production compositor matches sequential constructor-time `equipStumps`/`equipOrphanSides` for all 803 BeamLinkers: 2,116 BLinkers, 2,417 VLinkers, 2,860 Part folds, 9,186 closer-beam candidates with 703 limiter rebuilds, and 12,491 final-area seed checks with 2,169 reachable; it stops before HeadLinkers and source-ordered cross-beam anchor mutation |
 | STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; it precedes the beam-origin builders |
 | STEMS beam-origin `StemBuilder` boundary | every beam-origin V inspection reaches the actual source-ordered `StemBuilder` constructor and V `sb` assignment for 2,417 builders. The direction differs from its V only for Carmen system 2 / builder 56 (1,390 TOP / 1,027 BOTTOM builders); 2,169 seeds become 1,954, 6,676 targets become 6,670 (1,617 B / 5,053 C), 1,442 chunk glyph registrations yield 799 new and 643 reuse, 175 chunks are removed, and 9,419 final items yield 12,085 length rows. The bounded registry has zero external/unmodeled reuse without claiming global novelty; SIG/system-stem/link/C-builder/unexpected mutation counts are all zero |
+| STEMS head-corner reachability boundary | `materialize_native_stems_head_corner_reachability` is production and exact across 8 pages / 30 systems / 3,521 heads / 14,084 corners. It assigns 1,340 seeds, retains 4,566 C and 8,120 B targets in C-before-B order, writes every C seed list, and creates 1,687 head-origin anchors for 3,948 final BLinkers. Its 16,501 checks preserve the 2,417 V builders and keep all 14,084 C builders null, with zero forbidden SIG/link/registry mutation; the normal gate has 2 tests and 0 ignored |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -111,9 +112,9 @@ remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
-eight-page image-pipeline differentials, including complete HEADS and seven
-production semantic STEMS boundaries through beam-origin `StemBuilder`
-construction and V `sb` assignment.
+eight-page image-pipeline differentials, including complete HEADS and eight
+production semantic STEMS boundaries through exact head-corner reachability
+and head-origin anchor mutation.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -803,29 +804,38 @@ emitted-body, and complete-fixture SHA-256 are
 `adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806`,
 `da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
 `a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
-The next boundary is head-corner reachability before CLinker-origin
-`StemBuilder` construction, then the remaining head-origin builders, then
-linking/SIG mutation.
 
-That head-corner reachability boundary is frozen on the Java side, but it is not
-yet a native eighth boundary. From the post-linker baseline, the oracle replays
-the beam-anchor prefix visible to CLinkers. It does not
-execute the preceding beam `StemBuilder` constructors: their local and registry
-mutations are output-isolated from C reachability, while a later C-builder
-boundary must resume the real registry timeline from the beam-builder product.
-An audit questioned a replay sort, but `BeamGroupInter.getMembers()` actually
-returns a fresh list; a direct old/new comparison showed all 79,199 production
-semantic rows unchanged. The hardened probe still clones explicitly and
-snapshots/asserts every group member identity/order throughout the pass. It
-visits 3,521 heads / 14,084 corners, retains 1,340 of 36,736 seeds, accepts
-4,566 C and 8,120 B targets, and creates 1,687 anchors. The two-pass fixture is
-79,216 lines / 37,478,914 bytes. Probe, runner, emitted-body, and fixture
-SHA-256 are
+`materialize_native_stems_head_corner_reachability` closes the eighth
+production semantic STEMS boundary. Across eight pages and 30 systems it
+visits 3,521 standard black/void stem-capable heads and all 14,084 CLinker
+corners in TR/BL/TL/BR inspection order. The native pass reproduces 36,736
+ordered seed scans and assigns 1,340, compacts 1,007,081 ordered head scans into
+4,566 C targets, and scans 9,015 sibling members into 8,120 B targets. It writes
+all 14,084 C seed lists and appends 1,687 head-origin anchors. The final
+B-linker algebra is exact: 2,116 constructor entries + 145 beam-origin anchors
++ 1,687 head-origin anchors = 3,948. Each result preserves C-before-B target
+order.
+
+The 16,501 builder checks cover the preceding 2,417 assigned V builders plus
+all 14,084 still-null C builders. Forbidden SIG, link-state, and page-persistent
+registry mutation counts are zero. Scope remains limited to the standard
+black/void stem-capable heads in the corpus; small-head truncation is not
+implemented. The reachability-only beam prefix intentionally omits prior beam
+`StemBuilder` local/registry mutations because C reachability does not read
+them. The full C-builder boundary must resume the actual registry timeline from
+the beam-builder product. An audit of the replay sort confirmed
+`BeamGroupInter.getMembers()` returns a fresh list; the hardened probe still
+clones it and snapshots/asserts every group member identity/order throughout.
+
+The fixture is 79,216 lines / 37,478,914 bytes. Probe, runner, emitted-body,
+and fixture SHA-256 are
 `7bac85a2e878d67ccecab9866428a8068b83d1453c2249f49b0c18ae6a17b39f`,
 `e9016abb44a500e242b81364531b775fe6b724cddf697cfc0bd4cfe21af0f75d`,
 `b3f10b53346adac1309d12fa2d245840a88b02c17e399e88d7e5e36f0358889b`, and
 `537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
-Rust production and exact-gate work are active.
+The normal CI gate is green with two tests and zero ignored; its semantic run
+completed in 33.18 seconds. Next is the full head-origin CLinker `StemBuilder`
+constructor boundary, followed separately by linking/SIG mutation.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3394,9 +3404,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Port the frozen STEMS head-corner reachability boundary before CLinker-origin
-   `StemBuilder` construction, then head-origin builders and later linking/SIG mutation at
-   separate identity-free boundaries.
+1. Port the full head-origin CLinker `StemBuilder` constructors, then later
+   linking/SIG mutation at separate identity-free boundaries.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

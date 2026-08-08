@@ -28,9 +28,10 @@ limiting, and seed reachability for every live beam and hook. It now also
 constructs the live head-corner topology and performs source-ordered
 `inspectVLinkers` beam/head reachability with exact cross-beam anchor mutation,
 then takes every beam-origin VLinker through the real `StemBuilder` constructor
-and `sb` assignment in production order. This seventh boundary retains its
-seed/chunk work but stops before head-corner reachability, CLinker-origin
-builders, and later linking/SIG mutation;
+and `sb` assignment in production order. The eighth boundary now completes
+source-ordered head-corner reachability and head-origin anchor mutation; it
+stops before CLinker-origin `StemBuilder` construction and later linking/SIG
+mutation;
 the human-readable text
 report remains at `GRID`. HEADERS is an
 oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
@@ -155,7 +156,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first seven semantic `STEMS` boundaries are now production-shaped and graded.
+The first eight semantic `STEMS` boundaries are now production-shaped and graded.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -264,20 +265,28 @@ emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
 `da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
 `a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
 
-The next head-corner reachability boundary is frozen but not yet native. From
-the post-linker baseline, the Java oracle replays the beam-anchor prefix visible
-to CLinkers and visits 14,084 corners in TR/BL/TL/BR inspection order.
-It deliberately projects out the preceding beam `StemBuilder` constructors:
-their local and registry mutations are not read by later C reachability, but
-must be restored when C builders are ported. An audit questioned a replay sort,
-but source inspection proved `BeamGroupInter.getMembers()` returns a fresh
-list, and all 79,199 semantic rows remained byte-identical. The hardened probe
-still clones explicitly and asserts every group's identity/order throughout.
-It retains 1,340 of 36,736 seed scans, accepts 4,566 C and 8,120 B targets, and
-creates 1,687 head-origin anchors. Two fresh JDK 25 runs agree at 79,216 lines /
-37,478,914 bytes, fixture SHA-256
+`materialize_native_stems_head_corner_reachability` closes the eighth boundary.
+Across eight pages and 30 systems it visits 3,521 standard stem-capable
+black/void heads and all 14,084 corners in TR/BL/TL/BR order. It turns 36,736
+ordered seed scans into 1,340 assignments, compacts 1,007,081 head scans into
+4,566 C targets, scans 9,015 sibling members into 8,120 B targets, writes all
+14,084 C seed lists, and creates 1,687 head-origin anchors. The final B-linker
+algebra is 2,116 constructor entries + 145 beam anchors + 1,687 head anchors =
+3,948, with C-before-B target order. All C builders remain null; 16,501 builder
+checks cover the preceding 2,417 V assignments plus 14,084 C nulls, with zero
+forbidden SIG, link-state, or registry mutation. The scope excludes small-head
+truncation. Its reachability-only beam prefix omits the prior beam-builder
+registry mutations, so future C builders must resume the actual beam-builder
+registry timeline. `BeamGroupInter.getMembers()` was confirmed to return a
+fresh list; the hardened replay still clones and audits identity/order. The
+fixture is 79,216 lines / 37,478,914 bytes; probe, runner, emitted-body, and
+fixture SHA-256 values are
+`7bac85a2e878d67ccecab9866428a8068b83d1453c2249f49b0c18ae6a17b39f`,
+`e9016abb44a500e242b81364531b775fe6b724cddf697cfc0bd4cfe21af0f75d`,
+`b3f10b53346adac1309d12fa2d245840a88b02c17e399e88d7e5e36f0358889b`, and
 `537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
-The Rust production compositor and exact gate are in progress.
+The normal CI gate is green: two tests, zero ignored; the semantic differential
+completed in 33.18 seconds.
 
 Last updated 2026-08-08.
 
@@ -316,7 +325,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with exact median, grade, height, staff, pitch, and two-serif evidence. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Seven production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. The seventh completes the beam-origin `StemBuilder` constructor and `sb` assignment for 2,417 builders, with 2,169 -> 1,954 seeds, 6,676 -> 6,670 targets, 1,442 chunk registrations, and 9,419 final items. | Grade head-corner reachability before CLinker-origin `StemBuilder` construction, then head-origin builders, then linking/SIG mutation. |
+| 10 | `STEMS` | **Components graded** | Eight production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. The seventh completes 2,417 beam-origin `StemBuilder` constructors. The eighth assigns all 14,084 C seed lists, retains 4,566 C and 8,120 B targets in C-before-B order, adds 1,687 head anchors, and closes at 3,948 BLinkers with all C builders null. | Port the full head-origin CLinker `StemBuilder` constructors, then linking/SIG mutation. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -346,7 +355,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Port the frozen STEMS head-corner reachability boundary before CLinker-origin `StemBuilder` construction, then continue through head-origin builders and linking/SIG mutation at separate boundaries.
+1. Port the full head-origin CLinker `StemBuilder` constructors, then linking/SIG mutation at separate boundaries.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
 3. Complete GRID brace glyph/SIG promotion from the now-retained exact detached filament evidence; Part ownership is already live for downstream stages.
 4. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.
