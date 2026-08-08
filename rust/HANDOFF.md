@@ -582,8 +582,8 @@ original BINARY raster. The permanent eight-page differential matches all
 conflicts, zero empty-glyph drops, and all 174 final range heads by raw
 source/attempt, shape, pitch, grade/impact bits, provisional/final bounds,
 glyph weight/run digest, good decision, and dense order. No global Java glyph
-or SIG ID is invented. The active HEADS boundary is now the frozen staff/system
-epilog below.
+or SIG ID is invented. The staff/system epilog below is now composed from these
+live products rather than remaining an isolated frozen boundary.
 
 The boundary after range glyphs is frozen in a separate deterministic oracle.
 `oracle/java/run-heads-post-range.sh` manually follows the exact remainder of
@@ -629,24 +629,38 @@ complete caller context: shape/bounds and full positioned RunTable identity for
 0.2/0.8 width gates, strict 0.25 area gate, wrapping products, and NaN behavior
 for `HeadInter.overlaps`. Nine adversarial tests pin those semantics.
 
-`head_small_beam_purge.rs` ports the remaining system-level arbitration as a
-pure kernel. It filters all Java beam shapes by the strict integer
-`minBeamWidth` gate, preserves beam SIG order and stable head ordinate order,
-uses the exact filled horizontal-parallelogram intersection, and reproduces
-wrapping beam bottoms, strict contextual-grade comparison, NaN/equality head
-removal, and both iterator-removal effects. Nine adversarial tests cover those
-branches. The production adapter must still provide each beam's live contextual
-grade and compose the retained head removals.
+`head_small_beam_purge.rs` ports the system-level arbitration as a pure kernel.
+It filters all Java beam shapes by the strict integer `minBeamWidth` gate,
+preserves beam SIG order and stable head ordinate order, uses the exact filled
+horizontal-parallelogram intersection, and reproduces wrapping beam bottoms,
+strict contextual-grade comparison, NaN/equality head removal, and both
+iterator-removal effects. The production adapter now supplies live competitor,
+beam-group, MultipleRest, and head records. Contextual grades use Java's
+coefficient 3 / ratio 4 support contribution, exclude the raw hook/beam pairs,
+partition compatible partners in reverse-grade order, honor MultipleRest and
+earlier arbitration removals, and are recomputed after each beam removal.
 
 `heads_post_range_corpus.rs` parses the compact fixture into typed staff,
 system, beam, head, and scale records. It validates both SHA-256 commitments,
 all reconstructible FNV streams, hierarchy/count arithmetic, ordinals, tally
-rows, and the identity-free staff-head to purged/final-head multiset. Five tests
-freeze that contract. Initial-head and pair-check streams remain deliberately
-compact, so the live compositor must recreate and match their summary hashes.
+rows, and the identity-free staff-head to purged/final-head multiset. The live
+compositor now recreates the deliberately compact initial-head and pair-check
+streams and matches their committed summary hashes.
 
-**Nothing through the preceding retained-prerequisite checkpoint is unverified
-by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
+`compose_native_heads_staff_epilog` now combines the production seed and range
+glyphs in Java staff order, applies the exact duplicate/overlap predicates,
+purges duplicate tallies, and attaches survivors. `compose_native_heads_epilog`
+then consumes that staff state plus the live competitor and BEAMS products for
+system arbitration and sheet-wide tally analysis. The top-level eight-page gate
+is exact for all 3,609 inputs, 62 duplicate removals, 2,725 overlap exclusions,
+3,547 post-duplicate heads, 191 beam inputs, 10,053 ordered beam checks and
+hashes, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale
+rows. HEADS is therefore native and graded, not yet published. The remaining
+HEADS work is the complete schema-1 JSON/CLI recognition surface and, only if it
+can be represented honestly, beam source-glyph evidence; semantic STEMS follows.
+
+**The earlier retained-prerequisite checkpoint remains verified by CI as of
+Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
 which spent a day unverified: GitHub Actions was in a major outage when it
 landed (2026-08-06, incident from 15:22 UTC) and both its runs died in *Set up

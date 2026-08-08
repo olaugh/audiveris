@@ -111,6 +111,9 @@ pub struct SmallBeamPurgeResult {
     pub beam_removed: Vec<bool>,
     /// Final graph removal state, indexed by original input.
     pub head_removed: Vec<bool>,
+    /// Contextual grade computed immediately before each candidate beam scan.
+    /// Non-candidates remain `None`.
+    pub computed_contextual_grades: Vec<Option<f64>>,
     pub checks: Vec<SmallBeamPurgeCheck>,
     pub decisions: Vec<SmallBeamPurgeDecision>,
 }
@@ -127,6 +130,27 @@ pub fn purge_small_beams(
     beams: &[SmallBeamPurgeBeam],
     min_beam_width: i32,
 ) -> SmallBeamPurgeResult {
+    purge_small_beams_with_contextual_grades(heads, beams, min_beam_width, |beam_index, _, _| {
+        beams[beam_index].contextual_grade
+    })
+}
+
+/// Dynamic-grade form of [`purge_small_beams`].
+///
+/// Java calls `SIGraph.computeContextualGrade(iBeam)` immediately before each
+/// beam's head scan. The callback receives the original beam index and current
+/// graph-removal bits, so production composition can omit support edges of a
+/// beam purged earlier in this same traversal.
+#[must_use]
+pub fn purge_small_beams_with_contextual_grades<ContextualGrade>(
+    heads: &[SmallBeamPurgeHead],
+    beams: &[SmallBeamPurgeBeam],
+    min_beam_width: i32,
+    mut contextual_grade: ContextualGrade,
+) -> SmallBeamPurgeResult
+where
+    ContextualGrade: FnMut(usize, &[bool], &[bool]) -> f64,
+{
     let mut head_removed = heads.iter().map(|head| head.removed).collect::<Vec<_>>();
     let mut beam_removed = beams.iter().map(|beam| beam.removed).collect::<Vec<_>>();
 
@@ -147,11 +171,14 @@ pub fn purge_small_beams(
     let mut remaining_beam_indices = candidate_beam_indices.clone();
     let mut checks = Vec::new();
     let mut decisions = Vec::new();
+    let mut computed_contextual_grades = vec![None; beams.len()];
 
     let mut beam_position = 0;
     while beam_position < remaining_beam_indices.len() {
         let beam_index = remaining_beam_indices[beam_position];
         let beam = beams[beam_index];
+        let beam_contextual_grade = contextual_grade(beam_index, &beam_removed, &head_removed);
+        computed_contextual_grades[beam_index] = Some(beam_contextual_grade);
         let beam_bottom = beam
             .bounds
             .y
@@ -177,7 +204,7 @@ pub fn purge_small_beams(
             });
 
             if intersects {
-                let target = if head.grade > beam.contextual_grade {
+                let target = if head.grade > beam_contextual_grade {
                     beam_removed[beam_index] = true;
                     purged_beam = true;
                     SmallBeamPurgeTarget::Beam
@@ -188,7 +215,7 @@ pub fn purge_small_beams(
                 decisions.push(SmallBeamPurgeDecision {
                     beam_index,
                     head_index,
-                    beam_contextual_grade: beam.contextual_grade,
+                    beam_contextual_grade,
                     head_grade: head.grade,
                     target,
                 });
@@ -223,6 +250,7 @@ pub fn purge_small_beams(
         remaining_head_indices,
         beam_removed,
         head_removed,
+        computed_contextual_grades,
         checks,
         decisions,
     }

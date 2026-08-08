@@ -15,6 +15,7 @@ use audiveris_image::beam_structure::Segment;
 use head_scanner_slices::JavaRectangle;
 use head_small_beam_purge::{
     HeadBeamShape, SmallBeamPurgeBeam, SmallBeamPurgeHead, SmallBeamPurgeTarget, purge_small_beams,
+    purge_small_beams_with_contextual_grades,
 };
 
 fn rect(x: i32, y: i32, width: i32, height: i32) -> JavaRectangle {
@@ -280,4 +281,41 @@ fn initially_removed_vertices_are_omitted_from_both_live_queries() {
     assert_eq!(result.head_removed, [true, false]);
     assert_eq!(result.beam_removed, [true]);
     assert!(result.checks.is_empty());
+}
+
+#[test]
+fn dynamic_context_sees_beams_removed_by_an_earlier_scan() {
+    let heads = [head(0, 0, 2, 2, 0.9), head(10, 0, 2, 2, 0.6)];
+    let beams = [
+        beam(
+            HeadBeamShape::Beam,
+            rect(0, 0, 4, 2),
+            segment(0.0, 1.0, 4.0, 1.0),
+            2.0,
+            0.0,
+        ),
+        beam(
+            HeadBeamShape::Beam,
+            rect(10, 0, 4, 2),
+            segment(10.0, 1.0, 14.0, 1.0),
+            2.0,
+            0.0,
+        ),
+    ];
+
+    let result =
+        purge_small_beams_with_contextual_grades(&heads, &beams, 10, |beam_index, removed, _| {
+            match beam_index {
+                0 => 0.5,
+                1 if removed[0] => 0.4,
+                1 => 0.8,
+                _ => unreachable!(),
+            }
+        });
+
+    // Beam 0 loses to head 0. Beam 1 then loses its support from beam 0 and
+    // drops below head 1; a precomputed 0.8 would instead purge that head.
+    assert_eq!(result.beam_removed, [true, true]);
+    assert_eq!(result.head_removed, [false, false]);
+    assert_eq!(result.computed_contextual_grades, [Some(0.5), Some(0.4)]);
 }
