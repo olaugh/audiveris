@@ -1164,6 +1164,30 @@ classification sequence and harvests the ids -- documented in the test.
 `tests/header_corpus.rs` (renamed from `key_headers_corpus.rs`) now grades the
 complete header chain and is enforced by CI.
 
+### `header.stop` itself: 65/65, and a fourth getter shadow
+
+The final header stop -- what `Staff.getHeaderStop()` serves to
+`SpotsBuilder.eraseHeaderAreas` and `StemScaler.getBuffer` -- is now graded on
+every staff, closing the value BEAMS has waited on since the first session.
+
+The first run had **exactly the seventeen time-bearing staves off by exactly
++1**, which is as clean as a diagnosis gets. `HeaderTimeColumn.retrieveTime`
+computes its system offset from `Staff.getTimeStop()` -- the *getter*, which
+answers the inclusive right edge of `header.time`'s bounds -- while
+`setTimeStop` had stored the exclusive `x + width` a moment earlier. Fourth
+instance of the store/getter shadow (`getClefStop`, `getKeyStop`,
+`getTimeStop`-for-reading, now `getTimeStop`-for-the-offset). The rule stands:
+**when Java exposes a field through a getter, the port must call the getter
+everywhere Java does.** `StaffHeader::time_stop()` now exists and the column's
+return uses it; two unit fixtures that had pinned the exclusive convention were
+corrected by the corpus.
+
+**What this unblocks:** the header erase for BEAMS and `StemScaler` can now be
+driven by native values instead of being omitted with a stated cost. The
+`header_erase_cost_is_measured_not_assumed` caveat (5 spurious clef-sized
+candidates on chula) is ready to be retired by wiring `header.stop` into the
+spots path.
+
 
 ### KEY: the classifier seam is filled
 

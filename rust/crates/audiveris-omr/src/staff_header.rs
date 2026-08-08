@@ -166,6 +166,24 @@ impl Default for StaffHeader {
 }
 
 impl StaffHeader {
+    /// Java `Staff.getTimeStop()`: the inclusive right edge of the header time's own bounds.
+    ///
+    /// The fourth getter of the shadowing pattern: `setTimeStop` stores an *exclusive* end
+    /// (`timeBox.x + timeBox.width`), and `HeaderTimeColumn.retrieveTime` then computes the
+    /// system offset from this getter instead — one pixel less. A port reading the stored value
+    /// lands every time-bearing staff's header stop off by exactly +1, which is precisely how
+    /// this was caught.
+    #[must_use]
+    pub fn time_stop(&self) -> Option<i32> {
+        if let Some(time) = self.time.as_ref() {
+            return Some(time.bounds.x + time.bounds.width - 1);
+        }
+        self.time_range
+            .as_ref()
+            .filter(|range| range.valid)
+            .and_then(StaffHeaderRange::precise_stop)
+    }
+
     /// Java `Staff.getClefStop()`.
     ///
     /// **Not** the value `setClefStop` stored, and the difference is load-bearing. `registerClefs`

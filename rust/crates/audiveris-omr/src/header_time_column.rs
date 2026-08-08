@@ -412,13 +412,16 @@ where
             return Ok(-1);
         }
 
+        // Java `HeaderTimeColumn.retrieveTime` computes the offset from `Staff.getTimeStop()`
+        // -- the getter, inclusive right edge -- not from the exclusive value `setTimeStop`
+        // stored a moment earlier. See `StaffHeader::time_stop`.
         Ok(system
             .staffs
             .iter()
             .filter(|staff| !staff.tablature)
             .filter_map(|staff| {
-                let start = staff.header.as_ref()?.start;
-                Some(staff.time_stop?.wrapping_sub(start))
+                let header = staff.header.as_ref()?;
+                Some(header.time_stop()?.wrapping_sub(header.start))
             })
             .max()
             .unwrap_or(0))
@@ -829,7 +832,10 @@ mod tests {
         );
         let mut column = HeadlessHeaderTimeColumn::new(visual);
 
-        assert_eq!(column.retrieve_time(&mut system), Ok(98));
+        // One less than the stored (exclusive) time stop: Java's `HeaderTimeColumn.retrieveTime`
+        // computes the offset from the `getTimeStop()` getter, whose answer is the inclusive
+        // right edge -- the corpus caught the +1 on all seventeen time-bearing staves.
+        assert_eq!(column.retrieve_time(&mut system), Ok(97));
         assert_eq!(
             column
                 .visual()
@@ -882,7 +888,8 @@ mod tests {
         );
         let mut column = HeadlessHeaderTimeColumn::new(visual);
 
-        assert_eq!(column.retrieve_time(&mut system), Ok(18));
+        // Inclusive-getter offset; see the note in the sibling test.
+        assert_eq!(column.retrieve_time(&mut system), Ok(17));
         assert_eq!(column.time_value(), Some(value(3, 4)));
         assert_eq!(column.builders()[&1].selected_candidate_id, Some(110));
         assert_eq!(column.builders()[&2].selected_candidate_id, Some(200));

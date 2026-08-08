@@ -70,6 +70,9 @@ struct OracleStaff {
     id: usize,
     specific_interline: i32,
     header_start: i32,
+    /// The final `header.stop` after all three columns -- what `getHeaderStop()` returns and
+    /// what the BEAMS/STEM_SEEDS header erase reads.
+    header_stop: i32,
     /// `None` where Java found no key on this staff, which the port must also produce.
     key: Option<OracleKey>,
     /// `None` where Java found no time signature, which the port must also produce.
@@ -108,6 +111,7 @@ fn parse_oracle() -> Vec<(String, i32, Vec<OracleStaff>)> {
                     id: f[1].parse().unwrap(),
                     specific_interline: f[2].parse().unwrap(),
                     header_start: f[3].parse().unwrap(),
+                    header_stop: f[4].parse().unwrap(),
                     key: None,
                     time: None,
                     bars: Vec::new(),
@@ -225,7 +229,13 @@ fn run_time_stage(
     recognition: &audiveris_omr::recognize::GridLinesRecognition,
     time_sources: &BTreeMap<usize, audiveris_image::run_table::RunTable>,
     system: &mut HeadlessHeaderSystem,
-) -> Result<Option<audiveris_omr::header_time_column::NeutralTimeValue>, String> {
+) -> Result<
+    (
+        Option<audiveris_omr::header_time_column::NeutralTimeValue>,
+        i32,
+    ),
+    String,
+> {
     use audiveris_omr::header_time_column::VisualHeaderTimeProposalRecognizer;
 
     let build_recognizer = || {
@@ -376,10 +386,10 @@ fn run_time_stage(
         build_recognizer(),
         lifecycle,
     ));
-    time_column
+    let time_offset = time_column
         .retrieve_time(system)
         .map_err(|error| format!("{name}: retrieve_time failed: {error:?}"))?;
-    Ok(time_column.time_value())
+    Ok((time_column.time_value(), time_offset))
 }
 
 #[test]
@@ -668,7 +678,7 @@ fn native_headers_match_java_on_every_corpus_staff() {
                 }
             }
 
-            let time_value = match run_time_stage(
+            let (time_value, time_offset) = match run_time_stage(
                 name,
                 *sheet_interline,
                 oracle_staves,
@@ -682,6 +692,14 @@ fn native_headers_match_java_on_every_corpus_staff() {
                     continue;
                 }
             };
+            // Java `HeaderBuilder.setSystemTimeStop`: the final system-wide advance of header.stop.
+            if time_offset > 0 {
+                for staff in &mut system.staffs {
+                    if let Some(header) = staff.header.as_mut() {
+                        header.stop = header.start + time_offset;
+                    }
+                }
+            }
 
             // Java selects clefs only now, after the whole header is browsed.
             if let Err(error) = clef_column.select_clefs(&mut system) {
@@ -818,6 +836,22 @@ fn native_headers_match_java_on_every_corpus_staff() {
                         )),
                     }
                     }
+                }
+            }
+
+            // ---- header stop grading: the value getHeaderStop() serves to BEAMS/STEM_SEEDS ----
+            for oracle in oracle_staves {
+                let produced = system
+                    .staffs
+                    .iter()
+                    .find(|staff| staff.id == oracle.id)
+                    .and_then(|staff| staff.header.as_ref())
+                    .map(|header| header.stop);
+                if produced != Some(oracle.header_stop) {
+                    mismatches.push(format!(
+                        "{name} staff {}: header stop {produced:?}, Java {}",
+                        oracle.id, oracle.header_stop
+                    ));
                 }
             }
         } // per-system
