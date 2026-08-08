@@ -544,6 +544,18 @@ preconditions, and overflow. The remaining range work is to feed this kernel
 from the production scanner, retrieve the 174 final glyphs, and grade all
 per-staff hashes and rows.
 
+The compact range fixture now grades that pure post-processing across the
+whole corpus as far as its retained schema permits. The integration test
+strictly parses and reconciles all rows and summaries, validates aggregate
+ordinal/main/member ordering and the exact 0..34,100 raw-member partition, then
+replays all 3,376 first seed conflicts and 174 retained candidates. Each first
+conflict is checked by accumulated seed-head SIG provenance, bounds, grade, and
+independently computed Java-overflow IoU bits. The fixture omits full curved
+scanner-Area membership and nonqualifying seed heads; the test therefore builds
+the exact decision-complete x-order from the exhaustive conflict evidence and
+does not claim to reconstruct the raw aggregation input. A naive all-good
+system pool was explicitly rejected after it created one false Bach conflict.
+
 The production scanner half is now exact. `native_heads_range_lookup.rs`
 streams Java's range search from the retained prolog/scanner/pool state: exact
 `Rectangle.grow` spot intervals, Chamfer-3 safety checks and two-half-width
