@@ -15,8 +15,9 @@ when a deterministic Java/Rust comparison covers it.
 
 **Current checkpoint:** native recognition is published through `GRID`.
 Downstream BEAMS and LEDGERS JSON serializers now preserve their geometry,
-grades, impacts, exclusions, groups, and curved ledger paths, but the CLI is
-still gated at GRID. The first HEADERS prerequisite is now production-native:
+grades, impacts, exclusions, groups, and curved ledger paths. `omrscope` now
+understands both their horizontal medians and GRID's vertical medians, but the
+CLI is still gated at GRID. The first HEADERS prerequisite is now production-native:
 GRID alone yields the exact per-staff header starts, specific interlines, and
 good-connected-bar browse limits. The remaining work is to extract the already
 graded clef/key/time chain from its corpus driver and publish it. The downstream
@@ -84,7 +85,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **Published through `GRID`** | `LOAD -> BINARY -> SCALE -> GRID` is available on real images and PDFs. BEAMS/LEDGERS schema-1 serializers are implemented, but downstream CLI wiring waits on oracle-free HEADERS composition. |
+| CLI and JSON | **Published through `GRID`** | `LOAD -> BINARY -> SCALE -> GRID` is available on real images and PDFs. BEAMS/LEDGERS schema-1 serializers are implemented, and `omrscope` accepts both GRID's vertical and their horizontal median forms without inventing incomplete geometry. Downstream CLI wiring waits on oracle-free HEADERS composition. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 

@@ -246,6 +246,13 @@ sheet, one per line. This is the interchange format, not a debug dump, and it
 is shaped for two consumers that do not exist yet: an evaluation harness
 comparing several OMR systems, and a repair loop that proposes corrections.
 
+The checked-in `omrscope` consumer accepts both schema-1 median encodings:
+GRID's vertical `x/top/bottom` geometry and BEAMS/LEDGERS' endpoint
+`x1/y1/x2/y2` geometry. It deliberately leaves an incomplete median absent
+instead of letting Qt turn missing coordinates into zero, and it uses the line
+center for its abscissa display and Java/Rust pairing. The parser behavior has
+a CTest regression even though publication remains gated at GRID.
+
 Three decisions worth keeping:
 
 - **The envelope names its producer and schema.** A consensus front end diffing
@@ -662,9 +669,10 @@ the native corpus path in item 3 is closed; only publication remains there.
    twice, in `SpotsBuilder.eraseHeaderAreas` and again inside
    `StemScaler.getBuffer`, and both are the same dependency. Closed by the
    65/65 header chain and the 30/30 erase grade.
-3. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
-   currently show GRID-level inters only and so cannot display any beam work.
-   The native recognition input is now ready; only publication remains.
+3. **Beams into `-json`**, then into omrscope's Page and Inters tabs. The
+   consumer now parses and pairs horizontal beam/ledger medians as well as
+   GRID's vertical form; the CLI still emits GRID-level inters only. The native
+   recognition input is now ready; only publication remains.
 4. **LEDGERS post-analysis**, now that native GRID/HEADERS/BEAMS-to-builder
    composition and its first exact gate are closed.
 

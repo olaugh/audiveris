@@ -19,7 +19,7 @@ const QColor kStaff(120, 120, 120);
 double abscissaOf(const Inter &inter)
 {
     if (inter.median) {
-        return inter.median->x1();
+        return inter.median->center().x();
     }
     if (inter.bounds) {
         return inter.bounds->center().x();

@@ -19,6 +19,8 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Pdf Concurrent)
 
+include(CTest)
+
 add_executable(omrscope
     src/main.cpp
     src/MainWindow.cpp
@@ -29,3 +31,14 @@ add_executable(omrscope
 
 target_link_libraries(omrscope PRIVATE Qt6::Widgets Qt6::Pdf Qt6::Concurrent)
 target_compile_options(omrscope PRIVATE -Wall -Wextra)
+
+if(BUILD_TESTING)
+    add_executable(omrscope-parser-tests
+        tests/ParsersTest.cpp
+        src/Parsers.cpp
+    )
+    target_include_directories(omrscope-parser-tests PRIVATE src)
+    target_link_libraries(omrscope-parser-tests PRIVATE Qt6::Widgets)
+    target_compile_options(omrscope-parser-tests PRIVATE -Wall -Wextra)
+    add_test(NAME omrscope-parser-tests COMMAND omrscope-parser-tests)
+endif()

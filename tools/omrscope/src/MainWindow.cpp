@@ -452,7 +452,7 @@ void MainWindow::refreshFilter()
             return QString();
         }
         if (inter->median) {
-            return QString::number(inter->median->x1(), 'f', 1);
+            return QString::number(inter->median->center().x(), 'f', 1);
         }
         if (inter->bounds) {
             return QString::number(inter->bounds->center().x(), 'f', 1);

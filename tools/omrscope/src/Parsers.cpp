@@ -16,6 +16,30 @@ std::optional<double> optionalDouble(const QJsonValue &value)
     return value.isDouble() ? std::optional<double>(value.toDouble()) : std::nullopt;
 }
 
+std::optional<QLineF> parseMedian(const QJsonObject &median)
+{
+    // Schema 1 GRID records use a vertical median. Keep this branch explicit:
+    // QJsonValue::toDouble() defaults missing fields to zero, which could turn
+    // an unknown future shape into a plausible-looking line at the origin.
+    const auto x = optionalDouble(median.value(QStringLiteral("x")));
+    const auto top = optionalDouble(median.value(QStringLiteral("top")));
+    const auto bottom = optionalDouble(median.value(QStringLiteral("bottom")));
+    if (x && top && bottom) {
+        return QLineF(*x, *top, *x, *bottom);
+    }
+
+    // BEAMS and LEDGERS report the two endpoints of their horizontal median.
+    const auto x1 = optionalDouble(median.value(QStringLiteral("x1")));
+    const auto y1 = optionalDouble(median.value(QStringLiteral("y1")));
+    const auto x2 = optionalDouble(median.value(QStringLiteral("x2")));
+    const auto y2 = optionalDouble(median.value(QStringLiteral("y2")));
+    if (x1 && y1 && x2 && y2) {
+        return QLineF(*x1, *y1, *x2, *y2);
+    }
+
+    return std::nullopt;
+}
+
 /// A grade with no contextual value is not a grade of zero.
 QString formatMissing()
 {
@@ -121,9 +145,7 @@ EngineResult parseRustJson(const QString &text)
 
         const QJsonObject median = object.value(QStringLiteral("median")).toObject();
         if (!median.isEmpty()) {
-            const double x = median.value(QStringLiteral("x")).toDouble();
-            inter.median = QLineF(x, median.value(QStringLiteral("top")).toDouble(), x,
-                                  median.value(QStringLiteral("bottom")).toDouble());
+            inter.median = parseMedian(median);
         }
 
         const QJsonObject evidence = object.value(QStringLiteral("evidence")).toObject();
@@ -246,7 +268,7 @@ QVector<Pairing> pair(const EngineResult &rust, const EngineResult &java, const 
     // their inters independently, and an id match would be a coincidence.
     auto abscissa = [](const Inter &inter) {
         if (inter.median) {
-            return inter.median->x1();
+            return inter.median->center().x();
         }
         if (inter.bounds) {
             return inter.bounds->center().x();
