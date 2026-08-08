@@ -696,7 +696,7 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
             assert_eq!(ledgers.section_count, 4_052);
             assert_eq!(
                 ledgers.system_section_counts,
-                vec![(1, 2_039), (2, 577), (3, 961)]
+                vec![(1, 2_042), (2, 591), (3, 961)]
             );
             assert_eq!(ledgers.registered_filament_count, 104);
             assert_eq!(ledgers.candidates.len(), 104);

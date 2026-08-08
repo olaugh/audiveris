@@ -85,7 +85,10 @@ sheet-wide unbiased delta/height populations, rejects one outlier, removes its
 filament, and rebuilds system 1, leaving 18 final inters. Rust now reproduces
 all 18 exactly. The widened order-independent count/digest gate now covers all
 eight beam sheets, all 581 final inters, and all 95 inferred ledger-line paths
-exactly. `beams_json` and `ledgers_json` now publish the downstream geometry,
+exactly. Chula's Java `LedgersStep.Context.sectionMap` has 2,042, 591, and 961
+filtered section references in systems 1–3; the corpus assertion now reflects
+`SystemInfo.getRight()`'s inclusive extra column instead of the older Rust-only
+2,039/577/961 counts. `beams_json` and `ledgers_json` now publish the downstream geometry,
 grades, complete impact vectors, live ledger exclusions, group counts, and
 curved inferred ledger paths without changing GRID's schema-1 byte path. The
 serializers and native stage inputs are wired through
