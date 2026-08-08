@@ -36,6 +36,7 @@ pub mod cue_beams_step;
 pub mod curves_step;
 pub mod grid_executor;
 pub mod head_glyph_retrieval;
+pub mod head_range_postprocess;
 pub mod head_scanner;
 pub mod head_scanner_geometry;
 pub mod head_scanner_slices;

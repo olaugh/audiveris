@@ -531,6 +531,19 @@ The active implementation boundary is the streaming range scan plus stable
 grade aggregation and seed-conflict filtering; staff duplicate/overlap purge
 still follows it.
 
+The two list-level post-processing operations are now native independently of
+the scanner. `head_range_postprocess.rs` reproduces Java's stable reverse
+`Double.compare` grade sort, fixed first-member aggregate centers, first-group
+and inclusive-`maxTemplateDx` choice, then filters aggregated mains against the
+abscissa-sorted seed heads. Its rectangle path keeps `Rectangle.intersects`,
+signed overflowing `int` area arithmetic in `GeoUtil.iou`, non-wrapping
+`getMaxX`, first qualifying seed, early break, and inclusive 0.1 IoU and grade
+margin. Nine adversarial tests cover equal grades and ordering, canonical NaN,
+signed zero, exact thresholds, invalid rectangle dimensions, violated sort
+preconditions, and overflow. The remaining range work is to feed this kernel
+from the production scanner, retrieve the 174 final glyphs, and grade all
+per-staff hashes and rows.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
