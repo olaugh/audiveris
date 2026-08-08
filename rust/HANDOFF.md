@@ -342,6 +342,19 @@ probe asserts seed/range static geometry is identical. Competitor and frozen-bar
 `Area` slicing is deliberately a later sub-gate rather than being implied by
 this corpus.
 
+The dependency-light scanner kernel and its fixture gate are now native.
+`head_scanner.rs` derives Java's exact builder parameters, preserves the
+`0,+1,-1,+2,-2...` stem window and directional ordinate windows, retains the
+normal all/stem/hollow `EnumSet` order, decides open scanners, and implements
+every `getTheoreticalOrdinate` branch over abstract staff-line and ledger
+adapters with Java ties-to-even rounding. Five focused tests cover all three
+frozen parameter regimes and every ordinate branch. The separate integration
+test strictly parses all scanner-context row kinds, bit-checks Java doubles,
+recomputes nested FNV summaries, expands RLE lengths, and validates all 8 pages,
+30 systems, 55 staves, 1,767 geometries, and 3,534 schedules. This is an honest
+kernel/fixture boundary: production staff/ledger adapters and their exhaustive
+comparison are the next slice, and no scanner-context parity is claimed yet.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
