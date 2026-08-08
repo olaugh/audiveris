@@ -16,11 +16,12 @@ when a deterministic Java/Rust comparison covers it.
 **Current checkpoint:** native recognition is published through `GRID`.
 Downstream BEAMS and LEDGERS JSON serializers now preserve their geometry,
 grades, impacts, exclusions, groups, and curved ledger paths, but the CLI is
-still gated at GRID. An integration audit found that the corpus HEADERS driver
-still supplies Java-recorded header starts and good connected bar positions;
-those inputs must be derived from GRID before the later stages can honestly be
-called native end to end. The downstream kernels remain exact across all eight
-example sheets: 581 final ledger inters and 95 inferred ledger-line paths.
+still gated at GRID. The first HEADERS prerequisite is now production-native:
+GRID alone yields the exact per-staff header starts, specific interlines, and
+good-connected-bar browse limits. The remaining work is to extract the already
+graded clef/key/time chain from its corpus driver and publish it. The downstream
+kernels remain exact across all eight example sheets: 581 final ledger inters
+and 95 inferred ledger-line paths.
 
 Last updated 2026-08-07.
 
@@ -54,7 +55,7 @@ is present but the musical interpretation is not.
 | 2 | `BINARY` | **Native and published** | Global and adaptive thresholding, filters, masks, runs, and full-page raster parity. | No known corpus gap. |
 | 3 | `SCALE` | **Native and published** | Line, interline, beam, histogram, derivative, and decision logic are measured from the page. | Small-beam recognition needs a graded corpus case before downstream use. |
 | 4 | `GRID` | **Native and published** | Staff lines, systems, bars, connectors, parts, contextual grades, completed line geometry, and `NO_STAFF` pixels. All 65 staves and 420 barlines in the example corpus match Java. | No known example-corpus gap; continue widening the PDF corpus. |
-| 5 | `HEADERS` | **Components graded** | Clefs, keys, times, stop propagation, and all 30 system header-erasure rectangles. All 65 corpus staves match Java once their browse inputs are supplied. | Replace the corpus driver's Java-recorded header starts and good-connected-bar cutoffs with values derived from GRID, then publish header inters and evidence. |
+| 5 | `HEADERS` | **Components graded** | GRID-derived system/staff/part geometry now constructs exact header starts, specific interlines, and ordered good-connected-bar browse limits on all 65 corpus staves. Clefs, keys, times, stop propagation, and all 30 erases remain graded. | Compose the visual columns against the new production context, remove the corresponding oracle inputs from the corpus driver, and publish header inters and evidence. |
 | 6 | `STEM_SEEDS` | **Components graded** | Lifecycle, stem-scale histogram/peak/fallback, vertical orchestration, and stem checker. `maxStem` matches Java on all eight beam sheets. | Complete raw vertical `StickFactory` geometry and publish real seed glyphs. |
 | 7 | `BEAMS` | **Components graded** | Native spot chain, system dispatch, beam creation, beam-to-beam extension, hooks, grouping, and a schema-1 JSON serializer. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Feed it an oracle-free HEADERS result, wire the CLI, connect stem-seed extension, and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Components graded** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. Its schema-1 serializer includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. | Close the upstream HEADERS composition seam, wire the CLI, and widen beyond the example corpus. |
@@ -89,8 +90,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Derive HEADERS starts, staff interlines, and good-connected-bar browse limits
-   from GRID; then publish `HEADERS`, `BEAMS`, and `LEDGERS` through the CLI.
+1. Compose HEADERS clef/key/time recognition against the new GRID-only context;
+   then publish `HEADERS`, `BEAMS`, and `LEDGERS` through the CLI.
 2. Grade and port raw vertical `StickFactory` geometry for `STEM_SEEDS`, then
    connect accepted seeds to beam-to-stem extension.
 3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline

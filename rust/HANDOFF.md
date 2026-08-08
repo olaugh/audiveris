@@ -26,10 +26,14 @@ The CLI performs native page recognition through GRID. BEAMS and LEDGERS now
 have schema-1 JSON serializers, but they are not wired into the stage driver.
 The integration audit that preceded that wiring found one earlier claim was too
 strong: `header_corpus.rs` still reads Java-recorded header starts and good
-connected bar positions. Clef/key/time classification and the downstream beam
-and ledger kernels are exact, but the full chain is not oracle-free until those
-HEADERS inputs are derived from GRID. `audiveris-cli -batch -step SCALE|GRID
-<image>` remains the honest production boundary.
+connected bar positions. `derive_native_header_grid_context` now replaces both
+with GRID-only state: it builds real `HeadlessHeaderSystem` bar/group ownership,
+runs `compute_header_starts`, and applies `BarlineInter.isGood`'s overridden
+inclusive 0.6 threshold plus connection evidence. All nine example pages and
+65 staves match the oracle for sheet/staff interline, header start, and every
+ordered browse-bar vector. The next seam is extracting the
+already graded clef/key/time driver to consume that context; until then
+`audiveris-cli -batch -step SCALE|GRID <image>` remains the honest boundary.
 
 Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
@@ -61,8 +65,10 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 system areas/bounds, then creates, extends, hooks and groups beams. The current
 corpus producer of that list is not yet a production entry point: it seeds
 `StaffHeader` starts and `Staff.getBrowseStop` bar positions from
-`clef-headers.txt`. Those values are all available from GRID's staff/SIG state
-and are the prerequisite for honest CLI wiring.
+`clef-headers.txt`. `derive_native_header_grid_context` now computes the same
+values from GRID's staff/SIG state with explicit missing-geometry errors rather
+than zero defaults. The corpus driver still needs to be rewired to that API
+before its `HeaderErase` list is an oracle-free production product.
 
 `recognize_native_ledgers` now consumes that native BEAMS result plus GRID's
 `NO_STAFF`, curved per-staff lines/areas, and system areas/bounds. It preserves

@@ -46,6 +46,7 @@ pub mod key_peaks;
 pub mod ledgers_step;
 pub mod links_step;
 pub mod measures_step;
+pub mod native_headers;
 pub mod native_ledgers;
 pub mod page_step;
 pub mod production_stages;
