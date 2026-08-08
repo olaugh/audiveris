@@ -258,6 +258,21 @@ corpus and wire the measured scale, music-font point size, and per-staff point
 sizes into BEAMS. Then freeze the active head template catalogs and port the
 pure `Template.evaluate` kernel before scanner ordering or SIG allocation.
 
+The independent half of that grade is frozen in
+`oracle/black-head-sizer.txt`. `BlackHeadSizerProbe` reaches real STEM_SEEDS in
+a fresh JVM per page, lets production `SpotsBuilder.buildSpots` install the
+sizing side effect, then reflectively replays the private checks/close only to
+explain every decision. Across eight pages it records all 2,739 threshold-140
+inputs (distinct from 2,790 saved threshold-170 HEAD_SPOTS), 1,402 initial
+accepts, 1,289 one-component closes, 113 zero-component closes, 936 singles,
+5 stacks, 470 middle-half samples, eight sheet music-font sizes, and all 55
+staff point sizes. Every input and closed component carries complete geometry,
+centroid, run count, and cropped-run digest; populations use hexadecimal
+doubles. Two complete fresh-JVM passes are byte-identical. The 4,767-line
+fixture has SHA-256
+`49408a3fc31857f107efb65ead37f63fd2e6dfe159f3fdd6215c89ed233199a9`.
+The Rust corpus comparison and production BEAMS wiring are next.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
