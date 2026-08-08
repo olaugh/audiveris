@@ -23,6 +23,7 @@ pub mod beam_inters;
 pub mod beam_parameters;
 pub mod beam_recognizer;
 pub mod beams_step;
+pub mod black_head_sizer;
 pub mod brace_filament;
 pub mod brace_portions;
 pub mod brace_sig;

@@ -245,12 +245,18 @@ Bravura `NOTEHEAD_BLACK` (`U+E0A4`) has exact arbitrary-point-size Java2D
 outline widths, `MusicFont.computePointSize`'s two-sample secant and `Math.rint`
 order are ported, and the sheet-to-staff point-size interpolation (including
 the no-scale fallback) is explicit. Pinned Temurin 25 rows cover arbitrary
-sizes, the complete interpolation, and its near-zero fallback. This is not yet
-a production side effect: the next bounded milestone is to freeze and port BlackHeadSizer's
-spot decisions, middle-half width/height populations, BlackHeadScale, sheet
-music-font point size, and per-staff point sizes. Then freeze the active head
-template catalogs and port the pure `Template.evaluate` kernel before scanner
-ordering or SIG allocation.
+sizes, the complete interpolation, and its near-zero fallback.
+
+The dependency-light `black_head_sizer` kernel is native as well. It preserves
+the two `checkSpot` passes, optional head-oriented close and component rebuild,
+single/stack/unclassified decisions, discovery order, stable width sort at the
+20-single quorum, `[n/4, 3n/4)` core, and Java-compatible unbiased populations
+through `BlackHeadScale`. Its typed output deliberately does not invent glyph
+registration/group side effects. This is not yet a production side effect: the
+next bounded milestone is to grade these decisions against the fresh Java
+corpus and wire the measured scale, music-font point size, and per-staff point
+sizes into BEAMS. Then freeze the active head template catalogs and port the
+pure `Template.evaluate` kernel before scanner ordering or SIG allocation.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
