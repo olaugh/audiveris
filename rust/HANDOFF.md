@@ -509,6 +509,28 @@ weight/run digest, good flag, and LEFT/RIGHT tally. Java's process-global glyph
 and SIG IDs are intentionally not fabricated; range lookup is the next
 algorithmic boundary.
 
+That boundary is now frozen before its Rust implementation. The new
+`oracle/java/run-heads-range-pass.sh` performs the real seed half, adds those
+heads to the live ordinate-sorted competitor pool, and then calls the real
+range half for every non-tablature staff. Its independent replay exposes the
+scan/safety/shape/evaluation decisions, aggregation groups, dynamic seed-head
+conflicts, and predicted glyph construction while restoring the builder's
+counters before the production call and checking the resulting heads against
+the live SIG insertion order. Across eight pages, 30 systems, and 55 staves it
+records 6,759 ordered spot slices, 921,558 scan positions, 5,389 safety skips,
+3,119,882 template attempts, 34,101 raw candidates, 3,550 post-aggregation
+candidates, 3,376 seed conflicts, zero empty-glyph drops, and 174 final range
+heads. The default 6,480,068-byte
+fixture hashes and omits the three high-volume diagnostic row classes per staff;
+`--full-trace` emits them. Two fresh-JVM compact generations are byte-identical
+at SHA-256
+`35a8d063d557979b9d5e948c279a6228c42ffd3fb5a7784d236779b490740770`,
+and the emitted body hash is
+`46e62aaafff97ca4c239c1dcd925308e0ebb706c67d4d7cab8f8669549f11a05`.
+The active implementation boundary is the streaming range scan plus stable
+grade aggregation and seed-conflict filtering; staff duplicate/overlap purge
+still follows it.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
