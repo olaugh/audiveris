@@ -453,6 +453,34 @@ fn native_heads_prolog_matches_java_on_every_beam_sheet() {
             .unwrap_or_else(|error| panic!("{}: HEADS prolog failed: {error}", oracle.key));
 
         assert_eq!(
+            heads
+                .staff_template_catalogs
+                .iter()
+                .map(|selection| (
+                    selection.system_id,
+                    selection.staff_id,
+                    selection.specific_interline,
+                    selection.point_size,
+                ))
+                .collect::<Vec<_>>(),
+            beams
+                .staff_head_point_sizes
+                .iter()
+                .map(|point_size| (
+                    point_size.system_id,
+                    point_size.staff_id,
+                    point_size.specific_interline,
+                    point_size.point_size,
+                ))
+                .collect::<Vec<_>>(),
+            "{}: per-staff template catalog selection",
+            oracle.key
+        );
+        assert!(heads.staff_template_catalogs.iter().all(|selection| {
+            heads.template_catalogs[selection.catalog_ordinal].point_size() == selection.point_size
+        }));
+
+        assert_eq!(
             (
                 grid.scale.width,
                 grid.scale.height,

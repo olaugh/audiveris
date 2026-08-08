@@ -6,7 +6,12 @@
 //! note-head scanning and interpretation.  Everything before that boundary is
 //! concrete page state rather than a dependency-injected test fixture.
 
-use std::{collections::BTreeMap, convert::Infallible, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    convert::Infallible,
+    error::Error,
+    fmt,
+};
 
 use audiveris_image::{
     lines_coordinator::StaffCandidateKind, staff_line_conversion::PersistentStaffLine,
@@ -14,6 +19,8 @@ use audiveris_image::{
 
 use crate::{
     grid_executor::HeadlessStaffLine,
+    head_template::HeadTemplateCatalog,
+    head_template_catalog::{HeadTemplateCatalogAssetError, load_bravura_head_template_catalogs},
     heads_step::{
         NativeHeadRasterGlyph, NativeHeadStaffRaster, NativeHeadSystemRaster, NativeHeadsError,
         NativeHeadsPrologRaster, NeutralDistanceTable, NeutralHeadSpot,
@@ -35,6 +42,21 @@ pub struct NativeHeadsPrologRecognition {
     pub spots: Vec<NeutralHeadSpot>,
     /// Zero-based entries in `spots`, dispatched in system/source order.
     pub system_spot_ordinals: Vec<(usize, Vec<usize>)>,
+    /// Complete checked-in Bravura catalog set, sorted by point size.
+    pub template_catalogs: Vec<HeadTemplateCatalog>,
+    /// Exact catalog selected for each non-tablature staff, in system/staff order.
+    pub staff_template_catalogs: Vec<NativeHeadTemplateCatalogSelection>,
+}
+
+/// One Java `TemplateFactory.getCatalog(family, staff.getHeadPointSize())` selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeHeadTemplateCatalogSelection {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub specific_interline: i32,
+    pub point_size: i32,
+    /// Zero-based entry in [`NativeHeadsPrologRecognition::template_catalogs`].
+    pub catalog_ordinal: usize,
 }
 
 #[derive(Debug)]
@@ -84,6 +106,43 @@ pub enum NativeHeadsPrologRecognitionError {
         spot_ordinal: usize,
         system_id: usize,
     },
+    HeadPointSizeCount {
+        expected: usize,
+        actual: usize,
+    },
+    HeadPointSizeIdentity {
+        ordinal: usize,
+        expected_system_id: usize,
+        expected_staff_id: usize,
+        expected_interline: i32,
+        actual_system_id: usize,
+        actual_staff_id: usize,
+        actual_interline: i32,
+    },
+    DuplicateHeadPointSizeOwner {
+        system_id: usize,
+        staff_id: usize,
+    },
+    UnknownHeadPointSizeOwner {
+        system_id: usize,
+        staff_id: usize,
+    },
+    MissingHeadPointSize {
+        system_id: usize,
+        staff_id: usize,
+    },
+    HeadPointSizeValue {
+        system_id: usize,
+        staff_id: usize,
+        expected: i32,
+        actual: i32,
+    },
+    MissingTemplateCatalog {
+        system_id: usize,
+        staff_id: usize,
+        point_size: i32,
+    },
+    TemplateCatalog(HeadTemplateCatalogAssetError),
     Prolog(NativeHeadsError<Infallible>),
 }
 
@@ -159,6 +218,67 @@ impl fmt::Display for NativeHeadsPrologRecognitionError {
                 formatter,
                 "HEADS spot {spot_ordinal} references unknown system {system_id}"
             ),
+            Self::HeadPointSizeCount { expected, actual } => write!(
+                formatter,
+                "HEADS received {actual} staff head point sizes, expected {expected}"
+            ),
+            Self::HeadPointSizeIdentity {
+                ordinal,
+                expected_system_id,
+                expected_staff_id,
+                expected_interline,
+                actual_system_id,
+                actual_staff_id,
+                actual_interline,
+            } => write!(
+                formatter,
+                "HEADS staff point size {ordinal} identifies system {actual_system_id} staff \
+                 {actual_staff_id} interline {actual_interline}, expected system \
+                 {expected_system_id} staff {expected_staff_id} interline {expected_interline}"
+            ),
+            Self::DuplicateHeadPointSizeOwner {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "HEADS received duplicate point sizes for system {system_id} staff {staff_id}"
+            ),
+            Self::UnknownHeadPointSizeOwner {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "HEADS received a point size for unknown system {system_id} staff {staff_id}"
+            ),
+            Self::MissingHeadPointSize {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "HEADS is missing the point size for system {system_id} staff {staff_id}"
+            ),
+            Self::HeadPointSizeValue {
+                system_id,
+                staff_id,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "HEADS system {system_id} staff {staff_id} point size is {actual}, expected \
+                 {expected} from the retained music-font scale"
+            ),
+            Self::MissingTemplateCatalog {
+                system_id,
+                staff_id,
+                point_size,
+            } => write!(
+                formatter,
+                "HEADS system {system_id} staff {staff_id} needs unpinned Bravura template point \
+                 size {point_size}"
+            ),
+            Self::TemplateCatalog(source) => {
+                write!(formatter, "HEADS template catalog failed: {source}")
+            }
             Self::Prolog(source) => write!(formatter, "HEADS prolog failed: {source}"),
         }
     }
@@ -167,6 +287,7 @@ impl fmt::Display for NativeHeadsPrologRecognitionError {
 impl Error for NativeHeadsPrologRecognitionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::TemplateCatalog(source) => Some(source),
             Self::Prolog(source) => Some(source),
             _ => None,
         }
@@ -351,6 +472,8 @@ pub fn recognize_native_heads_prolog(
     stem_seeds: &NativeStemSeedRecognition,
 ) -> Result<NativeHeadsPrologRecognition, NativeHeadsPrologRecognitionError> {
     let raster = compose_native_heads_prolog_raster(grid, beams, ledgers, stem_seeds)?;
+    let (template_catalogs, staff_template_catalogs) =
+        select_native_head_template_catalogs(grid, beams)?;
     if raster.head_spots.width() != raster.binary.width()
         || raster.head_spots.height() != raster.binary.height()
     {
@@ -397,7 +520,136 @@ pub fn recognize_native_heads_prolog(
         distance_table,
         spots,
         system_spot_ordinals,
+        template_catalogs,
+        staff_template_catalogs,
     })
+}
+
+fn select_native_head_template_catalogs(
+    grid: &GridLinesRecognition,
+    beams: &NativeBeamRecognition,
+) -> Result<
+    (
+        Vec<HeadTemplateCatalog>,
+        Vec<NativeHeadTemplateCatalogSelection>,
+    ),
+    NativeHeadsPrologRecognitionError,
+> {
+    let expected_staffs = grid
+        .peak_graph
+        .systems
+        .iter()
+        .enumerate()
+        .flat_map(|(system_index, staff_ids)| {
+            staff_ids
+                .iter()
+                .map(move |&staff_id| (system_index + 1, staff_id))
+        })
+        .collect::<Vec<_>>();
+    if beams.staff_head_point_sizes.len() != expected_staffs.len() {
+        return Err(NativeHeadsPrologRecognitionError::HeadPointSizeCount {
+            expected: expected_staffs.len(),
+            actual: beams.staff_head_point_sizes.len(),
+        });
+    }
+
+    let expected_owners = expected_staffs.iter().copied().collect::<BTreeSet<_>>();
+    let mut point_sizes_by_owner = BTreeMap::new();
+    for point_size in &beams.staff_head_point_sizes {
+        let owner = (point_size.system_id, point_size.staff_id);
+        if !expected_owners.contains(&owner) {
+            return Err(
+                NativeHeadsPrologRecognitionError::UnknownHeadPointSizeOwner {
+                    system_id: point_size.system_id,
+                    staff_id: point_size.staff_id,
+                },
+            );
+        }
+        if point_sizes_by_owner.insert(owner, point_size).is_some() {
+            return Err(
+                NativeHeadsPrologRecognitionError::DuplicateHeadPointSizeOwner {
+                    system_id: point_size.system_id,
+                    staff_id: point_size.staff_id,
+                },
+            );
+        }
+    }
+
+    let template_catalogs = load_bravura_head_template_catalogs()
+        .map_err(NativeHeadsPrologRecognitionError::TemplateCatalog)?;
+    let mut selections = Vec::with_capacity(expected_staffs.len());
+    for (ordinal, (system_id, staff_id)) in expected_staffs.into_iter().enumerate() {
+        let point_size = point_sizes_by_owner.remove(&(system_id, staff_id)).ok_or(
+            NativeHeadsPrologRecognitionError::MissingHeadPointSize {
+                system_id,
+                staff_id,
+            },
+        )?;
+        let staff = grid
+            .peak_graph
+            .sheet_staffs
+            .iter()
+            .find(|staff| staff.id == staff_id)
+            .ok_or(NativeHeadsPrologRecognitionError::MissingStaff {
+                system_id,
+                staff_id,
+            })?;
+        let specific_interline = i32::try_from(staff.interline).map_err(|_| {
+            NativeHeadsPrologRecognitionError::CoordinateOutOfRange {
+                kind: "staff interline",
+                system_id,
+                ordinal,
+            }
+        })?;
+        if point_size.system_id != system_id
+            || point_size.staff_id != staff_id
+            || point_size.specific_interline != specific_interline
+        {
+            return Err(NativeHeadsPrologRecognitionError::HeadPointSizeIdentity {
+                ordinal,
+                expected_system_id: system_id,
+                expected_staff_id: staff_id,
+                expected_interline: specific_interline,
+                actual_system_id: point_size.system_id,
+                actual_staff_id: point_size.staff_id,
+                actual_interline: point_size.specific_interline,
+            });
+        }
+        let expected_point_size = audiveris_music_font::head_point_size(
+            beams.music_font_scale.map(|scale| scale.point_size),
+            grid.scale.scale.interline.main,
+            f64::from(specific_interline),
+        );
+        if point_size.point_size != expected_point_size {
+            return Err(NativeHeadsPrologRecognitionError::HeadPointSizeValue {
+                system_id,
+                staff_id,
+                expected: expected_point_size,
+                actual: point_size.point_size,
+            });
+        }
+        if staff.kind == StaffCandidateKind::Tablature {
+            continue;
+        }
+
+        let catalog_ordinal = template_catalogs
+            .iter()
+            .position(|catalog| catalog.point_size() == point_size.point_size)
+            .ok_or(NativeHeadsPrologRecognitionError::MissingTemplateCatalog {
+                system_id,
+                staff_id,
+                point_size: point_size.point_size,
+            })?;
+        selections.push(NativeHeadTemplateCatalogSelection {
+            system_id,
+            staff_id,
+            specific_interline,
+            point_size: point_size.point_size,
+            catalog_ordinal,
+        });
+    }
+    debug_assert!(point_sizes_by_owner.is_empty());
+    Ok((template_catalogs, selections))
 }
 
 #[cfg(test)]
@@ -447,5 +699,46 @@ mod tests {
                 .iter()
                 .any(|(_, ordinals)| !ordinals.is_empty())
         );
+        assert_eq!(
+            heads
+                .template_catalogs
+                .iter()
+                .map(HeadTemplateCatalog::point_size)
+                .collect::<Vec<_>>(),
+            [78, 83, 84, 85, 87]
+        );
+        assert_eq!(heads.staff_template_catalogs.len(), 6);
+        assert!(heads.staff_template_catalogs.iter().all(|selection| {
+            selection.point_size == 84
+                && selection.catalog_ordinal == 2
+                && heads.template_catalogs[selection.catalog_ordinal].point_size()
+                    == selection.point_size
+        }));
+
+        let mut wrong_valid_catalog = beams.clone();
+        wrong_valid_catalog.staff_head_point_sizes[0].point_size = 85;
+        assert!(matches!(
+            select_native_head_template_catalogs(&grid, &wrong_valid_catalog),
+            Err(NativeHeadsPrologRecognitionError::HeadPointSizeValue {
+                system_id: 1,
+                staff_id: 1,
+                expected: 84,
+                actual: 85,
+            })
+        ));
+
+        let mut unsupported = beams.clone();
+        unsupported.music_font_scale.as_mut().unwrap().point_size = 79;
+        for point_size in &mut unsupported.staff_head_point_sizes {
+            point_size.point_size = 79;
+        }
+        assert!(matches!(
+            select_native_head_template_catalogs(&grid, &unsupported),
+            Err(NativeHeadsPrologRecognitionError::MissingTemplateCatalog {
+                system_id: 1,
+                staff_id: 1,
+                point_size: 79,
+            })
+        ));
     }
 }

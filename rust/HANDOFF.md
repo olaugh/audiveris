@@ -317,7 +317,15 @@ the oracle text or invoke a font rasterizer. Point sizes 78/83/84/85/87 provide
 integration gate intentionally expands the deduplication again and compares
 all eight page catalogs: 32 templates, 192 anchors (precise bits and Java
 rounding), and 27,207 key records are exact. The next slice is per-staff catalog
-selection and scanner geometry.
+selection and scanner geometry. Per-staff selection is now production-wired:
+HEADS owns the decoded catalogs once and retains a compact selection for every
+non-tablature staff in system/staff order. It maps point-size records by owner
+rather than assuming BEAMS vector order, validates owner/interline identity,
+recomputes each size from the retained sheet music-font scale, rejects an
+unpinned size instead of choosing a neighbor, and records the exact catalog
+ordinal. All 55 graded staff selections compose transitively from the exact
+BlackHeadSizer and catalog gates. Scanner-context construction is the next
+boundary.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
