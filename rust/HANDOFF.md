@@ -445,6 +445,18 @@ slice: range scanners later see seed-created `HeadInter`
 instances, and actual template rectangles use Java2D area intersection. Those
 decisions belong to the evaluation oracle, not this immutable constructor gate.
 
+The pure template side of that next gate is now native. `HeadTemplate` exposes
+Java's integer full and slim bounds at every anchor, including wrapping
+subtraction and `java.awt.Rectangle.translate` overflow recovery; its main
+evaluator now uses the same wrapping coordinates. Hole-only evaluation skips
+out-of-image and `VALUE_UNKNOWN` cells, returns zero when no usable hole pixel
+exists, and preserves the exact white/expected ratio. `Template.impactOf` and
+the one-impact `HeadInter` grade/minimum constants are explicit, including
+`GradeImpacts` clamping. Nine focused template tests pin anchors, overflow,
+invalid distance state, exact ratio/grade bits, and all existing weighted
+foreground/background/hole branches. Scanner orchestration and semantic
+competitor/bar overlap remain the active boundary.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

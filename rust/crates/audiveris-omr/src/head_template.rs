@@ -21,6 +21,32 @@ pub const FOREGROUND_WEIGHT: f64 = 6.0;
 pub const BACKGROUND_WEIGHT: f64 = 1.0;
 /// Java `Template.Constants.holeWeight`.
 pub const HOLE_WEIGHT: f64 = 4.0;
+/// Java `Template.Constants.maxDistanceHigh`.
+pub const MAX_DISTANCE_HIGH: f64 = 0.5;
+/// Java `Template.Constants.maxDistanceLow`.
+pub const MAX_DISTANCE_LOW: f64 = 0.4;
+/// Java `Template.Constants.reallyBadDistance`.
+pub const REALLY_BAD_DISTANCE: f64 = 1.0;
+/// Java `Grades.intrinsicRatio`, applied by `HeadInter.Impacts`.
+pub const HEAD_INTRINSIC_RATIO: f64 = 0.8;
+/// Java `AbstractInter.getMinGrade()` / `Grades.minInterGrade`.
+pub const MIN_INTER_GRADE: f64 = HEAD_INTRINSIC_RATIO * 0.1;
+
+/// Java `Template.impactOf`, preserving division before subtraction.
+#[must_use]
+pub fn impact_of(distance: f64) -> f64 {
+    1.0 - (distance / MAX_DISTANCE_HIGH)
+}
+
+/// Intrinsic grade produced by one-impact `HeadInter.Impacts`.
+#[must_use]
+pub fn head_grade_of(distance: f64) -> f64 {
+    let impact = impact_of(distance);
+    // Java `GradeImpacts.setImpact` calls `GradeUtil.clamp`; `f64::clamp`
+    // likewise leaves a NaN input unchanged with these finite bounds.
+    let impact = impact.clamp(0.0, 1.0);
+    HEAD_INTRINSIC_RATIO * impact
+}
 
 /// The normal-staff head shapes used by the measured HEADS scan.
 ///
@@ -317,6 +343,39 @@ impl HeadTemplate {
         rounded_offset(offset).map_err(HeadTemplateEvaluationError::InvalidTemplateData)
     }
 
+    /// Java integer `Template.getBoundsAt` for an anchor placement.
+    ///
+    /// Java evaluates `x - offset.x` and `y - offset.y` as wrapping `int`
+    /// arithmetic before constructing the rectangle.
+    pub fn bounds_at(
+        &self,
+        x: i32,
+        y: i32,
+        anchor: HeadTemplateAnchor,
+    ) -> Result<HeadTemplateBounds, HeadTemplateEvaluationError> {
+        let (x, y) = self.upper_left(x, y, Some(anchor))?;
+        Ok(HeadTemplateBounds {
+            x,
+            y,
+            width: self.width,
+            height: self.height,
+        })
+    }
+
+    /// Java `Template.getSlimBoundsAt`, including `Rectangle.translate`'s
+    /// overflow clipping and dimension adjustment.
+    pub fn slim_bounds_at(
+        &self,
+        x: i32,
+        y: i32,
+        anchor: HeadTemplateAnchor,
+    ) -> Result<HeadTemplateBounds, HeadTemplateEvaluationError> {
+        let template = self.bounds_at(x, y, anchor)?;
+        let mut slim = self.slim_bounds;
+        java_rectangle_translate(&mut slim, template.x, template.y);
+        Ok(slim)
+    }
+
     /// Pure port of Java `Template.evaluate` over the native signed Chamfer table.
     ///
     /// As in Java, key points outside the image and `VALUE_UNKNOWN` cells are
@@ -331,17 +390,7 @@ impl HeadTemplate {
     ) -> Result<f64, HeadTemplateEvaluationError> {
         validate_distance_table(distances)?;
 
-        let (ul_x, ul_y) = if let Some(anchor) = anchor {
-            let (dx, dy) = self.rounded_anchor_offset(anchor)?;
-            (
-                x.checked_sub(dx)
-                    .ok_or(HeadTemplateEvaluationError::CoordinateOverflow)?,
-                y.checked_sub(dy)
-                    .ok_or(HeadTemplateEvaluationError::CoordinateOverflow)?,
-            )
-        } else {
-            (x, y)
-        };
+        let (ul_x, ul_y) = self.upper_left(x, y, anchor)?;
 
         let image_width = i32::try_from(distances.width)
             .map_err(|_| HeadTemplateEvaluationError::DistanceDimensionsTooLarge)?;
@@ -351,12 +400,8 @@ impl HeadTemplate {
         let mut total = 0.0;
 
         for point in &self.key_points {
-            let nx = ul_x
-                .checked_add(point.x)
-                .ok_or(HeadTemplateEvaluationError::CoordinateOverflow)?;
-            let ny = ul_y
-                .checked_add(point.y)
-                .ok_or(HeadTemplateEvaluationError::CoordinateOverflow)?;
+            let nx = ul_x.wrapping_add(point.x);
+            let ny = ul_y.wrapping_add(point.y);
 
             // Java deliberately ignores template points outside the image.
             if nx < 0 || nx >= image_width || ny < 0 || ny >= image_height {
@@ -398,6 +443,75 @@ impl HeadTemplate {
         } else {
             Ok(total / weights)
         }
+    }
+
+    /// Java `Template.evaluateHole`: ratio of actual white cells over
+    /// available, expected hole cells.
+    ///
+    /// Out-of-image and `VALUE_UNKNOWN` cells do not contribute to either
+    /// count. A placement with no available expected-hole cell returns zero.
+    pub fn evaluate_hole(
+        &self,
+        x: i32,
+        y: i32,
+        anchor: Option<HeadTemplateAnchor>,
+        distances: &NeutralDistanceTable,
+    ) -> Result<f64, HeadTemplateEvaluationError> {
+        validate_distance_table(distances)?;
+        let (ul_x, ul_y) = self.upper_left(x, y, anchor)?;
+        let image_width = i32::try_from(distances.width)
+            .map_err(|_| HeadTemplateEvaluationError::DistanceDimensionsTooLarge)?;
+        let image_height = i32::try_from(distances.height)
+            .map_err(|_| HeadTemplateEvaluationError::DistanceDimensionsTooLarge)?;
+        let mut expected_holes = 0_i32;
+        let mut actual_holes = 0_i32;
+
+        for point in &self.key_points {
+            let nx = ul_x.wrapping_add(point.x);
+            let ny = ul_y.wrapping_add(point.y);
+            if nx < 0 || nx >= image_width || ny < 0 || ny >= image_height {
+                continue;
+            }
+
+            let index = (usize::try_from(ny).expect("non-negative ordinate") * distances.width)
+                + usize::try_from(nx).expect("non-negative abscissa");
+            let actual_distance = distances.values[index];
+            if actual_distance == VALUE_UNKNOWN {
+                continue;
+            }
+            if actual_distance < VALUE_UNKNOWN {
+                return Err(HeadTemplateEvaluationError::InvalidDistanceValue {
+                    x: nx,
+                    y: ny,
+                    value: actual_distance,
+                });
+            }
+            if point.distance < 0.0 {
+                expected_holes = expected_holes.wrapping_add(1);
+                if actual_distance != 0 {
+                    actual_holes = actual_holes.wrapping_add(1);
+                }
+            }
+        }
+
+        if expected_holes == 0 {
+            Ok(0.0)
+        } else {
+            Ok(f64::from(actual_holes) / f64::from(expected_holes))
+        }
+    }
+
+    fn upper_left(
+        &self,
+        x: i32,
+        y: i32,
+        anchor: Option<HeadTemplateAnchor>,
+    ) -> Result<(i32, i32), HeadTemplateEvaluationError> {
+        let Some(anchor) = anchor else {
+            return Ok((x, y));
+        };
+        let (dx, dy) = self.rounded_anchor_offset(anchor)?;
+        Ok((x.wrapping_sub(dx), y.wrapping_sub(dy)))
     }
 }
 
@@ -523,6 +637,34 @@ fn java_math_round(value: f64) -> i32 {
     (value + 0.5).floor() as i32
 }
 
+/// OpenJDK `java.awt.Rectangle.translate`, including overflow recovery.
+fn java_rectangle_translate(bounds: &mut HeadTemplateBounds, dx: i32, dy: i32) {
+    java_rectangle_translate_axis(&mut bounds.x, &mut bounds.width, dx);
+    java_rectangle_translate_axis(&mut bounds.y, &mut bounds.height, dy);
+}
+
+fn java_rectangle_translate_axis(location: &mut i32, dimension: &mut i32, delta: i32) {
+    let old = *location;
+    let mut new = old.wrapping_add(delta);
+    if delta < 0 {
+        if new > old {
+            if *dimension >= 0 {
+                *dimension = dimension.wrapping_add(new.wrapping_sub(i32::MIN));
+            }
+            new = i32::MIN;
+        }
+    } else if new < old {
+        if *dimension >= 0 {
+            *dimension = dimension.wrapping_add(new.wrapping_sub(i32::MAX));
+            if *dimension < 0 {
+                *dimension = i32::MAX;
+            }
+        }
+        new = i32::MAX;
+    }
+    *location = new;
+}
+
 fn validate_distance_table(
     table: &NeutralDistanceTable,
 ) -> Result<(), HeadTemplateEvaluationError> {
@@ -639,7 +781,6 @@ pub enum HeadTemplateEvaluationError {
         value: i32,
     },
     DistanceDimensionsTooLarge,
-    CoordinateOverflow,
 }
 
 impl fmt::Display for HeadTemplateEvaluationError {
@@ -898,6 +1039,186 @@ mod tests {
             template.evaluate(20, 20, Some(HeadTemplateAnchor::Center), &table),
             Ok(0.0)
         );
+    }
+
+    #[test]
+    fn integer_full_and_slim_bounds_match_every_java_anchor_placement() {
+        let template = chula_84_black(vec![HeadTemplatePixelDistance {
+            x: 0,
+            y: 0,
+            distance: 0.0,
+        }]);
+        let expected_origins = [
+            (85, 186),
+            (98, 186),
+            (72, 186),
+            (95, 186),
+            (95, 186),
+            (95, 180),
+            (75, 186),
+            (75, 192),
+            (75, 186),
+        ];
+
+        for (&anchor, (x, y)) in HeadTemplateAnchor::ALL.iter().zip(expected_origins) {
+            assert_eq!(
+                template.bounds_at(100, 200, anchor),
+                Ok(HeadTemplateBounds {
+                    x,
+                    y,
+                    width: 31,
+                    height: 27,
+                })
+            );
+            assert_eq!(
+                template.slim_bounds_at(100, 200, anchor),
+                Ok(HeadTemplateBounds {
+                    x: x + 3,
+                    y: y + 4,
+                    width: 25,
+                    height: 20,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn integer_bounds_preserve_java_subtraction_and_rectangle_translate_overflow() {
+        let template = chula_84_black(vec![HeadTemplatePixelDistance {
+            x: 1,
+            y: 1,
+            distance: 0.0,
+        }]);
+        let x = i32::MIN.wrapping_add(14);
+        let y = i32::MIN.wrapping_add(13);
+        assert_eq!(
+            template.bounds_at(x, y, HeadTemplateAnchor::Center),
+            Ok(HeadTemplateBounds {
+                x: i32::MAX,
+                y: i32::MAX,
+                width: 31,
+                height: 27,
+            })
+        );
+        assert_eq!(
+            template.slim_bounds_at(x, y, HeadTemplateAnchor::Center),
+            Ok(HeadTemplateBounds {
+                x: i32::MAX,
+                y: i32::MAX,
+                width: 28,
+                height: 24,
+            })
+        );
+
+        let mut negative = HeadTemplateBounds {
+            x: i32::MIN,
+            y: i32::MIN,
+            width: 25,
+            height: 20,
+        };
+        java_rectangle_translate(&mut negative, -1, -2);
+        assert_eq!(
+            negative,
+            HeadTemplateBounds {
+                x: i32::MIN,
+                y: i32::MIN,
+                width: 24,
+                height: 18,
+            }
+        );
+    }
+
+    #[test]
+    fn hole_evaluator_matches_java_counts_unknown_bounds_wrapping_and_zero_fallback() {
+        let template = chula_84_black(vec![
+            HeadTemplatePixelDistance {
+                x: 0,
+                y: 0,
+                distance: -1.0,
+            },
+            HeadTemplatePixelDistance {
+                x: 1,
+                y: 0,
+                distance: -2.0,
+            },
+            HeadTemplatePixelDistance {
+                x: 2,
+                y: 0,
+                distance: -3.0,
+            },
+            HeadTemplatePixelDistance {
+                x: 3,
+                y: 0,
+                distance: 0.0,
+            },
+        ]);
+        let mut table = NeutralDistanceTable {
+            id: 5,
+            width: 4,
+            height: 1,
+            normalizer: 99,
+            values: vec![3, 0, 2, VALUE_UNKNOWN],
+        };
+
+        assert_eq!(
+            template
+                .evaluate_hole(0, 0, None, &table)
+                .unwrap()
+                .to_bits(),
+            0x3fe5_5555_5555_5555
+        );
+        assert_eq!(
+            template
+                .evaluate_hole(15, 14, Some(HeadTemplateAnchor::Center), &table)
+                .unwrap()
+                .to_bits(),
+            0x3fe5_5555_5555_5555
+        );
+
+        table.values[0] = VALUE_UNKNOWN;
+        assert_eq!(template.evaluate_hole(0, 0, None, &table), Ok(0.5));
+        table.values[1] = VALUE_UNKNOWN;
+        table.values[2] = VALUE_UNKNOWN;
+        assert_eq!(template.evaluate_hole(0, 0, None, &table), Ok(0.0));
+        assert_eq!(template.evaluate_hole(10, 0, None, &table), Ok(0.0));
+        assert_eq!(template.evaluate_hole(i32::MAX, 0, None, &table), Ok(0.0));
+
+        let no_hole = chula_84_black(vec![HeadTemplatePixelDistance {
+            x: 0,
+            y: 0,
+            distance: 0.0,
+        }]);
+        assert_eq!(no_hole.evaluate_hole(0, 0, None, &table), Ok(0.0));
+
+        table.values[0] = -2;
+        assert_eq!(
+            template.evaluate_hole(0, 0, None, &table),
+            Err(HeadTemplateEvaluationError::InvalidDistanceValue {
+                x: 0,
+                y: 0,
+                value: -2,
+            })
+        );
+    }
+
+    #[test]
+    fn distance_impact_grade_and_threshold_constants_preserve_java_bits() {
+        assert_eq!(MAX_DISTANCE_HIGH.to_bits(), 0x3fe0_0000_0000_0000);
+        assert_eq!(MAX_DISTANCE_LOW.to_bits(), 0x3fd9_9999_9999_999a);
+        assert_eq!(REALLY_BAD_DISTANCE.to_bits(), 0x3ff0_0000_0000_0000);
+        assert_eq!(HEAD_INTRINSIC_RATIO.to_bits(), 0x3fe9_9999_9999_999a);
+        assert_eq!(MIN_INTER_GRADE.to_bits(), 0x3fb4_7ae1_47ae_147c);
+        assert_eq!(impact_of(0.4).to_bits(), 0x3fc9_9999_9999_9998);
+        assert_eq!(impact_of(0.5).to_bits(), 0);
+        assert_eq!(impact_of(1.0), -1.0);
+        assert_eq!(head_grade_of(0.4).to_bits(), 0x3fc4_7ae1_47ae_147a);
+        assert_eq!(head_grade_of(1.0), 0.0);
+        assert_eq!(head_grade_of(-1.0), HEAD_INTRINSIC_RATIO);
+        assert!(impact_of(f64::NAN).is_nan());
+        assert!(head_grade_of(f64::NAN).is_nan());
+        assert_eq!(impact_of(f64::INFINITY), f64::NEG_INFINITY);
+        assert_eq!(head_grade_of(f64::INFINITY), 0.0);
+        assert_eq!(head_grade_of(f64::NEG_INFINITY), HEAD_INTRINSIC_RATIO);
     }
 
     #[test]
