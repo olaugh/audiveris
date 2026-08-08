@@ -105,6 +105,26 @@ gradle.projectsEvaluated {
                 }
     }
 
+    app.tasks.register('beamStemSeedsProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.BeamStemSeedsProbe'
+        workingDir = app.projectDir
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        // -PbeamStemSeedTargets="data/examples/chula.png:1"
+        args = ['--' + (app.findProperty('beamStemSeedMode') ?: 'seeded').toString()] +
+                (app.findProperty('beamStemSeedTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def bits = target.split(':')
+                    def file = new File(bits[0])
+                    def resolved = file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, bits[0])
+                    ([resolved.absolutePath] + bits[1..-1]).join(':')
+                }
+    }
+
     app.tasks.register('sigProbe', JavaExec) {
         dependsOn 'compileStaffImpactsProbe'
         classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath

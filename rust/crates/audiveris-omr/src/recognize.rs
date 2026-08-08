@@ -368,13 +368,46 @@ pub struct NativeBeamRecognition {
     pub group_count: usize,
 }
 
+/// Accepted `VERTICAL_SEED` glyphs adapted for one Java `SystemInfo`.
+///
+/// `ExtensionGlyph.id` is the exact raw-candidate ordinal. The extension
+/// kernel is invoked separately per system, so this is both stable and unique
+/// in the only identity domain that consumes it; it deliberately does not
+/// invent a sheet-global Java `GlyphIndex` id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeBeamStemSeedSystem {
+    pub system_id: usize,
+    /// Free-glyph/accepted-candidate order, before Java's per-lookup stable
+    /// abscissa sort.
+    pub seeds: Vec<audiveris_image::beam_extension::ExtensionGlyph>,
+}
+
 #[derive(Debug)]
 pub enum NativeBeamRecognitionError {
     RunTable(RunTableError),
     BeamContract(crate::beams_step::BeamsContractError),
-    UnsupportedSmallBeam { main: i32, small: i32 },
+    UnsupportedSmallBeam {
+        main: i32,
+        small: i32,
+    },
     InvalidStemScale(i32),
     MissingSystemArea(usize),
+    StemSeedSystemOrder {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    InvalidStemSeed {
+        system_id: usize,
+        ordinal: usize,
+    },
+    DuplicateStemSeedOrdinal {
+        system_id: usize,
+        ordinal: usize,
+    },
+    StemSeedBoundsOutOfRange {
+        system_id: usize,
+        ordinal: usize,
+    },
 }
 
 impl std::fmt::Display for NativeBeamRecognitionError {
@@ -390,6 +423,22 @@ impl std::fmt::Display for NativeBeamRecognitionError {
             Self::MissingSystemArea(system_id) => {
                 write!(formatter, "system {system_id} has bounds but no area")
             }
+            Self::StemSeedSystemOrder { expected, actual } => write!(
+                formatter,
+                "BEAMS system order {expected:?} differs from STEM_SEEDS {actual:?}"
+            ),
+            Self::InvalidStemSeed { system_id, ordinal } => write!(
+                formatter,
+                "system {system_id} STEM_SEEDS ordinal {ordinal} is not an accepted free vertical seed"
+            ),
+            Self::DuplicateStemSeedOrdinal { system_id, ordinal } => write!(
+                formatter,
+                "system {system_id} has duplicate free STEM_SEEDS ordinal {ordinal}"
+            ),
+            Self::StemSeedBoundsOutOfRange { system_id, ordinal } => write!(
+                formatter,
+                "system {system_id} STEM_SEEDS ordinal {ordinal} has bounds outside Java int range"
+            ),
         }
     }
 }
@@ -401,7 +450,11 @@ impl std::error::Error for NativeBeamRecognitionError {
             Self::BeamContract(error) => Some(error),
             Self::UnsupportedSmallBeam { .. }
             | Self::InvalidStemScale(_)
-            | Self::MissingSystemArea(_) => None,
+            | Self::MissingSystemArea(_)
+            | Self::StemSeedSystemOrder { .. }
+            | Self::InvalidStemSeed { .. }
+            | Self::DuplicateStemSeedOrdinal { .. }
+            | Self::StemSeedBoundsOutOfRange { .. } => None,
         }
     }
 }
@@ -418,16 +471,131 @@ impl From<crate::beams_step::BeamsContractError> for NativeBeamRecognitionError 
     }
 }
 
+/// Adapt the accepted/free native STEM_SEEDS boundary to the exact glyph
+/// geometry `BeamsBuilder.extendToStem` reads.
+///
+/// System order and candidate identity are validated rather than inferred.
+/// Within each system Java preserves accepted free-glyph order here; the beam
+/// extension lookup performs its own stable `Glyphs.byAbscissa` ordering.
+pub fn native_stem_seeds_for_beams(
+    recognition: &GridLinesRecognition,
+    stem_seeds: &crate::native_stem_seeds::NativeStemSeedRecognition,
+) -> Result<Vec<NativeBeamStemSeedSystem>, NativeBeamRecognitionError> {
+    use audiveris_image::beam_structure::Segment;
+    use std::collections::BTreeSet;
+
+    let expected = recognition
+        .system_bounds
+        .iter()
+        .map(|system| system.system_id)
+        .collect::<Vec<_>>();
+    let actual = stem_seeds
+        .systems
+        .iter()
+        .map(|system| system.raw.system_id)
+        .collect::<Vec<_>>();
+    if actual != expected {
+        return Err(NativeBeamRecognitionError::StemSeedSystemOrder { expected, actual });
+    }
+
+    stem_seeds
+        .systems
+        .iter()
+        .map(|system| {
+            let system_id = system.raw.system_id;
+            let mut ordinals = BTreeSet::new();
+            let mut seeds = Vec::with_capacity(system.free_glyphs.len());
+            for (free_index, glyph) in system.free_glyphs.iter().enumerate() {
+                let ordinal = glyph.source_ordinal;
+                if !ordinals.insert(ordinal) {
+                    return Err(NativeBeamRecognitionError::DuplicateStemSeedOrdinal {
+                        system_id,
+                        ordinal,
+                    });
+                }
+                let exact_accepted_identity = matches!(
+                    system.decisions.get(ordinal),
+                    Some(crate::native_stem_seeds::NativeStemSeedDecision::Checked {
+                        gate,
+                        accepted: true,
+                        free_glyph_index: Some(index),
+                        ..
+                    }) if gate.ordinal == ordinal && *index == free_index
+                );
+                if !glyph.vertical_seed_group
+                    || !glyph.free
+                    || system.raw.candidates.get(ordinal).is_none()
+                    || !exact_accepted_identity
+                {
+                    return Err(NativeBeamRecognitionError::InvalidStemSeed { system_id, ordinal });
+                }
+                let left = i32::try_from(glyph.bounds.x).map_err(|_| {
+                    NativeBeamRecognitionError::StemSeedBoundsOutOfRange { system_id, ordinal }
+                })?;
+                let top = i32::try_from(glyph.bounds.y).map_err(|_| {
+                    NativeBeamRecognitionError::StemSeedBoundsOutOfRange { system_id, ordinal }
+                })?;
+                let width = i32::try_from(glyph.bounds.width).map_err(|_| {
+                    NativeBeamRecognitionError::StemSeedBoundsOutOfRange { system_id, ordinal }
+                })?;
+                let height = i32::try_from(glyph.bounds.height).map_err(|_| {
+                    NativeBeamRecognitionError::StemSeedBoundsOutOfRange { system_id, ordinal }
+                })?;
+                if left.checked_add(width).is_none() || top.checked_add(height).is_none() {
+                    return Err(NativeBeamRecognitionError::StemSeedBoundsOutOfRange {
+                        system_id,
+                        ordinal,
+                    });
+                }
+                seeds.push(audiveris_image::beam_extension::ExtensionGlyph {
+                    id: ordinal,
+                    left,
+                    top,
+                    width: glyph.bounds.width,
+                    height: glyph.bounds.height,
+                    vertical_median: Some(Segment {
+                        x1: glyph.start.0,
+                        y1: glyph.start.1,
+                        x2: glyph.stop.0,
+                        y2: glyph.stop.1,
+                    }),
+                });
+            }
+            Ok(NativeBeamStemSeedSystem { system_id, seeds })
+        })
+        .collect()
+}
+
 /// Runs the native spot chain and beam recognizer from an already graded GRID
 /// result and HEADERS' erase rectangles.
 ///
-/// The remaining absent input is STEM_SEEDS geometry. It is deliberately an
-/// empty slice here: across the eight example sheets Java never extends a beam
-/// to a stem or spot, while the one observed beam-to-beam merge remains active.
-/// A measured small-beam scale is refused until that class has a corpus grade.
+/// Compatibility entry point retained for callers that have not yet composed
+/// STEM_SEEDS. Beam-to-stem lookup is disabled, while merge, spot and parallel
+/// modes remain active.
 pub fn recognize_native_beams(
     recognition: &GridLinesRecognition,
     header_erases: Vec<audiveris_image::spots::HeaderErase>,
+) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
+    recognize_native_beams_impl(recognition, header_erases, &[])
+}
+
+/// Run native BEAMS from GRID + HEADERS + accepted native STEM_SEEDS.
+///
+/// Java stage order is preserved: spot recognition and `createBeams`, then
+/// extension using the per-system vertical seeds, then hooks and grouping.
+pub fn recognize_native_beams_with_stem_seeds(
+    recognition: &GridLinesRecognition,
+    header_erases: Vec<audiveris_image::spots::HeaderErase>,
+    stem_seeds: &crate::native_stem_seeds::NativeStemSeedRecognition,
+) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
+    let systems = native_stem_seeds_for_beams(recognition, stem_seeds)?;
+    recognize_native_beams_impl(recognition, header_erases, &systems)
+}
+
+fn recognize_native_beams_impl(
+    recognition: &GridLinesRecognition,
+    header_erases: Vec<audiveris_image::spots::HeaderErase>,
+    stem_seed_systems: &[NativeBeamStemSeedSystem],
 ) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
     use audiveris_image::beam_structure::BeamRaster;
     use audiveris_image::spots::{
@@ -576,12 +744,16 @@ pub fn recognize_native_beams(
             .iter()
             .find(|area| area.system_id == *system_id)
             .ok_or(NativeBeamRecognitionError::MissingSystemArea(*system_id))?;
+        let seeds = stem_seed_systems
+            .iter()
+            .find(|system| system.system_id == *system_id)
+            .map_or(&[][..], |system| system.seeds.as_slice());
         raw_beams.extend(
             extend_beams(
                 &beams,
                 ExtensionSources {
                     spots: &spots,
-                    seeds: &[],
+                    seeds,
                 },
                 raster,
                 &scaling,

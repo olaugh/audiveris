@@ -130,12 +130,30 @@ The aggregate grade initially differed by one ULP even though every input and
 impact matched. Java's weighted geometric mean follows OpenJDK fdlibm while
 Rust's platform `pow` does not. `audiveris-core::java_math::java_positive_pow`
 is a narrowed direct port for non-negative bases and finite exponents; it makes
-all 2,003 grades bit-exact and carries a frozen residual regression. The next
-semantic seam is passing these accepted free glyphs into BEAMS' stem extension.
+all 2,003 grades bit-exact and carries a frozen residual regression.
 `audiveris-cli -batch -step STEM_SEEDS -json` exposes the accepted free glyphs
 in production `{system, ordinal}` order. It publishes geometry, grade, all
 checker values/weights/impacts/counts, materialization indices, run count, and
 a 16-digit run-table digest without inventing Java's process-global glyph IDs.
+`native_stem_seeds_for_beams` now validates exact system order, accepted
+decision/free-glyph identity, unique raw ordinals, group/free flags, and bounds
+before mapping the glyph bounds and exact start/stop median to BEAMS'
+`ExtensionGlyph`. `recognize_native_beams_with_stem_seeds` preserves Java's
+create -> extend with per-system seeds -> hooks -> groups order. All 1,906
+accepted glyphs cross that boundary on the eight-sheet gate. The compatibility
+entry point and current BEAMS/LEDGERS CLI remain explicitly seed-free until the
+next product-surface commit.
+`BeamStemSeedsProbe` independently prices this dependency inside Java. Each
+page and mode runs in a fresh JVM, reaches the real STEM_SEEDS step, then runs
+BEAMS either untouched or after hiding only `VERTICAL_SEED` free-glyph
+visibility. The two states are byte-identical for all 30 systems: 1,906 input
+seeds, 803 final beam/hook inters, 493 groups, one multiple rest, zero changed
+records. Two complete passes have state-row SHA-256
+`acca06864acfb212ea690b05987ab662668a2b2bf5fb6d4c86a26f32681fc6bf`;
+`oracle/beam-stem-seeds.txt` has SHA-256
+`283490cf3dc06afd7b65d3c8ca7c956b6e2b0372d43a0615edf89df469c8d785`.
+The probe must snapshot every system before hiding anything because adjacent
+systems can share the same registered Java `Glyph` object.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
@@ -599,13 +617,18 @@ the 31 hooks come from -- and its overlap test runs against a list that grows as
 the pass adds to it. Grouping is **per system**: run globally over the page it
 merges beams across a boundary Java never compares, and 60 groups become 48.
 
-One measured limitation. `extendBeams` is wired with no stem seeds, which
-disables `extendToStem`, because STEM_SEEDS' vertical geometry is not ported.
-Comparing beam medians before and after the stage across the eight example
-sheets and 30 systems, `extendBeams` fires **once** -- a merge on
-BachInvention5's sixth system, which is `extendToBeam` and is wired --
-and `extendToStem` and `extendToSpot` never fire at all. It closes when
-STEM_SEEDS lands.
+`extendBeams` now has two honest entry points. The compatibility wrapper passes
+no seeds and disables only `extendToStem`; the composed production entry point
+passes every accepted per-system STEM_SEEDS glyph in source order. Comparing
+them across the eight example sheets and 30 systems, all 1,906 seeds are live
+but the output is identical: `extendBeams` fires **once**, a merge on
+BachInvention5's sixth system (`extendToBeam`), while `extendToStem` and
+`extendToSpot` never succeed. The existing synthetic kernel gate covers the
+accepted stem mode. `oracle/beam-stem-seeds.txt` separately proves the same
+zero-effect fact in production Java over 803 final beam/hook inters, 493 groups,
+and one multiple rest; none of their geometry, grades, impacts, membership, or
+rest state changes when seed visibility is removed. A natural successful page
+and switching BEAMS/LEDGERS CLI composition remain open.
 
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.

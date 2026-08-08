@@ -25,7 +25,10 @@ groups, and curved paths; `omrscope` accepts both median forms and bounds-only
 header symbols and adapts accepted top-level stem seeds into its comparison
 model. Native STEM_SEEDS composes GRID and HEADERS through the exact
 2,425-candidate factory, 2,003 checks, and 1,906 accepted glyphs, and publishes
-those accepted glyphs without inventing SIG or glyph IDs.
+those accepted glyphs without inventing SIG or glyph IDs. A composed BEAMS
+entry point now supplies all 1,906 seeds to beam-to-stem lookup; the measured
+corpus output remains unchanged because no example beam accepts that extension.
+A seeded-vs-hidden Java counterfactual confirms zero changes across all 30 systems.
 
 Last updated 2026-08-07.
 
@@ -60,8 +63,8 @@ is present but the musical interpretation is not.
 | 3 | `SCALE` | **Native and published** | Line, interline, beam, histogram, derivative, and decision logic are measured from the page. | Small-beam recognition needs a graded corpus case before downstream use. |
 | 4 | `GRID` | **Native and published** | Staff lines, systems, bars, connectors, parts, contextual grades, completed line geometry, and `NO_STAFF` pixels. All 65 staves and 420 barlines in the example corpus match Java. | No known example-corpus gap; continue widening the PDF corpus. |
 | 5 | `HEADERS` | **Native and published** | `recognize_native_headers` composes clef, key, and time columns in Java order from live GRID state alone. All nine pages and 65 staves match for starts/stops and selected evidence, including 34 keys, 17 times, and all 30 downstream erase rectangles. Schema 1 publishes selected inters, lifecycle/classifier evidence, staff ranges, and system-owned erases. | Widen the corpus. |
-| 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. | Connect accepted seeds to BEAMS' stem extension; widen beyond profile 1 and add tablature/no-staff skip cases. |
-| 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS composition feeds the spot chain, system dispatch, beam creation, measured beam-to-beam extension, hooks, grouping, and schema-1 output. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Connect stem-seed extension and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
+| 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. The BEAMS adapter validates and preserves every accepted per-system identity and median. | Switch the BEAMS/LEDGERS CLI path to the composed entry point; widen beyond profile 1 and add tablature/no-staff skip cases. |
+| 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS composition feeds the spot chain, system dispatch, beam creation, measured beam-to-beam extension, hooks, grouping, and schema-1 output. A production entry point additionally composes all 1,906 accepted STEM_SEEDS into Java's extension order. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on these pages. The gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. | Route the CLI through the composed entry point, grade a natural successful stem-extension case, and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
@@ -94,8 +97,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Connect the 1,906 accepted STEM_SEEDS glyphs to beam-to-stem extension and
-   grade that composed path.
+1. Route BEAMS and LEDGERS CLI recognition through the new composed STEM_SEEDS
+   entry point, then grade a page where beam-to-stem extension succeeds.
 2. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
 3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline
    order through the semantic stages.

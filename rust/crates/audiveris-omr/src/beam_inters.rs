@@ -377,7 +377,7 @@ pub fn group_beams(
 #[derive(Clone, Copy, Debug)]
 pub struct ExtensionSources<'a> {
     pub spots: &'a [audiveris_image::beam_extension::ExtensionGlyph],
-    /// Empty disables `extendToStem`, which is the port's current state.
+    /// Empty explicitly disables Java `extendToStem` for compatibility callers.
     pub seeds: &'a [audiveris_image::beam_extension::ExtensionGlyph],
 }
 
@@ -398,11 +398,9 @@ pub struct BeamScaling<'a> {
 /// beams into one on BachInvention5's sixth system. `extendToStem` and
 /// `extendToSpot` never fire at all.
 ///
-/// That matters because `extendToStem` needs `GlyphGroup.VERTICAL_SEED`, which
-/// STEM_SEEDS produces and the port does not have yet. Passing no seeds
-/// disables exactly that mode and leaves the merge -- the one that was measured
-/// to matter -- working. The limitation is therefore measured rather than
-/// silent, and it closes when STEM_SEEDS' vertical geometry lands.
+/// Passing no seeds disables exactly `extendToStem`, which the compatibility
+/// BEAMS entry point retains. The composed production entry point adapts
+/// STEM_SEEDS' accepted free glyphs into this source in per-system order.
 ///
 /// Returns the surviving beams, with merged pairs replaced by their merger.
 #[must_use]

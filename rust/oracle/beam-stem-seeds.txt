@@ -1,0 +1,50 @@
+# Java Audiveris 5.11 (Temurin JDK 25) production BEAMS/STEM_SEEDS effect.
+#
+# Every page and mode was run in a fresh JVM. For each page, run the real STEM_SEEDS
+# and BEAMS steps once with the production seed collection and once after removing only
+# VERTICAL_SEED free-glyph visibility. BEAMS reads this group only in extendToStem.
+# Capture every system's seed, final beam/hook, group, and multiple-rest canonical hash.
+# The seeded and empty state rows below were byte-identical in two complete passes.
+#
+# Regenerate each target separately; do not put multiple pages in one JVM:
+#   env -u JAVA_TOOL_OPTIONS JAVA_HOME=/path/to/jdk25/Contents/Home \
+#     ./gradlew --no-daemon -q \
+#     -I rust/oracle/java/staff-impacts.init.gradle :app:beamStemSeedsProbe \
+#     -PbeamStemSeedMode=seeded -PbeamStemSeedTargets=data/examples/chula.png:1
+# Repeat with beamStemSeedMode=empty and for each of the other seven targets. Extract
+# beamstemseedstate rows in the order below. Seeded vs empty and pass 1 vs pass 2 must
+# all have SHA-256 acca06864acfb212ea690b05987ab662668a2b2bf5fb6d4c86a26f32681fc6bf.
+#
+# Canonical hashes cover exact beam class/shape/median/height/grade/all impacts,
+# exact group membership, multiple rests, and materialized seed geometry/run tables.
+beamstemseedstate chula.png#1 system 1 seeds 57 af75127a4aad7e26 beams 48 1bc5f77f6d17c51e groups 20 e28720575726ea96 rests 0 cbf29ce484222325 state 240bca13587fe733
+beamstemseedstate chula.png#1 system 2 seeds 60 a16a321d3b5eb9ce beams 37 d9e7114dfb35e6cc groups 18 e7a53cada13f2b60 rests 0 cbf29ce484222325 state 942443c0cf33b0cb
+beamstemseedstate chula.png#1 system 3 seeds 73 1d71af710959e841 beams 37 cbb9537477e2df19 groups 22 047990e228088d97 rests 0 cbf29ce484222325 state d8acd6cdc823525b
+beamstemseedstate allegretto.png#1 system 1 seeds 57 b5aa0499d7874526 beams 30 320937bd36dc3ef8 groups 18 7ba99f41872c100e rests 0 cbf29ce484222325 state 3a36e07821c968a9
+beamstemseedstate allegretto.png#1 system 2 seeds 75 26d9b6b1b10c4f31 beams 27 b4a44340bd36e293 groups 18 38132cfe1ac42f13 rests 0 cbf29ce484222325 state 12cf56e177881c1d
+beamstemseedstate allegretto.png#1 system 3 seeds 80 acde997920d9c6af beams 25 e80c3125a18ea13e groups 17 5685d315560c399b rests 0 cbf29ce484222325 state 7a32870d0853dfe0
+beamstemseedstate batuque.png#1 system 1 seeds 53 d362bb4d98628c08 beams 36 9c0c5f4fa77a1e90 groups 22 cd54b0ce0f85bf12 rests 0 cbf29ce484222325 state f8448ac767f3fbf5
+beamstemseedstate batuque.png#1 system 2 seeds 67 88cff9dde8b0c0d4 beams 42 ee68fb9152dca9f6 groups 24 448caa3cfdf12a98 rests 0 cbf29ce484222325 state 751d97010a63c555
+beamstemseedstate batuque.png#1 system 3 seeds 65 5979a188aecd9385 beams 30 1ade3162ca01cc5d groups 18 0d0d8dcc30ff93d3 rests 0 cbf29ce484222325 state cce9072323dc678b
+beamstemseedstate carmen.png#1 system 1 seeds 39 4d56334d893d7a05 beams 25 4cbfba6bfb06d68f groups 14 6fe692b922a5b153 rests 0 cbf29ce484222325 state c192ee4ed8824541
+beamstemseedstate carmen.png#1 system 2 seeds 58 6ef482940fdcf42d beams 27 1be390c4bb3231b0 groups 17 52710cba6acf81ff rests 0 cbf29ce484222325 state 0a6e8082474bad54
+beamstemseedstate carmen.png#1 system 3 seeds 73 bef491373c7e8016 beams 40 bca6dc4cccedd9af groups 23 e51a0a7c4812c77c rests 0 cbf29ce484222325 state 7d911cf5431229ca
+beamstemseedstate carmen.png#1 system 4 seeds 52 cd3798cad61c11d0 beams 40 70a626372abb7b66 groups 21 da2d441f908e3e49 rests 0 cbf29ce484222325 state 465554edba24ccb2
+beamstemseedstate carmen.png#1 system 5 seeds 55 2a162a721f8f2230 beams 36 c336b6f72b1954ba groups 19 ff5ff30360ff0d93 rests 0 cbf29ce484222325 state b862a5d7259e1814
+beamstemseedstate cucaracha.png#1 system 1 seeds 48 955455c04a2918ff beams 9 28ea24934cc45e44 groups 9 d863c94d19dbf969 rests 0 cbf29ce484222325 state e7d6b48aee274e9e
+beamstemseedstate cucaracha.png#1 system 2 seeds 54 256b500ca13b8fc5 beams 10 61a822bafea973d5 groups 10 47377c1bfb1ed65d rests 0 cbf29ce484222325 state 8a6c6351a40f91ed
+beamstemseedstate cucaracha.png#1 system 3 seeds 43 928f43d2aa280c05 beams 6 2c577f93c6941eec groups 6 08112e41c84e4384 rests 0 cbf29ce484222325 state c575b38fb6f644e3
+beamstemseedstate hove.png#1 system 1 seeds 69 eaaaad6abd3b85c1 beams 11 6a8b164e5079607f groups 11 d685297bed396440 rests 0 cbf29ce484222325 state dde9275fa29ae186
+beamstemseedstate hove.png#1 system 2 seeds 63 c28a8d3e296d1132 beams 13 afcaeac168a53eeb groups 13 21c79f3446de0b9c rests 0 cbf29ce484222325 state 984f8d52a26d6f52
+beamstemseedstate hove.png#1 system 3 seeds 47 c006a91f714fd421 beams 9 37cd1c315c5ff511 groups 9 a0e52fcb2682100c rests 0 cbf29ce484222325 state 7dce55ddabb46538
+beamstemseedstate hove.png#1 system 4 seeds 52 d6e0521f1574bb48 beams 11 cd099d696a555d62 groups 10 f2d932f24e612cda rests 0 cbf29ce484222325 state 279a84818af73199
+beamstemseedstate hove.png#1 system 5 seeds 43 449383f385109e80 beams 8 b9a2f5005df943e1 groups 6 258c710eb7bfb86b rests 0 cbf29ce484222325 state 6328a1d9c417f717
+beamstemseedstate zizi.png#1 system 1 seeds 70 58a89c9c1a84d6a6 beams 25 dff8231c08106644 groups 20 dfa569bf040c7678 rests 0 cbf29ce484222325 state 696fab869f6e5e19
+beamstemseedstate zizi.png#1 system 2 seeds 78 1bfb3745d9dad820 beams 27 c00bec11c3256b61 groups 18 b16ecf07c6b52485 rests 0 cbf29ce484222325 state a57c1f74d5f81eb1
+beamstemseedstate BachInvention5.jpg#1 system 1 seeds 51 cf2637e581a8d249 beams 21 87619795201d61b5 groups 12 6db4186e02b42883 rests 0 cbf29ce484222325 state efd2c2eaf2284433
+beamstemseedstate BachInvention5.jpg#1 system 2 seeds 84 985227c9d2c906e2 beams 36 eb0eb5584a917a88 groups 20 6050eb75ee16a9fe rests 0 cbf29ce484222325 state 90cba0599158f845
+beamstemseedstate BachInvention5.jpg#1 system 3 seeds 84 c7f31bcf12d38c2a beams 35 ba847e627eaf4d0e groups 20 d76752e01dcd57f6 rests 0 cbf29ce484222325 state ab9f8b06eaf591ed
+beamstemseedstate BachInvention5.jpg#1 system 4 seeds 82 775fa14694cbf486 beams 33 5247ea750133e107 groups 18 82fb0862060fbe61 rests 0 cbf29ce484222325 state 33179867d2d67d3b
+beamstemseedstate BachInvention5.jpg#1 system 5 seeds 85 bc9ff5885177954d beams 35 84a0106977670774 groups 20 ae8d89accacfbab0 rests 0 cbf29ce484222325 state d2cf995cc2f060e9
+beamstemseedstate BachInvention5.jpg#1 system 6 seeds 89 cfdf6735e46b237b beams 34 3700e05cf89ba5dd groups 20 bbf46cad69d5eff5 rests 1 a8929d8664c81468 state dac9d489668c0a40
+beamstemseedcorpussummary sheets 8 systems 30 seeds 1906 beams 803 groups 493 rests 1 changedSystems 0 changedRecords 0
