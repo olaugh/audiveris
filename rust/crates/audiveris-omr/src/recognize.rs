@@ -361,6 +361,9 @@ pub struct GridLinesRecognition {
 /// change their geometry or impacts.
 #[derive(Debug, Clone)]
 pub struct NativeBeamRecognition {
+    /// Java `Picture.TableKey.HEAD_SPOTS`, saved from the closed gray raster
+    /// at threshold 170 before BEAMS applies its own threshold of 140.
+    pub head_spot_runs: RunTable,
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
     pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
@@ -599,7 +602,8 @@ fn recognize_native_beams_impl(
 ) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
     use audiveris_image::beam_structure::BeamRaster;
     use audiveris_image::spots::{
-        BEAM_BINARIZATION_THRESHOLD, SpotParameters, spot_chain, spot_runs,
+        BEAM_BINARIZATION_THRESHOLD, HEAD_BINARIZATION_THRESHOLD, SpotParameters, spot_chain,
+        spot_runs,
     };
 
     use crate::beam_inters::{
@@ -647,6 +651,9 @@ fn recognize_native_beams_impl(
     let mut spot_parameters = SpotParameters::new(max_stem, main_beam);
     spot_parameters.header_erases = header_erases;
     let chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+    // Java persists this vertical table for HEADS before thresholding the
+    // same closed buffer more strictly for BEAMS.
+    let head_spot_runs = spot_runs(&chain.closed, width, height, HEAD_BINARIZATION_THRESHOLD)?;
     let table = spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD)?;
     let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
 
@@ -802,6 +809,7 @@ fn recognize_native_beams_impl(
     let group_count = group_counts.iter().map(|(_, count)| count).sum();
 
     Ok(NativeBeamRecognition {
+        head_spot_runs,
         spot_count: components.len(),
         raw_beams,
         hooks,
@@ -3215,6 +3223,60 @@ mod tests {
                 ],
                 [row[2], row[3]].map(str::to_owned),
                 "spot {index} centroid"
+            );
+        }
+    }
+
+    /// Production BEAMS must carry forward the second threshold of its closed
+    /// raster, because Java persists that exact vertical table for HEADS.
+    #[test]
+    fn native_beams_retains_java_head_spots_on_every_sheet() {
+        use audiveris_image::{morphology::digest, run_table::Orientation, spots::HeaderErase};
+
+        let pages = oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
+        assert_eq!(pages.len(), 8, "eight beam sheets are pinned");
+
+        for (page, records) in pages {
+            let one = |kind: &str| -> &Vec<&str> {
+                records
+                    .iter()
+                    .find(|record| record.first() == Some(&kind))
+                    .unwrap_or_else(|| panic!("{page}: no {kind} record"))
+            };
+            let margin: i32 = one("verticalmargin")[1].parse().expect("a margin");
+            let erases = records
+                .iter()
+                .filter(|record| record.first() == Some(&"erase"))
+                .map(|record| HeaderErase {
+                    x: record[4].parse().expect("an x"),
+                    stop: record[6].parse().expect("a stop"),
+                    top: record[8].parse::<i32>().expect("a first line") - margin,
+                    bottom: record[10].parse::<i32>().expect("a last line") + margin,
+                })
+                .collect();
+            let file = page.split('#').next().expect("a file name");
+            let grid = recognize_grid_lines(repo_path(&format!("data/examples/{file}")))
+                .unwrap_or_else(|error| panic!("{page}: GRID failed: {error}"));
+            let beams = recognize_native_beams(&grid, erases)
+                .unwrap_or_else(|error| panic!("{page}: BEAMS failed: {error}"));
+
+            let expected = one("headruns");
+            assert_eq!(
+                beams.head_spot_runs.orientation(),
+                Orientation::Vertical,
+                "{page}: HEAD_SPOTS orientation"
+            );
+            assert_eq!(
+                beams.head_spot_runs.sequence_count(),
+                expected[1].parse::<usize>().expect("a table size"),
+                "{page}: HEAD_SPOTS sequence count"
+            );
+            let actual_digest = digest(&beams.head_spot_runs.to_pixels());
+            assert_eq!(actual_digest, expected[2], "{page}: HEAD_SPOTS runs");
+            assert_eq!(
+                actual_digest,
+                one("headthreshold")[1],
+                "{page}: HEAD_SPOTS threshold buffer"
             );
         }
     }

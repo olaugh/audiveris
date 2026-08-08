@@ -60,6 +60,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
 | Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
+| HEAD_SPOTS handoff | threshold-170 vertical RunTable retained by production BEAMS; Java size and two independent pixel digests exact on all 8 sheets |
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
@@ -155,6 +156,16 @@ records. Two complete passes have state-row SHA-256
 `283490cf3dc06afd7b65d3c8ca7c956b6e2b0372d43a0615edf89df469c8d785`.
 The probe must snapshot every system before hiding anything because adjacent
 systems can share the same registered Java `Glyph` object.
+
+HEADS' first production dependency now survives the BEAMS boundary.
+`NativeBeamRecognition.head_spot_runs` is the exact vertical RunTable Java
+stores as `Picture.TableKey.HEAD_SPOTS`: the shared closed gray buffer is
+thresholded at 170 and saved before the existing 140 BEAMS threshold. The
+eight-page gate checks Java's table size and both the published run pixels and
+an independently thresholded buffer digest from `oracle/beam-spots.txt`; all
+are exact. This does not yet make HEADS native: persistent staff-line glyphs,
+final ledger glyphs, and accepted vertical seed glyphs still need to be
+composed into `NativeHeadsPrologRaster` before the visual classifier seam.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
