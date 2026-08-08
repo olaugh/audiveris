@@ -13,16 +13,18 @@ This page is the concise roadmap for the bit-exact Rust port of Audiveris.
 Java 5.11 remains the behavioral oracle: a feature is described as graded only
 when a deterministic Java/Rust comparison covers it.
 
-**Current checkpoint:** schema-1 JSON recognition is published through
-`LEDGERS`; the human-readable text report remains at `GRID`. HEADERS is an
+**Current checkpoint:** schema-1 JSON recognition publishes every native stage
+through `LEDGERS`, including accepted STEM_SEEDS; the human-readable text
+report remains at `GRID`. HEADERS is an
 oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
 17 times, and 30 erase rectangles match Java. The CLI composes that result into
 the exact eight-sheet BEAMS and LEDGERS gates: 787 raw beams, 581 final ledger
 inters, and 95 inferred ledger-line paths. JSON preserves selected header
 evidence, system-owned erases, beam/ledger geometry and impacts, exclusions,
 groups, and curved paths; `omrscope` accepts both median forms and bounds-only
-header symbols. Native STEM_SEEDS now composes GRID and HEADERS through the
-exact 2,425-candidate factory, 2,003 checks, and 1,906 accepted glyphs.
+header symbols. Native STEM_SEEDS composes GRID and HEADERS through the exact
+2,425-candidate factory, 2,003 checks, and 1,906 accepted glyphs, and publishes
+those accepted glyphs without inventing SIG or glyph IDs.
 
 Last updated 2026-08-07.
 
@@ -57,7 +59,7 @@ is present but the musical interpretation is not.
 | 3 | `SCALE` | **Native and published** | Line, interline, beam, histogram, derivative, and decision logic are measured from the page. | Small-beam recognition needs a graded corpus case before downstream use. |
 | 4 | `GRID` | **Native and published** | Staff lines, systems, bars, connectors, parts, contextual grades, completed line geometry, and `NO_STAFF` pixels. All 65 staves and 420 barlines in the example corpus match Java. | No known example-corpus gap; continue widening the PDF corpus. |
 | 5 | `HEADERS` | **Native and published** | `recognize_native_headers` composes clef, key, and time columns in Java order from live GRID state alone. All nine pages and 65 staves match for starts/stops and selected evidence, including 34 keys, 17 times, and all 30 downstream erase rectangles. Schema 1 publishes selected inters, lifecycle/classifier evidence, staff ranges, and system-owned erases. | Widen the corpus. |
-| 6 | `STEM_SEEDS` | **Native and graded** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. | Publish the accepted seeds and connect them to BEAMS' stem extension; widen beyond profile 1 and add tablature/no-staff skip cases. |
+| 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. | Connect accepted seeds to BEAMS' stem extension; widen beyond profile 1 and add tablature/no-staff skip cases. |
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS composition feeds the spot chain, system dispatch, beam creation, measured beam-to-beam extension, hooks, grouping, and schema-1 output. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Connect stem-seed extension and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
@@ -85,14 +87,14 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> BEAMS -> LEDGERS` in native order for `-json`; GRID keeps its text report. Downstream JSON carries selected headers and evidence, system-owned erases, beams, ledgers, relations, groups, and curved paths. `omrscope` accepts bounds-only header inters plus both median forms, and refuses incomplete geometry rather than inventing zero coordinates. |
+| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run native JSON entry points for every stage through LEDGERS; GRID keeps its text report. `-step STEM_SEEDS` composes GRID -> HEADERS -> STEM_SEEDS and publishes accepted glyphs, while BEAMS/LEDGERS deliberately retain their separately graded path until it consumes those seeds. Downstream JSON carries selected headers and evidence, system-owned erases, accepted seeds, beams, ledgers, relations, groups, and curved paths. `omrscope` accepts bounds-only header inters plus both median forms, and refuses incomplete geometry rather than inventing zero coordinates. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 
 ## Next work queue
 
-1. Publish the 1,906 accepted STEM_SEEDS glyphs, then connect them to
-   beam-to-stem extension and grade that composed path.
+1. Connect the 1,906 accepted STEM_SEEDS glyphs to beam-to-stem extension and
+   grade that composed path.
 2. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
 3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline
    order through the semantic stages.

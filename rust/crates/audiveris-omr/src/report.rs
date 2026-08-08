@@ -46,9 +46,13 @@ use crate::header_time_column::{
 use crate::key_column::NeutralKeyCandidate;
 use crate::native_headers::{NativeHeaderRecognition, NativeHeaderStaffRecognition};
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
+use crate::native_stem_seeds::{
+    NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
+};
 use crate::raw_ledger_filter::MaterializedLedgerInter;
 use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
 use crate::staff_header::{HeaderBounds, StaffHeaderRange};
+use crate::stem_seeds_step::{NativeStemCheckResult, NativeStemCounts, NativeStemImpacts};
 
 /// A minimal JSON writer.
 ///
@@ -168,7 +172,13 @@ impl Json {
 /// and the id counts from one, as `ImageLoading.Loader.getImage(int)` does.
 #[must_use]
 pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) -> String {
-    recognition_json("GRID", recognition, None, None, None, input, sheet)
+    recognition_json(
+        "GRID",
+        recognition,
+        RecognitionProducts::default(),
+        input,
+        sheet,
+    )
 }
 
 /// Emits native GRID and selected HEADERS products on one sheet using schema 1.
@@ -182,9 +192,33 @@ pub fn headers_json(
     recognition_json(
         "HEADERS",
         recognition,
-        Some(headers),
-        None,
-        None,
+        RecognitionProducts {
+            headers: Some(headers),
+            ..RecognitionProducts::default()
+        },
+        input,
+        sheet,
+    )
+}
+
+/// Emits native GRID, HEADERS, and accepted STEM_SEEDS products on one sheet
+/// using schema 1.
+#[must_use]
+pub fn stem_seeds_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "STEM_SEEDS",
+        recognition,
+        RecognitionProducts {
+            headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
+            ..RecognitionProducts::default()
+        },
         input,
         sheet,
     )
@@ -202,9 +236,11 @@ pub fn beams_json(
     recognition_json(
         "BEAMS",
         recognition,
-        Some(headers),
-        Some(beams),
-        None,
+        RecognitionProducts {
+            headers: Some(headers),
+            beams: Some(beams),
+            ..RecognitionProducts::default()
+        },
         input,
         sheet,
     )
@@ -224,23 +260,38 @@ pub fn ledgers_json(
     recognition_json(
         "LEDGERS",
         recognition,
-        Some(headers),
-        Some(beams),
-        Some(ledgers),
+        RecognitionProducts {
+            headers: Some(headers),
+            beams: Some(beams),
+            ledgers: Some(ledgers),
+            ..RecognitionProducts::default()
+        },
         input,
         sheet,
     )
 }
 
+#[derive(Clone, Copy, Default)]
+struct RecognitionProducts<'a> {
+    headers: Option<&'a NativeHeaderRecognition>,
+    stem_seeds: Option<&'a NativeStemSeedRecognition>,
+    beams: Option<&'a NativeBeamRecognition>,
+    ledgers: Option<&'a NativeLedgerRecognition>,
+}
+
 fn recognition_json(
     stage: &str,
     recognition: &GridLinesRecognition,
-    headers: Option<&NativeHeaderRecognition>,
-    beams: Option<&NativeBeamRecognition>,
-    ledgers: Option<&NativeLedgerRecognition>,
+    products: RecognitionProducts<'_>,
     input: &str,
     sheet: usize,
 ) -> String {
+    let RecognitionProducts {
+        headers,
+        stem_seeds,
+        beams,
+        ledgers,
+    } = products;
     let mut json = Json::default();
     json.open('{');
 
@@ -273,6 +324,10 @@ fn recognition_json(
     let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
+    if let Some(stem_seeds) = stem_seeds {
+        stem_scale(&mut json, stem_seeds);
+        stem_seeds_records(&mut json, stem_seeds);
+    }
     if let Some(beams) = beams {
         beam_groups(&mut json, beams);
     }
@@ -1124,6 +1179,161 @@ fn relations(
     json.close(']');
 }
 
+fn stem_scale(json: &mut Json, recognition: &NativeStemSeedRecognition) {
+    json.key("stem_scale");
+    json.open('{');
+    json.field_integer("maximum", i64::from(recognition.maximum_stem_thickness));
+    json.close('}');
+}
+
+struct AcceptedStemSeed<'a> {
+    system_id: usize,
+    gate: &'a NativeStemSeedGate,
+    threshold: f64,
+    weights: NativeStemImpacts,
+    check: &'a NativeStemCheckResult,
+    registered_glyph_index: usize,
+    free_glyph_index: usize,
+    glyph: &'a NativeStemSeedGlyph,
+}
+
+/// Accepted free glyphs, in system order and then raw-candidate order.
+///
+/// STEM_SEEDS does not create SIG inters, and the native boundary deliberately
+/// has no invented glyph identifier. `{system, ordinal}` is therefore the
+/// published identity; adding these to `inters` would misrepresent Java state
+/// and perturb the stage-local IDs later serializers allocate.
+fn stem_seeds_records(json: &mut Json, recognition: &NativeStemSeedRecognition) {
+    json.key("stem_seeds");
+    json.open('[');
+    for system in &recognition.systems {
+        for decision in &system.decisions {
+            let NativeStemSeedDecision::Checked {
+                gate,
+                threshold,
+                weights,
+                check,
+                registered_glyph_index,
+                accepted,
+                free_glyph_index,
+            } = decision
+            else {
+                continue;
+            };
+            if !accepted {
+                continue;
+            }
+            let free_glyph_index = (*free_glyph_index)
+                .expect("accepted native stem seed must have a free-glyph index");
+            let glyph = system
+                .free_glyphs
+                .get(free_glyph_index)
+                .expect("accepted native stem seed must resolve its free glyph");
+            assert_eq!(
+                glyph.source_ordinal, gate.ordinal,
+                "accepted native stem seed must preserve its raw ordinal"
+            );
+            stem_seed_record(
+                json,
+                AcceptedStemSeed {
+                    system_id: system.raw.system_id,
+                    gate,
+                    threshold: *threshold,
+                    weights: *weights,
+                    check,
+                    registered_glyph_index: *registered_glyph_index,
+                    free_glyph_index,
+                    glyph,
+                },
+            );
+        }
+    }
+    json.close(']');
+}
+
+fn stem_seed_record(json: &mut Json, seed: AcceptedStemSeed<'_>) {
+    json.open('{');
+    json.field_integer("system", seed.system_id as i64);
+    json.field_integer("ordinal", seed.gate.ordinal as i64);
+    json.field_string("status", "accepted");
+    json.field_string("kind", "VERTICAL_SEED");
+    optional_id(json, "staff", seed.gate.staff_id);
+    bounds(
+        json,
+        seed.glyph.bounds.x as f64,
+        seed.glyph.bounds.y as f64,
+        seed.glyph.bounds.width as f64,
+        seed.glyph.bounds.height as f64,
+    );
+    horizontal_median(
+        json,
+        seed.glyph.start.0,
+        seed.glyph.start.1,
+        seed.glyph.stop.0,
+        seed.glyph.stop.1,
+    );
+    json.field_number("thickness", seed.glyph.mean_thickness);
+    json.field_integer("weight", seed.glyph.weight as i64);
+    json.field_number("grade", seed.check.grade);
+    json.key("evidence");
+    json.open('{');
+    json.field_number("threshold", seed.threshold);
+    json.key("center");
+    json.open('{');
+    json.field_number("x", seed.gate.center.0);
+    json.field_number("y", seed.gate.center.1);
+    json.close('}');
+    json.key("header_stop");
+    match seed.gate.header_stop {
+        Some(stop) => json.integer(i64::from(stop)),
+        None => json.null(),
+    }
+    json.field_boolean("tablature", seed.gate.tablature);
+    json.field_integer("registered_glyph_index", seed.registered_glyph_index as i64);
+    json.field_integer("free_glyph_index", seed.free_glyph_index as i64);
+    stem_impacts(json, "values", seed.check.values);
+    stem_impacts(json, "weights", seed.weights);
+    stem_impacts(json, "impacts", seed.check.impacts);
+    stem_counts(json, seed.check.counts);
+    json.field_number("mean_distance", seed.glyph.mean_distance);
+    json.field_integer("run_count", seed.glyph.run_count() as i64);
+    json.field_string("run_digest", &format!("{:016x}", seed.glyph.run_digest()));
+    json.field_boolean("vertical_seed_group", seed.glyph.vertical_seed_group);
+    json.field_boolean("free", seed.glyph.free);
+    json.close('}');
+    json.close('}');
+}
+
+fn stem_impacts(json: &mut Json, name: &str, impacts: NativeStemImpacts) {
+    json.key(name);
+    json.open('{');
+    for (name, value) in [
+        ("slope", impacts.slope),
+        ("straight", impacts.straight),
+        ("length", impacts.length),
+        ("clean", impacts.clean),
+        ("black", impacts.black),
+        ("black_ratio", impacts.black_ratio),
+        ("gap", impacts.gap),
+    ] {
+        json.field_number(name, value);
+    }
+    json.close('}');
+}
+
+fn stem_counts(json: &mut Json, counts: NativeStemCounts) {
+    json.key("counts");
+    json.open('{');
+    json.field_integer("largest_gap", i64::from(counts.largest_gap));
+    json.field_integer("white", i64::from(counts.white));
+    json.field_integer("black", i64::from(counts.black));
+    json.field_integer("left", i64::from(counts.left));
+    json.field_integer("right", i64::from(counts.right));
+    json.field_integer("both", i64::from(counts.both));
+    json.field_integer("clean", i64::from(counts.clean));
+    json.close('}');
+}
+
 fn beam_groups(json: &mut Json, beams: &NativeBeamRecognition) {
     json.key("beam_groups");
     json.open('[');
@@ -1213,6 +1423,8 @@ pub(crate) mod tests {
     };
     use audiveris_image::{
         beam_structure::{BeamItem, BeamRasterEvidence, Segment},
+        run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable},
+        section::Bounds,
         spots::HeaderErase,
     };
 
@@ -1240,6 +1452,132 @@ pub(crate) mod tests {
             json.number(value);
             assert_eq!(json.out, "null");
         }
+    }
+
+    #[test]
+    fn accepted_stem_seed_publication_keeps_identity_geometry_and_exact_evidence() {
+        let run_table = RunTable::from_pixels(
+            Orientation::Vertical,
+            2,
+            3,
+            &[
+                FOREGROUND, BACKGROUND, FOREGROUND, FOREGROUND, BACKGROUND, FOREGROUND,
+            ],
+        )
+        .expect("stem glyph run table");
+        let glyph = NativeStemSeedGlyph {
+            source_ordinal: 17,
+            vertical_seed_group: true,
+            free: true,
+            bounds: Bounds {
+                x: 20,
+                y: 30,
+                width: 2,
+                height: 3,
+            },
+            weight: 4,
+            start: (20.25, 30.5),
+            stop: (21.0, 32.75),
+            mean_thickness: 1.5,
+            mean_distance: 0.125,
+            run_table,
+        };
+        let gate = NativeStemSeedGate {
+            ordinal: 17,
+            center: (21.0, 31.5),
+            staff_id: Some(5),
+            header_stop: Some(19),
+            tablature: false,
+        };
+        let values = NativeStemImpacts {
+            slope: 0.1,
+            straight: 0.2,
+            length: 0.3,
+            clean: 0.4,
+            black: 0.5,
+            black_ratio: 0.6,
+            gap: 0.7,
+        };
+        let weights = NativeStemImpacts {
+            slope: 1.0,
+            straight: 2.0,
+            length: 3.0,
+            clean: 4.0,
+            black: 5.0,
+            black_ratio: 6.0,
+            gap: 7.0,
+        };
+        let impacts = NativeStemImpacts {
+            slope: 0.11,
+            straight: 0.22,
+            length: 0.33,
+            clean: 0.44,
+            black: 0.55,
+            black_ratio: 0.66,
+            gap: 0.77,
+        };
+        let check = NativeStemCheckResult {
+            values,
+            impacts,
+            counts: NativeStemCounts {
+                largest_gap: 1,
+                white: 2,
+                black: 3,
+                left: 4,
+                right: 5,
+                both: 6,
+                clean: 7,
+            },
+            grade: 0.875,
+        };
+        let expected_digest = format!("{:016x}", glyph.run_digest());
+        let mut json = Json::default();
+        stem_seed_record(
+            &mut json,
+            AcceptedStemSeed {
+                system_id: 2,
+                gate: &gate,
+                threshold: 0.2,
+                weights,
+                check: &check,
+                registered_glyph_index: 11,
+                free_glyph_index: 9,
+                glyph: &glyph,
+            },
+        );
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(json.out.starts_with(
+            r#"{"system":2,"ordinal":17,"status":"accepted","kind":"VERTICAL_SEED","staff":5"#
+        ));
+        assert!(
+            json.out
+                .contains(r#""bounds":{"x":20.0,"y":30.0,"width":2.0,"height":3.0}"#)
+        );
+        assert!(
+            json.out
+                .contains(r#""median":{"x1":20.25,"y1":30.5,"x2":21.0,"y2":32.75}"#)
+        );
+        assert!(json.out.contains(
+            r#""values":{"slope":0.1,"straight":0.2,"length":0.3,"clean":0.4,"black":0.5,"black_ratio":0.6,"gap":0.7}"#
+        ));
+        assert!(json.out.contains(
+            r#""weights":{"slope":1.0,"straight":2.0,"length":3.0,"clean":4.0,"black":5.0,"black_ratio":6.0,"gap":7.0}"#
+        ));
+        assert!(json.out.contains(
+            r#""impacts":{"slope":0.11,"straight":0.22,"length":0.33,"clean":0.44,"black":0.55,"black_ratio":0.66,"gap":0.77}"#
+        ));
+        assert!(json.out.contains(
+            r#""counts":{"largest_gap":1,"white":2,"black":3,"left":4,"right":5,"both":6,"clean":7}"#
+        ));
+        assert!(
+            json.out
+                .contains(&format!(r#""run_digest":"{expected_digest}""#))
+        );
+        assert!(
+            !json.out.contains(r#""id":"#),
+            "no glyph/inter id is invented"
+        );
     }
 
     #[test]

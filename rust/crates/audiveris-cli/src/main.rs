@@ -5,11 +5,12 @@ use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
+use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{
     grid_lines_report, recognize_grid_lines_raster, recognize_native_beams, recognize_scale_raster,
     scale_report,
 };
-use audiveris_omr::report::{beams_json, grid_json, headers_json, ledgers_json};
+use audiveris_omr::report::{beams_json, grid_json, headers_json, ledgers_json, stem_seeds_json};
 
 fn usage() {
     println!(
@@ -22,17 +23,25 @@ fn usage() {
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
-         HEADERS, BEAMS, and LEDGERS currently require -json. Small-beam pages\n\
-         are refused explicitly; later stages use the compatibility handoff."
+         HEADERS, STEM_SEEDS, BEAMS, and LEDGERS currently require -json.\n\
+         Small-beam pages are refused explicitly; later stages use the\n\
+         compatibility handoff."
     );
 }
 
 fn is_native_step(step: OmrStep) -> bool {
-    step <= OmrStep::Grid || matches!(step, OmrStep::Headers | OmrStep::Beams | OmrStep::Ledgers)
+    step <= OmrStep::Grid
+        || matches!(
+            step,
+            OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers
+        )
 }
 
 fn is_json_only_step(step: OmrStep) -> bool {
-    matches!(step, OmrStep::Headers | OmrStep::Beams | OmrStep::Ledgers)
+    matches!(
+        step,
+        OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers
+    )
 }
 
 /// Native batch recognition for the stages the port supports so far.
@@ -86,16 +95,36 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                 if step == OmrStep::Grid {
                     grid_lines_report(&recognition)
                 } else {
-                    // These products are composed in Java step order. In
-                    // particular, BEAMS never receives a caller-invented
-                    // header erase, and LEDGERS never receives a synthetic
-                    // beam list.
+                    // Each published stage consumes its real native upstream
+                    // products. BEAMS still uses its separately graded empty
+                    // seed-extension seam until the next wiring milestone;
+                    // running STEM_SEEDS here does not pretend otherwise.
                     let headers = recognize_native_headers(&recognition)
                         .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
                     if step == OmrStep::Headers {
                         print!(
                             "{}",
                             headers_json(&recognition, &headers, &input_name, sheet)
+                        );
+                        continue;
+                    }
+                    if step == OmrStep::StemSeeds {
+                        let stem_seeds = recognize_native_stem_seeds(&recognition, &headers)
+                            .map_err(|error| {
+                                format!(
+                                    "{} sheet {sheet}: STEM_SEEDS failed: {error}",
+                                    input.display()
+                                )
+                            })?;
+                        print!(
+                            "{}",
+                            stem_seeds_json(
+                                &recognition,
+                                &headers,
+                                &stem_seeds,
+                                &input_name,
+                                sheet,
+                            )
                         );
                         continue;
                     }
@@ -207,29 +236,32 @@ mod tests {
             OmrStep::Scale,
             OmrStep::Grid,
             OmrStep::Headers,
+            OmrStep::StemSeeds,
             OmrStep::Beams,
             OmrStep::Ledgers,
         ] {
             assert!(is_native_step(step), "{step} should be native");
         }
-        assert!(!is_native_step(OmrStep::StemSeeds));
         assert!(!is_native_step(OmrStep::Heads));
     }
 
     #[test]
     fn downstream_text_requests_fail_instead_of_dumping_parameters() {
-        let parameters = Parameters {
-            step: Some(OmrStep::Headers),
-            ..Parameters::default()
-        };
-        let error = run_native(&parameters, false).expect_err("HEADERS text is not published");
-        assert_eq!(
-            error,
-            "native -step HEADERS output currently requires -json"
-        );
+        for step in [OmrStep::Headers, OmrStep::StemSeeds] {
+            let parameters = Parameters {
+                step: Some(step),
+                ..Parameters::default()
+            };
+            let error =
+                run_native(&parameters, false).expect_err("downstream text should fail explicitly");
+            assert_eq!(
+                error,
+                format!("native -step {step} output currently requires -json")
+            );
+        }
 
         let parameters = Parameters {
-            step: Some(OmrStep::StemSeeds),
+            step: Some(OmrStep::Heads),
             ..Parameters::default()
         };
         assert!(!run_native(&parameters, true).expect("unsupported handoff"));

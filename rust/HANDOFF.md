@@ -132,6 +132,10 @@ Rust's platform `pow` does not. `audiveris-core::java_math::java_positive_pow`
 is a narrowed direct port for non-negative bases and finite exponents; it makes
 all 2,003 grades bit-exact and carries a frozen residual regression. The next
 semantic seam is passing these accepted free glyphs into BEAMS' stem extension.
+`audiveris-cli -batch -step STEM_SEEDS -json` exposes the accepted free glyphs
+in production `{system, ordinal}` order. It publishes geometry, grade, all
+checker values/weights/impacts/counts, materialization indices, run count, and
+a 16-digit run-table digest without inventing Java's process-global glyph IDs.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
@@ -269,10 +273,10 @@ without disturbing a Homebrew or distribution `cargo`.
 
 ## Structured output
 
-`audiveris-cli -batch -step GRID|HEADERS|BEAMS|LEDGERS -json <input>` emits one
-JSON document per sheet, one per line. This is the interchange format, not a
-debug dump. It is shaped for an evaluation harness comparing several OMR
-systems and a repair loop that proposes corrections.
+`audiveris-cli -batch -step GRID|HEADERS|STEM_SEEDS|BEAMS|LEDGERS -json
+<input>` emits one JSON document per sheet, one per line. This is the
+interchange format, not a debug dump. It is shaped for an evaluation harness
+comparing several OMR systems and a repair loop that proposes corrections.
 
 The checked-in `omrscope` consumer accepts the three schema-1 geometry forms:
 HEADERS' bounds-only `x/y/width/height` symbols, GRID's vertical
@@ -284,9 +288,15 @@ regression, and downstream publication supplies all three forms.
 
 HEADERS documents add selected clef/key/time inters with their bounds, grades,
 contextual grades, and lifecycle/classifier evidence, plus staff ranges and
-system-owned erase rectangles. BEAMS and LEDGERS retain that state and append
-their stage products. GRID still calls the writer with no downstream products,
-preserving its established schema-1 byte path.
+system-owned erase rectangles. STEM_SEEDS documents add accepted free glyphs
+in raw-candidate order with complete check and materialization evidence. They
+remain a top-level stage product rather than false SIG inters, and
+`{system, ordinal}` is their stable identity. BEAMS and LEDGERS retain the
+HEADERS state and append their stage products; they deliberately do not run or
+consume STEM_SEEDS until the beam-extension seam is connected. GRID still
+calls the writer with no downstream products. The GRID, HEADERS, BEAMS, and
+LEDGERS Chula JSON hashes remained byte-identical across the serializer carrier
+refactor.
 
 Three decisions worth keeping:
 
