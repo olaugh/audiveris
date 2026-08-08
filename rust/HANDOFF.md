@@ -66,6 +66,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Final ledger glyphs | every non-removed ledger retains a 1:1 positioned fixed raster built from its referenced filtered sections; no median approximation |
 | Registered beam glyphs consumed by HEADS | all 191 narrow-beam bounds, weights, and vertical run digests exact after Java-equivalent `NO_STAFF` masking inside each final parallelogram |
 | Complete native HEADS | the owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live |
+| First semantic STEMS boundary | the production head-corner compositor consumes live HEADS/STEM_SEEDS products and matches 3,521 heads plus all 14,084 constructor-order reference/outside/inside corner points across 30 systems at exact double bits; it stops before stump lookup and mutation |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -99,8 +100,9 @@ serializers and native stage inputs are wired through
 remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
-locally under the pinned toolchain, and the whole workspace runs in about 45
-seconds since the dev profile went to `opt-level = 2`.
+locally under the pinned toolchain. The full suite includes several independent
+eight-page image-pipeline differentials, including complete HEADS and STEMS
+head-corner production entry points.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -664,7 +666,27 @@ BEAMS also retains the exact fixed vertical glyph Java rebuilds from `NO_STAFF`
 for every final raw beam and hook; all 191 HEADS-consumed glyph bounds, weights,
 and run digests match. `audiveris-cli -batch -step HEADS -json <image>` publishes
 the complete identity-free result plus its upstream products. HEADS is therefore
-native, graded, and published; semantic STEMS follows.
+native, graded, and published.
+
+The first production STEMS slice now continues directly from that owned HEADS
+result. `materialize_native_stems_head_corners` filters the live SIG-order heads
+after beam removal, retains stable abscissa and reverse-grade permutations, and
+resolves each head's actual staff-selected Bravura template. It reproduces the
+four `HeadLinker.CLinker` constructor corners, template bounds and rounded
+anchors, sheet head-seed side correction, and profile/interline inside/outside
+limits without allocating Java inter or glyph IDs. `StemsHeadCornerProbe` runs
+real HEADS in a fresh JVM for each of the eight pages and stops immediately
+before `CLinker.retrieveStump()`. Two complete oracle runs were byte-identical;
+the Rust differential matches 30 systems, 3,521 heads, and 14,084 corners row
+for row, including every head/template/glyph field and raw double bit. The
+probe source SHA-256 is
+`4180de0596c3580fbef45ee12b6ec05f0dee17ef9e7267531e62efabb28d9c40`, the
+body SHA-256 is
+`485544ae74a08d2a4d5c2a0de0030db67eec0086bd370d4eb6e2680917d0572a`, and
+the complete fixture SHA-256 is
+`26f9fff81c6207957dab6f42bf7d1650682ae9fca5de46e7b9a7dc46f20fd94b`.
+The next honest seam is stump/seed retrieval followed by no-stem area purge;
+linker geometry, glyph registration, and SIG mutation remain beyond it.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on

@@ -9,6 +9,7 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_stem_seeds::recognize_native_stem_seeds,
+    native_stems_head_corners::materialize_native_stems_head_corners,
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
 };
 
@@ -76,6 +77,19 @@ fn full_entry_owns_every_chula_heads_boundary() {
             .map(|system| system.final_heads.len())
             .sum::<usize>(),
         heads.epilog.final_head_count
+    );
+
+    let stem_corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
+        .expect("STEMS head-corner prolog");
+    assert_eq!(stem_corners.head_count, 326);
+    assert_eq!(stem_corners.corner_count, 1_304);
+    assert_eq!(
+        stem_corners
+            .systems
+            .iter()
+            .map(|system| system.system_id)
+            .collect::<Vec<_>>(),
+        expected_systems
     );
 }
 
