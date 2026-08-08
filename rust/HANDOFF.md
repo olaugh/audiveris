@@ -158,6 +158,20 @@ records. Two complete passes have state-row SHA-256
 The probe must snapshot every system before hiding anything because adjacent
 systems can share the same registered Java `Glyph` object.
 
+The acceptance branch is no longer merely wired: D039 is the natural positive
+case. On `data/examples/D0392410-1.256.png`, system 2 has 76 accepted seed
+inputs and replaces exactly one unextended beam when those seeds are visible;
+the other three systems and every hook/group count remain unchanged. The Rust
+regression compares the changed and replaced beam's median, height, grade, and
+all six impacts to Java by exact `f64` bits. The focused paired oracle covers
+465 seeds and 69 beams across four systems, has summary FNV
+`5acbd8b3dd4d1405`, and fixture SHA-256
+`991f3b4c56d4e9b5bb466657bffe931d6d0736daf759dd010964c82b01853f18`.
+It found two one-ULP errors hidden by the original zero-change corpus:
+intersection now preserves Java `LineUtil`'s determinant operation order, and
+beam grading uses the OpenJDK-compatible positive `pow` implementation rather
+than platform `powf`.
+
 HEADS' first production dependency now survives the BEAMS boundary.
 `NativeBeamRecognition.head_spot_runs` is the exact vertical RunTable Java
 stores as `Picture.TableKey.HEAD_SPOTS`: the shared closed gray buffer is

@@ -14,6 +14,8 @@ use std::{
     fmt,
 };
 
+use audiveris_core::java_math::java_positive_pow;
+
 use crate::{
     run_table::{FOREGROUND, Orientation, RunTable},
     section::{JunctionPolicy, Section, build_sections},
@@ -702,10 +704,10 @@ pub fn beam_grade(impacts: BeamImpacts) -> f64 {
         if value == 0.0 {
             product = 0.0;
         } else if weight != 0.0 {
-            product *= value.powf(weight);
+            product *= java_positive_pow(value, weight);
         }
     }
-    0.8 * product.powf(1.0 / total)
+    0.8 * java_positive_pow(product, 1.0 / total)
 }
 
 /// Which border of a beam line the jitter is measured against.

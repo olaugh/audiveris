@@ -650,16 +650,22 @@ fn point_line_distance(point: (f64, f64), line: Segment) -> f64 {
         / ((line.y2 - line.y1).hypot(line.x2 - line.x1))
 }
 fn line_intersection(one: Segment, two: Segment) -> Option<(f64, f64)> {
-    let one_dx = one.x2 - one.x1;
-    let one_dy = one.y2 - one.y1;
-    let two_dx = two.x2 - two.x1;
-    let two_dy = two.y2 - two.y1;
-    let denominator = (one_dx * two_dy) - (one_dy * two_dx);
+    // Keep LineUtil.intersection's determinant form and operation order. The
+    // algebraically equivalent parametric form differs by one ULP on the D039
+    // natural stem-extension case, and this point becomes persisted beam
+    // geometry as well as an input to the impact masks.
+    let denominator =
+        ((one.x1 - one.x2) * (two.y1 - two.y2)) - ((one.y1 - one.y2) * (two.x1 - two.x2));
     if denominator == 0.0 {
         return None;
     }
-    let t = (((two.x1 - one.x1) * two_dy) - ((two.y1 - one.y1) * two_dx)) / denominator;
-    Some((one.x1 + (t * one_dx), one.y1 + (t * one_dy)))
+    let one_determinant = (one.x1 * one.y2) - (one.y1 * one.x2);
+    let two_determinant = (two.x1 * two.y2) - (two.y1 * two.x2);
+    let x = ((one_determinant * (two.x1 - two.x2)) - ((one.x1 - one.x2) * two_determinant))
+        / denominator;
+    let y = ((one_determinant * (two.y1 - two.y2)) - ((one.y1 - one.y2) * two_determinant))
+        / denominator;
+    Some((x, y))
 }
 fn can_be_neighbors(one: ExtensionBeam, two: ExtensionBeam, p: BeamExtensionParameters) -> bool {
     let left = one.median.x1.max(two.median.x1);

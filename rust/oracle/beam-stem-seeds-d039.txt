@@ -1,0 +1,32 @@
+# Java Audiveris 5.11 (Temurin JDK 25) production BEAMS/STEM_SEEDS acceptance case.
+#
+# This is the focused paired output for the one natural repository page where making
+# accepted VERTICAL_SEED glyphs invisible changes BEAMS. `removed` is the seeded-only
+# canonical record; `added` is the hidden-seed canonical record. The group record repeats
+# its sole member, so one changed BeamInter accounts for both record deltas.
+#
+# Regenerate in one fresh JVM from the repository root:
+#   env -u JAVA_TOOL_OPTIONS JAVA_HOME=/path/to/jdk25/Contents/Home \
+#     ./gradlew --no-daemon -q \
+#     -I rust/oracle/java/staff-impacts.init.gradle :app:beamStemSeedsProbe \
+#     -PbeamStemSeedTargets=data/examples/D0392410-1.256.png:1
+#
+# The four seed-input hashes agree with separate fresh-JVM `seeded` and `empty` runs.
+# Canonical beam hashes cover exact class/shape/median/height/grade/all six impacts;
+# group hashes cover exact membership. The paired summary hash is FNV-1a-64 over every
+# emitted comparison and delta row in system order.
+beamstemseedsheet D0392410-1.256.png#1 systems 4
+beamstemseedinput D0392410-1.256.png#1 system 1 seeds 87 0c407972055f1799
+beamstemseedcompare D0392410-1.256.png#1 system 1 seededBeams 14 1853e2aebb927fd9 emptyBeams 14 1853e2aebb927fd9 seededGroups 11 fc6f24c0d0cf450c emptyGroups 11 fc6f24c0d0cf450c seededRests 0 cbf29ce484222325 emptyRests 0 cbf29ce484222325 changed false removed 0 added 0
+beamstemseedinput D0392410-1.256.png#1 system 2 seeds 76 edd9ec821c8dffdc
+beamstemseedcompare D0392410-1.256.png#1 system 2 seededBeams 13 0fcceba80f94f2e3 emptyBeams 13 9b2ff40c735a44b3 seededGroups 10 5e1239ba47da7e15 emptyGroups 10 8469a6d430da201f seededRests 0 cbf29ce484222325 emptyRests 0 cbf29ce484222325 changed true removed 2 added 2
+beamstemseedremoved D0392410-1.256.png#1 system 2 beam BeamInter BEAM median 0x1.564p10 0x1.6d543288fa04p10 0x1.6a2897ca9bbf6p10 0x1.67407b813250bp10 height 0x1.a0924924929p3 grade 0x1.435d45c069fefp-3 impacts wdth:0x1.0p-1:0x1.0p0 minH:0x1.0p0:0x1.0p0 maxH:0x1.0p0:0x1.936db6db6ccaap-1 core:0x1.0p1:0x1.6c9756f8a12aep-1 belt:0x1.0p1:0x1.e16ece540f48ap-2 jit:0x1.0p1:0x1.be103282014p-9
+beamstemseedremoved D0392410-1.256.png#1 system 2 group members 1 beam BeamInter BEAM median 0x1.564p10 0x1.6d543288fa04p10 0x1.6a2897ca9bbf6p10 0x1.67407b813250bp10 height 0x1.a0924924929p3 grade 0x1.435d45c069fefp-3 impacts wdth:0x1.0p-1:0x1.0p0 minH:0x1.0p0:0x1.0p0 maxH:0x1.0p0:0x1.936db6db6ccaap-1 core:0x1.0p1:0x1.6c9756f8a12aep-1 belt:0x1.0p1:0x1.e16ece540f48ap-2 jit:0x1.0p1:0x1.be103282014p-9
+beamstemseedadded D0392410-1.256.png#1 system 2 beam BeamInter BEAM median 0x1.564p10 0x1.6d543288fa04p10 0x1.658p10 0x1.68ac84497e29bp10 height 0x1.a0924924929p3 grade 0x1.4282ce087e4b2p-3 impacts wdth:0x1.0p-1:0x1.6666666666666p-1 minH:0x1.0p0:0x1.0p0 maxH:0x1.0p0:0x1.936db6db6ccaap-1 core:0x1.0p1:0x1.8354e74801b85p-1 belt:0x1.0p1:0x1.e9e6374075deep-2 jit:0x1.0p1:0x1.be103282014p-9
+beamstemseedadded D0392410-1.256.png#1 system 2 group members 1 beam BeamInter BEAM median 0x1.564p10 0x1.6d543288fa04p10 0x1.658p10 0x1.68ac84497e29bp10 height 0x1.a0924924929p3 grade 0x1.4282ce087e4b2p-3 impacts wdth:0x1.0p-1:0x1.6666666666666p-1 minH:0x1.0p0:0x1.0p0 maxH:0x1.0p0:0x1.936db6db6ccaap-1 core:0x1.0p1:0x1.8354e74801b85p-1 belt:0x1.0p1:0x1.e9e6374075deep-2 jit:0x1.0p1:0x1.be103282014p-9
+beamstemseedinput D0392410-1.256.png#1 system 3 seeds 142 cf6f7070aaff7a3e
+beamstemseedcompare D0392410-1.256.png#1 system 3 seededBeams 20 2b4f7779d7a1e26a emptyBeams 20 2b4f7779d7a1e26a seededGroups 19 72a4f203be140483 emptyGroups 19 72a4f203be140483 seededRests 0 cbf29ce484222325 emptyRests 0 cbf29ce484222325 changed false removed 0 added 0
+beamstemseedinput D0392410-1.256.png#1 system 4 seeds 160 0d306dbfc2c50486
+beamstemseedcompare D0392410-1.256.png#1 system 4 seededBeams 22 ae73efe810de9504 emptyBeams 22 ae73efe810de9504 seededGroups 16 04c0c38367e94560 emptyGroups 16 04c0c38367e94560 seededRests 0 cbf29ce484222325 emptyRests 0 cbf29ce484222325 changed false removed 0 added 0
+beamstemseedsheetsummary D0392410-1.256.png#1 systems 4 seeds 465 seededBeams 69 emptyBeams 69 seededGroups 56 emptyGroups 56 changedSystems 1 removed 2 added 2 5acbd8b3dd4d1405
+beamstemseedcorpussummary sheets 1 systems 4 seeds 465 seededBeams 69 emptyBeams 69 seededGroups 56 emptyGroups 56 changedSystems 1 removed 2 added 2 5acbd8b3dd4d1405
