@@ -14,10 +14,12 @@ Java 5.11 remains the behavioral oracle: a feature is described as graded only
 when a deterministic Java/Rust comparison covers it.
 
 **Current checkpoint:** native recognition is published through `GRID`, and a
-production-shaped corpus path continues through `HEADERS` and `BEAMS` without
-using oracle values as inputs. The next recognition stage is `LEDGERS`.
+production-shaped corpus path continues through `HEADERS`, `BEAMS`, and the
+`LEDGERS` builder without using oracle values as inputs. On `chula.png`, all
+nine Java final ledger survivors are already exact in the native builder; its
+sheet-wide statistical cleanup is the remaining stage tail.
 
-Last updated for port commit [`3fbb02a45`][beam-commit] (2026-08-07).
+Last updated 2026-08-07.
 
 ---
 
@@ -52,7 +54,7 @@ is present but the musical interpretation is not.
 | 5 | `HEADERS` | **Native and graded** | Clefs, keys, times, stop propagation, and all 30 system header-erasure rectangles. All 65 corpus staves match Java. | Publish header inters and evidence through the CLI/JSON stage driver. |
 | 6 | `STEM_SEEDS` | **Components graded** | Lifecycle, stem-scale histogram/peak/fallback, vertical orchestration, and stem checker. `maxStem` matches Java on all eight beam sheets. | Complete raw vertical `StickFactory` geometry and publish real seed glyphs. |
 | 7 | `BEAMS` | **Native and graded** | Native spot chain, system dispatch, beam creation, beam-to-beam extension, hooks, and grouping. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Publish CLI/JSON output; connect stem-seed extension; grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
-| 8 | `LEDGERS` | **Components graded** | Lifecycle, zones, runs, sections, horizontal filaments, seven-impact grading, overlap reduction, glyph/SIG materialization, exclusions, and staff ownership. | Compose the real visual filter input and close an end-to-end corpus gate. This is the next recognition target. |
+| 8 | `LEDGERS` | **Components graded** | Native composition now consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. On `chula.png`, 9,915 filtered runs become 4,052 sections and 117 horizontal candidates; all nine Java final survivors match by system, staff/index, median, thickness, seven impacts, and grade. | Port `LedgersPostAnalysis`, which statistically discards/rebuilds away 15 additional builder survivors on the first page; then widen the corpus and publish the result. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
@@ -84,8 +86,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Compose `LEDGERS` from the real native `NO_STAFF`/system inputs and grade the
-   complete stage against Java.
+1. Port and compose the sheet-wide `LEDGERS` statistical post-analysis, then
+   widen the exact end-to-end gate beyond `chula.png`.
 2. Publish native `HEADERS` and `BEAMS` records through the CLI and JSON report.
 3. Finish `STEM_SEEDS` vertical geometry so beam-to-stem extension is available
    when a corpus page exercises it.
@@ -102,6 +104,5 @@ tests or oracle counts in [`rust/PORTING.md`][porting] and
 [`rust/HANDOFF.md`][handoff]. A stage moves to **Native and graded** only when it
 consumes native upstream state and the oracle is a grader rather than an input.
 
-[beam-commit]: https://github.com/olaugh/audiveris/commit/3fbb02a45750261ed55e01add2dff58bbc0d9347
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

@@ -4,6 +4,7 @@ package org.audiveris.omr.rustport;
 import ij.process.ByteProcessor;
 
 import java.awt.Rectangle;
+import java.awt.geom.Line2D;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -22,6 +23,7 @@ import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sig.GradeImpacts;
 import org.audiveris.omr.sig.SIGraph;
 import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.LedgerInter;
 import org.audiveris.omr.sig.relation.Relation;
 import org.audiveris.omr.step.OmrStep;
 
@@ -214,6 +216,15 @@ public class SigProbe
                 line.append(' ').append(impacts.getName(i)).append(' ').append(
                         String.format("%.9f", impacts.getImpact(i)));
             }
+        }
+
+        if (inter instanceof LedgerInter ledger) {
+            final Line2D median = ledger.getMedian();
+            line.append(String.format(
+                    " ledger %d median %.9f %.9f %.9f %.9f thickness %.9f",
+                    ledger.getIndex(),
+                    median.getX1(), median.getY1(), median.getX2(), median.getY2(),
+                    ledger.getThickness()));
         }
 
         return line.toString();

@@ -11,10 +11,11 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use audiveris_image::{
+    beam_structure::BeamItem,
     run_table::{Orientation, RunTable, RunTableError},
     section::{Bounds, JunctionPolicy, Section, build_sections_from_id},
     stick_factory::{HorizontalStickFactory, HorizontalStickParameters, StraightStickError},
-    system_population::PopulationSystemArea,
+    system_population::{PopulationSystemArea, StaffBoundary},
 };
 
 use crate::ledgers_step::{
@@ -81,21 +82,21 @@ pub struct RawLedgerStaffZone {
     pub last_in_part: bool,
     /// Java `Staff.area`, used by `StaffManager.getClosestStaff`.
     pub area: PopulationSystemArea,
-    pub first_line: LedgerLineSegment,
-    pub last_line: LedgerLineSegment,
+    pub first_line: StaffBoundary,
+    pub last_line: StaffBoundary,
 }
 
 impl RawLedgerStaffZone {
     #[must_use]
     pub fn distance_to(&self, x: f64, y: f64) -> f64 {
-        (self.first_line.y_at(x) - y).max(y - self.last_line.y_at(x))
+        (self.first_line.y_at_x_ext(x) - y).max(y - self.last_line.y_at_x_ext(x))
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RawLedgerBeamArea {
     pub bounds: Bounds,
-    pub area: PopulationSystemArea,
+    pub item: BeamItem,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,7 +105,9 @@ pub struct RawLedgerSystemZone {
     pub left: i32,
     pub right: i32,
     pub area: PopulationSystemArea,
-    /// Good full beams only; hooks are deliberately absent.
+    /// Every `AbstractBeamInter`, used by `LedgersFilter`'s section purge.
+    pub all_beams: Vec<RawLedgerBeamArea>,
+    /// Good full `BeamInter`s only, used by `LedgersBuilder`'s candidate purge.
     pub good_full_beams: Vec<RawLedgerBeamArea>,
 }
 
@@ -202,7 +205,7 @@ pub fn filter_raw_ledger_sections(
             if system.area.contains(center_x as f64, center_y as f64)
                 && i32::try_from(center_x).is_ok_and(|x| x >= system.left && x <= system.right)
                 && !system
-                    .good_full_beams
+                    .all_beams
                     .iter()
                     .any(|beam| beam_intersects_section(beam, section))
             {
@@ -242,12 +245,34 @@ fn beam_intersects_section(beam: &RawLedgerBeamArea, section: &Section) -> bool 
     for (offset, run) in section.runs().iter().enumerate() {
         let y = section.first_pos() + offset;
         for x in run.start..=run.stop() {
-            if beam.area.contains(x as f64, y as f64) {
+            if beam_contains(beam.item, x as f64, y as f64) {
                 return true;
             }
         }
     }
     false
+}
+
+fn beam_contains(item: BeamItem, x: f64, y: f64) -> bool {
+    let half_height = item.height / 2.0;
+    let corners = [
+        (item.median.x1, item.median.y1 - half_height),
+        (item.median.x2, item.median.y2 - half_height),
+        (item.median.x2, item.median.y2 + half_height),
+        (item.median.x1, item.median.y1 + half_height),
+    ];
+    let mut crossings = 0;
+    for index in 0..corners.len() {
+        let (ax, ay) = corners[index];
+        let (bx, by) = corners[(index + 1) % corners.len()];
+        if (ay <= y) == (by <= y) {
+            continue;
+        }
+        if ax + ((y - ay) * (bx - ax) / (by - ay)) > x {
+            crossings += 1;
+        }
+    }
+    crossings % 2 == 1
 }
 
 fn bounds_intersect(one: Bounds, two: Bounds) -> bool {
@@ -447,7 +472,7 @@ pub fn source_native_ledger_candidates(
             (geometry.start.1 + geometry.stop.1) / 2.0,
         );
         let overlaps_good_beam = system.good_full_beams.iter().any(|beam| {
-            beam.area.contains(center.0, center.1)
+            beam_contains(beam.item, center.0, center.1)
                 && point_in_bounds(center.0, center.1, beam.bounds)
         });
         let candidate = RawLedgerCandidate {
@@ -604,11 +629,17 @@ pub fn evaluate_ledger_line_unreduced(
     let interline = f64::from(staff.specific_interline);
     let margin = f64::from(java_rint(interline * parameters.ledger_margin_y));
     let reference_line = if index < 0 {
-        staff.first_line
+        &staff.first_line
     } else {
-        staff.last_line
+        &staff.last_line
     };
-    let mut virtual_bounds = reference_line.bounds();
+    let (x, y, width, height) = reference_line.defining_point_bounds();
+    let mut virtual_bounds = LedgerFloatBounds {
+        x: f64::from(x),
+        y: f64::from(y),
+        width: f64::from(width),
+        height: f64::from(height),
+    };
     virtual_bounds.y += f64::from(index) * interline;
     // Rectangle.grow(0, 2*yMargin) grows each vertical side by 2*yMargin.
     virtual_bounds.y -= 2.0 * margin;
@@ -625,8 +656,13 @@ pub fn evaluate_ledger_line_unreduced(
         if !virtual_bounds.contains(middle.0, middle.1) {
             continue;
         }
+        // Java uses endpoint midpoint only for the rough containment above.
+        // `getYReference` then asks `SectionCompound.getCenter2D()`, which is
+        // the contour-bounds centre and is half a pixel farther right for an
+        // even-width inclusive stick.
+        let reference_x = candidate.bounds.x + (candidate.bounds.width / 2.0);
         let (y_reference, wide_reference) = if index.abs() == 1 {
-            (reference_line.y_at(middle.0), false)
+            (reference_line.y_at_x_ext(reference_x), false)
         } else {
             let Some(reference) = previous
                 .iter()
@@ -634,7 +670,7 @@ pub fn evaluate_ledger_line_unreduced(
             else {
                 continue;
             };
-            let y = y_on_reference(reference, middle.0);
+            let y = y_on_reference(reference, reference_x);
             (y, reference.bounds.width >= minimum_wide)
         };
         let y_target = y_reference + f64::from(index.signum()) * interline;
@@ -848,6 +884,8 @@ pub struct MaterializedLedgerInter {
     pub ledger_index: i32,
     pub pitch: i32,
     pub bounds: LedgerFloatBounds,
+    pub median: ((f64, f64), (f64, f64)),
+    pub thickness: f64,
     pub grade: f64,
     pub impacts: [LedgerCandidateImpact; 7],
     pub removed: bool,
@@ -937,6 +975,11 @@ impl LedgerMaterializer {
     }
 
     #[must_use]
+    pub fn inter_by_id(&self, id: usize) -> Option<&MaterializedLedgerInter> {
+        self.inter(id)
+    }
+
+    #[must_use]
     pub fn relations(&self) -> &[MaterializedLedgerRelation] {
         &self.relations
     }
@@ -1011,6 +1054,21 @@ impl LedgerMaterializer {
                     ledger_index: index,
                     pitch: index,
                     bounds: evaluated.candidate.bounds,
+                    // The checks above read `StraightFilament`'s inclusive
+                    // pixel regression. Only after acceptance does Java call
+                    // `stick.toGlyph(null)` and `Glyph.getCenterLine()`, whose
+                    // contour uses the exclusive far x edge and row centres.
+                    median: (
+                        (
+                            evaluated.candidate.start.0,
+                            evaluated.candidate.start.1 + 0.5,
+                        ),
+                        (
+                            evaluated.candidate.stop.0 + 1.0,
+                            evaluated.candidate.stop.1 + 0.5,
+                        ),
+                    ),
+                    thickness: evaluated.candidate.mean_thickness,
                     grade: evaluated.grade.grade,
                     impacts: evaluated.grade.impacts,
                     removed: false,
@@ -1234,6 +1292,7 @@ fn java_rint(value: f64) -> i32 {
 mod tests {
     use super::*;
     use audiveris_image::{
+        beam_structure::Segment,
         run_table::Run,
         system_population::{
             BoundarySegment, PopulationSystemGeometry, StaffBoundary, SystemStaffBoundaries,
@@ -1282,18 +1341,8 @@ mod tests {
             first_in_part: true,
             last_in_part: true,
             area: area(5, 40, 40),
-            first_line: LedgerLineSegment {
-                start_x: 0.0,
-                start_y: 20.0,
-                stop_x: 39.0,
-                stop_y: 20.0,
-            },
-            last_line: LedgerLineSegment {
-                start_x: 0.0,
-                start_y: 24.0,
-                stop_x: 39.0,
-                stop_y: 24.0,
-            },
+            first_line: boundary(40, 20),
+            last_line: boundary(40, 24),
         }
     }
 
@@ -1314,15 +1363,24 @@ mod tests {
             left: 0,
             right: 39,
             area: system_area.clone(),
-            good_full_beams: vec![RawLedgerBeamArea {
+            all_beams: vec![RawLedgerBeamArea {
                 bounds: Bounds {
                     x: 5,
                     y: 13,
                     width: 8,
                     height: 1,
                 },
-                area: system_area,
+                item: BeamItem {
+                    median: Segment {
+                        x1: 5.0,
+                        y1: 13.5,
+                        x2: 13.0,
+                        y2: 13.5,
+                    },
+                    height: 1.0,
+                },
             }],
+            good_full_beams: Vec::new(),
         };
 
         let output = filter_raw_ledger_sections(
@@ -1572,6 +1630,7 @@ mod tests {
             left: 0,
             right: 49,
             area: area(1, 50, 40),
+            all_beams: Vec::new(),
             good_full_beams: Vec::new(),
         };
 
@@ -1624,6 +1683,7 @@ mod tests {
             left: 0,
             right: 49,
             area: area(1, 50, 40),
+            all_beams: Vec::new(),
             good_full_beams: Vec::new(),
         };
 

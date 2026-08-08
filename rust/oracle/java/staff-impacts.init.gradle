@@ -115,6 +115,8 @@ gradle.projectsEvaluated {
         // classifier from there, so the working directory is app/ and the page
         // arguments are absolutised against the project root to compensate.
         workingDir = app.projectDir
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
         // -PsigTargets="data/examples/chula.png:1:GRID other.pdf:2:HEADS"
         args = (app.findProperty('sigTargets') ?: '').toString().split(/\s+/)
                 .findAll { !it.isEmpty() }

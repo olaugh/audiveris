@@ -1170,6 +1170,65 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
         )
         .unwrap_or_else(|error| panic!("{page}: native BEAMS failed: {error}"));
 
+        if file == "chula.png" {
+            let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(
+                &native.recognition,
+                &produced,
+            )
+            .unwrap_or_else(|error| panic!("{page}: native LEDGERS failed: {error}"));
+            assert_eq!(ledgers.filtered_run_count, 9_915);
+            assert_eq!(ledgers.section_count, 4_052);
+            assert_eq!(
+                ledgers.system_section_counts,
+                vec![(1, 2_072), (2, 645), (3, 1_010)]
+            );
+            assert_eq!(ledgers.registered_filament_count, 117);
+            assert_eq!(ledgers.candidates.len(), 117);
+
+            let expected = include_str!("../../../oracle/ledgers-chula.txt")
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let actual = ledgers
+                .ledgers()
+                .iter()
+                .map(|ledger| {
+                    format!(
+                        "ledger {} {} {} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {}",
+                        ledger.system_id,
+                        ledger.staff_id,
+                        ledger.ledger_index,
+                        ledger.median.0.0,
+                        ledger.median.0.1,
+                        ledger.median.1.0,
+                        ledger.median.1.1,
+                        ledger.thickness,
+                        ledger.grade,
+                        ledger
+                            .impacts
+                            .iter()
+                            .map(|impact| format!("{:.9}", impact.grade))
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let missing = expected
+                .iter()
+                .filter(|ledger| !actual.contains(ledger))
+                .collect::<Vec<_>>();
+            assert!(
+                missing.is_empty(),
+                "{page}: native builder missed exact Java ledgers {missing:?}"
+            );
+            // These are the builder survivors, before the still-separate
+            // sheet-wide statistical post-analysis. Java keeps the exact nine
+            // above and discards/rebuilds away the other fifteen.
+            assert_eq!(actual.len(), 24);
+            assert_eq!(actual.len() - expected.len(), 15);
+        }
+
         let expected_spots = spot_records
             .iter()
             .find(|fields| fields.first() == Some(&"spotcount"))

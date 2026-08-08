@@ -51,12 +51,23 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
 | Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
+| Native ledger composition | chula: 9915 filtered runs, 4052 sections, 117 candidates; all 9 Java final survivors exact by system, staff/index, median, thickness, 7 impacts, and grade |
 
 `recognize_native_beams` now consumes only the native GRID report and HEADERS'
 `HeaderErase` list: it measures `maxStem`, runs the spot chain, dispatches by
 native system areas/bounds, then creates, extends, hooks and groups beams. The
 oracle is the grader, no longer an input. This remains a corpus/test path until
 the result is published through `-json` and the CLI stage driver.
+
+`recognize_native_ledgers` now consumes that native BEAMS result plus GRID's
+`NO_STAFF`, curved per-staff lines/areas, and system areas/bounds. It preserves
+Java's distinct beam contracts: every beam/hook participates in the early
+section purge, while only good full `BeamInter`s participate in the later
+filament-middle purge. On chula, the native builder produces all nine Java
+final survivors exactly, including their seven impacts, and 15 additional
+builder survivors. Those 15 are the explicit remaining tail:
+`LedgersPostAnalysis` computes sheet-wide delta/height populations, discards
+outliers, removes their filaments, and rebuilds impacted staves.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
@@ -378,41 +389,38 @@ The neighbour walks are now shared. `SystemManager.vertNeighbors` and
 `vertical_neighbors`/`horizontal_neighbor` are generic over a small `Placed`
 trait rather than transcribed twice, which is one fewer place to drift.
 
-**What is left is the wiring, and it needs one thing that does not exist yet.**
-The builder wants each staff's own first and last line boundary, but
-`HeadlessPopulationState.staff_boundaries` is per *system*, not per staff. The
-data is available -- after `CleanStaffLines` every staff carries persistent
-lines with their points -- so the remaining work is to build
-`PopulationStaffGeometry` and per-staff `SystemStaffBoundaries` from
-`sheet.staffs`, call the builder, and publish the result.
+**The production wiring is closed.** `GridLinesRecognition.staff_lines` now
+publishes each staff's curved first and last line, while `staff_areas` publishes
+the corresponding closest-staff area. `native_ledgers.rs` consumes both
+directly; it no longer substitutes the per-system boundary collection.
 
 The gate is already generated and is behavioural rather than structural, since
 a `java.awt.geom.Area` is not worth serialising and the only consumer is
 `getClosestStaff`. `SigProbe` emits a `closest <x> <y> <staff>` record over a
 64-pixel lattice; chula gives 1209 points across its six staves, every one
-assigned. Compare the port's `closest_staff` against that.
+assigned, and the native closest-staff gate matches all of them.
 
 ### What LEDGERS still needs
 
+The former input blockers are closed. `native_ledgers.rs` composes the real
+native GRID and BEAMS products, and `ledgers-chula.txt` grades the nine final
+Java survivors to nine decimals. Two details were load-bearing:
 
+1. `LedgersFilter` removes sections intersecting **any** `AbstractBeamInter`,
+   hooks included. `LedgersBuilder` separately removes candidate middles only
+   under good full `BeamInter`s. These cannot share one beam list.
+2. Candidate checks use `StraightFilament`'s inclusive-pixel endpoints, but a
+   materialized `LedgerInter` gets `Glyph.getCenterLine()` on the glyph contour:
+   the right edge is exclusive and rows are centred at `y + 0.5`. Java also
+   uses endpoint midpoint for rough containment and bounds centre for the
+   staff-line reference; conflating those points perturbs every pitch impact.
 
-The ledger logic itself is largely ported -- `filter_raw_ledger_sections`,
-`source_native_ledger_candidates` with a concrete horizontal StickFactory,
-`evaluate_ledger_line` with all seven impacts, and the materializer. Two
-inputs are still missing, down from three:
-
-1. **Staff and system areas.** `RawLedgerStaffZone.area` is Java's `Staff.area`,
-   used by `StaffManager.getClosestStaff` to decide which staff a run belongs
-   to. GRID computes system areas; the staff areas are not published.
-2. **Beams.** `RawLedgerSystemZone.good_full_beams` exists because
-   `LedgersFilter` purges sections lying under good full beams, and BEAMS runs
-   *before* LEDGERS. Supplying an empty list would silently keep sections Java
-   discards, on any page with beams -- which is most piano music.
-
-So the remaining order is staff areas, then BEAMS, then LEDGERS. Staff areas
-are the smaller of the two and are pure geometry; BEAMS is a stage in its own
-right and now has both its input (the staff-free image) and a parity gate
-(`SigProbe` at `BEAMS`, 295 inters on chula) waiting for it.
+The remaining semantic tail is `LedgersPostAnalysis`. The native builder has
+24 chula survivors; Java's post-analysis keeps the exact nine pinned by the
+oracle and discards/rebuilds away the other 15. Port the sheet-wide delta and
+height populations, one-sigma thresholds, filament removal, impacted-staff
+rebuild, and final ledger-line construction. Then run the same exact gate over
+the other example pages before calling the stage native and graded.
 
 ## BEAMS: scoped, and its first seam is grayscale morphology (CLOSED)
 
@@ -614,8 +622,8 @@ the native corpus path in item 3 is closed; only publication remains there.
 3. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
    currently show GRID-level inters only and so cannot display any beam work.
    The native recognition input is now ready; only publication remains.
-4. **LEDGERS**, which is unblocked by BEAMS and no longer blocked on system
-   areas either, since `LedgersFilter` reads the same ones item 2 below closed.
+4. **LEDGERS post-analysis**, now that native GRID/HEADERS/BEAMS-to-builder
+   composition and its first exact gate are closed.
 
 ### Closed here: `scale.getMaxStem()`
 
@@ -1228,8 +1236,8 @@ source beam.
 
 One correction to the preceding handoff: it said 29 erase systems. The oracle
 has 30 rows (3+3+3+5+3+5+2+6), and both the header and end-to-end tests assert
-30. The next recognition stage is LEDGERS; CLI/JSON beam publication can proceed
-independently.
+30. LEDGERS now reaches its native builder; its sheet-wide post-analysis is the
+next recognition tail. CLI/JSON beam publication can proceed independently.
 
 
 ### KEY: the classifier seam is filled

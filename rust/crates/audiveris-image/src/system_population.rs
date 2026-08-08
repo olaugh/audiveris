@@ -407,6 +407,51 @@ impl StaffBoundary {
         boundary_y_at_x(self, x)
     }
 
+    /// Java `LineInfo.yAt(double)`: evaluate within the spline and extrapolate
+    /// outside it using the chord through the two endpoints.
+    #[must_use]
+    pub fn y_at_x_ext(&self, x: f64) -> f64 {
+        let start = self.first_point();
+        let stop = self.last_point();
+        if x < start.0 || x > stop.0 {
+            let dx = stop.0 - start.0;
+            if dx == 0.0 {
+                start.1
+            } else {
+                start.1 + ((stop.1 - start.1) * (x - start.0) / dx)
+            }
+        } else {
+            self.y_at_x(x).unwrap_or(start.1)
+        }
+    }
+
+    /// Java `StaffLine.getBounds()`: a rectangle around the defining spline
+    /// points, with a minimum height of one pixel.
+    #[must_use]
+    pub fn defining_point_bounds(&self) -> (i32, i32, i32, i32) {
+        let first = self.first_point();
+        let mut min_x = first.0;
+        let mut max_x = first.0;
+        let mut min_y = first.1;
+        let mut max_y = first.1;
+        for point in self.segments.iter().copied().map(BoundarySegment::end) {
+            min_x = min_x.min(point.0);
+            max_x = max_x.max(point.0);
+            min_y = min_y.min(point.1);
+            max_y = max_y.max(point.1);
+        }
+        let x = min_x.floor() as i32;
+        let y = min_y.floor() as i32;
+        let right = max_x.ceil() as i32;
+        let bottom = max_y.ceil() as i32;
+        (
+            x,
+            y,
+            right.saturating_sub(x),
+            bottom.saturating_sub(y).max(1),
+        )
+    }
+
     fn first_point(&self) -> (f64, f64) {
         self.segments
             .first()
