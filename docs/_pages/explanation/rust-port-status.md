@@ -13,6 +13,11 @@ This page is the concise roadmap for the bit-exact Rust port of Audiveris.
 Java 5.11 remains the behavioral oracle: a feature is described as graded only
 when a deterministic Java/Rust comparison covers it.
 
+Potential defects and source/documentation inconsistencies discovered in the
+Java implementation are kept separately in the
+[upstream findings catalog](https://github.com/olaugh/audiveris/blob/master/rust/AUDIVERIS_UPSTREAM_FINDINGS.md),
+including the evidence and the Rust parity policy for each finding.
+
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads;
 native `STEMS` now continues through no-stem seed purging and existing-seed

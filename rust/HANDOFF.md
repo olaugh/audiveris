@@ -4,6 +4,10 @@ This is the continuation record for the source-guided Audiveris Rust port. Read
 `PORTING.md` first, then this file. The port is an AGPL-3.0-or-later derivative and
 is intentionally parallel to the unchanged Java production tree.
 
+Maintainer-ready Java defects and compatibility risks found during the port are
+tracked in `AUDIVERIS_UPSTREAM_FINDINGS.md`; update that catalog whenever a
+production-source issue is confirmed.
+
 ## Repository state
 
 - Repository: `/Users/john/sources/jul10-charter/omr/tools/audiveris`

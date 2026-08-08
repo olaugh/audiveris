@@ -1,5 +1,11 @@
 # Porting contract and status
 
+Potential upstream Java defects and source/documentation inconsistencies found
+during differential work are tracked in
+[`AUDIVERIS_UPSTREAM_FINDINGS.md`](AUDIVERIS_UPSTREAM_FINDINGS.md). The port
+preserves confirmed Java behavior until an upstream change is deliberately
+re-frozen.
+
 ## Frozen source baseline
 
 - Audiveris source: `9e1e55cd2746037d059345881c53e6a6754bffbd` (`5.11.0`)
