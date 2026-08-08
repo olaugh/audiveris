@@ -294,6 +294,21 @@ signed values and raw `f64` bits. Two fresh-JVM passes are byte-identical; the
 Port the catalog representation and pure `Template.evaluate` consumer from
 these records; do not regenerate templates approximately from a rendered font.
 
+The dependency-light representation and evaluator are now native in
+`head_template`. The four active shapes, nine anchor kinds, template/slim
+geometry, ordered anchors, ordered signed `PixelDistance` keys, and four-record
+factory-order catalog all have validated typed constructors. `getOffset`
+preserves Java's asymmetric left/center/right `Math.round` expressions, and
+`evaluate` preserves foreground/background/hole weights (`6/1/4`),
+out-of-image and `VALUE_UNKNOWN` skips, zero-vs-nonzero comparison, accumulation
+order, and `Double.MAX_VALUE` empty fallback. Malformed catalog data, tables,
+coordinates, and anchors fail by typed error. Five focused tests use exact
+point-size-84 Chula geometry, raw distances, and anchors. Font rasterization is
+deliberately not guessed: the next slice must turn the complete frozen records
+into native catalog data (without parsing an oracle text file at runtime),
+grade all 27,207 keys/192 anchors, then connect per-staff catalog selection to
+the scanner.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

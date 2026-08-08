@@ -35,6 +35,7 @@ pub mod clef_parameters;
 pub mod cue_beams_step;
 pub mod curves_step;
 pub mod grid_executor;
+pub mod head_template;
 pub mod header_builder;
 pub mod header_time_builder;
 pub mod header_time_column;
