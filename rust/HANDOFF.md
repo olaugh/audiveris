@@ -304,10 +304,20 @@ out-of-image and `VALUE_UNKNOWN` skips, zero-vs-nonzero comparison, accumulation
 order, and `Double.MAX_VALUE` empty fallback. Malformed catalog data, tables,
 coordinates, and anchors fail by typed error. Five focused tests use exact
 point-size-84 Chula geometry, raw distances, and anchors. Font rasterization is
-deliberately not guessed: the next slice must turn the complete frozen records
-into native catalog data (without parsing an oracle text file at runtime),
-grade all 27,207 keys/192 anchors, then connect per-staff catalog selection to
-the scanner.
+deliberately not guessed.
+
+The complete frozen catalog is now production data as well. The deterministic
+generator validates the fresh-JVM text oracle and deduplicates identical
+`(Bravura, pointSize)` payloads into a versioned 105,021-byte checked-in binary
+asset (SHA-256
+`601a91da1359fc69633c496f2bc6860958e5dd3d861deb5495592beabf83077c`).
+Production uses `include_bytes!` and a strict typed decoder; it does not parse
+the oracle text or invoke a font rasterizer. Point sizes 78/83/84/85/87 provide
+20 unique templates, 120 precise anchors, and 17,094 signed keys. The
+integration gate intentionally expands the deduplication again and compares
+all eight page catalogs: 32 templates, 192 anchors (precise bits and Java
+rounding), and 27,207 key records are exact. The next slice is per-staff catalog
+selection and scanner geometry.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
