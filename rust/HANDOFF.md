@@ -67,6 +67,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Registered beam glyphs consumed by HEADS | all 191 narrow-beam bounds, weights, and vertical run digests exact after Java-equivalent `NO_STAFF` masking inside each final parallelogram |
 | Complete native HEADS | the owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live |
 | First semantic STEMS boundary | the production head-corner compositor consumes live HEADS/STEM_SEEDS products and matches 3,521 heads plus all 14,084 constructor-order reference/outside/inside corner points across 30 systems at exact double bits; it stops before stump lookup and mutation |
+| STEMS no-stem purge and existing-seed boundary | the production compositor consumes live GRID/STEM_SEEDS/head-corner products, matches 1,906 seeds -> 1,749 kept / 157 purged, 29,394 purge visits, 36,736 neighbors, 7,114 candidates, 4,182 selections, and 9,902 explicit section fallbacks across all 14,084 corners; it stops before section-built stump registration |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -102,7 +103,7 @@ remains.
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
 eight-page image-pipeline differentials, including complete HEADS and STEMS
-head-corner production entry points.
+head-corner plus no-stem-purge/existing-seed production entry points.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -685,8 +686,18 @@ body SHA-256 is
 `485544ae74a08d2a4d5c2a0de0030db67eec0086bd370d4eb6e2680917d0572a`, and
 the complete fixture SHA-256 is
 `26f9fff81c6207957dab6f42bf7d1650682ae9fca5de46e7b9a7dc46f20fd94b`.
-The next honest seam is stump/seed retrieval followed by no-stem area purge;
-linker geometry, glyph registration, and SIG mutation remain beyond it.
+The next honest seam is the section-built `buildStump()` fallback. Existing-seed
+selection and no-stem purging are now native and exact: the eight-page gate
+matches 1,906 input seeds, 1,749 survivors, 157 purges, 483 no-stem areas,
+29,394 purge visits, 36,736 neighbor rows, 7,114 sorted candidates, 7,005
+visited candidates, 4,182 selections, and 9,902 explicit fallback requests.
+The port derives `Glyph.getCenterLine()` from each fixed run table rather than
+reusing the distinct start/stop line, and it uses `SystemInfo.getArea().getBounds()`
+rather than staff extrema for the vicinity rectangle. The deterministic Java
+fixture SHA-256 is
+`19387924d0d7aaaabf07b0859b353c7fa8d3e3c5d10e8edec8e1d4287b1ace31`.
+Section collection/subsection materialization, glyph reuse and registration,
+linker geometry, and SIG mutation remain beyond it.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3255,11 +3266,12 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Port Java candidate ranking/minimum-grade policy independently, then add a narrow
-   connected-component/Glyph ownership adapter around the existing RunTable path. Do not
-   couple this work to MusicFont sizing or a recognition-stage behavior change.
-2. Complete the remaining concrete visual seams in `HEADERS`, `STEM_SEEDS`, `BEAMS`,
-   `LEDGERS`, and `HEADS`, stopping at the first new raw-image differential boundary.
+1. Freeze and port `HeadLinker.CLinker.buildStump()` from the explicit 9,902
+   section-fallback requests. Preserve full system vertical-section order,
+   intersection/containment gates, subsection materialization, fixed-glyph run evidence,
+   `GlyphIndex.registerOriginal()` reuse, registration order, and corner aliasing.
+2. Continue STEMS through beam/head linker geometry and SIG relation mutation, stopping
+   at each independently gradeable identity-free boundary.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

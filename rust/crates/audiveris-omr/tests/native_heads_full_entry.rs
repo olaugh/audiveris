@@ -10,6 +10,7 @@ use audiveris_omr::{
     native_ledgers::recognize_native_ledgers,
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_head_corners::materialize_native_stems_head_corners,
+    native_stems_head_seeds::materialize_native_stems_head_seeds,
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
 };
 
@@ -90,6 +91,20 @@ fn full_entry_owns_every_chula_heads_boundary() {
             .map(|system| system.system_id)
             .collect::<Vec<_>>(),
         expected_systems
+    );
+
+    let stem_head_seeds = materialize_native_stems_head_seeds(&grid, &stem_seeds, &stem_corners)
+        .expect("STEMS head seed selection");
+    assert_eq!(stem_head_seeds.input_seed_count, 190);
+    assert_eq!(stem_head_seeds.kept_seed_count, 164);
+    assert_eq!(stem_head_seeds.purged_seed_count, 26);
+    assert_eq!(stem_head_seeds.corner_count, 1_304);
+    assert_eq!(stem_head_seeds.selected_seed_count, 346);
+    assert_eq!(stem_head_seeds.section_fallback_count, 958);
+    assert_eq!(stem_head_seeds.visited_candidate_count, 649);
+    assert_eq!(
+        stem_head_seeds.selected_seed_count + stem_head_seeds.section_fallback_count,
+        stem_head_seeds.corner_count
     );
 }
 

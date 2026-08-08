@@ -14,7 +14,7 @@
 
 use audiveris_image::{
     beam_structure::Segment,
-    system_population::{BoundarySegment, StaffBoundary},
+    system_population::{BoundarySegment, PopulationSystemArea, StaffBoundary},
 };
 
 /// Java `java.awt.Rectangle` coordinates and dimensions.
@@ -74,6 +74,56 @@ impl JavaRectangle {
     fn bottom_as_f64(self) -> f64 {
         f64::from(self.y) + f64::from(self.height)
     }
+}
+
+/// Java `SystemInfo.getArea().getBounds()` for a populated system area.
+///
+/// The population product keeps the unsliced north/south paths plus the exact
+/// horizontal slice limits. Java intersects those two shapes before asking for
+/// integer bounds, so curve extrema outside `left..right` must not contribute.
+#[must_use]
+pub(crate) fn population_system_area_integer_bounds(area: &PopulationSystemArea) -> JavaRectangle {
+    if area.right <= area.left {
+        return JavaRectangle::default();
+    }
+
+    let left = f64::from(area.left);
+    let right = f64::from(area.right);
+    let mut minimum_y = f64::INFINITY;
+    let mut maximum_y = f64::NEG_INFINITY;
+    let mut found = false;
+    for segment in area.outline_segments() {
+        let (start, end) = segment_endpoints(segment);
+        let segment_left = start.0.min(end.0);
+        let segment_right = start.0.max(end.0);
+        let clipped_left = segment_left.max(left);
+        let clipped_right = segment_right.min(right);
+        if clipped_right < clipped_left {
+            continue;
+        }
+
+        let (segment_minimum_y, segment_maximum_y) = if start.0 == end.0 {
+            if start.0 < left || start.0 > right {
+                continue;
+            }
+            segment_y_range(segment, 0.0, 1.0)
+        } else {
+            let mut start_t = parameter_at_x(segment, clipped_left);
+            let mut end_t = parameter_at_x(segment, clipped_right);
+            if start_t > end_t {
+                std::mem::swap(&mut start_t, &mut end_t);
+            }
+            segment_y_range(segment, start_t, end_t)
+        };
+        minimum_y = minimum_y.min(segment_minimum_y);
+        maximum_y = maximum_y.max(segment_maximum_y);
+        found = true;
+    }
+
+    if !found {
+        return JavaRectangle::default();
+    }
+    enclosing_integer_bounds(left, minimum_y, right, maximum_y)
 }
 
 /// The `Area` built around a scanner staff line or ledger center-line.

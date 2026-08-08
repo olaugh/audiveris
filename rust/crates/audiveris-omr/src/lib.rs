@@ -78,6 +78,7 @@ pub mod native_heads_staff_epilog;
 pub mod native_ledgers;
 pub mod native_stem_seeds;
 pub mod native_stems_head_corners;
+pub mod native_stems_head_seeds;
 pub mod page_step;
 pub mod production_stages;
 pub mod raw_ledger_filter;

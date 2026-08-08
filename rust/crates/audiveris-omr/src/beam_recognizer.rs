@@ -107,6 +107,39 @@ pub fn center_line(component: &GlyphComponent) -> Option<Segment> {
         }
     }
 
+    fitted_center_line(&line)
+}
+
+/// `Glyph.getCenterLine()` for a fixed glyph backed by a `RunTable`.
+///
+/// This is the same regression as [`center_line`], with the fixed glyph's
+/// table origin applied after following Java's sequence/run/pixel order.
+#[must_use]
+pub fn run_table_center_line(run_table: &RunTable, left: i32, top: i32) -> Option<Segment> {
+    let mut line = BasicLine::default();
+    let horizontal = run_table.orientation() == Orientation::Horizontal;
+    for sequence in 0..run_table.sequence_count() {
+        for run in run_table.sequence(sequence).unwrap_or_default() {
+            for coordinate in (run.start..=run.stop()).rev() {
+                if horizontal {
+                    line.include_point(
+                        f64::from(left) + coordinate as f64,
+                        f64::from(top) + sequence as f64,
+                    );
+                } else {
+                    line.include_point(
+                        f64::from(left) + sequence as f64,
+                        f64::from(top) + coordinate as f64,
+                    );
+                }
+            }
+        }
+    }
+
+    fitted_center_line(&line)
+}
+
+fn fitted_center_line(line: &BasicLine) -> Option<Segment> {
     // `BasicLine.toCenterLine`: the fit translated to pixel centres and
     // extended to the pixel limits, which is half a pixel wider than the fit.
     let (x_min, x_max, y_min, y_max) = line.extents()?;
