@@ -264,6 +264,16 @@ emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
 `da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
 `a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
 
+The next head-corner reachability boundary is frozen but not yet native. After
+all beam-origin builders, the Java oracle visits 14,084 corners in exact
+TR/BL/TL/BR inspection order, retains 1,340 of 36,736 ordered seed scans,
+accepts 4,566 head-corner and 8,120 beam targets, and creates 1,687
+head-origin anchors without constructing a CLinker `StemBuilder`. Two fresh
+JDK 25 runs produced the same 79,213-line / 37,478,685-byte fixture, SHA-256
+`78d5a489e576aa668eaaad3eae257d5b88f628d3ab09c7954b3cef56c845cb8b`.
+The production Rust compositor and differential gate are in progress, so this
+freeze is evidence for the next slice rather than a port-completion claim.
+
 Last updated 2026-08-08.
 
 ---
@@ -331,7 +341,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Grade STEMS head-corner reachability before CLinker-origin `StemBuilder` construction, then head-origin builders, then linking/SIG mutation at separate boundaries.
+1. Port the frozen STEMS head-corner reachability boundary before CLinker-origin `StemBuilder` construction, then head-origin builders, then linking/SIG mutation at separate boundaries.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
 3. Complete GRID brace glyph/SIG promotion from the now-retained exact detached filament evidence; Part ownership is already live for downstream stages.
 4. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.
