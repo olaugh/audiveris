@@ -247,16 +247,15 @@ order are ported, and the sheet-to-staff point-size interpolation (including
 the no-scale fallback) is explicit. Pinned Temurin 25 rows cover arbitrary
 sizes, the complete interpolation, and its near-zero fallback.
 
-The dependency-light `black_head_sizer` kernel is native as well. It preserves
+The `black_head_sizer` kernel is now a production BEAMS side effect. It preserves
 the two `checkSpot` passes, optional head-oriented close and component rebuild,
 single/stack/unclassified decisions, discovery order, stable width sort at the
 20-single quorum, `[n/4, 3n/4)` core, and Java-compatible unbiased populations
-through `BlackHeadScale`. Its typed output deliberately does not invent glyph
-registration/group side effects. This is not yet a production side effect: the
-next bounded milestone is to grade these decisions against the fresh Java
-corpus and wire the measured scale, music-font point size, and per-staff point
-sizes into BEAMS. Then freeze the active head template catalogs and port the
-pure `Template.evaluate` kernel before scanner ordering or SIG allocation.
+through `BlackHeadScale`. Its typed output deliberately does not invent Java's
+process-global glyph ids, but retains exact source and sole closed components
+even for post-close rejects. `recognize_native_beams` now runs it on the actual
+threshold-140 components before system dispatch, derives the Bravura
+`MusicFontScale`, and retains every GRID staff's selected head point size.
 
 The independent half of that grade is frozen in
 `oracle/black-head-sizer.txt`. `BlackHeadSizerProbe` reaches real STEM_SEEDS in
@@ -271,7 +270,15 @@ centroid, run count, and cropped-run digest; populations use hexadecimal
 doubles. Two complete fresh-JVM passes are byte-identical. The 4,767-line
 fixture has SHA-256
 `49408a3fc31857f107efb65ead37f63fd2e6dfe159f3fdd6215c89ed233199a9`.
-The Rust corpus comparison and production BEAMS wiring are next.
+The Rust comparison drives the same eight pages through native GRID -> HEADERS
+-> BEAMS and matches every one of those candidate rows, source and closed
+component run table, decision, discovery/sort/core order, population bit
+pattern, sheet point size, and staff point size exactly. Totals remain 2,739
+inputs, 936 singles, 5 stacks, 470 core samples, and 55 staves. Existing raw
+beam, HEAD_SPOTS, LEDGERS, and HEADS-prolog gates remain unchanged; BEAMS now
+retains rather than discards the state `NoteHeadsBuilder` uses to select its
+catalog. The one-line-staff and drum-notation switches are not yet represented
+in the production entry point and remain outside this eight-page grade.
 
 The following HEADS dependency is already frozen independently in
 `oracle/head-template-catalog.txt`. `HeadTemplateCatalogProbe` reaches real

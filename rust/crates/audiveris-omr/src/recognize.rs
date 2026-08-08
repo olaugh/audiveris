@@ -364,11 +364,36 @@ pub struct NativeBeamRecognition {
     /// Java `Picture.TableKey.HEAD_SPOTS`, saved from the closed gray raster
     /// at threshold 170 before BEAMS applies its own threshold of 140.
     pub head_spot_runs: RunTable,
+    /// Java `SpotsBuilder.buildSpots`'s `BlackHeadSizer` side effect, measured
+    /// from the separate threshold-140 spot components before system dispatch.
+    pub black_head_sizing: crate::black_head_sizer::BlackHeadSizingResult,
+    /// Java `Scale.MusicFontScale`, absent only when the single-head quorum is
+    /// not met. Bravura is the only currently graded music family.
+    pub music_font_scale: Option<NativeMusicFontScale>,
+    /// Exact `Staff.getHeadPointSize()` value selected from the sheet scale for
+    /// every GRID staff, in staff order.
+    pub staff_head_point_sizes: Vec<NativeStaffHeadPointSize>,
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
     pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
     pub group_counts: Vec<(usize, usize)>,
     pub group_count: usize,
+}
+
+/// Native counterpart of Java `Scale.MusicFontScale` for the measured scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeMusicFontScale {
+    pub family: audiveris_music_font::MusicFamily,
+    pub point_size: i32,
+}
+
+/// One production `Staff.getHeadPointSize()` result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeStaffHeadPointSize {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub specific_interline: i32,
+    pub point_size: i32,
 }
 
 /// Accepted `VERTICAL_SEED` glyphs adapted for one Java `SystemInfo`.
@@ -389,6 +414,8 @@ pub struct NativeBeamStemSeedSystem {
 pub enum NativeBeamRecognitionError {
     RunTable(RunTableError),
     BeamContract(crate::beams_step::BeamsContractError),
+    BlackHeadSizer(crate::black_head_sizer::BlackHeadSizerError),
+    MusicFont(audiveris_music_font::sfnt::FontError),
     UnsupportedSmallBeam {
         main: i32,
         small: i32,
@@ -418,6 +445,8 @@ impl std::fmt::Display for NativeBeamRecognitionError {
         match self {
             Self::RunTable(error) => write!(formatter, "beam run table: {error}"),
             Self::BeamContract(error) => write!(formatter, "beam contract: {error}"),
+            Self::BlackHeadSizer(error) => write!(formatter, "black-head sizing: {error}"),
+            Self::MusicFont(error) => write!(formatter, "black-head music font: {error}"),
             Self::UnsupportedSmallBeam { main, small } => write!(
                 formatter,
                 "small-beam recognition is not graded (main {main}, small {small})"
@@ -451,6 +480,8 @@ impl std::error::Error for NativeBeamRecognitionError {
         match self {
             Self::RunTable(error) => Some(error),
             Self::BeamContract(error) => Some(error),
+            Self::BlackHeadSizer(error) => Some(error),
+            Self::MusicFont(error) => Some(error),
             Self::UnsupportedSmallBeam { .. }
             | Self::InvalidStemScale(_)
             | Self::MissingSystemArea(_)
@@ -471,6 +502,18 @@ impl From<RunTableError> for NativeBeamRecognitionError {
 impl From<crate::beams_step::BeamsContractError> for NativeBeamRecognitionError {
     fn from(error: crate::beams_step::BeamsContractError) -> Self {
         Self::BeamContract(error)
+    }
+}
+
+impl From<crate::black_head_sizer::BlackHeadSizerError> for NativeBeamRecognitionError {
+    fn from(error: crate::black_head_sizer::BlackHeadSizerError) -> Self {
+        Self::BlackHeadSizer(error)
+    }
+}
+
+impl From<audiveris_music_font::sfnt::FontError> for NativeBeamRecognitionError {
+    fn from(error: audiveris_music_font::sfnt::FontError) -> Self {
+        Self::MusicFont(error)
     }
 }
 
@@ -657,6 +700,53 @@ fn recognize_native_beams_impl(
     let table = spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD)?;
     let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
 
+    // In Java this happens inside `SpotsBuilder.buildSpots`, before the same
+    // glyphs are dispatched to systems and interpreted as beams. The switches
+    // which suppress sizing for one-line staves or drum notation are false on
+    // the graded corpus; those modes remain an explicit widening task.
+    let black_head_sizing = crate::black_head_sizer::measure_black_heads(
+        &crate::black_head_sizer::BlackHeadSizingInput {
+            spots: &components,
+            parameters: crate::black_head_sizer::BlackHeadSizerParameters::from_interline(
+                interline,
+            ),
+            closing: crate::black_head_sizer::BlackHeadClosing::Enabled,
+        },
+    )?;
+    let music_font_point_size = black_head_sizing
+        .black_head_scale
+        .map(|scale| {
+            audiveris_music_font::black_head_point_size(
+                audiveris_music_font::MusicFamily::Bravura,
+                scale.width_mean,
+            )
+        })
+        .transpose()?
+        .flatten();
+    let music_font_scale = music_font_point_size.map(|point_size| NativeMusicFontScale {
+        family: audiveris_music_font::MusicFamily::Bravura,
+        point_size,
+    });
+    let mut staff_head_point_sizes = Vec::with_capacity(recognition.staff_lines.len());
+    for staff in &recognition.staff_lines {
+        let system_id = recognition
+            .peak_graph
+            .systems
+            .iter()
+            .position(|staff_ids| staff_ids.contains(&staff.staff_id))
+            .map_or(0, |index| index + 1);
+        staff_head_point_sizes.push(NativeStaffHeadPointSize {
+            system_id,
+            staff_id: staff.staff_id,
+            specific_interline: staff.interline,
+            point_size: audiveris_music_font::head_point_size(
+                music_font_point_size,
+                interline,
+                f64::from(staff.interline),
+            ),
+        });
+    }
+
     let item = ItemParameters::new(interline, f64::from(main_beam), false);
     let sheet = SheetParameters::new(interline);
     let filter = &recognition.no_staff;
@@ -812,6 +902,9 @@ fn recognize_native_beams_impl(
 
     Ok(NativeBeamRecognition {
         head_spot_runs,
+        black_head_sizing,
+        music_font_scale,
+        staff_head_point_sizes,
         spot_count: components.len(),
         raw_beams,
         hooks,

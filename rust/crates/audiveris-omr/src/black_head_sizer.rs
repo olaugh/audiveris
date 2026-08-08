@@ -121,10 +121,20 @@ pub enum BlackHeadCandidateDecision {
 }
 
 /// Input-order trace for one source spot.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BlackHeadCandidateTrace {
     pub source_index: usize,
     pub source_ancestor_mark: usize,
+    /// Exact threshold-140 input component, retained for the BEAMS→HEADS
+    /// differential boundary.
+    pub source_component: GlyphComponent,
+    /// Number of components after Java's head-oriented close. `None` means
+    /// closing was skipped by the first gate or disabled by the caller.
+    pub closed_component_count: Option<usize>,
+    /// The exact sole component passed to the second gate. Retained even when
+    /// that gate rejects it, so corpus grading can distinguish morphology from
+    /// classification.
+    pub closed_component: Option<GlyphComponent>,
     pub decision: BlackHeadCandidateDecision,
 }
 
@@ -212,6 +222,9 @@ pub fn measure_black_heads(
             traces.push(BlackHeadCandidateTrace {
                 source_index,
                 source_ancestor_mark,
+                source_component: source.clone(),
+                closed_component_count: None,
+                closed_component: None,
                 decision: BlackHeadCandidateDecision::Rejected {
                     phase: BlackHeadCheckPhase::BeforeClosing,
                     reason,
@@ -228,6 +241,9 @@ pub fn measure_black_heads(
                     traces.push(BlackHeadCandidateTrace {
                         source_index,
                         source_ancestor_mark,
+                        source_component: source.clone(),
+                        closed_component_count: Some(closed.len()),
+                        closed_component: None,
                         decision: BlackHeadCandidateDecision::ClosingComponentCount(closed.len()),
                     });
                     continue;
@@ -240,6 +256,10 @@ pub fn measure_black_heads(
             traces.push(BlackHeadCandidateTrace {
                 source_index,
                 source_ancestor_mark,
+                source_component: source.clone(),
+                closed_component_count: (input.closing == BlackHeadClosing::Enabled).then_some(1),
+                closed_component: (input.closing == BlackHeadClosing::Enabled)
+                    .then(|| measured.clone()),
                 decision: BlackHeadCandidateDecision::Rejected {
                     phase: BlackHeadCheckPhase::AfterClosing,
                     reason,
@@ -252,6 +272,7 @@ pub fn measure_black_heads(
             .map_err(|_| BlackHeadSizerError::GeometryOutsideJavaInt { source_index })?;
         let weight = i32::try_from(measured.weight)
             .map_err(|_| BlackHeadSizerError::GeometryOutsideJavaInt { source_index })?;
+        let traced_closed = (input.closing == BlackHeadClosing::Enabled).then(|| measured.clone());
         let retained = MeasuredBlackHeadSpot {
             source_index,
             was_closed: input.closing == BlackHeadClosing::Enabled,
@@ -273,6 +294,9 @@ pub fn measure_black_heads(
         traces.push(BlackHeadCandidateTrace {
             source_index,
             source_ancestor_mark,
+            source_component: source.clone(),
+            closed_component_count: (input.closing == BlackHeadClosing::Enabled).then_some(1),
+            closed_component: traced_closed,
             decision,
         });
     }

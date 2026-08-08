@@ -48,6 +48,9 @@ differential gate is now exact for every post-erasure BINARY
 pixel, signed distance value, component run, and all 3,097 system-dispatch
 references. Its only initial mismatch exposed Java's one-pixel-beyond-staff
 `SystemInfo.getRight()` convention, now shared by every native consumer.
+BEAMS now also retains the previously missing BlackHeadSizer side effect:
+all 2,739 threshold-140 inputs and decisions, 936 singles, 5 stacks, 470 core
+samples, eight sheet font sizes, and all 55 staff head point sizes match Java.
 
 Last updated 2026-08-07.
 
@@ -85,7 +88,7 @@ is present but the musical interpretation is not.
 | 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. The BEAMS adapter and CLI validate and preserve every accepted per-system identity and median. | Widen beyond profile 1 and add tablature/no-staff skip cases. |
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. | Grade small beams and widen the corpus. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
-| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, 2,790 transient components, and 3,097 per-system spot references; all eight pages now match Java exactly through the `NoteHeadsBuilder` boundary. The dependency-light BlackHeadSizer decision/population kernel and exact font secant are native; a fresh-JVM oracle freezes all 2,739 sizing inputs, 936 singles, 5 stacks, 470 core samples, and 55 staff point sizes. The resulting five real template sizes and four active shapes are frozen through all 192 anchors and 27,207 keyed pixels. | Compare and wire the missing BEAMS sizing side effect, then port template representation/evaluation, scanning, and interpretation. |
+| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, 2,790 transient components, and 3,097 per-system spot references; all eight pages now match Java exactly through the `NoteHeadsBuilder` boundary. BEAMS' BlackHeadSizer side effect is now production-wired and exact for all 2,739 sizing inputs, 936 singles, 5 stacks, 470 core samples, eight font scales, and 55 staff point sizes. The resulting five real template sizes and four active shapes are frozen through all 192 anchors and 27,207 keyed pixels. | Port template representation/evaluation, then scanning and interpretation. Grade one-line/drum sizing suppression separately. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
@@ -107,7 +110,7 @@ is present but the musical interpretation is not.
 | Raster processing | **Ported and graded** | Run tables, projections, median/Gaussian filters, morphology, thresholding, chamfer distance, watershed, masks, and connected components. |
 | Baseline JPEG | **Ported for measured scope** | Pure Rust and bit-exact to Audiveris's bundled libjpeg behavior for supported 8-bit Huffman images. Progressive, arithmetic, 12-bit, and CMYK inputs are refused rather than approximated. |
 | PDF ingest and rendering | **Ported for measured corpus** | All 189 pinned pages match PDFBox through filters, rasters, transforms, placement, and rendered grayscale output. Unmeasured PDF shapes are refused by name. |
-| Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are also exact, ready for production BlackHeadSizer wiring. |
+| Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are exact and production-wired through every graded staff. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
 | CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS in native Java order for the applicable JSON target; GRID keeps its text report. BEAMS and LEDGERS documents retain stem scale and accepted seeds alongside selected headers, system-owned erases, beams, ledgers, relations, groups, and curved paths. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
@@ -116,10 +119,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Compare and wire the native `BlackHeadSizer` spot population, music-font
-   secant, and selected per-staff head point size into BEAMS,
-   the missing side effect that HEADS template selection consumes.
-2. Port the frozen active head-template catalogs and pure template evaluator.
+1. Port the frozen active head-template catalogs and pure template evaluator.
+2. Connect HEADS scanner geometry to the measured per-staff catalog.
 3. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
 4. Complete HEADS scanning/interpretation, then proceed in pipeline order.
 5. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
