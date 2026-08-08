@@ -540,9 +540,8 @@ signed overflowing `int` area arithmetic in `GeoUtil.iou`, non-wrapping
 `getMaxX`, first qualifying seed, early break, and inclusive 0.1 IoU and grade
 margin. Nine adversarial tests cover equal grades and ordering, canonical NaN,
 signed zero, exact thresholds, invalid rectangle dimensions, violated sort
-preconditions, and overflow. The remaining range work is to feed this kernel
-from the production scanner, retrieve the 174 final glyphs, and grade all
-per-staff hashes and rows.
+preconditions, and overflow. The production range compositor now feeds this
+kernel from every scanner and retrieves the 174 final glyphs.
 
 The compact range fixture now grades that pure post-processing across the
 whole corpus as far as its retained schema permits. The integration test
@@ -570,9 +569,21 @@ and raw-candidate hashes plus every scanner/count/performance/outcome partition:
 attempts, and 34,101 raw candidates. Four inverted source ranges remain explicit
 empty scanner invocations, as in Java. Seed-created `HeadInter`s are present in
 Java's dynamic competitor pool but `Scanner.overlap` deliberately skips them;
-they first matter at `filterSeedConflicts`. The next composition applies the
-already-native aggregation/conflict kernels per scanner and retrieves the 174
-range glyphs.
+they first matter at `filterSeedConflicts`.
+
+`native_heads_range_glyphs.rs` now completes that composition. In system/staff
+order it accumulates current and prior seed heads into the live competitor
+pool, preserves stable ordinate order, intersects good competitors with each
+scanner's exact retained curved semantic band, and stably sorts the slice by x.
+It aggregates that scanner's raw candidates, records every qualifying seed
+conflict with live/slice provenance, and retrieves surviving glyphs from the
+original BINARY raster. The permanent eight-page differential matches all
+3,550 compact candidates and aggregate main/member provenance, all 3,376
+conflicts, zero empty-glyph drops, and all 174 final range heads by raw
+source/attempt, shape, pitch, grade/impact bits, provisional/final bounds,
+glyph weight/run digest, good decision, and dense order. No global Java glyph
+or SIG ID is invented. The active HEADS boundary is now the frozen staff/system
+epilog below.
 
 The boundary after range glyphs is frozen in a separate deterministic oracle.
 `oracle/java/run-heads-post-range.sh` manually follows the exact remainder of
@@ -584,12 +595,35 @@ the actual `HeadsStep.doEpilog` image discard and `HeadSeedTally.analyze`; HEADS
 has no linking phase. Across eight pages it records 3,609 inputs, 62 duplicate
 removals, 2,725 overlap exclusions, 3,547 post-duplicate staff heads, zero beam
 removals, 26 head removals, 3,521 final heads, and 18 analyzed scale rows. The
-default 3,823,523-byte fixture retains decisions and survivors while hashing
-all ordered inputs, pair checks, tallies, and beam inputs; `--full-trace` exposes
-them. Two fresh-JVM generations are byte-identical at SHA-256
-`a6f159c14558d9804623f834a97da80e3931fad32ec74222b42a9a09be96150c`,
+default 4,004,446-byte fixture retains decisions, survivors, and 1,451
+identity-free live scale inputs while hashing all ordered inputs, pair checks,
+tallies, and beam inputs; `--full-trace` exposes the remaining diagnostics. Two
+fresh-JVM generations are byte-identical at SHA-256
+`356cf1a0dfb677062ab52fa16f701229400621f7d32fcb2b0c8dccd9d017a6b3`,
 with emitted body SHA-256
-`46b7cd41c0b4c57881621d66d0bfe0c64c5f8b31246caf6e98aa25897dfea47a`.
+`2b70d5ec9289dfd8b942b9b246e743dfbdd0b74d3e8887c54a0bc8eea8dff3e7`.
+
+`head_seed_tally_analysis.rs` now ports the final sheet-scale computation over
+that retained stream. It ignores removed heads, groups by Java `Shape` enum and
+LEFT/RIGHT `EnumMap` order, preserves each insertion-ordered Population's
+binary64 additions, and emits only buckets meeting the inclusive quorum of ten.
+Four adversarial tests cover ordering, quorum, removed entries, non-associative
+sums, and signed zero; the eight-page differential consumes all 1,451 samples
+and matches every one of the 18 Java mean-dx raw bit patterns.
+
+The common staff purge loop is now native as a pure decision kernel.
+`head_purge.rs` stably applies Java's `Inters.byFullAbscissa` ordering with
+wrapping comparator subtraction and relative ID tie order, positive-area
+rectangle gates, wrapping inclusive xMax break, removed-state skips, and the
+left-loop continuation when the left head loses. Duplicate mode performs true
+removals; overlap mode records exclusion decisions without removing either
+head. Equal grades use the strict `EPSILON` branch and reproduce
+`purgedEquals`: prefer a head with seed tally, then shape/bounds identity, and
+replicate complementary LEFT/RIGHT tallies only between two good identical
+heads. Twelve adversarial tests include NaN, overflow, pre-removed inputs, and
+multi-decision overlap behavior. The caller must still provide the complete
+glyph-aware `isSameAs` and staff/pitch/ratio-aware `HeadInter.overlaps`
+predicates; keeping those explicit marks the actual remaining composition seam.
 
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on

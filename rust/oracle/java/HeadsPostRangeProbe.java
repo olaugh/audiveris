@@ -116,6 +116,7 @@ public class HeadsPostRangeProbe
         int pagePurgedBeams = 0;
         int pagePurgedHeads = 0;
         int pageFinalHeads = 0;
+        int pageScaleInputs = 0;
 
         System.out.printf(
                 "headpostpage %s systems %d staves %d family %s%n",
@@ -468,6 +469,37 @@ public class HeadsPostRangeProbe
 
         // Exact HeadsStep.doEpilog order. No linking is performed by HEADS.
         sheet.getPicture().discardImage(Picture.ImageKey.HEAD_SPOTS);
+        final RowHasher scaleInputHash = new RowHasher();
+        for (Map.Entry<SystemInfo, HeadSeedTally> tallyEntry : tallies.entrySet()) {
+            final Map<HorizontalSide, Map<HeadInter, Double>> data =
+                    (Map<HorizontalSide, Map<HeadInter, Double>>) field(
+                            tallyEntry.getValue(), "data");
+            for (Map.Entry<HorizontalSide, Map<HeadInter, Double>> sideEntry
+                    : data.entrySet()) {
+                int entryOrdinal = 0;
+                for (Map.Entry<HeadInter, Double> headEntry
+                        : sideEntry.getValue().entrySet()) {
+                    final HeadInter head = headEntry.getKey();
+                    if (!head.isRemoved()) {
+                        final String row = String.format(
+                                "headpostscaleinput %s system %d ordinal %d side %s "
+                                        + "entry %d shape %s dx %s",
+                                page,
+                                tallyEntry.getKey().getId(),
+                                pageScaleInputs,
+                                sideEntry.getKey(),
+                                entryOrdinal,
+                                head.getShape(),
+                                hexDouble(headEntry.getValue()));
+                        pageHash.add(row);
+                        scaleInputHash.add(row);
+                        System.out.println(row);
+                        pageScaleInputs++;
+                    }
+                    entryOrdinal++;
+                }
+            }
+        }
         HeadSeedTally.analyze(sheet, tallies.values());
         final HeadSeedScale headSeedScale = sheet.getScale().getHeadSeedScale();
         final RowHasher scaleHash = new RowHasher();
@@ -491,7 +523,7 @@ public class HeadsPostRangeProbe
         System.out.printf(
                 "headpostpagesummary %s staffs %d inputs %d duplicates %d overlaps %d "
                         + "staffHeads %d purgedBeams %d purgedHeads %d finalHeads %d "
-                        + "scaleHash %016x hash %016x%n",
+                        + "scaleInputs %d scaleInputHash %016x scaleHash %016x hash %016x%n",
                 page,
                 pageStaffs,
                 pageInputs,
@@ -501,6 +533,8 @@ public class HeadsPostRangeProbe
                 pagePurgedBeams,
                 pagePurgedHeads,
                 pageFinalHeads,
+                pageScaleInputs,
+                scaleInputHash.value(),
                 scaleHash.value(),
                 pageHash.value());
     }
@@ -999,7 +1033,8 @@ public class HeadsPostRangeProbe
         System.out.println("# also run. HEADS performs no linking operation.");
         System.out.println("#");
         System.out.println("# Default output retains purge decisions and boundary survivors while hashing");
-        System.out.println("# every ordered input and pair check. Pass --full-trace for those verbose rows.");
+        System.out.println("# every ordered input and pair check. It also retains the identity-free surviving");
+        System.out.println("# tally stream consumed by HeadSeedTally.analyze. Pass --full-trace for verbose rows.");
         System.out.println("# All identities are per-boundary ordinals; doubles include hex text/raw bits.");
         System.out.println("# FNV-1a-64 hashes cover canonical UTF-8 rows with trailing newlines.");
     }
