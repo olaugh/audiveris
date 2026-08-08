@@ -312,6 +312,16 @@ impl<ClassifierError: fmt::Display> fmt::Display for NativeClefError<ClassifierE
     }
 }
 
+impl<ClassifierError: Error + 'static> Error for NativeClefError<ClassifierError> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::RunTable(source) => Some(source),
+            Self::Classifier(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
 /// Concrete Java lookup → vertical runs → parts → near-graph → connected
 /// subset decomposition. The classifier sees registered glyphs in Java trial
 /// order; all filtering around it remains native.

@@ -1,31 +1,58 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Production inputs for native HEADERS, derived only from GRID state.
+//! Production native HEADERS, derived only from GRID state.
 //!
 //! The visual clef/key/time recognizers need a precise header start and a
 //! staff's first good connected barline after that start.  The corpus harness
-//! used to supply both from its Java oracle.  This module closes that input
-//! seam: it adapts the live GRID sheet/SIG into [`HeadlessHeaderSystem`] state,
-//! runs Java's ported `computeHeaderStarts`, and records the bar starts that
-//! `Staff.getBrowseStop` is allowed to use.
+//! used to supply both from its Java oracle. This module closes that input
+//! seam, adapts the live GRID sheet/SIG into [`HeadlessHeaderSystem`] state,
+//! and composes the concrete clef, key, and time recognizers in Java order.
 
-use std::{convert::Infallible, error::Error, fmt};
+use std::{collections::BTreeMap, convert::Infallible, error::Error, fmt};
 
 use audiveris_image::{
     bars_logic::VerticalInterKind,
     grid_sig::{GridInterId, GridSigNode, GridSigRelation},
     lines_coordinator::StaffCandidateKind,
+    run_table::RunTable,
+    spots::HeaderErase,
 };
 
 use crate::{
+    clef_classifier::{BundledClefClassifier, ClefClassificationError},
+    clef_column::{
+        ClefColumnError, ClefLifecycleRecognizer, ClefLookupParameters, ClefLookupStaffGeometry,
+        HeadlessClefColumn, NativeClefError, NativeClefParameters, NativeClefProposalRecognizer,
+        NeutralClefCandidate, StaffLineOrdinates, build_clef_lookup_contexts_at,
+    },
     clef_parameters::SheetClefParameters,
     header_builder::{
         HeaderBarGroupRelation, HeaderBarline, HeaderBuilderError, HeaderHorizontalSide,
         compute_header_starts,
     },
+    header_time_builder::{
+        HeaderTimeRasterContext, NativeHeaderTimeError, NativeHeaderTimeParameters,
+        NativeHeaderTimeRecognizer,
+    },
+    header_time_column::{
+        HeaderTimeColumnError, HeaderTimeLifecycleContext, HeaderTimeLifecycleRecognizer,
+        HeadlessHeaderTimeColumn, NeutralTimeCandidate, NeutralTimeValue,
+        VisualHeaderTimeProposalRecognizer,
+    },
     headers_step::{HeadlessHeaderStaff, HeadlessHeaderSystem},
+    key_classifier::{BundledKeyClassifier, KeyClassificationError},
+    key_column::{
+        HeadlessKeyColumn, KeyClefSupport, KeyColumnError, KeyLifecycleContext,
+        KeyLifecycleRecognizer, NativeKeyError, NativeKeyParameters, NativeKeyProposalRecognizer,
+        NativeKeyStaffContext, NeutralKeyCandidate, StaffPitchGeometry,
+    },
+    key_parameters::{
+        KeyExtractorParameters, KeyPipelineParameters, browse_envelope, max_eval_rank,
+        max_header_width, max_slice_distance,
+    },
     recognize::{GridLinesRecognition, StaffLineGeometry},
-    staff_header::HeaderBounds,
+    staff_header::{HeaderBounds, StaffHeader},
+    time_classifier::{BundledTimeClassifier, TimeClassificationError},
 };
 
 /// Java `BarlineInter.isGood()`'s hard-coded threshold.
@@ -354,6 +381,888 @@ pub fn derive_native_header_grid_context(
         sheet_interline,
         systems,
     })
+}
+
+const INTRINSIC_RATIO: f64 = 0.8;
+const MINIMUM_CLEF_GRADE: f64 = 0.03 / INTRINSIC_RATIO;
+const MINIMUM_KEY_GRADE: f64 = 0.01 / INTRINSIC_RATIO;
+const MAXIMUM_DELTA_PITCH_ONE: f64 = 0.5;
+const MAXIMUM_DELTA_PITCH_FOUR: f64 = 2.0;
+const CLEF_KEY_SOURCE_RATIO: f64 = 5.0;
+const KEY_ALTERS_SOURCE_RATIO: f64 = 5.0;
+
+/// Oracle-free result of composing the visual clef, key, and time columns.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeaderRecognition {
+    pub sheet_interline: i32,
+    /// Results in GRID/Java system order.
+    pub systems: Vec<NativeHeaderSystemRecognition>,
+    /// Rectangles consumed directly by the native beam spot chain.
+    pub header_erases: Vec<HeaderErase>,
+}
+
+/// Selected header state and all retained candidate evidence for one system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeaderSystemRecognition {
+    pub system_id: usize,
+    /// Staff results in the system's source order.
+    pub staffs: Vec<NativeHeaderStaffRecognition>,
+    pub time_value: Option<NeutralTimeValue>,
+}
+
+/// The complete typed evidence left by the three Java-order column lifecycles.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeaderStaffRecognition {
+    pub staff_id: usize,
+    pub specific_interline: i32,
+    pub header: Option<StaffHeader>,
+    pub clef_candidates: Vec<NeutralClefCandidate>,
+    pub selected_clef_id: Option<usize>,
+    pub key_candidates: Vec<NeutralKeyCandidate>,
+    pub selected_key_id: Option<usize>,
+    pub time_candidates: Vec<NeutralTimeCandidate>,
+    pub selected_time_id: Option<usize>,
+}
+
+/// A precise production failure. Missing geometry is never replaced by an ordinate of zero.
+#[derive(Debug)]
+pub enum NativeHeaderRecognitionError {
+    GridContext(NativeHeaderGridContextError),
+    SheetHeightOutOfRange(usize),
+    MissingHeader {
+        system_id: usize,
+        staff_id: usize,
+    },
+    MissingStaffInput {
+        system_id: usize,
+        staff_id: usize,
+    },
+    MissingLineOrdinate {
+        system_id: usize,
+        staff_id: usize,
+        x: i32,
+        boundary: &'static str,
+    },
+    MissingSystemArea(usize),
+    IdentifierOverflow {
+        system_id: usize,
+        stage: &'static str,
+    },
+    InvalidScaledParameter {
+        system_id: usize,
+        staff_id: usize,
+        name: &'static str,
+        value: i32,
+    },
+    ClefClassifier(ClefClassificationError),
+    KeyClassifier(KeyClassificationError),
+    TimeClassifier(TimeClassificationError),
+    ClefColumn {
+        system_id: usize,
+        source: ClefColumnError<NativeClefError<ClefClassificationError>>,
+    },
+    KeyColumn {
+        system_id: usize,
+        source: KeyColumnError<NativeKeyError<KeyClassificationError>>,
+    },
+    TimeDiscovery {
+        system_id: usize,
+        staff_id: usize,
+        source: NativeHeaderTimeError<TimeClassificationError>,
+    },
+    TimeColumn {
+        system_id: usize,
+        source: HeaderTimeColumnError<NativeHeaderTimeError<TimeClassificationError>>,
+    },
+}
+
+impl fmt::Display for NativeHeaderRecognitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GridContext(source) => write!(formatter, "HEADERS GRID context failed: {source}"),
+            Self::SheetHeightOutOfRange(height) => {
+                write!(formatter, "HEADERS sheet height {height} does not fit i32")
+            }
+            Self::MissingHeader {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "HEADERS system {system_id} staff {staff_id} has no computed header"
+            ),
+            Self::MissingStaffInput {
+                system_id,
+                staff_id,
+            } => write!(
+                formatter,
+                "HEADERS system {system_id} staff {staff_id} has no GRID input"
+            ),
+            Self::MissingLineOrdinate {
+                system_id,
+                staff_id,
+                x,
+                boundary,
+            } => write!(
+                formatter,
+                "HEADERS system {system_id} staff {staff_id} has no {boundary} line ordinate at x={x}"
+            ),
+            Self::MissingSystemArea(system_id) => {
+                write!(formatter, "HEADERS system {system_id} has no GRID area")
+            }
+            Self::IdentifierOverflow { system_id, stage } => write!(
+                formatter,
+                "HEADERS system {system_id} cannot allocate the {stage} identifier range"
+            ),
+            Self::InvalidScaledParameter {
+                system_id,
+                staff_id,
+                name,
+                value,
+            } => write!(
+                formatter,
+                "HEADERS system {system_id} staff {staff_id} has invalid {name} value {value}"
+            ),
+            Self::ClefClassifier(source) => {
+                write!(
+                    formatter,
+                    "HEADERS clef classifier failed to load: {source}"
+                )
+            }
+            Self::KeyClassifier(source) => {
+                write!(formatter, "HEADERS key classifier failed to load: {source}")
+            }
+            Self::TimeClassifier(source) => {
+                write!(
+                    formatter,
+                    "HEADERS time classifier failed to load: {source}"
+                )
+            }
+            Self::ClefColumn { system_id, source } => {
+                write!(
+                    formatter,
+                    "HEADERS system {system_id} clef column failed: {source}"
+                )
+            }
+            Self::KeyColumn { system_id, source } => {
+                write!(
+                    formatter,
+                    "HEADERS system {system_id} key column failed: {source}"
+                )
+            }
+            Self::TimeDiscovery {
+                system_id,
+                staff_id,
+                source,
+            } => write!(
+                formatter,
+                "HEADERS system {system_id} staff {staff_id} time discovery failed: {source}"
+            ),
+            Self::TimeColumn { system_id, source } => {
+                write!(
+                    formatter,
+                    "HEADERS system {system_id} time column failed: {source}"
+                )
+            }
+        }
+    }
+}
+
+impl Error for NativeHeaderRecognitionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::GridContext(source) => Some(source),
+            Self::ClefClassifier(source) => Some(source),
+            Self::KeyClassifier(source) => Some(source),
+            Self::TimeClassifier(source) => Some(source),
+            Self::ClefColumn { source, .. } => Some(source),
+            Self::KeyColumn { source, .. } => Some(source),
+            Self::TimeDiscovery { source, .. } => Some(source),
+            Self::TimeColumn { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+struct GridOrdinates<'a>(&'a [StaffLineGeometry]);
+
+impl StaffLineOrdinates for GridOrdinates<'_> {
+    fn ordinates_at(&self, staff_id: usize, x: i32) -> Option<(i32, i32)> {
+        let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
+        Some((staff.first_line_y_at(x)?, staff.last_line_y_at(x)?))
+    }
+}
+
+struct GridPitch<'a>(&'a [StaffLineGeometry]);
+
+impl StaffPitchGeometry for GridPitch<'_> {
+    fn line_span_at(&self, staff_id: usize, x: f64) -> Option<(f64, f64)> {
+        let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
+        Some((staff.first_line.y_at_x(x)?, staff.last_line.y_at_x(x)?))
+    }
+}
+
+/// Run native HEADERS from live GRID state. No Java record is accepted as an input.
+pub fn recognize_native_headers(
+    grid: &GridLinesRecognition,
+) -> Result<NativeHeaderRecognition, NativeHeaderRecognitionError> {
+    let context = derive_native_header_grid_context(grid)
+        .map_err(NativeHeaderRecognitionError::GridContext)?;
+    let sheet_interline = context.sheet_interline;
+    let sheet_parameters = SheetClefParameters::new(sheet_interline);
+    let sheet_height = i32::try_from(grid.scale.height)
+        .map_err(|_| NativeHeaderRecognitionError::SheetHeightOutOfRange(grid.scale.height))?;
+
+    let mut clef_geometries = Vec::new();
+    let mut clef_parameters = BTreeMap::new();
+    for system_context in &context.systems {
+        for staff_input in &system_context.staffs {
+            let staff = header_staff(&system_context.header_system, staff_input.staff_id)?;
+            let start = header_start(system_context.system_id, staff)?;
+            let x_mid = start
+                .wrapping_add(start)
+                .wrapping_add(sheet_parameters.max_clef_end)
+                / 2;
+            let first = line_ordinate(system_context.system_id, staff_input, x_mid, true)?;
+            let last = line_ordinate(system_context.system_id, staff_input, x_mid, false)?;
+            clef_geometries.push(ClefLookupStaffGeometry {
+                staff_id: staff_input.staff_id,
+                browse_start: start,
+                browse_stop: start.wrapping_add(sheet_parameters.max_clef_end),
+                left_abscissa: staff_input.lines.left,
+                right_abscissa: staff_input.lines.right,
+                first_line_y: first,
+                last_line_y: last,
+                percussion_only: staff.one_line,
+            });
+            let parameters =
+                crate::clef_parameters::StaffClefParameters::new(staff_input.specific_interline);
+            clef_parameters.insert(
+                staff_input.staff_id,
+                NativeClefParameters {
+                    staff_interline: staff_input.specific_interline,
+                    first_line_y: f64::from(first),
+                    last_line_y: f64::from(last),
+                    min_part_weight: scaled_usize(
+                        system_context.system_id,
+                        staff_input.staff_id,
+                        "minimum clef part weight",
+                        parameters.min_part_weight,
+                    )?,
+                    max_part_count: crate::clef_parameters::max_part_count(),
+                    max_part_gap: parameters.max_part_gap,
+                    max_glyph_height: parameters.max_glyph_height,
+                    min_glyph_weight: scaled_usize(
+                        system_context.system_id,
+                        staff_input.staff_id,
+                        "minimum clef glyph weight",
+                        parameters.min_glyph_weight,
+                    )?,
+                    max_eval_rank: crate::clef_parameters::max_eval_rank(),
+                    minimum_classifier_grade: MINIMUM_CLEF_GRADE,
+                    f_area_pitch_offset: 0.0,
+                },
+            );
+        }
+    }
+    let clef_contexts = build_clef_lookup_contexts_at(
+        &clef_geometries,
+        ClefLookupParameters {
+            sheet_height,
+            above_staff: crate::clef_parameters::StaffClefParameters::new(sheet_interline)
+                .above_staff,
+            below_staff: crate::clef_parameters::StaffClefParameters::new(sheet_interline)
+                .below_staff,
+            belt_margin: sheet_parameters.belt_margin,
+            x_core_margin: sheet_parameters.x_core_margin,
+            y_core_margin: sheet_parameters.y_core_margin,
+        },
+        &GridOrdinates(&grid.staff_lines),
+    );
+
+    let sources = context
+        .systems
+        .iter()
+        .map(|system| (system.system_id, grid.no_staff.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut system_results = Vec::with_capacity(context.systems.len());
+    let mut header_erases = Vec::new();
+
+    for system_context in context.systems {
+        let system_id = system_context.system_id;
+        let identifier_base = system_context.header_system.last_inter_id;
+        let key_identifier_base = identifier_base.checked_add(100_000).ok_or(
+            NativeHeaderRecognitionError::IdentifierOverflow {
+                system_id,
+                stage: "key",
+            },
+        )?;
+        let time_identifier_base = identifier_base.checked_add(200_000).ok_or(
+            NativeHeaderRecognitionError::IdentifierOverflow {
+                system_id,
+                stage: "time",
+            },
+        )?;
+        let pair_identifier_base = identifier_base.checked_add(300_000).ok_or(
+            NativeHeaderRecognitionError::IdentifierOverflow {
+                system_id,
+                stage: "time-pair",
+            },
+        )?;
+        let mut system = system_context.header_system;
+        let mut clef_column = HeadlessClefColumn::new(ClefLifecycleRecognizer::new(
+            NativeClefProposalRecognizer::new(
+                BundledClefClassifier::bundled()
+                    .map_err(NativeHeaderRecognitionError::ClefClassifier)?,
+                sources.clone(),
+                clef_contexts.clone(),
+                clef_parameters.clone(),
+                identifier_base,
+                identifier_base,
+            ),
+            clef_contexts.clone(),
+            INTRINSIC_RATIO,
+            0.0,
+        ));
+        let clef_offset = clef_column
+            .retrieve_clefs(&mut system)
+            .map_err(|source| NativeHeaderRecognitionError::ClefColumn { system_id, source })?;
+        advance_header_stops(&mut system, clef_offset);
+
+        let mut key_contexts = BTreeMap::new();
+        let mut key_parameters = BTreeMap::new();
+        let mut lifecycle_contexts = BTreeMap::new();
+        for staff_input in &system_context.staffs {
+            let staff = header_staff(&system, staff_input.staff_id)?;
+            let header =
+                staff
+                    .header
+                    .as_ref()
+                    .ok_or(NativeHeaderRecognitionError::MissingHeader {
+                        system_id,
+                        staff_id: staff.id,
+                    })?;
+            let browse_start = header
+                .clef_stop()
+                .map_or(header.start, |stop| stop.wrapping_add(1));
+            let first = line_ordinate(system_id, staff_input, browse_start, true)?;
+            let last = line_ordinate(system_id, staff_input, browse_start, false)?;
+            let (envelope_top, envelope_bottom) =
+                browse_envelope(first, last, staff_input.specific_interline);
+            key_contexts.insert(
+                staff.id,
+                NativeKeyStaffContext {
+                    browse_stop: header
+                        .start
+                        .wrapping_add(max_header_width(sheet_interline))
+                        .wrapping_sub(1),
+                    envelope_top,
+                    envelope_bottom,
+                    staff_mid_y: f64::from(envelope_top + envelope_bottom) / 2.0,
+                    classifier_interline: sheet_interline,
+                    line_count: 5,
+                    staff_interline: staff_input.specific_interline,
+                },
+            );
+            let extractor = KeyExtractorParameters::new(staff_input.specific_interline);
+            key_parameters.insert(
+                staff.id,
+                NativeKeyParameters {
+                    minimum_component_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "minimum key component weight",
+                        extractor.minimum_part_weight,
+                    )?,
+                    maximum_component_gap: extractor.maximum_part_gap,
+                    minimum_glyph_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "minimum key glyph weight",
+                        extractor.minimum_glyph_weight,
+                    )?,
+                    maximum_glyph_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "maximum key glyph weight",
+                        extractor.maximum_glyph_weight,
+                    )?,
+                    minimum_alter_width: extractor.minimum_glyph_width,
+                    minimum_alter_height: extractor.minimum_glyph_height,
+                    maximum_alter_width: extractor.maximum_glyph_width,
+                    maximum_alter_height: extractor.maximum_glyph_height,
+                    maximum_alters: 7,
+                    maximum_rank: max_eval_rank(),
+                    minimum_classifier_grade: MINIMUM_KEY_GRADE,
+                    pipeline: KeyPipelineParameters::new(
+                        sheet_interline,
+                        staff_input.specific_interline,
+                    ),
+                },
+            );
+            let clefs = clef_column
+                .builders()
+                .get(&staff.id)
+                .map(|builder| {
+                    builder
+                        .candidates
+                        .iter()
+                        .map(|candidate| KeyClefSupport {
+                            id: candidate.id,
+                            kind: candidate.kind,
+                            grade: candidate.grade,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            lifecycle_contexts.insert(
+                staff.id,
+                KeyLifecycleContext {
+                    clefs,
+                    maximum_delta_pitch_one: MAXIMUM_DELTA_PITCH_ONE,
+                    maximum_delta_pitch_four: MAXIMUM_DELTA_PITCH_FOUR,
+                    clef_key_source_ratio: CLEF_KEY_SOURCE_RATIO,
+                    key_alters_source_ratio: KEY_ALTERS_SOURCE_RATIO,
+                },
+            );
+        }
+        let clef_supports = lifecycle_contexts
+            .iter()
+            .map(|(staff_id, context)| (*staff_id, context.clefs.clone()))
+            .collect();
+        let mut key_column = HeadlessKeyColumn::new(
+            KeyLifecycleRecognizer::new(
+                NativeKeyProposalRecognizer::new(
+                    BundledKeyClassifier::bundled()
+                        .map_err(NativeHeaderRecognitionError::KeyClassifier)?,
+                    GridPitch(&grid.staff_lines),
+                    sources.clone(),
+                    key_contexts,
+                    key_parameters,
+                    key_identifier_base,
+                    key_identifier_base,
+                )
+                .with_clef_supports(clef_supports),
+                lifecycle_contexts,
+            ),
+            max_slice_distance(sheet_interline),
+        );
+        let key_offset = key_column
+            .retrieve_keys(&mut system, max_header_width(sheet_interline))
+            .map_err(|source| NativeHeaderRecognitionError::KeyColumn { system_id, source })?;
+        advance_header_stops(&mut system, key_offset);
+
+        let (time_value, time_candidates, selected_times, time_offset) = run_native_time_stage(
+            grid,
+            &sources,
+            &system_context.staffs,
+            &mut system,
+            time_identifier_base,
+            pair_identifier_base,
+        )?;
+        advance_header_stops(&mut system, time_offset);
+        clef_column
+            .select_clefs(&mut system)
+            .map_err(|source| NativeHeaderRecognitionError::ClefColumn { system_id, source })?;
+
+        let erase = build_header_erase(grid, &system_context.staffs, &system, sheet_interline)?;
+        if let Some(erase) = erase {
+            header_erases.push(erase);
+        }
+
+        let mut staffs = Vec::with_capacity(system.staffs.len());
+        for staff in &system.staffs {
+            let staff_input = system_context
+                .staffs
+                .iter()
+                .find(|input| input.staff_id == staff.id)
+                .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+                    system_id,
+                    staff_id: staff.id,
+                })?;
+            let header = staff.header.clone();
+            let selected_clef_id = header
+                .as_ref()
+                .and_then(|header| header.clef.as_ref())
+                .map(|clef| clef.id);
+            let selected_key_id = header
+                .as_ref()
+                .and_then(|header| header.key.as_ref())
+                .map(|key| key.id);
+            staffs.push(NativeHeaderStaffRecognition {
+                staff_id: staff.id,
+                specific_interline: staff_input.specific_interline,
+                header,
+                clef_candidates: clef_column
+                    .builders()
+                    .get(&staff.id)
+                    .map(|builder| builder.candidates.clone())
+                    .unwrap_or_default(),
+                selected_clef_id,
+                key_candidates: key_column
+                    .builders()
+                    .get(&staff.id)
+                    .map(|builder| builder.candidates.clone())
+                    .unwrap_or_default(),
+                selected_key_id,
+                time_candidates: time_candidates.get(&staff.id).cloned().unwrap_or_default(),
+                selected_time_id: selected_times.get(&staff.id).copied().flatten(),
+            });
+        }
+        system_results.push(NativeHeaderSystemRecognition {
+            system_id,
+            staffs,
+            time_value,
+        });
+    }
+
+    Ok(NativeHeaderRecognition {
+        sheet_interline,
+        systems: system_results,
+        header_erases,
+    })
+}
+
+fn header_staff(
+    system: &HeadlessHeaderSystem,
+    staff_id: usize,
+) -> Result<&HeadlessHeaderStaff, NativeHeaderRecognitionError> {
+    system
+        .staffs
+        .iter()
+        .find(|staff| staff.id == staff_id)
+        .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+            system_id: system.id,
+            staff_id,
+        })
+}
+
+fn header_start(
+    system_id: usize,
+    staff: &HeadlessHeaderStaff,
+) -> Result<i32, NativeHeaderRecognitionError> {
+    staff.header.as_ref().map(|header| header.start).ok_or(
+        NativeHeaderRecognitionError::MissingHeader {
+            system_id,
+            staff_id: staff.id,
+        },
+    )
+}
+
+fn line_ordinate(
+    system_id: usize,
+    staff: &NativeHeaderGridStaff,
+    x: i32,
+    first: bool,
+) -> Result<i32, NativeHeaderRecognitionError> {
+    let ordinate = if first {
+        staff.lines.first_line_y_at(x)
+    } else {
+        staff.lines.last_line_y_at(x)
+    };
+    ordinate.ok_or(NativeHeaderRecognitionError::MissingLineOrdinate {
+        system_id,
+        staff_id: staff.staff_id,
+        x,
+        boundary: if first { "first" } else { "last" },
+    })
+}
+
+fn scaled_usize(
+    system_id: usize,
+    staff_id: usize,
+    name: &'static str,
+    value: i32,
+) -> Result<usize, NativeHeaderRecognitionError> {
+    usize::try_from(value).map_err(|_| NativeHeaderRecognitionError::InvalidScaledParameter {
+        system_id,
+        staff_id,
+        name,
+        value,
+    })
+}
+
+fn advance_header_stops(system: &mut HeadlessHeaderSystem, offset: i32) {
+    if offset > 0 {
+        for staff in &mut system.staffs {
+            if let Some(header) = staff.header.as_mut() {
+                header.stop = header.start.wrapping_add(offset);
+            }
+        }
+    }
+}
+
+fn fraction_int(interline: i32, value: f64) -> i32 {
+    (f64::from(interline) * value).round_ties_even() as i32
+}
+
+fn area_int(interline: i32, value: f64) -> i32 {
+    (f64::from(interline) * f64::from(interline) * value).round_ties_even() as i32
+}
+
+type NativeTimeCandidateMap = BTreeMap<usize, Vec<NeutralTimeCandidate>>;
+type NativeTimeSelectionMap = BTreeMap<usize, Option<usize>>;
+
+fn run_native_time_stage(
+    grid: &GridLinesRecognition,
+    sources: &BTreeMap<usize, RunTable>,
+    staff_inputs: &[NativeHeaderGridStaff],
+    system: &mut HeadlessHeaderSystem,
+    identifier_base: usize,
+    mut next_pair_id: usize,
+) -> Result<
+    (
+        Option<NeutralTimeValue>,
+        NativeTimeCandidateMap,
+        NativeTimeSelectionMap,
+        i32,
+    ),
+    NativeHeaderRecognitionError,
+> {
+    let system_id = system.id;
+    let sheet_interline = grid.scale.scale.interline.main;
+    let build_recognizer = || -> Result<_, NativeHeaderRecognitionError> {
+        let mut raster_contexts = BTreeMap::new();
+        let mut time_parameters = BTreeMap::new();
+        for staff in &system.staffs {
+            if staff.tablature {
+                continue;
+            }
+            let input = staff_inputs
+                .iter()
+                .find(|input| input.staff_id == staff.id)
+                .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+                    system_id,
+                    staff_id: staff.id,
+                })?;
+            let header =
+                staff
+                    .header
+                    .as_ref()
+                    .ok_or(NativeHeaderRecognitionError::MissingHeader {
+                        system_id,
+                        staff_id: staff.id,
+                    })?;
+            let browse_start = header.stop;
+            let mut stop = browse_start
+                .wrapping_add(fraction_int(sheet_interline, 4.0))
+                .wrapping_sub(1);
+            for &bar_x in &input.good_connected_bar_starts {
+                if bar_x > stop {
+                    break;
+                }
+                if bar_x > browse_start {
+                    stop = bar_x.wrapping_sub(1);
+                    break;
+                }
+            }
+            let top = line_ordinate(system_id, input, browse_start, true)?
+                .min(line_ordinate(system_id, input, stop, true)?);
+            // Java's implementation compares lastLine.yAt(stop) with itself; it does not read
+            // the browse-start ordinate for the bottom edge.
+            let bottom = line_ordinate(system_id, input, stop, false)?;
+            raster_contexts.insert(
+                staff.id,
+                HeaderTimeRasterContext {
+                    roi: HeaderBounds {
+                        x: browse_start,
+                        y: top,
+                        width: stop.wrapping_sub(browse_start).wrapping_add(1),
+                        height: bottom.wrapping_sub(top).wrapping_add(1),
+                    },
+                },
+            );
+            let staff_interline = input.specific_interline;
+            time_parameters.insert(
+                staff.id,
+                NativeHeaderTimeParameters {
+                    staff_interline,
+                    maximum_first_space_width: fraction_int(sheet_interline, 2.5),
+                    maximum_space_cumul: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "maximum time-space accumulation",
+                        fraction_int(staff_interline, 0.4),
+                    )?,
+                    minimum_time_width: fraction_int(staff_interline, 1.0),
+                    vertical_margin: fraction_int(staff_interline, 0.10),
+                    minimum_part_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "minimum time part weight",
+                        area_int(staff_interline, 0.01),
+                    )?,
+                    maximum_part_gap: f64::from(fraction_int(staff_interline, 1.0)),
+                    maximum_time_width: fraction_int(staff_interline, 2.0),
+                    minimum_whole_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "minimum whole-time weight",
+                        area_int(staff_interline, 1.0),
+                    )?,
+                    minimum_half_weight: scaled_usize(
+                        system_id,
+                        staff.id,
+                        "minimum half-time weight",
+                        area_int(staff_interline, 0.75),
+                    )?,
+                    maximum_eval_rank: 3,
+                    minimum_classifier_grade: 0.1 / INTRINSIC_RATIO,
+                    intrinsic_ratio: INTRINSIC_RATIO,
+                },
+            );
+        }
+        Ok(NativeHeaderTimeRecognizer::new(
+            BundledTimeClassifier::bundled()
+                .map_err(NativeHeaderRecognitionError::TimeClassifier)?,
+            sources.clone(),
+            raster_contexts,
+            time_parameters,
+            identifier_base,
+            identifier_base,
+        ))
+    };
+
+    // Pair IDs depend on the concrete number proposals. Replay the exact TreeMap staff sequence
+    // once, then run the real lifecycle with every permitted numerator/denominator crossing.
+    let mut discovery = build_recognizer()?;
+    let mut pair_ids_by_staff = BTreeMap::new();
+    for staff in &system.staffs {
+        if staff.tablature {
+            continue;
+        }
+        let header = staff
+            .header
+            .as_ref()
+            .ok_or(NativeHeaderRecognitionError::MissingHeader {
+                system_id,
+                staff_id: staff.id,
+            })?;
+        let input = crate::header_time_column::HeaderTimeRecognitionInput {
+            system_id,
+            staff_id: staff.id,
+            browse_start: header.stop,
+        };
+        let mut range = crate::staff_header::StaffHeaderRange::default();
+        range.browse_start = header.stop;
+        let proposals = discovery
+            .classify_time_parts(input, &range)
+            .map_err(|source| NativeHeaderRecognitionError::TimeDiscovery {
+                system_id,
+                staff_id: staff.id,
+                source,
+            })?;
+        let entry = pair_ids_by_staff
+            .entry(staff.id)
+            .or_insert_with(BTreeMap::new);
+        for numerator in &proposals.numerators {
+            for denominator in &proposals.denominators {
+                entry.insert((numerator.id, denominator.id), next_pair_id);
+                next_pair_id = next_pair_id.checked_add(1).ok_or(
+                    NativeHeaderRecognitionError::IdentifierOverflow {
+                        system_id,
+                        stage: "time-pair",
+                    },
+                )?;
+            }
+        }
+    }
+
+    let mut lifecycle = BTreeMap::new();
+    for staff in &system.staffs {
+        if staff.tablature {
+            continue;
+        }
+        let input = staff_inputs
+            .iter()
+            .find(|input| input.staff_id == staff.id)
+            .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+                system_id,
+                staff_id: staff.id,
+            })?;
+        lifecycle.insert(
+            staff.id,
+            HeaderTimeLifecycleContext {
+                maximum_halves_dx: fraction_int(input.specific_interline, 1.0),
+                top_bottom_source_ratio: 5.0,
+                pair_ids: pair_ids_by_staff.remove(&staff.id).unwrap_or_default(),
+                supported_values: vec![
+                    (2, 2),
+                    (3, 2),
+                    (2, 4),
+                    (3, 4),
+                    (4, 4),
+                    (5, 4),
+                    (6, 4),
+                    (3, 8),
+                    (6, 8),
+                    (9, 8),
+                    (12, 8),
+                    (7, 8),
+                ],
+            },
+        );
+    }
+    let mut column = HeadlessHeaderTimeColumn::new(HeaderTimeLifecycleRecognizer::new(
+        build_recognizer()?,
+        lifecycle,
+    ));
+    let offset = column
+        .retrieve_time(system)
+        .map_err(|source| NativeHeaderRecognitionError::TimeColumn { system_id, source })?;
+    let candidates = column
+        .builders()
+        .iter()
+        .map(|(staff_id, builder)| (*staff_id, builder.candidates.clone()))
+        .collect();
+    let selections = column
+        .builders()
+        .iter()
+        .map(|(staff_id, builder)| (*staff_id, builder.selected_candidate_id))
+        .collect();
+    Ok((column.time_value(), candidates, selections, offset))
+}
+
+fn build_header_erase(
+    grid: &GridLinesRecognition,
+    inputs: &[NativeHeaderGridStaff],
+    system: &HeadlessHeaderSystem,
+    sheet_interline: i32,
+) -> Result<Option<HeaderErase>, NativeHeaderRecognitionError> {
+    let Some(stop) = system
+        .staffs
+        .iter()
+        .filter(|staff| !staff.tablature)
+        .find_map(|staff| staff.header.as_ref().map(|header| header.stop))
+    else {
+        return Ok(None);
+    };
+    let first = inputs
+        .first()
+        .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+            system_id: system.id,
+            staff_id: 0,
+        })?;
+    let last = inputs
+        .last()
+        .ok_or(NativeHeaderRecognitionError::MissingStaffInput {
+            system_id: system.id,
+            staff_id: 0,
+        })?;
+    let top = line_ordinate(system.id, first, stop, true)?;
+    let bottom = line_ordinate(system.id, last, stop, false)?;
+    let x = grid
+        .system_areas
+        .iter()
+        .find(|area| area.system_id == system.id)
+        .map(|area| area.left)
+        .ok_or(NativeHeaderRecognitionError::MissingSystemArea(system.id))?;
+    let margin = fraction_int(sheet_interline, 2.0);
+    Ok(Some(HeaderErase {
+        x,
+        stop,
+        top: top.wrapping_sub(margin),
+        bottom: bottom.wrapping_add(margin),
+    }))
 }
 
 fn part_id_for_staff(

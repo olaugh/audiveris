@@ -1082,6 +1082,16 @@ impl<E: fmt::Display> fmt::Display for NativeKeyError<E> {
     }
 }
 
+impl<E: Error + 'static> Error for NativeKeyError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::RunTable(source) => Some(source),
+            Self::Classifier { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct NativeKeyPart {
     id: usize,

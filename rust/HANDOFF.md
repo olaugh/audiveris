@@ -24,15 +24,13 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 The CLI performs native page recognition through GRID. BEAMS and LEDGERS now
 have schema-1 JSON serializers, but they are not wired into the stage driver.
-The integration audit that preceded that wiring found one earlier claim was too
-strong: `header_corpus.rs` still reads Java-recorded header starts and good
-connected bar positions. `derive_native_header_grid_context` now replaces both
-with GRID-only state: it builds real `HeadlessHeaderSystem` bar/group ownership,
-runs `compute_header_starts`, and applies `BarlineInter.isGood`'s overridden
-inclusive 0.6 threshold plus connection evidence. All nine example pages and
-65 staves match the oracle for sheet/staff interline, header start, and every
-ordered browse-bar vector. The next seam is extracting the
-already graded clef/key/time driver to consume that context; until then
+`recognize_native_headers` now closes the integration issue that audit found:
+it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
+ownership, header starts, specific interlines, and connected-bar browse limits,
+then composes clef, key, and time columns in Java order. Java records are read
+only after that call for grading. All nine example pages and 65 staves match,
+including 34 keys, 17 times, and 30 downstream erase rectangles. The CLI/report
+driver has not published the new result yet, so
 `audiveris-cli -batch -step SCALE|GRID <image>` remains the honest boundary.
 
 Against a live Java 5.11 oracle across all nine `data/examples` pages:
@@ -45,7 +43,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Completed staff-line endpoints | 1300/1300 exact |
 | Sheet SIG | all 420 barline inters and 184 connectors promoted; every median and every intrinsic and contextual grade exact on every page |
 | Beam spot chain | all 8 transforms bit-identical, and all 305 of chula's spot glyphs by bounds, weight and centroid |
-| Beam recognition | **787/787 raw beams across 8 sheets** -- system ownership, geometry, all six impacts, and grade exact after the corpus HEADERS driver supplies its two remaining Java-recorded browse inputs. 7 of 8 sheets exact through the end of BEAMS |
+| Beam recognition | **787/787 raw beams across 8 sheets** -- system ownership, geometry, all six impacts, and grade exact after production HEADERS runs from GRID alone. 7 of 8 sheets exact through the end of BEAMS |
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 | PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
@@ -60,15 +58,13 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 
-`recognize_native_beams` itself consumes only the GRID report and a HEADERS
-`HeaderErase` list: it measures `maxStem`, runs the spot chain, dispatches by
-system areas/bounds, then creates, extends, hooks and groups beams. The current
-corpus producer of that list is not yet a production entry point: it seeds
-`StaffHeader` starts and `Staff.getBrowseStop` bar positions from
-`clef-headers.txt`. `derive_native_header_grid_context` now computes the same
-values from GRID's staff/SIG state with explicit missing-geometry errors rather
-than zero defaults. The corpus driver still needs to be rewired to that API
-before its `HeaderErase` list is an oracle-free production product.
+`recognize_native_beams` consumes the GRID report and the `HeaderErase` list
+returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
+chain, dispatches by system areas/bounds, then creates, extends, hooks and groups
+beams. The corpus now calls that production HEADERS entry point before reading
+`clef-headers.txt`; the Java file is solely a grader. Missing staff geometry,
+ordinates, system areas, or nested visual failures are explicit typed errors
+rather than zero or empty fallbacks.
 
 `recognize_native_ledgers` now consumes that native BEAMS result plus GRID's
 `NO_STAFF`, curved per-staff lines/areas, and system areas/bounds. It preserves
@@ -86,8 +82,8 @@ eight beam sheets, all 581 final inters, and all 95 inferred ledger-line paths
 exactly. `beams_json` and `ledgers_json` now publish the downstream geometry,
 grades, complete impact vectors, live ledger exclusions, group counts, and
 curved inferred ledger paths without changing GRID's schema-1 byte path. The
-serializers are ready; end-to-end native publication still waits on the
-HEADERS input correction above and a corpus beyond the examples remains.
+serializers and native stage inputs are ready; CLI/report wiring and a corpus
+beyond the examples remain.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
