@@ -20,8 +20,9 @@ oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
 the exact eight-sheet BEAMS and LEDGERS gates: 787 raw beams, 581 final ledger
 inters, and 95 inferred ledger-line paths. JSON preserves selected header
 evidence, system-owned erases, beam/ledger geometry and impacts, exclusions,
-groups, and curved paths; `omrscope` accepts both median forms. Native
-STEM_SEEDS now reaches the exact 2,425-candidate raw `StickFactory` boundary.
+groups, and curved paths; `omrscope` accepts both median forms and bounds-only
+header symbols. Native STEM_SEEDS now reaches the exact 2,425-candidate raw
+`StickFactory` boundary.
 
 Last updated 2026-08-07.
 
@@ -84,7 +85,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> BEAMS -> LEDGERS` in native order for `-json`; GRID keeps its text report. Downstream JSON carries selected headers and evidence, system-owned erases, beams, ledgers, relations, groups, and curved paths. `omrscope` accepts both vertical and horizontal median forms without inventing incomplete geometry. |
+| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> BEAMS -> LEDGERS` in native order for `-json`; GRID keeps its text report. Downstream JSON carries selected headers and evidence, system-owned erases, beams, ledgers, relations, groups, and curved paths. `omrscope` accepts bounds-only header inters plus both median forms, and refuses incomplete geometry rather than inventing zero coordinates. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 

@@ -16,6 +16,21 @@ std::optional<double> optionalDouble(const QJsonValue &value)
     return value.isDouble() ? std::optional<double>(value.toDouble()) : std::nullopt;
 }
 
+std::optional<QRectF> parseBounds(const QJsonObject &bounds)
+{
+    // Selected HEADERS inters have bounds but no median. Require all four
+    // schema-1 coordinates: QJsonValue::toDouble() would otherwise turn a
+    // missing height into a plausible zero-height symbol at the origin.
+    const auto x = optionalDouble(bounds.value(QStringLiteral("x")));
+    const auto y = optionalDouble(bounds.value(QStringLiteral("y")));
+    const auto width = optionalDouble(bounds.value(QStringLiteral("width")));
+    const auto height = optionalDouble(bounds.value(QStringLiteral("height")));
+    if (x && y && width && height) {
+        return QRectF(*x, *y, *width, *height);
+    }
+    return std::nullopt;
+}
+
 std::optional<QLineF> parseMedian(const QJsonObject &median)
 {
     // Schema 1 GRID records use a vertical median. Keep this branch explicit:
@@ -142,6 +157,11 @@ EngineResult parseRustJson(const QString &text)
         inter.staff = object.value(QStringLiteral("staff")).toInt(-1);
         inter.grade = object.value(QStringLiteral("grade")).toDouble();
         inter.contextual = optionalDouble(object.value(QStringLiteral("contextual_grade")));
+
+        const QJsonObject bounds = object.value(QStringLiteral("bounds")).toObject();
+        if (!bounds.isEmpty()) {
+            inter.bounds = parseBounds(bounds);
+        }
 
         const QJsonObject median = object.value(QStringLiteral("median")).toObject();
         if (!median.isEmpty()) {

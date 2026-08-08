@@ -262,12 +262,13 @@ JSON document per sheet, one per line. This is the interchange format, not a
 debug dump. It is shaped for an evaluation harness comparing several OMR
 systems and a repair loop that proposes corrections.
 
-The checked-in `omrscope` consumer accepts both schema-1 median encodings:
-GRID's vertical `x/top/bottom` geometry and BEAMS/LEDGERS' endpoint
-`x1/y1/x2/y2` geometry. It deliberately leaves an incomplete median absent
-instead of letting Qt turn missing coordinates into zero, and it uses the line
-center for its abscissa display and Java/Rust pairing. The parser behavior has
-a CTest regression, and downstream publication now supplies those forms.
+The checked-in `omrscope` consumer accepts the three schema-1 geometry forms:
+HEADERS' bounds-only `x/y/width/height` symbols, GRID's vertical
+`x/top/bottom` medians, and BEAMS/LEDGERS' endpoint `x1/y1/x2/y2` medians. It
+deliberately leaves incomplete bounds or medians absent instead of letting Qt
+turn missing coordinates into zero, and it uses the geometry center for its
+abscissa display and Java/Rust pairing. The parser behavior has a CTest
+regression, and downstream publication supplies all three forms.
 
 HEADERS documents add selected clef/key/time inters with their bounds, grades,
 contextual grades, and lifecycle/classifier evidence, plus staff ranges and
