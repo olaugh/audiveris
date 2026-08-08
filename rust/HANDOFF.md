@@ -382,8 +382,34 @@ header/Part join; drum and one-line scanners fail explicitly until the DrumSet
 pitch-to-shape mapping is ported. Competitor/frozen-bar `Area` slicing remains
 the next HEADS-local oracle.
 
-**Nothing through native ledger-line construction is unverified by CI as of
-Rust run `31243273019` and Java run `31243273022`**, both green on
+That next immutable boundary is now frozen separately, without overstating the
+dynamic lookup path. `HeadsScannerContextProbe --slices` reaches LEDGERS and
+the real HEADS prolog in one fresh JVM per page, prepares the builder exactly
+through the start of `buildHeads`, and records each seed-mode scanner before
+lookup can create a head or mutate the SIG. Two complete passes are
+byte-identical (SHA-256
+`82d87324be1d2eef2a14be4c8cc68be332e9f76311eeb4b6dedd1c74d3c96ee3`).
+The strict Rust gate validates 1,334 competing-shape candidates: 847 accepted,
+29 not-good, 430 rejected by the vertical-width guard, and 28 rejected because
+their beam group has no long member. It also freezes all 533 bar/connector
+candidates, 474 frozen areas, three raw-bit semantic bands and ordered
+seed/spot/competitor/bar rectangle slices for each of the 1,767 scanner
+contexts. This deliberately does not serialize Java2D `Area` path internals.
+
+The oracle also converts one previously documented BEAMS difference into a
+hard HEADS dependency. Bach system 6's accepted competitor pool contains the
+`MultipleRestInter` created after `BeamsBuilder`; the source beam is already
+removed, while both generated vertical serifs are present but rejected as too
+thin. `NativeBeamRecognition` still publishes the pre-`MultipleRestsBuilder`
+beam list and only group counts. Retain final group membership and the
+beam-to-rest replacement before claiming production competitor slices. The
+current fixture is explicitly the base/pre-lookup slice: range scanners later
+see seed-created `HeadInter` instances, and actual template rectangles use
+Java2D area intersection. Those decisions belong to the evaluation oracle,
+not this immutable constructor gate.
+
+**Nothing through native HEADS scanner-context construction is unverified by CI
+as of Rust run `31252800282` and Java run `31252800280`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
 which spent a day unverified: GitHub Actions was in a major outage when it
 landed (2026-08-06, incident from 15:22 UTC) and both its runs died in *Set up

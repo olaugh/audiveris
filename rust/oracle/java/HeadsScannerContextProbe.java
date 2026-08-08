@@ -2,6 +2,8 @@
 package org.audiveris.omr.rustport;
 
 import java.awt.Rectangle;
+import java.awt.geom.Area;
+import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -16,6 +18,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.audiveris.omr.CLI;
 import org.audiveris.omr.Main;
@@ -41,6 +44,14 @@ import org.audiveris.omr.sheet.note.DistancesBuilder;
 import org.audiveris.omr.sheet.note.HeadSeedTally;
 import org.audiveris.omr.sheet.note.HeadSpotsBuilder;
 import org.audiveris.omr.sheet.note.NoteHeadsBuilder;
+import org.audiveris.omr.sig.inter.AbstractBeamInter;
+import org.audiveris.omr.sig.inter.AbstractHorizontalInter;
+import org.audiveris.omr.sig.inter.AbstractVerticalInter;
+import org.audiveris.omr.sig.inter.BarConnectorInter;
+import org.audiveris.omr.sig.inter.BarlineInter;
+import org.audiveris.omr.sig.inter.Inter;
+import org.audiveris.omr.sig.inter.Inters;
+import org.audiveris.omr.sig.inter.HeadInter;
 import org.audiveris.omr.sig.inter.LedgerInter;
 import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.ui.symbol.MusicFamily;
@@ -56,9 +67,11 @@ import org.audiveris.omr.util.HorizontalSide;
  * processStaff order and proves their static geometry agrees before recording it once. No head is
  * created, no SIG vertex is added, and no head/seed tally is mutated.
  *
- * <p>The boundary deliberately stops before competitor and frozen-bar slicing. It freezes the
+ * <p>The default mode deliberately stops before competitor and frozen-bar slicing. It freezes the
  * schedule, scale parameters, catalog selection, offsets, staff/ledger source identities, farther
- * ledger axes, and complete theoretical-ordinate/range vectors. The vectors use run-length
+ * ledger axes, and complete theoretical-ordinate/range vectors. The optional {@code --slices}
+ * mode freezes the pre-lookup competitor/bar candidate decisions, semantic bands, and exact
+ * seed/spot/competitor/bar rectangle slices without mutating the SIG. The vectors use run-length
  * encoding so every integer ordinate remains recoverable without a full-width record per pixel.
  */
 public class HeadsScannerContextProbe
@@ -83,8 +96,15 @@ public class HeadsScannerContextProbe
             System.exit(0);
         }
 
-        if (args.length != 1) {
-            throw new IllegalArgumentException("expected exactly one <path>:<sheet> target");
+        if ((args.length == 1) && args[0].equals("--slices-header")) {
+            printSlicesHeader();
+            System.exit(0);
+        }
+
+        final boolean slices = (args.length == 2) && args[0].equals("--slices");
+        if ((!slices && (args.length != 1)) || (slices && (args.length != 2))) {
+            throw new IllegalArgumentException(
+                    "expected [--slices] <path>:<sheet> target");
         }
 
         final CLI cli = new CLI(WellKnowns.TOOL_NAME);
@@ -94,13 +114,17 @@ public class HeadsScannerContextProbe
         cliField.set(null, cli);
         MusicFont.checkMusicFont();
 
-        final String[] parts = args[0].split(":");
+        final String[] parts = args[slices ? 1 : 0].split(":");
         if (parts.length != 2) {
             throw new IllegalArgumentException("target must be <path>:<sheet>");
         }
         final Path path = Paths.get(parts[0]).toAbsolutePath();
         final int wanted = Integer.parseInt(parts[1]);
-        runPage(path, wanted);
+        if (slices) {
+            runSlicesPage(path, wanted);
+        } else {
+            runPage(path, wanted);
+        }
         System.exit(0);
     }
 
@@ -108,21 +132,7 @@ public class HeadsScannerContextProbe
                                  int wanted)
         throws Exception
     {
-        final Book book = new Book(path);
-        book.createStubs();
-        SheetStub wantedStub = null;
-        for (SheetStub stub : book.getValidStubs()) {
-            if (stub.getNumber() == wanted) {
-                wantedStub = stub;
-                break;
-            }
-        }
-        if (wantedStub == null) {
-            throw new IllegalArgumentException("missing sheet " + wanted + " in " + path);
-        }
-
-        wantedStub.reachStep(OmrStep.LEDGERS, false);
-        final Sheet sheet = wantedStub.getSheet();
+        final Sheet sheet = loadPage(path, wanted);
         final Scale scale = sheet.getScale();
         final String page = path.getFileName() + "#" + wanted;
         final MusicFamily family = sheet.getStub().getMusicFamily();
@@ -247,6 +257,237 @@ public class HeadsScannerContextProbe
                 pageStandardStaves,
                 pageGeometries,
                 pageSchedules,
+                hash(pageRows));
+    }
+
+    private static Sheet loadPage (Path path,
+                                   int wanted)
+        throws Exception
+    {
+        final Book book = new Book(path);
+        book.createStubs();
+        SheetStub wantedStub = null;
+        for (SheetStub stub : book.getValidStubs()) {
+            if (stub.getNumber() == wanted) {
+                wantedStub = stub;
+                break;
+            }
+        }
+        if (wantedStub == null) {
+            throw new IllegalArgumentException("missing sheet " + wanted + " in " + path);
+        }
+
+        wantedStub.reachStep(OmrStep.LEDGERS, false);
+        return wantedStub.getSheet();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void runSlicesPage (Path path,
+                                       int wanted)
+        throws Exception
+    {
+        final Sheet sheet = loadPage(path, wanted);
+        final String page = path.getFileName() + "#" + wanted;
+        final DistanceTable distances = new DistancesBuilder(sheet).buildDistances();
+        final Map<SystemInfo, List<Glyph>> sheetSpots = new HeadSpotsBuilder(sheet).getSpots();
+        final List<String> pageRows = new ArrayList<>();
+        int pageGeometries = 0;
+        int pageCompetitorCandidates = 0;
+        int pageCompetitors = 0;
+        int pageBarCandidates = 0;
+        int pageBars = 0;
+
+        System.out.printf(
+                "headslicepage %s width %d height %d systems %d staves %d%n",
+                page,
+                distances.getWidth(),
+                distances.getHeight(),
+                sheet.getSystems().size(),
+                sheet.getStaffManager().getStaffCount());
+
+        for (SystemInfo system : sheet.getSystems()) {
+            final List<Glyph> systemSpots = sheetSpots.get(system);
+            if (systemSpots == null) {
+                throw new IllegalStateException("HEADS prolog omitted system " + system.getId());
+            }
+            final NoteHeadsBuilder builder = new NoteHeadsBuilder(
+                    system,
+                    distances,
+                    systemSpots,
+                    new HeadSeedTally(),
+                    false,
+                    new java.util.TreeMap<>());
+            prepareBuilder(builder, system, systemSpots);
+
+            final List<Glyph> systemSeeds = (List<Glyph>) field(builder, "systemSeeds");
+            final List<Inter> systemCompetitors = (List<Inter>) field(builder, "systemCompetitors");
+            final List<Area> systemBarAreas = (List<Area>) field(builder, "systemBarAreas");
+            final Set<Shape> competingShapes = (Set<Shape>) staticField("COMPETING_SHAPES");
+            final List<Inter> competitorCandidates = system.getSig().inters(
+                    inter -> competingShapes.contains(inter.getShape()));
+            final int maxStem = sheet.getScale().getMaxStem();
+            final int minBeamWidth = intField(field(builder, "params"), "minBeamWidth");
+            final List<Inter> barCandidates = system.getSig().inters(
+                    inter -> inter instanceof BarlineInter || inter instanceof BarConnectorInter);
+            final List<Inter> frozenBars = system.getSig().inters(inter -> inter.isFrozen()
+                    && (inter instanceof BarlineInter || inter instanceof BarConnectorInter));
+            Collections.sort(frozenBars, Inters.byOrdinate);
+            if (frozenBars.size() != systemBarAreas.size()) {
+                throw new IllegalStateException("bar owner/area count mismatch");
+            }
+
+            final List<String> systemRows = new ArrayList<>();
+            for (int ordinal = 0; ordinal < competitorCandidates.size(); ordinal++) {
+                final Inter candidate = competitorCandidates.get(ordinal);
+                final String decision = competitorDecision(candidate, maxStem, minBeamWidth);
+                final String accepted = identityIndex(systemCompetitors, candidate);
+                if ((decision.equals("accept")) != !accepted.equals("-")) {
+                    throw new IllegalStateException("competitor decision/list mismatch");
+                }
+                final String row = String.format(
+                        "headslicecompetitorcandidate %s system %d inputOrdinal %d decision %s "
+                                + "acceptedOrdinal %s maxStem %d minBeamWidth %d evidence %s %s",
+                        page,
+                        system.getId(),
+                        ordinal,
+                        decision,
+                        accepted,
+                        maxStem,
+                        minBeamWidth,
+                        competitorEvidence(candidate, minBeamWidth),
+                        interRecord(candidate));
+                pageRows.add(row);
+                systemRows.add(row);
+                System.out.println(row);
+                pageCompetitorCandidates++;
+            }
+            for (int ordinal = 0; ordinal < systemCompetitors.size(); ordinal++) {
+                final String row = String.format(
+                        "headslicecompetitor %s system %d ordinal %d %s",
+                        page,
+                        system.getId(),
+                        ordinal,
+                        interRecord(systemCompetitors.get(ordinal)));
+                pageRows.add(row);
+                systemRows.add(row);
+                System.out.println(row);
+                pageCompetitors++;
+            }
+            for (int ordinal = 0; ordinal < barCandidates.size(); ordinal++) {
+                final Inter candidate = barCandidates.get(ordinal);
+                final String row = String.format(
+                        "headslicebarcandidate %s system %d inputOrdinal %d decision %s "
+                                + "frozenOrdinal %s %s",
+                        page,
+                        system.getId(),
+                        ordinal,
+                        candidate.isFrozen() ? "frozen" : "not-frozen",
+                        identityIndex(frozenBars, candidate),
+                        interRecord(candidate));
+                pageRows.add(row);
+                systemRows.add(row);
+                System.out.println(row);
+                pageBarCandidates++;
+            }
+            for (int ordinal = 0; ordinal < frozenBars.size(); ordinal++) {
+                final Inter owner = frozenBars.get(ordinal);
+                final Area area = systemBarAreas.get(ordinal);
+                if (!areaSummary(owner.getArea()).equals(areaSummary(area))) {
+                    throw new IllegalStateException("frozen bar owner/area mismatch");
+                }
+                final String row = String.format(
+                        "headslicebar %s system %d ordinal %d %s",
+                        page,
+                        system.getId(),
+                        ordinal,
+                        interRecord(owner));
+                pageRows.add(row);
+                systemRows.add(row);
+                System.out.println(row);
+                pageBars++;
+            }
+
+            int systemGeometries = 0;
+            for (Staff staff : system.getStaves()) {
+                if (staff.isTablature()) {
+                    continue;
+                }
+                final List<String> staffRows = new ArrayList<>();
+                final List<Geometry> geometries = buildGeometries(builder, staff);
+                for (int ordinal = 0; ordinal < geometries.size(); ordinal++) {
+                    final Geometry geometry = geometries.get(ordinal);
+                    final Object scanner = geometry.scanner;
+                    final Area seedsArea = (Area) field(scanner, "seedsArea");
+                    final Area competitorsArea = (Area) field(scanner, "competitorsArea");
+                    final List<Area> bars = (List<Area>) field(scanner, "barAreas");
+                    final List<Inter> competitors = (List<Inter>) field(scanner, "competitors");
+                    final List<Glyph> seeds = glyphsSlice(builder, systemSeeds, seedsArea);
+                    final List<Glyph> spots = glyphsSlice(builder, systemSpots, competitorsArea);
+                    final String row = String.format(
+                            "headslicescan %s system %d staff %d ordinal %d source %s "
+                                    + "seedBand %s competitorBand %s barBand %s "
+                                    + "seedsArea %s competitorsArea %s seeds %s spots %s "
+                                    + "competitors %s bars %s",
+                            page,
+                            system.getId(),
+                            staff.getId(),
+                            ordinal,
+                            geometry.source.text,
+                            seedBand(builder, geometry),
+                            competitorBand(geometry),
+                            barBand(builder, geometry),
+                            areaSummary(seedsArea),
+                            areaSummary(competitorsArea),
+                            identityIndexes(systemSeeds, seeds),
+                            identityIndexes(systemSpots, spots),
+                            identityIndexes(systemCompetitors, competitors),
+                            identityIndexes(systemBarAreas, bars));
+                    pageRows.add(row);
+                    systemRows.add(row);
+                    staffRows.add(row);
+                    System.out.println(row);
+                    pageGeometries++;
+                    systemGeometries++;
+                }
+                final String summary = String.format(
+                        "headslicestaffsummary %s system %d staff %d geometries %d %016x",
+                        page,
+                        system.getId(),
+                        staff.getId(),
+                        geometries.size(),
+                        hash(staffRows));
+                pageRows.add(summary);
+                systemRows.add(summary);
+                System.out.println(summary);
+            }
+
+            final String summary = String.format(
+                    "headslicesystemsummary %s system %d seeds %d spots %d "
+                            + "competitorCandidates %d competitors %d barCandidates %d bars %d "
+                            + "geometries %d %016x",
+                    page,
+                    system.getId(),
+                    systemSeeds.size(),
+                    systemSpots.size(),
+                    competitorCandidates.size(),
+                    systemCompetitors.size(),
+                    barCandidates.size(),
+                    systemBarAreas.size(),
+                    systemGeometries,
+                    hash(systemRows));
+            pageRows.add(summary);
+            System.out.println(summary);
+        }
+
+        System.out.printf(
+                "headslicepagesummary %s competitorCandidates %d competitors %d "
+                        + "barCandidates %d bars %d geometries %d %016x%n",
+                page,
+                pageCompetitorCandidates,
+                pageCompetitors,
+                pageBarCandidates,
+                pageBars,
+                pageGeometries,
                 hash(pageRows));
     }
 
@@ -472,6 +713,7 @@ public class HeadsScannerContextProbe
         }
 
         return new Geometry(
+                scanner,
                 source,
                 intField(scanner, "interline"),
                 intField(scanner, "dir"),
@@ -630,6 +872,18 @@ public class HeadsScannerContextProbe
         return method.invoke(target);
     }
 
+    @SuppressWarnings("unchecked")
+    private static List<Glyph> glyphsSlice (NoteHeadsBuilder builder,
+                                            List<Glyph> glyphs,
+                                            Area area)
+        throws Exception
+    {
+        final Method method = BUILDER_CLASS.getDeclaredMethod(
+                "getGlyphsSlice", List.class, Area.class);
+        method.setAccessible(true);
+        return (List<Glyph>) method.invoke(builder, glyphs, area);
+    }
+
     private static Object field (Object target,
                                  String name)
         throws Exception
@@ -637,6 +891,14 @@ public class HeadsScannerContextProbe
         final Field field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(target);
+    }
+
+    private static Object staticField (String name)
+        throws Exception
+    {
+        final Field field = BUILDER_CLASS.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(null);
     }
 
     private static void setField (Object target,
@@ -697,6 +959,165 @@ public class HeadsScannerContextProbe
         return sb.toString();
     }
 
+    private static <T> String identityIndexes (List<T> universe,
+                                               List<T> selected)
+    {
+        if (selected.isEmpty()) {
+            return "-";
+        }
+        final StringBuilder sb = new StringBuilder();
+        for (T item : selected) {
+            int found = -1;
+            for (int index = 0; index < universe.size(); index++) {
+                if (universe.get(index) == item) {
+                    found = index;
+                    break;
+                }
+            }
+            if (found < 0) {
+                throw new IllegalStateException("slice item is absent from its source pool");
+            }
+            if (!sb.isEmpty()) {
+                sb.append(',');
+            }
+            sb.append(found);
+        }
+        return sb.toString();
+    }
+
+    private static <T> String identityIndex (List<T> universe,
+                                             T selected)
+    {
+        for (int index = 0; index < universe.size(); index++) {
+            if (universe.get(index) == selected) {
+                return Integer.toString(index);
+            }
+        }
+        return "-";
+    }
+
+    private static String areaSummary (Area area)
+    {
+        if (area == null) {
+            return "-";
+        }
+        final Rectangle box = area.getBounds();
+        return String.format("%d:%d:%d:%d", box.x, box.y, box.width, box.height);
+    }
+
+    private static String interRecord (Inter inter)
+    {
+        final Rectangle box = inter.getBounds();
+        final int staff = (inter.getStaff() == null) ? -1 : inter.getStaff().getId();
+        final StringBuilder sb = new StringBuilder(String.format(
+                "class %s shape %s staff %s bounds %d:%d:%d:%d grade %s best %s "
+                        + "good %s frozen %s removed %s area %s",
+                inter.getClass().getSimpleName(),
+                inter.getShape(),
+                (staff < 0) ? "-" : Integer.toString(staff),
+                box.x,
+                box.y,
+                box.width,
+                box.height,
+                hexDouble(inter.getGrade()),
+                hexDouble(inter.getBestGrade()),
+                inter.isGood(),
+                inter.isFrozen(),
+                inter.isRemoved(),
+                areaSummary(inter.getArea())));
+        if (inter instanceof AbstractVerticalInter vertical) {
+            final Line2D median = vertical.getMedian();
+            sb.append(" vertical ").append(axis(median.getP1(), median.getP2()));
+            sb.append(" width ").append(hexDouble(vertical.getWidth()));
+        } else if (inter instanceof AbstractHorizontalInter horizontal) {
+            final Line2D median = horizontal.getMedian();
+            sb.append(" horizontal ").append(axis(median.getP1(), median.getP2()));
+            sb.append(" height ").append(hexDouble(horizontal.getHeight()));
+        } else {
+            sb.append(" geometry -");
+        }
+        return sb.toString();
+    }
+
+    private static String competitorDecision (Inter inter,
+                                              int maxStem,
+                                              int minBeamWidth)
+    {
+        if (!inter.isGood()) {
+            return "not-good";
+        }
+        if (inter instanceof AbstractVerticalInter vertical
+                && ((int) Math.floor(vertical.getWidth()) <= maxStem)) {
+            return "thin-vertical";
+        }
+        if (inter instanceof AbstractBeamInter beam
+                && !beam.getGroup().hasLongBeam(minBeamWidth)) {
+            return "short-beam-group";
+        }
+        return "accept";
+    }
+
+    private static String competitorEvidence (Inter inter,
+                                              int minBeamWidth)
+    {
+        if (inter instanceof AbstractVerticalInter vertical) {
+            return "vertical-floor:" + (int) Math.floor(vertical.getWidth());
+        }
+        if (inter instanceof AbstractBeamInter beam) {
+            final StringBuilder widths = new StringBuilder();
+            for (AbstractBeamInter member : beam.getGroup().getBeams()) {
+                if (!widths.isEmpty()) {
+                    widths.append(',');
+                }
+                widths.append(member.getBounds().width);
+            }
+            return "beam-group:" + beam.getGroup().hasLongBeam(minBeamWidth) + ":" + widths;
+        }
+        return "-";
+    }
+
+    private static String seedBand (NoteHeadsBuilder builder,
+                                    Geometry geometry)
+        throws Exception
+    {
+        final Object constants = staticField("constants");
+        final double ratio = constantValue(field(constants, "pitchMargin"));
+        final double above = (geometry.interline * (geometry.dir - ratio)) / 2;
+        final double below = (geometry.interline * (geometry.dir + ratio)) / 2;
+        return band(above, below);
+    }
+
+    private static String competitorBand (Geometry geometry)
+    {
+        final double ratio = HeadInter.getShrinkVertRatio();
+        final double above = (geometry.interline * (geometry.dir - ratio)) / 2;
+        final double below = (geometry.interline * (geometry.dir + ratio)) / 2;
+        return band(above, below);
+    }
+
+    private static String barBand (NoteHeadsBuilder builder,
+                                   Geometry geometry)
+        throws Exception
+    {
+        final double margin = doubleField(field(builder, "params"), "vBarMargin");
+        final double above = (geometry.interline * geometry.dir / 2.0) - margin;
+        final double below = (geometry.interline * geometry.dir / 2.0) + margin;
+        return band(above, below);
+    }
+
+    private static String band (double above,
+                                double below)
+    {
+        return hexDouble(above) + ":" + hexDouble(below) + ":" + hexDouble(below + 1);
+    }
+
+    private static double constantValue (Object constant)
+        throws Exception
+    {
+        final Method method = constant.getClass().getMethod("getValue");
+        return ((Number) method.invoke(constant)).doubleValue();
+    }
+
     private static String axis (Point2D left,
                                 Point2D right)
     {
@@ -754,6 +1175,24 @@ public class HeadsScannerContextProbe
         System.out.println("# cucaracha, hove, zizi, BachInvention5.");
     }
 
+    private static void printSlicesHeader ()
+    {
+        System.out.println(
+                "# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) HEADS base-slice oracle.");
+        System.out.println("#");
+        System.out.println("# Every target reaches real LEDGERS and runs real HEADS prolog in a fresh JVM.");
+        System.out.println("# Scanner constructors run in processStaff order, before lookup mutates the SIG.");
+        System.out.println("# The fixture freezes semantic Area bounds and the exact finite rectangle slices");
+        System.out.println("# consumed for vertical seeds, head spots, existing competitors, and frozen bars.");
+        System.out.println("# Dynamic seed-created HeadInter competitors and template-box overlap are deferred.");
+        System.out.println("#");
+        System.out.println("# Doubles are Double.toHexString/raw-bits. Source-pool ordinals preserve stable");
+        System.out.println("# ordinate/abscissa ordering. Summaries are FNV-1a-64 over canonical UTF-8 rows.");
+        System.out.println("#");
+        System.out.println("# Generate one target per fresh JVM: chula, allegretto, batuque, carmen,");
+        System.out.println("# cucaracha, hove, zizi, BachInvention5.");
+    }
+
     private static final class Source
     {
         final String text;
@@ -806,6 +1245,8 @@ public class HeadsScannerContextProbe
 
     private static final class Geometry
     {
+        final Object scanner;
+
         final Source source;
 
         final int interline;
@@ -842,7 +1283,8 @@ public class HeadsScannerContextProbe
 
         final String rangeOrdinateRle;
 
-        Geometry (Source source,
+        Geometry (Object scanner,
+                  Source source,
                   int interline,
                   int dir,
                   int pitch,
@@ -861,6 +1303,7 @@ public class HeadsScannerContextProbe
                   int rangeRight,
                   String rangeOrdinateRle)
         {
+            this.scanner = scanner;
             this.source = source;
             this.interline = interline;
             this.dir = dir;
