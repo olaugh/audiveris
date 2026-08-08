@@ -98,8 +98,17 @@ mixed-orientation member order, bounds, weight, endpoints, thickness, and mean
 distance with hexadecimal doubles. Two pinned-JDK runs were byte-identical;
 the corpus FNV is `d6ac0c99a5093beb` and fixture SHA-256 is
 `c2ae9a9fe6a593072ede7f98de9073346ff006ccf48a8d5016c58ed4899cebd0`.
-This is the honest Rust target: stop at raw candidates before applying the
-already ported staff/header/checker gates.
+The immediate boundary after it is frozen too. `StemSeedGlyphsProbe` invokes
+the actual private `checkVerticals(Collection)`, captures the private
+`SeedCheckSuite` values, normalized impacts, weights, Clean side effects,
+grades, and threshold, then reads the actual `VERTICAL_SEED` free glyphs and
+hashes their complete run tables. Across the same corpus, 2,003 candidates are
+checked, 1,906 are accepted/materialized, 97 are rejected, and 422 are skipped
+by the header gate. Two full runs were byte-identical; the corpus FNV is
+`541b1354720a0d35` and fixture SHA-256 is
+`2e0455b7985a4e9fe68da25a020a0d1fc9f9e2161e6f1a5025e3c69dd1624953`.
+Only profile 1 is exercised, with no tablature or no-staff skip case. These two
+fixtures now grade raw factory output and accepted materialization separately.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
