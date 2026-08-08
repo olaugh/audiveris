@@ -808,9 +808,13 @@ The next boundary is head-corner reachability before CLinker-origin
 linking/SIG mutation.
 
 That head-corner reachability boundary is now frozen on the Java side, but it
-is not yet a native eighth boundary. After the complete beam-origin builder
-prefix, the oracle visits all 3,521 heads and 14,084 corners in stable-head
-then TR/BL/TL/BR order. It scans 36,736 neighboring seeds and retains 1,340;
+is not yet a native eighth boundary. From the post-linker baseline, the oracle
+replays the exact beam-anchor prefix visible to CLinkers and visits all 3,521
+heads and 14,084 corners in stable-head then TR/BL/TL/BR order. It does not
+execute the preceding beam `StemBuilder` constructors: their local and registry
+mutations are output-isolated from C reachability, while a later C-builder
+boundary must resume the real registry timeline from the beam-builder product.
+It scans 36,736 neighboring seeds and retains 1,340;
 compacts 1,007,081 head scans while preserving 4,566 accepted C targets; scans
 9,015 sibling members, emits 8,120 B targets, and appends 1,687 head-origin
 anchors. It records C geometry, branch decisions, C-before-B ordering, and

@@ -264,12 +264,16 @@ emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
 `da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
 `a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
 
-The next head-corner reachability boundary is frozen but not yet native. After
-all beam-origin builders, the Java oracle visits 14,084 corners in exact
-TR/BL/TL/BR inspection order, retains 1,340 of 36,736 ordered seed scans,
-accepts 4,566 head-corner and 8,120 beam targets, and creates 1,687
-head-origin anchors without constructing a CLinker `StemBuilder`. Two fresh
-JDK 25 runs produced the same 79,213-line / 37,478,685-byte fixture, SHA-256
+The next head-corner reachability boundary is frozen but not yet native. From
+the post-linker baseline, the Java oracle replays the exact beam-anchor prefix
+visible to CLinkers and visits 14,084 corners in TR/BL/TL/BR inspection order.
+It deliberately projects out the preceding beam `StemBuilder` constructors:
+their local and registry mutations are not read by later C reachability, but
+must be restored when C builders are ported. The oracle retains 1,340 of
+36,736 ordered seed scans, accepts 4,566 head-corner and 8,120 beam targets,
+and creates 1,687 head-origin anchors without constructing a CLinker
+`StemBuilder`. Two fresh JDK 25 runs produced the same 79,213-line /
+37,478,685-byte fixture, SHA-256
 `78d5a489e576aa668eaaad3eae257d5b88f628d3ab09c7954b3cef56c845cb8b`.
 The production Rust compositor and differential gate are in progress, so this
 freeze is evidence for the next slice rather than a port-completion claim.
