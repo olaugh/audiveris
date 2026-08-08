@@ -392,6 +392,33 @@ fn run_time_stage(
     Ok((time_column.time_value(), time_offset))
 }
 
+/// One `erase` row: `(system, x, stop, first line y, last line y)`.
+type EraseRow = (usize, i32, i32, i32, i32);
+
+/// The `erase system <s> x <x> stop <x2> firstline <y1> lastline <y2>` rows of the beam oracle,
+/// keyed by page name: what Java's `SpotsBuilder.eraseHeaderAreas` actually erased.
+fn parse_beam_erases() -> BTreeMap<String, Vec<EraseRow>> {
+    let text = std::fs::read_to_string(repo_path("rust/oracle/beam-spots.txt"))
+        .expect("the beam-spots oracle is checked in");
+    let mut map: BTreeMap<String, Vec<EraseRow>> = BTreeMap::new();
+    let mut page = String::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("sheet ") {
+            page = rest.split('#').next().unwrap_or("").trim().to_owned();
+        } else if line.starts_with("erase ") {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            map.entry(page.clone()).or_default().push((
+                f[2].parse().unwrap(),
+                f[4].parse().unwrap(),
+                f[6].parse().unwrap(),
+                f[8].parse().unwrap(),
+                f[10].parse().unwrap(),
+            ));
+        }
+    }
+    map
+}
+
 #[test]
 fn native_headers_match_java_on_every_corpus_staff() {
     // 65 of 65 staves exact -- shape presence/absence, fifths, union box and keyStop.
@@ -414,9 +441,11 @@ fn native_headers_match_java_on_every_corpus_staff() {
     // Every step was diagnosed by this test's failure pattern plus targeted instrumentation, and
     // the last one by the per-alter boxes added to the oracle for exactly that purpose.
     let pages = parse_oracle();
+    let beam_erases = parse_beam_erases();
     let mut checked = 0;
     let mut with_key = 0;
     let mut with_time = 0;
+    let mut erases_checked = 0;
     let mut mismatches: Vec<String> = Vec::new();
 
     for (name, sheet_interline, oracle_staves) in &pages {
@@ -839,6 +868,50 @@ fn native_headers_match_java_on_every_corpus_staff() {
                 }
             }
 
+            // ---- native header erase vs Java's SpotsBuilder.eraseHeaderAreas ----
+            //
+            // This is what retires the beams caveat: the erase rectangle is now computed from the
+            // *native* header stop and staff lines and must equal what Java erased. Java reads the
+            // first non-tablature headered staff's stop, and the system's first/last staff lines at
+            // that abscissa.
+            if let Some(rows) = beam_erases.get(name.as_str()) {
+                if let Some(&(_, expected_x, expected_stop, expected_first, expected_last)) = rows
+                    .iter()
+                    .find(|(system_id, ..)| *system_id == system_index + 1)
+                {
+                    let stop = system
+                        .staffs
+                        .iter()
+                        .find_map(|staff| staff.header.as_ref().map(|header| header.stop))
+                        .expect("headered staff");
+                    let first_id = member_ids.first().copied().expect("non-empty system");
+                    let last_id = member_ids.last().copied().expect("non-empty system");
+                    let line_at = |staff_id: usize, first: bool| -> i32 {
+                        recognition
+                            .staff_lines
+                            .iter()
+                            .find(|lines| lines.staff_id == staff_id)
+                            .and_then(|lines| {
+                                if first {
+                                    lines.first_line_y_at(stop)
+                                } else {
+                                    lines.last_line_y_at(stop)
+                                }
+                            })
+                            .unwrap_or_default()
+                    };
+                    let produced = (0, stop, line_at(first_id, true), line_at(last_id, false));
+                    let expected = (expected_x, expected_stop, expected_first, expected_last);
+                    erases_checked += 1;
+                    if produced != expected {
+                        mismatches.push(format!(
+                            "{name} system {}: header erase {produced:?}, Java {expected:?}",
+                            system_index + 1
+                        ));
+                    }
+                }
+            }
+
             // ---- header stop grading: the value getHeaderStop() serves to BEAMS/STEM_SEEDS ----
             for oracle in oracle_staves {
                 let produced = system
@@ -860,6 +933,11 @@ fn native_headers_match_java_on_every_corpus_staff() {
     assert_eq!(checked, 65, "every oracle staff was compared");
     assert_eq!(with_key, 34, "the 34 key-bearing staves were reached");
     assert_eq!(with_time, 17, "the 17 time-bearing staves were reached");
+    assert_eq!(
+        erases_checked,
+        beam_erases.values().map(Vec::len).sum::<usize>(),
+        "every Java header-erase rectangle was compared against the native one"
+    );
     assert!(
         mismatches.is_empty(),
         "{} of {checked} staves disagree with Java:\n{}",

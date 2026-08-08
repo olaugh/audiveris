@@ -1182,11 +1182,17 @@ everywhere Java does.** `StaffHeader::time_stop()` now exists and the column's
 return uses it; two unit fixtures that had pinned the exclusive convention were
 corrected by the corpus.
 
-**What this unblocks:** the header erase for BEAMS and `StemScaler` can now be
-driven by native values instead of being omitted with a stated cost. The
-`header_erase_cost_is_measured_not_assumed` caveat (5 spurious clef-sized
-candidates on chula) is ready to be retired by wiring `header.stop` into the
-spots path.
+**Retired: the beams header-erase caveat.** `header_corpus.rs` now computes the
+erase rectangle Java's `SpotsBuilder.eraseHeaderAreas` uses -- system area left,
+the first headered staff's `header.stop`, the system's first/last staff lines at
+that abscissa -- **entirely from native values**, and grades it against the
+`erase` rows of `beam-spots.txt`: all 29 systems across the eight beam sheets
+match exactly, with a count assertion so the comparison cannot silently cover
+nothing. The `header_erase_cost_is_measured_not_assumed` measurement (5 spurious
+clef-sized candidates on chula without the erase) remains as documentation of
+what the erase is worth, but the caveat it guarded -- "beams cannot run natively
+because the erase needs HEADERS" -- is gone: the spot chain's `HeaderErase`
+inputs are now producible without a Java oracle.
 
 
 ### KEY: the classifier seam is filled
