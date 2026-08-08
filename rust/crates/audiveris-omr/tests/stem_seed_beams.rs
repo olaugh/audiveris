@@ -8,8 +8,8 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_stem_seeds::recognize_native_stem_seeds,
     recognize::{
-        NativeBeamRecognitionError, native_stem_seeds_for_beams, recognize_grid_lines,
-        recognize_native_beams, recognize_native_beams_with_stem_seeds,
+        NativeBeamRecognition, NativeBeamRecognitionError, native_stem_seeds_for_beams,
+        recognize_grid_lines, recognize_native_beams, recognize_native_beams_with_stem_seeds,
     },
 };
 
@@ -151,6 +151,55 @@ fn assert_frozen_beam(
     }
 }
 
+fn assert_retained_group_memberships(recognition: &NativeBeamRecognition, interline: i32) {
+    assert_eq!(
+        recognition
+            .group_memberships
+            .iter()
+            .map(|membership| (membership.system_id, membership.groups.len()))
+            .collect::<Vec<_>>(),
+        recognition.group_counts
+    );
+    assert_eq!(
+        recognition
+            .group_memberships
+            .iter()
+            .map(|membership| membership.groups.len())
+            .sum::<usize>(),
+        recognition.group_count
+    );
+
+    for membership in &recognition.group_memberships {
+        let members = recognition
+            .raw_beams
+            .iter()
+            .chain(&recognition.hooks)
+            .filter(|(system_id, _)| *system_id == membership.system_id)
+            .map(|(_, beam)| *beam)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            membership.groups,
+            audiveris_omr::beam_inters::group_beams(&members, interline).groups,
+            "system {} retains group/member order",
+            membership.system_id
+        );
+
+        let mut retained = membership
+            .groups
+            .iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        retained.sort_unstable();
+        assert_eq!(
+            retained,
+            (0..members.len()).collect::<Vec<_>>(),
+            "system {} memberships partition its grouping input",
+            membership.system_id
+        );
+    }
+}
+
 #[test]
 fn java_counterfactual_freezes_zero_observable_stem_extension_effect() {
     let fixture = std::fs::read_to_string(repo_path("rust/oracle/beam-stem-seeds.txt"))
@@ -249,10 +298,38 @@ fn d039_natural_stem_extension_matches_java_exactly() {
     );
     assert_frozen_beam(&seeded_only[0], &seeded_java);
     assert_frozen_beam(&empty_only[0], &empty_java);
+    let interline = grid.scale.scale.interline.main;
+    assert_retained_group_memberships(&seeded, interline);
+    assert_retained_group_memberships(&empty, interline);
+    for system_id in [1, 3, 4] {
+        assert_eq!(
+            seeded
+                .group_memberships
+                .iter()
+                .find(|membership| membership.system_id == system_id),
+            empty
+                .group_memberships
+                .iter()
+                .find(|membership| membership.system_id == system_id),
+            "unchanged system {system_id} retains identical groups"
+        );
+    }
+    assert_ne!(
+        seeded
+            .group_memberships
+            .iter()
+            .find(|membership| membership.system_id == 2),
+        empty
+            .group_memberships
+            .iter()
+            .find(|membership| membership.system_id == 2),
+        "the extended beam changes exact system-2 group/member ordering"
+    );
 
     // Java reports two canonical deltas in each direction because its one-member
-    // BeamGroupInter record embeds the changed beam. Production Rust exposes the
-    // beam itself and group counts; everything else remains byte-for-byte stable.
+    // BeamGroupInter records embed the changed beam, and the extension changes
+    // exact system-2 group/member ordering while retaining the same group count.
+    // Everything outside those beam-owned records remains byte-for-byte stable.
     assert_eq!(seeded.spot_count, empty.spot_count);
     assert_eq!(seeded.hooks, empty.hooks);
     assert_eq!(seeded.group_counts, empty.group_counts);
@@ -325,9 +402,12 @@ fn accepted_stems_feed_beam_extension_in_system_and_candidate_order() {
     let composed =
         recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
             .expect("composed BEAMS");
+    assert_retained_group_memberships(&compatibility, grid.scale.scale.interline.main);
+    assert_retained_group_memberships(&composed, grid.scale.scale.interline.main);
     assert_eq!(composed.spot_count, compatibility.spot_count);
     assert_eq!(composed.raw_beams, compatibility.raw_beams);
     assert_eq!(composed.hooks, compatibility.hooks);
+    assert_eq!(composed.group_memberships, compatibility.group_memberships);
     assert_eq!(composed.group_counts, compatibility.group_counts);
     assert_eq!(composed.group_count, compatibility.group_count);
 }
@@ -366,8 +446,14 @@ fn composed_stem_extension_is_output_stable_on_all_graded_beam_pages() {
         let composed =
             recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
                 .unwrap_or_else(|error| panic!("{file}: composed BEAMS failed: {error}"));
+        assert_retained_group_memberships(&compatibility, grid.scale.scale.interline.main);
+        assert_retained_group_memberships(&composed, grid.scale.scale.interline.main);
         assert_eq!(composed.raw_beams, compatibility.raw_beams, "{file}");
         assert_eq!(composed.hooks, compatibility.hooks, "{file}");
+        assert_eq!(
+            composed.group_memberships, compatibility.group_memberships,
+            "{file}"
+        );
         assert_eq!(composed.group_counts, compatibility.group_counts, "{file}");
     }
     assert_eq!(systems, 30);

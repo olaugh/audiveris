@@ -37,6 +37,7 @@ pub mod curves_step;
 pub mod grid_executor;
 pub mod head_scanner;
 pub mod head_scanner_geometry;
+pub mod head_scanner_slices;
 pub mod head_template;
 pub mod head_template_catalog;
 pub mod header_builder;

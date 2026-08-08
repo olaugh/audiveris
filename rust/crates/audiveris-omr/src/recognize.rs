@@ -376,8 +376,22 @@ pub struct NativeBeamRecognition {
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
     pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Exact surviving `BeamGroupInter` memberships, in system order.
+    ///
+    /// Within each system, groups retain `group_beams` creation order and
+    /// members retain relation insertion order. A member ordinal indexes the
+    /// system-local grouping input: all matching `raw_beams` in source order,
+    /// followed by all matching `hooks` in source order.
+    pub group_memberships: Vec<NativeBeamGroupMembership>,
     pub group_counts: Vec<(usize, usize)>,
     pub group_count: usize,
+}
+
+/// Ordered beam-group membership for one system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeBeamGroupMembership {
+    pub system_id: usize,
+    pub groups: Vec<Vec<usize>>,
 }
 
 /// Native counterpart of Java `Scale.MusicFontScale` for the measured scope.
@@ -886,7 +900,7 @@ fn recognize_native_beams_impl(
         );
     }
 
-    let group_counts = system_ids
+    let group_memberships = system_ids
         .iter()
         .map(|system_id| {
             let members = raw_beams
@@ -895,8 +909,15 @@ fn recognize_native_beams_impl(
                 .filter(|(id, _)| id == system_id)
                 .map(|(_, beam)| *beam)
                 .collect::<Vec<_>>();
-            (*system_id, group_beams(&members, interline).groups.len())
+            NativeBeamGroupMembership {
+                system_id: *system_id,
+                groups: group_beams(&members, interline).groups,
+            }
         })
+        .collect::<Vec<_>>();
+    let group_counts = group_memberships
+        .iter()
+        .map(|membership| (membership.system_id, membership.groups.len()))
         .collect::<Vec<_>>();
     let group_count = group_counts.iter().map(|(_, count)| count).sum();
 
@@ -908,6 +929,7 @@ fn recognize_native_beams_impl(
         spot_count: components.len(),
         raw_beams,
         hooks,
+        group_memberships,
         group_counts,
         group_count,
     })

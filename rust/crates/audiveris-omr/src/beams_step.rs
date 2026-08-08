@@ -31,7 +31,7 @@ use audiveris_image::{
     projection::{MultiRestSideRequest, NeutralStaffProjectorResult, ProjectionError},
     run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
     section::Section,
-    staff_peak::PeakBounds,
+    staff_peak::{PeakBounds, StaffPeak},
     system_population::PopulationSystemArea,
 };
 
@@ -342,6 +342,75 @@ pub struct MultipleRestBeamEvidence {
     pub stop_pitch: f64,
 }
 
+/// Java `MultipleRestsBuilder.Constants.maxAbsolutePitch`.
+pub const MULTIPLE_REST_MAX_ABSOLUTE_PITCH: f64 = 0.2;
+
+/// Pure result of Java `MultipleRestsBuilder.process` for one source beam.
+///
+/// The source collection passed to [`native_multiple_rest_replacements`] must
+/// be in `SIGraph.inters(BeamInter.class)` order. The kernel preserves that
+/// order exactly, just as Java's `LinkedHashMap<BeamInter, ...> found` does.
+/// This is decision evidence, not a graph mutation: the source beam median and
+/// stable SIG, glyph, serif-inter, and relation identities deliberately remain
+/// adapter inputs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeMultipleRestReplacement {
+    pub beam_id: usize,
+    pub grade: f64,
+    pub height: f64,
+    pub staff_id: usize,
+    pub left_peak: StaffPeak,
+    pub right_peak: StaffPeak,
+}
+
+/// Exact pure decision kernel for Java `MultipleRestsBuilder.process` after
+/// each beam's staff lookup, pitches, and native serif search are available.
+///
+/// Input order is Java SIG source order; no geometric sort is performed.
+#[must_use]
+pub fn native_multiple_rest_replacements(
+    minimum_length: i32,
+    candidates: &[(MultipleRestBeamEvidence, MultipleRestSerifSearchEvidence)],
+) -> Vec<NativeMultipleRestReplacement> {
+    candidates
+        .iter()
+        .filter_map(|(beam, search)| {
+            native_multiple_rest_replacement(minimum_length, *beam, search)
+        })
+        .collect()
+}
+
+fn native_multiple_rest_replacement(
+    minimum_length: i32,
+    beam: MultipleRestBeamEvidence,
+    search: &MultipleRestSerifSearchEvidence,
+) -> Option<NativeMultipleRestReplacement> {
+    let staff_id = multiple_rest_staff_id(minimum_length, beam)?;
+    let left_peak = search.left.clone()?;
+    let right_peak = search.right.clone()?;
+    Some(NativeMultipleRestReplacement {
+        beam_id: beam.beam_id,
+        grade: beam.grade,
+        height: beam.height,
+        staff_id,
+        left_peak,
+        right_peak,
+    })
+}
+
+fn multiple_rest_staff_id(minimum_length: i32, beam: MultipleRestBeamEvidence) -> Option<usize> {
+    let staff_id = beam.staff_id?;
+    if beam.width < minimum_length
+        || beam.staff_tablature
+        || beam.start_pitch.abs() > MULTIPLE_REST_MAX_ABSOLUTE_PITCH
+        || beam.stop_pitch.abs() > MULTIPLE_REST_MAX_ABSOLUTE_PITCH
+    {
+        None
+    } else {
+        Some(staff_id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MultipleRestSectionLag {
     Vertical,
@@ -631,12 +700,8 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             else {
                 continue;
             };
-            if evidence.width < sheet.systems[system_index].multiple_rest_min_length
-                || evidence.staff_id.is_none()
-                || evidence.staff_tablature
-                || evidence.start_pitch.abs() > 0.2
-                || evidence.stop_pitch.abs() > 0.2
-            {
+            let minimum_length = sheet.systems[system_index].multiple_rest_min_length;
+            if multiple_rest_staff_id(minimum_length, evidence).is_none() {
                 continue;
             }
             let native_evidence =
@@ -2551,6 +2616,99 @@ mod tests {
                 BeamsMutation::SystemFailed { system_id: 2 },
             ]
         );
+    }
+
+    fn multiple_rest_beam(beam_id: usize) -> MultipleRestBeamEvidence {
+        MultipleRestBeamEvidence {
+            beam_id,
+            width: 40,
+            grade: 0.75,
+            height: 8.0,
+            staff_id: Some(5),
+            staff_tablature: false,
+            start_pitch: 0.0,
+            stop_pitch: 0.0,
+        }
+    }
+
+    fn multiple_rest_search(
+        left_start: i32,
+        left_stop: i32,
+        right_start: i32,
+        right_stop: i32,
+    ) -> MultipleRestSerifSearchEvidence {
+        use audiveris_image::bar_column::StaffId;
+
+        let left = StaffPeak::new(StaffId::new(5), 10, 20, left_start, left_stop).unwrap();
+        let right = StaffPeak::new(StaffId::new(5), 10, 20, right_start, right_stop).unwrap();
+        MultipleRestSerifSearchEvidence {
+            added_chunk: 7,
+            left_peaks: vec![left.clone()],
+            right_peaks: vec![right.clone()],
+            left: Some(left),
+            right: Some(right),
+        }
+    }
+
+    #[test]
+    fn native_multiple_rest_kernel_preserves_sig_order_and_inclusive_thresholds() {
+        let mut first = multiple_rest_beam(30);
+        first.start_pitch = -MULTIPLE_REST_MAX_ABSOLUTE_PITCH;
+        first.stop_pitch = MULTIPLE_REST_MAX_ABSOLUTE_PITCH;
+        let mut second = multiple_rest_beam(10);
+        second.width = 80;
+        // Java's `Math.abs(NaN) > limit` is false, so NaN passes this exact
+        // comparison just as it does in `MultipleRestsBuilder.process`.
+        second.start_pitch = f64::NAN;
+        let mut too_short = multiple_rest_beam(20);
+        too_short.width = 39;
+        let candidates = vec![
+            (first, multiple_rest_search(1, 3, 50, 54)),
+            (too_short, multiple_rest_search(4, 6, 60, 62)),
+            (second, multiple_rest_search(7, 8, 70, 73)),
+        ];
+
+        let replacements = native_multiple_rest_replacements(40, &candidates);
+
+        // There is deliberately no abscissa sort: LinkedHashMap insertion
+        // follows the source SIG iteration, including stable ties.
+        assert_eq!(
+            replacements
+                .iter()
+                .map(|replacement| replacement.beam_id)
+                .collect::<Vec<_>>(),
+            vec![30, 10]
+        );
+        assert_eq!(replacements[0].left_peak.width(), 3);
+        assert_eq!(replacements[0].right_peak.width(), 5);
+        assert_eq!(replacements[1].left_peak.width(), 2);
+        assert_eq!(replacements[1].right_peak.width(), 4);
+    }
+
+    #[test]
+    fn native_multiple_rest_kernel_applies_staff_pitch_and_two_serif_gates() {
+        let search = multiple_rest_search(1, 2, 50, 51);
+        let mut missing_staff = multiple_rest_beam(1);
+        missing_staff.staff_id = None;
+        let mut tablature = multiple_rest_beam(2);
+        tablature.staff_tablature = true;
+        let mut high_start = multiple_rest_beam(3);
+        high_start.start_pitch = MULTIPLE_REST_MAX_ABSOLUTE_PITCH + f64::EPSILON;
+        let mut low_stop = multiple_rest_beam(4);
+        low_stop.stop_pitch = -(MULTIPLE_REST_MAX_ABSOLUTE_PITCH + f64::EPSILON);
+        let one_sided = MultipleRestSerifSearchEvidence {
+            right: None,
+            ..search.clone()
+        };
+        let candidates = vec![
+            (missing_staff, search.clone()),
+            (tablature, search.clone()),
+            (high_start, search.clone()),
+            (low_stop, search.clone()),
+            (multiple_rest_beam(5), one_sided),
+        ];
+
+        assert!(native_multiple_rest_replacements(40, &candidates).is_empty());
     }
 
     #[test]

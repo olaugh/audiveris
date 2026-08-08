@@ -59,7 +59,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Key classification | 65/65 staves: presence, fifths, union box and `keyStop` exact |
 | Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
 | Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
-| Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
+| Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets; production now retains each ordered group membership rather than only its count |
 | HEAD_SPOTS handoff | threshold-170 vertical RunTable retained by production BEAMS; Java size and two independent pixel digests exact on all 8 sheets |
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 | Final ledger glyphs | every non-removed ledger retains a 1:1 positioned fixed raster built from its referenced filtered sections; no median approximation |
@@ -401,15 +401,30 @@ hard HEADS dependency. Bach system 6's accepted competitor pool contains the
 `MultipleRestInter` created after `BeamsBuilder`; the source beam is already
 removed, while both generated vertical serifs are present but rejected as too
 thin. `NativeBeamRecognition` still publishes the pre-`MultipleRestsBuilder`
-beam list and only group counts. Retain final group membership and the
-beam-to-rest replacement before claiming production competitor slices. The
-current fixture is explicitly the base/pre-lookup slice: range scanners later
-see seed-created `HeadInter` instances, and actual template rectangles use
-Java2D area intersection. Those decisions belong to the evaluation oracle,
-not this immutable constructor gate.
+beam list, but it now retains every system's group creation and member
+relation-insertion order. D039 proves this is observable even when the group
+count is unchanged. The pure replacement kernel now preserves Java's SIG
+source order, inclusive minimum length and ±0.2 pitch checks, staff/tablature
+gates, NaN comparison, and requirement for both serif peaks. Real
+staff/projector evidence and stable MultipleRest/serif/glyph/relation identities
+still have to be composed before claiming the final competitor pool.
 
-**Nothing through native HEADS scanner-context construction is unverified by CI
-as of Rust run `31252800282` and Java run `31252800280`**, both green on
+The first production-shaped slice geometry is also native. `JavaRectangle`
+ports positive-area half-open intersection, signed dimensions, and Java's
+wrapping overflow behavior. `HeadScannerBand` builds staff-spline and ledger
+bands with the source's explicit `below + 1`, resolves quadratic/cubic extrema
+without polyline flattening, and intersects source-ordered vertical areas;
+`VerticalRibbonArea` reproduces the integer bounds of the straight GRID
+barline/connector ribbon. Nine focused tests pin live Chula semantic-band,
+barline, and connector bounds plus empty, edge, tangent, curve, overflow, and
+ordering cases. Production still needs to build the seed, spot, frozen-bar, and
+final competitor pools and grade all 1,767 contexts. The fixture remains the
+base/pre-lookup slice: range scanners later see seed-created `HeadInter`
+instances, and actual template rectangles use Java2D area intersection. Those
+decisions belong to the evaluation oracle, not this immutable constructor gate.
+
+**Nothing through the frozen HEADS base-slice oracle is unverified by CI as of
+Rust run `31253888388` and Java run `31253888380`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
 which spent a day unverified: GitHub Actions was in a major outage when it
 landed (2026-08-06, incident from 15:22 UTC) and both its runs died in *Set up
