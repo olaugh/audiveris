@@ -16,7 +16,8 @@ when a deterministic Java/Rust comparison covers it.
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads;
 native `STEMS` now continues through no-stem seed purging and existing-seed
-selection for every head corner;
+selection plus exact section-built stump materialization and registration for
+every head corner;
 the human-readable text
 report remains at `GRID`. HEADERS is an
 oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
@@ -141,7 +142,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first two semantic `STEMS` boundaries are now production-shaped and graded.
+The first three semantic `STEMS` boundaries are now production-shaped and graded.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -159,8 +160,17 @@ seeds, all 29,394 purge visits, 36,736 neighbor rows, 7,114 sorted candidates,
 section-fallback outcomes across all 14,084 corners. The fixture is
 byte-identical across fresh-JVM runs (SHA-256
 `19387924d0d7aaaabf07b0859b353c7fa8d3e3c5d10e8edec8e1d4287b1ace31`).
-This boundary stops immediately before the mutating section-built stump path,
-glyph registration, or SIG mutation.
+`materialize_native_stems_head_stumps` then consumes the 9,902 fallbacks against
+each system's complete vertical lag. It preserves positive-area per-run
+intersection, stable distance order, integer polygon containment, the repeated
+pre-added-member width gate, shifted subsection extraction, tight fixed-glyph
+rasterization, registration-before-standout, exact reuse, and corner aliasing.
+The projected row differential is exact for 18,398 section and compound steps,
+3,660 subsection attempts, 969 empty builds, and 8,933 registered candidates:
+758 accepted, 8,175 rejected, 5,591 new, and 3,342 reused. The Java fixture is
+byte-identical across fresh-JVM runs (SHA-256
+`dd0247fbd992c7ec40351040efd336f98c8efa88bab0eef10c744430252e966e`).
+Beam/head linker geometry and SIG mutation remain after this boundary.
 
 Last updated 2026-08-07.
 
@@ -199,7 +209,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with exact median, grade, height, staff, pitch, and two-serif evidence. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Two production boundaries consume live final HEADS, GRID, and STEM_SEEDS state without Java IDs. The first retains 3,521 heads and matches all 14,084 constructor-order reference/outside/inside corner points. The second reconstructs 483 no-stem ribbons, purges 1,906 seeds to 1,749 survivors, and exactly grades all 36,736 neighbor rows, 7,114 sorted candidates, 4,182 existing-seed selections, and 9,902 section-fallback outcomes. | Port section-built stump creation and registration, then beam/head linker geometry and graph mutation. |
+| 10 | `STEMS` | **Components graded** | Three production boundaries consume live final HEADS, GRID, and STEM_SEEDS state without Java IDs. They match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, 8,933 registered candidates, and exact new/reuse/accept/reject outcomes. | Port beam/head linker geometry and graph mutation. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -229,7 +239,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Continue STEMS through the section-built stump fallback, including exact vertical-section order, subsection materialization, glyph reuse/registration, and corner aliasing.
+1. Continue STEMS through beam/head linker geometry and SIG relation mutation, preserving stable canonical stump handles and stopping at independently gradeable boundaries.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
 3. Wire GRID's production brace path so Part ownership and merged-staff behavior are exact.
 4. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.

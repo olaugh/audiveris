@@ -153,6 +153,8 @@ pub struct NativeStemSeedSystemRecognition {
 /// Production boundary immediately before BEAMS.
 #[derive(Debug)]
 pub struct NativeStemSeedRecognition {
+    /// Java `Scale.getStemThickness()`, used by section-built stumps.
+    pub main_stem_thickness: i32,
     pub maximum_stem_thickness: i32,
     pub systems: Vec<NativeStemSeedSystemRecognition>,
 }
@@ -164,6 +166,7 @@ pub struct RawStemSeedSystem {
     pub left: i32,
     pub right: i32,
     pub interline: i32,
+    pub main_stem_thickness: i32,
     pub maximum_stem_thickness: i32,
     pub minimum_core_section_length: i32,
     pub minimum_side_ratio: f64,
@@ -177,6 +180,7 @@ pub struct RawStemSeedSystem {
 
 #[derive(Debug)]
 pub struct RawStemSeedRecognition {
+    pub main_stem_thickness: i32,
     pub maximum_stem_thickness: i32,
     pub systems: Vec<RawStemSeedSystem>,
 }
@@ -553,6 +557,7 @@ pub fn recognize_native_stem_seeds(
     }
 
     Ok(NativeStemSeedRecognition {
+        main_stem_thickness: raw.main_stem_thickness,
         maximum_stem_thickness: raw.maximum_stem_thickness,
         systems,
     })
@@ -757,6 +762,7 @@ pub fn recognize_raw_stem_seed_candidates(
             left: bounds.left,
             right,
             interline,
+            main_stem_thickness: stem.main,
             maximum_stem_thickness: stem.maximum,
             minimum_core_section_length: minimum_core,
             minimum_side_ratio: STEM_SEEDS_MINIMUM_SIDE_RATIO,
@@ -767,6 +773,7 @@ pub fn recognize_raw_stem_seed_candidates(
     }
 
     Ok(RawStemSeedRecognition {
+        main_stem_thickness: stem.main,
         maximum_stem_thickness: stem.maximum,
         systems,
     })
@@ -796,7 +803,7 @@ fn select_sections(
     selected
 }
 
-fn contains_section_centroid(area: &PopulationSystemArea, x: f64, y: f64) -> bool {
+pub(crate) fn contains_section_centroid(area: &PopulationSystemArea, x: f64, y: f64) -> bool {
     if area.contains(x, y) {
         return true;
     }

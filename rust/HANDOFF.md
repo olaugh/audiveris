@@ -68,6 +68,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Complete native HEADS | the owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live |
 | First semantic STEMS boundary | the production head-corner compositor consumes live HEADS/STEM_SEEDS products and matches 3,521 heads plus all 14,084 constructor-order reference/outside/inside corner points across 30 systems at exact double bits; it stops before stump lookup and mutation |
 | STEMS no-stem purge and existing-seed boundary | the production compositor consumes live GRID/STEM_SEEDS/head-corner products, matches 1,906 seeds -> 1,749 kept / 157 purged, 29,394 purge visits, 36,736 neighbors, 7,114 candidates, 4,182 selections, and 9,902 explicit section fallbacks across all 14,084 corners; it stops before section-built stump registration |
+| STEMS section-built head-stump boundary | the production compositor consumes all 9,902 explicit fallbacks, matches 18,398 section/compound steps and 3,660 subsection attempts, and reproduces all 8,933 registrations: 758 accepted / 8,175 rejected and 5,591 new / 3,342 reused, with stable canonical aliases |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -686,8 +687,7 @@ body SHA-256 is
 `485544ae74a08d2a4d5c2a0de0030db67eec0086bd370d4eb6e2680917d0572a`, and
 the complete fixture SHA-256 is
 `26f9fff81c6207957dab6f42bf7d1650682ae9fca5de46e7b9a7dc46f20fd94b`.
-The next honest seam is the section-built `buildStump()` fallback. Existing-seed
-selection and no-stem purging are now native and exact: the eight-page gate
+Existing-seed selection and no-stem purging are native and exact: the eight-page gate
 matches 1,906 input seeds, 1,749 survivors, 157 purges, 483 no-stem areas,
 29,394 purge visits, 36,736 neighbor rows, 7,114 sorted candidates, 7,005
 visited candidates, 4,182 selections, and 9,902 explicit fallback requests.
@@ -696,8 +696,20 @@ reusing the distinct start/stop line, and it uses `SystemInfo.getArea().getBound
 rather than staff extrema for the vicinity rectangle. The deterministic Java
 fixture SHA-256 is
 `19387924d0d7aaaabf07b0859b353c7fa8d3e3c5d10e8edec8e1d4287b1ace31`.
-Section collection/subsection materialization, glyph reuse and registration,
-linker geometry, and SIG mutation remain beyond it.
+`materialize_native_stems_head_stumps` now closes the next mutating boundary.
+It dispatches the complete system VLAG rather than the narrower seed-builder
+section subset, preserves run-box intersection, stable bounds-center distance,
+integer point containment, repeated pre-member width checks, and the signed
+shift in `getSubSection()`. It paints exact tight fixed glyphs, registers before
+the standout decision, and canonicalizes exact `(bounds, RunTable)` identities
+without merging transient STUMP groups. The projected eight-page gate matches
+18,398 section rows and compound steps, 3,660 subsection attempts, 969 empty
+builds, and 8,933 candidates: 758 accepted, 8,175 rejected, 5,591 new, and 3,342
+reused. The Java probe also freezes the preceding 803 BeamLinkers and five beam
+side-stump registrations; those beam-side constructions are deliberately not
+claimed by the current Rust product. The fixture SHA-256 is
+`dd0247fbd992c7ec40351040efd336f98c8efa88bab0eef10c744430252e966e`.
+Beam/head linker geometry and SIG mutation are the next honest seam.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3266,22 +3278,18 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Freeze and port `HeadLinker.CLinker.buildStump()` from the explicit 9,902
-   section-fallback requests. Preserve full system vertical-section order,
-   intersection/containment gates, subsection materialization, fixed-glyph run evidence,
-   `GlyphIndex.registerOriginal()` reuse, registration order, and corner aliasing.
-2. Continue STEMS through beam/head linker geometry and SIG relation mutation, stopping
+1. Continue STEMS through beam/head linker geometry and SIG relation mutation, stopping
    at each independently gradeable identity-free boundary.
-3. Extend `.omr` typing only through bounded read-only views that preserve every
+2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
-4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
+3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
    current vector ordering stable while its key-aware diagnostics catch schema drift.
-5. Add Tesseract data to the oracle manifest when its resolved runtime location is
+4. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
-6. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
+5. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
    to work in a standalone Audiveris clone; today those vectors deliberately resolve
    `../../data/synth/...` from this parent OMR checkout.
-7. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
+6. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
    differing stage so later agreement cannot hide an upstream mismatch.
 
 ## Differential fixture plan
