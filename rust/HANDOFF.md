@@ -273,6 +273,20 @@ fixture has SHA-256
 `49408a3fc31857f107efb65ead37f63fd2e6dfe159f3fdd6215c89ed233199a9`.
 The Rust corpus comparison and production BEAMS wiring are next.
 
+The following HEADS dependency is already frozen independently in
+`oracle/head-template-catalog.txt`. `HeadTemplateCatalogProbe` reaches real
+HEADS in a fresh JVM per page, so every catalog comes from the actual
+BEAMS-derived `Staff.getHeadPointSize()`. The eight pages use five point sizes
+(`78`, `83`, `84`, `85`, `87`) and exactly four normal-staff scan shapes:
+`NOTEHEAD_BLACK`, `NOTEHEAD_VOID`, `WHOLE_NOTE`, and `BREVE`. The fixture holds
+55 staff-to-catalog usages, 32 page-local template records, 192 exact anchor
+offsets/rounded offsets, and all 27,207 keyed `PixelDistance` records with
+signed values and raw `f64` bits. Two fresh-JVM passes are byte-identical; the
+27,606-line fixture SHA-256 is
+`84c39208891530965f5d9ce71ff9b79cf373c101f4da8036059cdbf25e2a2ea6`.
+Port the catalog representation and pure `Template.evaluate` consumer from
+these records; do not regenerate templates approximately from a rendered font.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
