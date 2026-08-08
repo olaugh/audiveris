@@ -7,9 +7,8 @@ is intentionally parallel to the unchanged Java production tree.
 ## Repository state
 
 - Repository: `/Users/john/sources/jul10-charter/omr/tools/audiveris`
-- Branch: `codex/rust-port`; the current work is on `claude/rust-port-takeover`,
-  branched from `8418c6a` and pushed to `github.com/olaugh/audiveris`. Rebase
-  onto `codex/rust-port` if that has moved.
+- Branch: `codex/native-beam-e2e`; completed checkpoints are pushed to
+  `github.com/olaugh/audiveris` on `master`.
 - Java baseline: Audiveris 5.11.0, source commit
   `9e1e55cd2746037d059345881c53e6a6754bffbd`
 - Rust workspace: `rust/`
@@ -22,11 +21,13 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI now performs native schema-1 JSON recognition through LEDGERS. GRID's
-human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, and
-LEDGERS require `-json` and compose in Java stage order rather than accepting
-invented downstream inputs. BEAMS and LEDGERS run GRID -> HEADERS ->
-STEM_SEEDS -> BEAMS and retain the accepted seeds in their documents.
+The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
+human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
+and HEADS require `-json` and compose in Java stage order rather than accepting
+invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
+-> LEDGERS -> HEADS, retains every upstream product, and adds identity-free
+final heads, source provenance, exact glyph evidence, beam decisions, and
+tally-scale rows without fabricating Java SIG or glyph IDs.
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
@@ -63,6 +64,8 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | HEAD_SPOTS handoff | threshold-170 vertical RunTable retained by production BEAMS; Java size and two independent pixel digests exact on all 8 sheets |
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 | Final ledger glyphs | every non-removed ledger retains a 1:1 positioned fixed raster built from its referenced filtered sections; no median approximation |
+| Registered beam glyphs consumed by HEADS | all 191 narrow-beam bounds, weights, and vertical run digests exact after Java-equivalent `NO_STAFF` masking inside each final parallelogram |
+| Complete native HEADS | the owned production entry point is exact for 3,609 epilog inputs, 62 duplicate removals, 2,725 overlap exclusions, 26 beam-defeated heads, 3,521 final heads, 1,451 tally inputs, and 18 scale rows; schema-1 CLI publication is live |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -655,9 +658,13 @@ system arbitration and sheet-wide tally analysis. The top-level eight-page gate
 is exact for all 3,609 inputs, 62 duplicate removals, 2,725 overlap exclusions,
 3,547 post-duplicate heads, 191 beam inputs, 10,053 ordered beam checks and
 hashes, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale
-rows. HEADS is therefore native and graded, not yet published. The remaining
-HEADS work is the complete schema-1 JSON/CLI recognition surface and, only if it
-can be represented honestly, beam source-glyph evidence; semantic STEMS follows.
+rows. `recognize_native_heads` now owns that full production chain, and the
+eight-page gate calls it directly rather than manually recreating its stages.
+BEAMS also retains the exact fixed vertical glyph Java rebuilds from `NO_STAFF`
+for every final raw beam and hook; all 191 HEADS-consumed glyph bounds, weights,
+and run digests match. `audiveris-cli -batch -step HEADS -json <image>` publishes
+the complete identity-free result plus its upstream products. HEADS is therefore
+native, graded, and published; semantic STEMS follows.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -1041,8 +1048,8 @@ Java's rebuild never resurrects an inter already removed by overlap reduction;
 carrying those tombstones closed the last six extras on cucaracha, hove, and
 BachInvention5. `buildAllLedgerLines` is native too: it recursively translates
 the curved outer staff line by each index's mean ledger offset, and all 95 paths
-match Java. The stage is native and graded. What remains is CLI/JSON
-publication and a gate beyond the example corpus.
+match Java. The stage is native, graded, and published. What remains is a gate
+beyond the example corpus.
 
 ## BEAMS: scoped, and its first seam is grayscale morphology (CLOSED)
 

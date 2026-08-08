@@ -4,13 +4,16 @@ use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
 use audiveris_omr::native_headers::recognize_native_headers;
+use audiveris_omr::native_heads::recognize_native_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{
     grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
     recognize_scale_raster, scale_report,
 };
-use audiveris_omr::report::{beams_json, grid_json, headers_json, ledgers_json, stem_seeds_json};
+use audiveris_omr::report::{
+    beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json,
+};
 
 fn usage() {
     println!(
@@ -18,12 +21,12 @@ fn usage() {
          Usage: audiveris-cli [options] [inputs]\n\n\
          Native text recognition currently stops at -step GRID, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID page.png\n\n\
-         Schema-1 JSON is published through LEDGERS, e.g.:\n\
-         \x20 audiveris-cli -batch -step LEDGERS -json page.png\n\n\
+         Schema-1 JSON is published through HEADS, e.g.:\n\
+         \x20 audiveris-cli -batch -step HEADS -json page.png\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
-         HEADERS, STEM_SEEDS, BEAMS, and LEDGERS currently require -json.\n\
+         HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS currently require -json.\n\
          Small-beam pages are refused explicitly; later stages use the\n\
          compatibility handoff."
     );
@@ -33,14 +36,18 @@ fn is_native_step(step: OmrStep) -> bool {
     step <= OmrStep::Grid
         || matches!(
             step,
-            OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers
+            OmrStep::Headers
+                | OmrStep::StemSeeds
+                | OmrStep::Beams
+                | OmrStep::Ledgers
+                | OmrStep::Heads
         )
 }
 
 fn is_json_only_step(step: OmrStep) -> bool {
     matches!(
         step,
-        OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers
+        OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers | OmrStep::Heads
     )
 }
 
@@ -152,14 +159,40 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         recognize_native_ledgers(&recognition, &beams).map_err(|error| {
                             format!("{} sheet {sheet}: LEDGERS failed: {error}", input.display())
                         })?;
+                    if step == OmrStep::Ledgers {
+                        print!(
+                            "{}",
+                            ledgers_json(
+                                &recognition,
+                                &headers,
+                                &stem_seeds,
+                                &beams,
+                                &ledgers,
+                                &input_name,
+                                sheet,
+                            )
+                        );
+                        continue;
+                    }
+                    let heads = recognize_native_heads(
+                        &recognition,
+                        &headers,
+                        &stem_seeds,
+                        &beams,
+                        &ledgers,
+                    )
+                    .map_err(|error| {
+                        format!("{} sheet {sheet}: HEADS failed: {error}", input.display())
+                    })?;
                     print!(
                         "{}",
-                        ledgers_json(
+                        heads_json(
                             &recognition,
                             &headers,
                             &stem_seeds,
                             &beams,
                             &ledgers,
+                            &heads.epilog,
                             &input_name,
                             sheet,
                         )
@@ -256,15 +289,22 @@ mod tests {
             OmrStep::StemSeeds,
             OmrStep::Beams,
             OmrStep::Ledgers,
+            OmrStep::Heads,
         ] {
             assert!(is_native_step(step), "{step} should be native");
         }
-        assert!(!is_native_step(OmrStep::Heads));
+        assert!(!is_native_step(OmrStep::Stems));
     }
 
     #[test]
     fn downstream_text_requests_fail_instead_of_dumping_parameters() {
-        for step in [OmrStep::Headers, OmrStep::StemSeeds] {
+        for step in [
+            OmrStep::Headers,
+            OmrStep::StemSeeds,
+            OmrStep::Beams,
+            OmrStep::Ledgers,
+            OmrStep::Heads,
+        ] {
             let parameters = Parameters {
                 step: Some(step),
                 ..Parameters::default()
@@ -278,7 +318,7 @@ mod tests {
         }
 
         let parameters = Parameters {
-            step: Some(OmrStep::Heads),
+            step: Some(OmrStep::Stems),
             ..Parameters::default()
         };
         assert!(!run_native(&parameters, true).expect("unsupported handoff"));

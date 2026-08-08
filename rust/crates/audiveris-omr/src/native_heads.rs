@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Production composition of native upstream state into the HEADS prolog.
+//! Production composition of native upstream state through the complete HEADS
+//! step.
 //!
-//! This stops at the first genuinely unported HEADS algorithm: template-based
-//! note-head scanning and interpretation.  Everything before that boundary is
-//! concrete page state rather than a dependency-injected test fixture.
+//! The public entry point retains every independently useful intermediate
+//! product while running the same typed kernels used by the focused seed,
+//! range, glyph-retrieval, and epilog differential tests.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -26,10 +27,222 @@ use crate::{
         NativeHeadsPrologRaster, NeutralDistanceTable, NeutralHeadSpot,
         build_native_distance_table, retrieve_native_head_spots,
     },
+    native_headers::NativeHeaderRecognition,
+    native_heads_bar_slices::{
+        NativeHeadScannerBarSliceError, NativeHeadScannerBarSlicesRecognition,
+        materialize_native_head_scanner_bar_slices,
+    },
+    native_heads_competitor_slices::{
+        NativeHeadScannerCompetitorSliceError, NativeHeadScannerCompetitorSlicesRecognition,
+        materialize_native_head_scanner_competitor_slices,
+    },
+    native_heads_competitors::{
+        NativeHeadsCompetitorError, NativeHeadsCompetitorPool, materialize_native_heads_competitors,
+    },
+    native_heads_epilog::{
+        NativeHeadsEpilogError, NativeHeadsEpilogInput, NativeHeadsEpilogRecognition,
+        compose_native_heads_epilog,
+    },
+    native_heads_obstacles::{
+        NativeHeadsBarObstacleError, NativeHeadsBarObstaclePool,
+        materialize_native_heads_bar_obstacles,
+    },
+    native_heads_range_glyphs::{
+        NativeHeadsRangeGlyphError, NativeHeadsRangeGlyphRecognition, NativeHeadsRangeGlyphsInput,
+        retrieve_native_heads_range_glyphs,
+    },
+    native_heads_range_lookup::{
+        NativeHeadsRangeLookupError, NativeHeadsRangeLookupInput,
+        NativeHeadsRangeLookupRecognition, recognize_native_heads_range_lookup,
+    },
+    native_heads_scanner::{
+        NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError,
+        recognize_native_heads_scanner_context,
+    },
+    native_heads_scanner_pools::{
+        NativeHeadScannerPoolError, NativeHeadScannerPoolsRecognition,
+        materialize_native_head_scanner_pools,
+    },
+    native_heads_seed_glyphs::{
+        NativeHeadsSeedGlyphError, NativeHeadsSeedGlyphRecognition, NativeHeadsSeedGlyphsInput,
+        retrieve_native_heads_seed_glyphs,
+    },
+    native_heads_seed_lookup::{
+        NativeHeadsSeedLookupError, NativeHeadsSeedLookupInput, NativeHeadsSeedLookupRecognition,
+        recognize_native_heads_seed_lookup,
+    },
     native_ledgers::NativeLedgerRecognition,
     native_stem_seeds::NativeStemSeedRecognition,
     recognize::{GridLinesRecognition, NativeBeamRecognition},
 };
+
+/// Complete native product of Java's HEADS step.
+///
+/// The fields retain each independently useful production boundary without
+/// borrowing the upstream GRID, HEADERS, STEM_SEEDS, BEAMS, or LEDGERS state.
+/// Their vector order is the order established by the production calls: sheet
+/// system order, then staff/scanner/candidate source order unless a field's
+/// narrower contract documents Java's explicit stable sort.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeHeadsRecognition {
+    pub obstacles: NativeHeadsBarObstaclePool,
+    pub prolog: NativeHeadsPrologRecognition,
+    pub scanners: NativeHeadsScannerRecognition,
+    pub scanner_pools: NativeHeadScannerPoolsRecognition,
+    pub bar_slices: NativeHeadScannerBarSlicesRecognition,
+    pub competitors: NativeHeadsCompetitorPool,
+    pub competitor_slices: NativeHeadScannerCompetitorSlicesRecognition,
+    pub seed_lookup: NativeHeadsSeedLookupRecognition,
+    pub seed_glyphs: NativeHeadsSeedGlyphRecognition,
+    pub range_lookup: NativeHeadsRangeLookupRecognition,
+    pub range_glyphs: NativeHeadsRangeGlyphRecognition,
+    pub epilog: NativeHeadsEpilogRecognition,
+}
+
+/// Failure at one concrete production boundary in [`recognize_native_heads`].
+#[derive(Debug)]
+pub enum NativeHeadsRecognitionError {
+    Obstacles(NativeHeadsBarObstacleError),
+    Prolog(NativeHeadsPrologRecognitionError),
+    Scanners(NativeHeadsScannerRecognitionError),
+    ScannerPools(NativeHeadScannerPoolError),
+    BarSlices(NativeHeadScannerBarSliceError),
+    Competitors(NativeHeadsCompetitorError),
+    CompetitorSlices(NativeHeadScannerCompetitorSliceError),
+    SeedLookup(NativeHeadsSeedLookupError),
+    SeedGlyphs(NativeHeadsSeedGlyphError),
+    RangeLookup(NativeHeadsRangeLookupError),
+    RangeGlyphs(NativeHeadsRangeGlyphError),
+    Epilog(NativeHeadsEpilogError),
+}
+
+impl fmt::Display for NativeHeadsRecognitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (boundary, source): (&str, &dyn fmt::Display) = match self {
+            Self::Obstacles(source) => ("bar obstacles", source),
+            Self::Prolog(source) => ("prolog", source),
+            Self::Scanners(source) => ("scanner context", source),
+            Self::ScannerPools(source) => ("scanner pools", source),
+            Self::BarSlices(source) => ("bar slices", source),
+            Self::Competitors(source) => ("competitors", source),
+            Self::CompetitorSlices(source) => ("competitor slices", source),
+            Self::SeedLookup(source) => ("seed lookup", source),
+            Self::SeedGlyphs(source) => ("seed glyph retrieval", source),
+            Self::RangeLookup(source) => ("range lookup", source),
+            Self::RangeGlyphs(source) => ("range glyph retrieval", source),
+            Self::Epilog(source) => ("epilog", source),
+        };
+        write!(formatter, "HEADS {boundary} failed: {source}")
+    }
+}
+
+impl Error for NativeHeadsRecognitionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(match self {
+            Self::Obstacles(source) => source,
+            Self::Prolog(source) => source,
+            Self::Scanners(source) => source,
+            Self::ScannerPools(source) => source,
+            Self::BarSlices(source) => source,
+            Self::Competitors(source) => source,
+            Self::CompetitorSlices(source) => source,
+            Self::SeedLookup(source) => source,
+            Self::SeedGlyphs(source) => source,
+            Self::RangeLookup(source) => source,
+            Self::RangeGlyphs(source) => source,
+            Self::Epilog(source) => source,
+        })
+    }
+}
+
+/// Run the complete native HEADS step over live upstream recognition products.
+///
+/// No oracle state or reconstructed candidates enter this path. Each stage
+/// consumes the preceding owned production product directly, so Java's source
+/// and stable-sort ordering contracts remain visible in the returned value.
+pub fn recognize_native_heads(
+    grid: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+) -> Result<NativeHeadsRecognition, NativeHeadsRecognitionError> {
+    let obstacles = materialize_native_heads_bar_obstacles(grid)
+        .map_err(NativeHeadsRecognitionError::Obstacles)?;
+    let competitors = materialize_native_heads_competitors(grid, beams)
+        .map_err(NativeHeadsRecognitionError::Competitors)?;
+    let prolog = recognize_native_heads_prolog(grid, beams, ledgers, stem_seeds)
+        .map_err(NativeHeadsRecognitionError::Prolog)?;
+    let scanners =
+        recognize_native_heads_scanner_context(grid, headers, ledgers, stem_seeds, &prolog)
+            .map_err(NativeHeadsRecognitionError::Scanners)?;
+    let scanner_pools = materialize_native_head_scanner_pools(stem_seeds, &prolog, &scanners)
+        .map_err(NativeHeadsRecognitionError::ScannerPools)?;
+    let bar_slices = materialize_native_head_scanner_bar_slices(&scanner_pools, &obstacles)
+        .map_err(NativeHeadsRecognitionError::BarSlices)?;
+    let competitor_slices =
+        materialize_native_head_scanner_competitor_slices(&scanner_pools, &competitors)
+            .map_err(NativeHeadsRecognitionError::CompetitorSlices)?;
+    let seed_lookup = recognize_native_heads_seed_lookup(NativeHeadsSeedLookupInput {
+        heads: &prolog,
+        scanners: &scanners,
+        pools: &scanner_pools,
+        obstacles: &obstacles,
+        bar_slices: &bar_slices,
+        competitors: &competitors,
+        competitor_slices: &competitor_slices,
+        stem_seeds,
+    })
+    .map_err(NativeHeadsRecognitionError::SeedLookup)?;
+    let seed_glyphs = retrieve_native_heads_seed_glyphs(NativeHeadsSeedGlyphsInput {
+        grid,
+        heads: &prolog,
+        lookup: &seed_lookup,
+    })
+    .map_err(NativeHeadsRecognitionError::SeedGlyphs)?;
+    let range_lookup = recognize_native_heads_range_lookup(NativeHeadsRangeLookupInput {
+        heads: &prolog,
+        scanners: &scanners,
+        pools: &scanner_pools,
+        obstacles: &obstacles,
+        bar_slices: &bar_slices,
+        competitors: &competitors,
+        competitor_slices: &competitor_slices,
+    })
+    .map_err(NativeHeadsRecognitionError::RangeLookup)?;
+    let range_glyphs = retrieve_native_heads_range_glyphs(NativeHeadsRangeGlyphsInput {
+        grid,
+        heads: &prolog,
+        scanners: &scanners,
+        pools: &scanner_pools,
+        competitors: &competitors,
+        range_lookup: &range_lookup,
+        seed_glyphs: &seed_glyphs,
+    })
+    .map_err(NativeHeadsRecognitionError::RangeGlyphs)?;
+    let epilog = compose_native_heads_epilog(NativeHeadsEpilogInput {
+        seed_glyphs: &seed_glyphs,
+        range_glyphs: &range_glyphs,
+        competitors: &competitors,
+        beams,
+    })
+    .map_err(NativeHeadsRecognitionError::Epilog)?;
+
+    Ok(NativeHeadsRecognition {
+        obstacles,
+        prolog,
+        scanners,
+        scanner_pools,
+        bar_slices,
+        competitors,
+        competitor_slices,
+        seed_lookup,
+        seed_glyphs,
+        range_lookup,
+        range_glyphs,
+        epilog,
+    })
+}
 
 /// Bounded production result immediately before Java `NoteHeadsBuilder`.
 #[derive(Clone, Debug, PartialEq)]

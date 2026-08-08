@@ -378,6 +378,12 @@ pub struct NativeBeamRecognition {
     pub staff_head_point_sizes: Vec<NativeStaffHeadPointSize>,
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Exact registered fixed glyph for each entry in `raw_beams`.
+    ///
+    /// The vectors are aligned by sheet-global raw-beam ordinal. Each tuple
+    /// repeats the owning system so consumers can validate that alignment
+    /// rather than silently transferring glyph evidence between systems.
+    pub raw_beam_glyphs: Vec<(usize, crate::beam_inters::RegisteredBeamGlyph)>,
     /// Source beams after Java's ordered MultipleRest replacement/removal.
     /// The unfiltered `raw_beams` remain available as the pre-replacement
     /// diagnostic boundary.
@@ -388,6 +394,9 @@ pub struct NativeBeamRecognition {
     /// retained.
     pub multiple_rests: Vec<NativeMultipleRestDescriptor>,
     pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Exact registered fixed glyph for each entry in `hooks`, aligned by
+    /// sheet-global hook ordinal.
+    pub hook_glyphs: Vec<(usize, crate::beam_inters::RegisteredBeamGlyph)>,
     /// Exact surviving `BeamGroupInter` memberships, in system order.
     ///
     /// Within each system, groups retain `group_beams` creation order and
@@ -718,6 +727,7 @@ fn recognize_native_beams_impl(
 
     use crate::beam_inters::{
         BeamScaling, ExtensionSources, build_hooks, create_beam_inters, extend_beams, group_beams,
+        retrieve_beam_glyph,
     };
     use crate::beam_parameters::{ItemParameters, SheetParameters};
     use crate::beam_recognizer::check_beam_glyph;
@@ -935,6 +945,15 @@ fn recognize_native_beams_impl(
     }
 
     let multiple_rests = recognize_native_multiple_rests(recognition, &raw_beams)?;
+    let raw_beam_glyphs = raw_beams
+        .iter()
+        .map(|(system_id, beam)| {
+            Ok((
+                *system_id,
+                retrieve_beam_glyph(beam.item, width, height, &pixels)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, NativeBeamRecognitionError>>()?;
     let beams_after_multiple_rests = raw_beams
         .iter()
         .enumerate()
@@ -964,6 +983,15 @@ fn recognize_native_beams_impl(
                 .map(|hook| (*system_id, hook)),
         );
     }
+    let hook_glyphs = hooks
+        .iter()
+        .map(|(system_id, hook)| {
+            Ok((
+                *system_id,
+                retrieve_beam_glyph(hook.item, width, height, &pixels)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, NativeBeamRecognitionError>>()?;
 
     let group_memberships = system_ids
         .iter()
@@ -993,9 +1021,11 @@ fn recognize_native_beams_impl(
         staff_head_point_sizes,
         spot_count: components.len(),
         raw_beams,
+        raw_beam_glyphs,
         beams_after_multiple_rests,
         multiple_rests,
         hooks,
+        hook_glyphs,
         group_memberships,
         group_counts,
         group_count,

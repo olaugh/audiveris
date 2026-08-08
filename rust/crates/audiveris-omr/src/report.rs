@@ -40,11 +40,22 @@ use audiveris_image::system_population::BoundarySegment;
 use crate::beam_inters::{RawBeam, beam_bounds};
 use crate::clef_column::{NeutralClefCandidate, NeutralClefKind};
 use crate::grid_executor::HeadlessStaffLine;
+use crate::head_seed_tally_analysis::{HeadSeedScaleEntry, HeadSeedTallySide};
+use crate::head_small_beam_purge::{SmallBeamPurgeDecision, SmallBeamPurgeTarget};
+use crate::head_template::HeadTemplateShape;
 use crate::header_time_column::{
     NeutralSpecificTimeShape, NeutralTimeCandidate, NeutralTimeCandidateKind,
 };
 use crate::key_column::NeutralKeyCandidate;
 use crate::native_headers::{NativeHeaderRecognition, NativeHeaderStaffRecognition};
+use crate::native_heads_competitors::NativeHeadsCompetitorSource;
+use crate::native_heads_epilog::{
+    JavaHeadSeedShape, NativeHeadsEpilogRecognition, NativeHeadsEpilogSystem,
+};
+use crate::native_heads_staff_epilog::{
+    NativeHeadStaffEpilogOrigin, NativeHeadStaffEpilogProvenance, NativeHeadStaffEpilogRef,
+    NativeHeadsStaffEpilogSystem,
+};
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
 use crate::native_stem_seeds::{
     NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
@@ -269,6 +280,41 @@ pub fn ledgers_json(
             stem_seeds: Some(stem_seeds),
             beams: Some(beams),
             ledgers: Some(ledgers),
+            heads: None,
+        },
+        input,
+        sheet,
+    )
+}
+
+/// Emits native GRID, HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and final HEADS
+/// products on one sheet using schema 1.
+///
+/// HEADS deliberately publishes source provenance rather than Java inter or
+/// glyph identifiers. The final-head array order and the source ordinals are
+/// stable identities without pretending that Rust allocated Java's gapped
+/// `InterIndex` sequence.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn heads_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    heads: &NativeHeadsEpilogRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "HEADS",
+        recognition,
+        RecognitionProducts {
+            headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
+            beams: Some(beams),
+            ledgers: Some(ledgers),
+            heads: Some(heads),
         },
         input,
         sheet,
@@ -281,6 +327,7 @@ struct RecognitionProducts<'a> {
     stem_seeds: Option<&'a NativeStemSeedRecognition>,
     beams: Option<&'a NativeBeamRecognition>,
     ledgers: Option<&'a NativeLedgerRecognition>,
+    heads: Option<&'a NativeHeadsEpilogRecognition>,
 }
 
 fn recognition_json(
@@ -295,6 +342,7 @@ fn recognition_json(
         stem_seeds,
         beams,
         ledgers,
+        heads,
     } = products;
     let mut json = Json::default();
     json.open('{');
@@ -337,6 +385,9 @@ fn recognition_json(
     }
     if let Some(ledgers) = ledgers {
         ledger_lines(&mut json, &ledgers.ledger_lines);
+    }
+    if let Some(heads) = heads {
+        heads_product(&mut json, heads);
     }
 
     json.close('}');
@@ -1370,6 +1421,318 @@ fn ledger_lines(json: &mut Json, lines: &[NativeLedgerLine]) {
     json.close(']');
 }
 
+/// Final HEADS product and the exact counts that delimit its three epilog
+/// passes. Heads are not added to schema-1 `inters`: doing so would require
+/// fabricating the Java IDs that the native epilog intentionally does not
+/// carry. Their source provenance is the stable public identity instead.
+fn heads_product(json: &mut Json, heads: &NativeHeadsEpilogRecognition) {
+    json.key("heads");
+    json.open('{');
+    json.key("summary");
+    json.open('{');
+    json.field_integer("system_count", heads.systems.len() as i64);
+    json.field_integer(
+        "input_head_count",
+        heads.staff_epilog.input_head_count as i64,
+    );
+    json.field_integer(
+        "duplicate_removal_count",
+        heads.staff_epilog.duplicate_removal_count as i64,
+    );
+    json.field_integer(
+        "overlap_exclusion_count",
+        heads.staff_epilog.overlap_exclusion_count as i64,
+    );
+    json.field_integer(
+        "post_duplicate_head_count",
+        heads.staff_epilog.retained_head_count as i64,
+    );
+    json.field_integer("beam_removal_count", heads.beam_removal_count as i64);
+    json.field_integer(
+        "head_beam_removal_count",
+        heads.head_beam_removal_count as i64,
+    );
+    json.field_integer("final_head_count", heads.final_head_count as i64);
+    json.field_integer("tally_sample_count", heads.tally_samples.len() as i64);
+    json.field_integer("tally_scale_row_count", heads.scale_analysis.len() as i64);
+    json.close('}');
+
+    json.key("systems");
+    json.open('[');
+    for system in &heads.systems {
+        let staff_system = heads
+            .staff_epilog
+            .systems
+            .iter()
+            .find(|candidate| candidate.system_id == system.system_id)
+            .expect("HEADS epilog system must resolve its staff epilog");
+        heads_system(json, staff_system, system);
+    }
+    json.close(']');
+
+    json.key("tally_scale");
+    json.open('[');
+    for row in &heads.scale_analysis {
+        head_tally_scale_row(json, row);
+    }
+    json.close(']');
+    json.close('}');
+}
+
+fn heads_system(
+    json: &mut Json,
+    staff_system: &NativeHeadsStaffEpilogSystem,
+    system: &NativeHeadsEpilogSystem,
+) {
+    json.open('{');
+    json.field_integer("system", system.system_id as i64);
+    json.key("summary");
+    json.open('{');
+    json.field_integer("input_head_count", staff_system.input_head_count as i64);
+    json.field_integer(
+        "duplicate_removal_count",
+        staff_system.duplicate_removal_count as i64,
+    );
+    json.field_integer(
+        "overlap_exclusion_count",
+        staff_system.overlap_exclusion_count as i64,
+    );
+    json.field_integer(
+        "post_duplicate_head_count",
+        staff_system.retained_head_count as i64,
+    );
+    json.field_integer(
+        "beam_decision_count",
+        system.small_beams.arbitration.decisions.len() as i64,
+    );
+    json.field_integer(
+        "beam_removal_count",
+        system
+            .small_beams
+            .arbitration
+            .decisions
+            .iter()
+            .filter(|decision| decision.target == SmallBeamPurgeTarget::Beam)
+            .count() as i64,
+    );
+    json.field_integer(
+        "head_beam_removal_count",
+        system.beam_removed_heads.len() as i64,
+    );
+    json.field_integer("final_head_count", system.final_heads.len() as i64);
+    json.close('}');
+
+    json.key("final_heads");
+    json.open('[');
+    for reference in &system.final_heads {
+        head_record(json, staff_system, *reference);
+    }
+    json.close(']');
+
+    json.key("beam_decisions");
+    json.open('[');
+    for decision in &system.small_beams.arbitration.decisions {
+        head_beam_decision(json, staff_system, system, decision);
+    }
+    json.close(']');
+    json.close('}');
+}
+
+fn head_record(
+    json: &mut Json,
+    system: &NativeHeadsStaffEpilogSystem,
+    reference: NativeHeadStaffEpilogRef,
+) {
+    let staff = &system.staffs[reference.staff_index];
+    let head = &staff.heads[reference.head_index];
+    json.open('{');
+    json.field_integer("staff", staff.staff_id as i64);
+    head_origin(json, head.origin);
+    head_provenance(json, head.provenance);
+    json.field_string("shape", head_shape(head.shape));
+    json.field_number("pitch", head.pitch());
+    integer_bounds(json, "bounds", head.bounds);
+    json.field_number("grade", head.grade());
+    json.key("glyph");
+    json.open('{');
+    integer_bounds(json, "bounds", head.glyph_bounds);
+    json.field_integer("weight", head.glyph_weight as i64);
+    json.field_string("run_digest", &format!("{:016x}", head.glyph_run_digest));
+    json.close('}');
+    json.close('}');
+}
+
+fn head_reference(
+    json: &mut Json,
+    system: &NativeHeadsStaffEpilogSystem,
+    reference: NativeHeadStaffEpilogRef,
+) {
+    let staff = &system.staffs[reference.staff_index];
+    let head = &staff.heads[reference.head_index];
+    json.open('{');
+    json.field_integer("staff", staff.staff_id as i64);
+    head_origin(json, head.origin);
+    head_provenance(json, head.provenance);
+    json.close('}');
+}
+
+fn head_origin(json: &mut Json, origin: NativeHeadStaffEpilogOrigin) {
+    json.key("origin");
+    json.open('{');
+    match origin {
+        NativeHeadStaffEpilogOrigin::Seed(ordinal) => {
+            json.field_string("kind", "seed");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+        NativeHeadStaffEpilogOrigin::Range(ordinal) => {
+            json.field_string("kind", "range");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+    }
+    json.close('}');
+}
+
+fn head_provenance(json: &mut Json, provenance: NativeHeadStaffEpilogProvenance) {
+    json.key("provenance");
+    json.open('{');
+    match provenance {
+        NativeHeadStaffEpilogProvenance::Seed {
+            ordinal,
+            candidate_ordinal,
+            search_ordinal,
+            geometry_ordinal,
+            seed_pool_index,
+            seed_source_ordinal,
+        } => {
+            json.field_string("kind", "seed");
+            json.field_integer("ordinal", ordinal as i64);
+            json.field_integer("candidate_ordinal", candidate_ordinal as i64);
+            json.field_integer("search_ordinal", search_ordinal as i64);
+            json.field_integer("geometry_ordinal", geometry_ordinal as i64);
+            json.field_integer("seed_pool_index", seed_pool_index as i64);
+            json.field_integer("seed_source_ordinal", seed_source_ordinal as i64);
+        }
+        NativeHeadStaffEpilogProvenance::Range {
+            ordinal,
+            candidate_ordinal,
+            raw_ordinal,
+            attempt_ordinal,
+            geometry_ordinal,
+        } => {
+            json.field_string("kind", "range");
+            json.field_integer("ordinal", ordinal as i64);
+            json.field_integer("candidate_ordinal", candidate_ordinal as i64);
+            json.field_integer("raw_ordinal", raw_ordinal as i64);
+            json.field_integer("attempt_ordinal", attempt_ordinal as i64);
+            json.field_integer("geometry_ordinal", geometry_ordinal as i64);
+        }
+    }
+    json.close('}');
+}
+
+fn head_beam_decision(
+    json: &mut Json,
+    staff_system: &NativeHeadsStaffEpilogSystem,
+    system: &NativeHeadsEpilogSystem,
+    decision: &SmallBeamPurgeDecision,
+) {
+    let beam = system.small_beams.beam_provenance[decision.beam_index];
+    let head = system.small_beams.head_provenance[decision.head_index];
+    json.open('{');
+    json.field_string(
+        "target",
+        match decision.target {
+            SmallBeamPurgeTarget::Beam => "beam",
+            SmallBeamPurgeTarget::Head => "head",
+        },
+    );
+    json.key("beam");
+    json.open('{');
+    competitor_source(json, beam.source);
+    json.field_integer("source_ordinal", beam.source_ordinal as i64);
+    json.close('}');
+    json.key("head");
+    head_reference(json, staff_system, head);
+    json.field_number("beam_contextual_grade", decision.beam_contextual_grade);
+    json.field_number("head_grade", decision.head_grade);
+    json.close('}');
+}
+
+fn competitor_source(json: &mut Json, source: NativeHeadsCompetitorSource) {
+    match source {
+        NativeHeadsCompetitorSource::GridInter(ordinal) => {
+            json.field_string("kind", "grid-inter");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+        NativeHeadsCompetitorSource::RawBeam(ordinal) => {
+            json.field_string("kind", "raw-beam");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+        NativeHeadsCompetitorSource::Hook(ordinal) => {
+            json.field_string("kind", "hook");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+        NativeHeadsCompetitorSource::MultipleRest(ordinal) => {
+            json.field_string("kind", "multiple-rest");
+            json.field_integer("ordinal", ordinal as i64);
+        }
+        NativeHeadsCompetitorSource::MultipleRestSerif { rest_ordinal, side } => {
+            json.field_string("kind", "multiple-rest-serif");
+            json.field_integer("rest_ordinal", rest_ordinal as i64);
+            json.field_string(
+                "side",
+                match side {
+                    crate::native_heads_competitors::NativeHeadsSerifSide::Left => "left",
+                    crate::native_heads_competitors::NativeHeadsSerifSide::Right => "right",
+                },
+            );
+        }
+    }
+}
+
+fn head_tally_scale_row(json: &mut Json, row: &HeadSeedScaleEntry<JavaHeadSeedShape>) {
+    json.open('{');
+    json.field_string("shape", java_head_seed_shape(row.shape));
+    json.field_string(
+        "side",
+        match row.side {
+            HeadSeedTallySide::Left => "left",
+            HeadSeedTallySide::Right => "right",
+        },
+    );
+    json.field_number("dx", row.dx);
+    json.field_integer("cardinality", row.cardinality as i64);
+    json.close('}');
+}
+
+fn head_shape(shape: HeadTemplateShape) -> &'static str {
+    match shape {
+        HeadTemplateShape::NoteheadBlack => "NOTEHEAD_BLACK",
+        HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
+        HeadTemplateShape::WholeNote => "WHOLE_NOTE",
+        HeadTemplateShape::Breve => "BREVE",
+    }
+}
+
+fn java_head_seed_shape(shape: JavaHeadSeedShape) -> &'static str {
+    match shape {
+        JavaHeadSeedShape::Breve => "BREVE",
+        JavaHeadSeedShape::WholeNote => "WHOLE_NOTE",
+        JavaHeadSeedShape::NoteheadVoid => "NOTEHEAD_VOID",
+        JavaHeadSeedShape::NoteheadBlack => "NOTEHEAD_BLACK",
+    }
+}
+
+fn integer_bounds(json: &mut Json, name: &str, value: crate::head_scanner_slices::JavaRectangle) {
+    json.key(name);
+    json.open('{');
+    json.field_integer("x", i64::from(value.x));
+    json.field_integer("y", i64::from(value.y));
+    json.field_integer("width", i64::from(value.width));
+    json.field_integer("height", i64::from(value.height));
+    json.close('}');
+}
+
 fn point(json: &mut Json, name: &str, point: (f64, f64)) {
     json.key(name);
     json.open('{');
@@ -1872,6 +2235,200 @@ pub(crate) mod tests {
         assert!(json.out.contains(r#""kind":"cubic""#));
         assert!(json.out.contains(r#""control1":{"x":3.0,"y":4.0}"#));
         assert!(json.out.contains(r#""control2":{"x":5.0,"y":6.0}"#));
+    }
+
+    #[test]
+    fn heads_product_publishes_final_provenance_arbitration_scale_and_exact_counts() {
+        use crate::{
+            head_purge::{HeadPurgePhase, HeadPurgeResult, HeadSeedTally},
+            head_seed_tally_analysis::HeadSeedTallySample,
+            head_small_beam_purge::{
+                HeadBeamShape, SmallBeamPurgeBeam, SmallBeamPurgeHead, SmallBeamPurgeResult,
+            },
+            head_template::HeadTemplateShape,
+            native_heads_epilog::{NativeHeadsEpilogSystem, NativeHeadsTallyEntry},
+            native_heads_small_beams::{
+                NativeHeadsSmallBeamBeamProvenance, NativeHeadsSmallBeamSystemResult,
+            },
+            native_heads_staff_epilog::{
+                NativeHeadStaffEpilogHead, NativeHeadsStaffEpilogRecognition,
+                NativeHeadsStaffEpilogStaff, NativeHeadsStaffEpilogSystem,
+            },
+        };
+
+        let reference = NativeHeadStaffEpilogRef {
+            staff_index: 0,
+            head_index: 0,
+        };
+        let rectangle = crate::head_scanner_slices::JavaRectangle::new(10, 20, 11, 9);
+        let head = NativeHeadStaffEpilogHead {
+            origin: NativeHeadStaffEpilogOrigin::Seed(3),
+            provenance: NativeHeadStaffEpilogProvenance::Seed {
+                ordinal: 3,
+                candidate_ordinal: 13,
+                search_ordinal: 23,
+                geometry_ordinal: 33,
+                seed_pool_index: 43,
+                seed_source_ordinal: 53,
+            },
+            relative_java_id: 99,
+            system_creation_ordinal: 0,
+            input_ordinal: 0,
+            original_shape: HeadTemplateShape::NoteheadBlack,
+            shape: HeadTemplateShape::NoteheadBlack,
+            pitch_bits: (-1.5_f64).to_bits(),
+            bounds: rectangle,
+            raw_distance_impact_bits: 0.7_f64.to_bits(),
+            distance_impact_bits: 0.8_f64.to_bits(),
+            grade_bits: 0.64_f64.to_bits(),
+            minimum_grade_bits: 0.08_f64.to_bits(),
+            good: true,
+            glyph_bounds: crate::head_scanner_slices::JavaRectangle::new(11, 21, 9, 7),
+            glyph_weight: 17,
+            glyph_run_digest: 0x0123_4567_89ab_cdef,
+            tally_before: HeadSeedTally::default(),
+            tally_after_replication: HeadSeedTally::default(),
+            tally_retained_after_cleanup: false,
+            duplicate_removed: false,
+            attachment_ordinal: Some(0),
+        };
+        let purge = HeadPurgeResult {
+            ordered_indices: vec![0],
+            duplicate_removed_indices: Vec::new(),
+            retained_indices: vec![0],
+            removed: vec![false],
+            tallies: vec![HeadSeedTally::default()],
+            duplicate: HeadPurgePhase::default(),
+            overlap: HeadPurgePhase::default(),
+        };
+        let staff_system = NativeHeadsStaffEpilogSystem {
+            system_id: 2,
+            staffs: vec![NativeHeadsStaffEpilogStaff {
+                staff_id: 7,
+                staff_identity: 0,
+                heads: vec![head],
+                ordered_input_indices: vec![0],
+                retained_attachment_indices: vec![0],
+                purge,
+            }],
+            creation_order: vec![reference],
+            retained_creation_order: vec![reference],
+            attachment_order: vec![reference],
+            input_head_count: 1,
+            duplicate_removal_count: 0,
+            overlap_exclusion_count: 0,
+            retained_head_count: 1,
+        };
+        let decision = SmallBeamPurgeDecision {
+            beam_index: 0,
+            head_index: 0,
+            beam_contextual_grade: 0.6,
+            head_grade: 0.64,
+            target: SmallBeamPurgeTarget::Beam,
+        };
+        let small_beams = NativeHeadsSmallBeamSystemResult {
+            system_id: 2,
+            min_beam_width: 25,
+            head_provenance: vec![reference],
+            head_inputs: vec![SmallBeamPurgeHead {
+                bounds: rectangle,
+                grade: 0.64,
+                removed: false,
+            }],
+            beam_provenance: vec![NativeHeadsSmallBeamBeamProvenance {
+                source: NativeHeadsCompetitorSource::RawBeam(9),
+                source_ordinal: 12,
+            }],
+            beam_inputs: vec![SmallBeamPurgeBeam {
+                shape: HeadBeamShape::BeamHook,
+                bounds: rectangle,
+                median: Segment {
+                    x1: 10.0,
+                    y1: 20.0,
+                    x2: 20.0,
+                    y2: 20.0,
+                },
+                height: 3.0,
+                contextual_grade: 0.6,
+                removed: false,
+            }],
+            arbitration: SmallBeamPurgeResult {
+                ordered_head_indices: vec![0],
+                candidate_beam_indices: vec![0],
+                remaining_beam_indices: Vec::new(),
+                remaining_head_indices: vec![0],
+                beam_removed: vec![true],
+                head_removed: vec![false],
+                computed_contextual_grades: vec![Some(0.6)],
+                checks: Vec::new(),
+                decisions: vec![decision],
+            },
+        };
+        let tally = NativeHeadsTallyEntry {
+            head: reference,
+            shape: JavaHeadSeedShape::NoteheadBlack,
+            side: HeadSeedTallySide::Right,
+            dx: 2.5,
+            removed: false,
+        };
+        let recognition = NativeHeadsEpilogRecognition {
+            staff_epilog: NativeHeadsStaffEpilogRecognition {
+                systems: vec![staff_system],
+                input_head_count: 1,
+                duplicate_removal_count: 0,
+                overlap_exclusion_count: 0,
+                retained_head_count: 1,
+            },
+            systems: vec![NativeHeadsEpilogSystem {
+                system_id: 2,
+                heads_in_sig_order: vec![reference],
+                heads_before_beam_by_ordinate: vec![reference],
+                small_beams,
+                beam_removed_heads: Vec::new(),
+                final_heads: vec![reference],
+                tally_left: Vec::new(),
+                tally_right: vec![tally],
+            }],
+            tally_samples: vec![HeadSeedTallySample {
+                shape: JavaHeadSeedShape::NoteheadBlack,
+                side: HeadSeedTallySide::Right,
+                dx: 2.5,
+                removed: false,
+            }],
+            scale_analysis: vec![HeadSeedScaleEntry {
+                shape: JavaHeadSeedShape::NoteheadBlack,
+                side: HeadSeedTallySide::Right,
+                dx: 2.5,
+                cardinality: 10,
+            }],
+            beam_removal_count: 1,
+            head_beam_removal_count: 0,
+            final_head_count: 1,
+        };
+
+        let mut json = Json::default();
+        json.open('{');
+        heads_product(&mut json, &recognition);
+        json.close('}');
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(json.out.contains(
+            r#""summary":{"system_count":1,"input_head_count":1,"duplicate_removal_count":0,"overlap_exclusion_count":0,"post_duplicate_head_count":1,"beam_removal_count":1,"head_beam_removal_count":0,"final_head_count":1,"tally_sample_count":1,"tally_scale_row_count":1}"#
+        ));
+        assert!(json.out.contains(
+            r#""staff":7,"origin":{"kind":"seed","ordinal":3},"provenance":{"kind":"seed","ordinal":3,"candidate_ordinal":13,"search_ordinal":23,"geometry_ordinal":33,"seed_pool_index":43,"seed_source_ordinal":53},"shape":"NOTEHEAD_BLACK","pitch":-1.5"#
+        ));
+        assert!(json.out.contains(
+            r#""glyph":{"bounds":{"x":11,"y":21,"width":9,"height":7},"weight":17,"run_digest":"0123456789abcdef"}"#
+        ));
+        assert!(json.out.contains(
+            r#""beam_decisions":[{"target":"beam","beam":{"kind":"raw-beam","ordinal":9,"source_ordinal":12}"#
+        ));
+        assert!(json.out.contains(
+            r#""tally_scale":[{"shape":"NOTEHEAD_BLACK","side":"right","dx":2.5,"cardinality":10}]"#
+        ));
+        assert!(!json.out.contains("relative_java_id"));
+        assert!(!json.out.contains("system_creation_ordinal"));
     }
 
     /// Scans for the shapes a stateful writer gets wrong: a comma where a

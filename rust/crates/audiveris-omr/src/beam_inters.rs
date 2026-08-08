@@ -19,7 +19,10 @@ use audiveris_image::beam_structure::{
     compute_jitter,
 };
 pub use audiveris_image::beam_structure::{beam_grade, clamp_impact, clamped};
-use audiveris_image::run_table::RunTable;
+use audiveris_image::{
+    beam_groups::BeamBounds,
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
+};
 
 use crate::beam_parameters::{ItemParameters, SheetParameters};
 
@@ -70,6 +73,135 @@ pub struct RawBeam {
     pub item: BeamItem,
     pub impacts: BeamImpacts,
     pub grade: f64,
+}
+
+/// Exact fixed glyph Java's `BeamsBuilder.registerBeam` attaches to a beam.
+///
+/// This is not the threshold-140 spot which originally led to an
+/// interpretation. Java rebuilds a vertical run table from `NO_STAFF` inside
+/// the final beam parallelogram every time it registers an inter, including
+/// for hooks and extension/merge products. Retaining that table therefore
+/// avoids inventing a source identity for geometry which spans more than one
+/// spot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegisteredBeamGlyph {
+    /// `beam.getBounds().intersection(sheetBox)`, in sheet coordinates.
+    pub bounds: BeamBounds,
+    /// Cropped vertical table registered with Java's `GlyphIndex`.
+    pub run_table: RunTable,
+}
+
+impl RegisteredBeamGlyph {
+    #[must_use]
+    pub fn weight(&self) -> usize {
+        self.run_table.weight()
+    }
+
+    /// FNV-1a-64 over the oracle's canonical orientation/dimensions/run rows.
+    #[must_use]
+    pub fn run_digest(&self) -> u64 {
+        run_table_digest(&self.run_table)
+    }
+}
+
+/// Port `BeamsBuilder.retrieveGlyph` for one already-graded beam.
+///
+/// `binary` is the row-major `Picture.SourceKey.NO_STAFF` raster. Pixels are
+/// kept only when they are foreground and the Java2D beam parallelogram
+/// contains their integer coordinate; the result is cropped to the beam's
+/// sheet-clipped bounds and encoded vertically.
+pub fn retrieve_beam_glyph(
+    item: BeamItem,
+    raster_width: usize,
+    raster_height: usize,
+    binary: &[u8],
+) -> Result<RegisteredBeamGlyph, RunTableError> {
+    let expected = raster_width
+        .checked_mul(raster_height)
+        .ok_or(RunTableError::InvalidDimensions)?;
+    if binary.len() != expected {
+        return Err(RunTableError::InvalidPixels);
+    }
+    let sheet_width = i32::try_from(raster_width).map_err(|_| RunTableError::InvalidDimensions)?;
+    let sheet_height =
+        i32::try_from(raster_height).map_err(|_| RunTableError::InvalidDimensions)?;
+    let raw = beam_bounds(item);
+    let left = raw.x.clamp(0, sheet_width);
+    let top = raw.y.clamp(0, sheet_height);
+    let right = i64::from(raw.x)
+        .saturating_add(i64::from(raw.width))
+        .min(i64::from(sheet_width))
+        .max(i64::from(left));
+    let bottom = i64::from(raw.y)
+        .saturating_add(i64::from(raw.height))
+        .min(i64::from(sheet_height))
+        .max(i64::from(top));
+    let width =
+        usize::try_from(right - i64::from(left)).map_err(|_| RunTableError::InvalidDimensions)?;
+    let height =
+        usize::try_from(bottom - i64::from(top)).map_err(|_| RunTableError::InvalidDimensions)?;
+    if width == 0 || height == 0 {
+        return Err(RunTableError::InvalidDimensions);
+    }
+
+    let mut cropped = vec![BACKGROUND; width * height];
+    for dy in 0..height {
+        let y = top + i32::try_from(dy).map_err(|_| RunTableError::InvalidDimensions)?;
+        for dx in 0..width {
+            let x = left + i32::try_from(dx).map_err(|_| RunTableError::InvalidDimensions)?;
+            let source = usize::try_from(y).expect("clipped beam ordinate") * raster_width
+                + usize::try_from(x).expect("clipped beam abscissa");
+            if binary[source] == FOREGROUND
+                && beam_parallelogram_contains(item, f64::from(x), f64::from(y))
+            {
+                cropped[dy * width + dx] = FOREGROUND;
+            }
+        }
+    }
+    let run_table = RunTable::from_pixels(Orientation::Vertical, width, height, &cropped)?;
+    Ok(RegisteredBeamGlyph {
+        bounds: BeamBounds {
+            x: left,
+            y: top,
+            width: i32::try_from(width).map_err(|_| RunTableError::InvalidDimensions)?,
+            height: i32::try_from(height).map_err(|_| RunTableError::InvalidDimensions)?,
+        },
+        run_table,
+    })
+}
+
+fn beam_parallelogram_contains(item: BeamItem, x: f64, y: f64) -> bool {
+    x >= item.median.x1
+        && x < item.median.x2
+        && y >= item.median.y_at_x(x) - (item.height / 2.0)
+        && y < item.median.y_at_x(x) + (item.height / 2.0)
+}
+
+fn run_table_digest(table: &RunTable) -> u64 {
+    let orientation = match table.orientation() {
+        Orientation::Horizontal => "HORIZONTAL",
+        Orientation::Vertical => "VERTICAL",
+    };
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    hash_run_row(
+        &mut hash,
+        &format!("{orientation} {} {}", table.width(), table.height()),
+    );
+    for sequence in 0..table.sequence_count() {
+        let mut row = sequence.to_string();
+        for run in table.sequence(sequence).unwrap_or_default() {
+            row.push_str(&format!(" {}:{}", run.start, run.length));
+        }
+        hash_run_row(&mut hash, &row);
+    }
+    hash
+}
+
+fn hash_run_row(hash: &mut u64, row: &str) {
+    for byte in row.bytes().chain(std::iter::once(b'\n')) {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
 }
 
 /// The jitter impact one structure contributes to all of its items.
@@ -551,5 +683,75 @@ mod tests {
     fn the_minimum_grade_carries_the_intrinsic_ratio() {
         // 0.8 * 0.1, not 0.1. Both beams and hooks use AbstractInter's default.
         assert!((MIN_INTER_GRADE - 0.08).abs() < 1e-15);
+    }
+
+    #[test]
+    fn registered_glyph_masks_no_staff_inside_the_final_beam_area() {
+        let mut binary = vec![FOREGROUND; 7 * 5];
+        binary[2 * 7 + 3] = BACKGROUND;
+        let glyph = retrieve_beam_glyph(
+            BeamItem {
+                median: audiveris_image::beam_structure::Segment {
+                    x1: 1.0,
+                    y1: 2.0,
+                    x2: 5.0,
+                    y2: 2.0,
+                },
+                height: 2.0,
+            },
+            7,
+            5,
+            &binary,
+        )
+        .expect("valid registered beam glyph");
+
+        assert_eq!(
+            glyph.bounds,
+            BeamBounds {
+                x: 1,
+                y: 1,
+                width: 4,
+                height: 2,
+            }
+        );
+        assert_eq!(glyph.weight(), 7);
+        assert_eq!(
+            glyph.run_table.to_pixels(),
+            vec![
+                FOREGROUND, FOREGROUND, FOREGROUND, FOREGROUND, FOREGROUND, FOREGROUND, BACKGROUND,
+                FOREGROUND,
+            ]
+        );
+        assert_ne!(glyph.run_digest(), 0);
+    }
+
+    #[test]
+    fn registered_glyph_clips_the_beam_box_to_the_sheet() {
+        let glyph = retrieve_beam_glyph(
+            BeamItem {
+                median: audiveris_image::beam_structure::Segment {
+                    x1: -2.0,
+                    y1: 0.5,
+                    x2: 2.0,
+                    y2: 0.5,
+                },
+                height: 3.0,
+            },
+            3,
+            2,
+            &[FOREGROUND; 6],
+        )
+        .expect("clipped registered beam glyph");
+
+        assert_eq!(
+            glyph.bounds,
+            BeamBounds {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2,
+            }
+        );
+        assert_eq!(glyph.weight(), 4);
     }
 }

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use audiveris_omr::{
+    heads_post_range_corpus::parse_heads_post_range_corpus,
     native_headers::recognize_native_headers,
     native_heads_competitors::{
         NativeHeadsCompetitor, NativeHeadsCompetitorDecision, NativeHeadsCompetitorEvidence,
@@ -14,6 +15,7 @@ use audiveris_omr::{
 };
 
 const ORACLE: &str = include_str!("../../../oracle/heads-scanner-slices.txt");
+const POST_RANGE_ORACLE: &str = include_str!("../../../oracle/heads-post-range.txt");
 
 #[derive(Debug)]
 struct ExpectedPage {
@@ -114,10 +116,18 @@ fn oracle_freezes_current_competitor_class_shape_and_decision_matrix() {
 #[test]
 fn production_grid_and_beams_match_java_competitor_corpus() {
     let pages = parse_oracle();
+    let post_range =
+        parse_heads_post_range_corpus(POST_RANGE_ORACLE).expect("valid post-range corpus");
     let mut total_candidates = 0_usize;
     let mut total_accepted = 0_usize;
+    let mut total_beam_glyphs = 0_usize;
 
     for expected_page in pages {
+        let post_page = post_range
+            .pages
+            .iter()
+            .find(|page| page.page == expected_page.key)
+            .expect("post-range page");
         let image = expected_page
             .key
             .split('#')
@@ -139,6 +149,11 @@ fn production_grid_and_beams_match_java_competitor_corpus() {
         assert_eq!(actual.systems.len(), expected_page.systems.len());
         for actual_system in &actual.systems {
             let expected = &expected_page.systems[&actual_system.system_id];
+            let post_system = post_page
+                .systems
+                .iter()
+                .find(|system| system.system_id == actual_system.system_id)
+                .expect("post-range system");
             let label = format!("{} system {}", expected_page.key, actual_system.system_id);
             assert_eq!(
                 actual_system.candidates_in_sig_order.len(),
@@ -175,6 +190,60 @@ fn production_grid_and_beams_match_java_competitor_corpus() {
                     "{label} accepted order"
                 );
             }
+            let narrow_beams = actual_system
+                .candidates_in_sig_order
+                .iter()
+                .filter(|candidate| {
+                    matches!(
+                        candidate.shape,
+                        audiveris_omr::native_heads_competitors::NativeHeadsCompetitorShape::Beam
+                            | audiveris_omr::native_heads_competitors::NativeHeadsCompetitorShape::BeamHook
+                            | audiveris_omr::native_heads_competitors::NativeHeadsCompetitorShape::BeamSmall
+                    ) && candidate.bounds.width < actual_system.min_beam_width
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                narrow_beams.len(),
+                post_system.beam_inputs.len(),
+                "{label} narrow-beam glyph count"
+            );
+            for (actual, expected) in narrow_beams.into_iter().zip(&post_system.beam_inputs) {
+                let glyph = actual
+                    .glyph
+                    .unwrap_or_else(|| panic!("{label} beam {} missing glyph", expected.ordinal));
+                let expected_glyph = expected
+                    .inter
+                    .glyph
+                    .expect("post-range beam carries registered glyph");
+                assert_eq!(
+                    actual.shape.java_name(),
+                    expected.inter.shape.java_name(),
+                    "{label} beam {} shape",
+                    expected.ordinal
+                );
+                assert_eq!(
+                    rectangle(glyph.bounds),
+                    [
+                        expected_glyph.bounds.x,
+                        expected_glyph.bounds.y,
+                        expected_glyph.bounds.width,
+                        expected_glyph.bounds.height,
+                    ],
+                    "{label} beam {} glyph bounds",
+                    expected.ordinal
+                );
+                assert_eq!(
+                    glyph.weight, expected_glyph.weight,
+                    "{label} beam {} glyph weight",
+                    expected.ordinal
+                );
+                assert_eq!(
+                    glyph.run_digest, expected_glyph.run_hash,
+                    "{label} beam {} glyph runs",
+                    expected.ordinal
+                );
+                total_beam_glyphs += 1;
+            }
             total_candidates += actual_system.candidates_in_sig_order.len();
             total_accepted += actual_system.accepted_by_ordinate.len();
         }
@@ -182,6 +251,7 @@ fn production_grid_and_beams_match_java_competitor_corpus() {
 
     assert_eq!(total_candidates, 1_334);
     assert_eq!(total_accepted, 847);
+    assert_eq!(total_beam_glyphs, 191);
 }
 
 fn assert_competitor(

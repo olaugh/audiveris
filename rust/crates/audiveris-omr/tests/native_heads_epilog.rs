@@ -21,29 +21,11 @@ use audiveris_omr::{
         parse_heads_post_range_corpus,
     },
     native_headers::recognize_native_headers,
-    native_heads::recognize_native_heads_prolog,
-    native_heads_bar_slices::materialize_native_head_scanner_bar_slices,
-    native_heads_competitor_slices::materialize_native_head_scanner_competitor_slices,
-    native_heads_competitors::{
-        NativeHeadsCompetitorPool, NativeHeadsCompetitorShape, materialize_native_heads_competitors,
-    },
-    native_heads_epilog::{
-        JavaHeadSeedShape, NativeHeadsEpilogInput, NativeHeadsEpilogRecognition,
-        compose_native_heads_epilog,
-    },
-    native_heads_obstacles::materialize_native_heads_bar_obstacles,
-    native_heads_range_glyphs::{
-        NativeHeadRangeGlyph, NativeHeadsRangeGlyphRecognition, NativeHeadsRangeGlyphsInput,
-        retrieve_native_heads_range_glyphs,
-    },
-    native_heads_range_lookup::{NativeHeadsRangeLookupInput, recognize_native_heads_range_lookup},
-    native_heads_scanner::recognize_native_heads_scanner_context,
-    native_heads_scanner_pools::materialize_native_head_scanner_pools,
-    native_heads_seed_glyphs::{
-        NativeHeadSeedGlyph, NativeHeadsSeedGlyphRecognition, NativeHeadsSeedGlyphsInput,
-        retrieve_native_heads_seed_glyphs,
-    },
-    native_heads_seed_lookup::{NativeHeadsSeedLookupInput, recognize_native_heads_seed_lookup},
+    native_heads::{NativeHeadsRecognition, recognize_native_heads},
+    native_heads_competitors::{NativeHeadsCompetitorPool, NativeHeadsCompetitorShape},
+    native_heads_epilog::{JavaHeadSeedShape, NativeHeadsEpilogRecognition},
+    native_heads_range_glyphs::{NativeHeadRangeGlyph, NativeHeadsRangeGlyphRecognition},
+    native_heads_seed_glyphs::{NativeHeadSeedGlyph, NativeHeadsSeedGlyphRecognition},
     native_heads_small_beams::NativeHeadsSmallBeamSystemResult,
     native_heads_staff_epilog::{
         NativeHeadStaffEpilogOrigin, NativeHeadStaffEpilogRef, NativeHeadsStaffEpilogRecognition,
@@ -65,6 +47,7 @@ struct NativeHeadsPageProducts {
     competitors: NativeHeadsCompetitorPool,
     seed_heads: NativeHeadsSeedGlyphRecognition,
     range_heads: NativeHeadsRangeGlyphRecognition,
+    epilog: NativeHeadsEpilogRecognition,
 }
 
 #[derive(Clone, Copy)]
@@ -139,16 +122,10 @@ fn native_heads_epilog_matches_java_corpus() {
     for page in &expected.pages {
         let native = load_native_page(page);
         assert_pre_epilog_staff_contract(page, &native, &mut totals);
-        let epilog = compose_native_heads_epilog(NativeHeadsEpilogInput {
-            seed_glyphs: &native.seed_heads,
-            range_glyphs: &native.range_heads,
-            competitors: &native.competitors,
-            beams: &native.beams,
-        })
-        .unwrap_or_else(|error| panic!("{}: complete epilog failed: {error}", page.page));
+        let epilog = &native.epilog;
         assert_staff_epilog_contract(page, &epilog.staff_epilog);
-        assert_small_beam_contract(page, &native, &epilog);
-        assert_scale_contract(page, &epilog);
+        assert_small_beam_contract(page, &native, epilog);
+        assert_scale_contract(page, epilog);
         assert_eq!(
             epilog.beam_removal_count, page.summary.purged_beams,
             "{}",
@@ -204,72 +181,29 @@ fn load_native_page(page: &PostRangePage) -> NativeHeadsPageProducts {
     let image = page.page.strip_suffix("#1").expect("page sheet suffix");
     let grid = recognize_grid_lines(repo_path(&format!("data/examples/{image}")))
         .unwrap_or_else(|error| panic!("{}: GRID failed: {error}", page.page));
-    let obstacles = materialize_native_heads_bar_obstacles(&grid)
-        .unwrap_or_else(|error| panic!("{}: obstacles failed: {error}", page.page));
     let headers = recognize_native_headers(&grid)
         .unwrap_or_else(|error| panic!("{}: HEADERS failed: {error}", page.page));
     let stem_seeds = recognize_native_stem_seeds(&grid, &headers)
         .unwrap_or_else(|error| panic!("{}: STEM_SEEDS failed: {error}", page.page));
     let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
         .unwrap_or_else(|error| panic!("{}: BEAMS failed: {error}", page.page));
-    let competitors = materialize_native_heads_competitors(&grid, &beams)
-        .unwrap_or_else(|error| panic!("{}: competitors failed: {error}", page.page));
     let ledgers = recognize_native_ledgers(&grid, &beams)
         .unwrap_or_else(|error| panic!("{}: LEDGERS failed: {error}", page.page));
-    let heads = recognize_native_heads_prolog(&grid, &beams, &ledgers, &stem_seeds)
-        .unwrap_or_else(|error| panic!("{}: HEADS prolog failed: {error}", page.page));
-    let scanners =
-        recognize_native_heads_scanner_context(&grid, &headers, &ledgers, &stem_seeds, &heads)
-            .unwrap_or_else(|error| panic!("{}: scanner context failed: {error}", page.page));
-    let pools = materialize_native_head_scanner_pools(&stem_seeds, &heads, &scanners)
-        .unwrap_or_else(|error| panic!("{}: scanner pools failed: {error}", page.page));
-    let bar_slices = materialize_native_head_scanner_bar_slices(&pools, &obstacles)
-        .unwrap_or_else(|error| panic!("{}: bar slices failed: {error}", page.page));
-    let competitor_slices = materialize_native_head_scanner_competitor_slices(&pools, &competitors)
-        .unwrap_or_else(|error| panic!("{}: competitor slices failed: {error}", page.page));
-    let seed_lookup = recognize_native_heads_seed_lookup(NativeHeadsSeedLookupInput {
-        heads: &heads,
-        scanners: &scanners,
-        pools: &pools,
-        obstacles: &obstacles,
-        bar_slices: &bar_slices,
-        competitors: &competitors,
-        competitor_slices: &competitor_slices,
-        stem_seeds: &stem_seeds,
-    })
-    .unwrap_or_else(|error| panic!("{}: seed lookup failed: {error}", page.page));
-    let seed_heads = retrieve_native_heads_seed_glyphs(NativeHeadsSeedGlyphsInput {
-        grid: &grid,
-        heads: &heads,
-        lookup: &seed_lookup,
-    })
-    .unwrap_or_else(|error| panic!("{}: seed glyphs failed: {error}", page.page));
-    let range_lookup = recognize_native_heads_range_lookup(NativeHeadsRangeLookupInput {
-        heads: &heads,
-        scanners: &scanners,
-        pools: &pools,
-        obstacles: &obstacles,
-        bar_slices: &bar_slices,
-        competitors: &competitors,
-        competitor_slices: &competitor_slices,
-    })
-    .unwrap_or_else(|error| panic!("{}: range lookup failed: {error}", page.page));
-    let range_heads = retrieve_native_heads_range_glyphs(NativeHeadsRangeGlyphsInput {
-        grid: &grid,
-        heads: &heads,
-        scanners: &scanners,
-        pools: &pools,
-        competitors: &competitors,
-        range_lookup: &range_lookup,
-        seed_glyphs: &seed_heads,
-    })
-    .unwrap_or_else(|error| panic!("{}: range glyphs failed: {error}", page.page));
+    let NativeHeadsRecognition {
+        competitors,
+        seed_glyphs: seed_heads,
+        range_glyphs: range_heads,
+        epilog,
+        ..
+    } = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .unwrap_or_else(|error| panic!("{}: complete HEADS failed: {error}", page.page));
     NativeHeadsPageProducts {
         grid,
         beams,
         competitors,
         seed_heads,
         range_heads,
+        epilog,
     }
 }
 

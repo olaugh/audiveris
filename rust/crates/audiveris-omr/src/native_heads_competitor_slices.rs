@@ -219,6 +219,7 @@ mod tests {
                 },
                 width: 2.0,
             },
+            glyph: None,
             evidence: NativeHeadsCompetitorEvidence::VerticalFloor(2),
             decision: NativeHeadsCompetitorDecision::Accept,
         }

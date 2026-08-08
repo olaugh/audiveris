@@ -145,6 +145,14 @@ pub enum NativeHeadsCompetitorDecision {
     ShortBeamGroup,
 }
 
+/// Identity-free summary of the fixed glyph attached during BEAMS.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeHeadsCompetitorGlyph {
+    pub bounds: JavaRectangle,
+    pub weight: usize,
+    pub run_digest: u64,
+}
+
 /// One live competing SIG node before Java's final ordinate sort.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeHeadsCompetitor {
@@ -160,6 +168,7 @@ pub struct NativeHeadsCompetitor {
     pub good: bool,
     pub frozen: bool,
     pub geometry: NativeHeadsCompetitorGeometry,
+    pub glyph: Option<NativeHeadsCompetitorGlyph>,
     pub evidence: NativeHeadsCompetitorEvidence,
     pub decision: NativeHeadsCompetitorDecision,
 }
@@ -202,6 +211,7 @@ pub enum NativeHeadsCompetitorError {
         member_ordinal: usize,
     },
     InconsistentPostRestBeams,
+    InconsistentBeamGlyphs,
     MissingSerifImpacts {
         rest_ordinal: usize,
         side: NativeHeadsSerifSide,
@@ -254,6 +264,9 @@ impl fmt::Display for NativeHeadsCompetitorError {
             Self::InconsistentPostRestBeams => {
                 formatter.write_str("post-MultipleRest beam state does not match source removals")
             }
+            Self::InconsistentBeamGlyphs => formatter.write_str(
+                "registered beam glyph state does not match raw beam and hook identities",
+            ),
             Self::MissingSerifImpacts { rest_ordinal, side } => {
                 write!(
                     formatter,
@@ -289,6 +302,7 @@ pub fn materialize_native_heads_competitors(
     let min_beam_width =
         (f64::from(grid.scale.scale.interline.main) * MIN_BEAM_WIDTH).round_ties_even() as i32;
     validate_post_rest_beams(beams)?;
+    validate_beam_glyphs(beams)?;
 
     let systems = bars
         .systems
@@ -332,9 +346,11 @@ pub fn materialize_native_heads_competitors(
             }
 
             for (raw_ordinal, beam) in raw_beams_in_sig_order(beams, system_id, &removed) {
+                let (_, glyph) = &beams.raw_beam_glyphs[raw_ordinal];
                 candidates.push(beam_candidate(
                     NativeHeadsCompetitorSource::RawBeam(raw_ordinal),
                     beam,
+                    glyph,
                     beam_group_evidence(
                         system_id,
                         NativeHeadsCompetitorSource::RawBeam(raw_ordinal),
@@ -346,9 +362,11 @@ pub fn materialize_native_heads_competitors(
                 ));
             }
             for (hook_ordinal, hook) in hooks_in_sig_order(beams, system_id)? {
+                let (_, glyph) = &beams.hook_glyphs[hook_ordinal];
                 candidates.push(beam_candidate(
                     NativeHeadsCompetitorSource::Hook(hook_ordinal),
                     hook,
+                    glyph,
                     beam_group_evidence(
                         system_id,
                         NativeHeadsCompetitorSource::Hook(hook_ordinal),
@@ -432,6 +450,25 @@ fn validate_post_rest_beams(
         .collect::<Vec<_>>();
     if expected != beams.beams_after_multiple_rests {
         return Err(NativeHeadsCompetitorError::InconsistentPostRestBeams);
+    }
+    Ok(())
+}
+
+fn validate_beam_glyphs(beams: &NativeBeamRecognition) -> Result<(), NativeHeadsCompetitorError> {
+    let raw_valid = beams.raw_beams.len() == beams.raw_beam_glyphs.len()
+        && beams
+            .raw_beams
+            .iter()
+            .zip(&beams.raw_beam_glyphs)
+            .all(|((beam_system, _), (glyph_system, _))| beam_system == glyph_system);
+    let hooks_valid = beams.hooks.len() == beams.hook_glyphs.len()
+        && beams
+            .hooks
+            .iter()
+            .zip(&beams.hook_glyphs)
+            .all(|((beam_system, _), (glyph_system, _))| beam_system == glyph_system);
+    if !raw_valid || !hooks_valid {
+        return Err(NativeHeadsCompetitorError::InconsistentBeamGlyphs);
     }
     Ok(())
 }
@@ -623,6 +660,7 @@ fn bar_candidate(
             median: obstacle.median,
             width: obstacle.thickness,
         },
+        glyph: None,
         evidence: NativeHeadsCompetitorEvidence::VerticalFloor(width_floor),
         decision: NativeHeadsCompetitorDecision::Accept,
     }
@@ -631,6 +669,7 @@ fn bar_candidate(
 fn beam_candidate(
     source: NativeHeadsCompetitorSource,
     beam: RawBeam,
+    glyph: &crate::beam_inters::RegisteredBeamGlyph,
     evidence: NativeHeadsCompetitorEvidence,
 ) -> NativeHeadsCompetitor {
     let (class, shape) = match beam.kind {
@@ -647,7 +686,7 @@ fn beam_candidate(
             NativeHeadsCompetitorShape::BeamSmall,
         ),
     };
-    let bounds = beam_bounds(beam.item);
+    let bounds = glyph.bounds;
     NativeHeadsCompetitor {
         source,
         source_ordinal: 0,
@@ -669,6 +708,16 @@ fn beam_candidate(
             median: beam.item.median,
             height: beam.item.height,
         },
+        glyph: Some(NativeHeadsCompetitorGlyph {
+            bounds: JavaRectangle {
+                x: glyph.bounds.x,
+                y: glyph.bounds.y,
+                width: glyph.bounds.width,
+                height: glyph.bounds.height,
+            },
+            weight: glyph.weight(),
+            run_digest: glyph.run_digest(),
+        }),
         evidence,
         decision: NativeHeadsCompetitorDecision::Accept,
     }
@@ -699,6 +748,7 @@ fn rest_candidate(
             median: rest.source_median,
             height: rest.height,
         },
+        glyph: None,
         evidence: NativeHeadsCompetitorEvidence::None,
         decision: NativeHeadsCompetitorDecision::Accept,
     }
@@ -737,6 +787,7 @@ fn serif_candidate(
         good: grade >= GOOD_INTER_GRADE,
         frozen: false,
         geometry: NativeHeadsCompetitorGeometry::Vertical { median, width },
+        glyph: None,
         evidence: NativeHeadsCompetitorEvidence::VerticalFloor(width.floor() as i32),
         decision: NativeHeadsCompetitorDecision::Accept,
     })
@@ -893,6 +944,7 @@ mod tests {
                 },
                 width: 10.0,
             },
+            glyph: None,
             evidence,
             decision: NativeHeadsCompetitorDecision::Accept,
         }

@@ -58,6 +58,7 @@ fn candidate(
         good: true,
         frozen: false,
         geometry,
+        glyph: None,
         evidence: NativeHeadsCompetitorEvidence::None,
         decision: NativeHeadsCompetitorDecision::Accept,
     }
@@ -105,9 +106,11 @@ fn recognition_with_empty_groups(system_ids: &[usize]) -> NativeBeamRecognition 
         staff_head_point_sizes: vec![],
         spot_count: 0,
         raw_beams: vec![],
+        raw_beam_glyphs: vec![],
         beams_after_multiple_rests: vec![],
         multiple_rests: vec![],
         hooks: vec![],
+        hook_glyphs: vec![],
         group_memberships: system_ids
             .iter()
             .map(|system_id| NativeBeamGroupMembership {
