@@ -107,7 +107,7 @@ is present but the musical interpretation is not.
 | Raster processing | **Ported and graded** | Run tables, projections, median/Gaussian filters, morphology, thresholding, chamfer distance, watershed, masks, and connected components. |
 | Baseline JPEG | **Ported for measured scope** | Pure Rust and bit-exact to Audiveris's bundled libjpeg behavior for supported 8-bit Huffman images. Progressive, arithmetic, 12-bit, and CMYK inputs are refused rather than approximated. |
 | PDF ingest and rendering | **Ported for measured corpus** | All 189 pinned pages match PDFBox through filters, rasters, transforms, placement, and rendered grayscale output. Unmeasured PDF shapes are refused by name. |
-| Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
+| Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are also exact, ready for production BlackHeadSizer wiring. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
 | CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS in native Java order for the applicable JSON target; GRID keeps its text report. BEAMS and LEDGERS documents retain stem scale and accepted seeds alongside selected headers, system-owned erases, beams, ledgers, relations, groups, and curved paths. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
@@ -116,8 +116,9 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Port and grade `BlackHeadSizer` plus the selected per-staff head point size,
-   the missing BEAMS side effect that HEADS template selection consumes.
+1. Port and grade `BlackHeadSizer`'s spot population, then wire the already
+   native music-font secant and selected per-staff head point size into BEAMS,
+   the missing side effect that HEADS template selection consumes.
 2. Freeze the active head-template catalogs and port the pure template evaluator.
 3. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
 4. Complete HEADS scanning/interpretation, then proceed in pipeline order.

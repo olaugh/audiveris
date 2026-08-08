@@ -237,7 +237,13 @@ The next blocker is upstream state BEAMS currently discards. Java
 `SpotsBuilder` runs `BlackHeadSizer`, which selects `Scale.MusicFontScale` and
 ultimately `Staff.getHeadPointSize()`; `NoteHeadsBuilder` uses that point size
 to select its `TemplateFactory` catalog. HEADS does **not** use the native MLP
-classifier. The next bounded milestone is to freeze and port BlackHeadSizer's
+classifier. The font-metric half is now native in `audiveris-music-font`:
+Bravura `NOTEHEAD_BLACK` (`U+E0A4`) has exact arbitrary-point-size Java2D
+outline widths, `MusicFont.computePointSize`'s two-sample secant and `Math.rint`
+order are ported, and the sheet-to-staff point-size interpolation (including
+the no-scale fallback) is explicit. Pinned Temurin 25 rows cover arbitrary
+sizes, the complete interpolation, and its near-zero fallback. This is not yet
+a production side effect: the next bounded milestone is to freeze and port BlackHeadSizer's
 spot decisions, middle-half width/height populations, BlackHeadScale, sheet
 music-font point size, and per-staff point sizes. Then freeze the active head
 template catalogs and port the pure `Template.evaluate` kernel before scanner

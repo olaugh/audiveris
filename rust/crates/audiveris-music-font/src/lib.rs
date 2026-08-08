@@ -173,6 +173,9 @@ pub fn codepoint(family: MusicFamily, shape: &str) -> Option<u32> {
         "FLAT" => Some(0xE260),
         "NATURAL" => Some(0xE261),
         "SHARP" => Some(0xE262),
+        // `BravuraSymbols`: the filled oval that `BlackHeadSizer` measures when deriving the
+        // sheet's head-specific music-font scale.
+        "NOTEHEAD_BLACK" => Some(0xE0A4),
         // `BravuraSymbols.LINE_CODE` and `STAFF_CODE`: a one-line and a five-line staff segment.
         // Not musical symbols -- they exist so `AbstractPitchedInter` can measure how tall one
         // pitch step is in a given font, which is what turns a glyph box into a pitch offset.
@@ -227,6 +230,20 @@ pub fn layout_bounds(
     shape: &str,
     staff_interline: i32,
 ) -> Result<Option<Bounds>, FontError> {
+    layout_bounds_at_point_size(family, shape, point_size(staff_interline))
+}
+
+/// Ports `TextLayout.getBounds()` for a single-glyph music symbol at an integer point size.
+///
+/// Most recognition callers start from a staff interline and should use [`layout_bounds`].
+/// `BlackHeadSizer` is the exception: Java's `MusicFont.computePointSize` samples the black
+/// notehead at two arbitrary integer point sizes before secant interpolation, so restricting this
+/// operation to `4 * interline` would skip observable sizes.
+pub fn layout_bounds_at_point_size(
+    family: MusicFamily,
+    shape: &str,
+    point_size: i32,
+) -> Result<Option<Bounds>, FontError> {
     let Some(codepoint) = codepoint(family, shape) else {
         return Ok(None);
     };
@@ -243,7 +260,7 @@ pub fn layout_bounds(
         return Ok(None);
     };
 
-    let scale = div_fix(i64::from(point_size(staff_interline)) * 64, units_per_em);
+    let scale = div_fix(i64::from(point_size) * 64, units_per_em);
     // Every edge of every clef box lands on an on-curve point, so all six are whole font units.
     // A fractional edge would mean a curve *interior* sets the box, and then the order of
     // operations becomes observable — Java's scaler quantizes points to 26.6 first and solves for
@@ -269,6 +286,69 @@ pub fn layout_bounds(
         width: grid(right - left),
         height: grid(bottom - top),
     }))
+}
+
+/// The width Java's `TextLayout.getBounds()` reports for Bravura's `NOTEHEAD_BLACK` at one
+/// integer point size.
+///
+/// This is the exact metric sampled by `MusicFont.computePointSize`; no glyph rasterisation is
+/// involved. The function remains family-parametric because Java stores the selected family in
+/// `Scale.MusicFontScale`, even though Bravura is currently the only ported family.
+pub fn black_head_layout_width(
+    family: MusicFamily,
+    point_size: i32,
+) -> Result<Option<f64>, FontError> {
+    Ok(layout_bounds_at_point_size(family, "NOTEHEAD_BLACK", point_size)?.map(|box_| box_.width))
+}
+
+/// Ports Java `MusicFont.computePointSize`, including both `Math.rint` calls, the direction of
+/// the second sample, and the near-zero secant fallback.
+///
+/// The input is `BlackHeadScale.widthMean`, so production calls are finite and non-negative.
+/// The optional result preserves the font-family fallback boundary: a family without a black-head
+/// codepoint reports absence rather than silently deriving a size from another glyph.
+pub fn black_head_point_size(family: MusicFamily, width: f64) -> Result<Option<i32>, FontError> {
+    // Very rough first value, exactly as Java computes it.
+    let v1 = java_rint_to_int(width * 3.3);
+    let Some(w1) = black_head_layout_width(family, v1)? else {
+        return Ok(None);
+    };
+
+    // A second point far enough away to make the secant useful. `dv == 0` is observable for
+    // tiny widths and deliberately falls through to Java's `abs(dw) < 0.01` branch below.
+    let dv = java_rint_to_int(width * 0.25);
+    let v2 = if w1 < width { v1 + dv } else { v1 - dv };
+    let Some(w2) = black_head_layout_width(family, v2)? else {
+        return Ok(None);
+    };
+
+    let dw = w2 - w1;
+    let point_size = if dw.abs() < 0.01 {
+        v1
+    } else {
+        java_rint_to_int(f64::from(v1) + f64::from(v2 - v1) * ((width - w1) / (w2 - w1)))
+    };
+    Ok(Some(point_size))
+}
+
+/// Ports `MusicFont.getHeadPointSize` without coupling this metric crate to the sheet model.
+///
+/// `music_font_point_size` is the sheet-wide value produced by [`black_head_point_size`]. When it
+/// is present, Java scales it by this staff's interline relative to the sheet interline and rounds
+/// once. When absent, Java's current `headRatio` is exactly `1.0`, then `getPointSize` multiplies
+/// the rounded staff interline by four.
+#[must_use]
+pub fn head_point_size(
+    music_font_point_size: Option<i32>,
+    sheet_interline: i32,
+    staff_interline: f64,
+) -> i32 {
+    match music_font_point_size {
+        Some(point_size) => {
+            java_rint_to_int((staff_interline / f64::from(sheet_interline)) * f64::from(point_size))
+        }
+        None => point_size(java_rint_to_int(staff_interline)),
+    }
 }
 
 /// FreeType's `FT_DivFix`: `a / b` as a 16.16 fixed-point value, rounded to nearest.
@@ -662,5 +742,102 @@ mod pitch_offset_tests {
             area_pitch_offset(MusicFamily::Bravura, "NATURAL").expect("Bravura parses"),
             0.0
         );
+    }
+}
+
+#[cfg(test)]
+mod black_head_size_tests {
+    use super::*;
+
+    #[test]
+    fn black_head_width_matches_java_at_arbitrary_point_sizes() {
+        // Captured directly from Temurin 25.0.3+9-LTS `TextLayout.getBounds()` with Bravura's
+        // NOTEHEAD_BLACK U+E0A4. These sizes are deliberately not all divisible by four:
+        // `computePointSize` samples arbitrary integer sizes, unlike ordinary interline layouts.
+        let rows = [
+            (0, 0.0),
+            (1, 0.296875),
+            (4, 1.1875),
+            (52, 15.34375),
+            (53, 15.640625),
+            (54, 15.9375),
+            (55, 16.21875),
+            (56, 16.515625),
+            (57, 16.8125),
+            (58, 17.109375),
+            (59, 17.40625),
+            (60, 17.703125),
+            (61, 18.0),
+            (62, 18.296875),
+            (63, 18.578125),
+            (64, 18.875),
+            (100, 29.5),
+        ];
+        for (point_size, expected) in rows {
+            assert_eq!(
+                black_head_layout_width(MusicFamily::Bravura, point_size).expect("Bravura parses"),
+                Some(expected),
+                "point size {point_size}"
+            );
+        }
+    }
+
+    #[test]
+    fn black_head_point_size_matches_java_two_point_interpolation() {
+        // Same pinned-JDK capture, this time through the complete Java `computePointSize` body.
+        // The tiny rows cover its `abs(dw) < 0.01` fallback; the corpus-sized rows exercise
+        // independent `rint`s for v1/dv and the final secant result.
+        let rows = [
+            (0.0, 0),
+            (0.125, 0),
+            (0.5, 2),
+            (4.0, 14),
+            (8.0, 27),
+            (10.0, 34),
+            (15.0, 51),
+            (15.5, 53),
+            (16.0, 54),
+            (16.5, 56),
+            (17.0, 58),
+            (17.25, 58),
+            (17.5, 59),
+            (18.0, 61),
+            (18.25, 62),
+            (18.5, 63),
+            (19.0, 64),
+            (20.0, 68),
+            (21.0, 71),
+            (22.0, 75),
+            (24.0, 81),
+            (32.0, 108),
+        ];
+        for (width, expected) in rows {
+            assert_eq!(
+                black_head_point_size(MusicFamily::Bravura, width).expect("Bravura parses"),
+                Some(expected),
+                "measured width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn per_staff_head_size_uses_java_rounding_and_fallback() {
+        assert_eq!(head_point_size(Some(61), 20, 20.0), 61);
+        assert_eq!(
+            head_point_size(Some(61), 20, 10.0),
+            30,
+            "30.5 rounds to the even 30"
+        );
+        assert_eq!(
+            head_point_size(Some(61), 20, 30.0),
+            92,
+            "91.5 rounds to the even 92"
+        );
+        assert_eq!(
+            head_point_size(None, 20, 20.5),
+            80,
+            "fallback rounds staff interline before multiplying by four"
+        );
+        assert_eq!(head_point_size(None, 20, 21.5), 88);
     }
 }
