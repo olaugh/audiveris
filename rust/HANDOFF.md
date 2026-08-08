@@ -22,9 +22,11 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The port performs native page recognition through GRID. `audiveris-cli -batch
--step SCALE|GRID <image>` runs `LOAD -> BINARY -> SCALE -> GRID` on a real
-raster, with every threshold derived from the measured sheet scale.
+The CLI performs native page recognition through GRID. The corpus harness now
+continues the same native state through HEADERS and BEAMS; CLI/JSON publication
+of those two stages remains separate wiring work. `audiveris-cli -batch -step
+SCALE|GRID <image>` runs `LOAD -> BINARY -> SCALE -> GRID` on a real raster,
+with every threshold derived from the measured sheet scale.
 
 Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
@@ -36,20 +38,25 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Completed staff-line endpoints | 1300/1300 exact |
 | Sheet SIG | all 420 barline inters and 184 connectors promoted; every median and every intrinsic and contextual grade exact on every page |
 | Beam spot chain | all 8 transforms bit-identical, and all 305 of chula's spot glyphs by bounds, weight and centroid |
-| Beam recognition | **787/787 raw beams across 8 sheets** -- geometry, all six impacts, grade. 7 of 8 sheets exact through the end of BEAMS |
+| Beam recognition | **787/787 raw beams across 8 sheets** -- system ownership, geometry, all six impacts, and grade exact from native GRID + HEADERS inputs. 7 of 8 sheets exact through the end of BEAMS |
 | JPEG decoding | bit-exact against the libjpeg Audiveris bundles, on 130 fixtures and 140 sampling combinations |
 | PDF reading | 189/189 corpus pages: geometry, image structure, raw stream bytes, and **every filter chain** byte-identical to PDFBox |
 
 | Spot-to-system dispatch | 2739/2739 spot centroids on 8 sheets, exact |
 | Stem scale | Java's `maxStem` on all 8 sheets, from the uncleaned raster |
 | Symbol centroids | 6 header clefs, pinned bit-exact |
-| Symbol outline bounds | 1276/1276 swept values on 11 shapes x 116 sizes, exact |
+| Symbol outline bounds | 1624/1624 swept values on 14 shapes x 116 sizes, exact |
 | Clef classification | 65/65 corpus staves: shape, symbol box and `clefStop` exact |
-| Key classification | 45/65 staves match; 3 divergences fixed, 2 residuals characterised |
+| Key classification | 65/65 staves: presence, fifths, union box and `keyStop` exact |
+| Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
+| Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
+| Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
 
-Beams run only in tests, fed by the oracle. Two of the three inputs that kept
-them there are now native -- see "Next session: start here". The third is the
-header erase, which is HEADERS, which is MusicFont.
+`recognize_native_beams` now consumes only the native GRID report and HEADERS'
+`HeaderErase` list: it measures `maxStem`, runs the spot chain, dispatches by
+native system areas/bounds, then creates, extends, hooks and groups beams. The
+oracle is the grader, no longer an input. This remains a corpus/test path until
+the result is published through `-json` and the CLI stage driver.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
@@ -497,22 +504,21 @@ STEM_SEEDS lands.
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.
 
-## Beams cannot yet run as a production path
+## BEAMS native corpus path (CLOSED; CLI/JSON publication remains)
 
 The beam pipeline is exact -- 787 of 787 raw beams across the eight example
-sheets -- but it only runs *in tests*, fed by the oracle. Emitting it from
-`-json` needs three inputs the port does not compute, and shipping
-oracle-derived values in a production report would be dishonest output:
+sheets -- and now runs end to end from native GRID and HEADERS inputs. The three
+inputs that originally kept it oracle-fed are all closed:
 
 1. ~~**`scale.getMaxStem()`**~~ **(closed, `2982cef69`)**, for the stem-run
    removal that opens the spot chain. Not cheap for the reason first given --
    `StemScaler.getBuffer` cleans the raster before counting -- but the cleaning
    turned out not to move the mode on any of the eight sheets. See "Next
    session: start here".
-2. **`Staff.getHeaderStop()`**, for `eraseHeaderAreas`. This is HEADERS, and so
-   MusicFont. Measured cost of omitting it: five spurious clef-sized candidates
-   out of 100 on chula, and zero real beams. **This is now the only one left**,
-   and it appears twice -- here and inside `StemScaler.getBuffer`.
+2. ~~**`Staff.getHeaderStop()`**~~ **(closed)**, for `eraseHeaderAreas`.
+   HEADERS now supplies all 30 native rectangles. Measured cost of omitting the
+   chula rectangles remains five spurious clef-sized candidates and zero real
+   beams, so this input is not optional even though that page loses no true beam.
 3. ~~**System areas**~~ **(closed, `2982cef69`)**, for `dispatchSheetSpots`.
    `GridLinesRecognition` now carries `system_areas` and `system_bounds`, graded
    over 2739 centroids. Wiring rather than a port, as predicted, with one
@@ -522,8 +528,10 @@ oracle-derived values in a production report would be dishonest output:
    `BeamGroupInter.populateSystem` partitions -- grouping run sheet-wide instead
    of per system turns chula's 60 groups into 48.
 
-With (1) and (3) closed, the report can be made honest with (2) still open,
-provided the output states its cost rather than hiding it.
+`recognize_native_beams` is the honest composition boundary. What remains here
+is output integration: publish its beam/hook/group records through `-json` and
+the CLI stage driver. A measured small-beam scale is refused loudly because no
+example sheet grades that class; none of the eight beam sheets has one.
 
 ## Push to `master` only
 
@@ -587,26 +595,25 @@ pinned by that test, and the test fails if the erase ever becomes load-bearing
 for a real beam. It should be re-measured on other pages rather than assumed to
 hold.
 
-## Next session: start here
+## Historical plan that led to native HEADERS and BEAMS
 
-Two of the three inputs that kept beams out of the production path are closed
-(`2982cef69`). What is left is the one that was always the hard one.
+This list is retained as the dependency record. Items 1 and 2 are closed, and
+the native corpus path in item 3 is closed; only publication remains there.
 
-1. **The CFF/OTF outline parser**, which the MusicFont thread below shows is the
+1. ~~**The CFF/OTF outline parser**~~, which the MusicFont thread below shows is the
    one piece with no shortcut left. `rust/oracle/music-font.txt` is already its
    grading oracle. The JDK question that used to head this list is answered: the
    sweep is bit-identical under OpenJDK 26.0.1 and Temurin 25.0.3+9.
    (CI is clean too -- run `31134170478`, both legs, full step list.)
-2. **The header erase**, which is now the *only* thing between the beam pipeline
+2. ~~**The header erase**~~, which was the *only* thing between the beam pipeline
    and running natively end to end. It is `Staff.getHeaderStop()`, so it is
    HEADERS, so it is MusicFont -- see the MusicFont thread below. It shows up
    twice, in `SpotsBuilder.eraseHeaderAreas` and again inside
-   `StemScaler.getBuffer`, and both are the same dependency.
+   `StemScaler.getBuffer`, and both are the same dependency. Closed by the
+   65/65 header chain and the 30/30 erase grade.
 3. **Beams into `-json`**, then into omrscope's Page and Inters tabs, which
    currently show GRID-level inters only and so cannot display any beam work.
-   This can proceed ahead of item 2 if the header erase is left out and the cost
-   is stated: 5 spurious candidates and 0 real beams on chula, already pinned by
-   `header_erase_cost_is_measured_not_assumed`.
+   The native recognition input is now ready; only publication remains.
 4. **LEDGERS**, which is unblocked by BEAMS and no longer blocked on system
    areas either, since `LedgersFilter` reads the same ones item 2 below closed.
 
@@ -1186,13 +1193,43 @@ corrected by the corpus.
 erase rectangle Java's `SpotsBuilder.eraseHeaderAreas` uses -- system area left,
 the first headered staff's `header.stop`, the system's first/last staff lines at
 that abscissa -- **entirely from native values**, and grades it against the
-`erase` rows of `beam-spots.txt`: all 29 systems across the eight beam sheets
+`erase` rows of `beam-spots.txt`: all 30 systems across the eight beam sheets
 match exactly, with a count assertion so the comparison cannot silently cover
 nothing. The `header_erase_cost_is_measured_not_assumed` measurement (5 spurious
 clef-sized candidates on chula without the erase) remains as documentation of
 what the erase is worth, but the caveat it guarded -- "beams cannot run natively
 because the erase needs HEADERS" -- is gone: the spot chain's `HeaderErase`
 inputs are now producible without a Java oracle.
+
+### Native BEAMS end to end: closed
+
+`recognize_native_beams` composes the previously isolated pieces from the
+native GRID report plus that native `HeaderErase` list: uncleaned-NO_STAFF
+`maxStem`, the complete spot chain, system-area/bounds dispatch, per-spot beam
+recognition, beam extension, hooks, and per-system grouping. The oracle is used
+only after the result exists.
+
+`native_grid_headers_and_beams_match_java_on_every_beam_sheet` grades all eight
+beam sheets against both `beam-structures.txt` and `beams-sig.txt`:
+
+- 2739 native spot components and all 30 native header erases reach BEAMS;
+- 787/787 raw beams match by system, median, height, grade, and all six impacts;
+- final beams and hooks match by system, integer bounds, grade, and all six
+  impacts, and every per-system group count matches;
+- the sole final-SIG difference remains the already-explained
+  BachInvention5 system-6 source beam `(1183,2377,104,11)`, which Java's
+  subsequent `MultipleRestsBuilder` replaces with a `MultipleRestInter`.
+
+The older beam test used `BTreeSet` keys and therefore reported 190 versus 189
+BeamInter impact vectors on Bach; three duplicates on each side were silently
+collapsed. The new gate is a multiset: the honest counts are 193 native
+pre-replacement versus 192 in Java's final SIG, differing by exactly that one
+source beam.
+
+One correction to the preceding handoff: it said 29 erase systems. The oracle
+has 30 rows (3+3+3+5+3+5+2+6), and both the header and end-to-end tests assert
+30. The next recognition stage is LEDGERS; CLI/JSON beam publication can proceed
+independently.
 
 
 ### KEY: the classifier seam is filled

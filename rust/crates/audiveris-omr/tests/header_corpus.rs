@@ -395,6 +395,12 @@ fn run_time_stage(
 /// One `erase` row: `(system, x, stop, first line y, last line y)`.
 type EraseRow = (usize, i32, i32, i32, i32);
 
+struct NativeHeaderPage {
+    name: String,
+    recognition: audiveris_omr::recognize::GridLinesRecognition,
+    header_erases: Vec<audiveris_image::spots::HeaderErase>,
+}
+
 /// The `erase system <s> x <x> stop <x2> firstline <y1> lastline <y2>` rows of the beam oracle,
 /// keyed by page name: what Java's `SpotsBuilder.eraseHeaderAreas` actually erased.
 fn parse_beam_erases() -> BTreeMap<String, Vec<EraseRow>> {
@@ -419,8 +425,7 @@ fn parse_beam_erases() -> BTreeMap<String, Vec<EraseRow>> {
     map
 }
 
-#[test]
-fn native_headers_match_java_on_every_corpus_staff() {
+fn run_native_headers() -> Vec<NativeHeaderPage> {
     // 65 of 65 staves exact -- shape presence/absence, fifths, union box and keyStop.
     //
     // The grade history is the record of what the port was missing, in order:
@@ -447,11 +452,13 @@ fn native_headers_match_java_on_every_corpus_staff() {
     let mut with_time = 0;
     let mut erases_checked = 0;
     let mut mismatches: Vec<String> = Vec::new();
+    let mut native_pages = Vec::new();
 
     for (name, sheet_interline, oracle_staves) in &pages {
         let recognition = recognize_grid_lines(repo_path(&format!("data/examples/{name}")))
             .unwrap_or_else(|error| panic!("{name}: GRID failed: {error}"));
         let sheet = SheetClefParameters::new(*sheet_interline);
+        let mut page_erases = Vec::new();
 
         // ---- clef stage, whose clefStop the key stage browses from ----
         let geometries: Vec<ClefLookupStaffGeometry> = oracle_staves
@@ -874,33 +881,49 @@ fn native_headers_match_java_on_every_corpus_staff() {
             // *native* header stop and staff lines and must equal what Java erased. Java reads the
             // first non-tablature headered staff's stop, and the system's first/last staff lines at
             // that abscissa.
-            if let Some(rows) = beam_erases.get(name.as_str()) {
-                if let Some(&(_, expected_x, expected_stop, expected_first, expected_last)) = rows
-                    .iter()
-                    .find(|(system_id, ..)| *system_id == system_index + 1)
-                {
-                    let stop = system
-                        .staffs
+            if let Some(stop) = system
+                .staffs
+                .iter()
+                .find_map(|staff| staff.header.as_ref().map(|header| header.stop))
+            {
+                let first_id = member_ids.first().copied().expect("non-empty system");
+                let last_id = member_ids.last().copied().expect("non-empty system");
+                let line_at = |staff_id: usize, first: bool| -> i32 {
+                    recognition
+                        .staff_lines
                         .iter()
-                        .find_map(|staff| staff.header.as_ref().map(|header| header.stop))
-                        .expect("headered staff");
-                    let first_id = member_ids.first().copied().expect("non-empty system");
-                    let last_id = member_ids.last().copied().expect("non-empty system");
-                    let line_at = |staff_id: usize, first: bool| -> i32 {
-                        recognition
-                            .staff_lines
-                            .iter()
-                            .find(|lines| lines.staff_id == staff_id)
-                            .and_then(|lines| {
-                                if first {
-                                    lines.first_line_y_at(stop)
-                                } else {
-                                    lines.last_line_y_at(stop)
-                                }
-                            })
-                            .unwrap_or_default()
-                    };
-                    let produced = (0, stop, line_at(first_id, true), line_at(last_id, false));
+                        .find(|lines| lines.staff_id == staff_id)
+                        .and_then(|lines| {
+                            if first {
+                                lines.first_line_y_at(stop)
+                            } else {
+                                lines.last_line_y_at(stop)
+                            }
+                        })
+                        .unwrap_or_default()
+                };
+                let first = line_at(first_id, true);
+                let last = line_at(last_id, false);
+                let x = recognition
+                    .system_areas
+                    .iter()
+                    .find(|area| area.system_id == system_index + 1)
+                    .map_or(0, |area| area.left);
+                let margin = (2.0 * f64::from(*sheet_interline)).round_ties_even() as i32;
+                page_erases.push(audiveris_image::spots::HeaderErase {
+                    x,
+                    stop,
+                    top: first - margin,
+                    bottom: last + margin,
+                });
+
+                if let Some(&(_, expected_x, expected_stop, expected_first, expected_last)) =
+                    beam_erases.get(name.as_str()).and_then(|rows| {
+                        rows.iter()
+                            .find(|(system_id, ..)| *system_id == system_index + 1)
+                    })
+                {
+                    let produced = (x, stop, first, last);
                     let expected = (expected_x, expected_stop, expected_first, expected_last);
                     erases_checked += 1;
                     if produced != expected {
@@ -928,6 +951,11 @@ fn native_headers_match_java_on_every_corpus_staff() {
                 }
             }
         } // per-system
+        native_pages.push(NativeHeaderPage {
+            name: name.clone(),
+            recognition,
+            header_erases: page_erases,
+        });
     }
 
     assert_eq!(checked, 65, "every oracle staff was compared");
@@ -943,5 +971,330 @@ fn native_headers_match_java_on_every_corpus_staff() {
         "{} of {checked} staves disagree with Java:\n{}",
         mismatches.len(),
         mismatches.join("\n")
+    );
+    native_pages
+}
+
+#[test]
+fn native_headers_match_java_on_every_corpus_staff() {
+    assert_eq!(
+        run_native_headers().len(),
+        9,
+        "every corpus page ran through GRID and HEADERS"
+    );
+}
+
+/// Records grouped by the `sheet` row that starts each oracle segment.
+fn beam_oracle_pages(text: &'static str) -> Vec<(String, Vec<Vec<&'static str>>)> {
+    let mut pages: Vec<(String, Vec<Vec<&'static str>>)> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields[0] == "sheet" {
+            pages.push((fields[1].to_owned(), Vec::new()));
+        }
+        pages
+            .last_mut()
+            .expect("an oracle record follows a sheet row")
+            .1
+            .push(fields);
+    }
+    pages
+}
+
+fn raw_beam_key(system_id: usize, raw: audiveris_omr::beam_inters::RawBeam) -> String {
+    format!(
+        "{system_id} {} {} {:.9} {:.9} {:.9} {:.9} {:.9} grade {:.9} impacts \
+         wdth {:.9} minH {:.9} maxH {:.9} core {:.9} belt {:.9} jit {:.9}",
+        raw.kind.class_name(),
+        raw.kind.shape(),
+        raw.item.median.x1,
+        raw.item.median.y1,
+        raw.item.median.x2,
+        raw.item.median.y2,
+        raw.item.height,
+        raw.grade,
+        raw.impacts.width,
+        raw.impacts.min_height,
+        raw.impacts.max_height,
+        raw.impacts.core,
+        raw.impacts.belt,
+        raw.impacts.distance,
+    )
+}
+
+fn multiset_difference<T: Clone + PartialEq>(mine: &[T], theirs: &[T]) -> (Vec<T>, Vec<T>) {
+    let mut spurious = mine.to_vec();
+    for expected in theirs {
+        if let Some(index) = spurious.iter().position(|actual| actual == expected) {
+            spurious.remove(index);
+        }
+    }
+    let mut missing = theirs.to_vec();
+    for actual in mine {
+        if let Some(index) = missing.iter().position(|expected| expected == actual) {
+            missing.remove(index);
+        }
+    }
+    (spurious, missing)
+}
+
+/// A final beam keyed by system, class, bounds, grade, and all six impacts.
+fn expected_final_beams(records: &[Vec<&'static str>]) -> Vec<(usize, String, Vec<String>)> {
+    records
+        .iter()
+        .filter(|fields| fields.first() == Some(&"inter"))
+        .filter(|fields| matches!(fields[3], "BeamInter" | "BeamHookInter" | "SmallBeamInter"))
+        .map(|fields| {
+            let bounds = fields
+                .iter()
+                .position(|field| *field == "bounds")
+                .expect("a beam has bounds");
+            let grade = fields
+                .iter()
+                .position(|field| *field == "grade")
+                .expect("a beam has a grade");
+            let impacts = fields
+                .iter()
+                .position(|field| *field == "impacts")
+                .expect("a beam has impacts");
+            let mut evidence = fields[bounds + 1..bounds + 5]
+                .iter()
+                .map(|field| (*field).to_owned())
+                .collect::<Vec<_>>();
+            evidence.extend(["grade".to_owned(), fields[grade + 1].to_owned()]);
+            evidence.extend(
+                fields[impacts + 1..impacts + 13]
+                    .iter()
+                    .map(|field| (*field).to_owned()),
+            );
+            (
+                fields[1].parse().expect("a system id"),
+                fields[3].to_owned(),
+                evidence,
+            )
+        })
+        .collect()
+}
+
+fn produced_final_beams(
+    recognition: &audiveris_omr::recognize::NativeBeamRecognition,
+) -> Vec<(usize, String, Vec<String>)> {
+    recognition
+        .raw_beams
+        .iter()
+        .chain(&recognition.hooks)
+        .map(|(system_id, raw)| {
+            let bounds = audiveris_omr::beam_inters::beam_bounds(raw.item);
+            (
+                *system_id,
+                raw.kind.class_name().to_owned(),
+                vec![
+                    bounds.x.to_string(),
+                    bounds.y.to_string(),
+                    bounds.width.to_string(),
+                    bounds.height.to_string(),
+                    "grade".to_owned(),
+                    format!("{:.9}", raw.grade),
+                    "wdth".to_owned(),
+                    format!("{:.9}", raw.impacts.width),
+                    "minH".to_owned(),
+                    format!("{:.9}", raw.impacts.min_height),
+                    "maxH".to_owned(),
+                    format!("{:.9}", raw.impacts.max_height),
+                    "core".to_owned(),
+                    format!("{:.9}", raw.impacts.core),
+                    "belt".to_owned(),
+                    format!("{:.9}", raw.impacts.belt),
+                    "jit".to_owned(),
+                    format!("{:.9}", raw.impacts.distance),
+                ],
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
+    let structures = beam_oracle_pages(include_str!("../../../oracle/beam-structures.txt"));
+    let spots = beam_oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
+    let sig = beam_oracle_pages(include_str!("../../../oracle/beams-sig.txt"));
+    let native_pages = run_native_headers();
+
+    assert_eq!(structures.len(), 8, "eight beam sheets are pinned");
+    let mut ungraded_small = native_pages[0].recognition.clone();
+    ungraded_small.scale.scale.small_beam = Some(audiveris_image::scale_estimate::BeamScale {
+        main: 7,
+        extrapolated: false,
+    });
+    assert!(matches!(
+        audiveris_omr::recognize::recognize_native_beams(
+            &ungraded_small,
+            native_pages[0].header_erases.clone(),
+        ),
+        Err(
+            audiveris_omr::recognize::NativeBeamRecognitionError::UnsupportedSmallBeam {
+                small: 7,
+                ..
+            }
+        )
+    ));
+    let mut checked = 0;
+    let mut raw_checked = 0;
+    let mut spots_checked = 0;
+    let mut erases_checked = 0;
+    let mut failures = Vec::new();
+
+    for (page, structure_records) in &structures {
+        let file = page.split('#').next().expect("a file name");
+        let native = native_pages
+            .iter()
+            .find(|native| native.name == file)
+            .unwrap_or_else(|| panic!("no native HEADERS result for {page}"));
+        let spot_records = &spots
+            .iter()
+            .find(|(name, _)| name == page)
+            .unwrap_or_else(|| panic!("no spot oracle for {page}"))
+            .1;
+        let sig_records = &sig
+            .iter()
+            .find(|(name, _)| name == page)
+            .unwrap_or_else(|| panic!("no SIG oracle for {page}"))
+            .1;
+
+        let produced = audiveris_omr::recognize::recognize_native_beams(
+            &native.recognition,
+            native.header_erases.clone(),
+        )
+        .unwrap_or_else(|error| panic!("{page}: native BEAMS failed: {error}"));
+
+        let expected_spots = spot_records
+            .iter()
+            .find(|fields| fields.first() == Some(&"spotcount"))
+            .expect("a spot count")[1]
+            .parse::<usize>()
+            .expect("a numeric spot count");
+        assert_eq!(produced.spot_count, expected_spots, "{page}: spot count");
+        spots_checked += produced.spot_count;
+        erases_checked += native.header_erases.len();
+
+        let mut expected_raw = structure_records
+            .iter()
+            .filter(|fields| fields.first() == Some(&"rawbeam"))
+            .map(|fields| fields[1..].join(" "))
+            .collect::<Vec<_>>();
+        let mut actual_raw = produced
+            .raw_beams
+            .iter()
+            .map(|(system_id, raw)| raw_beam_key(*system_id, *raw))
+            .collect::<Vec<_>>();
+        expected_raw.sort();
+        actual_raw.sort();
+        raw_checked += actual_raw.len();
+        if actual_raw != expected_raw {
+            let (spurious, missing) = multiset_difference(&actual_raw, &expected_raw);
+            let differing = spurious.len().max(missing.len());
+            failures.push(format!(
+                "{page}: {differing} raw beams differ ({} vs Java {})",
+                actual_raw.len(),
+                expected_raw.len()
+            ));
+        }
+
+        let expected = expected_final_beams(sig_records);
+        let actual = produced_final_beams(&produced);
+        for kind in ["BeamInter", "BeamHookInter", "SmallBeamInter"] {
+            let mut theirs = expected
+                .iter()
+                .filter(|(_, class, _)| class == kind)
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut mine = actual
+                .iter()
+                .filter(|(_, class, _)| class == kind)
+                .cloned()
+                .collect::<Vec<_>>();
+            theirs.sort();
+            mine.sort();
+            if mine.len() != theirs.len() {
+                failures.push(format!(
+                    "{page}: {kind} count {} vs Java {}",
+                    mine.len(),
+                    theirs.len()
+                ));
+            }
+            if mine != theirs {
+                let (spurious, missing) = multiset_difference(&mine, &theirs);
+                let differing = spurious.len().max(missing.len());
+                failures.push(format!(
+                    "{page}: {kind} -- {differing} of {} differ",
+                    theirs.len()
+                ));
+            }
+        }
+
+        let mut expected_groups = BTreeMap::new();
+        for fields in sig_records
+            .iter()
+            .filter(|fields| fields.first() == Some(&"inter") && fields[3] == "BeamGroupInter")
+        {
+            *expected_groups
+                .entry(fields[1].parse::<usize>().expect("a system id"))
+                .or_insert(0usize) += 1;
+        }
+        let mut actual_groups = produced
+            .group_counts
+            .iter()
+            .copied()
+            .collect::<BTreeMap<_, _>>();
+        for bounds in &native.recognition.system_bounds {
+            expected_groups.entry(bounds.system_id).or_insert(0);
+            actual_groups.entry(bounds.system_id).or_insert(0);
+        }
+        if actual_groups != expected_groups {
+            failures.push(format!(
+                "{page}: beam groups {actual_groups:?} vs Java {expected_groups:?}"
+            ));
+        }
+
+        checked += 1;
+    }
+
+    assert_eq!(checked, 8, "every beam sheet was compared");
+    assert_eq!(raw_checked, 787, "all raw beam records were compared");
+    assert_eq!(
+        spots_checked, 2_739,
+        "all native spot components were counted"
+    );
+    assert_eq!(erases_checked, 30, "all native header erases reached BEAMS");
+
+    // `MultipleRestsBuilder` runs after beam recognition and replaces one long
+    // BachInvention5 beam with a MultipleRestInter. The native beam result is
+    // therefore expected to retain exactly this one source beam until that
+    // separate recognizer is wired.
+    let known = [
+        "BachInvention5.jpg#1: BeamInter count 193 vs Java 192",
+        "BachInvention5.jpg#1: BeamInter -- 1 of 192 differ",
+    ];
+    let unexpected = failures
+        .iter()
+        .filter(|failure| !known.contains(&failure.as_str()))
+        .collect::<Vec<_>>();
+    assert!(
+        unexpected.is_empty(),
+        "new native end-to-end beam divergences:\n{}",
+        unexpected
+            .iter()
+            .map(|failure| failure.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(
+        failures.len(),
+        known.len(),
+        "a known divergence disappeared; remove it deliberately:\n{}",
+        failures.join("\n")
     );
 }

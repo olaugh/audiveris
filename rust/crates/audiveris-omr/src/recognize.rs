@@ -347,6 +347,305 @@ pub struct GridLinesRecognition {
     pub staff_lines: Vec<StaffLineGeometry>,
 }
 
+/// Native BEAMS output before `MultipleRestsBuilder` replaces any long beam.
+///
+/// `raw_beams` is Java's state after `extendBeams`; `hooks` is what
+/// `buildHooks` adds afterward. Grouping reads both collections but does not
+/// change their geometry or impacts.
+#[derive(Debug, Clone)]
+pub struct NativeBeamRecognition {
+    pub spot_count: usize,
+    pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
+    pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
+    pub group_counts: Vec<(usize, usize)>,
+    pub group_count: usize,
+}
+
+#[derive(Debug)]
+pub enum NativeBeamRecognitionError {
+    RunTable(RunTableError),
+    BeamContract(crate::beams_step::BeamsContractError),
+    UnsupportedSmallBeam { main: i32, small: i32 },
+    InvalidStemScale(i32),
+    MissingSystemArea(usize),
+}
+
+impl std::fmt::Display for NativeBeamRecognitionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RunTable(error) => write!(formatter, "beam run table: {error}"),
+            Self::BeamContract(error) => write!(formatter, "beam contract: {error}"),
+            Self::UnsupportedSmallBeam { main, small } => write!(
+                formatter,
+                "small-beam recognition is not graded (main {main}, small {small})"
+            ),
+            Self::InvalidStemScale(value) => write!(formatter, "invalid maximum stem {value}"),
+            Self::MissingSystemArea(system_id) => {
+                write!(formatter, "system {system_id} has bounds but no area")
+            }
+        }
+    }
+}
+
+impl std::error::Error for NativeBeamRecognitionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RunTable(error) => Some(error),
+            Self::BeamContract(error) => Some(error),
+            Self::UnsupportedSmallBeam { .. }
+            | Self::InvalidStemScale(_)
+            | Self::MissingSystemArea(_) => None,
+        }
+    }
+}
+
+impl From<RunTableError> for NativeBeamRecognitionError {
+    fn from(error: RunTableError) -> Self {
+        Self::RunTable(error)
+    }
+}
+
+impl From<crate::beams_step::BeamsContractError> for NativeBeamRecognitionError {
+    fn from(error: crate::beams_step::BeamsContractError) -> Self {
+        Self::BeamContract(error)
+    }
+}
+
+/// Runs the native spot chain and beam recognizer from an already graded GRID
+/// result and HEADERS' erase rectangles.
+///
+/// The remaining absent input is STEM_SEEDS geometry. It is deliberately an
+/// empty slice here: across the eight example sheets Java never extends a beam
+/// to a stem or spot, while the one observed beam-to-beam merge remains active.
+/// A measured small-beam scale is refused until that class has a corpus grade.
+pub fn recognize_native_beams(
+    recognition: &GridLinesRecognition,
+    header_erases: Vec<audiveris_image::spots::HeaderErase>,
+) -> Result<NativeBeamRecognition, NativeBeamRecognitionError> {
+    use audiveris_image::beam_structure::BeamRaster;
+    use audiveris_image::spots::{
+        BEAM_BINARIZATION_THRESHOLD, SpotParameters, spot_chain, spot_runs,
+    };
+
+    use crate::beam_inters::{
+        BeamScaling, ExtensionSources, build_hooks, create_beam_inters, extend_beams, group_beams,
+    };
+    use crate::beam_parameters::{ItemParameters, SheetParameters};
+    use crate::beam_recognizer::check_beam_glyph;
+    use crate::stem_seeds_step::{StemScaleComputation, compute_stem_scale};
+
+    let pixels = recognition.no_staff.to_pixels();
+    let (width, height) = (recognition.scale.width, recognition.scale.height);
+    let interline = recognition.scale.scale.interline.main;
+    let main_beam = recognition.scale.scale.beam.main;
+    if let Some(small) = recognition.scale.scale.small_beam {
+        return Err(NativeBeamRecognitionError::UnsupportedSmallBeam {
+            main: main_beam,
+            small: small.main,
+        });
+    }
+
+    // Java cleans headers and bar/connectors before measuring stems. The
+    // full-corpus measurement in `stem_scale_from_the_uncleaned_no_staff...`
+    // proves the mode is unchanged on all eight beam sheets, so the native
+    // NO_STAFF table is the graded input until a page disproves that shortcut.
+    let horizontal = RunTable::from_pixels(Orientation::Horizontal, width, height, &pixels)?;
+    let lengths = (0..horizontal.sequence_count())
+        .filter_map(|index| horizontal.sequence(index))
+        .flat_map(|runs| runs.iter().map(|run| run.length as i32))
+        .collect::<Vec<_>>();
+    let line = recognition.scale.scale.line;
+    let stem = compute_stem_scale(
+        &lengths,
+        StemScaleComputation {
+            interline,
+            foreground_main: line.main,
+            foreground_maximum: line.max,
+            minimum_value_ratio: 0.1,
+            minimum_derivative_ratio: 0.05,
+            minimum_gain_ratio: 0.1,
+            stem_as_foreground_ratio: 1.0,
+        },
+    );
+    let max_stem = usize::try_from(stem.maximum)
+        .map_err(|_| NativeBeamRecognitionError::InvalidStemScale(stem.maximum))?;
+    let mut spot_parameters = SpotParameters::new(max_stem, main_beam);
+    spot_parameters.header_erases = header_erases;
+    let chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+    let table = spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD)?;
+    let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+
+    let item = ItemParameters::new(interline, f64::from(main_beam), false);
+    let sheet = SheetParameters::new(interline);
+    let filter = &recognition.no_staff;
+    let raster = BeamRaster {
+        table: filter,
+        offset_x: 0,
+        offset_y: 0,
+    };
+
+    let systems_for = |component: &audiveris_image::glyph_factory::GlyphComponent| {
+        recognition
+            .system_areas
+            .iter()
+            .filter_map(|area| {
+                let bounds = recognition
+                    .system_bounds
+                    .iter()
+                    .find(|bounds| bounds.system_id == area.system_id)?;
+                let x = component.rounded_centroid_x;
+                let y = component.rounded_centroid_y;
+                (area.contains(f64::from(x), f64::from(y)) && x >= bounds.left && x <= bounds.right)
+                    .then_some(area.system_id)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut initial = Vec::new();
+    let mut leftover = Vec::new();
+    for component in &components {
+        let systems = systems_for(component);
+        if systems.is_empty() {
+            continue;
+        }
+        let spot_raster = crate::beams_step::component_vertical_raster(component)?;
+        let check = check_beam_glyph(component, &spot_raster, &item, &sheet);
+        let Some(structure) = check.structure else {
+            for system in systems {
+                leftover.push((system, native_hook_glyph(component)));
+            }
+            continue;
+        };
+        let created = create_beam_inters(
+            &structure,
+            &spot_raster,
+            component.left,
+            component.top,
+            raster,
+            &item,
+            &sheet,
+        );
+        for system in systems {
+            if created.is_empty() {
+                leftover.push((system, native_hook_glyph(component)));
+            }
+            initial.extend(created.iter().map(|beam| (system, *beam)));
+        }
+    }
+
+    let scaling = BeamScaling {
+        item_parameters: &item,
+        sheet: &sheet,
+        interline,
+    };
+    let system_ids = recognition
+        .system_bounds
+        .iter()
+        .map(|bounds| bounds.system_id)
+        .collect::<Vec<_>>();
+    let mut raw_beams = Vec::new();
+    for system_id in &system_ids {
+        let beams = initial
+            .iter()
+            .filter(|(id, _)| id == system_id)
+            .map(|(_, beam)| *beam)
+            .collect::<Vec<_>>();
+        let spots = leftover
+            .iter()
+            .filter(|(id, _)| id == system_id)
+            .map(
+                |(_, glyph)| audiveris_image::beam_extension::ExtensionGlyph {
+                    id: glyph.id,
+                    left: glyph.left,
+                    top: glyph.top,
+                    width: glyph.width,
+                    height: glyph.height,
+                    vertical_median: None,
+                },
+            )
+            .collect::<Vec<_>>();
+        let area = recognition
+            .system_areas
+            .iter()
+            .find(|area| area.system_id == *system_id)
+            .ok_or(NativeBeamRecognitionError::MissingSystemArea(*system_id))?;
+        raw_beams.extend(
+            extend_beams(
+                &beams,
+                ExtensionSources {
+                    spots: &spots,
+                    seeds: &[],
+                },
+                raster,
+                &scaling,
+                |point, beam_height| {
+                    [-1.0, 1.0].into_iter().all(|direction| {
+                        area.contains(point.0, point.1 + (direction * beam_height / 2.0))
+                    })
+                },
+            )
+            .into_iter()
+            .map(|beam| (*system_id, beam)),
+        );
+    }
+
+    let mut hooks = Vec::new();
+    for system_id in &system_ids {
+        let beams = raw_beams
+            .iter()
+            .filter(|(id, _)| id == system_id)
+            .map(|(_, beam)| *beam)
+            .collect::<Vec<_>>();
+        let spots = leftover
+            .iter()
+            .filter(|(id, _)| id == system_id)
+            .map(|(_, glyph)| *glyph)
+            .collect::<Vec<_>>();
+        hooks.extend(
+            build_hooks(&beams, &spots, raster, &item, &sheet)
+                .into_iter()
+                .map(|hook| (*system_id, hook)),
+        );
+    }
+
+    let group_counts = system_ids
+        .iter()
+        .map(|system_id| {
+            let members = raw_beams
+                .iter()
+                .chain(&hooks)
+                .filter(|(id, _)| id == system_id)
+                .map(|(_, beam)| *beam)
+                .collect::<Vec<_>>();
+            (*system_id, group_beams(&members, interline).groups.len())
+        })
+        .collect::<Vec<_>>();
+    let group_count = group_counts.iter().map(|(_, count)| count).sum();
+
+    Ok(NativeBeamRecognition {
+        spot_count: components.len(),
+        raw_beams,
+        hooks,
+        group_counts,
+        group_count,
+    })
+}
+
+fn native_hook_glyph(
+    component: &audiveris_image::glyph_factory::GlyphComponent,
+) -> audiveris_image::beam_hooks::HookGlyph {
+    audiveris_image::beam_hooks::HookGlyph {
+        id: component.ancestor_mark,
+        left: component.left,
+        top: component.top,
+        width: component.width,
+        height: component.height,
+        weight: component.weight,
+        centroid_x: component.centroid_x,
+        centroid_y: component.centroid_y,
+    }
+}
+
 /// One candidate peak that a purge removed, and which purge removed it.
 #[derive(Debug, Clone)]
 pub struct PeakRejection {
