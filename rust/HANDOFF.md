@@ -327,6 +327,21 @@ ordinal. All 55 graded staff selections compose transitively from the exact
 BlackHeadSizer and catalog gates. Scanner-context construction is the next
 boundary.
 
+That boundary is independently frozen now in
+`oracle/heads-scanner-context.txt` (SHA-256
+`c137725c110755229c6b693410077b8c1933d7d70b63ed49dd7b3330a385d886`).
+`HeadsScannerContextProbe` reaches real LEDGERS, runs the real HEADS prolog,
+prepares `NoteHeadsBuilder` through its immutable system fields, and constructs
+the private seed/range scanners without calling lookup or mutating the SIG.
+Two all-fresh-JVM eight-page passes are byte-identical. The fixture covers 30
+systems, 55 standard staves, 1,767 geometries (605 staff-line and 1,162 ledger)
+and 3,534 schedules. It retains exact builder parameters; catalog selections;
+x/y offsets; scanner shape order; staff/ledger source geometry; farther-ledger
+axes; and complete theoretical-ordinate/range vectors as reversible RLE. The
+probe asserts seed/range static geometry is identical. Competitor and frozen-bar
+`Area` slicing is deliberately a later sub-gate rather than being implied by
+this corpus.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
