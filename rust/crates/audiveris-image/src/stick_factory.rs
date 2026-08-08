@@ -444,7 +444,6 @@ impl VerticalStickFactory {
         }
         if self.parameters.interline == 0
             || self.parameters.maximum_stick_thickness == 0
-            || self.parameters.minimum_core_section_length == 0
             || !self.parameters.minimum_side_ratio.is_finite()
             || self.parameters.minimum_side_ratio < 0.0
             || vertical_sections
@@ -1099,5 +1098,24 @@ mod tests {
         assert_eq!(outcome.error, Some(StraightStickError::InvalidParameters));
         assert!(outcome.result.creation_ids().is_empty());
         assert!(outcome.result.survivors().is_empty());
+    }
+
+    #[test]
+    fn vertical_factory_accepts_zero_minimum_core_for_stem_builder_chunks() {
+        let mut table = RunTable::new(Orientation::Vertical, 2, 12).unwrap();
+        assert!(table.add_run(0, Run::new(1, 10)).unwrap());
+        let vertical = build_sections_from_id(&table, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        let factory = VerticalStickFactory::new(VerticalStickParameters {
+            interline: 10,
+            maximum_stick_thickness: 2,
+            minimum_core_section_length: 0,
+            minimum_side_ratio: 0.4,
+        });
+
+        let outcome = factory.retrieve_sticks(&vertical, &[], 1);
+
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.result.creation_ids(), [1]);
+        assert_eq!(outcome.result.survivors().len(), 1);
     }
 }

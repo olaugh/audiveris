@@ -75,7 +75,8 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS section-built head-stump boundary | the production compositor consumes all 9,902 explicit fallbacks, matches 18,398 section/compound steps and 3,660 subsection attempts, and reproduces all 8,933 registrations: 758 accepted / 8,175 rejected and 5,591 new / 3,342 reused, with stable canonical aliases |
 | STEMS BeamLinker stump-preparation boundary | the production compositor matches constructor-time `retrieveStumps()` for 803 BeamLinkers and all 1,606 sides: 3,934 neighbors, 1,820 seed inputs, 1,087 purge comparisons, 301 missing-side builds, 6 direction-accepted builds (5 new registrations and 1 canonical reuse), 1,821 final stumps, 1,311 final side stumps, and zero tremolos; it stops before `equipStumps`/`equipOrphanSides` creates B/V linker topology and geometry |
 | STEMS BeamLinker B/V-construction boundary | the production compositor matches sequential constructor-time `equipStumps`/`equipOrphanSides` for all 803 BeamLinkers: 2,116 BLinkers, 2,417 VLinkers, 2,860 Part folds, 9,186 closer-beam candidates with 703 limiter rebuilds, and 12,491 final-area seed checks with 2,169 reachable; it stops before HeadLinkers and source-ordered cross-beam anchor mutation |
-| STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; all seed snapshots and `StemBuilder` fields remain untouched |
+| STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; it precedes the beam-origin builders |
+| STEMS beam-origin `StemBuilder` boundary | every beam-origin V inspection reaches the actual source-ordered `StemBuilder` constructor and V `sb` assignment for 2,417 builders. The direction differs from its V only for Carmen system 2 / builder 56 (1,390 TOP / 1,027 BOTTOM builders); 2,169 seeds become 1,954, 6,676 targets become 6,670 (1,617 B / 5,053 C), 1,442 chunk glyph registrations yield 799 new and 643 reuse, 175 chunks are removed, and 9,419 final items yield 12,085 length rows. The bounded registry has zero external/unmodeled reuse without claiming global novelty; SIG/system-stem/link/C-builder/unexpected mutation counts are all zero |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -110,9 +111,9 @@ remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
-eight-page image-pipeline differentials, including complete HEADS and six
-production semantic STEMS boundaries through source-ordered beam/head
-reachability before `StemBuilder`.
+eight-page image-pipeline differentials, including complete HEADS and seven
+production semantic STEMS boundaries through beam-origin `StemBuilder`
+construction and V `sb` assignment.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -759,8 +760,8 @@ ends before HeadLinkers and source-ordered `inspectVLinkers`; the next boundary
 must preserve B-before-C reachability and cross-beam anchor reuse/append order.
 
 `materialize_native_stems_beam_reachability` closes the sixth production
-semantic STEMS boundary after all HeadLinkers exist and before any
-`StemBuilder`. The global traversal covers 803 beam starts, 2,145 BLinker
+semantic STEMS boundary after all HeadLinkers exist. The global traversal covers
+803 beam starts, 2,145 BLinker
 visits, 29 anchor skips, and all 2,417 VLinkers. Its 4,960 sibling scans yield
 1,617 eligible cross-beam searches and 5,354 candidate BLinker visits. Strict
 first-tie and inclusive-threshold semantics reuse 1,472 BLinkers, including
@@ -771,16 +772,40 @@ each VLinker: 158,886 stable scans produce 5,739 area hits, 46 distance drops,
 11,386 corner checks, 531 void-side drops, and 5,059 accepted CLinkers, always
 after the ordered B targets. The corpus has zero competing-head removals, small
 heads, small beams, or size drops; those zeroes are graded and generalized
-small-head support is not claimed. All 2,417 seed snapshots remain unchanged
-and all 35,419 reflected builder fields remain null. The signed-zero-corrected
-fixture is byte-identical across two fresh JVM runs at 232,460 lines /
+small-head support is not claimed. All 2,417 seed snapshots remain unchanged.
+The signed-zero-corrected fixture is byte-identical across two fresh JVM runs at
+232,460 lines /
 61,411,164 bytes. Probe, runner, emitted-body, and complete-fixture SHA-256 are
 `39ed0694f7c31593f157b5f250f8bfa4f006984e3b491a877903d64d810edd7b`,
 `61801362bc7328cfb3e90f7460016e333d776ee964d39cc296f60cf6edac33f1`,
 `470827ebc19065890c41c10016511e77eeefc851823bb8587f7537c7e7db23cf`, and
 `9c3f6d17fa6806cba9b01f3922aca34a220d21dc1a5269723e151a025c693221`.
-The next honest boundary is `StemBuilder` item retrieval and seed/chunk
-mutation, followed separately by later SIG linking.
+
+`materialize_native_stems_beam_builders` closes the seventh production semantic
+STEMS boundary. It replays each beam-origin `VLinker.inspect(maxProfile)` once
+in production order, reaches the actual `StemBuilder` constructor return, and
+records its V `sb` assignment for all 2,417 builders. A builder recomputes its
+direction from the theoretical line rather than inheriting the V direction; the
+only divergence is Carmen system 2 / builder 56, leaving 1,390 TOP and 1,027
+BOTTOM builders. The constructor removes 215 of 2,169 seeds, retains 1,954,
+and reduces 6,676 targets to 6,670: all 1,617 B targets and 5,053 C targets.
+It registers 1,442 chunk glyphs (799 new and 643 canonical reuse), removes 175
+chunks, retains 9,419 final items, and emits 12,085 length rows. The bounded
+registry records zero external members and zero unmodeled reuse; this is not a
+global glyph-novelty claim. Its JDK 25 mini-TimSort-only audit records 18
+comparator cycles and 2,503 equivalence inconsistencies. Target lists reach 11
+items and final lists 14; an observed list length of 32 or greater fails closed.
+All 35,419 builder checks record zero SIG, system-stem, linker, C-builder, and
+unexpected-builder mutations. The emitted body is 91,211 lines / 29,195,732
+bytes and the complete fixture 91,212 lines / 29,197,924 bytes. Probe, runner,
+emitted-body, and complete-fixture SHA-256 are
+`c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178`,
+`adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806`,
+`da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
+`a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
+The next boundary is head-corner reachability before CLinker-origin
+`StemBuilder` construction, then the remaining head-origin builders, then
+linking/SIG mutation.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3349,9 +3374,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue STEMS through `StemBuilder`: grade ordered item retrieval,
-   seed/chunk mutation, and registration before later SIG linking at separate
-   identity-free boundaries.
+1. Grade STEMS head-corner reachability before CLinker-origin `StemBuilder`
+   construction, then head-origin builders, then later linking/SIG mutation at
+   separate identity-free boundaries.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

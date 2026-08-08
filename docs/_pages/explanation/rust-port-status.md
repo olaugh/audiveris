@@ -26,8 +26,11 @@ head corner, constructor-time `BeamLinker` stump preparation, and exact
 `equipStumps`/`equipOrphanSides` B/V topology, lookup geometry, closer-beam
 limiting, and seed reachability for every live beam and hook. It now also
 constructs the live head-corner topology and performs source-ordered
-`inspectVLinkers` beam/head reachability with exact cross-beam anchor mutation;
-it stops before `StemBuilder` construction and seed/chunk/SIG mutation;
+`inspectVLinkers` beam/head reachability with exact cross-beam anchor mutation,
+then takes every beam-origin VLinker through the real `StemBuilder` constructor
+and `sb` assignment in production order. This seventh boundary retains its
+seed/chunk work but stops before head-corner reachability, CLinker-origin
+builders, and later linking/SIG mutation;
 the human-readable text
 report remains at `GRID`. HEADERS is an
 oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
@@ -152,7 +155,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first six semantic `STEMS` boundaries are now production-shaped and graded.
+The first seven semantic `STEMS` boundaries are now production-shaped and graded.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -232,16 +235,34 @@ candidates, rejects 46 for beam distance, checks 11,386 corners, and accepts
 removals, zero small heads/beams, and zero size drops on the frozen corpus, so
 small-head generality remains explicitly unclaimed. Every output preserves
 BLinkers before CLinkers, immediate beam-end and final anchor snapshots, raw
-`luYLimit`/quadrilateral/theoretical-line bits, and seed plus null-`StemBuilder`
-immutability. Two corrected fresh-JVM runs are byte-identical at 232,460 lines
+`luYLimit`/quadrilateral/theoretical-line bits and seed immutability. Two
+corrected fresh-JVM runs are byte-identical at 232,460 lines
 and 61,411,164 bytes. Probe, runner, emitted-body, and complete-fixture SHA-256
 values are respectively
 `39ed0694f7c31593f157b5f250f8bfa4f006984e3b491a877903d64d810edd7b`,
 `61801362bc7328cfb3e90f7460016e333d776ee964d39cc296f60cf6edac33f1`,
 `470827ebc19065890c41c10016511e77eeefc851823bb8587f7537c7e7db23cf`, and
 `9c3f6d17fa6806cba9b01f3922aca34a220d21dc1a5269723e151a025c693221`.
-The claim stops before `StemBuilder`, which consumes these ordered targets and
-can mutate VLinker seeds, register chunks, and later create SIG relations.
+
+`materialize_native_stems_beam_builders` closes the seventh boundary: every one
+of the 2,417 beam-origin VLinker inspections reaches the actual `StemBuilder`
+constructor and V `sb` assignment in production order. The constructor's
+direction is distinct from the V direction: exactly one differs (Carmen system
+2, builder 56), producing 1,390 TOP and 1,027 BOTTOM builders. It removes 215
+of 2,169 seeds, retains 6,670 of 6,676 targets (1,617 B and 5,053 C), makes
+1,442 chunk-glyph registrations (799 new, 643 reuse), removes 175 chunks, and
+retains 9,419 final items with 12,085 length rows. Its sort audit records 18
+comparator cycles and 2,503 equivalence inconsistencies; only the JDK 25
+mini-TimSort cases are modeled, with maxima of 11 target and 14 final items and
+a fail-closed limit at 32. The registry is bounded: external members and
+unmodeled reuse are zero there, not a claim of global glyph novelty. All SIG,
+system-stem, linker, C-builder, and unexpected-builder mutations are zero. The
+emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
+29,197,924 bytes; probe, runner, body, and fixture SHA-256 values are
+`c320870ea130e5156124b111e34c918fa4f640595109ac44b8a4de89b732d178`,
+`adc2647152b925a2a81fe580a240b4c8be05fca3148ef3d3df29d73577e72806`,
+`da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
+`a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
 
 Last updated 2026-08-08.
 
@@ -280,7 +301,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with exact median, grade, height, staff, pitch, and two-serif evidence. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Six production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. | Port `StemBuilder` item retrieval and seed/chunk mutation, then later SIG linking. |
+| 10 | `STEMS` | **Components graded** | Seven production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. The seventh completes the beam-origin `StemBuilder` constructor and `sb` assignment for 2,417 builders, with 2,169 -> 1,954 seeds, 6,676 -> 6,670 targets, 1,442 chunk registrations, and 9,419 final items. | Grade head-corner reachability before CLinker-origin `StemBuilder` construction, then head-origin builders, then linking/SIG mutation. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -310,7 +331,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Continue STEMS through `StemBuilder`: grade ordered item retrieval, seed/chunk mutation, and registration before later SIG linking at separate boundaries.
+1. Grade STEMS head-corner reachability before CLinker-origin `StemBuilder` construction, then head-origin builders, then linking/SIG mutation at separate boundaries.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
 3. Complete GRID brace glyph/SIG promotion from the now-retained exact detached filament evidence; Part ownership is already live for downstream stages.
 4. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.

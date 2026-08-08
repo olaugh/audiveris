@@ -119,6 +119,36 @@ Java source checked into this repository and may move.
   including rejected candidates, before the current system's beam-origin
   builders.
 
+### AV-JAVA-RISK-003: a VLinker direction can disagree with its StemBuilder direction
+
+- **Locations:**
+  `app/src/main/java/org/audiveris/omr/sheet/stem/BeamLinker.java`, around
+  lines 1054 and 1147, and
+  `app/src/main/java/org/audiveris/omr/sheet/stem/StemBuilder.java`, around
+  lines 156–160.
+- **Behavior:** `VLinker` retains the requested vertical direction, but
+  `StemBuilder` does not consume that field. It independently derives its
+  direction from `theoLine.getY2() > theoLine.getY1()`. A closer-beam limit can
+  put the final theoretical-line endpoint on the opposite side of the
+  reference point, so the two directions are not guaranteed to agree.
+- **Live evidence:** the exhaustive eight-page beam-origin audit finds one
+  disagreement in 2,417 builders: `carmen.png`, system 2, builder 56 has
+  VLinker direction down (`+1`) and StemBuilder direction up (`-1`). All five
+  Java length-map entries for profiles 0 through 4 are zero. Treating the
+  VLinker direction as the builder direction instead produces length 1 in
+  every row.
+- **Impact:** callers and diagnostic tools can silently use the wrong
+  direction if they assume the VLinker direction is inherited by its builder.
+  The duplicate representation also makes later filtering, sorting, gap, and
+  length behavior depend on which direction a reimplementation chooses.
+- **Status:** this may be a tolerated degenerate geometry rather than an
+  intended invariant. It is worth either asserting that the two directions
+  agree when geometry is built or documenting why the builder is allowed to
+  reverse direction.
+- **Rust parity policy:** retain both values as explicit evidence and use the
+  direction derived from the final theoretical line for every StemBuilder
+  operation.
+
 ## Reporting notes
 
 Findings in test probes, Rust-only code, or oracle normalization are not listed
