@@ -544,6 +544,24 @@ preconditions, and overflow. The remaining range work is to feed this kernel
 from the production scanner, retrieve the 174 final glyphs, and grade all
 per-staff hashes and rows.
 
+The production scanner half is now exact. `native_heads_range_lookup.rs`
+streams Java's range search from the retained prolog/scanner/pool state: exact
+`Rectangle.grow` spot intervals, Chamfer-3 safety checks and two-half-width
+jumps, black-versus-hollow shape schedules, MIDDLE_LEFT y-only evaluation,
+semantic bar/competitor overlap, strict best replacement, nominal abandonment,
+black-to-void conversion, weak stemless gating, and provisional construction.
+It retains only the 34,101 raw candidates while feeding canonical records into
+four online FNV streams, so the 3,119,882 attempts do not become production
+memory. The permanent eight-page gate matches all 55 staff spot, scan, attempt,
+and raw-candidate hashes plus every scanner/count/performance/outcome partition:
+6,759 retained spot rows, 921,558 x visits, 5,389 safety skips, 3,119,882 shape
+attempts, and 34,101 raw candidates. Four inverted source ranges remain explicit
+empty scanner invocations, as in Java. Seed-created `HeadInter`s are present in
+Java's dynamic competitor pool but `Scanner.overlap` deliberately skips them;
+they first matter at `filterSeedConflicts`. The next composition applies the
+already-native aggregation/conflict kernels per scanner and retrieves the 174
+range glyphs.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

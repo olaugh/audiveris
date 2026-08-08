@@ -61,6 +61,7 @@ pub mod native_heads_bar_slices;
 pub mod native_heads_competitor_slices;
 pub mod native_heads_competitors;
 pub mod native_heads_obstacles;
+pub mod native_heads_range_lookup;
 pub mod native_heads_scanner;
 pub mod native_heads_scanner_pools;
 pub mod native_heads_seed_glyphs;
