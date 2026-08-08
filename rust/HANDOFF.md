@@ -71,6 +71,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS section-built head-stump boundary | the production compositor consumes all 9,902 explicit fallbacks, matches 18,398 section/compound steps and 3,660 subsection attempts, and reproduces all 8,933 registrations: 758 accepted / 8,175 rejected and 5,591 new / 3,342 reused, with stable canonical aliases |
 | STEMS BeamLinker stump-preparation boundary | the production compositor matches constructor-time `retrieveStumps()` for 803 BeamLinkers and all 1,606 sides: 3,934 neighbors, 1,820 seed inputs, 1,087 purge comparisons, 301 missing-side builds, 6 direction-accepted builds (5 new registrations and 1 canonical reuse), 1,821 final stumps, 1,311 final side stumps, and zero tremolos; it stops before `equipStumps`/`equipOrphanSides` creates B/V linker topology and geometry |
 | STEMS BeamLinker B/V-construction boundary | the production compositor matches sequential constructor-time `equipStumps`/`equipOrphanSides` for all 803 BeamLinkers: 2,116 BLinkers, 2,417 VLinkers, 2,860 Part folds, 9,186 closer-beam candidates with 703 limiter rebuilds, and 12,491 final-area seed checks with 2,169 reachable; it stops before HeadLinkers and source-ordered cross-beam anchor mutation |
+| STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; all seed snapshots and `StemBuilder` fields remain untouched |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -105,9 +106,9 @@ remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
-eight-page image-pipeline differentials, including complete HEADS and five
-production semantic STEMS boundaries through BeamLinker B/V construction and
-constructor-time reachability.
+eight-page image-pipeline differentials, including complete HEADS and six
+production semantic STEMS boundaries through source-ordered beam/head
+reachability before `StemBuilder`.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -749,9 +750,33 @@ runner, emitted-body, and complete-fixture SHA-256 are
 `77cfa1f1d9b6e3f8917ff44db7e3f643ffca690bd639d8a5a93f6fea208a8388`.
 The prerequisite live GRID path now retains detached brace filaments and drives
 exact two-staff Part ownership; registered beam glyphs use pinned OpenJDK
-`Area`/`Order1` crossings rather than a determinant shortcut. The current claim
+`Area`/`Order1` crossings rather than a determinant shortcut. That constructor claim
 ends before HeadLinkers and source-ordered `inspectVLinkers`; the next boundary
 must preserve B-before-C reachability and cross-beam anchor reuse/append order.
+
+`materialize_native_stems_beam_reachability` closes the sixth production
+semantic STEMS boundary after all HeadLinkers exist and before any
+`StemBuilder`. The global traversal covers 803 beam starts, 2,145 BLinker
+visits, 29 anchor skips, and all 2,417 VLinkers. Its 4,960 sibling scans yield
+1,617 eligible cross-beam searches and 5,354 candidate BLinker visits. Strict
+first-tie and inclusive-threshold semantics reuse 1,472 BLinkers, including
+215 anchors, while 145 new anchors grow the final arenas from 2,116 to 2,261
+entries. The product retains immediate beam-end and final snapshots so later
+backward appends remain distinct. `filterHeads` runs after beam mutation for
+each VLinker: 158,886 stable scans produce 5,739 area hits, 46 distance drops,
+11,386 corner checks, 531 void-side drops, and 5,059 accepted CLinkers, always
+after the ordered B targets. The corpus has zero competing-head removals, small
+heads, small beams, or size drops; those zeroes are graded and generalized
+small-head support is not claimed. All 2,417 seed snapshots remain unchanged
+and all 35,419 reflected builder fields remain null. The signed-zero-corrected
+fixture is byte-identical across two fresh JVM runs at 232,460 lines /
+61,411,164 bytes. Probe, runner, emitted-body, and complete-fixture SHA-256 are
+`39ed0694f7c31593f157b5f250f8bfa4f006984e3b491a877903d64d810edd7b`,
+`61801362bc7328cfb3e90f7460016e333d776ee964d39cc296f60cf6edac33f1`,
+`470827ebc19065890c41c10016511e77eeefc851823bb8587f7537c7e7db23cf`, and
+`9c3f6d17fa6806cba9b01f3922aca34a220d21dc1a5269723e151a025c693221`.
+The next honest boundary is `StemBuilder` item retrieval and seed/chunk
+mutation, followed separately by later SIG linking.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3320,9 +3345,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Continue STEMS through source-ordered `inspectVLinkers`: preserve
-   cross-beam anchor creation/reuse before head filtering, then grade
-   StemBuilder and later SIG mutation at separate identity-free boundaries.
+1. Continue STEMS through `StemBuilder`: grade ordered item retrieval,
+   seed/chunk mutation, and registration before later SIG linking at separate
+   identity-free boundaries.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

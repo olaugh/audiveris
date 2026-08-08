@@ -215,7 +215,12 @@ fn beam_parallelogram_contains(item: BeamItem, x: f64, y: f64) -> bool {
 }
 
 /// OpenJDK 25 `Curve.crossingsFor` + `Order1.XforY` for one line segment.
-fn openjdk_order1_crosses(mut start: (f64, f64), mut stop: (f64, f64), x: f64, y: f64) -> bool {
+pub(crate) fn openjdk_order1_crosses(
+    mut start: (f64, f64),
+    mut stop: (f64, f64),
+    x: f64,
+    y: f64,
+) -> bool {
     if start.1 == stop.1 {
         // `Curve.insertLine` drops horizontal segments.
         return false;

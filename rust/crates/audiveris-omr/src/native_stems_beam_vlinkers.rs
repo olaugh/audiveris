@@ -1553,7 +1553,7 @@ fn get_target_point(reference: NativeStemPoint, limit: Segment, slope: f64) -> N
     )
 }
 
-fn generic_intersection(one: Segment, two: Segment) -> NativeStemPoint {
+pub(crate) fn generic_intersection(one: Segment, two: Segment) -> NativeStemPoint {
     let denominator =
         ((one.x1 - one.x2) * (two.y1 - two.y2)) - ((one.y1 - one.y2) * (two.x1 - two.x2));
     let one_cross = (one.x1 * one.y2) - (one.y1 * one.x2);
@@ -1564,7 +1564,10 @@ fn generic_intersection(one: Segment, two: Segment) -> NativeStemPoint {
     }
 }
 
-fn beam_border(beam: &NativeStemsBeamStumpBeam, side: NativeStemVerticalSide) -> Segment {
+pub(crate) fn beam_border(
+    beam: &NativeStemsBeamStumpBeam,
+    side: NativeStemVerticalSide,
+) -> Segment {
     let delta_y = if side == NativeStemVerticalSide::Top {
         -beam.height / 2.0
     } else {
@@ -1762,7 +1765,7 @@ fn double_bounds_to_integer(bounds: NativeStemsBeamDoubleBounds) -> JavaRectangl
     }
 }
 
-fn convex_quad_intersects_rectangle(
+pub(crate) fn convex_quad_intersects_rectangle(
     quadrilateral: [NativeStemPoint; 4],
     rectangle: JavaRectangle,
 ) -> bool {
