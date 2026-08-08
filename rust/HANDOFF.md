@@ -355,6 +355,33 @@ recomputes nested FNV summaries, expands RLE lengths, and validates all 8 pages,
 kernel/fixture boundary: production staff/ledger adapters and their exhaustive
 comparison are the next slice, and no scanner-context parity is claimed yet.
 
+That production comparison is now complete for the oracle's operational
+scanner geometry. `native_heads_scanner.rs` joins live GRID, HEADERS, LEDGERS,
+STEM_SEEDS, and HEADS-prolog products; `head_scanner_geometry.rs` owns exact
+persistent staff splines and ledger axes. The eight-page integration gate
+matches all 1,767 contexts and 3,534 schedule rows: every parameter and ordered
+offset/shape list, staff/ledger source, raw axis bit, farther-ledger list,
+source/range bound (including four inverted empty ranges), and every expanded
+theoretical ordinate. Ledger membership is read from
+`LedgerMaterializer::staff_inter_ids`, preserving x order and legitimate
+multi-index/staff reuse. The first implementation incorrectly used inter
+creation identity. A second mismatch established that `Glyph.getStartPoint`
+and `getStopPoint` use the cached uncentered `BasicLine.toDouble`, whereas
+`Glyph.getCenterLine` extends and offsets the fit; Rust now exposes both exact
+forms.
+
+The same gate found an upstream boundary that is recorded rather than hidden:
+Java gives each two-staff example system one brace-created Part, but production
+Rust GRID passes `brace_search: None` and never runs its already separated
+brace-continuation path, so its `bar_tail.parts` are singletons. Scanner Part
+ID/range metadata is therefore not published or claimed. All 55 graded staves
+are non-merged, so the operational merged decision and every resulting scanner
+schedule are still exact. Port production brace detection before claiming Part
+ownership or grading a merged grand staff. Tablature skips do not require a
+header/Part join; drum and one-line scanners fail explicitly until the DrumSet
+pitch-to-shape mapping is ported. Competitor/frozen-bar `Area` slicing remains
+the next HEADS-local oracle.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

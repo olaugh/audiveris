@@ -128,6 +128,52 @@ pub fn center_line(component: &GlyphComponent) -> Option<Segment> {
     }
 }
 
+/// Java `Glyph.getStartPoint`/`getStopPoint`: the uncentered least-squares
+/// line through every glyph pixel.
+///
+/// This deliberately differs from [`center_line`]. `Glyph.getCenterLine()`
+/// calls `BasicLine.toCenterLine`, while the endpoint getters cache
+/// `BasicLine.toDouble`; HEADS' ledger adapter uses the latter.
+#[must_use]
+pub fn pixel_line(component: &GlyphComponent) -> Option<Segment> {
+    let mut line = BasicLine::default();
+    let horizontal = component.orientation == Orientation::Horizontal;
+    for entry in &component.runs {
+        let start = entry.run.start;
+        for offset in (0..entry.run.length).rev() {
+            if horizontal {
+                line.include_point(
+                    f64::from(component.left) + (start + offset) as f64,
+                    f64::from(component.top) + entry.sequence as f64,
+                );
+            } else {
+                line.include_point(
+                    f64::from(component.left) + entry.sequence as f64,
+                    f64::from(component.top) + (start + offset) as f64,
+                );
+            }
+        }
+    }
+
+    let (x_min, x_max, y_min, y_max) = line.extents()?;
+    let coefficients = line.coefficients().ok()?;
+    if coefficients.rather_vertical {
+        Some(Segment {
+            x1: line.x_at_y(y_min).ok()?,
+            y1: y_min,
+            x2: line.x_at_y(y_max).ok()?,
+            y2: y_max,
+        })
+    } else {
+        Some(Segment {
+            x1: x_min,
+            y1: line.y_at_x(x_min).ok()?,
+            x2: x_max,
+            y2: line.y_at_x(x_max).ok()?,
+        })
+    }
+}
+
 /// `BeamStructure.getWidth()`: the span of the outermost line endpoints.
 #[must_use]
 pub fn structure_width(analysis: &BeamStructureAnalysis) -> f64 {
@@ -262,7 +308,11 @@ pub fn check_beam_glyph(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use audiveris_image::beam_structure::BeamLine;
+    use audiveris_image::{
+        beam_structure::BeamLine,
+        glyph_factory::build_glyph_components,
+        run_table::{BACKGROUND, FOREGROUND, Orientation},
+    };
 
     fn analysis(lines: Vec<(f64, f64, f64, f64)>) -> BeamStructureAnalysis {
         BeamStructureAnalysis {
@@ -284,6 +334,24 @@ mod tests {
         // Plus one: Java counts pixels, not the distance between them.
         let structure = analysis(vec![(10.0, 0.0, 40.0, 0.0), (15.0, 9.0, 60.0, 9.0)]);
         assert_eq!(structure_width(&structure), 51.0);
+    }
+
+    #[test]
+    fn glyph_endpoint_line_is_not_the_center_line() {
+        let pixels = [
+            FOREGROUND, FOREGROUND, FOREGROUND, BACKGROUND, BACKGROUND, FOREGROUND, FOREGROUND,
+            FOREGROUND,
+        ];
+        let table = RunTable::from_pixels(Orientation::Horizontal, 4, 2, &pixels).unwrap();
+        let components = build_glyph_components(&table, 10, 20);
+        let component = &components[0];
+        let endpoints = pixel_line(component).unwrap();
+        let centered = center_line(component).unwrap();
+
+        assert_eq!(endpoints.x1, centered.x1);
+        assert_eq!(endpoints.x2 + 1.0, centered.x2);
+        assert_eq!(endpoints.y1 + 0.5, centered.y1);
+        assert_eq!(endpoints.y2 + 0.5, centered.y2);
     }
 
     #[test]

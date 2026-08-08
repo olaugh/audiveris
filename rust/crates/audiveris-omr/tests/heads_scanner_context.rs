@@ -2,7 +2,21 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::str::FromStr;
+
+use audiveris_omr::{
+    head_scanner_geometry::HeadScannerAxis,
+    head_template::HeadTemplateShape,
+    native_headers::recognize_native_headers,
+    native_heads::recognize_native_heads_prolog,
+    native_heads_scanner::{
+        NativeHeadScannerPhase, NativeHeadScannerSource, recognize_native_heads_scanner_context,
+    },
+    native_ledgers::recognize_native_ledgers,
+    native_stem_seeds::recognize_native_stem_seeds,
+    recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
+};
 
 const ORACLE: &str = include_str!("../../../oracle/heads-scanner-context.txt");
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -1509,4 +1523,413 @@ fn scanner_context_oracle_parser_freezes_exact_corpus_shape() {
     assert_eq!(standard_staves, 55);
     assert_eq!(geometries, 1_767);
     assert_eq!(schedules, 3_534);
+}
+
+fn repo_path(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(path)
+}
+
+fn native_shape(shape: HeadShape) -> HeadTemplateShape {
+    match shape {
+        HeadShape::Breve => HeadTemplateShape::Breve,
+        HeadShape::WholeNote => HeadTemplateShape::WholeNote,
+        HeadShape::NoteheadVoid => HeadTemplateShape::NoteheadVoid,
+        HeadShape::NoteheadBlack => HeadTemplateShape::NoteheadBlack,
+    }
+}
+
+fn axis_bits(axis: HeadScannerAxis) -> [u64; 4] {
+    [
+        axis.x1.to_bits(),
+        axis.y1.to_bits(),
+        axis.x2.to_bits(),
+        axis.y2.to_bits(),
+    ]
+}
+
+fn expected_axis_bits(axis: &Axis) -> [u64; 4] {
+    [
+        axis.left.x.bits,
+        axis.left.y.bits,
+        axis.right.x.bits,
+        axis.right.y.bits,
+    ]
+}
+
+fn expand_rle(spans: &[RleSpan]) -> Vec<i32> {
+    spans
+        .iter()
+        .flat_map(|span| std::iter::repeat_n(span.ordinate, span.length))
+        .collect()
+}
+
+#[test]
+fn native_scanner_context_matches_java_on_every_beam_sheet() {
+    let oracle = ExpectedOracle::parse(ORACLE);
+    let mut compared_geometries = 0_usize;
+    let mut compared_schedules = 0_usize;
+
+    for expected_page in oracle.pages {
+        let image = expected_page
+            .key
+            .split('#')
+            .next()
+            .expect("page key has an image name");
+        let grid = recognize_grid_lines(repo_path(&format!("data/examples/{image}")))
+            .unwrap_or_else(|error| panic!("{}: GRID failed: {error}", expected_page.key));
+        let headers = recognize_native_headers(&grid)
+            .unwrap_or_else(|error| panic!("{}: HEADERS failed: {error}", expected_page.key));
+        let stem_seeds = recognize_native_stem_seeds(&grid, &headers)
+            .unwrap_or_else(|error| panic!("{}: STEM_SEEDS failed: {error}", expected_page.key));
+        let beams =
+            recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+                .unwrap_or_else(|error| panic!("{}: BEAMS failed: {error}", expected_page.key));
+        let ledgers = recognize_native_ledgers(&grid, &beams)
+            .unwrap_or_else(|error| panic!("{}: LEDGERS failed: {error}", expected_page.key));
+        let heads = recognize_native_heads_prolog(&grid, &beams, &ledgers, &stem_seeds)
+            .unwrap_or_else(|error| panic!("{}: HEADS prolog failed: {error}", expected_page.key));
+        let actual =
+            recognize_native_heads_scanner_context(&grid, &headers, &ledgers, &stem_seeds, &heads)
+                .unwrap_or_else(|error| {
+                    panic!("{}: scanner context failed: {error}", expected_page.key)
+                });
+
+        assert_eq!(
+            (grid.scale.width, grid.scale.height),
+            (expected_page.width, expected_page.height),
+            "{} page dimensions",
+            expected_page.key
+        );
+        assert_eq!(
+            actual.systems.len(),
+            expected_page.systems.len(),
+            "{} systems",
+            expected_page.key
+        );
+
+        for (expected_system, actual_system) in expected_page.systems.iter().zip(&actual.systems) {
+            let context = format!("{} system {}", expected_page.key, expected_system.id);
+            assert_eq!(actual_system.system_id, expected_system.id, "{context} id");
+            let expected_params = &expected_system.params;
+            let params = &actual_system.parameters;
+            assert_eq!(
+                params.main_interline, expected_params.main_interline,
+                "{context} interline"
+            );
+            assert_eq!(
+                params.max_stem,
+                i32::try_from(expected_params.max_stem).unwrap(),
+                "{context} max stem"
+            );
+            assert_eq!(
+                params.max_distance_low.to_bits(),
+                expected_params.max_distance_low.bits,
+                "{context} max distance low"
+            );
+            assert_eq!(
+                params.really_bad_distance.to_bits(),
+                expected_params.really_bad_distance.bits,
+                "{context} really bad distance"
+            );
+            assert_eq!(
+                params.max_template_dx, expected_params.max_template_dx,
+                "{context} max template dx"
+            );
+            assert_eq!(
+                params.max_closed_dy, expected_params.max_closed_dy,
+                "{context} max closed dy"
+            );
+            assert_eq!(
+                params.max_open_dy, expected_params.max_open_dy,
+                "{context} max open dy"
+            );
+            assert_eq!(
+                params.min_beam_width, expected_params.min_beam_width,
+                "{context} min beam width"
+            );
+            assert_eq!(
+                params.vertical_bar_margin.to_bits(),
+                expected_params.v_bar_margin.bits,
+                "{context} bar margin"
+            );
+            assert_eq!(
+                params.min_template_width, expected_params.min_template_width,
+                "{context} min template width"
+            );
+            assert_eq!(
+                params.template_half, expected_params.template_half,
+                "{context} template half"
+            );
+            assert_eq!(
+                params.x_offsets, expected_params.x_offsets,
+                "{context} x offsets"
+            );
+            assert_eq!(
+                actual_system.staffs.len(),
+                expected_system.staves.len(),
+                "{context} staves"
+            );
+
+            for (expected_staff, actual_staff) in
+                expected_system.staves.iter().zip(&actual_system.staffs)
+            {
+                let context = format!("{context} staff {}", expected_staff.id);
+                assert_eq!(actual_staff.staff_id, expected_staff.id, "{context} id");
+                assert_eq!(
+                    actual_staff.tablature, expected_staff.tablature,
+                    "{context} tablature"
+                );
+                assert_eq!(actual_staff.drum, expected_staff.drum, "{context} drum");
+                assert_eq!(
+                    actual_staff.line_count, expected_staff.line_count,
+                    "{context} line count"
+                );
+                assert_eq!(
+                    actual_staff.specific_interline, expected_staff.interline,
+                    "{context} interline"
+                );
+                assert_eq!(
+                    actual_staff.header_stop, expected_staff.header_stop,
+                    "{context} header stop"
+                );
+                assert_eq!(
+                    actual_staff.merged, expected_staff.merged,
+                    "{context} merged"
+                );
+                assert_eq!(
+                    actual_staff.point_size,
+                    Some(expected_staff.point_size),
+                    "{context} point size"
+                );
+                let catalog_ordinal = actual_staff
+                    .catalog_ordinal
+                    .expect("standard staff catalog");
+                assert_eq!(
+                    heads.template_catalogs[catalog_ordinal].point_size(),
+                    expected_staff.catalog_point_size,
+                    "{context} catalog point size"
+                );
+                assert_eq!(
+                    expected_staff.catalog_family, expected_page.family,
+                    "{context} catalog family"
+                );
+                assert_eq!(
+                    actual_staff.geometries.len(),
+                    expected_staff.geometries.len(),
+                    "{context} geometries"
+                );
+
+                for (expected_geometry, actual_geometry) in expected_staff
+                    .geometries
+                    .iter()
+                    .zip(&actual_staff.geometries)
+                {
+                    let context = format!("{context} geometry {}", expected_geometry.ordinal);
+                    match (&expected_geometry.source, &actual_geometry.source) {
+                        (
+                            GeometrySource::StaffLine { line_index, axis },
+                            NativeHeadScannerSource::StaffLine {
+                                line_index: actual_index,
+                                axis: actual_axis,
+                            },
+                        ) => {
+                            assert_eq!(actual_index, line_index, "{context} line source");
+                            assert_eq!(
+                                axis_bits(*actual_axis),
+                                expected_axis_bits(axis),
+                                "{context} staff axis"
+                            );
+                        }
+                        (
+                            GeometrySource::Ledger {
+                                ledger_index,
+                                ordinal,
+                                bounds,
+                                weight,
+                                run_hash,
+                                axis,
+                            },
+                            NativeHeadScannerSource::Ledger {
+                                ledger_index: actual_index,
+                                ordinal: actual_ordinal,
+                                bounds: actual_bounds,
+                                weight: actual_weight,
+                                run_digest,
+                                axis: actual_axis,
+                                ..
+                            },
+                        ) => {
+                            assert_eq!(actual_index, ledger_index, "{context} ledger index");
+                            assert_eq!(actual_ordinal, ordinal, "{context} ledger ordinal");
+                            assert_eq!(
+                                (
+                                    actual_bounds.x,
+                                    actual_bounds.y,
+                                    actual_bounds.width,
+                                    actual_bounds.height
+                                ),
+                                (
+                                    usize::try_from(bounds.left).unwrap(),
+                                    usize::try_from(bounds.top).unwrap(),
+                                    bounds.width,
+                                    bounds.height
+                                ),
+                                "{context} ledger bounds"
+                            );
+                            assert_eq!(actual_weight, weight, "{context} ledger weight");
+                            assert_eq!(run_digest, run_hash, "{context} ledger run hash");
+                            assert_eq!(
+                                axis_bits(*actual_axis),
+                                expected_axis_bits(axis),
+                                "{context} ledger axis"
+                            );
+                        }
+                        _ => panic!("{context} source kind"),
+                    }
+
+                    assert_eq!(
+                        actual_geometry.direction, expected_geometry.direction,
+                        "{context} direction"
+                    );
+                    assert_eq!(
+                        actual_geometry.pitch, expected_geometry.pitch,
+                        "{context} pitch"
+                    );
+                    assert_eq!(
+                        actual_geometry.open, expected_geometry.open,
+                        "{context} open"
+                    );
+                    assert_eq!(
+                        actual_geometry.line_count,
+                        i32::try_from(expected_staff.line_count).unwrap(),
+                        "{context} line count"
+                    );
+                    assert_eq!(
+                        actual_geometry.interline, expected_geometry.interline,
+                        "{context} interline"
+                    );
+                    assert_eq!(
+                        actual_geometry.line_range(),
+                        (expected_geometry.line.left, expected_geometry.line.right),
+                        "{context} line range"
+                    );
+                    assert_eq!(
+                        actual_geometry.line2_range(),
+                        expected_geometry
+                            .line2
+                            .map(|range| (range.left, range.right)),
+                        "{context} line2 range"
+                    );
+                    assert_eq!(
+                        actual_geometry.y_offsets, expected_geometry.y_offsets,
+                        "{context} y offsets"
+                    );
+                    assert_eq!(
+                        actual_geometry.all_shapes,
+                        expected_geometry
+                            .all_shapes
+                            .iter()
+                            .copied()
+                            .map(native_shape)
+                            .collect::<Vec<_>>(),
+                        "{context} all shapes"
+                    );
+                    assert_eq!(
+                        actual_geometry.stem_shapes,
+                        expected_geometry
+                            .stem_shapes
+                            .iter()
+                            .copied()
+                            .map(native_shape)
+                            .collect::<Vec<_>>(),
+                        "{context} stem shapes"
+                    );
+                    assert_eq!(
+                        actual_geometry.hollow_shapes,
+                        expected_geometry
+                            .hollow_shapes
+                            .iter()
+                            .copied()
+                            .map(native_shape)
+                            .collect::<Vec<_>>(),
+                        "{context} hollow shapes"
+                    );
+                    assert_eq!(
+                        actual_geometry
+                            .farther_ledgers
+                            .iter()
+                            .map(|ledger| axis_bits(ledger.axis()))
+                            .collect::<Vec<_>>(),
+                        expected_geometry
+                            .farther_axes
+                            .iter()
+                            .map(expected_axis_bits)
+                            .collect::<Vec<_>>(),
+                        "{context} farther ledgers"
+                    );
+
+                    let actual_ordinate = (expected_geometry.line.left
+                        ..=expected_geometry.line.right)
+                        .map(|x| {
+                            actual_geometry
+                                .theoretical_ordinate(x)
+                                .unwrap_or_else(|error| panic!("{context} ordinate x={x}: {error}"))
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        actual_ordinate,
+                        expand_rle(&expected_geometry.ordinate),
+                        "{context} full ordinate"
+                    );
+                    assert_eq!(
+                        (actual_geometry.range_left, actual_geometry.range_right),
+                        (expected_geometry.range.left, expected_geometry.range.right),
+                        "{context} scan range"
+                    );
+                    let actual_range_ordinate =
+                        if actual_geometry.range_left <= actual_geometry.range_right {
+                            (actual_geometry.range_left..=actual_geometry.range_right)
+                                .map(|x| {
+                                    actual_geometry.theoretical_ordinate(x).unwrap_or_else(
+                                        |error| panic!("{context} range ordinate x={x}: {error}"),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        } else {
+                            Vec::new()
+                        };
+                    assert_eq!(
+                        actual_range_ordinate,
+                        expand_rle(&expected_geometry.range_ordinate),
+                        "{context} range ordinate"
+                    );
+                    compared_geometries += 1;
+                }
+
+                assert_eq!(
+                    actual_staff.schedule.len(),
+                    expected_staff.schedule.len(),
+                    "{context} schedule"
+                );
+                for (expected, actual) in expected_staff.schedule.iter().zip(&actual_staff.schedule)
+                {
+                    let phase = match expected.phase {
+                        ScannerPhase::Seed => NativeHeadScannerPhase::Seed,
+                        ScannerPhase::Range => NativeHeadScannerPhase::Range,
+                    };
+                    assert_eq!(
+                        (actual.phase, actual.ordinal, actual.geometry),
+                        (phase, expected.ordinal, expected.geometry),
+                        "{context} schedule record"
+                    );
+                    compared_schedules += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(compared_geometries, 1_767);
+    assert_eq!(compared_schedules, 3_534);
 }
