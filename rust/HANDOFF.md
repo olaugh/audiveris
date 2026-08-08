@@ -93,6 +93,18 @@ HEADERS input correction above and a corpus beyond the examples remains.
 locally under the pinned toolchain, and the whole workspace runs in about 45
 seconds since the dev profile went to `opt-level = 2`.
 
+The next STEM_SEEDS boundary is now frozen before Rust implementation.
+`StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
+and reflectively invokes only `VerticalsBuilder.retrieveCandidates()` -- never
+`checkVerticals()`. `oracle/stem-seeds.txt` records exact system inputs and all
+2,425 raw `StickFactory` candidates across eight sheets and 30 systems, including
+mixed-orientation member order, bounds, weight, endpoints, thickness, and mean
+distance with hexadecimal doubles. Two pinned-JDK runs were byte-identical;
+the corpus FNV is `d6ac0c99a5093beb` and fixture SHA-256 is
+`c2ae9a9fe6a593072ede7f98de9073346ff006ccf48a8d5016c58ed4899cebd0`.
+This is the honest Rust target: stop at raw candidates before applying the
+already ported staff/header/checker gates.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
