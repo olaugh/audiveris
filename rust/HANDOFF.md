@@ -193,6 +193,19 @@ non-horizontal section sets are errors. HEADS can therefore erase the actual
 ledger glyph pixels; reconstructing a band from the fitted median would be an
 unmeasured approximation.
 
+The complete production adapter now reaches the next honest HEADS boundary.
+`native_heads::recognize_native_heads_prolog` accepts GRID, BEAMS, LEDGERS,
+and STEM_SEEDS outputs, validates system order plus staff/ledger/seed ownership,
+and constructs `NativeHeadsPrologRaster` without oracle inputs. GRID supplies
+the original BINARY RunTable, persistent staff lines, and curved system areas;
+BEAMS supplies retained HEAD_SPOTS; LEDGERS supplies the final fixed glyphs;
+STEM_SEEDS supplies accepted free vertical glyphs. The result exposes the
+post-erasure BINARY pixels, Chamfer-3 values, transient components in factory
+order, and per-system zero-based spot ordinals after the area and inclusive
+horizontal tests. A real Chula run composes the whole native chain and reaches
+the `NoteHeadsBuilder` boundary. The independent Java prolog corpus comparison
+is the next gate; template scanning and head interpretation remain beyond it.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

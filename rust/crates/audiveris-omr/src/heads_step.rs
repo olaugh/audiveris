@@ -544,7 +544,7 @@ where
     }
 }
 
-fn build_native_distance_table<ClassifierError>(
+pub(crate) fn build_native_distance_table<ClassifierError>(
     raster: &NativeHeadsPrologRaster,
     mut record_prefix: impl FnMut(&[u8]),
 ) -> Result<(Vec<u8>, NeutralDistanceTable), NativeHeadsError<ClassifierError>> {
@@ -631,7 +631,7 @@ fn build_native_distance_table<ClassifierError>(
     ))
 }
 
-fn retrieve_native_head_spots(raster: &NativeHeadsPrologRaster) -> Vec<NeutralHeadSpot> {
+pub(crate) fn retrieve_native_head_spots(raster: &NativeHeadsPrologRaster) -> Vec<NeutralHeadSpot> {
     build_glyph_components(&raster.head_spots, 0, 0)
         .into_iter()
         .map(|component| {

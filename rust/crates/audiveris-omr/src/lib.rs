@@ -47,6 +47,7 @@ pub mod ledgers_step;
 pub mod links_step;
 pub mod measures_step;
 pub mod native_headers;
+pub mod native_heads;
 pub mod native_ledgers;
 pub mod native_stem_seeds;
 pub mod page_step;
