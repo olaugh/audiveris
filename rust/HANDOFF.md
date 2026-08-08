@@ -218,7 +218,30 @@ systems. Two complete passes are byte-identical at SHA-256
 `31e6166b0e2e8e7ae38909cca31d0a1709f8acc40f2812727509ea0bfb0a8422`.
 The checked-in runner uses direct `javac` plus the saved runtime classpath to
 avoid Gradle snapshotting the locally duplicated build outputs. The Rust
-comparison is deliberately a separate next increment.
+comparison is now exact as well.
+
+The Rust gate drives the same eight pages through native GRID -> HEADERS ->
+STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS prolog and checks every threshold-170
+table, post-erasure BINARY pixel, signed-i32 Chamfer value, component
+bounds/weight/centroid/cropped runs, and all 3,097 dispatch references. The
+only initial mismatch was Bach component 693 at center x=1916. Java includes
+it because `SystemInfo.updateCoordinates` stores
+`width = maxStaffRight - left + 1` and `getRight()` returns `left + width`, one
+pixel beyond the greatest staff abscissa. The port had stored the staff extreme
+correctly but several direct-getter consumers forgot the extra pixel.
+`SystemBounds::java_right()` now names the distinction and is used by BEAMS,
+LEDGERS, STEM_SEEDS, and HEADS; all old corpus gates remain exact. HEADS is
+therefore graded through the real `NoteHeadsBuilder` boundary.
+
+The next blocker is upstream state BEAMS currently discards. Java
+`SpotsBuilder` runs `BlackHeadSizer`, which selects `Scale.MusicFontScale` and
+ultimately `Staff.getHeadPointSize()`; `NoteHeadsBuilder` uses that point size
+to select its `TemplateFactory` catalog. HEADS does **not** use the native MLP
+classifier. The next bounded milestone is to freeze and port BlackHeadSizer's
+spot decisions, middle-half width/height populations, BlackHeadScale, sheet
+music-font point size, and per-staff point sizes. Then freeze the active head
+template catalogs and port the pure `Template.evaluate` kernel before scanner
+ordering or SIG allocation.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on

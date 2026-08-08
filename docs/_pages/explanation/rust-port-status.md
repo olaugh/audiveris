@@ -43,8 +43,11 @@ composes those products with GRID's persistent staff lines, original binary,
 system areas, and accepted STEM_SEEDS, and reaches the live distance-table and
 transient-spot boundary on Chula without fixture-shaped inputs. An independent
 fresh-JVM Java prolog oracle now freezes all eight pages—55 staves, 581 ledgers,
-1,906 seeds, 2,790 components, and 30 dispatch systems—ready for the composed
-Rust differential gate.
+1,906 seeds, 2,790 components, and 30 dispatch systems—and the composed Rust
+differential gate is now exact for every post-erasure BINARY
+pixel, signed distance value, component run, and all 3,097 system-dispatch
+references. Its only initial mismatch exposed Java's one-pixel-beyond-staff
+`SystemInfo.getRight()` convention, now shared by every native consumer.
 
 Last updated 2026-08-07.
 
@@ -82,7 +85,7 @@ is present but the musical interpretation is not.
 | 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. The BEAMS adapter and CLI validate and preserve every accepted per-system identity and median. | Widen beyond profile 1 and add tablature/no-staff skip cases. |
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. | Grade small beams and widen the corpus. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections. | Widen beyond the example corpus. |
-| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, transient components, and per-system spot ordinals; the Chula production path reaches the `NoteHeadsBuilder` boundary. The independent eight-page Java fixture freezes every output component and dispatch ordinal. | Complete the Rust side of that corpus differential, then port template scanning and interpretation. |
+| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, 2,790 transient components, and 3,097 per-system spot references; all eight pages now match Java exactly through the `NoteHeadsBuilder` boundary. | Port and grade BEAMS' missing black-head sizing/font-scale side effect, then template catalogs, evaluation, scanning, and interpretation. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
@@ -113,11 +116,12 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Grade the composed native `HEADS` prolog against Java across the corpus.
-2. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
-3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline
-   order through the semantic stages.
-4. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
+1. Port and grade `BlackHeadSizer` plus the selected per-staff head point size,
+   the missing BEAMS side effect that HEADS template selection consumes.
+2. Freeze the active head-template catalogs and port the pure template evaluator.
+3. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
+4. Complete HEADS scanning/interpretation, then proceed in pipeline order.
+5. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
 
 ## Maintenance rule
 

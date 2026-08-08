@@ -386,7 +386,7 @@ pub fn recognize_native_heads_prolog(
                     system_id,
                 },
             )?;
-            if spot.center_x >= bounds.left && spot.center_x <= bounds.right {
+            if spot.center_x >= bounds.left && spot.center_x <= bounds.java_right() {
                 system_spot_ordinals[system_id - 1].1.push(spot_ordinal);
             }
         }

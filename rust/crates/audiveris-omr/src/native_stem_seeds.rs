@@ -726,7 +726,7 @@ pub fn recognize_raw_stem_seed_candidates(
         // `SystemInfo.updateCoordinates` stores `width = last - left + 1`,
         // while `getRight()` returns `left + width`: one pixel beyond the
         // last staff abscissa. `VerticalsBuilder` calls that getter directly.
-        let right = bounds.right.saturating_add(1);
+        let right = bounds.java_right();
         let vertical_sections = select_sections(
             bounds.left,
             right,

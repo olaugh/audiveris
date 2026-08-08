@@ -677,8 +677,10 @@ fn recognize_native_beams_impl(
                     .find(|bounds| bounds.system_id == area.system_id)?;
                 let x = component.rounded_centroid_x;
                 let y = component.rounded_centroid_y;
-                (area.contains(f64::from(x), f64::from(y)) && x >= bounds.left && x <= bounds.right)
-                    .then_some(area.system_id)
+                (area.contains(f64::from(x), f64::from(y))
+                    && x >= bounds.left
+                    && x <= bounds.java_right())
+                .then_some(area.system_id)
             })
             .collect::<Vec<_>>()
     };
@@ -1950,6 +1952,16 @@ pub struct SystemBounds {
     pub right: i32,
     pub top: i32,
     pub bottom: i32,
+}
+
+impl SystemBounds {
+    /// Java `SystemInfo.getRight()` is one pixel beyond the greatest staff
+    /// abscissa: `updateCoordinates` stores `width = right - left + 1`, then
+    /// the getter returns `left + width`.
+    #[must_use]
+    pub const fn java_right(self) -> i32 {
+        self.right.saturating_add(1)
+    }
 }
 
 /// Java `StaffManager.constants.verticalAreaMargin`, 0.9 interline.
@@ -3619,7 +3631,7 @@ mod tests {
                             .system_bounds
                             .iter()
                             .find(|bounds| bounds.system_id == area.system_id)
-                            .is_some_and(|bounds| x >= bounds.left && x <= bounds.right)
+                            .is_some_and(|bounds| x >= bounds.left && x <= bounds.java_right())
                     })
                     .map(|area| area.system_id)
                     .collect();

@@ -739,7 +739,7 @@ fn build_system_zones(
             Ok(RawLedgerSystemZone {
                 id,
                 left: bounds.left,
-                right: bounds.right,
+                right: bounds.java_right(),
                 area: area.clone(),
                 all_beams,
                 good_full_beams,
