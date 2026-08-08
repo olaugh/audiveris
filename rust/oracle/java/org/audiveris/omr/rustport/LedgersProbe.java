@@ -10,13 +10,16 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import org.audiveris.omr.CLI;
 import org.audiveris.omr.Main;
 import org.audiveris.omr.WellKnowns;
+import org.audiveris.omr.math.GeoPath;
 import org.audiveris.omr.sheet.Book;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
+import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.ledger.LedgersBuilder;
 import org.audiveris.omr.sheet.ledger.LedgersPostAnalysis;
@@ -92,14 +95,36 @@ public class LedgersProbe
                         System.out.println(record);
                     }
                 }
-                records.sort(String::compareTo);
-                long hash = 0xcbf29ce484222325L;
-                for (String record : records) {
-                    for (byte value : (record + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
-                        hash ^= Byte.toUnsignedLong(value);
-                        hash *= 0x100000001b3L;
+                final Field ledgerLines = Staff.class.getDeclaredField("ledgerLineMap");
+                ledgerLines.setAccessible(true);
+                final List<String> lineRecords = new ArrayList<>();
+                for (SystemInfo system : sheet.getSystems()) {
+                    for (Staff staff : system.getStaves()) {
+                        @SuppressWarnings("unchecked")
+                        final Map<Integer, GeoPath> map =
+                                (Map<Integer, GeoPath>) ledgerLines.get(staff);
+                        for (Map.Entry<Integer, GeoPath> entry : map.entrySet()) {
+                            final GeoPath base = entry.getKey() < 0
+                                    ? staff.getFirstLine().getSpline()
+                                    : staff.getLastLine().getSpline();
+                            final double translation = entry.getValue().getFirstPoint().getY()
+                                    - base.getFirstPoint().getY();
+                            final String record = String.format(
+                                    Locale.ROOT,
+                                    "ledgerline %d %d %d %.9f",
+                                    system.getId(),
+                                    staff.getId(),
+                                    entry.getKey(),
+                                    translation);
+                            lineRecords.add(record);
+                            System.out.println(record);
+                        }
                     }
                 }
+                records.sort(String::compareTo);
+                lineRecords.sort(String::compareTo);
+                final long hash = hash(records);
+                final long lineHash = hash(lineRecords);
                 System.out.printf(
                         Locale.ROOT,
                         "ledgerbuildsummary %s#%d %d %d%n",
@@ -114,6 +139,13 @@ public class LedgersProbe
                         wanted,
                         records.size(),
                         hash);
+                System.out.printf(
+                        Locale.ROOT,
+                        "ledgerlinesummary %s#%d %d %016x%n",
+                        path.getFileName(),
+                        wanted,
+                        lineRecords.size(),
+                        lineHash);
             }
         }
         System.exit(0);
@@ -136,5 +168,17 @@ public class LedgersProbe
             line.append(String.format(Locale.ROOT, " %.9f", impacts.getImpact(i)));
         }
         return line.toString();
+    }
+
+    private static long hash (List<String> records)
+    {
+        long hash = 0xcbf29ce484222325L;
+        for (String record : records) {
+            for (byte value : (record + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+                hash ^= Byte.toUnsignedLong(value);
+                hash *= 0x100000001b3L;
+            }
+        }
+        return hash;
     }
 }

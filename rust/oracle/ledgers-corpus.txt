@@ -1,11 +1,20 @@
 # Java Audiveris 5.11 final LEDGERS inter summaries on every beam sheet.
 # FNV-1a-64 covers the lexicographically sorted exact ledger rows, each with a trailing newline.
 # ledgersummary <page> <count> <digest>
+# ledgerlinesummary <page> <count> <digest>
 ledgersummary chula.png#1 18 7deae6ef6bb6fd38
+ledgerlinesummary chula.png#1 3 c20cb34776fb9dcb
 ledgersummary allegretto.png#1 42 7dfd87f3e8237449
+ledgerlinesummary allegretto.png#1 9 6233ee22a51c9620
 ledgersummary batuque.png#1 43 b76741deee041fe6
+ledgerlinesummary batuque.png#1 8 2f0fd6e70faba13a
 ledgersummary carmen.png#1 164 611ddb4041e6683e
+ledgerlinesummary carmen.png#1 20 9ba45887bc4a59ea
 ledgersummary cucaracha.png#1 44 670eca5c4843a1ed
+ledgerlinesummary cucaracha.png#1 11 24c761ac3a31716b
 ledgersummary hove.png#1 73 aa7d50df6dff79f4
+ledgerlinesummary hove.png#1 17 785d7ed91ae1ae40
 ledgersummary zizi.png#1 47 3496f13e101c9a42
+ledgerlinesummary zizi.png#1 7 d41eaa72f580198c
 ledgersummary BachInvention5.jpg#1 150 7a71eba5e45634d3
+ledgerlinesummary BachInvention5.jpg#1 20 d64b4e566a50c79c

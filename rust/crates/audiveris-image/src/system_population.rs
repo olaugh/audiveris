@@ -425,6 +425,50 @@ impl StaffBoundary {
         }
     }
 
+    /// Java `GeoPath.yAtX(double)`, whose curve parameter is derived from the
+    /// segment endpoints' x coordinates rather than by inverting curve x(t).
+    /// `Staff.buildAllLedgerLines()` uses this convenience evaluation.
+    #[must_use]
+    pub fn geopath_y_at_x(&self, x: f64) -> Option<f64> {
+        let segment = self
+            .segments
+            .iter()
+            .copied()
+            .find(|segment| x <= segment.end().0)?;
+        let start = segment.start();
+        let stop = segment.end();
+        let t = (x - start.0) / (stop.0 - start.0);
+        let u = 1.0 - t;
+        Some(match segment {
+            BoundarySegment::Line { .. } => start.1 + (t * (stop.1 - start.1)),
+            BoundarySegment::Quadratic { control, .. } => {
+                (start.1 * u * u) + (2.0 * control.1 * t * u) + (stop.1 * t * t)
+            }
+            BoundarySegment::Cubic {
+                control1, control2, ..
+            } => {
+                (start.1 * u * u * u)
+                    + (3.0 * control1.1 * t * u * u)
+                    + (3.0 * control2.1 * t * t * u)
+                    + (stop.1 * t * t * t)
+            }
+        })
+    }
+
+    /// Translate every path coordinate vertically, as Java's
+    /// `new GeoPath(line, AffineTransform.getTranslateInstance(0, dy))`.
+    #[must_use]
+    pub fn translated_y(&self, delta: f64) -> Self {
+        Self {
+            segments: self
+                .segments
+                .iter()
+                .copied()
+                .map(|segment| segment.translated_y(delta))
+                .collect(),
+        }
+    }
+
     /// Java `StaffLine.getBounds()`: a rectangle around the defining spline
     /// points, with a minimum height of one pixel.
     #[must_use]

@@ -8,7 +8,7 @@ use std::{
     fmt,
 };
 
-use audiveris_image::section::Bounds;
+use audiveris_image::{section::Bounds, system_population::StaffBoundary};
 
 use crate::{
     beam_inters::{BeamKind, beam_bounds},
@@ -33,7 +33,18 @@ pub struct NativeLedgerRecognition {
     pub builder_survivor_count: usize,
     pub discarded_filament_ids: Vec<usize>,
     pub rebuilt_system_ids: Vec<usize>,
+    pub ledger_lines: Vec<NativeLedgerLine>,
     pub materializer: LedgerMaterializer,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeLedgerLine {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub index: i32,
+    /// Cumulative vertical translation from the first/last staff line.
+    pub translation_y: f64,
+    pub geometry: StaffBoundary,
 }
 
 impl NativeLedgerRecognition {
@@ -195,6 +206,7 @@ pub fn recognize_native_ledgers(
         })
         .collect::<Vec<_>>();
     let materializer = materialize_ledgers(&staves, &rebuilt_candidates, scale, parameters)?;
+    let ledger_lines = build_ledger_lines(&staves, &materializer);
 
     Ok(NativeLedgerRecognition {
         filtered_run_count: filtered.run_table.total_run_count(),
@@ -209,8 +221,64 @@ pub fn recognize_native_ledgers(
         builder_survivor_count,
         discarded_filament_ids,
         rebuilt_system_ids,
+        ledger_lines,
         materializer,
     })
+}
+
+fn build_ledger_lines(
+    staves: &[RawLedgerStaffZone],
+    materializer: &LedgerMaterializer,
+) -> Vec<NativeLedgerLine> {
+    let mut lines = Vec::new();
+    for staff in staves {
+        for increment in [-1, 1] {
+            let mut geometry = if increment < 0 {
+                staff.first_line.clone()
+            } else {
+                staff.last_line.clone()
+            };
+            let mut translation_y = 0.0;
+            let mut index = increment;
+            loop {
+                let inter_ids = materializer.staff_inter_ids(staff.system_id, staff.id, index);
+                if inter_ids.is_empty() {
+                    break;
+                }
+                let mut sum = 0.0;
+                let mut count = 0;
+                for inter in inter_ids
+                    .iter()
+                    .filter_map(|id| materializer.inter_by_id(*id))
+                {
+                    let middle = (
+                        (inter.median.0.0 + inter.median.1.0) / 2.0,
+                        (inter.median.0.1 + inter.median.1.1) / 2.0,
+                    );
+                    let Some(y_line) = geometry.geopath_y_at_x(middle.0) else {
+                        continue;
+                    };
+                    sum += middle.1 - y_line;
+                    count += 1;
+                }
+                if count == 0 {
+                    break;
+                }
+                let delta = sum / f64::from(count);
+                translation_y += delta;
+                geometry = geometry.translated_y(delta);
+                lines.push(NativeLedgerLine {
+                    system_id: staff.system_id,
+                    staff_id: staff.id,
+                    index,
+                    translation_y,
+                    geometry: geometry.clone(),
+                });
+                index += increment;
+            }
+        }
+    }
+    lines
 }
 
 fn materialize_ledgers(

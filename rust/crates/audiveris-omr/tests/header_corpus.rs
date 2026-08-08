@@ -1116,20 +1116,21 @@ fn produced_final_beams(
         .collect()
 }
 
-fn ledger_oracle_summaries(input: &str) -> BTreeMap<String, (usize, String)> {
+fn ledger_oracle_summaries(input: &str, record_name: &str) -> BTreeMap<String, (usize, String)> {
     input
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
+        .filter_map(|line| {
             let fields = line.split_whitespace().collect::<Vec<_>>();
-            assert_eq!(fields.first(), Some(&"ledgersummary"));
-            (
-                fields[1].to_owned(),
+            (fields.first() == Some(&record_name)).then(|| {
                 (
-                    fields[2].parse().expect("a ledger count"),
-                    fields[3].to_owned(),
-                ),
-            )
+                    fields[1].to_owned(),
+                    (
+                        fields[2].parse().expect("a ledger count"),
+                        fields[3].to_owned(),
+                    ),
+                )
+            })
         })
         .collect()
 }
@@ -1163,17 +1164,38 @@ fn produced_final_ledgers(
         .collect()
 }
 
+fn produced_final_ledger_lines(
+    recognition: &audiveris_omr::native_ledgers::NativeLedgerRecognition,
+) -> Vec<String> {
+    recognition
+        .ledger_lines
+        .iter()
+        .map(|line| {
+            format!(
+                "ledgerline {} {} {} {:.9}",
+                line.system_id, line.staff_id, line.index, line.translation_y
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
     let structures = beam_oracle_pages(include_str!("../../../oracle/beam-structures.txt"));
     let spots = beam_oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
     let sig = beam_oracle_pages(include_str!("../../../oracle/beams-sig.txt"));
-    let ledger_summaries =
-        ledger_oracle_summaries(include_str!("../../../oracle/ledgers-corpus.txt"));
+    let ledger_oracle = include_str!("../../../oracle/ledgers-corpus.txt");
+    let ledger_summaries = ledger_oracle_summaries(ledger_oracle, "ledgersummary");
+    let ledger_line_summaries = ledger_oracle_summaries(ledger_oracle, "ledgerlinesummary");
     let native_pages = run_native_headers();
 
     assert_eq!(structures.len(), 8, "eight beam sheets are pinned");
     assert_eq!(ledger_summaries.len(), 8, "eight ledger sheets are pinned");
+    assert_eq!(
+        ledger_line_summaries.len(),
+        8,
+        "eight ledger-line sheets are pinned"
+    );
     let mut ungraded_small = native_pages[0].recognition.clone();
     ungraded_small.scale.scale.small_beam = Some(audiveris_image::scale_estimate::BeamScale {
         main: 7,
@@ -1196,6 +1218,7 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
     let mut spots_checked = 0;
     let mut erases_checked = 0;
     let mut ledgers_checked = 0;
+    let mut ledger_lines_checked = 0;
     let mut failures = Vec::new();
     let mut ledger_failures = Vec::new();
 
@@ -1249,6 +1272,29 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
                 ledgers.builder_survivor_count,
                 ledgers.discarded_filament_ids.len(),
                 ledgers.rebuilt_system_ids,
+            ));
+        }
+
+        let mut actual_lines = produced_final_ledger_lines(&ledgers);
+        actual_lines.sort();
+        let canonical_lines = actual_lines
+            .iter()
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        let actual_line_summary = (
+            actual_lines.len(),
+            format!(
+                "{:016x}",
+                audiveris_image::ingest::fnv1a64_bytes(canonical_lines.as_bytes())
+            ),
+        );
+        ledger_lines_checked += actual_lines.len();
+        let expected_line_summary = ledger_line_summaries
+            .get(page)
+            .unwrap_or_else(|| panic!("no ledger-line summary oracle for {page}"));
+        if &actual_line_summary != expected_line_summary {
+            ledger_failures.push(format!(
+                "{page}: native ledger lines {actual_line_summary:?}, Java {expected_line_summary:?}"
             ));
         }
 
@@ -1383,6 +1429,10 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
     assert_eq!(
         ledgers_checked, 581,
         "all final Java ledger inters were compared"
+    );
+    assert_eq!(
+        ledger_lines_checked, 95,
+        "all final Java inferred ledger lines were compared"
     );
     assert!(
         ledger_failures.is_empty(),
