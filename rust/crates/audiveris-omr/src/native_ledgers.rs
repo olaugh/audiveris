@@ -715,7 +715,7 @@ fn build_system_zones(
                 .find(|bounds| bounds.system_id == id)
                 .ok_or(NativeLedgerRecognitionError::MissingSystemBounds(id))?;
             let raw = beams
-                .raw_beams
+                .beams_after_multiple_rests
                 .iter()
                 .filter(|(system_id, _)| *system_id == id)
                 .map(|(_, beam)| raw_beam_area(beam.item))
@@ -729,7 +729,7 @@ fn build_system_zones(
                     .map(|(_, beam)| raw_beam_area(beam.item)),
             );
             let good_full_beams = beams
-                .raw_beams
+                .beams_after_multiple_rests
                 .iter()
                 .filter(|(system_id, beam)| {
                     *system_id == id && beam.kind == BeamKind::Beam && beam.grade >= 0.4

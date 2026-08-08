@@ -385,7 +385,7 @@ fn native_multiple_rest_replacement(
     beam: MultipleRestBeamEvidence,
     search: &MultipleRestSerifSearchEvidence,
 ) -> Option<NativeMultipleRestReplacement> {
-    let staff_id = multiple_rest_staff_id(minimum_length, beam)?;
+    let staff_id = native_multiple_rest_staff_id(minimum_length, beam)?;
     let left_peak = search.left.clone()?;
     let right_peak = search.right.clone()?;
     Some(NativeMultipleRestReplacement {
@@ -398,7 +398,13 @@ fn native_multiple_rest_replacement(
     })
 }
 
-fn multiple_rest_staff_id(minimum_length: i32, beam: MultipleRestBeamEvidence) -> Option<usize> {
+/// Java's length, staff, tablature, and endpoint-pitch gates before it probes
+/// either serif side. Returns the selected staff identity when all pass.
+#[must_use]
+pub fn native_multiple_rest_staff_id(
+    minimum_length: i32,
+    beam: MultipleRestBeamEvidence,
+) -> Option<usize> {
     let staff_id = beam.staff_id?;
     if beam.width < minimum_length
         || beam.staff_tablature
@@ -701,7 +707,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                 continue;
             };
             let minimum_length = sheet.systems[system_index].multiple_rest_min_length;
-            if multiple_rest_staff_id(minimum_length, evidence).is_none() {
+            if native_multiple_rest_staff_id(minimum_length, evidence).is_none() {
                 continue;
             }
             let native_evidence =

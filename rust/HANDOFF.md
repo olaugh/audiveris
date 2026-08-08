@@ -400,31 +400,40 @@ The oracle also converts one previously documented BEAMS difference into a
 hard HEADS dependency. Bach system 6's accepted competitor pool contains the
 `MultipleRestInter` created after `BeamsBuilder`; the source beam is already
 removed, while both generated vertical serifs are present but rejected as too
-thin. `NativeBeamRecognition` still publishes the pre-`MultipleRestsBuilder`
-beam list, but it now retains every system's group creation and member
-relation-insertion order. D039 proves this is observable even when the group
-count is unchanged. The pure replacement kernel now preserves Java's SIG
-source order, inclusive minimum length and ±0.2 pitch checks, staff/tablature
-gates, NaN comparison, and requirement for both serif peaks. Real
-staff/projector evidence and stable MultipleRest/serif/glyph/relation identities
-still have to be composed before claiming the final competitor pool.
+thin. Production Rust now performs that decision from real state. It rebuilds
+Java's fresh BEAMS-time `StaffProjector` from original BINARY plus completed
+persistent staff splines/thicknesses, applies the source-order length,
+staff/tablature, endpoint-pitch, and two-serif gates, and retains an
+identity-free descriptor alongside explicit pre- and post-replacement beam
+lists. Bach's sole replacement is source ordinal 182 in system 6/staff 12;
+its bounds, median, grade, height, pitches, and both peaks are pinned to the
+frozen HEADS evidence. Group memberships remain pre-replacement because Java
+groups first; LEDGERS now consumes post-replacement beams because Java deletes
+the source before that step. Stable MultipleRest/serif/glyph/relation identities
+and serif-glyph reconstruction remain graph-materialization work.
 
-The first production-shaped slice geometry is also native. `JavaRectangle`
-ports positive-area half-open intersection, signed dimensions, and Java's
+The first production-shaped slice geometry and two production pools are also
+native. `JavaRectangle` ports positive-area half-open intersection, signed dimensions, and Java's
 wrapping overflow behavior. `HeadScannerBand` builds staff-spline and ledger
 bands with the source's explicit `below + 1`, resolves quadratic/cubic extrema
 without polyline flattening, and intersects source-ordered vertical areas;
 `VerticalRibbonArea` reproduces the integer bounds of the straight GRID
-barline/connector ribbon. Nine focused tests pin live Chula semantic-band,
-barline, and connector bounds plus empty, edge, tangent, curve, overflow, and
-ordering cases. Production still needs to build the seed, spot, frozen-bar, and
-final competitor pools and grade all 1,767 contexts. The fixture remains the
-base/pre-lookup slice: range scanners later see seed-created `HeadInter`
+barline/connector ribbon. Production now builds every ordinate-sorted seed and
+head-spot rectangle pool, all three bands, and the exact seed/spot slices for
+all 1,767 contexts. The eight-page differential covers 1,906 seeds and 3,097
+spots, with 1,455 nonempty seed slices/15,343 references and 1,455 nonempty spot
+slices/6,759 references. A separate GRID adapter matches 528 source-order bar
+and connector candidates and all 474 frozen obstacles by class, shape, staff,
+raw median/thickness bits, stable ordinate order, and integer Area bounds. The
+other five raw oracle candidates are unfrozen Hove dummy bars created later by
+HEADERS, so they cannot enter the consumed frozen pool. Frozen-bar and final
+competitor slice composition remain next. The fixture remains the base/pre-lookup
+slice: range scanners later see seed-created `HeadInter`
 instances, and actual template rectangles use Java2D area intersection. Those
 decisions belong to the evaluation oracle, not this immutable constructor gate.
 
-**Nothing through the frozen HEADS base-slice oracle is unverified by CI as of
-Rust run `31253888388` and Java run `31253888380`**, both green on
+**Nothing through the preceding retained-prerequisite checkpoint is unverified
+by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
 which spent a day unverified: GitHub Actions was in a major outage when it
 landed (2026-08-06, incident from 15:22 UTC) and both its runs died in *Set up

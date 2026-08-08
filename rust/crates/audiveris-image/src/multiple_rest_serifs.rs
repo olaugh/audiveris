@@ -48,24 +48,64 @@ pub struct MultipleRestSerifSearchInput<'a> {
     pub request: MultiRestSideRequest,
 }
 
+/// Serif-search inputs when the caller owns richer staff-line geometry than
+/// the straight [`Segment`] boundary used by [`MultipleRestSerifSearchInput`].
+#[derive(Clone, Copy, Debug)]
+pub struct MultipleRestSerifGeometrySearchInput<'a> {
+    pub projector: &'a NeutralStaffProjectorResult,
+    pub raster_width: usize,
+    pub raster_height: usize,
+    pub pixels: &'a [u8],
+    pub beam_bounds: PeakBounds,
+    pub beam_height: f64,
+    pub middle_line_thickness: f64,
+    pub request: MultiRestSideRequest,
+}
+
 pub fn search_multiple_rest_serifs(
     input: MultipleRestSerifSearchInput<'_>,
 ) -> Result<MultipleRestSerifSearchEvidence, ProjectionError> {
-    let added_chunk =
-        (input.beam_height - input.staff_lines.middle_thickness).round_ties_even() as i32;
+    search_multiple_rest_serifs_with_geometry(
+        MultipleRestSerifGeometrySearchInput {
+            projector: input.projector,
+            raster_width: input.raster_width,
+            raster_height: input.raster_height,
+            pixels: input.pixels,
+            beam_bounds: input.beam_bounds,
+            beam_height: input.beam_height,
+            middle_line_thickness: input.staff_lines.middle_thickness,
+            request: input.request,
+        },
+        |x| {
+            PeakCoreGeometry::new(
+                y_at_x(input.staff_lines.first, x),
+                y_at_x(input.staff_lines.last, x),
+                y_at_x(input.staff_lines.middle, x),
+            )
+        },
+    )
+}
+
+/// Java `getSerifPeaks` with caller-owned current staff-line geometry.
+///
+/// `StaffProjector` owns its projection independently of the staff-line
+/// geometry that `processMultiRestSide` reads while constructing peak cores.
+/// This callback boundary preserves that split, including a projector created
+/// afresh during BEAMS from the completed lines.
+pub fn search_multiple_rest_serifs_with_geometry<Geometry>(
+    input: MultipleRestSerifGeometrySearchInput<'_>,
+    mut core_geometry_at: Geometry,
+) -> Result<MultipleRestSerifSearchEvidence, ProjectionError>
+where
+    Geometry: FnMut(i32) -> PeakCoreGeometry,
+{
+    let added_chunk = (input.beam_height - input.middle_line_thickness).round_ties_even() as i32;
     let left_x = input.beam_bounds.x;
     let right_x = input
         .beam_bounds
         .x
         .wrapping_add(input.beam_bounds.width)
         .wrapping_sub(1);
-    let geometry = |x| {
-        PeakCoreGeometry::new(
-            y_at_x(input.staff_lines.first, x),
-            y_at_x(input.staff_lines.last, x),
-            y_at_x(input.staff_lines.middle, x),
-        )
-    };
     let left_peaks = input.projector.process_multi_rest_side(
         input.raster_width,
         input.raster_height,
@@ -76,7 +116,7 @@ pub fn search_multiple_rest_serifs(
             added_chunk,
             ..input.request
         },
-        geometry,
+        &mut core_geometry_at,
     )?;
     let right_peaks = input.projector.process_multi_rest_side(
         input.raster_width,
@@ -88,7 +128,7 @@ pub fn search_multiple_rest_serifs(
             added_chunk,
             ..input.request
         },
-        geometry,
+        core_geometry_at,
     )?;
     Ok(MultipleRestSerifSearchEvidence {
         added_chunk,

@@ -476,7 +476,7 @@ fn produced_final_beams(
     recognition: &audiveris_omr::recognize::NativeBeamRecognition,
 ) -> Vec<(usize, String, Vec<String>)> {
     recognition
-        .raw_beams
+        .beams_after_multiple_rests
         .iter()
         .chain(&recognition.hooks)
         .map(|(system_id, raw)| {
@@ -833,31 +833,9 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
         ledger_failures.join("\n")
     );
 
-    // `MultipleRestsBuilder` runs after beam recognition and replaces one long
-    // BachInvention5 beam with a MultipleRestInter. The native beam result is
-    // therefore expected to retain exactly this one source beam until that
-    // separate recognizer is wired.
-    let known = [
-        "BachInvention5.jpg#1: BeamInter count 193 vs Java 192",
-        "BachInvention5.jpg#1: BeamInter -- 1 of 192 differ",
-    ];
-    let unexpected = failures
-        .iter()
-        .filter(|failure| !known.contains(&failure.as_str()))
-        .collect::<Vec<_>>();
     assert!(
-        unexpected.is_empty(),
-        "new native end-to-end beam divergences:\n{}",
-        unexpected
-            .iter()
-            .map(|failure| failure.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    assert_eq!(
-        failures.len(),
-        known.len(),
-        "a known divergence disappeared; remove it deliberately:\n{}",
+        failures.is_empty(),
+        "native end-to-end beam divergences:\n{}",
         failures.join("\n")
     );
 }

@@ -2,7 +2,19 @@
 
 use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::str::FromStr;
+
+use audiveris_omr::{
+    head_scanner_slices::{HeadScannerBand, JavaRectangle},
+    native_headers::recognize_native_headers,
+    native_heads::recognize_native_heads_prolog,
+    native_heads_scanner::recognize_native_heads_scanner_context,
+    native_heads_scanner_pools::materialize_native_head_scanner_pools,
+    native_ledgers::recognize_native_ledgers,
+    native_stem_seeds::recognize_native_stem_seeds,
+    recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
+};
 
 const ORACLE: &str = include_str!("../../../oracle/heads-scanner-slices.txt");
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -1628,4 +1640,146 @@ fn scanner_slice_oracle_parser_freezes_exact_corpus_shape() {
     assert_eq!(slice_totals(|scan| &scan.spots), (1_455, 6_759));
     assert_eq!(slice_totals(|scan| &scan.competitors), (408, 1_944));
     assert_eq!(slice_totals(|scan| &scan.bars), (552, 5_060));
+}
+
+#[test]
+fn native_seed_and_spot_slices_match_java_corpus_oracle() {
+    let oracle = ExpectedOracle::parse(ORACLE);
+    let mut compared_scans = 0_usize;
+    let mut seed_nonempty = 0_usize;
+    let mut seed_references = 0_usize;
+    let mut spot_nonempty = 0_usize;
+    let mut spot_references = 0_usize;
+
+    for expected_page in &oracle.pages {
+        let image = expected_page
+            .key
+            .split('#')
+            .next()
+            .expect("page key has an image name");
+        let grid = recognize_grid_lines(repo_path(&format!("data/examples/{image}")))
+            .unwrap_or_else(|error| panic!("{}: GRID failed: {error}", expected_page.key));
+        let headers = recognize_native_headers(&grid)
+            .unwrap_or_else(|error| panic!("{}: HEADERS failed: {error}", expected_page.key));
+        let stem_seeds = recognize_native_stem_seeds(&grid, &headers)
+            .unwrap_or_else(|error| panic!("{}: STEM_SEEDS failed: {error}", expected_page.key));
+        let beams =
+            recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+                .unwrap_or_else(|error| panic!("{}: BEAMS failed: {error}", expected_page.key));
+        let ledgers = recognize_native_ledgers(&grid, &beams)
+            .unwrap_or_else(|error| panic!("{}: LEDGERS failed: {error}", expected_page.key));
+        let heads = recognize_native_heads_prolog(&grid, &beams, &ledgers, &stem_seeds)
+            .unwrap_or_else(|error| panic!("{}: HEADS prolog failed: {error}", expected_page.key));
+        let scanners =
+            recognize_native_heads_scanner_context(&grid, &headers, &ledgers, &stem_seeds, &heads)
+                .unwrap_or_else(|error| {
+                    panic!("{}: scanner context failed: {error}", expected_page.key)
+                });
+        let actual = materialize_native_head_scanner_pools(&stem_seeds, &heads, &scanners)
+            .unwrap_or_else(|error| panic!("{}: scanner pools failed: {error}", expected_page.key));
+
+        assert_eq!(actual.systems.len(), expected_page.systems.len());
+        for (expected_system, actual_system) in expected_page.systems.iter().zip(&actual.systems) {
+            let system_label = format!("{} system {}", expected_page.key, expected_system.id);
+            assert_eq!(
+                actual_system.system_id, expected_system.id,
+                "{system_label} id"
+            );
+            let summary = expected_system.summary.as_ref().expect("system summary");
+            assert_eq!(
+                actual_system.seeds.len(),
+                summary.seeds,
+                "{system_label} seeds"
+            );
+            assert_eq!(
+                actual_system.spots.len(),
+                summary.spots,
+                "{system_label} spots"
+            );
+            assert_eq!(actual_system.staffs.len(), expected_system.staffs.len());
+
+            for (expected_staff, actual_staff) in
+                expected_system.staffs.iter().zip(&actual_system.staffs)
+            {
+                let staff_label = format!("{system_label} staff {}", expected_staff.id);
+                assert_eq!(actual_staff.staff_id, expected_staff.id, "{staff_label} id");
+                assert_eq!(actual_staff.scans.len(), expected_staff.scans.len());
+                for (expected_scan, actual_scan) in
+                    expected_staff.scans.iter().zip(&actual_staff.scans)
+                {
+                    let scan_label = format!("{staff_label} scan {}", expected_scan.ordinal);
+                    assert_eq!(
+                        actual_scan.geometry_ordinal, expected_scan.ordinal,
+                        "{scan_label} ordinal"
+                    );
+                    assert_band(
+                        &actual_scan.seed_band,
+                        &expected_scan.seed_band,
+                        &scan_label,
+                    );
+                    assert_band(
+                        &actual_scan.competitor_band,
+                        &expected_scan.competitor_band,
+                        &scan_label,
+                    );
+                    assert_band(&actual_scan.bar_band, &expected_scan.bar_band, &scan_label);
+                    assert_eq!(
+                        actual_scan.seed_band.integer_bounds(),
+                        expected_rectangle(expected_scan.seeds_area),
+                        "{scan_label} seed Area"
+                    );
+                    assert_eq!(
+                        actual_scan.competitor_band.integer_bounds(),
+                        expected_rectangle(expected_scan.competitors_area),
+                        "{scan_label} competitor Area"
+                    );
+                    assert_eq!(
+                        actual_scan.seed_indices, expected_scan.seeds,
+                        "{scan_label} seed slice"
+                    );
+                    assert_eq!(
+                        actual_scan.spot_indices, expected_scan.spots,
+                        "{scan_label} spot slice"
+                    );
+                    compared_scans += 1;
+                    seed_nonempty += usize::from(!actual_scan.seed_indices.is_empty());
+                    seed_references += actual_scan.seed_indices.len();
+                    spot_nonempty += usize::from(!actual_scan.spot_indices.is_empty());
+                    spot_references += actual_scan.spot_indices.len();
+                }
+            }
+        }
+    }
+
+    assert_eq!(compared_scans, 1_767);
+    assert_eq!((seed_nonempty, seed_references), (1_455, 15_343));
+    assert_eq!((spot_nonempty, spot_references), (1_455, 6_759));
+}
+
+fn assert_band(actual: &HeadScannerBand, expected: &Band, label: &str) {
+    assert_eq!(
+        actual.above().to_bits(),
+        expected.above.bits,
+        "{label} above"
+    );
+    assert_eq!(
+        actual.effective_bottom().to_bits(),
+        expected.effective_bottom.bits,
+        "{label} effective bottom"
+    );
+}
+
+fn expected_rectangle(expected: Rect) -> JavaRectangle {
+    JavaRectangle::new(
+        expected.left,
+        expected.top,
+        i32::try_from(expected.width).expect("oracle rectangle width fits Java int"),
+        i32::try_from(expected.height).expect("oracle rectangle height fits Java int"),
+    )
+}
+
+fn repo_path(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(path)
 }

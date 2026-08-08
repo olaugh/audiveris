@@ -39,7 +39,9 @@ use audiveris_image::ingest::{self, LoadError, fnv1a64_bytes};
 use audiveris_image::lag_rebuild::RegisteredHorizontalLag;
 use audiveris_image::line_completion::LineCompletionStage;
 use audiveris_image::line_short_sections::HorizontalSectionLag;
-use audiveris_image::lines_coordinator::{StaffCandidate, retrieve_staff_candidates};
+use audiveris_image::lines_coordinator::{
+    StaffCandidate, StaffCandidateKind, retrieve_staff_candidates,
+};
 use audiveris_image::no_staff::erase_staff_glyphs;
 use audiveris_image::peak_graph::PeakGraph;
 use audiveris_image::prepared_bars::ProductionProcessBars;
@@ -49,10 +51,11 @@ use audiveris_image::production_grid_params::{
     ProductionGridParameters, production_grid_parameters,
 };
 use audiveris_image::projection::{
-    BarlineHeightSpec, NeutralStaffProjectorRequest, PeakConstructionParams, PeakCoreGeometry,
-    PeakCoreParams, PeakRefinementParams, ProjectionBlank, ShortProjection, StaffProjectionRequest,
+    BarlineHeightSpec, MultiRestSideRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
+    PeakCoreGeometry, PeakCoreParams, PeakRefinementParams, ProjectionBlank, ShortProjection,
+    StaffProjectionRequest, StaffProjectorProcessRequest, StaffProjectorProcessTuning,
     StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
-    has_blank_between, staff_projector_scale_parameters,
+    has_blank_between, process_staff_projection, staff_projector_scale_parameters,
 };
 use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
@@ -375,6 +378,15 @@ pub struct NativeBeamRecognition {
     pub staff_head_point_sizes: Vec<NativeStaffHeadPointSize>,
     pub spot_count: usize,
     pub raw_beams: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Source beams after Java's ordered MultipleRest replacement/removal.
+    /// The unfiltered `raw_beams` remain available as the pre-replacement
+    /// diagnostic boundary.
+    pub beams_after_multiple_rests: Vec<(usize, crate::beam_inters::RawBeam)>,
+    /// Ordered, identity-free replacements created by
+    /// `MultipleRestsBuilder`. Stable SIG/Glyph/Relation IDs are intentionally
+    /// absent, but every observable geometry used by later recognition is
+    /// retained.
+    pub multiple_rests: Vec<NativeMultipleRestDescriptor>,
     pub hooks: Vec<(usize, crate::beam_inters::RawBeam)>,
     /// Exact surviving `BeamGroupInter` memberships, in system order.
     ///
@@ -392,6 +404,24 @@ pub struct NativeBeamRecognition {
 pub struct NativeBeamGroupMembership {
     pub system_id: usize,
     pub groups: Vec<Vec<usize>>,
+}
+
+/// Production MultipleRest decision before stable graph identity allocation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeMultipleRestDescriptor {
+    /// Index in [`NativeBeamRecognition::raw_beams`].
+    pub source_beam_ordinal: usize,
+    pub system_id: usize,
+    pub source_median: audiveris_image::beam_structure::Segment,
+    pub source_bounds: PeakBounds,
+    pub grade: f64,
+    pub height: f64,
+    pub staff_id: usize,
+    pub start_pitch: f64,
+    pub stop_pitch: f64,
+    pub serif_search: audiveris_image::multiple_rest_serifs::MultipleRestSerifSearchEvidence,
+    pub left_peak: StaffPeak,
+    pub right_peak: StaffPeak,
 }
 
 /// Native counterpart of Java `Scale.MusicFontScale` for the measured scope.
@@ -430,6 +460,12 @@ pub enum NativeBeamRecognitionError {
     BeamContract(crate::beams_step::BeamsContractError),
     BlackHeadSizer(crate::black_head_sizer::BlackHeadSizerError),
     MusicFont(audiveris_music_font::sfnt::FontError),
+    MultipleRestProjection {
+        source_beam_ordinal: usize,
+        source: audiveris_image::projection::ProjectionError,
+    },
+    MissingMultipleRestSource(usize),
+    MissingMultipleRestStaffLines(usize),
     UnsupportedSmallBeam {
         main: i32,
         small: i32,
@@ -461,6 +497,20 @@ impl std::fmt::Display for NativeBeamRecognitionError {
             Self::BeamContract(error) => write!(formatter, "beam contract: {error}"),
             Self::BlackHeadSizer(error) => write!(formatter, "black-head sizing: {error}"),
             Self::MusicFont(error) => write!(formatter, "black-head music font: {error}"),
+            Self::MultipleRestProjection {
+                source_beam_ordinal,
+                source,
+            } => write!(
+                formatter,
+                "multiple-rest beam {source_beam_ordinal} projection: {source}"
+            ),
+            Self::MissingMultipleRestSource(source_beam_ordinal) => write!(
+                formatter,
+                "multiple-rest replacement beam {source_beam_ordinal} has no source evidence"
+            ),
+            Self::MissingMultipleRestStaffLines(staff_id) => {
+                write!(formatter, "staff {staff_id} has no completed line geometry")
+            }
             Self::UnsupportedSmallBeam { main, small } => write!(
                 formatter,
                 "small-beam recognition is not graded (main {main}, small {small})"
@@ -496,7 +546,10 @@ impl std::error::Error for NativeBeamRecognitionError {
             Self::BeamContract(error) => Some(error),
             Self::BlackHeadSizer(error) => Some(error),
             Self::MusicFont(error) => Some(error),
+            Self::MultipleRestProjection { source, .. } => Some(source),
             Self::UnsupportedSmallBeam { .. }
+            | Self::MissingMultipleRestSource(_)
+            | Self::MissingMultipleRestStaffLines(_)
             | Self::InvalidStemScale(_)
             | Self::MissingSystemArea(_)
             | Self::StemSeedSystemOrder { .. }
@@ -881,6 +934,18 @@ fn recognize_native_beams_impl(
         );
     }
 
+    let multiple_rests = recognize_native_multiple_rests(recognition, &raw_beams)?;
+    let beams_after_multiple_rests = raw_beams
+        .iter()
+        .enumerate()
+        .filter(|(ordinal, _)| {
+            !multiple_rests
+                .iter()
+                .any(|rest| rest.source_beam_ordinal == *ordinal)
+        })
+        .map(|(_, beam)| *beam)
+        .collect::<Vec<_>>();
+
     let mut hooks = Vec::new();
     for system_id in &system_ids {
         let beams = raw_beams
@@ -928,6 +993,8 @@ fn recognize_native_beams_impl(
         staff_head_point_sizes,
         spot_count: components.len(),
         raw_beams,
+        beams_after_multiple_rests,
+        multiple_rests,
         hooks,
         group_memberships,
         group_counts,
@@ -948,6 +1015,361 @@ fn native_hook_glyph(
         centroid_x: component.centroid_x,
         centroid_y: component.centroid_y,
     }
+}
+
+/// Compose a fresh BEAMS-time projector over completed staff splines with the
+/// pre-replacement native beams.
+///
+/// The result is the deepest production boundary available without allocating
+/// Java `InterIndex`, `GlyphIndex`, or relation identities.
+pub fn recognize_native_multiple_rests(
+    recognition: &GridLinesRecognition,
+    raw_beams: &[(usize, crate::beam_inters::RawBeam)],
+) -> Result<Vec<NativeMultipleRestDescriptor>, NativeBeamRecognitionError> {
+    use audiveris_image::multiple_rest_serifs::{
+        MultipleRestSerifGeometrySearchInput, search_multiple_rest_serifs_with_geometry,
+    };
+
+    use crate::beam_inters::{BeamKind, beam_bounds};
+    use crate::beams_step::{
+        MultipleRestBeamEvidence, native_multiple_rest_replacements, native_multiple_rest_staff_id,
+    };
+
+    let minimum_length =
+        (4.0 * f64::from(recognition.scale.scale.interline.main)).round_ties_even() as i32;
+    let pixels = recognition.scale.binary.as_slice();
+    let mut candidates = Vec::new();
+    let mut sources = Vec::new();
+
+    for (source_beam_ordinal, (system_id, beam)) in raw_beams.iter().enumerate() {
+        if beam.kind != BeamKind::Beam {
+            continue;
+        }
+        let bounds = beam_bounds(beam.item);
+        let center = (
+            f64::from(bounds.x + (bounds.width / 2)),
+            f64::from(bounds.y + (bounds.height / 2)),
+        );
+        let Some(staff) = multiple_rest_staff_at_or_above(recognition, *system_id, center) else {
+            continue;
+        };
+        let Some(start_pitch) =
+            multiple_rest_pitch_position(staff, beam.item.median.x1, beam.item.median.y1)
+        else {
+            return Err(NativeBeamRecognitionError::MissingMultipleRestStaffLines(
+                staff.id,
+            ));
+        };
+        let Some(stop_pitch) =
+            multiple_rest_pitch_position(staff, beam.item.median.x2, beam.item.median.y2)
+        else {
+            return Err(NativeBeamRecognitionError::MissingMultipleRestStaffLines(
+                staff.id,
+            ));
+        };
+        let evidence = MultipleRestBeamEvidence {
+            beam_id: source_beam_ordinal,
+            width: bounds.width,
+            grade: beam.grade,
+            height: beam.item.height,
+            staff_id: Some(staff.id),
+            staff_tablature: staff.kind == StaffCandidateKind::Tablature,
+            start_pitch,
+            stop_pitch,
+        };
+        if native_multiple_rest_staff_id(minimum_length, evidence).is_none() {
+            continue;
+        }
+
+        let projector = multiple_rest_projector(recognition, staff)
+            .ok_or(NativeBeamRecognitionError::MissingMultipleRestStaffLines(
+                staff.id,
+            ))?
+            .map_err(
+                |source| NativeBeamRecognitionError::MultipleRestProjection {
+                    source_beam_ordinal,
+                    source,
+                },
+            )?;
+        let middle_index = staff.lines.len() / 2;
+        let middle_line = multiple_rest_line(staff, middle_index).ok_or(
+            NativeBeamRecognitionError::MissingMultipleRestStaffLines(staff.id),
+        )?;
+        let first_boundary = multiple_rest_line_boundary(staff, 0).ok_or(
+            NativeBeamRecognitionError::MissingMultipleRestStaffLines(staff.id),
+        )?;
+        let middle_boundary = multiple_rest_line_boundary(staff, middle_index).ok_or(
+            NativeBeamRecognitionError::MissingMultipleRestStaffLines(staff.id),
+        )?;
+        let last_boundary = multiple_rest_line_boundary(staff, staff.lines.len() - 1).ok_or(
+            NativeBeamRecognitionError::MissingMultipleRestStaffLines(staff.id),
+        )?;
+        let search = search_multiple_rest_serifs_with_geometry(
+            MultipleRestSerifGeometrySearchInput {
+                projector: &projector.projector,
+                raster_width: recognition.scale.width,
+                raster_height: recognition.scale.height,
+                pixels,
+                beam_bounds: PeakBounds {
+                    x: bounds.x,
+                    y: bounds.y,
+                    width: bounds.width,
+                    height: bounds.height,
+                },
+                beam_height: beam.item.height,
+                middle_line_thickness: middle_line.thickness,
+                request: projector.request,
+            },
+            |x| {
+                PeakCoreGeometry::new(
+                    first_boundary.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                    last_boundary.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                    middle_boundary.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                )
+            },
+        )
+        .map_err(
+            |source| NativeBeamRecognitionError::MultipleRestProjection {
+                source_beam_ordinal,
+                source,
+            },
+        )?;
+        candidates.push((evidence, search.clone()));
+        sources.push((
+            source_beam_ordinal,
+            *system_id,
+            *beam,
+            PeakBounds {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+            },
+            search,
+        ));
+    }
+
+    let replacements = native_multiple_rest_replacements(minimum_length, &candidates);
+    let mut descriptors = Vec::with_capacity(replacements.len());
+    for replacement in replacements {
+        let (source_beam_ordinal, system_id, beam, source_bounds, serif_search) = sources
+            .iter()
+            .find(|(ordinal, ..)| *ordinal == replacement.beam_id)
+            .ok_or(NativeBeamRecognitionError::MissingMultipleRestSource(
+                replacement.beam_id,
+            ))?;
+        let evidence = candidates
+            .iter()
+            .find(|(evidence, _)| evidence.beam_id == replacement.beam_id)
+            .map(|(evidence, _)| evidence)
+            .ok_or(NativeBeamRecognitionError::MissingMultipleRestSource(
+                replacement.beam_id,
+            ))?;
+        descriptors.push(NativeMultipleRestDescriptor {
+            source_beam_ordinal: *source_beam_ordinal,
+            system_id: *system_id,
+            source_median: beam.item.median,
+            source_bounds: *source_bounds,
+            grade: replacement.grade,
+            height: replacement.height,
+            staff_id: replacement.staff_id,
+            start_pitch: evidence.start_pitch,
+            stop_pitch: evidence.stop_pitch,
+            serif_search: serif_search.clone(),
+            left_peak: replacement.left_peak,
+            right_peak: replacement.right_peak,
+        });
+    }
+    Ok(descriptors)
+}
+
+fn multiple_rest_line(
+    staff: &HeadlessStaff,
+    index: usize,
+) -> Option<&audiveris_image::staff_line_conversion::PersistentStaffLine> {
+    match staff.lines.get(index)? {
+        HeadlessStaffLine::Persistent { line, .. } => Some(line),
+        HeadlessStaffLine::Filament { .. } => None,
+    }
+}
+
+struct ProductionMultipleRestProjector {
+    projector: audiveris_image::projection::NeutralStaffProjectorResult,
+    request: MultiRestSideRequest,
+}
+
+fn multiple_rest_projector(
+    recognition: &GridLinesRecognition,
+    staff: &HeadlessStaff,
+) -> Option<Result<ProductionMultipleRestProjector, audiveris_image::projection::ProjectionError>> {
+    let lines = staff
+        .lines
+        .iter()
+        .map(|line| match line {
+            HeadlessStaffLine::Persistent { line, .. } => Some(line),
+            HeadlessStaffLine::Filament { .. } => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let first = boundary_from_points(&lines.first()?.points).ok()?;
+    let middle = boundary_from_points(&lines[lines.len() / 2].points).ok()?;
+    let last = boundary_from_points(&lines.last()?.points).ok()?;
+    let thicknesses = lines.iter().map(|line| line.thickness).collect::<Vec<_>>();
+    let line_count = i32::try_from(lines.len()).ok()?;
+    let interline = i32::try_from(staff.interline).ok()?;
+    let is_one_line = staff.kind == StaffCandidateKind::OneLine;
+    let half_bar_height =
+        audiveris_image::projection::barline_height(BarlineHeightSpec::Four, interline) / 2;
+    let first_ordinate = |x| {
+        let y = if is_one_line {
+            middle.y_at_x_ext(f64::from(x)) - f64::from(half_bar_height)
+        } else {
+            first.y_at_x_ext(f64::from(x))
+        };
+        y.round_ties_even() as i32
+    };
+    let last_ordinate = |x| {
+        let y = if is_one_line {
+            middle.y_at_x_ext(f64::from(x)) + f64::from(half_bar_height)
+        } else {
+            last.y_at_x_ext(f64::from(x))
+        };
+        y.round_ties_even() as i32
+    };
+    Some(
+        process_staff_projection(
+            recognition.scale.width,
+            recognition.scale.height,
+            &recognition.scale.binary,
+            StaffProjectorProcessRequest {
+                staff_id: StaffId::new(staff.id),
+                staff_left: staff.left.round_ties_even() as i32,
+                staff_right: staff.right.round_ties_even() as i32,
+                line_thicknesses: &thicknesses,
+                staff_line_count: line_count,
+                foreground_thickness: recognition.scale.scale.line.main,
+                scale: StaffProjectorScaleRequest {
+                    large_interline: recognition.scale.scale.interline.main,
+                    staff_specific_interline: interline,
+                    is_one_line_staff: is_one_line,
+                    barline_height: BarlineHeightSpec::Four,
+                    ratios: StaffProjectorScaleRatios::java_defaults(),
+                },
+                tuning: StaffProjectorProcessTuning::java_defaults(),
+            },
+            first_ordinate,
+            last_ordinate,
+            |x| {
+                PeakCoreGeometry::new(
+                    first.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                    last.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                    middle.y_at_x_ext(f64::from(x)).round_ties_even() as i32,
+                )
+            },
+        )
+        .and_then(|output| {
+            let refinement = PeakRefinementParams::new(
+                output.scale_parameters.bar_threshold,
+                output.line_thresholds.lines_threshold,
+                output.line_thresholds.chunk_threshold,
+                output.scale_parameters.bar_refine_dx,
+                output.scale_parameters.chunk_width,
+            )?;
+            let peak_construction =
+                PeakConstructionParams::new(refinement, output.scale_parameters.maximum_bar_width)?;
+            let peak_core = PeakCoreParams::new(
+                output.scale_parameters.gap_threshold,
+                StaffProjectorProcessTuning::java_defaults().minimum_white_ratio_beyond_serif,
+            )?;
+            Ok(ProductionMultipleRestProjector {
+                request: MultiRestSideRequest {
+                    x: 0,
+                    side: HorizontalSide::Left,
+                    added_chunk: 0,
+                    vertical_serif_width: output.scale_parameters.vertical_serif_width,
+                    bar_threshold: output.scale_parameters.bar_threshold,
+                    lines_threshold: output.line_thresholds.lines_threshold,
+                    total_height: interline.wrapping_mul(if is_one_line {
+                        4
+                    } else {
+                        line_count.wrapping_sub(1)
+                    }),
+                    staff_id: StaffId::new(staff.id),
+                    peak_construction,
+                    peak_core,
+                },
+                projector: output.result,
+            })
+        }),
+    )
+}
+
+fn multiple_rest_line_ordinate(staff: &HeadlessStaff, index: usize, x: f64) -> Option<f64> {
+    multiple_rest_line_boundary(staff, index).map(|line| line.y_at_x_ext(x))
+}
+
+fn multiple_rest_line_boundary(staff: &HeadlessStaff, index: usize) -> Option<StaffBoundary> {
+    let line = multiple_rest_line(staff, index)?;
+    boundary_from_points(&line.points).ok()
+}
+
+fn multiple_rest_staff_distance(staff: &HeadlessStaff, point: (f64, f64)) -> Option<f64> {
+    let top = multiple_rest_line_ordinate(staff, 0, point.0)?;
+    let bottom = multiple_rest_line_ordinate(staff, staff.lines.len().checked_sub(1)?, point.0)?;
+    Some((top - point.1).max(point.1 - bottom).trunc())
+}
+
+fn multiple_rest_staff_at_or_above(
+    recognition: &GridLinesRecognition,
+    system_id: usize,
+    point: (f64, f64),
+) -> Option<&HeadlessStaff> {
+    let staff_ids = recognition
+        .peak_graph
+        .systems
+        .get(system_id.checked_sub(1)?)?;
+    let mut closest = None;
+    let mut closest_distance = f64::MAX;
+    for staff_id in staff_ids {
+        let area = recognition
+            .staff_areas
+            .iter()
+            .find(|area| area.staff_id == *staff_id)?;
+        if !area.area.contains(point.0, point.1) {
+            continue;
+        }
+        let staff = recognition
+            .peak_graph
+            .sheet_staffs
+            .iter()
+            .find(|staff| staff.id == *staff_id)?;
+        let distance = multiple_rest_staff_distance(staff, point)?;
+        if distance < closest_distance {
+            closest_distance = distance;
+            closest = Some(staff);
+        }
+    }
+    let closest = closest?;
+    let to_top = multiple_rest_line_ordinate(closest, 0, point.0)? - point.1;
+    if to_top <= 0.0 {
+        Some(closest)
+    } else {
+        let index = staff_ids
+            .iter()
+            .position(|staff_id| *staff_id == closest.id)?;
+        let previous_id = *staff_ids.get(index.checked_sub(1)?)?;
+        recognition
+            .peak_graph
+            .sheet_staffs
+            .iter()
+            .find(|staff| staff.id == previous_id)
+    }
+}
+
+fn multiple_rest_pitch_position(staff: &HeadlessStaff, x: f64, y: f64) -> Option<f64> {
+    let top = multiple_rest_line_ordinate(staff, 0, x)?;
+    let bottom = multiple_rest_line_ordinate(staff, staff.lines.len().checked_sub(1)?, x)?;
+    let line_span = staff.lines.len().checked_sub(1)? as f64;
+    Some(line_span * ((2.0 * y) - bottom - top) / (bottom - top))
 }
 
 /// One candidate peak that a purge removed, and which purge removed it.
