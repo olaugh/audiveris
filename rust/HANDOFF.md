@@ -574,6 +574,23 @@ they first matter at `filterSeedConflicts`. The next composition applies the
 already-native aggregation/conflict kernels per scanner and retrieves the 174
 range glyphs.
 
+The boundary after range glyphs is frozen in a separate deterministic oracle.
+`oracle/java/run-heads-post-range.sh` manually follows the exact remainder of
+`NoteHeadsBuilder.buildHeads` around real private production calls: combine and
+full-abscissa-sort seed/range heads, remove duplicates, insert overlap
+exclusions, purge discarded tally entries, apply the zero-valued stemless boost,
+attach surviving notes, and run system small-beam arbitration. It then executes
+the actual `HeadsStep.doEpilog` image discard and `HeadSeedTally.analyze`; HEADS
+has no linking phase. Across eight pages it records 3,609 inputs, 62 duplicate
+removals, 2,725 overlap exclusions, 3,547 post-duplicate staff heads, zero beam
+removals, 26 head removals, 3,521 final heads, and 18 analyzed scale rows. The
+default 3,823,523-byte fixture retains decisions and survivors while hashing
+all ordered inputs, pair checks, tallies, and beam inputs; `--full-trace` exposes
+them. Two fresh-JVM generations are byte-identical at SHA-256
+`a6f159c14558d9804623f834a97da80e3931fad32ec74222b42a9a09be96150c`,
+with emitted body SHA-256
+`46b7cd41c0b4c57881621d66d0bfe0c64c5f8b31246caf6e98aa25897dfea47a`.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
