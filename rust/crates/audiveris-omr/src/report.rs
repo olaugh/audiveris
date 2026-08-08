@@ -224,11 +224,13 @@ pub fn stem_seeds_json(
     )
 }
 
-/// Emits native GRID, HEADERS, and BEAMS products on one sheet using schema 1.
+/// Emits native GRID, HEADERS, STEM_SEEDS, and BEAMS products on one sheet
+/// using schema 1.
 #[must_use]
 pub fn beams_json(
     recognition: &GridLinesRecognition,
     headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
     beams: &NativeBeamRecognition,
     input: &str,
     sheet: usize,
@@ -238,6 +240,7 @@ pub fn beams_json(
         recognition,
         RecognitionProducts {
             headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
             beams: Some(beams),
             ..RecognitionProducts::default()
         },
@@ -246,12 +249,13 @@ pub fn beams_json(
     )
 }
 
-/// Emits native GRID, HEADERS, BEAMS, and final LEDGERS products on one sheet
-/// using schema 1.
+/// Emits native GRID, HEADERS, STEM_SEEDS, BEAMS, and final LEDGERS products on
+/// one sheet using schema 1.
 #[must_use]
 pub fn ledgers_json(
     recognition: &GridLinesRecognition,
     headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
     beams: &NativeBeamRecognition,
     ledgers: &NativeLedgerRecognition,
     input: &str,
@@ -262,9 +266,9 @@ pub fn ledgers_json(
         recognition,
         RecognitionProducts {
             headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
             beams: Some(beams),
             ledgers: Some(ledgers),
-            ..RecognitionProducts::default()
         },
         input,
         sheet,

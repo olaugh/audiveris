@@ -23,9 +23,10 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 ## Current status (read this first)
 
 The CLI now performs native schema-1 JSON recognition through LEDGERS. GRID's
-human-readable report remains unchanged; HEADERS, BEAMS, and LEDGERS currently
-require `-json` and compose in Java stage order rather than accepting invented
-downstream inputs.
+human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, and
+LEDGERS require `-json` and compose in Java stage order rather than accepting
+invented downstream inputs. BEAMS and LEDGERS run GRID -> HEADERS ->
+STEM_SEEDS -> BEAMS and retain the accepted seeds in their documents.
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
@@ -141,8 +142,8 @@ before mapping the glyph bounds and exact start/stop median to BEAMS'
 `ExtensionGlyph`. `recognize_native_beams_with_stem_seeds` preserves Java's
 create -> extend with per-system seeds -> hooks -> groups order. All 1,906
 accepted glyphs cross that boundary on the eight-sheet gate. The compatibility
-entry point and current BEAMS/LEDGERS CLI remain explicitly seed-free until the
-next product-surface commit.
+entry point remains explicitly seed-free, while the BEAMS/LEDGERS CLI uses the
+composed entry point and carries stem scale plus accepted seeds forward.
 `BeamStemSeedsProbe` independently prices this dependency inside Java. Each
 page and mode runs in a fresh JVM, reaches the real STEM_SEEDS step, then runs
 BEAMS either untouched or after hiding only `VERTICAL_SEED` free-glyph
@@ -313,11 +314,13 @@ system-owned erase rectangles. STEM_SEEDS documents add accepted free glyphs
 in raw-candidate order with complete check and materialization evidence. They
 remain a top-level stage product rather than false SIG inters, and
 `{system, ordinal}` is their stable identity. BEAMS and LEDGERS retain the
-HEADERS state and append their stage products; they deliberately do not run or
-consume STEM_SEEDS until the beam-extension seam is connected. GRID still
-calls the writer with no downstream products. The GRID, HEADERS, BEAMS, and
-LEDGERS Chula JSON hashes remained byte-identical across the serializer carrier
-refactor.
+HEADERS and STEM_SEEDS state and append their stage products. The CLI runs the
+composed seed-aware BEAMS entry point before either serializer. GRID still calls
+the writer with no downstream products. After removing only `stem_scale` and
+`stem_seeds`, the canonical prior Chula content is unchanged: BEAMS SHA-256
+`f0866ce1ff0bd46d9b1093cc00e45c7ecd1692651f7e77a58c0e16ea81de9711`
+and LEDGERS SHA-256
+`4f67b6c2f98f51bc0e8bc5ded7dad501b875de3d8defa3906604650d5f023fdc`.
 
 Three decisions worth keeping:
 
@@ -628,7 +631,7 @@ accepted stem mode. `oracle/beam-stem-seeds.txt` separately proves the same
 zero-effect fact in production Java over 803 final beam/hook inters, 493 groups,
 and one multiple rest; none of their geometry, grades, impacts, membership, or
 rest state changes when seed visibility is removed. A natural successful page
-and switching BEAMS/LEDGERS CLI composition remain open.
+remains open; the BEAMS/LEDGERS CLI composition is now seed-aware.
 
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.

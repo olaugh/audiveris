@@ -7,8 +7,8 @@ use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{
-    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams, recognize_scale_raster,
-    scale_report,
+    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
+    recognize_scale_raster, scale_report,
 };
 use audiveris_omr::report::{beams_json, grid_json, headers_json, ledgers_json, stem_seeds_json};
 
@@ -96,9 +96,7 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                     grid_lines_report(&recognition)
                 } else {
                     // Each published stage consumes its real native upstream
-                    // products. BEAMS still uses its separately graded empty
-                    // seed-extension seam until the next wiring milestone;
-                    // running STEM_SEEDS here does not pretend otherwise.
+                    // products, in Java stage order.
                     let headers = recognize_native_headers(&recognition)
                         .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
                     if step == OmrStep::Headers {
@@ -108,14 +106,14 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
+                    let stem_seeds =
+                        recognize_native_stem_seeds(&recognition, &headers).map_err(|error| {
+                            format!(
+                                "{} sheet {sheet}: STEM_SEEDS failed: {error}",
+                                input.display()
+                            )
+                        })?;
                     if step == OmrStep::StemSeeds {
-                        let stem_seeds = recognize_native_stem_seeds(&recognition, &headers)
-                            .map_err(|error| {
-                                format!(
-                                    "{} sheet {sheet}: STEM_SEEDS failed: {error}",
-                                    input.display()
-                                )
-                            })?;
                         print!(
                             "{}",
                             stem_seeds_json(
@@ -128,14 +126,25 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         );
                         continue;
                     }
-                    let beams = recognize_native_beams(&recognition, headers.beam_erases())
-                        .map_err(|error| {
-                            format!("{} sheet {sheet}: BEAMS failed: {error}", input.display())
-                        })?;
+                    let beams = recognize_native_beams_with_stem_seeds(
+                        &recognition,
+                        headers.beam_erases(),
+                        &stem_seeds,
+                    )
+                    .map_err(|error| {
+                        format!("{} sheet {sheet}: BEAMS failed: {error}", input.display())
+                    })?;
                     if step == OmrStep::Beams {
                         print!(
                             "{}",
-                            beams_json(&recognition, &headers, &beams, &input_name, sheet)
+                            beams_json(
+                                &recognition,
+                                &headers,
+                                &stem_seeds,
+                                &beams,
+                                &input_name,
+                                sheet,
+                            )
                         );
                         continue;
                     }
@@ -145,7 +154,15 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                         })?;
                     print!(
                         "{}",
-                        ledgers_json(&recognition, &headers, &beams, &ledgers, &input_name, sheet,)
+                        ledgers_json(
+                            &recognition,
+                            &headers,
+                            &stem_seeds,
+                            &beams,
+                            &ledgers,
+                            &input_name,
+                            sheet,
+                        )
                     );
                     continue;
                 }
