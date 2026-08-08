@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Structured output for what GRID recognised, including *why*.
+//! Structured output for native recognition products, including *why*.
 //!
 //! The text reports are for reading a run; this is for consuming one. It exists
 //! because the interesting part of an Audiveris-shaped recogniser is not its
@@ -14,7 +14,8 @@
 //! a `Math.rint` versus `f64::round` divergence that six sessions of reading
 //! the two sources had missed. A consumer -- an evaluation harness, a
 //! model that proposes corrections, a human -- can only use that if it is
-//! emitted.
+//! emitted. GRID remains the stable schema-1 core; downstream stages add
+//! their interpretations and stage-owned summaries without replacing it.
 //!
 //! # Format
 //!
@@ -28,14 +29,19 @@
 //! grades and impacts is that they are exact against Java. Rounding them for
 //! looks would throw away the only property that makes them checkable.
 
-use std::fmt::Write as _;
+use std::{collections::BTreeMap, fmt::Write as _};
 
 use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
+use audiveris_image::beam_structure::BeamImpacts;
 use audiveris_image::grid_sig::{GridSigNode, GridSigRelation};
 use audiveris_image::lines_coordinator::StaffCandidateKind;
+use audiveris_image::system_population::BoundarySegment;
 
+use crate::beam_inters::{RawBeam, beam_bounds};
 use crate::grid_executor::HeadlessStaffLine;
-use crate::recognize::{GridLinesRecognition, ScaleRecognition};
+use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
+use crate::raw_ledger_filter::MaterializedLedgerInter;
+use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
 
 /// A minimal JSON writer.
 ///
@@ -155,6 +161,52 @@ impl Json {
 /// and the id counts from one, as `ImageLoading.Loader.getImage(int)` does.
 #[must_use]
 pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) -> String {
+    recognition_json("GRID", recognition, None, None, input, sheet)
+}
+
+/// Emits native GRID and BEAMS products on one sheet using schema 1.
+///
+/// This is deliberately independent of the CLI's HEADERS composition. A
+/// caller that already owns a genuinely native header result can publish the
+/// downstream beam product without changing the stable GRID envelope.
+#[must_use]
+pub fn beams_json(
+    recognition: &GridLinesRecognition,
+    beams: &NativeBeamRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json("BEAMS", recognition, Some(beams), None, input, sheet)
+}
+
+/// Emits native GRID, BEAMS, and final LEDGERS products on one sheet using
+/// schema 1.
+#[must_use]
+pub fn ledgers_json(
+    recognition: &GridLinesRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "LEDGERS",
+        recognition,
+        Some(beams),
+        Some(ledgers),
+        input,
+        sheet,
+    )
+}
+
+fn recognition_json(
+    stage: &str,
+    recognition: &GridLinesRecognition,
+    beams: Option<&NativeBeamRecognition>,
+    ledgers: Option<&NativeLedgerRecognition>,
+    input: &str,
+    sheet: usize,
+) -> String {
     let mut json = Json::default();
     json.open('{');
 
@@ -168,7 +220,7 @@ pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) 
     json.open('{');
     json.field_string("name", "audiveris-rust");
     json.field_string("version", env!("CARGO_PKG_VERSION"));
-    json.field_string("stage", "GRID");
+    json.field_string("stage", stage);
     json.close('}');
     json.field_string("input", input);
     json.field_integer("sheet", sheet as i64);
@@ -180,9 +232,15 @@ pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) 
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
-    inters(&mut json, recognition);
+    let publication = inters(&mut json, recognition, beams, ledgers);
     candidates(&mut json, recognition);
-    relations(&mut json, recognition);
+    relations(&mut json, recognition, ledgers, &publication.ledger_ids);
+    if let Some(beams) = beams {
+        beam_groups(&mut json, beams);
+    }
+    if let Some(ledgers) = ledgers {
+        ledger_lines(&mut json, &ledgers.ledger_lines);
+    }
 
     json.close('}');
     json.out.push('\n');
@@ -322,11 +380,26 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
 }
 
 /// The promoted inters, each with the evidence it was graded from.
-fn inters(json: &mut Json, recognition: &GridLinesRecognition) {
+#[derive(Default)]
+struct PublicationIds {
+    ledger_ids: BTreeMap<(usize, usize), usize>,
+}
+
+fn inters(
+    json: &mut Json,
+    recognition: &GridLinesRecognition,
+    beams: Option<&NativeBeamRecognition>,
+    ledgers: Option<&NativeLedgerRecognition>,
+) -> PublicationIds {
     json.key("inters");
     json.open('[');
+    let mut next_ids = BTreeMap::<usize, usize>::new();
     for system in &recognition.peak_graph.sig.systems {
         for (id, node) in system.sig.nodes_in_order() {
+            next_ids
+                .entry(system.system_id)
+                .and_modify(|next| *next = (*next).max(id.value()))
+                .or_insert(id.value());
             json.open('{');
             json.field_integer("id", id.value() as i64);
             json.field_integer("system", system.system_id as i64);
@@ -418,7 +491,149 @@ fn inters(json: &mut Json, recognition: &GridLinesRecognition) {
             json.close('}');
         }
     }
+    if let Some(beams) = beams {
+        for (system_id, beam) in beams.raw_beams.iter().chain(&beams.hooks) {
+            let id = allocate_publication_id(&mut next_ids, *system_id);
+            beam_inter(json, id, *system_id, beam);
+        }
+    }
+    let mut publication = PublicationIds::default();
+    if let Some(ledgers) = ledgers {
+        for ledger in ledgers.ledgers() {
+            let id = allocate_publication_id(&mut next_ids, ledger.system_id);
+            publication
+                .ledger_ids
+                .insert((ledger.system_id, ledger.id), id);
+            ledger_inter(json, id, ledger);
+        }
+    }
     json.close(']');
+    publication
+}
+
+fn allocate_publication_id(next_ids: &mut BTreeMap<usize, usize>, system_id: usize) -> usize {
+    let next = next_ids.entry(system_id).or_default();
+    *next += 1;
+    *next
+}
+
+fn bounds(json: &mut Json, x: f64, y: f64, width: f64, height: f64) {
+    json.key("bounds");
+    json.open('{');
+    json.field_number("x", x);
+    json.field_number("y", y);
+    json.field_number("width", width);
+    json.field_number("height", height);
+    json.close('}');
+}
+
+fn horizontal_median(json: &mut Json, x1: f64, y1: f64, x2: f64, y2: f64) {
+    json.key("median");
+    json.open('{');
+    json.field_number("x1", x1);
+    json.field_number("y1", y1);
+    json.field_number("x2", x2);
+    json.field_number("y2", y2);
+    json.close('}');
+}
+
+fn beam_inter(json: &mut Json, id: usize, system_id: usize, beam: &RawBeam) {
+    json.open('{');
+    json.field_integer("id", id as i64);
+    json.field_integer("system", system_id as i64);
+    json.field_string("status", "accepted");
+    json.field_string("kind", beam.kind.shape());
+    let beam_box = beam_bounds(beam.item);
+    bounds(
+        json,
+        f64::from(beam_box.x),
+        f64::from(beam_box.y),
+        f64::from(beam_box.width),
+        f64::from(beam_box.height),
+    );
+    horizontal_median(
+        json,
+        beam.item.median.x1,
+        beam.item.median.y1,
+        beam.item.median.x2,
+        beam.item.median.y2,
+    );
+    json.field_number("thickness", beam.item.height);
+    json.field_number("grade", beam.grade);
+    json.key("contextual_grade");
+    json.null();
+    json.key("evidence");
+    json.open('{');
+    json.field_boolean("frozen", false);
+    beam_impacts(json, beam.impacts);
+    json.close('}');
+    json.close('}');
+}
+
+fn beam_impacts(json: &mut Json, impacts: BeamImpacts) {
+    json.key("impacts");
+    json.open('{');
+    json.field_number("width", impacts.width);
+    json.field_number("min_height", impacts.min_height);
+    json.field_number("max_height", impacts.max_height);
+    json.field_number("core", impacts.core);
+    json.field_number("belt", impacts.belt);
+    // Java names this the border-jitter impact. The Rust recognition kernel
+    // calls the normalized value `distance`, but publishing the internal name
+    // would make the same Audiveris evidence look like two different terms.
+    json.field_number("jitter", impacts.distance);
+    json.close('}');
+}
+
+fn ledger_inter(json: &mut Json, id: usize, ledger: &MaterializedLedgerInter) {
+    json.open('{');
+    json.field_integer("id", id as i64);
+    json.field_integer("system", ledger.system_id as i64);
+    json.field_integer("staff", ledger.staff_id as i64);
+    json.field_string("status", "accepted");
+    json.field_string("kind", "LEDGER");
+    json.field_integer("ledger_index", i64::from(ledger.ledger_index));
+    json.field_integer("pitch", i64::from(ledger.pitch));
+    bounds(
+        json,
+        ledger.bounds.x,
+        ledger.bounds.y,
+        ledger.bounds.width,
+        ledger.bounds.height,
+    );
+    horizontal_median(
+        json,
+        ledger.median.0.0,
+        ledger.median.0.1,
+        ledger.median.1.0,
+        ledger.median.1.1,
+    );
+    json.field_number("thickness", ledger.thickness);
+    json.field_number("grade", ledger.grade);
+    json.key("contextual_grade");
+    json.null();
+    json.key("evidence");
+    json.open('{');
+    json.field_boolean("frozen", false);
+    json.key("impacts");
+    json.open('{');
+    for (name, impact) in [
+        "min_thickness",
+        "max_thickness",
+        "length",
+        "convexity",
+        "straightness",
+        "left_pitch",
+        "right_pitch",
+    ]
+    .into_iter()
+    .zip(ledger.impacts)
+    {
+        json.field_number(name, impact.grade);
+    }
+    json.close('}');
+    json.close('}');
+    json.close('}');
 }
 
 /// The candidates that lost, and which stage rejected them.
@@ -459,7 +674,12 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
 
 /// The support and exclusion edges, which are what a contextual grade is made
 /// of and the first thing to look at when one is wrong.
-fn relations(json: &mut Json, recognition: &GridLinesRecognition) {
+fn relations(
+    json: &mut Json,
+    recognition: &GridLinesRecognition,
+    ledgers: Option<&NativeLedgerRecognition>,
+    ledger_ids: &BTreeMap<(usize, usize), usize>,
+) {
     json.key("relations");
     json.open('[');
     for system in &recognition.peak_graph.sig.systems {
@@ -482,12 +702,118 @@ fn relations(json: &mut Json, recognition: &GridLinesRecognition) {
             json.close('}');
         }
     }
+    if let Some(ledgers) = ledgers {
+        for relation in ledgers
+            .materializer
+            .relations()
+            .iter()
+            .filter(|relation| !relation.removed)
+        {
+            let Some(source) = ledger_ids
+                .get(&(relation.system_id, relation.source_inter_id))
+                .copied()
+            else {
+                continue;
+            };
+            let Some(target) = ledger_ids
+                .get(&(relation.system_id, relation.target_inter_id))
+                .copied()
+            else {
+                continue;
+            };
+            json.open('{');
+            json.field_integer("system", relation.system_id as i64);
+            json.field_integer("source", source as i64);
+            json.field_integer("target", target as i64);
+            json.field_string("kind", "exclusion");
+            json.close('}');
+        }
+    }
     json.close(']');
+}
+
+fn beam_groups(json: &mut Json, beams: &NativeBeamRecognition) {
+    json.key("beam_groups");
+    json.open('[');
+    for (system_id, count) in &beams.group_counts {
+        json.open('{');
+        json.field_integer("system", *system_id as i64);
+        json.field_integer("count", *count as i64);
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn ledger_lines(json: &mut Json, lines: &[NativeLedgerLine]) {
+    json.key("ledger_lines");
+    json.open('[');
+    for line in lines {
+        json.open('{');
+        json.field_integer("system", line.system_id as i64);
+        json.field_integer("staff", line.staff_id as i64);
+        json.field_integer("ledger_index", i64::from(line.index));
+        json.field_number("translation_y", line.translation_y);
+        json.key("path");
+        json.open('[');
+        for segment in &line.geometry.segments {
+            boundary_segment(json, *segment);
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn point(json: &mut Json, name: &str, point: (f64, f64)) {
+    json.key(name);
+    json.open('{');
+    json.field_number("x", point.0);
+    json.field_number("y", point.1);
+    json.close('}');
+}
+
+fn boundary_segment(json: &mut Json, segment: BoundarySegment) {
+    json.open('{');
+    match segment {
+        BoundarySegment::Line { start, end } => {
+            json.field_string("kind", "line");
+            point(json, "start", start);
+            point(json, "end", end);
+        }
+        BoundarySegment::Quadratic {
+            start,
+            control,
+            end,
+        } => {
+            json.field_string("kind", "quadratic");
+            point(json, "start", start);
+            point(json, "control", control);
+            point(json, "end", end);
+        }
+        BoundarySegment::Cubic {
+            start,
+            control1,
+            control2,
+            end,
+        } => {
+            json.field_string("kind", "cubic");
+            point(json, "start", start);
+            point(json, "control1", control1);
+            point(json, "control2", control2);
+            point(json, "end", end);
+        }
+    }
+    json.close('}');
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::{
+        beam_inters::BeamKind,
+        raw_ledger_filter::{LedgerCandidateImpact, LedgerFloatBounds},
+    };
+    use audiveris_image::beam_structure::{BeamItem, BeamRasterEvidence, Segment};
 
     #[test]
     fn escapes_what_json_requires_and_nothing_else() {
@@ -513,6 +839,156 @@ pub(crate) mod tests {
             json.number(value);
             assert_eq!(json.out, "null");
         }
+    }
+
+    #[test]
+    fn beam_publication_keeps_horizontal_geometry_and_all_six_impacts() {
+        let beam = RawBeam {
+            kind: BeamKind::Hook,
+            item: BeamItem {
+                median: Segment {
+                    x1: 10.25,
+                    y1: 20.5,
+                    x2: 30.75,
+                    y2: 21.5,
+                },
+                height: 4.0,
+            },
+            impacts: BeamImpacts {
+                width: 0.1,
+                min_height: 0.2,
+                max_height: 0.3,
+                core: 0.4,
+                belt: 0.5,
+                distance: 0.6,
+                raster: BeamRasterEvidence {
+                    core_foreground: 1,
+                    core_count: 2,
+                    belt_foreground: 3,
+                    belt_count: 4,
+                    core_ratio: 0.5,
+                    belt_ratio: 0.75,
+                    rounded_width: 21,
+                },
+            },
+            grade: 0.7,
+        };
+        let mut json = Json::default();
+        beam_inter(&mut json, 9, 2, &beam);
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(json.out.contains(r#""kind":"BEAM_HOOK""#));
+        assert!(
+            json.out
+                .contains(r#""median":{"x1":10.25,"y1":20.5,"x2":30.75,"y2":21.5}"#)
+        );
+        assert!(json.out.contains(
+            r#""impacts":{"width":0.1,"min_height":0.2,"max_height":0.3,"core":0.4,"belt":0.5,"jitter":0.6}"#
+        ));
+    }
+
+    #[test]
+    fn ledger_publication_uses_normalized_impacts_and_stage_local_identity() {
+        let impacts = [
+            LedgerCandidateImpact {
+                value: 10.0,
+                grade: 0.1,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 20.0,
+                grade: 0.2,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 30.0,
+                grade: 0.3,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 40.0,
+                grade: 0.4,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 50.0,
+                grade: 0.5,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 60.0,
+                grade: 0.6,
+                weight: 1.0,
+            },
+            LedgerCandidateImpact {
+                value: 70.0,
+                grade: 0.7,
+                weight: 1.0,
+            },
+        ];
+        let ledger = MaterializedLedgerInter {
+            id: 3,
+            glyph_id: 4,
+            filament_id: 5,
+            system_id: 2,
+            staff_id: 7,
+            ledger_index: -2,
+            pitch: -8,
+            bounds: LedgerFloatBounds {
+                x: 100.0,
+                y: 200.0,
+                width: 30.0,
+                height: 3.0,
+            },
+            median: ((100.0, 201.0), (129.0, 202.0)),
+            thickness: 2.5,
+            grade: 0.75,
+            impacts,
+            removed: false,
+        };
+        let mut json = Json::default();
+        ledger_inter(&mut json, 42, &ledger);
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(json.out.contains(r#""id":42,"system":2,"staff":7"#));
+        assert!(json.out.contains(r#""ledger_index":-2,"pitch":-8"#));
+        assert!(json.out.contains(
+            r#""impacts":{"min_thickness":0.1,"max_thickness":0.2,"length":0.3,"convexity":0.4,"straightness":0.5,"left_pitch":0.6,"right_pitch":0.7}"#
+        ));
+        assert!(
+            !json.out.contains("10.0"),
+            "raw measurements are not impacts"
+        );
+
+        let mut next = BTreeMap::from([(2, 41)]);
+        assert_eq!(allocate_publication_id(&mut next, 2), 42);
+        assert_eq!(allocate_publication_id(&mut next, 1), 1);
+    }
+
+    #[test]
+    fn ledger_line_publication_preserves_curve_controls() {
+        let lines = [NativeLedgerLine {
+            system_id: 3,
+            staff_id: 6,
+            index: -1,
+            translation_y: -20.25,
+            geometry: audiveris_image::system_population::StaffBoundary {
+                segments: vec![BoundarySegment::Cubic {
+                    start: (1.0, 2.0),
+                    control1: (3.0, 4.0),
+                    control2: (5.0, 6.0),
+                    end: (7.0, 8.0),
+                }],
+            },
+        }];
+        let mut json = Json::default();
+        ledger_lines(&mut json, &lines);
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(json.out.contains(r#""translation_y":-20.25"#));
+        assert!(json.out.contains(r#""kind":"cubic""#));
+        assert!(json.out.contains(r#""control1":{"x":3.0,"y":4.0}"#));
+        assert!(json.out.contains(r#""control2":{"x":5.0,"y":6.0}"#));
     }
 
     /// Scans for the shapes a stateful writer gets wrong: a comma where a

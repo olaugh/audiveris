@@ -13,12 +13,14 @@ This page is the concise roadmap for the bit-exact Rust port of Audiveris.
 Java 5.11 remains the behavioral oracle: a feature is described as graded only
 when a deterministic Java/Rust comparison covers it.
 
-**Current checkpoint:** native recognition is published through `GRID`, and a
-production-shaped corpus path continues through `HEADERS`, `BEAMS`, and final
-`LEDGERS` inter recognition without using oracle values as inputs. Across all
-eight example sheets that exercise BEAMS and LEDGERS, the sheet-wide
-statistical cleanup and rebuild leave all 581 Java final ledger inters and all
-95 inferred ledger-line paths exact.
+**Current checkpoint:** native recognition is published through `GRID`.
+Downstream BEAMS and LEDGERS JSON serializers now preserve their geometry,
+grades, impacts, exclusions, groups, and curved ledger paths, but the CLI is
+still gated at GRID. An integration audit found that the corpus HEADERS driver
+still supplies Java-recorded header starts and good connected bar positions;
+those inputs must be derived from GRID before the later stages can honestly be
+called native end to end. The downstream kernels remain exact across all eight
+example sheets: 581 final ledger inters and 95 inferred ledger-line paths.
 
 Last updated 2026-08-07.
 
@@ -52,10 +54,10 @@ is present but the musical interpretation is not.
 | 2 | `BINARY` | **Native and published** | Global and adaptive thresholding, filters, masks, runs, and full-page raster parity. | No known corpus gap. |
 | 3 | `SCALE` | **Native and published** | Line, interline, beam, histogram, derivative, and decision logic are measured from the page. | Small-beam recognition needs a graded corpus case before downstream use. |
 | 4 | `GRID` | **Native and published** | Staff lines, systems, bars, connectors, parts, contextual grades, completed line geometry, and `NO_STAFF` pixels. All 65 staves and 420 barlines in the example corpus match Java. | No known example-corpus gap; continue widening the PDF corpus. |
-| 5 | `HEADERS` | **Native and graded** | Clefs, keys, times, stop propagation, and all 30 system header-erasure rectangles. All 65 corpus staves match Java. | Publish header inters and evidence through the CLI/JSON stage driver. |
+| 5 | `HEADERS` | **Components graded** | Clefs, keys, times, stop propagation, and all 30 system header-erasure rectangles. All 65 corpus staves match Java once their browse inputs are supplied. | Replace the corpus driver's Java-recorded header starts and good-connected-bar cutoffs with values derived from GRID, then publish header inters and evidence. |
 | 6 | `STEM_SEEDS` | **Components graded** | Lifecycle, stem-scale histogram/peak/fallback, vertical orchestration, and stem checker. `maxStem` matches Java on all eight beam sheets. | Complete raw vertical `StickFactory` geometry and publish real seed glyphs. |
-| 7 | `BEAMS` | **Native and graded** | Native spot chain, system dispatch, beam creation, beam-to-beam extension, hooks, and grouping. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Publish CLI/JSON output; connect stem-seed extension; grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
-| 8 | `LEDGERS` | **Native and graded** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. All 581 final Java inters and 95 inferred ledger-line paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Chula's trace is 9,915 filtered runs → 4,052 sections → 104 candidates → 19 builder survivors → 18 final inters. | Publish LEDGERS through the CLI/JSON driver and widen beyond the example corpus. |
+| 7 | `BEAMS` | **Components graded** | Native spot chain, system dispatch, beam creation, beam-to-beam extension, hooks, grouping, and a schema-1 JSON serializer. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Feed it an oracle-free HEADERS result, wire the CLI, connect stem-seed extension, and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
+| 8 | `LEDGERS` | **Components graded** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. Its schema-1 serializer includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. | Close the upstream HEADERS composition seam, wire the CLI, and widen beyond the example corpus. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
@@ -81,16 +83,16 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **Published through `GRID`** | `LOAD -> BINARY -> SCALE -> GRID` is available on real images and PDFs. `HEADERS`, `BEAMS`, and `LEDGERS` still need report and stage-driver wiring. |
+| CLI and JSON | **Published through `GRID`** | `LOAD -> BINARY -> SCALE -> GRID` is available on real images and PDFs. BEAMS/LEDGERS schema-1 serializers are implemented, but downstream CLI wiring waits on oracle-free HEADERS composition. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 
 ## Next work queue
 
-1. Publish native `HEADERS`, `BEAMS`, and `LEDGERS` records through the CLI and
-   JSON stage driver, then widen LEDGERS beyond the example corpus.
-2. Finish `STEM_SEEDS` vertical geometry so beam-to-stem extension is available
-   when a corpus page exercises it.
+1. Derive HEADERS starts, staff interlines, and good-connected-bar browse limits
+   from GRID; then publish `HEADERS`, `BEAMS`, and `LEDGERS` through the CLI.
+2. Grade and port raw vertical `StickFactory` geometry for `STEM_SEEDS`, then
+   connect accepted seeds to beam-to-stem extension.
 3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline
    order through the semantic stages.
 4. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
