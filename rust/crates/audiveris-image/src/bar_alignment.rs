@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
 
-use audiveris_core::grade::clamp;
+use audiveris_core::{grade::clamp, java_math::java_positive_pow};
 
 use crate::bar_column::{PeakId, StaffId};
 
@@ -447,10 +447,10 @@ fn weighted_grade(impacts: &[f64], weights: &[f64]) -> f64 {
         if impact == 0.0 {
             global = 0.0;
         } else if weight != 0.0 {
-            global *= impact.powf(weight);
+            global *= java_positive_pow(impact, weight);
         }
     }
-    INTRINSIC_RATIO * global.powf(1.0 / total_weight)
+    INTRINSIC_RATIO * java_positive_pow(global, 1.0 / total_weight)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -552,8 +552,8 @@ mod tests {
     #[test]
     fn weighted_impacts_clamp_and_preserve_java_weights() {
         let impacts = BarImpacts::alignment(0.5, 1.0).unwrap();
-        let expected = 0.8 * 0.25_f64.powf(1.0 / 3.0);
-        assert!((impacts.grade() - expected).abs() < 1.0e-14);
+        let expected = 0.8 * java_positive_pow(0.25, 1.0 / 3.0);
+        assert_eq!(impacts.grade().to_bits(), expected.to_bits());
 
         let clamped = BarImpacts::connection(2.0, 1.0, -1.0, 1.0).unwrap();
         assert_eq!(clamped.grade(), 0.0);

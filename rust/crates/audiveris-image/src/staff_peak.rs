@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
 
-use audiveris_core::grade::clamp;
+use audiveris_core::{grade::clamp, java_math::java_positive_pow};
 
 use crate::bar_alignment::VerticalSide;
 use crate::bar_column::StaffId;
@@ -97,10 +97,10 @@ fn weighted_grade(impacts: &[f64], weights: &[f64]) -> f64 {
         if impact == 0.0 {
             global = 0.0;
         } else if weight != 0.0 {
-            global *= impact.powf(weight);
+            global *= java_positive_pow(impact, weight);
         }
     }
-    INTRINSIC_RATIO * global.powf(1.0 / total_weight)
+    INTRINSIC_RATIO * java_positive_pow(global, 1.0 / total_weight)
 }
 
 /// Java-compatible integer rectangle, including inclusive peak dimensions.
@@ -533,8 +533,9 @@ mod tests {
         assert_eq!(impacts.grade(), 0.0);
 
         let impacts = StaffVerticalImpacts::new(0.5, 1.0, 1.0, 1.0, 0.25, 1.0);
-        let expected = 0.8 * (0.5_f64 * 0.25_f64.sqrt()).powf(1.0 / 5.0);
-        assert!((impacts.grade() - expected).abs() < 1.0e-14);
+        let product = 0.5_f64 * java_positive_pow(0.25, 0.5);
+        let expected = 0.8 * java_positive_pow(product, 1.0 / 5.0);
+        assert_eq!(impacts.grade().to_bits(), expected.to_bits());
 
         let peak = StaffPeak::with_impacts(StaffId::new(2), 10, 20, 4, 5, impacts).unwrap();
         assert_eq!(peak.impacts(), Some(impacts));

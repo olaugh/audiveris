@@ -55,6 +55,8 @@ pub mod measures_step;
 pub mod native_headers;
 pub mod native_heads;
 pub mod native_heads_bar_slices;
+pub mod native_heads_competitor_slices;
+pub mod native_heads_competitors;
 pub mod native_heads_obstacles;
 pub mod native_heads_scanner;
 pub mod native_heads_scanner_pools;

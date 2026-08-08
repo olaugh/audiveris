@@ -430,7 +430,17 @@ HEADERS, so they cannot enter the consumed frozen pool. Production now also
 composes every scanner's semantic bar band with that frozen pool. The exhaustive
 gate matches all 1,767 slices exactly: 552 are nonempty and retain 5,060 obstacle
 references in Java's stable-by-ordinate order; `getBarAreas` performs no x sort.
-Final competitor pool and slice composition remain next. The fixture remains the base/pre-lookup
+The production competitor adapter now reconstructs all 1,334 current GRID,
+BEAMS, MultipleRest, and serif candidates in Java SIG order, including exact
+class/shape/staff/geometry, intrinsic and best grade bits, frozen state,
+`isGood`, maximum-stem and minimum-beam thresholds, vertical floors, beam-group
+member widths, and all decisions. It retains the same 847 acceptances and stable
+ordinate order. The exact grade gate exposed the last one-ULP GRID seam:
+`StaffVerticalImpacts` and bar-alignment impacts still called the platform
+`powf`; both now reuse the port's OpenJDK-compatible positive-base `Math.pow`
+kernel. Competitor slicing is exact across the same 1,767 scanner contexts: 408
+slices are nonempty and retain 1,944 accepted-pool indices after semantic Area
+intersection and Java's stable-by-abscissa sort. The fixture remains the base/pre-lookup
 slice: range scanners later see seed-created `HeadInter`
 instances, and actual template rectangles use Java2D area intersection. Those
 decisions belong to the evaluation oracle, not this immutable constructor gate.

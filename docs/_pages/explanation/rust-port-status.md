@@ -57,11 +57,13 @@ BEAMS-time staff projector from completed splines and the original binary,
 replaces Bach system 6's one source beam exactly, and exposes both pre- and
 post-replacement beam state; LEDGERS consumes the latter. HEADS now builds all
 seed and head-spot pools plus the complete 474-member frozen GRID
-bar/connector pool. Across all 1,767 scanners, every band, seed/competitor Area
-bound, ordered seed slice, ordered spot slice, and frozen-bar slice matches
-Java (15,343, 6,759, and 5,060 references respectively). Bar filtering retains
-Java's stable-by-ordinate obstacle order rather than applying an x sort.
-Competitor materialization and slice composition is the active next boundary.
+bar/connector pool. It also reconstructs all 1,334 live competing-shape
+candidates and Java's exact filtering decisions, leaving the same 847 accepted
+competitors in stable ordinate order. Across all 1,767 scanners, every band,
+seed/competitor Area bound, and ordered base slice matches Java: seed, spot,
+frozen-bar, and competitor slices retain 15,343, 6,759, 5,060, and 1,944
+references respectively. The next boundary is dynamic seed-created heads and
+the template evaluation/overlap gate.
 
 Last updated 2026-08-07.
 
@@ -99,7 +101,7 @@ is present but the musical interpretation is not.
 | 6 | `STEM_SEEDS` | **Native and published** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. Schema 1 publishes accepted seeds in production order with geometry and exact checker/materialization evidence. The BEAMS adapter and CLI validate and preserve every accepted per-system identity and median. | Widen beyond profile 1 and add tablature/no-staff skip cases. |
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with exact median, grade, height, staff, pitch, and two-serif evidence. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
-| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, 2,790 transient components, and 3,097 per-system spot references; all eight pages match Java exactly through the `NoteHeadsBuilder` boundary. BEAMS' BlackHeadSizer side effect and all 55 staff point sizes are exact. Five native point-size catalogs replay all 32 page-local templates, 192 anchors, and 27,207 keyed pixels. Production builds all 1,767 scanner geometries and 3,534 schedules exactly. The native pool adapters now reproduce 1,906 ordinate-sorted seeds, 3,097 spots, 528 GRID bar/connector candidates, and the complete 474 frozen obstacles. Every seed/spot band, Area bound, and ordered slice matches Java across all scanners: 1,455 nonempty seed slices/15,343 references and 1,455 nonempty spot slices/6,759 references. Frozen-bar slicing also matches all 1,767 scanners: 552 nonempty slices and 5,060 references in the required stable-by-ordinate order. Java HEADERS' five unfrozen Hove dummy bars account explicitly for the difference from the 533 raw oracle candidates and never enter the frozen pool. | Compose and grade the final competitor pool and slices, then port dynamic seed-head and Java2D template-box overlap decisions in the evaluation gate. |
+| 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. `recognize_native_heads_prolog` composes real GRID, BEAMS, LEDGERS, and STEM_SEEDS state into BINARY erasure, Chamfer-3 distance values, 2,790 transient components, and 3,097 per-system spot references; all eight pages match Java exactly through the `NoteHeadsBuilder` boundary. BEAMS' BlackHeadSizer side effect and all 55 staff point sizes are exact. Five native point-size catalogs replay all 32 page-local templates, 192 anchors, and 27,207 keyed pixels. Production builds all 1,767 scanner geometries and 3,534 schedules exactly. The native pool adapters reproduce 1,906 ordinate-sorted seeds, 3,097 spots, 528 GRID bar/connector candidates, all 474 frozen obstacles, and all 1,334 live competing-shape candidates. Competitor grades, best grades, geometry, source order, `isGood`, vertical/beam-group guards, 847 acceptances, and three rejection branches are exact. Every ordered base slice matches Java: 1,455 nonempty seed slices/15,343 references, 1,455 nonempty spot slices/6,759 references, 552 nonempty frozen-bar slices/5,060 references, and 408 nonempty competitor slices/1,944 references. Java HEADERS' five unfrozen Hove dummy bars account explicitly for the difference from the 533 raw oracle candidates and never enter the frozen pool. | Port dynamic seed-created heads and Java2D template-box overlap decisions in the evaluation gate. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
@@ -130,13 +132,12 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Compose and grade the final HEADS competitor pool and rectangle slices.
+1. Freeze and port dynamic seed-head and per-template Java2D overlap decisions with evaluation.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
-3. Freeze and port dynamic seed-head and per-template Java2D overlap decisions with evaluation.
-4. Wire GRID's production brace path so Part ownership and merged-staff behavior are exact.
-5. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
-6. Complete HEADS scanning/interpretation, then proceed in pipeline order.
-7. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
+3. Wire GRID's production brace path so Part ownership and merged-staff behavior are exact.
+4. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
+5. Complete HEADS scanning/interpretation, then proceed in pipeline order.
+6. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
 
 ## Maintenance rule
 
