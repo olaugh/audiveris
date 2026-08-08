@@ -4,6 +4,16 @@ Read `rust/PORTING.md` for parity status, `rust/HANDOFF.md` for where work
 stands, and `rust/LINUX-SETUP.md` before running anything that touches the Java
 oracle.
 
+## Keep the web port status current
+
+Review `docs/_pages/explanation/rust-port-status.md` after every Rust-port
+contribution. When the contribution changes parity, stage composition, product
+exposure, or the next-work queue, update the page in the same commit. Keep the
+web page concise and evidence-backed; `rust/PORTING.md` and `rust/HANDOFF.md`
+remain the detailed record. Do not call a stage ported merely because its
+lifecycle or test scaffold exists. Commit and push each verified increment to
+`master` as directed by `rust/HANDOFF.md`.
+
 ## Do not estimate work in human wall-clock time
 
 When asked "how hard would this be", the instinct is to answer in days. That

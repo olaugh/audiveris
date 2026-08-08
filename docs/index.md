@@ -18,9 +18,13 @@ It is now available in two versions:
 ## For the developer
 - [Format of ".omr" files]  
 This is the description of the internals of any ``.omr`` Audiveris book file
+- [Rust port status]
+
+This tracks what has been ported and graded in Rust and what remains
 - [Audiveris Wiki]  
 This Wiki gathers various articles about the development and potential evolutions of the Audiveris project.
 
 [Audiveris Wiki]:           https://github.com/Audiveris/audiveris/wiki
 [Format of ".omr" files]:   ./_pages/reference/outputs/omr
 [HandBook]:                 ./_pages/handbook
+[Rust port status]:         ./_pages/explanation/rust-port-status
