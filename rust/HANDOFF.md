@@ -62,6 +62,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
 | HEAD_SPOTS handoff | threshold-170 vertical RunTable retained by production BEAMS; Java size and two independent pixel digests exact on all 8 sheets |
 | Native ledger composition | all 581 final Java inters and 95 inferred ledger-line paths across the 8 beam sheets are exact; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
+| Final ledger glyphs | every non-removed ledger retains a 1:1 positioned fixed raster built from its referenced filtered sections; no median approximation |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -166,6 +167,17 @@ an independently thresholded buffer digest from `oracle/beam-spots.txt`; all
 are exact. This does not yet make HEADS native: persistent staff-line glyphs,
 final ledger glyphs, and accepted vertical seed glyphs still need to be
 composed into `NativeHeadsPrologRaster` before the visual classifier seam.
+
+The ledger half of that raster handoff is now concrete.
+`NativeLedgerRecognition.ledger_glyphs` is parallel to `ledgers()` in final
+materializer insertion order and carries system/staff/inter/glyph/filament
+identity, minimal absolute bounds, and the cropped fixed RunTable. Production
+resolves each surviving glyph's exact `section_ids` against LEDGERS' filtered
+horizontal sections, paints those pixels, and uses Java's orientation rule
+(`width > height` is horizontal, otherwise vertical). Empty, missing, and
+non-horizontal section sets are errors. HEADS can therefore erase the actual
+ledger glyph pixels; reconstructing a band from the fitted median would be an
+unmeasured approximation.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on

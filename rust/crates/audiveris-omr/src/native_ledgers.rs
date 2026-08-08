@@ -8,16 +8,20 @@ use std::{
     fmt,
 };
 
-use audiveris_image::{section::Bounds, system_population::StaffBoundary};
+use audiveris_image::{
+    run_table::{Orientation, RunTable},
+    section::{Bounds, Section},
+    system_population::StaffBoundary,
+};
 
 use crate::{
     beam_inters::{BeamKind, beam_bounds},
     raw_ledger_filter::{
-        LedgerMaterializationError, LedgerMaterializer, LedgerPreviousReference,
-        MaterializedLedgerInter, NativeLedgerCandidateOutcome, RawLedgerBeamArea,
-        RawLedgerCandidate, RawLedgerCandidateParameters, RawLedgerFilterError,
+        LedgerGlyphRasterError, LedgerMaterializationError, LedgerMaterializer,
+        LedgerPreviousReference, MaterializedLedgerInter, NativeLedgerCandidateOutcome,
+        RawLedgerBeamArea, RawLedgerCandidate, RawLedgerCandidateParameters, RawLedgerFilterError,
         RawLedgerFilterParameters, RawLedgerScale, RawLedgerStaffZone, RawLedgerSystemZone,
-        evaluate_ledger_line_unreduced, filter_raw_ledger_sections,
+        evaluate_ledger_line_unreduced, filter_raw_ledger_sections, materialize_fixed_ledger_glyph,
         source_native_ledger_candidates,
     },
     recognize::{GridLinesRecognition, NativeBeamRecognition},
@@ -34,7 +38,67 @@ pub struct NativeLedgerRecognition {
     pub discarded_filament_ids: Vec<usize>,
     pub rebuilt_system_ids: Vec<usize>,
     pub ledger_lines: Vec<NativeLedgerLine>,
+    /// Exact final fixed glyphs, in the same order as [`Self::ledgers`].
+    pub ledger_glyphs: Vec<NativeLedgerGlyph>,
     pub materializer: LedgerMaterializer,
+}
+
+/// One final non-removed ledger inter's exact positioned fixed glyph.
+///
+/// `bounds` is absolute sheet geometry while `run_table` is cropped to those
+/// bounds, matching Java `StraightFilament.toGlyph(null)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeLedgerGlyph {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub inter_id: usize,
+    pub glyph_id: usize,
+    pub filament_id: usize,
+    pub bounds: Bounds,
+    pub run_table: RunTable,
+}
+
+impl NativeLedgerGlyph {
+    /// Number of concrete runs in the cropped fixed-glyph table.
+    #[must_use]
+    pub fn run_count(&self) -> usize {
+        (0..self.run_table.sequence_count())
+            .map(|index| self.run_table.sequence(index).map_or(0, <[_]>::len))
+            .sum()
+    }
+
+    /// FNV-1a-64 over orientation, dimensions and exact run sequences.
+    #[must_use]
+    pub fn run_digest(&self) -> u64 {
+        let orientation = match self.run_table.orientation() {
+            Orientation::Horizontal => "HORIZONTAL",
+            Orientation::Vertical => "VERTICAL",
+        };
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        hash_ledger_glyph_row(
+            &mut hash,
+            &format!(
+                "{orientation} {} {}",
+                self.run_table.width(),
+                self.run_table.height()
+            ),
+        );
+        for sequence in 0..self.run_table.sequence_count() {
+            let mut row = sequence.to_string();
+            for run in self.run_table.sequence(sequence).unwrap_or_default() {
+                row.push_str(&format!(" {}:{}", run.start, run.length));
+            }
+            hash_ledger_glyph_row(&mut hash, &row);
+        }
+        hash
+    }
+}
+
+fn hash_ledger_glyph_row(hash: &mut u64, row: &str) {
+    for byte in row.bytes().chain(std::iter::once(b'\n')) {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +140,15 @@ pub enum NativeLedgerRecognitionError {
         index: i32,
         source: LedgerMaterializationError,
     },
+    MissingGlyph {
+        inter_id: usize,
+        glyph_id: usize,
+    },
+    GlyphRaster {
+        inter_id: usize,
+        glyph_id: usize,
+        source: LedgerGlyphRasterError,
+    },
 }
 
 impl fmt::Display for NativeLedgerRecognitionError {
@@ -101,6 +174,18 @@ impl fmt::Display for NativeLedgerRecognitionError {
             } => write!(
                 formatter,
                 "system {system_id} staff {staff_id} ledger line {index} failed: {source}"
+            ),
+            Self::MissingGlyph { inter_id, glyph_id } => write!(
+                formatter,
+                "ledger inter {inter_id} references missing glyph {glyph_id}"
+            ),
+            Self::GlyphRaster {
+                inter_id,
+                glyph_id,
+                source,
+            } => write!(
+                formatter,
+                "ledger inter {inter_id} glyph {glyph_id} raster failed: {source}"
             ),
         }
     }
@@ -207,6 +292,7 @@ pub fn recognize_native_ledgers(
         .collect::<Vec<_>>();
     let materializer = materialize_ledgers(&staves, &rebuilt_candidates, scale, parameters)?;
     let ledger_lines = build_ledger_lines(&staves, &materializer);
+    let ledger_glyphs = materialize_final_ledger_glyphs(&materializer, &filtered.sections)?;
 
     Ok(NativeLedgerRecognition {
         filtered_run_count: filtered.run_table.total_run_count(),
@@ -222,8 +308,43 @@ pub fn recognize_native_ledgers(
         discarded_filament_ids,
         rebuilt_system_ids,
         ledger_lines,
+        ledger_glyphs,
         materializer,
     })
+}
+
+fn materialize_final_ledger_glyphs(
+    materializer: &LedgerMaterializer,
+    filtered_sections: &[Section],
+) -> Result<Vec<NativeLedgerGlyph>, NativeLedgerRecognitionError> {
+    materializer
+        .inters()
+        .iter()
+        .filter(|inter| !inter.removed)
+        .map(|inter| {
+            let glyph = materializer.glyph_by_id(inter.glyph_id).ok_or(
+                NativeLedgerRecognitionError::MissingGlyph {
+                    inter_id: inter.id,
+                    glyph_id: inter.glyph_id,
+                },
+            )?;
+            let raster = materialize_fixed_ledger_glyph(&glyph.section_ids, filtered_sections)
+                .map_err(|source| NativeLedgerRecognitionError::GlyphRaster {
+                    inter_id: inter.id,
+                    glyph_id: inter.glyph_id,
+                    source,
+                })?;
+            Ok(NativeLedgerGlyph {
+                system_id: inter.system_id,
+                staff_id: inter.staff_id,
+                inter_id: inter.id,
+                glyph_id: inter.glyph_id,
+                filament_id: inter.filament_id,
+                bounds: raster.bounds,
+                run_table: raster.run_table,
+            })
+        })
+        .collect()
 }
 
 fn build_ledger_lines(
@@ -642,7 +763,14 @@ fn raw_beam_area(item: audiveris_image::beam_structure::BeamItem) -> RawLedgerBe
 
 #[cfg(test)]
 mod tests {
-    use super::LedgerPopulation;
+    use super::*;
+    use crate::raw_ledger_filter::{
+        LedgerCandidateGrade, LedgerCandidateImpact, LedgerFloatBounds, LedgerLineCandidate,
+    };
+    use audiveris_image::{
+        run_table::Run,
+        section::{JunctionPolicy, build_sections_from_id},
+    };
 
     #[test]
     fn ledger_population_uses_java_unbiased_standard_deviation() {
@@ -652,5 +780,118 @@ mod tests {
         }
 
         assert_eq!(population.mean_and_deviation(), Some((2.0, 1.0)));
+    }
+
+    fn evaluated_ledger(id: usize, section_id: usize, x: f64, width: f64) -> LedgerLineCandidate {
+        let impact = LedgerCandidateImpact {
+            value: 1.0,
+            grade: 1.0,
+            weight: 1.0,
+        };
+        LedgerLineCandidate {
+            candidate: RawLedgerCandidate {
+                id,
+                glyph_id: None,
+                inter_id: None,
+                section_ids: vec![section_id],
+                // Deliberately unrelated to the referenced section bounds:
+                // these fields drive SIG reduction, not fixed-glyph pixels.
+                bounds: LedgerFloatBounds {
+                    x,
+                    y: 9.0,
+                    width,
+                    height: 2.0,
+                },
+                start: (x, 10.0),
+                stop: (x + width - 1.0, 10.0),
+                mean_thickness: 2.0,
+                mean_distance: 0.0,
+                convex_end_count: 2,
+                overlaps_good_beam: false,
+            },
+            grade: LedgerCandidateGrade {
+                candidate_id: id,
+                staff_id: 5,
+                index: -1,
+                y_target: 10.0,
+                impacts: [impact; 7],
+                grade: 0.8,
+            },
+        }
+    }
+
+    #[test]
+    fn final_glyph_rasters_follow_nonremoved_inter_mapping_order_and_digest() {
+        let mut filtered = RunTable::new(Orientation::Horizontal, 40, 12).unwrap();
+        assert!(filtered.add_run(2, Run::new(10, 3)).unwrap());
+        assert!(filtered.add_run(4, Run::new(20, 2)).unwrap());
+        assert!(filtered.add_run(6, Run::new(30, 4)).unwrap());
+        let sections = build_sections_from_id(&filtered, JunctionPolicy::Shift { max_shift: 0 }, 1);
+
+        // Factory order is right, left, far. The first two overlap and the
+        // equal-grade reduction removes the second inter; the final raster
+        // order must remain surviving inter insertion order (first, third).
+        let candidates = vec![
+            evaluated_ledger(50, 1, 15.0, 20.0),
+            evaluated_ledger(51, 2, 5.0, 20.0),
+            evaluated_ledger(52, 3, 50.0, 5.0),
+        ];
+        let mut materializer = LedgerMaterializer::new(10, 100, 500);
+        let outcome = materializer.materialize_line(1, 5, -1, &candidates);
+        assert_eq!(outcome.error, None);
+        assert_eq!(outcome.survivor_inter_ids, vec![100, 102]);
+
+        let glyphs = materialize_final_ledger_glyphs(&materializer, &sections).unwrap();
+        assert_eq!(
+            glyphs
+                .iter()
+                .map(|glyph| (
+                    glyph.system_id,
+                    glyph.staff_id,
+                    glyph.inter_id,
+                    glyph.glyph_id,
+                    glyph.filament_id,
+                    glyph.bounds,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    1,
+                    5,
+                    100,
+                    10,
+                    50,
+                    Bounds {
+                        x: 10,
+                        y: 2,
+                        width: 3,
+                        height: 1,
+                    },
+                ),
+                (
+                    1,
+                    5,
+                    102,
+                    12,
+                    52,
+                    Bounds {
+                        x: 30,
+                        y: 6,
+                        width: 4,
+                        height: 1,
+                    },
+                ),
+            ]
+        );
+        assert_eq!(glyphs[0].run_count(), 1);
+        assert_eq!(glyphs[0].run_digest(), 0xeb7b_9722_e53f_5244);
+        assert_eq!(
+            glyphs
+                .iter()
+                .zip(materializer.inters().iter().filter(|inter| !inter.removed))
+                .map(|(glyph, inter)| (glyph.inter_id, inter.id, glyph.glyph_id, inter.glyph_id))
+                .collect::<Vec<_>>(),
+            vec![(100, 100, 10, 10), (102, 102, 12, 12)]
+        );
     }
 }

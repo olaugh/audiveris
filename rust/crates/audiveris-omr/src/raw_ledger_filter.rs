@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use audiveris_image::{
     beam_structure::BeamItem,
-    run_table::{Orientation, RunTable, RunTableError},
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable, RunTableError},
     section::{Bounds, JunctionPolicy, Section, build_sections_from_id},
     stick_factory::{HorizontalStickFactory, HorizontalStickParameters, StraightStickError},
     system_population::{PopulationSystemArea, StaffBoundary},
@@ -908,6 +908,134 @@ pub struct MaterializedLedgerGlyph {
     pub bounds: LedgerFloatBounds,
 }
 
+/// Positioned fixed glyph produced by Java `StraightFilament.toGlyph(null)`.
+///
+/// The table is cropped to the exact union of the referenced section pixels;
+/// `bounds` retains its absolute sheet position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixedLedgerGlyphRaster {
+    pub bounds: Bounds,
+    pub run_table: RunTable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerGlyphRasterError {
+    EmptySections,
+    MissingSection(usize),
+    NonHorizontalSection(usize),
+    RunTable(RunTableError),
+}
+
+impl fmt::Display for LedgerGlyphRasterError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptySections => formatter.write_str("ledger glyph has no sections"),
+            Self::MissingSection(id) => write!(formatter, "ledger glyph section {id} is missing"),
+            Self::NonHorizontalSection(id) => {
+                write!(formatter, "ledger glyph section {id} is not horizontal")
+            }
+            Self::RunTable(source) => write!(formatter, "invalid ledger glyph raster: {source}"),
+        }
+    }
+}
+
+impl Error for LedgerGlyphRasterError {}
+
+/// Materialize the exact filtered-section pixels used by a ledger filament.
+///
+/// Java's `SectionCompound.toGlyph(null)` computes the minimal member bounds,
+/// paints every member into a cropped buffer, and chooses horizontal runs only
+/// when the crop is wider than it is tall. The candidate's fitted median and
+/// floating-point bounds are intentionally not inputs to this operation.
+pub fn materialize_fixed_ledger_glyph(
+    section_ids: &[usize],
+    filtered_sections: &[Section],
+) -> Result<FixedLedgerGlyphRaster, LedgerGlyphRasterError> {
+    if section_ids.is_empty() {
+        return Err(LedgerGlyphRasterError::EmptySections);
+    }
+
+    let mut members = Vec::with_capacity(section_ids.len());
+    let mut left = usize::MAX;
+    let mut top = usize::MAX;
+    let mut right = 0;
+    let mut bottom = 0;
+    for &section_id in section_ids {
+        let section = filtered_sections
+            .iter()
+            .find(|section| section.id() == section_id)
+            .ok_or(LedgerGlyphRasterError::MissingSection(section_id))?;
+        if section.orientation() != Orientation::Horizontal {
+            return Err(LedgerGlyphRasterError::NonHorizontalSection(section_id));
+        }
+        let bounds = section.bounds();
+        left = left.min(bounds.x);
+        top = top.min(bounds.y);
+        right = right.max(bounds.x.checked_add(bounds.width).ok_or(
+            LedgerGlyphRasterError::RunTable(RunTableError::InvalidDimensions),
+        )?);
+        bottom = bottom.max(bounds.y.checked_add(bounds.height).ok_or(
+            LedgerGlyphRasterError::RunTable(RunTableError::InvalidDimensions),
+        )?);
+        members.push(section);
+    }
+
+    let width = right
+        .checked_sub(left)
+        .ok_or(LedgerGlyphRasterError::RunTable(
+            RunTableError::InvalidDimensions,
+        ))?;
+    let height = bottom
+        .checked_sub(top)
+        .ok_or(LedgerGlyphRasterError::RunTable(
+            RunTableError::InvalidDimensions,
+        ))?;
+    let mut pixels = vec![
+        BACKGROUND;
+        width
+            .checked_mul(height)
+            .ok_or(LedgerGlyphRasterError::RunTable(
+                RunTableError::InvalidDimensions,
+            ))?
+    ];
+    for section in members {
+        for (offset, run) in section.runs().iter().enumerate() {
+            let y = section.first_pos() + offset;
+            let relative_y = y
+                .checked_sub(top)
+                .ok_or(LedgerGlyphRasterError::RunTable(RunTableError::OutOfBounds))?;
+            for x in run.start..=run.stop() {
+                let relative_x = x
+                    .checked_sub(left)
+                    .ok_or(LedgerGlyphRasterError::RunTable(RunTableError::OutOfBounds))?;
+                let pixel = relative_y
+                    .checked_mul(width)
+                    .and_then(|row| row.checked_add(relative_x))
+                    .filter(|&index| index < pixels.len())
+                    .ok_or(LedgerGlyphRasterError::RunTable(RunTableError::OutOfBounds))?;
+                pixels[pixel] = FOREGROUND;
+            }
+        }
+    }
+
+    let orientation = if width > height {
+        Orientation::Horizontal
+    } else {
+        Orientation::Vertical
+    };
+    let run_table = RunTable::from_pixels(orientation, width, height, &pixels)
+        .map_err(LedgerGlyphRasterError::RunTable)?;
+    Ok(FixedLedgerGlyphRaster {
+        bounds: Bounds {
+            x: left,
+            y: top,
+            width,
+            height,
+        },
+        run_table,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MaterializedLedgerInter {
     pub id: usize,
@@ -1001,6 +1129,11 @@ impl LedgerMaterializer {
     #[must_use]
     pub fn glyphs(&self) -> &[MaterializedLedgerGlyph] {
         &self.glyphs
+    }
+
+    #[must_use]
+    pub fn glyph_by_id(&self, id: usize) -> Option<&MaterializedLedgerGlyph> {
+        self.glyphs.iter().find(|glyph| glyph.id == id)
     }
 
     #[must_use]
@@ -1452,6 +1585,55 @@ mod tests {
                 .map(Section::id)
                 .collect::<Vec<_>>(),
             vec![2]
+        );
+    }
+
+    #[test]
+    fn fixed_ledger_glyph_uses_exact_referenced_sections_and_minimal_bounds() {
+        let mut raster = RunTable::new(Orientation::Horizontal, 12, 8).unwrap();
+        assert!(raster.add_run(2, Run::new(3, 4)).unwrap());
+        assert!(raster.add_run(3, Run::new(3, 4)).unwrap());
+        assert!(raster.add_run(5, Run::new(8, 2)).unwrap());
+        let sections = build_sections_from_id(&raster, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        assert_eq!(sections.len(), 2);
+
+        // Member order does not alter the painted pixels. The crop comes from
+        // the sections themselves, never from fitted candidate geometry.
+        let glyph = materialize_fixed_ledger_glyph(&[2, 1], &sections).unwrap();
+        assert_eq!(
+            glyph.bounds,
+            Bounds {
+                x: 3,
+                y: 2,
+                width: 7,
+                height: 4,
+            }
+        );
+        assert_eq!(glyph.run_table.orientation(), Orientation::Horizontal);
+        assert_eq!(
+            (0..glyph.run_table.sequence_count())
+                .map(|sequence| {
+                    glyph
+                        .run_table
+                        .sequence(sequence)
+                        .unwrap_or_default()
+                        .to_vec()
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                vec![Run::new(0, 4)],
+                vec![Run::new(0, 4)],
+                Vec::new(),
+                vec![Run::new(5, 2)],
+            ]
+        );
+        assert_eq!(
+            materialize_fixed_ledger_glyph(&[3], &sections),
+            Err(LedgerGlyphRasterError::MissingSection(3))
+        );
+        assert_eq!(
+            materialize_fixed_ledger_glyph(&[], &sections),
+            Err(LedgerGlyphRasterError::EmptySections)
         );
     }
 
