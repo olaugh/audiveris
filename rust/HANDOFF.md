@@ -22,16 +22,19 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI performs native page recognition through GRID. BEAMS and LEDGERS now
-have schema-1 JSON serializers, but they are not wired into the stage driver.
+The CLI now performs native schema-1 JSON recognition through LEDGERS. GRID's
+human-readable report remains unchanged; HEADERS, BEAMS, and LEDGERS currently
+require `-json` and compose in Java stage order rather than accepting invented
+downstream inputs.
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
 then composes clef, key, and time columns in Java order. Java records are read
 only after that call for grading. All nine example pages and 65 staves match,
-including 34 keys, 17 times, and 30 downstream erase rectangles. The CLI/report
-driver has not published the new result yet, so
-`audiveris-cli -batch -step SCALE|GRID <image>` remains the honest boundary.
+including 34 keys, 17 times, and 30 downstream erase rectangles. Selected
+header inters, ranges, evidence, and system-owned erase rectangles are now
+published by `audiveris-cli -batch -step HEADERS -json <image>` and retained in
+the BEAMS and LEDGERS documents.
 
 Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
@@ -82,8 +85,9 @@ eight beam sheets, all 581 final inters, and all 95 inferred ledger-line paths
 exactly. `beams_json` and `ledgers_json` now publish the downstream geometry,
 grades, complete impact vectors, live ledger exclusions, group counts, and
 curved inferred ledger paths without changing GRID's schema-1 byte path. The
-serializers and native stage inputs are ready; CLI/report wiring and a corpus
-beyond the examples remain.
+serializers and native stage inputs are wired through
+`audiveris-cli -batch -step LEDGERS -json <image>`; a corpus beyond the examples
+remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
@@ -253,17 +257,23 @@ without disturbing a Homebrew or distribution `cargo`.
 
 ## Structured output
 
-`audiveris-cli -batch -step GRID -json <input>` emits one JSON document per
-sheet, one per line. This is the interchange format, not a debug dump, and it
-is shaped for two consumers that do not exist yet: an evaluation harness
-comparing several OMR systems, and a repair loop that proposes corrections.
+`audiveris-cli -batch -step GRID|HEADERS|BEAMS|LEDGERS -json <input>` emits one
+JSON document per sheet, one per line. This is the interchange format, not a
+debug dump. It is shaped for an evaluation harness comparing several OMR
+systems and a repair loop that proposes corrections.
 
 The checked-in `omrscope` consumer accepts both schema-1 median encodings:
 GRID's vertical `x/top/bottom` geometry and BEAMS/LEDGERS' endpoint
 `x1/y1/x2/y2` geometry. It deliberately leaves an incomplete median absent
 instead of letting Qt turn missing coordinates into zero, and it uses the line
 center for its abscissa display and Java/Rust pairing. The parser behavior has
-a CTest regression even though publication remains gated at GRID.
+a CTest regression, and downstream publication now supplies those forms.
+
+HEADERS documents add selected clef/key/time inters with their bounds, grades,
+contextual grades, and lifecycle/classifier evidence, plus staff ranges and
+system-owned erase rectangles. BEAMS and LEDGERS retain that state and append
+their stage products. GRID still calls the writer with no downstream products,
+preserving its established schema-1 byte path.
 
 Three decisions worth keeping:
 
@@ -574,7 +584,7 @@ STEM_SEEDS lands.
 The header erase remains the other open input, and it is priced in the section
 below: five spurious clef-sized candidates out of 100 on chula, zero real beams.
 
-## BEAMS native corpus path (CLOSED; CLI/JSON publication remains)
+## BEAMS native corpus path and CLI/JSON publication (CLOSED)
 
 The beam pipeline is exact -- 787 of 787 raw beams across the eight example
 sheets -- and now runs end to end from native GRID and HEADERS inputs. The three
@@ -667,8 +677,7 @@ hold.
 
 ## Historical plan that led to native HEADERS and BEAMS
 
-This list is retained as the dependency record. Items 1 and 2 are closed, and
-the native corpus path in item 3 is closed; only publication remains there.
+This list is retained as the dependency record. Items 1 through 3 are closed.
 
 1. ~~**The CFF/OTF outline parser**~~, which the MusicFont thread below shows is the
    one piece with no shortcut left. `rust/oracle/music-font.txt` is already its
@@ -681,10 +690,10 @@ the native corpus path in item 3 is closed; only publication remains there.
    twice, in `SpotsBuilder.eraseHeaderAreas` and again inside
    `StemScaler.getBuffer`, and both are the same dependency. Closed by the
    65/65 header chain and the 30/30 erase grade.
-3. **Beams into `-json`**, then into omrscope's Page and Inters tabs. The
-   consumer now parses and pairs horizontal beam/ledger medians as well as
-   GRID's vertical form; the CLI still emits GRID-level inters only. The native
-   recognition input is now ready; only publication remains.
+3. ~~**Beams into `-json`**, then into omrscope's Page and Inters tabs.~~ The
+   CLI now publishes HEADERS, BEAMS, and LEDGERS in schema 1, and the consumer
+   parses and pairs horizontal beam/ledger medians as well as GRID's vertical
+   form.
 4. **LEDGERS post-analysis**, now that native GRID/HEADERS/BEAMS-to-builder
    composition and its first exact gate are closed.
 

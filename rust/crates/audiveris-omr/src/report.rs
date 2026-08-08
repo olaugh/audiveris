@@ -38,10 +38,17 @@ use audiveris_image::lines_coordinator::StaffCandidateKind;
 use audiveris_image::system_population::BoundarySegment;
 
 use crate::beam_inters::{RawBeam, beam_bounds};
+use crate::clef_column::{NeutralClefCandidate, NeutralClefKind};
 use crate::grid_executor::HeadlessStaffLine;
+use crate::header_time_column::{
+    NeutralSpecificTimeShape, NeutralTimeCandidate, NeutralTimeCandidateKind,
+};
+use crate::key_column::NeutralKeyCandidate;
+use crate::native_headers::{NativeHeaderRecognition, NativeHeaderStaffRecognition};
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
 use crate::raw_ledger_filter::MaterializedLedgerInter;
 use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
+use crate::staff_header::{HeaderBounds, StaffHeaderRange};
 
 /// A minimal JSON writer.
 ///
@@ -161,29 +168,54 @@ impl Json {
 /// and the id counts from one, as `ImageLoading.Loader.getImage(int)` does.
 #[must_use]
 pub fn grid_json(recognition: &GridLinesRecognition, input: &str, sheet: usize) -> String {
-    recognition_json("GRID", recognition, None, None, input, sheet)
+    recognition_json("GRID", recognition, None, None, None, input, sheet)
 }
 
-/// Emits native GRID and BEAMS products on one sheet using schema 1.
-///
-/// This is deliberately independent of the CLI's HEADERS composition. A
-/// caller that already owns a genuinely native header result can publish the
-/// downstream beam product without changing the stable GRID envelope.
+/// Emits native GRID and selected HEADERS products on one sheet using schema 1.
+#[must_use]
+pub fn headers_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "HEADERS",
+        recognition,
+        Some(headers),
+        None,
+        None,
+        input,
+        sheet,
+    )
+}
+
+/// Emits native GRID, HEADERS, and BEAMS products on one sheet using schema 1.
 #[must_use]
 pub fn beams_json(
     recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
     beams: &NativeBeamRecognition,
     input: &str,
     sheet: usize,
 ) -> String {
-    recognition_json("BEAMS", recognition, Some(beams), None, input, sheet)
+    recognition_json(
+        "BEAMS",
+        recognition,
+        Some(headers),
+        Some(beams),
+        None,
+        input,
+        sheet,
+    )
 }
 
-/// Emits native GRID, BEAMS, and final LEDGERS products on one sheet using
-/// schema 1.
+/// Emits native GRID, HEADERS, BEAMS, and final LEDGERS products on one sheet
+/// using schema 1.
 #[must_use]
 pub fn ledgers_json(
     recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
     beams: &NativeBeamRecognition,
     ledgers: &NativeLedgerRecognition,
     input: &str,
@@ -192,6 +224,7 @@ pub fn ledgers_json(
     recognition_json(
         "LEDGERS",
         recognition,
+        Some(headers),
         Some(beams),
         Some(ledgers),
         input,
@@ -202,6 +235,7 @@ pub fn ledgers_json(
 fn recognition_json(
     stage: &str,
     recognition: &GridLinesRecognition,
+    headers: Option<&NativeHeaderRecognition>,
     beams: Option<&NativeBeamRecognition>,
     ledgers: Option<&NativeLedgerRecognition>,
     input: &str,
@@ -232,7 +266,11 @@ fn recognition_json(
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
-    let publication = inters(&mut json, recognition, beams, ledgers);
+    if let Some(headers) = headers {
+        staff_headers(&mut json, headers);
+        header_erases(&mut json, headers);
+    }
+    let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
     if let Some(beams) = beams {
@@ -379,6 +417,98 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
     json.close(']');
 }
 
+/// The staff-level HEADERS product. Selected symbols are emitted as inters;
+/// this parallel summary keeps the range that positioned them and makes an
+/// absent selection distinguishable from an absent staff header.
+fn staff_headers(json: &mut Json, headers: &NativeHeaderRecognition) {
+    json.key("staff_headers");
+    json.open('[');
+    for system in &headers.systems {
+        for staff in &system.staffs {
+            json.open('{');
+            json.field_integer("system", system.system_id as i64);
+            json.field_integer("staff", staff.staff_id as i64);
+            json.field_integer("interline", i64::from(staff.specific_interline));
+            match &staff.header {
+                Some(header) => {
+                    json.field_integer("start", i64::from(header.start));
+                    json.field_integer("stop", i64::from(header.stop));
+                    optional_id(json, "clef", staff.selected_clef_id);
+                    optional_id(json, "key", staff.selected_key_id);
+                    optional_id(json, "time", staff.selected_time_id);
+                    optional_range(json, "clef_range", header.clef_range.as_ref());
+                    optional_range(json, "key_range", header.key_range.as_ref());
+                    optional_range(json, "time_range", header.time_range.as_ref());
+                }
+                None => {
+                    json.key("start");
+                    json.null();
+                    json.key("stop");
+                    json.null();
+                    optional_id(json, "clef", None);
+                    optional_id(json, "key", None);
+                    optional_id(json, "time", None);
+                    optional_range(json, "clef_range", None);
+                    optional_range(json, "key_range", None);
+                    optional_range(json, "time_range", None);
+                }
+            }
+            json.close('}');
+        }
+    }
+    json.close(']');
+}
+
+fn optional_id(json: &mut Json, name: &str, id: Option<usize>) {
+    json.key(name);
+    match id {
+        Some(id) => json.integer(id as i64),
+        None => json.null(),
+    }
+}
+
+fn optional_range(json: &mut Json, name: &str, range: Option<&StaffHeaderRange>) {
+    json.key(name);
+    let Some(range) = range else {
+        json.null();
+        return;
+    };
+    json.open('{');
+    json.field_boolean("valid", range.valid);
+    json.field_integer("browse_start", i64::from(range.browse_start));
+    json.field_integer("browse_stop", i64::from(range.browse_stop));
+    json.key("start");
+    match range.start() {
+        Ok(start) => json.integer(i64::from(start)),
+        Err(_) => json.null(),
+    }
+    json.key("stop");
+    match range.precise_stop() {
+        Some(stop) => json.integer(i64::from(stop)),
+        None => json.null(),
+    }
+    json.close('}');
+}
+
+/// The exact rectangles the next native stage consumes. Keeping them in the
+/// report makes BEAMS' changed pixels attributable to HEADERS rather than to a
+/// hidden preprocessing step.
+fn header_erases(json: &mut Json, headers: &NativeHeaderRecognition) {
+    json.key("header_erases");
+    json.open('[');
+    for item in &headers.header_erases {
+        let erase = item.erase;
+        json.open('{');
+        json.field_integer("system", item.system_id as i64);
+        json.field_integer("x", i64::from(erase.x));
+        json.field_integer("stop", i64::from(erase.stop));
+        json.field_integer("top", i64::from(erase.top));
+        json.field_integer("bottom", i64::from(erase.bottom));
+        json.close('}');
+    }
+    json.close(']');
+}
+
 /// The promoted inters, each with the evidence it was graded from.
 #[derive(Default)]
 struct PublicationIds {
@@ -388,6 +518,7 @@ struct PublicationIds {
 fn inters(
     json: &mut Json,
     recognition: &GridLinesRecognition,
+    headers: Option<&NativeHeaderRecognition>,
     beams: Option<&NativeBeamRecognition>,
     ledgers: Option<&NativeLedgerRecognition>,
 ) -> PublicationIds {
@@ -491,6 +622,9 @@ fn inters(
             json.close('}');
         }
     }
+    if let Some(headers) = headers {
+        header_inters(json, headers, &mut next_ids);
+    }
     if let Some(beams) = beams {
         for (system_id, beam) in beams.raw_beams.iter().chain(&beams.hooks) {
             let id = allocate_publication_id(&mut next_ids, *system_id);
@@ -509,6 +643,264 @@ fn inters(
     }
     json.close(']');
     publication
+}
+
+fn header_inters(
+    json: &mut Json,
+    headers: &NativeHeaderRecognition,
+    next_ids: &mut BTreeMap<usize, usize>,
+) {
+    for system in &headers.systems {
+        for staff in &system.staffs {
+            if let Some(id) = staff.selected_clef_id
+                && let Some(candidate) = staff.clef_candidates.iter().find(|item| item.id == id)
+            {
+                observe_publication_id(next_ids, system.system_id, id);
+                clef_inter(json, system.system_id, staff, candidate);
+            }
+            if let Some(id) = staff.selected_key_id
+                && let Some(candidate) = staff.key_candidates.iter().find(|item| item.id == id)
+            {
+                observe_publication_id(next_ids, system.system_id, id);
+                key_inter(json, system.system_id, staff, candidate);
+            }
+            if let Some(id) = staff.selected_time_id
+                && let Some(candidate) = staff.time_candidates.iter().find(|item| item.id == id)
+            {
+                observe_publication_id(next_ids, system.system_id, id);
+                time_inter(json, system.system_id, staff, candidate);
+            }
+        }
+    }
+}
+
+fn observe_publication_id(next_ids: &mut BTreeMap<usize, usize>, system_id: usize, id: usize) {
+    next_ids
+        .entry(system_id)
+        .and_modify(|next| *next = (*next).max(id))
+        .or_insert(id);
+}
+
+fn selected_component_is_frozen(
+    staff: &NativeHeaderStaffRecognition,
+    id: usize,
+    component: fn(
+        &crate::staff_header::StaffHeader,
+    ) -> Option<&crate::staff_header::HeaderComponent>,
+) -> bool {
+    staff
+        .header
+        .as_ref()
+        .and_then(component)
+        .filter(|selected| selected.id == id)
+        .is_some_and(crate::staff_header::HeaderComponent::is_frozen)
+}
+
+fn clef_component(
+    header: &crate::staff_header::StaffHeader,
+) -> Option<&crate::staff_header::HeaderComponent> {
+    header.clef.as_ref()
+}
+
+fn key_component(
+    header: &crate::staff_header::StaffHeader,
+) -> Option<&crate::staff_header::HeaderComponent> {
+    header.key.as_ref()
+}
+
+fn time_component(
+    header: &crate::staff_header::StaffHeader,
+) -> Option<&crate::staff_header::HeaderComponent> {
+    header.time.as_ref()
+}
+
+struct HeaderInter<'a> {
+    id: usize,
+    system_id: usize,
+    staff_id: usize,
+    kind: &'a str,
+    bounds_value: HeaderBounds,
+    grade: f64,
+    contextual_grade: Option<f64>,
+}
+
+fn header_inter_start(json: &mut Json, inter: HeaderInter<'_>) {
+    json.open('{');
+    json.field_integer("id", inter.id as i64);
+    json.field_integer("system", inter.system_id as i64);
+    json.field_integer("staff", inter.staff_id as i64);
+    json.field_string("status", "accepted");
+    json.field_string("kind", inter.kind);
+    bounds(
+        json,
+        f64::from(inter.bounds_value.x),
+        f64::from(inter.bounds_value.y),
+        f64::from(inter.bounds_value.width),
+        f64::from(inter.bounds_value.height),
+    );
+    json.field_number("grade", inter.grade);
+    json.key("contextual_grade");
+    match inter.contextual_grade {
+        Some(grade) => json.number(grade),
+        None => json.null(),
+    }
+}
+
+fn clef_inter(
+    json: &mut Json,
+    system_id: usize,
+    staff: &NativeHeaderStaffRecognition,
+    candidate: &NeutralClefCandidate,
+) {
+    let (kind, clef_kind) = match candidate.kind {
+        NeutralClefKind::Treble => ("G_CLEF", "treble"),
+        NeutralClefKind::Bass => ("F_CLEF", "bass"),
+        NeutralClefKind::Baritone => ("C_CLEF", "baritone"),
+        NeutralClefKind::Tenor => ("C_CLEF", "tenor"),
+        NeutralClefKind::Alto => ("C_CLEF", "alto"),
+        NeutralClefKind::MezzoSoprano => ("C_CLEF", "mezzo-soprano"),
+        NeutralClefKind::Soprano => ("C_CLEF", "soprano"),
+        NeutralClefKind::Percussion => ("PERCUSSION_CLEF", "percussion"),
+    };
+    header_inter_start(
+        json,
+        HeaderInter {
+            id: candidate.id,
+            system_id,
+            staff_id: staff.staff_id,
+            kind,
+            bounds_value: candidate.bounds,
+            grade: candidate.grade,
+            contextual_grade: candidate.contextual_grade,
+        },
+    );
+    json.key("evidence");
+    json.open('{');
+    json.field_boolean(
+        "frozen",
+        selected_component_is_frozen(staff, candidate.id, clef_component),
+    );
+    json.field_string("clef_kind", clef_kind);
+    optional_id(json, "glyph_id", candidate.glyph_id);
+    json.key("glyph_bounds");
+    match candidate.glyph_bounds {
+        Some(value) => header_bounds(json, value),
+        None => json.null(),
+    }
+    json.field_boolean(
+        "original_glyph_registered",
+        candidate.original_glyph_registered,
+    );
+    json.field_boolean("in_sig", candidate.in_sig);
+    json.close('}');
+    json.close('}');
+}
+
+fn key_inter(
+    json: &mut Json,
+    system_id: usize,
+    staff: &NativeHeaderStaffRecognition,
+    candidate: &NeutralKeyCandidate,
+) {
+    header_inter_start(
+        json,
+        HeaderInter {
+            id: candidate.id,
+            system_id,
+            staff_id: staff.staff_id,
+            kind: "KEY_SIGNATURE",
+            bounds_value: candidate.bounds,
+            grade: candidate.grade,
+            contextual_grade: candidate.contextual_grade,
+        },
+    );
+    json.key("evidence");
+    json.open('{');
+    json.field_boolean(
+        "frozen",
+        candidate.frozen || selected_component_is_frozen(staff, candidate.id, key_component),
+    );
+    json.field_integer("fifths", i64::from(candidate.fifths));
+    json.field_boolean("in_sig", candidate.in_sig);
+    json.key("slices");
+    json.open('[');
+    for slice in &candidate.slices {
+        json.open('{');
+        json.field_integer("start", i64::from(slice.start));
+        json.field_integer("width", i64::from(slice.width));
+        optional_id(json, "alter_id", slice.alter_id);
+        json.key("alter_bounds");
+        match slice.alter_bounds {
+            Some(value) => header_bounds(json, value),
+            None => json.null(),
+        }
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
+    json.close('}');
+}
+
+fn time_inter(
+    json: &mut Json,
+    system_id: usize,
+    staff: &NativeHeaderStaffRecognition,
+    candidate: &NeutralTimeCandidate,
+) {
+    let kind = match candidate.value.specific_shape {
+        Some(NeutralSpecificTimeShape::Common) => "COMMON_TIME",
+        Some(NeutralSpecificTimeShape::Cut) => "CUT_TIME",
+        None => "TIME_SIGNATURE",
+    };
+    header_inter_start(
+        json,
+        HeaderInter {
+            id: candidate.id,
+            system_id,
+            staff_id: staff.staff_id,
+            kind,
+            bounds_value: candidate.symbol_bounds,
+            grade: candidate.grade,
+            contextual_grade: None,
+        },
+    );
+    json.key("evidence");
+    json.open('{');
+    json.field_boolean(
+        "frozen",
+        selected_component_is_frozen(staff, candidate.id, time_component),
+    );
+    json.field_string(
+        "recognition",
+        match candidate.kind {
+            NeutralTimeCandidateKind::Whole => "whole",
+            NeutralTimeCandidateKind::Pair => "pair",
+        },
+    );
+    json.field_integer("numerator", i64::from(candidate.value.numerator));
+    json.field_integer("denominator", i64::from(candidate.value.denominator));
+    json.key("members");
+    json.open('[');
+    for id in &candidate.member_ids {
+        json.integer(*id as i64);
+    }
+    json.close(']');
+    json.field_boolean(
+        "original_glyphs_registered",
+        candidate.original_glyphs_registered,
+    );
+    json.field_boolean("in_sig", candidate.in_sig);
+    json.close('}');
+    json.close('}');
+}
+
+fn header_bounds(json: &mut Json, value: HeaderBounds) {
+    json.open('{');
+    json.field_integer("x", i64::from(value.x));
+    json.field_integer("y", i64::from(value.y));
+    json.field_integer("width", i64::from(value.width));
+    json.field_integer("height", i64::from(value.height));
+    json.close('}');
 }
 
 fn allocate_publication_id(next_ids: &mut BTreeMap<usize, usize>, system_id: usize) -> usize {
@@ -811,9 +1203,18 @@ pub(crate) mod tests {
     use super::*;
     use crate::{
         beam_inters::BeamKind,
+        header_time_column::NeutralTimeValue,
+        key_column::NeutralKeySlice,
+        native_headers::{
+            NativeHeaderErase, NativeHeaderStaffRecognition, NativeHeaderSystemRecognition,
+        },
         raw_ledger_filter::{LedgerCandidateImpact, LedgerFloatBounds},
+        staff_header::{HeaderComponent, StaffHeader},
     };
-    use audiveris_image::beam_structure::{BeamItem, BeamRasterEvidence, Segment};
+    use audiveris_image::{
+        beam_structure::{BeamItem, BeamRasterEvidence, Segment},
+        spots::HeaderErase,
+    };
 
     #[test]
     fn escapes_what_json_requires_and_nothing_else() {
@@ -839,6 +1240,146 @@ pub(crate) mod tests {
             json.number(value);
             assert_eq!(json.out, "null");
         }
+    }
+
+    #[test]
+    fn selected_header_publication_keeps_ranges_and_classifier_evidence() {
+        let bounds = HeaderBounds {
+            x: 20,
+            y: 30,
+            width: 12,
+            height: 40,
+        };
+        let mut clef_component = HeaderComponent::new(10, bounds);
+        clef_component.freeze();
+        let mut key_component = HeaderComponent::new(110, bounds);
+        key_component.freeze();
+        let mut time_component = HeaderComponent::new(210, bounds);
+        time_component.freeze();
+        let mut range = StaffHeaderRange::default();
+        range.valid = true;
+        range.browse_start = 12;
+        range.browse_stop = 99;
+        range.set_start(20);
+        range.set_stop(80);
+        let staff = NativeHeaderStaffRecognition {
+            staff_id: 3,
+            specific_interline: 20,
+            header: Some(StaffHeader {
+                start: 12,
+                stop: 91,
+                clef: Some(clef_component),
+                key: Some(key_component),
+                time: Some(time_component),
+                clef_range: Some(range.clone()),
+                key_range: Some(range.clone()),
+                alter_starts: Some(vec![40, 50, 60]),
+                time_range: Some(range.clone()),
+            }),
+            clef_candidates: vec![NeutralClefCandidate {
+                id: 10,
+                kind: NeutralClefKind::Bass,
+                grade: 0.7,
+                contextual_grade: Some(0.8),
+                bounds,
+                glyph_id: Some(501),
+                glyph_bounds: Some(bounds),
+                in_sig: true,
+                staff_id: Some(3),
+                original_glyph_registered: true,
+                removed: false,
+            }],
+            selected_clef_id: Some(10),
+            key_candidates: vec![NeutralKeyCandidate {
+                id: 110,
+                fifths: -3,
+                grade: 0.6,
+                contextual_grade: Some(0.75),
+                bounds,
+                range: range.clone(),
+                slices: vec![NeutralKeySlice {
+                    start: 40,
+                    width: 5,
+                    alter_id: Some(111),
+                    alter_bounds: Some(bounds),
+                }],
+                in_sig: true,
+                staff_id: Some(3),
+                frozen: true,
+                removed: false,
+            }],
+            selected_key_id: Some(110),
+            time_candidates: vec![NeutralTimeCandidate {
+                id: 210,
+                kind: NeutralTimeCandidateKind::Pair,
+                value: NeutralTimeValue {
+                    specific_shape: Some(NeutralSpecificTimeShape::Common),
+                    numerator: 4,
+                    denominator: 4,
+                },
+                grade: 0.9,
+                symbol_bounds: bounds,
+                member_ids: vec![211, 212],
+                staff_id: Some(3),
+                in_sig: true,
+                original_glyphs_registered: true,
+                removed: false,
+            }],
+            selected_time_id: Some(210),
+        };
+        let headers = NativeHeaderRecognition {
+            sheet_interline: 20,
+            systems: vec![NativeHeaderSystemRecognition {
+                system_id: 2,
+                staffs: vec![staff],
+                time_value: None,
+            }],
+            header_erases: vec![NativeHeaderErase {
+                system_id: 2,
+                erase: HeaderErase {
+                    x: 10,
+                    stop: 91,
+                    top: 5,
+                    bottom: 120,
+                },
+            }],
+        };
+        let mut json = Json::default();
+        json.open('{');
+        staff_headers(&mut json, &headers);
+        header_erases(&mut json, &headers);
+        json.key("inters");
+        json.open('[');
+        let mut next_ids = BTreeMap::new();
+        header_inters(&mut json, &headers, &mut next_ids);
+        json.close(']');
+        json.close('}');
+
+        assert!(structural_faults(&json.out).is_empty(), "{}", json.out);
+        assert!(
+            json.out
+                .contains(r#""start":12,"stop":91,"clef":10,"key":110,"time":210"#)
+        );
+        assert!(json.out.contains(
+            r#""clef_range":{"valid":true,"browse_start":12,"browse_stop":99,"start":20,"stop":80}"#
+        ));
+        assert!(
+            json.out.contains(
+                r#""header_erases":[{"system":2,"x":10,"stop":91,"top":5,"bottom":120}]"#
+            )
+        );
+        assert!(json.out.contains(r#""kind":"F_CLEF""#));
+        assert!(json.out.contains(r#""clef_kind":"bass","glyph_id":501"#));
+        assert!(json.out.contains(r#""kind":"KEY_SIGNATURE""#));
+        assert!(json.out.contains(r#""fifths":-3"#));
+        assert!(json.out.contains(r#""kind":"COMMON_TIME""#));
+        assert!(
+            json.out.contains(
+                r#""recognition":"pair","numerator":4,"denominator":4,"members":[211,212]"#
+            )
+        );
+        assert_eq!(next_ids, BTreeMap::from([(2, 210)]));
+        assert_eq!(allocate_publication_id(&mut next_ids, 2), 211);
     }
 
     #[test]

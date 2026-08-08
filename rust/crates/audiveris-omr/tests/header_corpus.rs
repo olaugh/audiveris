@@ -319,7 +319,12 @@ fn run_native_headers() -> Vec<NativeHeaderPage> {
         let margin = (2.0 * f64::from(expected_interline)).round_ties_even() as i32;
         if let Some(expected_rows) = beam_erases.get(&name) {
             for &(system_id, x, stop, first, last) in expected_rows {
-                let Some(erase) = native.header_erases.get(system_id - 1) else {
+                let Some(erase) = native
+                    .header_erases
+                    .iter()
+                    .find(|item| item.system_id == system_id)
+                    .map(|item| item.erase)
+                else {
                     mismatches.push(format!("{name} system {system_id}: no header erase"));
                     continue;
                 };
@@ -342,7 +347,7 @@ fn run_native_headers() -> Vec<NativeHeaderPage> {
         native_pages.push(NativeHeaderPage {
             name,
             recognition,
-            header_erases: native.header_erases,
+            header_erases: native.beam_erases(),
         });
     }
 

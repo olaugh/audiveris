@@ -3,23 +3,36 @@
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
+use audiveris_omr::native_headers::recognize_native_headers;
+use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::recognize::{
-    grid_lines_report, recognize_grid_lines_raster, recognize_scale_raster, scale_report,
+    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams, recognize_scale_raster,
+    scale_report,
 };
-use audiveris_omr::report::grid_json;
+use audiveris_omr::report::{beams_json, grid_json, headers_json, ledgers_json};
 
 fn usage() {
     println!(
         "Audiveris Rust port (incomplete)\n\n\
          Usage: audiveris-cli [options] [inputs]\n\n\
-         Native recognition currently stops at -step GRID, e.g.:\n\
+         Native text recognition currently stops at -step GRID, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID page.png\n\n\
+         Schema-1 JSON is published through LEDGERS, e.g.:\n\
+         \x20 audiveris-cli -batch -step LEDGERS -json page.png\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
-         Use the Java Audiveris executable for later stages until PORTING.md\n\
-         marks them compatible."
+         HEADERS, BEAMS, and LEDGERS currently require -json. Small-beam pages\n\
+         are refused explicitly; later stages use the compatibility handoff."
     );
+}
+
+fn is_native_step(step: OmrStep) -> bool {
+    step <= OmrStep::Grid || matches!(step, OmrStep::Headers | OmrStep::Beams | OmrStep::Ledgers)
+}
+
+fn is_json_only_step(step: OmrStep) -> bool {
+    matches!(step, OmrStep::Headers | OmrStep::Beams | OmrStep::Ledgers)
 }
 
 /// Native batch recognition for the stages the port supports so far.
@@ -30,8 +43,13 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
     let Some(step) = parameters.step else {
         return Ok(false);
     };
-    if step > OmrStep::Grid {
+    if !is_native_step(step) {
         return Ok(false);
+    }
+    if is_json_only_step(step) && !json {
+        return Err(format!(
+            "native -step {step} output currently requires -json"
+        ));
     }
     if parameters.arguments.is_empty() {
         return Err(format!("-step {step:?} requires at least one input image"));
@@ -54,20 +72,54 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
             } else {
                 format!("input={}\n", input.display())
             };
-            let report = if step == OmrStep::Grid {
+            let input_name = input.display().to_string();
+            let report = if step >= OmrStep::Grid {
                 let recognition = recognize_grid_lines_raster(&raster)
                     .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
-                if json {
+                if step == OmrStep::Grid && json {
                     // One JSON document per sheet, one per line: a consensus
                     // front end reading several producers wants a stream it can
                     // consume incrementally, not one array it must buffer.
+                    print!("{}", grid_json(&recognition, &input_name, sheet));
+                    continue;
+                }
+                if step == OmrStep::Grid {
+                    grid_lines_report(&recognition)
+                } else {
+                    // These products are composed in Java step order. In
+                    // particular, BEAMS never receives a caller-invented
+                    // header erase, and LEDGERS never receives a synthetic
+                    // beam list.
+                    let headers = recognize_native_headers(&recognition)
+                        .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
+                    if step == OmrStep::Headers {
+                        print!(
+                            "{}",
+                            headers_json(&recognition, &headers, &input_name, sheet)
+                        );
+                        continue;
+                    }
+                    let beams = recognize_native_beams(&recognition, headers.beam_erases())
+                        .map_err(|error| {
+                            format!("{} sheet {sheet}: BEAMS failed: {error}", input.display())
+                        })?;
+                    if step == OmrStep::Beams {
+                        print!(
+                            "{}",
+                            beams_json(&recognition, &headers, &beams, &input_name, sheet)
+                        );
+                        continue;
+                    }
+                    let ledgers =
+                        recognize_native_ledgers(&recognition, &beams).map_err(|error| {
+                            format!("{} sheet {sheet}: LEDGERS failed: {error}", input.display())
+                        })?;
                     print!(
                         "{}",
-                        grid_json(&recognition, &input.display().to_string(), sheet)
+                        ledgers_json(&recognition, &headers, &beams, &ledgers, &input_name, sheet,)
                     );
                     continue;
                 }
-                grid_lines_report(&recognition)
             } else {
                 let recognition = recognize_scale_raster(&raster)
                     .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
@@ -128,7 +180,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::sheets_to_process;
+    use super::{is_native_step, run_native, sheets_to_process};
+    use audiveris_cli::Parameters;
+    use audiveris_core::step::OmrStep;
 
     #[test]
     fn no_selection_means_every_sheet() {
@@ -143,5 +197,41 @@ mod tests {
         // Java's Book skips the ids it does not have rather than failing.
         assert_eq!(sheets_to_process(&[1, 2, 3, 4, 5], 3), vec![1, 2, 3]);
         assert_eq!(sheets_to_process(&[0, -1, 7], 3), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn native_stage_routing_skips_the_uncomposed_gap() {
+        for step in [
+            OmrStep::Load,
+            OmrStep::Binary,
+            OmrStep::Scale,
+            OmrStep::Grid,
+            OmrStep::Headers,
+            OmrStep::Beams,
+            OmrStep::Ledgers,
+        ] {
+            assert!(is_native_step(step), "{step} should be native");
+        }
+        assert!(!is_native_step(OmrStep::StemSeeds));
+        assert!(!is_native_step(OmrStep::Heads));
+    }
+
+    #[test]
+    fn downstream_text_requests_fail_instead_of_dumping_parameters() {
+        let parameters = Parameters {
+            step: Some(OmrStep::Headers),
+            ..Parameters::default()
+        };
+        let error = run_native(&parameters, false).expect_err("HEADERS text is not published");
+        assert_eq!(
+            error,
+            "native -step HEADERS output currently requires -json"
+        );
+
+        let parameters = Parameters {
+            step: Some(OmrStep::StemSeeds),
+            ..Parameters::default()
+        };
+        assert!(!run_native(&parameters, true).expect("unsupported handoff"));
     }
 }

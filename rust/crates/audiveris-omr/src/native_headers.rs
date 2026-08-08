@@ -398,7 +398,25 @@ pub struct NativeHeaderRecognition {
     /// Results in GRID/Java system order.
     pub systems: Vec<NativeHeaderSystemRecognition>,
     /// Rectangles consumed directly by the native beam spot chain.
-    pub header_erases: Vec<HeaderErase>,
+    pub header_erases: Vec<NativeHeaderErase>,
+}
+
+impl NativeHeaderRecognition {
+    /// Plain raster operations BEAMS consumes, preserving HEADERS' order.
+    #[must_use]
+    pub fn beam_erases(&self) -> Vec<HeaderErase> {
+        self.header_erases.iter().map(|item| item.erase).collect()
+    }
+}
+
+/// One HEADERS erase rectangle with explicit system ownership.
+///
+/// A tablature-only system can omit an erase, so vector position is not a
+/// safe substitute for this identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeHeaderErase {
+    pub system_id: usize,
+    pub erase: HeaderErase,
 }
 
 /// Selected header state and all retained candidate evidence for one system.
@@ -866,7 +884,7 @@ pub fn recognize_native_headers(
 
         let erase = build_header_erase(grid, &system_context.staffs, &system, sheet_interline)?;
         if let Some(erase) = erase {
-            header_erases.push(erase);
+            header_erases.push(NativeHeaderErase { system_id, erase });
         }
 
         let mut staffs = Vec::with_capacity(system.staffs.len());
