@@ -457,6 +457,25 @@ invalid distance state, exact ratio/grade bits, and all existing weighted
 foreground/background/hole branches. Scanner orchestration and semantic
 competitor/bar overlap remain the active boundary.
 
+That active boundary now has a production oracle rather than a synthetic
+fixture. `oracle/java/run-heads-seed-pass.sh` reaches real LEDGERS in one fresh
+JVM per page, prepares `NoteHeadsBuilder`, and calls the real private
+`processStaff(staff, true)` for every non-tablature staff in Java order. The
+probe independently replays the private evaluation/create-inter calls to expose
+provenance, restores the builder's performance counters before production, and
+asserts the traced counters and predicted final heads against the real call.
+After each staff it appends returned heads to `systemCompetitors` and performs
+Java's stable ordinate sort; range lookup and later purges never run. The
+default compact fixture hashes all 61,372 seed/side/shape searches, retains all
+3,435 minimum-grade provisional candidates and all 3,435 final glyph-backed
+heads, and records 55 staff, 30 system, and 8 page summaries. Two fresh-JVM
+generations are byte-identical at 3,831,005 bytes and SHA-256
+`aca3cd20941846ae0eab9b4c1e56b3c9959afb6ed649519888b854e2b68f0414`;
+`--full-trace` emits the otherwise omitted per-search diagnostic rows. The
+identity-free `kernelHash` deliberately normalizes every minimum-grade result
+to `provisional`, so Rust can grade the pre-glyph kernel without claiming the
+next glyph/SIG boundary.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,

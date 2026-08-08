@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package org.audiveris.omr.rustport;
 
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.geom.Area;
 import java.awt.geom.Line2D;
@@ -28,18 +29,27 @@ import org.audiveris.omr.glyph.GlyphGroup;
 import org.audiveris.omr.glyph.Glyphs;
 import org.audiveris.omr.glyph.Shape;
 import org.audiveris.omr.image.DistanceTable;
+import org.audiveris.omr.image.Anchored.Anchor;
+import static org.audiveris.omr.image.Anchored.Anchor.LEFT_STEM;
+import static org.audiveris.omr.image.Anchored.Anchor.RIGHT_STEM;
+import org.audiveris.omr.image.PixelDistance;
+import org.audiveris.omr.image.Template;
 import org.audiveris.omr.image.TemplateFactory;
+import org.audiveris.omr.image.TemplateFactory.Catalog;
+import org.audiveris.omr.math.LineUtil;
 import org.audiveris.omr.run.Orientation;
 import org.audiveris.omr.run.Run;
 import org.audiveris.omr.run.RunTable;
 import org.audiveris.omr.sheet.Book;
 import org.audiveris.omr.sheet.Part;
+import org.audiveris.omr.sheet.Picture;
 import org.audiveris.omr.sheet.Scale;
 import org.audiveris.omr.sheet.Sheet;
 import org.audiveris.omr.sheet.SheetStub;
 import org.audiveris.omr.sheet.Staff;
 import org.audiveris.omr.sheet.SystemInfo;
 import org.audiveris.omr.sheet.grid.LineInfo;
+import org.audiveris.omr.sig.GradeImpacts;
 import org.audiveris.omr.sheet.note.DistancesBuilder;
 import org.audiveris.omr.sheet.note.HeadSeedTally;
 import org.audiveris.omr.sheet.note.HeadSpotsBuilder;
@@ -57,6 +67,8 @@ import org.audiveris.omr.step.OmrStep;
 import org.audiveris.omr.ui.symbol.MusicFamily;
 import org.audiveris.omr.ui.symbol.MusicFont;
 import org.audiveris.omr.util.HorizontalSide;
+
+import ij.process.ByteProcessor;
 
 /**
  * Exact oracle for the immutable construction context of NoteHeadsBuilder.Scanner.
@@ -101,10 +113,17 @@ public class HeadsScannerContextProbe
             System.exit(0);
         }
 
+        if ((args.length == 1) && args[0].equals("--seed-heads-header")) {
+            printSeedHeadsHeader();
+            System.exit(0);
+        }
+
         final boolean slices = (args.length == 2) && args[0].equals("--slices");
-        if ((!slices && (args.length != 1)) || (slices && (args.length != 2))) {
+        final boolean seedHeads = (args.length == 2) && args[0].equals("--seed-heads");
+        if ((!slices && !seedHeads && (args.length != 1))
+                || ((slices || seedHeads) && (args.length != 2))) {
             throw new IllegalArgumentException(
-                    "expected [--slices] <path>:<sheet> target");
+                    "expected [--slices|--seed-heads] <path>:<sheet> target");
         }
 
         final CLI cli = new CLI(WellKnowns.TOOL_NAME);
@@ -114,13 +133,15 @@ public class HeadsScannerContextProbe
         cliField.set(null, cli);
         MusicFont.checkMusicFont();
 
-        final String[] parts = args[slices ? 1 : 0].split(":");
+        final String[] parts = args[(slices || seedHeads) ? 1 : 0].split(":");
         if (parts.length != 2) {
             throw new IllegalArgumentException("target must be <path>:<sheet>");
         }
         final Path path = Paths.get(parts[0]).toAbsolutePath();
         final int wanted = Integer.parseInt(parts[1]);
-        if (slices) {
+        if (seedHeads) {
+            runSeedHeadsPage(path, wanted);
+        } else if (slices) {
             runSlicesPage(path, wanted);
         } else {
             runPage(path, wanted);
@@ -258,6 +279,787 @@ public class HeadsScannerContextProbe
                 pageGeometries,
                 pageSchedules,
                 hash(pageRows));
+    }
+
+    /**
+     * Run only the real seed-based half of {@code NoteHeadsBuilder.buildHeads}.
+     *
+     * <p>Each staff invokes the private production {@code processStaff(staff, true)} method.
+     * Returned heads are then appended to the live competitor pool and stably sorted by ordinate,
+     * exactly as in {@code buildHeads}. Range lookup and every later purge are intentionally absent.
+     */
+    @SuppressWarnings("unchecked")
+    private static void runSeedHeadsPage (Path path,
+                                          int wanted)
+        throws Exception
+    {
+        final Sheet sheet = loadPage(path, wanted);
+        final String page = path.getFileName() + "#" + wanted;
+        final MusicFamily family = sheet.getStub().getMusicFamily();
+        final DistanceTable distances = new DistancesBuilder(sheet).buildDistances();
+        final Map<SystemInfo, List<Glyph>> sheetSpots = new HeadSpotsBuilder(sheet).getSpots();
+        final ByteProcessor image = sheet.getPicture().getSource(Picture.SourceKey.BINARY);
+        final List<String> pageRows = new ArrayList<>();
+        int pageStaffs = 0;
+        int pageAttempts = 0;
+        int pageHeads = 0;
+
+        System.out.printf(
+                "headseedpage %s width %d height %d systems %d staves %d family %s%n",
+                page,
+                distances.getWidth(),
+                distances.getHeight(),
+                sheet.getSystems().size(),
+                sheet.getStaffManager().getStaffCount(),
+                family);
+
+        for (SystemInfo system : sheet.getSystems()) {
+            final List<Glyph> systemSpots = sheetSpots.get(system);
+            if (systemSpots == null) {
+                throw new IllegalStateException("HEADS prolog omitted system " + system.getId());
+            }
+            final HeadSeedTally tally = new HeadSeedTally();
+            final NoteHeadsBuilder builder = new NoteHeadsBuilder(
+                    system,
+                    distances,
+                    systemSpots,
+                    tally,
+                    false,
+                    new java.util.TreeMap<>());
+            prepareBuilder(builder, system, systemSpots);
+            setField(builder, "image", image);
+
+            final List<Glyph> systemSeeds = (List<Glyph>) field(builder, "systemSeeds");
+            final List<Inter> systemCompetitors = (List<Inter>) field(builder, "systemCompetitors");
+            final List<String> systemRows = new ArrayList<>();
+            final int initialSigCount = system.getSig().vertexSet().size();
+            final int initialCompetitorCount = systemCompetitors.size();
+            int systemAttempts = 0;
+            int systemHeads = 0;
+
+            for (Staff staff : system.getStaves()) {
+                if (staff.isTablature()) {
+                    continue;
+                }
+                pageStaffs++;
+                final Catalog catalog = TemplateFactory.getInstance().getCatalog(
+                        family,
+                        staff.getHeadPointSize());
+                if (catalog == null) {
+                    throw new IllegalStateException(
+                            "missing catalog " + family + "/" + staff.getHeadPointSize());
+                }
+                setField(builder, "catalog", catalog);
+
+                // Trace the same private eval/createInter operations against the live pre-staff
+                // state, but restore the debug counters before invoking production processStaff.
+                final List<Geometry> geometries = buildGeometries(builder, staff);
+                final PerfCounts perfBeforeTrace = readSeedPerf(builder);
+                final List<SeedAttempt> attempts = traceSeedAttempts(
+                        builder,
+                        systemSeeds,
+                        geometries,
+                        catalog,
+                        image);
+                final PerfCounts perfAfterTrace = readSeedPerf(builder);
+                final PerfCounts tracedCalls = perfAfterTrace.minus(perfBeforeTrace);
+                restoreSeedPerf(builder, perfBeforeTrace);
+
+                final List<Inter> sigBefore = new ArrayList<>(system.getSig().vertexSet());
+                final int competitorsBefore = systemCompetitors.size();
+                final PerfCounts perfBefore = readSeedPerf(builder);
+                final List<HeadInter> heads = processSeedStaff(builder, staff);
+                final PerfCounts perfAfter = readSeedPerf(builder);
+                final PerfCounts perfDelta = perfAfter.minus(perfBefore);
+                final List<Inter> sigAfter = new ArrayList<>(system.getSig().vertexSet());
+
+                final int predictedAbandons = (int) attempts.stream()
+                        .filter(attempt -> attempt.outcome.startsWith("abandoned-"))
+                        .count();
+                if ((tracedCalls.bars != perfDelta.bars)
+                        || (tracedCalls.overlaps != perfDelta.overlaps)
+                        || (tracedCalls.evals != perfDelta.evals)
+                        || (predictedAbandons != perfDelta.abandons)) {
+                    throw new IllegalStateException(String.format(
+                            "%s system %d staff %d traced perf %s/%d abandons != production %s",
+                            page,
+                            system.getId(),
+                            staff.getId(),
+                            tracedCalls,
+                            predictedAbandons,
+                            perfDelta));
+                }
+
+                final List<SeedAttempt> finals = attempts.stream()
+                        .filter(attempt -> attempt.outcome.equals("final"))
+                        .toList();
+                if (finals.size() != heads.size()) {
+                    throw new IllegalStateException(String.format(
+                            "%s system %d staff %d predicted %d seed heads but production made %d",
+                            page,
+                            system.getId(),
+                            staff.getId(),
+                            finals.size(),
+                            heads.size()));
+                }
+                if (sigAfter.size() != sigBefore.size() + heads.size()) {
+                    throw new IllegalStateException(String.format(
+                            "%s system %d staff %d SIG grew %d, expected %d",
+                            page,
+                            system.getId(),
+                            staff.getId(),
+                            sigAfter.size() - sigBefore.size(),
+                            heads.size()));
+                }
+
+                // This mutation is deliberately before recording final competitor ordinals and
+                // before moving to the next staff, exactly as in buildHeads.
+                systemCompetitors.addAll(heads);
+                Collections.sort(systemCompetitors, Inters.byOrdinate);
+
+                final List<String> staffRows = new ArrayList<>();
+                final List<String> attemptRows = new ArrayList<>();
+                final List<String> kernelRows = new ArrayList<>();
+                final List<String> candidateRows = new ArrayList<>();
+                final List<String> headRows = new ArrayList<>();
+                for (int ordinal = 0; ordinal < attempts.size(); ordinal++) {
+                    final SeedAttempt attempt = attempts.get(ordinal);
+                    attempt.ordinal = ordinal;
+                    final String row = seedAttemptRow(page, system, staff, attempt);
+                    pageRows.add(row);
+                    systemRows.add(row);
+                    staffRows.add(row);
+                    attemptRows.add(row);
+                    kernelRows.add(seedKernelRecord(system, staff, attempt));
+                    System.out.println(row);
+                }
+
+                int candidateOrdinal = 0;
+                for (SeedAttempt attempt : attempts) {
+                    if (!attempt.minGradePass) {
+                        continue;
+                    }
+                    attempt.candidateOrdinal = candidateOrdinal;
+                    final String row = seedCandidateRow(
+                            page,
+                            system,
+                            staff,
+                            candidateOrdinal++,
+                            attempt);
+                    pageRows.add(row);
+                    systemRows.add(row);
+                    staffRows.add(row);
+                    candidateRows.add(row);
+                    System.out.println(row);
+                }
+
+                for (int ordinal = 0; ordinal < heads.size(); ordinal++) {
+                    final HeadInter head = heads.get(ordinal);
+                    final SeedAttempt attempt = finals.get(ordinal);
+                    assertFinalHeadMatches(page, system, staff, head, attempt);
+                    final String row = seedHeadRow(
+                            page,
+                            system,
+                            staff,
+                            ordinal,
+                            head,
+                            attempt,
+                            sigAfter,
+                            systemCompetitors,
+                            tally);
+                    pageRows.add(row);
+                    systemRows.add(row);
+                    staffRows.add(row);
+                    headRows.add(row);
+                    System.out.println(row);
+                }
+
+                final String summary = String.format(
+                        "headseedstaffsummary %s system %d staff %d scanners %d seeds %d "
+                                + "attempts %d candidates %d heads %d sigBefore %d sigAfter %d competitorsBefore "
+                                + "%d competitorsAfter %d outcomes %d:%d:%d:%d:%d:%d:%d "
+                                + "perf %d:%d:%d:%d attemptHash %016x kernelHash %016x candidateHash %016x "
+                                + "headHash %016x hash %016x",
+                        page,
+                        system.getId(),
+                        staff.getId(),
+                        geometries.size(),
+                        systemSeeds.size(),
+                        attempts.size(),
+                        candidateRows.size(),
+                        heads.size(),
+                        sigBefore.size(),
+                        sigAfter.size(),
+                        competitorsBefore,
+                        systemCompetitors.size(),
+                        outcomeCount(attempts, "abandoned-bar"),
+                        outcomeCount(attempts, "abandoned-competitor"),
+                        outcomeCount(attempts, "abandoned-nominal"),
+                        outcomeCount(attempts, "no-best"),
+                        outcomeCount(attempts, "min-grade"),
+                        outcomeCount(attempts, "glyph"),
+                        outcomeCount(attempts, "final"),
+                        perfDelta.bars,
+                        perfDelta.overlaps,
+                        perfDelta.evals,
+                        perfDelta.abandons,
+                        hash(attemptRows),
+                        hash(kernelRows),
+                        hash(candidateRows),
+                        hash(headRows),
+                        hash(staffRows));
+                pageRows.add(summary);
+                systemRows.add(summary);
+                System.out.println(summary);
+
+                pageAttempts += attempts.size();
+                pageHeads += heads.size();
+                systemAttempts += attempts.size();
+                systemHeads += heads.size();
+            }
+
+            final PerfCounts systemPerf = readSeedPerf(builder);
+            final String summary = String.format(
+                    "headseedsystemsummary %s system %d staffs %d attempts %d heads %d "
+                            + "sigBefore %d sigAfter %d competitorsBefore %d competitorsAfter %d "
+                            + "perf %d:%d:%d:%d %016x",
+                    page,
+                    system.getId(),
+                    system.getStaves().stream().filter(staff -> !staff.isTablature()).count(),
+                    systemAttempts,
+                    systemHeads,
+                    initialSigCount,
+                    system.getSig().vertexSet().size(),
+                    initialCompetitorCount,
+                    systemCompetitors.size(),
+                    systemPerf.bars,
+                    systemPerf.overlaps,
+                    systemPerf.evals,
+                    systemPerf.abandons,
+                    hash(systemRows));
+            pageRows.add(summary);
+            System.out.println(summary);
+        }
+
+        System.out.printf(
+                "headseedpagesummary %s staffs %d attempts %d heads %d %016x%n",
+                page,
+                pageStaffs,
+                pageAttempts,
+                pageHeads,
+                hash(pageRows));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<HeadInter> processSeedStaff (NoteHeadsBuilder builder,
+                                                     Staff staff)
+        throws Exception
+    {
+        final Method method = BUILDER_CLASS.getDeclaredMethod(
+                "processStaff", Staff.class, boolean.class);
+        method.setAccessible(true);
+        return (List<HeadInter>) method.invoke(builder, staff, true);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<SeedAttempt> traceSeedAttempts (NoteHeadsBuilder builder,
+                                                        List<Glyph> systemSeeds,
+                                                        List<Geometry> geometries,
+                                                        Catalog catalog,
+                                                        ByteProcessor image)
+        throws Exception
+    {
+        final List<SeedAttempt> attempts = new ArrayList<>();
+        final int[] xOffsets = (int[]) field(builder, "xOffsets");
+        final Object params = field(builder, "params");
+        final double maxDistanceLow = doubleField(params, "maxDistanceLow");
+        final double reallyBadDistance = doubleField(params, "reallyBadDistance");
+        final Method theoretical = SCANNER_CLASS.getDeclaredMethod(
+                "getTheoreticalOrdinate", int.class);
+        theoretical.setAccessible(true);
+        final Method eval = SCANNER_CLASS.getDeclaredMethod(
+                "eval", Shape.class, int.class, int.class, Anchor.class);
+        eval.setAccessible(true);
+        final Method evalBlackAsVoid = SCANNER_CLASS.getDeclaredMethod(
+                "evalBlackAsVoid", int.class, int.class, Anchor.class);
+        evalBlackAsVoid.setAccessible(true);
+        final Method createInter = BUILDER_CLASS.getDeclaredMethod(
+                "createInter",
+                PixelDistance.class,
+                Anchor.class,
+                Shape.class,
+                Staff.class,
+                double.class);
+        createInter.setAccessible(true);
+
+        for (int scannerOrdinal = 0; scannerOrdinal < geometries.size(); scannerOrdinal++) {
+            final Geometry geometry = geometries.get(scannerOrdinal);
+            final Object scanner = geometry.scanner;
+            final Area seedsArea = (Area) field(scanner, "seedsArea");
+            final List<Glyph> seeds = glyphsSlice(builder, systemSeeds, seedsArea);
+            final List<Shape> shapes = new ArrayList<>(
+                    (Collection<Shape>) field(scanner, "scannerTemplateNotesStem"));
+            final int[] yOffsets = (int[]) field(scanner, "yOffsets");
+            final Object line = field(scanner, "line");
+            final Method lineYAt = line.getClass().getDeclaredMethod("yAt", double.class);
+            lineYAt.setAccessible(true);
+
+            for (Glyph seed : seeds) {
+                final int seedPoolOrdinal = identityOrdinal(systemSeeds, seed);
+                int nominalX = (int) Math.rint(seed.getCenter2D().getX());
+                final double yLine = ((Number) lineYAt.invoke(line, (double) nominalX)).doubleValue();
+                final Point2D top = seed.getStartPoint(Orientation.VERTICAL);
+                final Point2D bottom = seed.getStopPoint(Orientation.VERTICAL);
+                nominalX = (int) Math.rint(LineUtil.xAtY(top, bottom, yLine));
+                final int nominalY = (int) theoretical.invoke(scanner, nominalX);
+
+                for (Anchor side : new Anchor[] { LEFT_STEM, RIGHT_STEM }) {
+                    for (int shapeOrdinal = 0; shapeOrdinal < shapes.size(); shapeOrdinal++) {
+                        final Shape originalShape = shapes.get(shapeOrdinal);
+                        Shape finalShape = originalShape;
+                        PixelDistance best = null;
+                        int bestYOrdinal = -1;
+                        int bestXOrdinal = -1;
+                        int bestUpdates = 0;
+                        String nominalGate = "-";
+                        Double nominalDistance = null;
+                        String outcome = null;
+                        final PerfCounts perfBefore = readSeedPerf(builder);
+
+                        Search:
+                        for (int yOrdinal = 0; yOrdinal < yOffsets.length; yOrdinal++) {
+                            final int y = nominalY + yOffsets[yOrdinal];
+                            for (int xOrdinal = 0; xOrdinal < xOffsets.length; xOrdinal++) {
+                                final int x = nominalX + xOffsets[xOrdinal];
+                                final PerfCounts beforeEval = readSeedPerf(builder);
+                                final PixelDistance location = (PixelDistance) eval.invoke(
+                                        scanner,
+                                        originalShape,
+                                        x,
+                                        y,
+                                        side);
+                                final PerfCounts afterEval = readSeedPerf(builder);
+
+                                if ((x == nominalX) && (y == nominalY)) {
+                                    if (location != null) {
+                                        nominalGate = "evaluated";
+                                        nominalDistance = location.d;
+                                    } else if (afterEval.bars > beforeEval.bars) {
+                                        nominalGate = "bar";
+                                    } else if (afterEval.overlaps > beforeEval.overlaps) {
+                                        nominalGate = "competitor";
+                                    } else {
+                                        throw new IllegalStateException(
+                                                "null nominal eval without a rejecting gate");
+                                    }
+                                }
+
+                                if ((location != null) && (location.d <= maxDistanceLow)) {
+                                    if ((best == null) || (best.d > location.d)) {
+                                        best = location;
+                                        bestYOrdinal = yOrdinal;
+                                        bestXOrdinal = xOrdinal;
+                                        bestUpdates++;
+                                    }
+                                } else if ((x == nominalX) && (y == nominalY)
+                                        && ((location == null)
+                                                || (location.d >= reallyBadDistance))) {
+                                    outcome = switch (nominalGate) {
+                                        case "bar" -> "abandoned-bar";
+                                        case "competitor" -> "abandoned-competitor";
+                                        default -> "abandoned-nominal";
+                                    };
+                                    break Search;
+                                }
+                            }
+                        }
+
+                        Boolean blackToVoid = null;
+                        HeadInter tracedHead = null;
+                        boolean minGradePass = false;
+                        if (outcome == null) {
+                            if (best == null) {
+                                outcome = "no-best";
+                            } else {
+                                if (originalShape == Shape.NOTEHEAD_BLACK) {
+                                    final Shape converted = (Shape) evalBlackAsVoid.invoke(
+                                            scanner,
+                                            best.x,
+                                            best.y,
+                                            side);
+                                    blackToVoid = converted != null;
+                                    if (converted != null) {
+                                        finalShape = converted;
+                                    }
+                                }
+                                tracedHead = (HeadInter) createInter.invoke(
+                                        builder,
+                                        best,
+                                        side,
+                                        finalShape,
+                                        field(scanner, "line") == null ? null
+                                                : staffOfScanner(scanner),
+                                        (double) geometry.pitch);
+                                minGradePass = tracedHead != null;
+                                if (!minGradePass) {
+                                    outcome = "min-grade";
+                                } else {
+                                    final Template template = catalog.getTemplate(finalShape);
+                                    final Rectangle templateBounds = template.getBounds(
+                                            tracedHead.getBounds());
+                                    final List<Point> foreground = template.getForegroundPixels(
+                                            templateBounds,
+                                            image);
+                                    outcome = foreground.isEmpty() ? "glyph" : "final";
+                                }
+                            }
+                        }
+
+                        final PerfCounts perfDelta = readSeedPerf(builder).minus(perfBefore);
+                        attempts.add(new SeedAttempt(
+                                scannerOrdinal,
+                                geometry.source,
+                                seedPoolOrdinal,
+                                seed,
+                                side,
+                                shapeOrdinal,
+                                originalShape,
+                                finalShape,
+                                nominalX,
+                                nominalY,
+                                nominalGate,
+                                nominalDistance,
+                                perfDelta,
+                                bestUpdates,
+                                best,
+                                bestYOrdinal,
+                                (bestYOrdinal < 0) ? 0 : yOffsets[bestYOrdinal],
+                                bestXOrdinal,
+                                (bestXOrdinal < 0) ? 0 : xOffsets[bestXOrdinal],
+                                blackToVoid,
+                                minGradePass,
+                                tracedHead,
+                                outcome));
+                    }
+                }
+            }
+        }
+        return attempts;
+    }
+
+    private static Staff staffOfScanner (Object scanner)
+        throws Exception
+    {
+        final Object line = field(scanner, "line");
+        final Method method = line.getClass().getMethod("getStaff");
+        method.setAccessible(true);
+        return (Staff) method.invoke(line);
+    }
+
+    private static String seedAttemptRow (String page,
+                                          SystemInfo system,
+                                          Staff staff,
+                                          SeedAttempt attempt)
+    {
+        final Rectangle seedBounds = attempt.seed.getBounds();
+        final String selected = (attempt.best == null) ? "-"
+                : String.format(
+                        "%d:%d:%d:%d:%d:%d:%s",
+                        attempt.bestYOrdinal,
+                        attempt.bestYValue,
+                        attempt.bestXOrdinal,
+                        attempt.bestXValue,
+                        attempt.best.x,
+                        attempt.best.y,
+                        hexDouble(attempt.best.d));
+        final String slim = (attempt.tracedHead == null) ? "-"
+                : rectangle(attempt.tracedHead.getBounds());
+        return String.format(
+                "headseedattempt %s system %d staff %d ordinal %d scanner %d source %s "
+                        + "seed %d seedId %d seedBounds %s seedWeight %d seedRuns %016x side %s "
+                        + "shapeOrdinal %d original %s finalShape %s nominal %d:%d nominalGate %s "
+                        + "nominalDistance %s calls %d:%d:%d bestUpdates %d selected %s "
+                        + "blackToVoid %s minGrade %s slim %s outcome %s",
+                page,
+                system.getId(),
+                staff.getId(),
+                attempt.ordinal,
+                attempt.scannerOrdinal,
+                attempt.source.text,
+                attempt.seedPoolOrdinal,
+                attempt.seed.getId(),
+                rectangle(seedBounds),
+                attempt.seed.getWeight(),
+                runTableHash(attempt.seed.getRunTable()),
+                attempt.side,
+                attempt.shapeOrdinal,
+                attempt.originalShape,
+                attempt.finalShape,
+                attempt.nominalX,
+                attempt.nominalY,
+                attempt.nominalGate,
+                nullableDouble(attempt.nominalDistance),
+                attempt.perf.bars,
+                attempt.perf.overlaps,
+                attempt.perf.evals,
+                attempt.bestUpdates,
+                selected,
+                (attempt.blackToVoid == null) ? "-" : attempt.blackToVoid,
+                attempt.minGradePass,
+                slim,
+                attempt.outcome);
+    }
+
+    /** Identity-free canonical search row shared with the Rust pre-glyph kernel. */
+    private static String seedKernelRecord (SystemInfo system,
+                                            Staff staff,
+                                            SeedAttempt attempt)
+    {
+        final Rectangle seedBounds = attempt.seed.getBounds();
+        final String selected = (attempt.best == null) ? "-"
+                : String.format(
+                        "%d:%d:%d:%d:%d:%d:%s",
+                        attempt.bestYOrdinal,
+                        attempt.bestYValue,
+                        attempt.bestXOrdinal,
+                        attempt.bestXValue,
+                        attempt.best.x,
+                        attempt.best.y,
+                        hexDouble(attempt.best.d));
+        final String slim = (attempt.tracedHead == null) ? "-"
+                : rectangle(attempt.tracedHead.getBounds());
+        return String.format(
+                "headseedkernel system %d staff %d scanner %d source %s seed %d "
+                        + "seedBounds %s seedWeight %d seedRuns %016x side %s shapeOrdinal %d "
+                        + "original %s finalShape %s nominal %d:%d nominalGate %s "
+                        + "nominalDistance %s calls %d:%d:%d bestUpdates %d selected %s "
+                        + "blackToVoid %s minGrade %s slim %s outcome %s",
+                system.getId(),
+                staff.getId(),
+                attempt.scannerOrdinal,
+                attempt.source.text,
+                attempt.seedPoolOrdinal,
+                rectangle(seedBounds),
+                attempt.seed.getWeight(),
+                runTableHash(attempt.seed.getRunTable()),
+                attempt.side,
+                attempt.shapeOrdinal,
+                attempt.originalShape,
+                attempt.finalShape,
+                attempt.nominalX,
+                attempt.nominalY,
+                attempt.nominalGate,
+                nullableDouble(attempt.nominalDistance),
+                attempt.perf.bars,
+                attempt.perf.overlaps,
+                attempt.perf.evals,
+                attempt.bestUpdates,
+                selected,
+                (attempt.blackToVoid == null) ? "-" : attempt.blackToVoid,
+                attempt.minGradePass,
+                slim,
+                attempt.minGradePass ? "provisional" : attempt.outcome);
+    }
+
+    private static String seedHeadRow (String page,
+                                       SystemInfo system,
+                                       Staff staff,
+                                       int ordinal,
+                                       HeadInter head,
+                                       SeedAttempt attempt,
+                                       List<Inter> sigAfter,
+                                       List<Inter> systemCompetitors,
+                                       HeadSeedTally tally)
+    {
+        final Glyph glyph = head.getGlyph();
+        if (glyph == null) {
+            throw new IllegalStateException("seed-created head has no glyph");
+        }
+        final GradeImpacts impacts = head.getImpacts();
+        final StringBuilder impactValues = new StringBuilder();
+        for (int index = 0; index < impacts.getImpactCount(); index++) {
+            if (!impactValues.isEmpty()) {
+                impactValues.append(',');
+            }
+            impactValues.append(impacts.getName(index)).append(':')
+                    .append(hexDouble(impacts.getImpact(index))).append(':')
+                    .append(hexDouble(impacts.getWeight(index)));
+        }
+        final Rectangle box = head.getBounds();
+        final Rectangle glyphBounds = glyph.getBounds();
+        return String.format(
+                "headseedhead %s system %d staff %d ordinal %d candidate %d attempt %d scanner %d "
+                        + "seed %d side %s "
+                        + "shapeOrdinal %d original %s finalShape %s selected %d:%d:%d:%d:%d:%d "
+                        + "distance %s blackToVoid %s slim %s sigId %d sigOrdinal %d "
+                        + "competitorOrdinal %d shape %s pitch %s bounds %s grade %s impacts %s "
+                        + "good %s glyphId %d glyphBounds %s glyphWeight %d glyphRuns %016x "
+                        + "tallyLeft %s tallyRight %s",
+                page,
+                system.getId(),
+                staff.getId(),
+                ordinal,
+                attempt.candidateOrdinal,
+                attempt.ordinal,
+                attempt.scannerOrdinal,
+                attempt.seedPoolOrdinal,
+                attempt.side,
+                attempt.shapeOrdinal,
+                attempt.originalShape,
+                attempt.finalShape,
+                attempt.bestYOrdinal,
+                attempt.bestYValue,
+                attempt.bestXOrdinal,
+                attempt.bestXValue,
+                attempt.best.x,
+                attempt.best.y,
+                hexDouble(attempt.best.d),
+                (attempt.blackToVoid == null) ? "-" : attempt.blackToVoid,
+                rectangle(attempt.tracedHead.getBounds()),
+                head.getId(),
+                identityOrdinal(sigAfter, head),
+                identityOrdinal(systemCompetitors, head),
+                head.getShape(),
+                hexDouble(head.getPitch()),
+                rectangle(box),
+                hexDouble(head.getGrade()),
+                impactValues,
+                head.isGood(),
+                glyph.getId(),
+                rectangle(glyphBounds),
+                glyph.getWeight(),
+                runTableHash(glyph.getRunTable()),
+                nullableDouble(tally.getDx(head, HorizontalSide.LEFT)),
+                nullableDouble(tally.getDx(head, HorizontalSide.RIGHT)));
+    }
+
+    private static String seedCandidateRow (String page,
+                                            SystemInfo system,
+                                            Staff staff,
+                                            int ordinal,
+                                            SeedAttempt attempt)
+    {
+        final HeadInter head = attempt.tracedHead;
+        if (head == null) {
+            throw new IllegalStateException("minimum-grade candidate has no provisional head");
+        }
+        final GradeImpacts impacts = head.getImpacts();
+        final StringBuilder impactValues = new StringBuilder();
+        for (int index = 0; index < impacts.getImpactCount(); index++) {
+            if (!impactValues.isEmpty()) {
+                impactValues.append(',');
+            }
+            impactValues.append(impacts.getName(index)).append(':')
+                    .append(hexDouble(impacts.getImpact(index))).append(':')
+                    .append(hexDouble(impacts.getWeight(index)));
+        }
+        return String.format(
+                "headseedcandidate %s system %d staff %d ordinal %d attempt %d scanner %d "
+                        + "seed %d side %s shapeOrdinal %d original %s finalShape %s "
+                        + "selected %d:%d:%d:%d:%d:%d distance %s blackToVoid %s pitch %s "
+                        + "slim %s grade %s impacts %s outcome %s",
+                page,
+                system.getId(),
+                staff.getId(),
+                ordinal,
+                attempt.ordinal,
+                attempt.scannerOrdinal,
+                attempt.seedPoolOrdinal,
+                attempt.side,
+                attempt.shapeOrdinal,
+                attempt.originalShape,
+                attempt.finalShape,
+                attempt.bestYOrdinal,
+                attempt.bestYValue,
+                attempt.bestXOrdinal,
+                attempt.bestXValue,
+                attempt.best.x,
+                attempt.best.y,
+                hexDouble(attempt.best.d),
+                (attempt.blackToVoid == null) ? "-" : attempt.blackToVoid,
+                hexDouble(head.getPitch()),
+                rectangle(head.getBounds()),
+                hexDouble(head.getGrade()),
+                impactValues,
+                attempt.outcome);
+    }
+
+    private static void assertFinalHeadMatches (String page,
+                                                SystemInfo system,
+                                                Staff staff,
+                                                HeadInter actual,
+                                                SeedAttempt attempt)
+    {
+        final HeadInter traced = attempt.tracedHead;
+        if ((traced == null)
+                || (actual.getShape() != traced.getShape())
+                || (Double.doubleToLongBits(actual.getPitch())
+                        != Double.doubleToLongBits(traced.getPitch()))
+                || (Double.doubleToLongBits(actual.getGrade())
+                        != Double.doubleToLongBits(traced.getGrade()))
+                || (actual.getImpacts().getImpactCount() != traced.getImpacts().getImpactCount())) {
+            throw new IllegalStateException(String.format(
+                    "%s system %d staff %d final head does not match traced attempt %d",
+                    page,
+                    system.getId(),
+                    staff.getId(),
+                    attempt.ordinal));
+        }
+        for (int index = 0; index < actual.getImpacts().getImpactCount(); index++) {
+            if (Double.doubleToLongBits(actual.getImpacts().getImpact(index))
+                    != Double.doubleToLongBits(traced.getImpacts().getImpact(index))) {
+                throw new IllegalStateException("final head impact differs from trace");
+            }
+        }
+    }
+
+    private static PerfCounts readSeedPerf (NoteHeadsBuilder builder)
+        throws Exception
+    {
+        final Object perf = field(builder, "seedsPerf");
+        return new PerfCounts(
+                intField(perf, "bars"),
+                intField(perf, "overlaps"),
+                intField(perf, "evals"),
+                intField(perf, "abandons"));
+    }
+
+    private static void restoreSeedPerf (NoteHeadsBuilder builder,
+                                         PerfCounts values)
+        throws Exception
+    {
+        final Object perf = field(builder, "seedsPerf");
+        writeIntField(perf, "bars", values.bars);
+        writeIntField(perf, "overlaps", values.overlaps);
+        writeIntField(perf, "evals", values.evals);
+        writeIntField(perf, "abandons", values.abandons);
+    }
+
+    private static int identityOrdinal (List<?> universe,
+                                        Object selected)
+    {
+        for (int index = 0; index < universe.size(); index++) {
+            if (universe.get(index) == selected) {
+                return index;
+            }
+        }
+        throw new IllegalStateException("item is absent from its identity pool");
+    }
+
+    private static int outcomeCount (List<SeedAttempt> attempts,
+                                     String outcome)
+    {
+        return (int) attempts.stream().filter(attempt -> attempt.outcome.equals(outcome)).count();
+    }
+
+    private static String rectangle (Rectangle box)
+    {
+        return String.format("%d:%d:%d:%d", box.x, box.y, box.width, box.height);
+    }
+
+    private static String nullableDouble (Double value)
+    {
+        return (value == null) ? "-" : hexDouble(value);
     }
 
     private static Sheet loadPage (Path path,
@@ -911,6 +1713,16 @@ public class HeadsScannerContextProbe
         field.set(target, value);
     }
 
+    private static void writeIntField (Object target,
+                                       String name,
+                                       int value)
+        throws Exception
+    {
+        final Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.setInt(target, value);
+    }
+
     private static int intField (Object target,
                                  String name)
         throws Exception
@@ -1191,6 +2003,172 @@ public class HeadsScannerContextProbe
         System.out.println("#");
         System.out.println("# Generate one target per fresh JVM: chula, allegretto, batuque, carmen,");
         System.out.println("# cucaracha, hove, zizi, BachInvention5.");
+    }
+
+    private static void printSeedHeadsHeader ()
+    {
+        System.out.println(
+                "# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) HEADS seed-pass oracle.");
+        System.out.println("#");
+        System.out.println("# Every target reaches real LEDGERS and runs real HEADS prolog in a fresh JVM.");
+        System.out.println("# Each non-tablature staff invokes actual processStaff(staff,true) in production");
+        System.out.println("# order, then appends returned heads to systemCompetitors and stably ordinate-sorts.");
+        System.out.println("# Range lookup, aggregation, duplicate/overlap purge, and linking never run.");
+        System.out.println("#");
+        System.out.println("# Internally, one headseedattempt row records every seed/side/original-shape loop");
+        System.out.println("# iteration. The default runner omits these diagnostic rows after hashing them;");
+        System.out.println("# pass --full-trace to retain them in generated output.");
+        System.out.println("# Private eval/createInter are replayed against identical live state solely to expose");
+        System.out.println("# provenance; their debug counters are restored before the production invocation and");
+        System.out.println("# asserted equal afterward. Glyph outcome is predicted by the exact foreground gate.");
+        System.out.println("# Compact headseedcandidate rows retain every minimum-grade provisional head, while");
+        System.out.println("# Final rows freeze SIG/competitor identity order, inter impacts, registered glyph runs,");
+        System.out.println("# and both identity-keyed HeadSeedTally dx values.");
+        System.out.println("#");
+        System.out.println("# Doubles are Double.toHexString/raw-bits. Run and row digests are FNV-1a-64 over");
+        System.out.println("# canonical UTF-8 records with trailing newlines.");
+        System.out.println("#");
+        System.out.println("# Generate one target per fresh JVM: chula, allegretto, batuque, carmen,");
+        System.out.println("# cucaracha, hove, zizi, BachInvention5.");
+    }
+
+    private static final class PerfCounts
+    {
+        final int bars;
+
+        final int overlaps;
+
+        final int evals;
+
+        final int abandons;
+
+        PerfCounts (int bars,
+                    int overlaps,
+                    int evals,
+                    int abandons)
+        {
+            this.bars = bars;
+            this.overlaps = overlaps;
+            this.evals = evals;
+            this.abandons = abandons;
+        }
+
+        PerfCounts minus (PerfCounts other)
+        {
+            return new PerfCounts(
+                    bars - other.bars,
+                    overlaps - other.overlaps,
+                    evals - other.evals,
+                    abandons - other.abandons);
+        }
+
+        @Override
+        public String toString ()
+        {
+            return bars + ":" + overlaps + ":" + evals + ":" + abandons;
+        }
+    }
+
+    private static final class SeedAttempt
+    {
+        int ordinal;
+
+        int candidateOrdinal = -1;
+
+        final int scannerOrdinal;
+
+        final Source source;
+
+        final int seedPoolOrdinal;
+
+        final Glyph seed;
+
+        final Anchor side;
+
+        final int shapeOrdinal;
+
+        final Shape originalShape;
+
+        final Shape finalShape;
+
+        final int nominalX;
+
+        final int nominalY;
+
+        final String nominalGate;
+
+        final Double nominalDistance;
+
+        final PerfCounts perf;
+
+        final int bestUpdates;
+
+        final PixelDistance best;
+
+        final int bestYOrdinal;
+
+        final int bestYValue;
+
+        final int bestXOrdinal;
+
+        final int bestXValue;
+
+        final Boolean blackToVoid;
+
+        final boolean minGradePass;
+
+        final HeadInter tracedHead;
+
+        final String outcome;
+
+        SeedAttempt (int scannerOrdinal,
+                     Source source,
+                     int seedPoolOrdinal,
+                     Glyph seed,
+                     Anchor side,
+                     int shapeOrdinal,
+                     Shape originalShape,
+                     Shape finalShape,
+                     int nominalX,
+                     int nominalY,
+                     String nominalGate,
+                     Double nominalDistance,
+                     PerfCounts perf,
+                     int bestUpdates,
+                     PixelDistance best,
+                     int bestYOrdinal,
+                     int bestYValue,
+                     int bestXOrdinal,
+                     int bestXValue,
+                     Boolean blackToVoid,
+                     boolean minGradePass,
+                     HeadInter tracedHead,
+                     String outcome)
+        {
+            this.scannerOrdinal = scannerOrdinal;
+            this.source = source;
+            this.seedPoolOrdinal = seedPoolOrdinal;
+            this.seed = seed;
+            this.side = side;
+            this.shapeOrdinal = shapeOrdinal;
+            this.originalShape = originalShape;
+            this.finalShape = finalShape;
+            this.nominalX = nominalX;
+            this.nominalY = nominalY;
+            this.nominalGate = nominalGate;
+            this.nominalDistance = nominalDistance;
+            this.perf = perf;
+            this.bestUpdates = bestUpdates;
+            this.best = best;
+            this.bestYOrdinal = bestYOrdinal;
+            this.bestYValue = bestYValue;
+            this.bestXOrdinal = bestXOrdinal;
+            this.bestXValue = bestXValue;
+            this.blackToVoid = blackToVoid;
+            this.minGradePass = minGradePass;
+            this.tracedHead = tracedHead;
+            this.outcome = outcome;
+        }
     }
 
     private static final class Source
