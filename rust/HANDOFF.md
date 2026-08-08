@@ -280,11 +280,14 @@ comparing several OMR systems and a repair loop that proposes corrections.
 
 The checked-in `omrscope` consumer accepts the three schema-1 geometry forms:
 HEADERS' bounds-only `x/y/width/height` symbols, GRID's vertical
-`x/top/bottom` medians, and BEAMS/LEDGERS' endpoint `x1/y1/x2/y2` medians. It
-deliberately leaves incomplete bounds or medians absent instead of letting Qt
-turn missing coordinates into zero, and it uses the geometry center for its
-abscissa display and Java/Rust pairing. The parser behavior has a CTest
-regression, and downstream publication supplies all three forms.
+`x/top/bottom` medians, and STEM_SEEDS/BEAMS/LEDGERS' endpoint
+`x1/y1/x2/y2` medians. Accepted top-level stem seeds are adapted into the
+viewer's common comparison record without inventing a schema ID; rejected
+records are ignored. It deliberately leaves incomplete bounds or medians
+absent instead of letting Qt turn missing coordinates into zero, and it uses
+the geometry center for its abscissa display and Java/Rust pairing. The parser
+behavior has a CTest regression, and downstream publication supplies all three
+forms.
 
 HEADERS documents add selected clef/key/time inters with their bounds, grades,
 contextual grades, and lifecycle/classifier evidence, plus staff ranges and

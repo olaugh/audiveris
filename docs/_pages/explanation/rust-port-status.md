@@ -22,7 +22,8 @@ the exact eight-sheet BEAMS and LEDGERS gates: 787 raw beams, 581 final ledger
 inters, and 95 inferred ledger-line paths. JSON preserves selected header
 evidence, system-owned erases, beam/ledger geometry and impacts, exclusions,
 groups, and curved paths; `omrscope` accepts both median forms and bounds-only
-header symbols. Native STEM_SEEDS composes GRID and HEADERS through the exact
+header symbols and adapts accepted top-level stem seeds into its comparison
+model. Native STEM_SEEDS composes GRID and HEADERS through the exact
 2,425-candidate factory, 2,003 checks, and 1,906 accepted glyphs, and publishes
 those accepted glyphs without inventing SIG or glyph IDs.
 
@@ -87,7 +88,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run native JSON entry points for every stage through LEDGERS; GRID keeps its text report. `-step STEM_SEEDS` composes GRID -> HEADERS -> STEM_SEEDS and publishes accepted glyphs, while BEAMS/LEDGERS deliberately retain their separately graded path until it consumes those seeds. Downstream JSON carries selected headers and evidence, system-owned erases, accepted seeds, beams, ledgers, relations, groups, and curved paths. `omrscope` accepts bounds-only header inters plus both median forms, and refuses incomplete geometry rather than inventing zero coordinates. |
+| CLI and JSON | **JSON published through `LEDGERS`** | Real images and PDFs run native JSON entry points for every stage through LEDGERS; GRID keeps its text report. `-step STEM_SEEDS` composes GRID -> HEADERS -> STEM_SEEDS and publishes accepted glyphs, while BEAMS/LEDGERS deliberately retain their separately graded path until it consumes those seeds. Downstream JSON carries selected headers and evidence, system-owned erases, accepted seeds, beams, ledgers, relations, groups, and curved paths. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 

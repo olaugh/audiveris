@@ -34,8 +34,8 @@ struct Inter
     QString shape;
     int staff = -1;
     std::optional<QRectF> bounds;
-    /// Rust geometry. GRID uses a vertical x/top/bottom line; BEAMS and
-    /// LEDGERS use horizontal x1/y1/x2/y2 endpoints. Java's is in bounds.
+    /// Rust geometry. GRID uses a vertical x/top/bottom line; STEM_SEEDS,
+    /// BEAMS, and LEDGERS use x1/y1/x2/y2 endpoints. Java's is in bounds.
     std::optional<QLineF> median;
     double grade = 0.0;
     std::optional<double> contextual;

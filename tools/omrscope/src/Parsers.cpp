@@ -55,6 +55,35 @@ std::optional<QLineF> parseMedian(const QJsonObject &median)
     return std::nullopt;
 }
 
+Inter parseRustInter(const QJsonObject &object)
+{
+    Inter inter;
+    inter.id = object.value(QStringLiteral("id")).toInt();
+    inter.kind = object.value(QStringLiteral("kind")).toString();
+    inter.shape = inter.kind;
+    inter.staff = object.value(QStringLiteral("staff")).toInt(-1);
+    inter.grade = object.value(QStringLiteral("grade")).toDouble();
+    inter.contextual = optionalDouble(object.value(QStringLiteral("contextual_grade")));
+
+    const QJsonObject bounds = object.value(QStringLiteral("bounds")).toObject();
+    if (!bounds.isEmpty()) {
+        inter.bounds = parseBounds(bounds);
+    }
+
+    const QJsonObject median = object.value(QStringLiteral("median")).toObject();
+    if (!median.isEmpty()) {
+        inter.median = parseMedian(median);
+    }
+
+    const QJsonObject evidence = object.value(QStringLiteral("evidence")).toObject();
+    inter.frozen = evidence.value(QStringLiteral("frozen")).toBool();
+    const QJsonObject impacts = evidence.value(QStringLiteral("impacts")).toObject();
+    for (auto it = impacts.begin(); it != impacts.end(); ++it) {
+        inter.impacts << Impact{it.key(), it.value().toDouble()};
+    }
+    return inter;
+}
+
 /// A grade with no contextual value is not a grade of zero.
 QString formatMissing()
 {
@@ -149,32 +178,20 @@ EngineResult parseRustJson(const QString &text)
     }
 
     for (const QJsonValue &value : root.value(QStringLiteral("inters")).toArray()) {
+        result.inters << parseRustInter(value.toObject());
+    }
+
+    // STEM_SEEDS creates accepted free glyphs rather than SIG inters, so the
+    // schema keeps them in a stage-owned top-level array. Adapt them into the
+    // viewer's common geometry record without inventing an id. Only accepted
+    // records are displayable products; a future rejected-candidate array is
+    // a separate concern.
+    for (const QJsonValue &value : root.value(QStringLiteral("stem_seeds")).toArray()) {
         const QJsonObject object = value.toObject();
-        Inter inter;
-        inter.id = object.value(QStringLiteral("id")).toInt();
-        inter.kind = object.value(QStringLiteral("kind")).toString();
-        inter.shape = inter.kind;
-        inter.staff = object.value(QStringLiteral("staff")).toInt(-1);
-        inter.grade = object.value(QStringLiteral("grade")).toDouble();
-        inter.contextual = optionalDouble(object.value(QStringLiteral("contextual_grade")));
-
-        const QJsonObject bounds = object.value(QStringLiteral("bounds")).toObject();
-        if (!bounds.isEmpty()) {
-            inter.bounds = parseBounds(bounds);
+        if (object.value(QStringLiteral("status")).toString() != QLatin1String("accepted")) {
+            continue;
         }
-
-        const QJsonObject median = object.value(QStringLiteral("median")).toObject();
-        if (!median.isEmpty()) {
-            inter.median = parseMedian(median);
-        }
-
-        const QJsonObject evidence = object.value(QStringLiteral("evidence")).toObject();
-        inter.frozen = evidence.value(QStringLiteral("frozen")).toBool();
-        const QJsonObject impacts = evidence.value(QStringLiteral("impacts")).toObject();
-        for (auto it = impacts.begin(); it != impacts.end(); ++it) {
-            inter.impacts << Impact{it.key(), it.value().toDouble()};
-        }
-        result.inters << inter;
+        result.inters << parseRustInter(object);
     }
 
     // The candidates that lost. A recogniser judged only on what it emitted
