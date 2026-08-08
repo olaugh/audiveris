@@ -51,7 +51,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
 | Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
-| Native ledger composition | chula: 9915 filtered runs, 4052 sections, 104 candidates, 19 builder survivors, one post-analysis rejection, and all 18 final Java inters exact by system, staff/index, median, thickness, 7 impacts, and grade |
+| Native ledger composition | all 581 final Java inters across the 8 beam sheets are exact by system, staff/index, median, thickness, 7 impacts, and grade; chula traces 9915 runs → 4052 sections → 104 candidates → 19 builder survivors → 18 final inters |
 
 `recognize_native_beams` now consumes only the native GRID report and HEADERS'
 `HeaderErase` list: it measures `maxStem`, runs the spot chain, dispatches by
@@ -70,7 +70,8 @@ probe output had been truncated to system 3, hiding nine earlier final inters.
 The full Java path has 19 builder survivors; `LedgersPostAnalysis` computes
 sheet-wide unbiased delta/height populations, rejects one outlier, removes its
 filament, and rebuilds system 1, leaving 18 final inters. Rust now reproduces
-all 18 exactly.
+all 18 exactly. The widened order-independent count/digest gate now covers all
+eight beam sheets and all 581 final inters exactly.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
@@ -427,9 +428,12 @@ load-bearing:
 The native builder has 19 chula survivors. The sheet-wide post-analysis rejects
 one, removes its candidate filament, and rebuilds system 1; all 18 final inters
 then match Java by ownership, geometry, thickness, seven impacts, and grade.
-What remains is final inferred ledger-line construction, the same exact gate on
-the other example pages, and CLI/JSON publication before calling the stage
-native and graded.
+The same exact gate covers all 581 final inters across the eight beam sheets.
+Java's rebuild never resurrects an inter already removed by overlap reduction;
+carrying those tombstones closed the last six extras on cucaracha, hove, and
+BachInvention5. What remains is final inferred ledger-line construction,
+CLI/JSON publication, and a gate beyond the example corpus before calling the
+stage native and graded.
 
 ## BEAMS: scoped, and its first seam is grayscale morphology (CLOSED)
 

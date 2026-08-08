@@ -15,9 +15,9 @@ when a deterministic Java/Rust comparison covers it.
 
 **Current checkpoint:** native recognition is published through `GRID`, and a
 production-shaped corpus path continues through `HEADERS`, `BEAMS`, and final
-`LEDGERS` inter recognition without using oracle values as inputs. On
-`chula.png`, the sheet-wide statistical cleanup and rebuild leave all 18 Java
-final ledger inters exact.
+`LEDGERS` inter recognition without using oracle values as inputs. Across all
+eight example sheets that exercise BEAMS and LEDGERS, the sheet-wide
+statistical cleanup and rebuild leave all 581 Java final ledger inters exact.
 
 Last updated 2026-08-07.
 
@@ -54,7 +54,7 @@ is present but the musical interpretation is not.
 | 5 | `HEADERS` | **Native and graded** | Clefs, keys, times, stop propagation, and all 30 system header-erasure rectangles. All 65 corpus staves match Java. | Publish header inters and evidence through the CLI/JSON stage driver. |
 | 6 | `STEM_SEEDS` | **Components graded** | Lifecycle, stem-scale histogram/peak/fallback, vertical orchestration, and stem checker. `maxStem` matches Java on all eight beam sheets. | Complete raw vertical `StickFactory` geometry and publish real seed glyphs. |
 | 7 | `BEAMS` | **Native and graded** | Native spot chain, system dispatch, beam creation, beam-to-beam extension, hooks, and grouping. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Publish CLI/JSON output; connect stem-seed extension; grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
-| 8 | `LEDGERS` | **Components graded** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. On `chula.png`, 9,915 filtered runs become 4,052 sections, 104 horizontal candidates, and 19 builder survivors; the sheet-wide one-sigma post-analysis rejects one candidate and the rebuild leaves all 18 Java final inters exact by system, staff/index, median, thickness, seven impacts, and grade. | Widen the exact gate beyond the first page, construct the final inferred ledger-line paths, and publish LEDGERS through the CLI/JSON driver. |
+| 8 | `LEDGERS` | **Components graded** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and BEAMS' beams/hooks. All 581 final Java inters on the eight beam sheets match by system, staff/index, median, thickness, seven impacts, and grade after sheet-wide one-sigma post-analysis and rebuild. Chula's trace is 9,915 filtered runs → 4,052 sections → 104 candidates → 19 builder survivors → 18 final inters. | Construct the final inferred ledger-line paths, publish LEDGERS through the CLI/JSON driver, and widen beyond the example corpus. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
 | 10 | `STEMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic and visual recognition. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
@@ -86,8 +86,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Widen the exact end-to-end `LEDGERS` gate beyond `chula.png`, then construct
-   inferred ledger-line paths and publish the stage.
+1. Construct final inferred `LEDGERS` line paths and publish the stage through
+   the CLI/JSON driver, then widen beyond the example corpus.
 2. Publish native `HEADERS` and `BEAMS` records through the CLI and JSON report.
 3. Finish `STEM_SEEDS` vertical geometry so beam-to-stem extension is available
    when a corpus page exercises it.

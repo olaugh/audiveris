@@ -1116,14 +1116,64 @@ fn produced_final_beams(
         .collect()
 }
 
+fn ledger_oracle_summaries(input: &str) -> BTreeMap<String, (usize, String)> {
+    input
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            assert_eq!(fields.first(), Some(&"ledgersummary"));
+            (
+                fields[1].to_owned(),
+                (
+                    fields[2].parse().expect("a ledger count"),
+                    fields[3].to_owned(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn produced_final_ledgers(
+    recognition: &audiveris_omr::native_ledgers::NativeLedgerRecognition,
+) -> Vec<String> {
+    recognition
+        .ledgers()
+        .iter()
+        .map(|ledger| {
+            format!(
+                "ledger {} {} {} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {}",
+                ledger.system_id,
+                ledger.staff_id,
+                ledger.ledger_index,
+                ledger.median.0.0,
+                ledger.median.0.1,
+                ledger.median.1.0,
+                ledger.median.1.1,
+                ledger.thickness,
+                ledger.grade,
+                ledger
+                    .impacts
+                    .iter()
+                    .map(|impact| format!("{:.9}", impact.grade))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
     let structures = beam_oracle_pages(include_str!("../../../oracle/beam-structures.txt"));
     let spots = beam_oracle_pages(include_str!("../../../oracle/beam-spots.txt"));
     let sig = beam_oracle_pages(include_str!("../../../oracle/beams-sig.txt"));
+    let ledger_summaries =
+        ledger_oracle_summaries(include_str!("../../../oracle/ledgers-corpus.txt"));
     let native_pages = run_native_headers();
 
     assert_eq!(structures.len(), 8, "eight beam sheets are pinned");
+    assert_eq!(ledger_summaries.len(), 8, "eight ledger sheets are pinned");
     let mut ungraded_small = native_pages[0].recognition.clone();
     ungraded_small.scale.scale.small_beam = Some(audiveris_image::scale_estimate::BeamScale {
         main: 7,
@@ -1145,7 +1195,9 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
     let mut raw_checked = 0;
     let mut spots_checked = 0;
     let mut erases_checked = 0;
+    let mut ledgers_checked = 0;
     let mut failures = Vec::new();
+    let mut ledger_failures = Vec::new();
 
     for (page, structure_records) in &structures {
         let file = page.split('#').next().expect("a file name");
@@ -1170,12 +1222,37 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
         )
         .unwrap_or_else(|error| panic!("{page}: native BEAMS failed: {error}"));
 
+        let ledgers =
+            audiveris_omr::native_ledgers::recognize_native_ledgers(&native.recognition, &produced)
+                .unwrap_or_else(|error| panic!("{page}: native LEDGERS failed: {error}"));
+        let mut actual_ledgers = produced_final_ledgers(&ledgers);
+        actual_ledgers.sort();
+        let canonical = actual_ledgers
+            .iter()
+            .map(|ledger| format!("{ledger}\n"))
+            .collect::<String>();
+        let actual_summary = (
+            actual_ledgers.len(),
+            format!(
+                "{:016x}",
+                audiveris_image::ingest::fnv1a64_bytes(canonical.as_bytes())
+            ),
+        );
+        ledgers_checked += actual_ledgers.len();
+        let expected_summary = ledger_summaries
+            .get(page)
+            .unwrap_or_else(|| panic!("no ledger summary oracle for {page}"));
+        if &actual_summary != expected_summary {
+            ledger_failures.push(format!(
+                "{page}: native {actual_summary:?}, Java {expected_summary:?}; {} candidates, {} builder survivors, {} direct rejects, rebuilt {:?}",
+                ledgers.candidates.len(),
+                ledgers.builder_survivor_count,
+                ledgers.discarded_filament_ids.len(),
+                ledgers.rebuilt_system_ids,
+            ));
+        }
+
         if file == "chula.png" {
-            let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(
-                &native.recognition,
-                &produced,
-            )
-            .unwrap_or_else(|error| panic!("{page}: native LEDGERS failed: {error}"));
             assert_eq!(ledgers.filtered_run_count, 9_915);
             assert_eq!(ledgers.section_count, 4_052);
             assert_eq!(
@@ -1193,39 +1270,15 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
-            let actual = ledgers
-                .ledgers()
-                .iter()
-                .map(|ledger| {
-                    format!(
-                        "ledger {} {} {} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {}",
-                        ledger.system_id,
-                        ledger.staff_id,
-                        ledger.ledger_index,
-                        ledger.median.0.0,
-                        ledger.median.0.1,
-                        ledger.median.1.0,
-                        ledger.median.1.1,
-                        ledger.thickness,
-                        ledger.grade,
-                        ledger
-                            .impacts
-                            .iter()
-                            .map(|impact| format!("{:.9}", impact.grade))
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    )
-                })
-                .collect::<Vec<_>>();
             let missing = expected
                 .iter()
-                .filter(|ledger| !actual.contains(ledger))
+                .filter(|ledger| !actual_ledgers.contains(ledger))
                 .collect::<Vec<_>>();
             assert!(
                 missing.is_empty(),
                 "{page}: native builder missed exact Java ledgers {missing:?}"
             );
-            assert_eq!(actual.len(), expected.len());
+            assert_eq!(actual_ledgers.len(), expected.len());
         }
 
         let expected_spots = spot_records
@@ -1327,6 +1380,15 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
         "all native spot components were counted"
     );
     assert_eq!(erases_checked, 30, "all native header erases reached BEAMS");
+    assert_eq!(
+        ledgers_checked, 581,
+        "all final Java ledger inters were compared"
+    );
+    assert!(
+        ledger_failures.is_empty(),
+        "native end-to-end ledger divergences:\n{}",
+        ledger_failures.join("\n")
+    );
 
     // `MultipleRestsBuilder` runs after beam recognition and replaces one long
     // BachInvention5 beam with a MultipleRestInter. The native beam result is

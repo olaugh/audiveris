@@ -167,6 +167,16 @@ pub fn recognize_native_ledgers(
         .flat_map(BTreeSet::iter)
         .copied()
         .collect::<Vec<_>>();
+    // `LedgersBuilder.stick2ledger` retains inters removed by an overlap
+    // exclusion. On a later post-analysis rebuild Java finds that removed
+    // inter and refuses to add it again; rebuilding from candidate geometry
+    // must therefore carry the same tombstones explicitly.
+    let retired_filament_ids = builder
+        .inters()
+        .iter()
+        .filter(|inter| inter.removed)
+        .map(|inter| inter.filament_id)
+        .collect::<BTreeSet<_>>();
     let rebuilt_candidates = system_candidates
         .iter()
         .map(|(system_id, candidates)| {
@@ -175,7 +185,10 @@ pub fn recognize_native_ledgers(
                 *system_id,
                 candidates
                     .iter()
-                    .filter(|candidate| removed.is_none_or(|ids| !ids.contains(&candidate.id)))
+                    .filter(|candidate| {
+                        !retired_filament_ids.contains(&candidate.id)
+                            && removed.is_none_or(|ids| !ids.contains(&candidate.id))
+                    })
                     .cloned()
                     .collect::<Vec<_>>(),
             )
