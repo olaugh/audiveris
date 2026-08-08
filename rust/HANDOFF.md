@@ -476,6 +476,23 @@ identity-free `kernelHash` deliberately normalizes every minimum-grade result
 to `provisional`, so Rust can grade the pre-glyph kernel without claiming the
 next glyph/SIG boundary.
 
+That pre-glyph kernel is now exact. `head_template_overlap.rs` ports the
+positive-area semantics of Java2D `Area.intersects(Rectangle2D)` for the
+straight vertical ribbons and horizontal parallelograms used by the frozen bar
+and competitor pools; edge/corner contact, slopes, reversed extents,
+degenerate/non-finite paths, and double rectangle maxima are focused-tested.
+`recognize_native_heads_seed_lookup` composes the prolog, scanner geometry,
+catalogs, seed pools, frozen bars, competitors, and both ordered slice products.
+It preserves seed/LEFT-then-RIGHT/shape/y-offset/x-offset order, exact stem-axis
+intersection and `Math.rint`, first overlap gates, strict best replacement,
+nominal abandon, black-to-void hole evaluation, minimum-grade construction,
+and provisional tally dx. The exhaustive differential matches all 55 staff
+`kernelHash` values, all 61,372 searches and outcome/performance partitions,
+and every one of 3,435 provisional candidates by order, selected offset/pivot,
+shape, pitch, bounds, distance, impact, and grade bits. Tablature staffs are
+validated but omitted as in Java. The result deliberately stops before
+`HeadInter.retrieveGlyph`, SIG insertion, and identity-keyed tally storage.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
