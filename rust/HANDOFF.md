@@ -206,6 +206,20 @@ horizontal tests. A real Chula run composes the whole native chain and reaches
 the `NoteHeadsBuilder` boundary. The independent Java prolog corpus comparison
 is the next gate; template scanning and head interpretation remain beyond it.
 
+That independent side is now frozen in `oracle/heads-prolog.txt`.
+`HeadsPrologProbe` runs each of the eight beam pages through real Java LEDGERS
+in its own fresh JVM, then calls `DistancesBuilder.buildDistances()` and
+`HeadSpotsBuilder.getSpots()` in HEADS source order. It records exact upstream
+paint inputs, the threshold-170 table, post-erasure BINARY mask, signed-i32
+Chamfer table, every unsorted `GlyphFactory` component with its complete
+cropped runs, and every production system-dispatch ordinal. Totals are 55
+staves/275 line glyphs, 581 ledgers, 1,906 seeds, 2,790 components, and 30
+systems. Two complete passes are byte-identical at SHA-256
+`31e6166b0e2e8e7ae38909cca31d0a1709f8acc40f2812727509ea0bfb0a8422`.
+The checked-in runner uses direct `javac` plus the saved runtime classpath to
+avoid Gradle snapshotting the locally duplicated build outputs. The Rust
+comparison is deliberately a separate next increment.
+
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
