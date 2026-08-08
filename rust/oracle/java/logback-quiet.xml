@@ -16,7 +16,7 @@
       <pattern>%-5level %logger{0} - %msg%n</pattern>
     </encoder>
   </appender>
-  <root level="DEBUG">
+  <root level="WARN">
     <appender-ref ref="STDERR"/>
   </root>
 </configuration>

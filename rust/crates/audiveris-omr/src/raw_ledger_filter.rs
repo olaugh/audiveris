@@ -242,25 +242,24 @@ fn beam_intersects_section(beam: &RawLedgerBeamArea, section: &Section) -> bool 
     if !bounds_intersect(beam.bounds, section_bounds) {
         return false;
     }
-    for (offset, run) in section.runs().iter().enumerate() {
-        let y = section.first_pos() + offset;
-        for x in run.start..=run.stop() {
-            if beam_contains(beam.item, x as f64, y as f64) {
-                return true;
-            }
-        }
-    }
-    false
+    let x = section_bounds.x as f64;
+    let y = section_bounds.y as f64;
+    let rectangle = [
+        (x, y),
+        (x + section_bounds.width as f64, y),
+        (
+            x + section_bounds.width as f64,
+            y + section_bounds.height as f64,
+        ),
+        (x, y + section_bounds.height as f64),
+    ];
+    // Java deliberately tests the beam area against `Section.getBounds()`,
+    // rather than against the individual foreground runs in the section.
+    convex_areas_intersect(beam_corners(beam.item), rectangle)
 }
 
 fn beam_contains(item: BeamItem, x: f64, y: f64) -> bool {
-    let half_height = item.height / 2.0;
-    let corners = [
-        (item.median.x1, item.median.y1 - half_height),
-        (item.median.x2, item.median.y2 - half_height),
-        (item.median.x2, item.median.y2 + half_height),
-        (item.median.x1, item.median.y1 + half_height),
-    ];
+    let corners = beam_corners(item);
     let mut crossings = 0;
     for index in 0..corners.len() {
         let (ax, ay) = corners[index];
@@ -273,6 +272,41 @@ fn beam_contains(item: BeamItem, x: f64, y: f64) -> bool {
         }
     }
     crossings % 2 == 1
+}
+
+fn beam_corners(item: BeamItem) -> [(f64, f64); 4] {
+    let half_height = item.height / 2.0;
+    [
+        (item.median.x1, item.median.y1 - half_height),
+        (item.median.x2, item.median.y2 - half_height),
+        (item.median.x2, item.median.y2 + half_height),
+        (item.median.x1, item.median.y1 + half_height),
+    ]
+}
+
+/// Positive-area intersection of two convex Java2D `Area` polygons.
+fn convex_areas_intersect(one: [(f64, f64); 4], two: [(f64, f64); 4]) -> bool {
+    for polygon in [&one, &two] {
+        for index in 0..polygon.len() {
+            let start = polygon[index];
+            let stop = polygon[(index + 1) % polygon.len()];
+            let axis = (-(stop.1 - start.1), stop.0 - start.0);
+            let project = |points: &[(f64, f64); 4]| {
+                points
+                    .iter()
+                    .map(|point| (point.0 * axis.0) + (point.1 * axis.1))
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), value| {
+                        (min.min(value), max.max(value))
+                    })
+            };
+            let (one_min, one_max) = project(&one);
+            let (two_min, two_max) = project(&two);
+            if one_max <= two_min || two_max <= one_min {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 fn bounds_intersect(one: Bounds, two: Bounds) -> bool {
@@ -1000,6 +1034,16 @@ impl LedgerMaterializer {
             .map_or(&[], Vec::as_slice)
     }
 
+    #[must_use]
+    pub fn staff_ledger_indexes(&self, system_id: usize, staff_id: usize) -> Vec<i32> {
+        self.staff_ownership
+            .keys()
+            .filter_map(|&(owner_system, owner_staff, index)| {
+                (owner_system == system_id && owner_staff == staff_id).then_some(index)
+            })
+            .collect()
+    }
+
     /// Java `lookupLine` from `registerOriginal(stick.toGlyph(null))` through
     /// SIG insertion, overlap exclusions/reduction and staff attachment.
     #[must_use]
@@ -1351,6 +1395,9 @@ mod tests {
         let mut raster = RunTable::new(Orientation::Horizontal, 40, 40).unwrap();
         // At y=15, distance is 5 == rint(10 * .5): retained. Identical
         // preceding run joins it; shifted endpoint at y=13 starts a section.
+        // The beam covers y=[13,14), so its positive-area overlap with that
+        // first section's box is detected even though no sampled pixel centre
+        // lies inside the beam.
         assert!(raster.add_run(13, Run::new(5, 8)).unwrap());
         assert!(raster.add_run(14, Run::new(4, 8)).unwrap());
         assert!(raster.add_run(15, Run::new(4, 8)).unwrap());
@@ -1837,6 +1884,7 @@ mod tests {
         assert_eq!(materializer.inters()[0].pitch, -1);
         assert_eq!(materializer.staff_inter_ids(1, 5, -1), [20]);
         assert_eq!(materializer.staff_inter_ids(1, 5, -2), [20]);
+        assert_eq!(materializer.staff_ledger_indexes(1, 5), vec![-2, -1]);
         assert_eq!(
             second.delta.mutations,
             vec![LedgerDeltaMutation::AttachToStaff {

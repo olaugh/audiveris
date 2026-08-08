@@ -1180,10 +1180,13 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
             assert_eq!(ledgers.section_count, 4_052);
             assert_eq!(
                 ledgers.system_section_counts,
-                vec![(1, 2_072), (2, 645), (3, 1_010)]
+                vec![(1, 2_039), (2, 577), (3, 961)]
             );
-            assert_eq!(ledgers.registered_filament_count, 117);
-            assert_eq!(ledgers.candidates.len(), 117);
+            assert_eq!(ledgers.registered_filament_count, 104);
+            assert_eq!(ledgers.candidates.len(), 104);
+            assert_eq!(ledgers.builder_survivor_count, 19);
+            assert_eq!(ledgers.discarded_filament_ids.len(), 1);
+            assert_eq!(ledgers.rebuilt_system_ids, vec![1]);
 
             let expected = include_str!("../../../oracle/ledgers-chula.txt")
                 .lines()
@@ -1222,11 +1225,7 @@ fn native_grid_headers_and_beams_match_java_on_every_beam_sheet() {
                 missing.is_empty(),
                 "{page}: native builder missed exact Java ledgers {missing:?}"
             );
-            // These are the builder survivors, before the still-separate
-            // sheet-wide statistical post-analysis. Java keeps the exact nine
-            // above and discards/rebuilds away the other fifteen.
-            assert_eq!(actual.len(), 24);
-            assert_eq!(actual.len() - expected.len(), 15);
+            assert_eq!(actual.len(), expected.len());
         }
 
         let expected_spots = spot_records

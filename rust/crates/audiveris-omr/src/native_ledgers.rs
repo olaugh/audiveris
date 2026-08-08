@@ -2,7 +2,11 @@
 
 //! Production composition of native GRID and BEAMS output into LEDGERS.
 
-use std::{error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use audiveris_image::section::Bounds;
 
@@ -26,6 +30,9 @@ pub struct NativeLedgerRecognition {
     pub system_section_counts: Vec<(usize, usize)>,
     pub candidates: Vec<(usize, RawLedgerCandidate)>,
     pub registered_filament_count: usize,
+    pub builder_survivor_count: usize,
+    pub discarded_filament_ids: Vec<usize>,
+    pub rebuilt_system_ids: Vec<usize>,
     pub materializer: LedgerMaterializer,
 }
 
@@ -90,9 +97,8 @@ impl fmt::Display for NativeLedgerRecognitionError {
 
 impl Error for NativeLedgerRecognitionError {}
 
-/// Run Java's `LedgersFilter` and `LedgersBuilder` composition over native
-/// GRID/BEAMS products. The sheet-wide statistical post-analysis is a separate
-/// tail and is deliberately not hidden in this result.
+/// Run Java's `LedgersFilter`, `LedgersBuilder` and sheet-wide statistical
+/// post-analysis composition over native GRID/BEAMS products.
 pub fn recognize_native_ledgers(
     grid: &GridLinesRecognition,
     beams: &NativeBeamRecognition,
@@ -120,7 +126,7 @@ pub fn recognize_native_ledgers(
     let mut next_filament_id = 1_u64;
     let mut registered_filament_count = 0;
     let mut candidates = Vec::new();
-    let mut materializer = LedgerMaterializer::new(1, 1, 1);
+    let mut system_candidates = Vec::new();
     for system in &systems {
         let sections = filtered
             .by_system
@@ -145,28 +151,79 @@ pub fn recognize_native_ledgers(
                 .cloned()
                 .map(|candidate| (system.id, candidate)),
         );
+        system_candidates.push((system.id, sourced.candidates));
+    }
 
-        for staff in staves.iter().filter(|staff| staff.system_id == system.id) {
+    let builder = materialize_ledgers(&staves, &system_candidates, scale, parameters)?;
+    let builder_survivor_count = builder
+        .inters()
+        .iter()
+        .filter(|inter| !inter.removed)
+        .count();
+    let discarded = post_analysis_discards(&staves, &builder);
+    let rebuilt_system_ids = discarded.keys().copied().collect::<Vec<_>>();
+    let discarded_filament_ids = discarded
+        .values()
+        .flat_map(BTreeSet::iter)
+        .copied()
+        .collect::<Vec<_>>();
+    let rebuilt_candidates = system_candidates
+        .iter()
+        .map(|(system_id, candidates)| {
+            let removed = discarded.get(system_id);
+            (
+                *system_id,
+                candidates
+                    .iter()
+                    .filter(|candidate| removed.is_none_or(|ids| !ids.contains(&candidate.id)))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let materializer = materialize_ledgers(&staves, &rebuilt_candidates, scale, parameters)?;
+
+    Ok(NativeLedgerRecognition {
+        filtered_run_count: filtered.run_table.total_run_count(),
+        section_count: filtered.sections.len(),
+        system_section_counts: filtered
+            .by_system
+            .iter()
+            .map(|sections| (sections.system_id, sections.sections.len()))
+            .collect(),
+        candidates,
+        registered_filament_count,
+        builder_survivor_count,
+        discarded_filament_ids,
+        rebuilt_system_ids,
+        materializer,
+    })
+}
+
+fn materialize_ledgers(
+    staves: &[RawLedgerStaffZone],
+    system_candidates: &[(usize, Vec<RawLedgerCandidate>)],
+    scale: RawLedgerScale,
+    parameters: RawLedgerCandidateParameters,
+) -> Result<LedgerMaterializer, NativeLedgerRecognitionError> {
+    let mut materializer = LedgerMaterializer::new(1, 1, 1);
+    for (system_id, candidates) in system_candidates {
+        for staff in staves.iter().filter(|staff| staff.system_id == *system_id) {
             for increment in [-1, 1] {
                 let mut index = increment;
                 let mut previous = Vec::new();
                 loop {
                     let evaluated = evaluate_ledger_line_unreduced(
-                        staff,
-                        index,
-                        &sourced.candidates,
-                        &previous,
-                        scale,
-                        parameters,
+                        staff, index, candidates, &previous, scale, parameters,
                     );
                     if evaluated.is_empty() {
                         break;
                     }
                     let outcome =
-                        materializer.materialize_line(system.id, staff.id, index, &evaluated);
+                        materializer.materialize_line(*system_id, staff.id, index, &evaluated);
                     if let Some(source) = outcome.error {
                         return Err(NativeLedgerRecognitionError::Materialization {
-                            system_id: system.id,
+                            system_id: *system_id,
                             staff_id: staff.id,
                             index,
                             source,
@@ -191,19 +248,153 @@ pub fn recognize_native_ledgers(
             }
         }
     }
+    Ok(materializer)
+}
 
-    Ok(NativeLedgerRecognition {
-        filtered_run_count: filtered.run_table.total_run_count(),
-        section_count: filtered.sections.len(),
-        system_section_counts: filtered
-            .by_system
-            .iter()
-            .map(|sections| (sections.system_id, sections.sections.len()))
-            .collect(),
-        candidates,
-        registered_filament_count,
-        materializer,
-    })
+#[derive(Clone, Copy)]
+struct LedgerPostInfo {
+    system_id: usize,
+    filament_id: usize,
+    index: i32,
+    interline: i32,
+    delta: f64,
+    delta_ratio: f64,
+    height: f64,
+    height_ratio: f64,
+}
+
+#[derive(Default)]
+struct LedgerPopulation {
+    count: usize,
+    sum: f64,
+    squares_sum: f64,
+}
+
+impl LedgerPopulation {
+    fn include(&mut self, value: f64) {
+        self.count += 1;
+        self.sum += value;
+        self.squares_sum += value * value;
+    }
+
+    fn mean_and_deviation(&self) -> Option<(f64, f64)> {
+        if self.count == 0 {
+            return None;
+        }
+        let count = self.count as f64;
+        let mean = self.sum / count;
+        if self.count == 1 {
+            return Some((mean, 0.0));
+        }
+        let biased = ((self.squares_sum - ((self.sum * self.sum) / count)) / count).max(0.0);
+        Some((mean, ((count * biased) / (count - 1.0)).sqrt()))
+    }
+}
+
+fn post_analysis_discards(
+    staves: &[RawLedgerStaffZone],
+    materializer: &LedgerMaterializer,
+) -> BTreeMap<usize, BTreeSet<usize>> {
+    let mut delta_above = LedgerPopulation::default();
+    let mut delta_below = LedgerPopulation::default();
+    let mut heights = LedgerPopulation::default();
+    // Java's `infoMap` is keyed by ledger identity. A ledger reused in more
+    // than one staff-map entry contributes every observation to populations,
+    // while its last (TreeMap-order) entry supplies the eventual filter info.
+    let mut infos = BTreeMap::new();
+    let mut discarded: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+
+    for staff in staves {
+        let indexes = materializer.staff_ledger_indexes(staff.system_id, staff.id);
+        for index in indexes {
+            for inter_id in materializer.staff_inter_ids(staff.system_id, staff.id, index) {
+                let Some(inter) = materializer.inter_by_id(*inter_id) else {
+                    continue;
+                };
+                let middle = (
+                    (inter.median.0.0 + inter.median.1.0) / 2.0,
+                    (inter.median.0.1 + inter.median.1.1) / 2.0,
+                );
+                let delta = if index.abs() >= 2 {
+                    let previous_index = index - index.signum();
+                    let previous = materializer
+                        .staff_inter_ids(staff.system_id, staff.id, previous_index)
+                        .iter()
+                        .filter_map(|id| materializer.inter_by_id(*id))
+                        .find(|previous| {
+                            middle.0 >= previous.bounds.x
+                                && middle.0 < previous.bounds.x + previous.bounds.width
+                        });
+                    let Some(previous) = previous else {
+                        discarded
+                            .entry(inter.system_id)
+                            .or_default()
+                            .insert(inter.filament_id);
+                        continue;
+                    };
+                    (middle.1 - line_y_at(previous.median, middle.0)).abs()
+                } else {
+                    staff.distance_to(middle.0, middle.1)
+                };
+                let interline = f64::from(staff.specific_interline);
+                let info = LedgerPostInfo {
+                    system_id: inter.system_id,
+                    filament_id: inter.filament_id,
+                    index,
+                    interline: staff.specific_interline,
+                    delta,
+                    delta_ratio: delta / interline,
+                    height: inter.thickness,
+                    height_ratio: inter.thickness / interline,
+                };
+                if index < 0 {
+                    delta_above.include(info.delta_ratio);
+                } else {
+                    delta_below.include(info.delta_ratio);
+                }
+                heights.include(info.height_ratio);
+                infos.insert(inter.id, info);
+            }
+        }
+    }
+
+    let above = delta_above.mean_and_deviation();
+    let below = delta_below.mean_and_deviation();
+    let height = heights.mean_and_deviation();
+    for info in infos.into_values() {
+        let Some((delta_mean, delta_deviation)) = (if info.index < 0 { above } else { below })
+        else {
+            continue;
+        };
+        let Some((height_mean, height_deviation)) = height else {
+            continue;
+        };
+        let interline = f64::from(info.interline);
+        let min_delta = ((delta_mean - delta_deviation) * interline).floor();
+        let max_delta = ((delta_mean + delta_deviation) * interline).ceil();
+        let min_height = ((height_mean - height_deviation) * interline).floor();
+        let max_height = ((height_mean + height_deviation) * interline).ceil();
+        if info.delta.ceil() < min_delta
+            || info.delta.floor() > max_delta
+            || info.height.ceil() < min_height
+            || info.height.floor() > max_height
+        {
+            discarded
+                .entry(info.system_id)
+                .or_default()
+                .insert(info.filament_id);
+        }
+    }
+    discarded
+}
+
+fn line_y_at(median: ((f64, f64), (f64, f64)), x: f64) -> f64 {
+    let dx = median.1.0 - median.0.0;
+    if dx == 0.0 {
+        median.0.1
+    } else {
+        median.0.1 + ((x - median.0.0) * (median.1.1 - median.0.1) / dx)
+    }
 }
 
 fn check_candidate_outcome(
@@ -365,5 +556,20 @@ fn raw_beam_area(item: audiveris_image::beam_structure::BeamItem) -> RawLedgerBe
             height: usize::try_from(bounds.height).unwrap_or(0),
         },
         item,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LedgerPopulation;
+
+    #[test]
+    fn ledger_population_uses_java_unbiased_standard_deviation() {
+        let mut population = LedgerPopulation::default();
+        for value in [1.0, 2.0, 3.0] {
+            population.include(value);
+        }
+
+        assert_eq!(population.mean_and_deviation(), Some((2.0, 1.0)));
     }
 }

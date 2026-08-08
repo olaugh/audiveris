@@ -51,7 +51,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | Time classification | 65/65 staves: presence, value, symbol box and `timeStop` exact |
 | Final `header.stop` | 65/65 staves exact; all **30** system header erases exact |
 | Native beam composition | 2739 spots, 30 header erases, 787 raw beams, final beams/hooks and per-system group counts graded on all 8 sheets |
-| Native ledger composition | chula: 9915 filtered runs, 4052 sections, 117 candidates; all 9 Java final survivors exact by system, staff/index, median, thickness, 7 impacts, and grade |
+| Native ledger composition | chula: 9915 filtered runs, 4052 sections, 104 candidates, 19 builder survivors, one post-analysis rejection, and all 18 final Java inters exact by system, staff/index, median, thickness, 7 impacts, and grade |
 
 `recognize_native_beams` now consumes only the native GRID report and HEADERS'
 `HeaderErase` list: it measures `maxStem`, runs the spot chain, dispatches by
@@ -63,11 +63,14 @@ the result is published through `-json` and the CLI stage driver.
 `NO_STAFF`, curved per-staff lines/areas, and system areas/bounds. It preserves
 Java's distinct beam contracts: every beam/hook participates in the early
 section purge, while only good full `BeamInter`s participate in the later
-filament-middle purge. On chula, the native builder produces all nine Java
-final survivors exactly, including their seven impacts, and 15 additional
-builder survivors. Those 15 are the explicit remaining tail:
-`LedgersPostAnalysis` computes sheet-wide delta/height populations, discards
-outliers, removes their filaments, and rebuilds impacted staves.
+filament-middle purge. On chula, the native builder reproduced every Java inter
+exposed by the first comparison exactly, including their seven impacts. A
+compact LEDGERS-only probe corrected that incomplete result: the general SIG
+probe output had been truncated to system 3, hiding nine earlier final inters.
+The full Java path has 19 builder survivors; `LedgersPostAnalysis` computes
+sheet-wide unbiased delta/height populations, rejects one outlier, removes its
+filament, and rebuilds system 1, leaving 18 final inters. Rust now reproduces
+all 18 exactly.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain, and the whole workspace runs in about 45
@@ -402,9 +405,10 @@ assigned, and the native closest-staff gate matches all of them.
 
 ### What LEDGERS still needs
 
-The former input blockers are closed. `native_ledgers.rs` composes the real
-native GRID and BEAMS products, and `ledgers-chula.txt` grades the nine final
-Java survivors to nine decimals. Two details were load-bearing:
+The former input and post-analysis blockers are closed. `native_ledgers.rs`
+composes the real native GRID and BEAMS products, and `ledgers-chula.txt`
+grades all 18 final Java inters to nine decimals. Three details were
+load-bearing:
 
 1. `LedgersFilter` removes sections intersecting **any** `AbstractBeamInter`,
    hooks included. `LedgersBuilder` separately removes candidate middles only
@@ -414,13 +418,18 @@ Java survivors to nine decimals. Two details were load-bearing:
    the right edge is exclusive and rows are centred at `y + 0.5`. Java also
    uses endpoint midpoint for rough containment and bounds centre for the
    staff-line reference; conflating those points perturbs every pitch impact.
+3. Java tests a beam's geometric area against `Section.getBounds()`, not
+   sampled section pixels. The post-analysis populations use the unbiased
+   standard deviation and Java's floor/ceil integer checks; a ledger reused in
+   several staff-map entries contributes every observation but only its last
+   entry supplies the identity-keyed filter record.
 
-The remaining semantic tail is `LedgersPostAnalysis`. The native builder has
-24 chula survivors; Java's post-analysis keeps the exact nine pinned by the
-oracle and discards/rebuilds away the other 15. Port the sheet-wide delta and
-height populations, one-sigma thresholds, filament removal, impacted-staff
-rebuild, and final ledger-line construction. Then run the same exact gate over
-the other example pages before calling the stage native and graded.
+The native builder has 19 chula survivors. The sheet-wide post-analysis rejects
+one, removes its candidate filament, and rebuilds system 1; all 18 final inters
+then match Java by ownership, geometry, thickness, seven impacts, and grade.
+What remains is final inferred ledger-line construction, the same exact gate on
+the other example pages, and CLI/JSON publication before calling the stage
+native and graded.
 
 ## BEAMS: scoped, and its first seam is grayscale morphology (CLOSED)
 
