@@ -13,8 +13,13 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::brace_portions::BracePortionParameters;
 use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::production_stages::TerminalRasterStages;
+use crate::raw_projector_adapter::{
+    DetachedBraceFilamentEvidence, DetachedBraceProjector, DetachedBraceStageParameters,
+    advance_live_bars_through_braces,
+};
 use audiveris_image::adaptive;
 use audiveris_image::bar_alignment::BarAlignment;
 use audiveris_image::bar_alignments::{
@@ -29,6 +34,7 @@ use audiveris_image::bars_coordinator::{
     BarsPurgeParameters, BarsRightEvidence, BarsRootEvidence, BarsStaffState, BarsSystemState,
     PeakRemovalStage,
 };
+use audiveris_image::filament::FilamentGeometry;
 use audiveris_image::grid_lifecycle::{GridStepExecutor, GridStepStage};
 
 use crate::grid_executor::{
@@ -51,11 +57,12 @@ use audiveris_image::production_grid_params::{
     ProductionGridParameters, production_grid_parameters,
 };
 use audiveris_image::projection::{
-    BarlineHeightSpec, MultiRestSideRequest, NeutralStaffProjectorRequest, PeakConstructionParams,
-    PeakCoreGeometry, PeakCoreParams, PeakRefinementParams, ProjectionBlank, ShortProjection,
-    StaffProjectionRequest, StaffProjectorProcessRequest, StaffProjectorProcessTuning,
-    StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
-    has_blank_between, process_staff_projection, staff_projector_scale_parameters,
+    BarlineHeightSpec, MultiRestSideRequest, NeutralStaffProjectorRequest,
+    NeutralStaffProjectorResult, PeakConstructionParams, PeakCoreGeometry, PeakCoreParams,
+    PeakRefinementParams, ShortProjection, StaffProjectionRequest, StaffProjectorProcessRequest,
+    StaffProjectorProcessTuning, StaffProjectorScaleParameters, StaffProjectorScaleRatios,
+    StaffProjectorScaleRequest, has_blank_between, process_staff_projection,
+    staff_projector_scale_parameters,
 };
 use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
@@ -232,6 +239,10 @@ pub struct PeakGraphReport {
     pub stick_count: usize,
     /// Peaks Java drops because no acceptable bar filament could be built.
     pub stickless_peak_count: usize,
+    /// Accepted detached brace-portion filaments in Java system/staff/probe
+    /// order. Their member identities are retained for the later full brace
+    /// glyph/SIG promotion boundary.
+    pub brace_filaments: Vec<DetachedBraceFilamentEvidence>,
     /// Candidate peaks a `BarsRetriever` purge removed, each with the stage
     /// that removed it.
     ///
@@ -1446,6 +1457,21 @@ fn grid_stage<E: std::fmt::Debug>(stage: &'static str) -> impl FnOnce(E) -> Grid
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct LiveStaffProjector {
+    staff_id: StaffId,
+    staff_left: i32,
+    minimum_small_blank_width: i32,
+    minimum_standard_blank_width: i32,
+    minimum_wide_blank_width: i32,
+    maximum_left_extremum: i32,
+    maximum_right_extremum: i32,
+    brace_threshold: i32,
+    first_geometry: FilamentGeometry,
+    last_geometry: FilamentGeometry,
+    result: NeutralStaffProjectorResult,
+}
+
 /// Runs one staff's `StaffProjector`, returning its graded bar peaks.
 ///
 /// Reproduces Java `StaffProjector.process`: raster accumulation over the
@@ -1456,7 +1482,7 @@ fn project_staff_peaks(
     projector_pixels: &[u8],
     staff: &StaffCandidate,
     scale_parameters: &StaffProjectorScaleParameters,
-) -> Result<(Vec<StaffPeak>, Vec<ProjectionBlank>, i32, i32), GridRecognitionError> {
+) -> Result<LiveStaffProjector, GridRecognitionError> {
     // The cluster's own line filaments, not the factory's pre-merge ones: a
     // line seeded by a short fragment keeps that fragment's id after absorbing
     // the full-width filament, so resolving the id here would return the
@@ -1464,12 +1490,10 @@ fn project_staff_peaks(
     let lines: Vec<&audiveris_image::filament::StaffFilament> =
         staff.line_filaments().iter().collect();
     let Some((first, last)) = lines.first().zip(lines.last()) else {
-        return Ok((
-            Vec::new(),
-            Vec::new(),
-            scale_parameters.minimum_standard_blank_width,
-            staff.left().round() as i32,
-        ));
+        return Err(GridRecognitionError::Stage {
+            stage: "projector",
+            message: format!("staff {} has no line geometry", staff.id()),
+        });
     };
     let middle = lines[lines.len() / 2];
     // Build each needed line's spline geometry once, not per abscissa.
@@ -1540,7 +1564,7 @@ fn project_staff_peaks(
         scale_parameters.chunk_width.max(1),
     )
     .map_err(grid_stage("peak refinement parameters"))?;
-    let result = accumulation
+    let mut result = accumulation
         .finish_neutral(
             recognition.width,
             recognition.height,
@@ -1580,7 +1604,6 @@ fn project_staff_peaks(
     // Java's projector marks the peak sitting at the staff's left end as
     // STAFF_LEFT_END, and `purgeTooLeft` exempts marked peaks. Without the
     // mark every staff loses its opening barline to that purge.
-    let mut peaks = result.peaks;
     let staff_left = staff.left().round() as i32;
     // The opening bar starts at or before the staff edge and sits within
     // Java's `maxLeftExtremum` of it; anything further left is a brace or
@@ -1588,15 +1611,26 @@ fn project_staff_peaks(
     // Take the rightmost such peak: anything further left is a brace or
     // bracket, and marking that instead would leave the real opening bar
     // exposed to the purge.
-    if let Some(opening) = peaks.iter_mut().rfind(|peak| peak.start() <= staff_left) {
+    if let Some(opening) = result
+        .peaks
+        .iter_mut()
+        .rfind(|peak| peak.start() <= staff_left)
+    {
         opening.set_staff_end(HorizontalSide::Left);
     }
-    Ok((
-        peaks,
-        result.all_blanks,
-        scale_parameters.minimum_standard_blank_width,
+    Ok(LiveStaffProjector {
+        staff_id: StaffId::new(staff.id()),
         staff_left,
-    ))
+        minimum_small_blank_width: scale_parameters.minimum_small_blank_width,
+        minimum_standard_blank_width: scale_parameters.minimum_standard_blank_width,
+        minimum_wide_blank_width: scale_parameters.minimum_wide_blank_width,
+        maximum_left_extremum: scale_parameters.maximum_left_extremum,
+        maximum_right_extremum: scale_parameters.maximum_right_extremum,
+        brace_threshold: scale_parameters.brace_threshold,
+        first_geometry,
+        last_geometry,
+        result,
+    })
 }
 
 /// Builds Java `PeakGraph` alignments across staves and groups the staves
@@ -1617,8 +1651,7 @@ fn build_peak_graph(
     raster_pixels: &[u8],
     lags: &InitialGridLags,
     staff_blanks: &[BTreeMap<StaffPeakKey, bool>],
-    staff_projection_blanks: &[Vec<ProjectionBlank>],
-    projector_scale: &StaffProjectorScaleParameters,
+    live_projectors: &[LiveStaffProjector],
     production: &ProductionGridParameters,
     source: &RunTable,
     (width, height): (usize, usize),
@@ -1742,7 +1775,7 @@ fn build_peak_graph(
     }
     merge_overlapping(&mut systems);
 
-    let derived = derive_bars_systems(
+    let mut derived = derive_bars_systems(
         staff_peaks,
         alignment_staffs,
         &systems,
@@ -1762,29 +1795,93 @@ fn build_peak_graph(
     let sheet_right = i32::try_from(width).unwrap_or(i32::MAX).saturating_sub(1);
     let (root_evidence, right_evidence): (Vec<_>, Vec<_>) = alignment_staffs
         .iter()
-        .enumerate()
-        .map(|(index, staff)| {
-            let blanks = staff_projection_blanks
-                .get(index)
-                .cloned()
-                .unwrap_or_default();
+        .map(|staff| {
+            let projector = live_projectors
+                .iter()
+                .find(|projector| projector.staff_id == staff.staff_id)
+                .expect("alignment staff originates in the live projector list");
+            let blanks = projector.result.all_blanks.clone();
             (
                 BarsRootEvidence {
                     staff_id: staff.staff_id,
                     blanks: blanks.clone(),
-                    minimum_small_blank_width: projector_scale.minimum_small_blank_width,
-                    maximum_left_extremum: projector_scale.maximum_left_extremum,
+                    minimum_small_blank_width: projector.minimum_small_blank_width,
+                    maximum_left_extremum: projector.maximum_left_extremum,
                 },
                 BarsRightEvidence {
                     staff_id: staff.staff_id,
                     blanks,
                     sheet_right,
-                    minimum_small_blank_width: projector_scale.minimum_small_blank_width,
-                    maximum_right_extremum: projector_scale.maximum_right_extremum,
+                    minimum_small_blank_width: projector.minimum_small_blank_width,
+                    maximum_right_extremum: projector.maximum_right_extremum,
                 },
             )
         })
         .unzip();
+
+    let detached_projectors = live_projectors
+        .iter()
+        .map(|projector| DetachedBraceProjector {
+            staff_id: projector.staff_id,
+            staff_left: projector.staff_left,
+            minimum_small_blank_width: projector.minimum_small_blank_width,
+            minimum_wide_blank_width: projector.minimum_wide_blank_width,
+            maximum_left_extremum: projector.maximum_left_extremum,
+            brace_threshold: projector.brace_threshold,
+            result: projector.result.clone(),
+        })
+        .collect::<Vec<_>>();
+    let brace_parameters = production.braces;
+    let brace_stage = advance_live_bars_through_braces(
+        &mut derived.systems,
+        &detached_projectors,
+        &lags.vertical,
+        &lags.horizontal,
+        &skew,
+        *bars_parameters,
+        DetachedBraceStageParameters {
+            portions: BracePortionParameters {
+                neutral_gap: brace_parameters.neutral_gap,
+                maximum_peak_width: brace_parameters.maximum_peak_width,
+                maximum_bar_gap: brace_parameters.maximum_bar_gap,
+                minimum_portion_height: f64::from(brace_parameters.minimum_portion_height),
+                maximum_curvature: f64::from(brace_parameters.maximum_curvature),
+                lookup_extension: f64::from(brace_parameters.lookup_extension),
+            },
+            stick: BarStickParameters {
+                vertical_extension: brace_parameters.lookup_extension,
+                minimum_core_section_length: pixels(0.5, interline).max(1) as usize,
+                probe_width: pixels(0.5, interline).max(1) as usize,
+                minimum_probe_weight: pixels(0.2, interline).max(1) as usize,
+                segment_length: pixels(1.0, interline).max(1) as usize,
+                minimum_mean_curvature: 0.0,
+                first_filament_id: stick_state.next_filament_id(),
+            },
+            maximum_section_width: brace_parameters.maximum_section_width,
+            maximum_foreground_thickness: i32::try_from(production.raster.max_fore)
+                .unwrap_or(i32::MAX),
+            maximum_alignment_dx: f64::from(brace_parameters.maximum_alignment_dx),
+        },
+        |staff_id, x| {
+            let projector = live_projectors
+                .iter()
+                .find(|projector| projector.staff_id == staff_id)
+                .ok_or_else(|| format!("staff {} has no line geometry", staff_id.value()))?;
+            Ok((
+                projector
+                    .first_geometry
+                    .position_at(f64::from(x))
+                    .unwrap_or(0.0)
+                    .round_ties_even() as i32,
+                projector
+                    .last_geometry
+                    .position_at(f64::from(x))
+                    .unwrap_or(0.0)
+                    .round_ties_even() as i32,
+            ))
+        },
+    )
+    .map_err(grid_stage("brace portions"))?;
 
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
     let bars = ProductionProcessBars::new(
@@ -1797,6 +1894,8 @@ fn build_peak_graph(
         *bars_parameters,
         production.maximum_group_gap,
     )
+    .map_err(grid_stage("process bars"))?
+    .with_completed_brace_prefixes(brace_stage.completed_prefixes.clone())
     .map_err(grid_stage("process bars"))?
     .with_extending_purge(
         derived.filament_bounds,
@@ -1916,7 +2015,7 @@ fn build_peak_graph(
     let mut surviving: Vec<(usize, Vec<i32>)> = Vec::new();
     for system in &executor.sheet.sig.systems {
         for (staff_id, peaks) in system.staff_ids.iter().zip(system.staff_peaks.iter()) {
-            surviving.push((*staff_id, peaks.iter().map(StaffPeak::start).collect()));
+            surviving.push((*staff_id, published_barline_starts(peaks)));
         }
     }
     let retained_peaks: usize = surviving.iter().map(|(_, peaks)| peaks.len()).sum();
@@ -1939,6 +2038,7 @@ fn build_peak_graph(
         connection_count,
         stick_count,
         stickless_peak_count,
+        brace_filaments: brace_stage.filaments,
         retained_peaks,
         purged_peaks,
         rejections,
@@ -1948,6 +2048,19 @@ fn build_peak_graph(
         vertical_sections,
         horizontal_sections,
     })
+}
+
+/// Java `BarsRetriever.createInters` keeps brace portions in the projector's
+/// peak list for brace/Part grouping but skips them when publishing vertical
+/// inters.  The compatibility barline report must apply the same boundary;
+/// otherwise aligned fallback portions look like additional barlines even
+/// though they have no `BarlineInter` in the live SIG.
+fn published_barline_starts(peaks: &[StaffPeak]) -> Vec<i32> {
+    peaks
+        .iter()
+        .filter(|peak| !peak.is_brace())
+        .map(StaffPeak::start)
+        .collect()
 }
 
 /// Per-system bars state, derived but not yet purged.
@@ -2170,17 +2283,18 @@ pub fn recognize_grid_lines_raster(
     let mut staff_peaks: Vec<Vec<StaffPeak>> = Vec::with_capacity(result.staffs().len());
     let mut alignment_staffs: Vec<AlignmentStaff> = Vec::with_capacity(result.staffs().len());
     let mut staff_blanks: Vec<BTreeMap<StaffPeakKey, bool>> = Vec::new();
-    // Java `StaffProjector` keeps its blanks for the two stages that set a
-    // staff's abscissae; the port previously used them only for the
-    // blank-to-lines test and dropped the rest.
-    let mut staff_projection_blanks: Vec<Vec<ProjectionBlank>> = Vec::new();
+    // Java retains the full projector through the later brace and staff-end
+    // stages. Keep projection, blanks, resolved thresholds, and exact line
+    // splines together rather than reconstructing any of them from peaks.
+    let mut live_projectors = Vec::with_capacity(result.staffs().len());
     for staff in result.staffs() {
-        let (projected, blanks, minimum_standard_blank, refined_left) = project_staff_peaks(
+        let live = project_staff_peaks(
             &scale_recognition,
             projector_pixels,
             staff,
             &projector_scale,
         )?;
+        let projected = &live.result.peaks;
         let peaks = projected
             .iter()
             .map(|peak| {
@@ -2206,7 +2320,7 @@ pub fn recognize_grid_lines_raster(
         };
         alignment_staffs.push(AlignmentStaff {
             staff_id: StaffId::new(staff.id()),
-            left: f64::from(refined_left),
+            left: f64::from(live.staff_left),
             right: staff.right(),
             top: line_ordinate(0)?,
             bottom: line_ordinate(staff.line_ids().len().saturating_sub(1))?,
@@ -2225,13 +2339,17 @@ pub fn recognize_grid_lines_raster(
             .map(|peak| {
                 (
                     peak.key(),
-                    has_blank_between(&blanks, peak.stop(), refined_left, minimum_standard_blank),
+                    has_blank_between(
+                        &live.result.all_blanks,
+                        peak.stop(),
+                        live.staff_left,
+                        live.minimum_standard_blank_width,
+                    ),
                 )
             })
             .collect();
         staff_blanks.push(blank_evidence);
-        staff_projection_blanks.push(blanks);
-        staff_peaks.push(projected);
+        staff_peaks.push(projected.clone());
         staves.push(StaffCandidateReport {
             id: staff.id(),
             kind: format!("{:?}", staff.kind()).to_lowercase(),
@@ -2243,6 +2361,7 @@ pub fn recognize_grid_lines_raster(
             line_count: staff.line_ids().len(),
             peaks,
         });
+        live_projectors.push(live);
     }
     let peak_graph = build_peak_graph(
         &mut staff_peaks,
@@ -2253,8 +2372,7 @@ pub fn recognize_grid_lines_raster(
         projector_pixels,
         &lags,
         &staff_blanks,
-        &staff_projection_blanks,
-        &projector_scale,
+        &live_projectors,
         &parameters,
         &scale_recognition.vertical_runs,
         (scale_recognition.width, scale_recognition.height),
@@ -2646,6 +2764,19 @@ mod tests {
     }
 
     #[test]
+    fn legacy_barline_report_skips_projector_brace_portions_only() {
+        use audiveris_image::staff_peak::StaffPeakAttribute;
+
+        let staff = StaffId::new(1);
+        let left = StaffPeak::new(staff, 0, 20, 10, 11).expect("ordinary left peak");
+        let mut brace = StaffPeak::new(staff, 0, 20, 4, 5).expect("brace portion");
+        brace.set(StaffPeakAttribute::BraceTop);
+        let right = StaffPeak::new(staff, 0, 20, 30, 31).expect("ordinary right peak");
+
+        assert_eq!(published_barline_starts(&[left, brace, right]), [10, 30]);
+    }
+
+    #[test]
     fn recognizes_chula_scale_with_production_settings() {
         let recognition = recognize_scale(repo_path("data/examples/chula.png"))
             .expect("chula page must recognize");
@@ -2693,6 +2824,22 @@ mod tests {
         assert!(report.contains("staves:6"));
         assert!(report.contains("staff=1:standard:x203-2323:interline:21:lines:5"));
         assert!(report.contains("staff=6:standard:x83-2309:interline:21:lines:5"));
+    }
+
+    #[test]
+    fn chula_live_braces_create_one_two_staff_part_per_system() {
+        let recognition = recognize_grid_lines(repo_path("data/examples/chula.png"))
+            .expect("chula grid recognition");
+        assert!(!recognition.peak_graph.brace_filaments.is_empty());
+        assert_eq!(recognition.peak_graph.sig.systems.len(), 3);
+        for (system_index, system) in recognition.peak_graph.sig.systems.iter().enumerate() {
+            let first = (2 * system_index) + 1;
+            assert_eq!(system.staff_ids, [first, first + 1]);
+            assert_eq!(system.bar_tail.parts.len(), 1);
+            assert_eq!(system.bar_tail.parts[0].first_staff_id, first as i32);
+            assert_eq!(system.bar_tail.parts[0].last_staff_id, (first + 1) as i32);
+            assert!(system.brace_peaks.iter().all(Option::is_some));
+        }
     }
 
     #[test]

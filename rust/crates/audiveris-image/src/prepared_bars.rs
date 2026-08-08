@@ -106,8 +106,21 @@ pub struct ProductionProcessBars<Upstream> {
     maximum_group_gap: i32,
     extending: Option<ExtendingPurge>,
     limits: Option<StaffLimitRefinement>,
+    completed_brace_prefixes: Option<Vec<CompletedBracePrefix>>,
     handoff: Option<PreparedBarsHandoff>,
     removals: Vec<(usize, RemovedPeak)>,
+}
+
+/// A system already advanced through `detectBracePortions`, `buildBraces`,
+/// `purgeLeftOfBraces`, and `verifyLinesRoot` by a sheet-aware caller.  The
+/// state itself remains in `ProductionProcessBars::systems`; this retains the
+/// ordered mutation evidence needed to assemble the final coordinator result
+/// without replaying the prefix.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompletedBracePrefix {
+    pub system_id: usize,
+    pub start_column_index: Option<usize>,
+    pub removed_peaks: Vec<RemovedPeak>,
 }
 
 /// Projector evidence for the two stages that set a staff's abscissae.
@@ -154,6 +167,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             maximum_group_gap,
             extending: None,
             limits: None,
+            completed_brace_prefixes: None,
             handoff: None,
             removals: Vec::new(),
         })
@@ -177,6 +191,27 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             parameters,
         });
         self
+    }
+
+    /// Consume states a sheet-aware brace stage has already advanced through
+    /// Java's post-brace boundary. System order must exactly match the owned
+    /// state vector.
+    pub fn with_completed_brace_prefixes(
+        mut self,
+        prefixes: Vec<CompletedBracePrefix>,
+    ) -> Result<Self, ProductionProcessBarsError<Upstream::OtherError>>
+    where
+        Upstream: RemainingRasterGridStages,
+    {
+        if prefixes
+            .iter()
+            .map(|prefix| prefix.system_id)
+            .ne(self.systems.iter().map(BarsSystemState::system_id))
+        {
+            return Err(ProductionProcessBarsError::InvalidSystemOrder);
+        }
+        self.completed_brace_prefixes = Some(prefixes);
+        Ok(self)
     }
 
     /// Enables Java's two staff-abscissa refinements: `verifyLinesRoot` and
@@ -251,16 +286,24 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         parameters: BarsCoordinatorParameters,
         extending: Option<&ExtendingPurge>,
         limits: Option<&StaffLimitRefinement>,
+        completed_brace_prefix: Option<&CompletedBracePrefix>,
     ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
         let (Some(extending), Some(limits)) = (extending, limits) else {
             return process_bars_system(system, parameters);
         };
 
-        let prefix = process_bars_through_too_far_left(system, parameters)?;
-        let mut removed = prefix.removed_peaks().to_vec();
-
-        let braces = process_bars_after_braces(system, &limits.root_evidence)?;
-        removed.extend_from_slice(braces.removed_peaks());
+        let (start_column_index, mut removed) = if let Some(completed) = completed_brace_prefix {
+            (
+                completed.start_column_index,
+                completed.removed_peaks.clone(),
+            )
+        } else {
+            let prefix = process_bars_through_too_far_left(system, parameters)?;
+            let mut removed = prefix.removed_peaks().to_vec();
+            let braces = process_bars_after_braces(system, &limits.root_evidence)?;
+            removed.extend_from_slice(braces.removed_peaks());
+            (prefix.start_column_index(), removed)
+        };
 
         let purges =
             process_bars_peak_purges(system, &extending.filament_bounds, extending.parameters)?;
@@ -306,7 +349,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         )?;
 
         Ok(BarsCoordinatorResult::from_staged(
-            prefix.start_column_index(),
+            start_column_index,
             removed,
             widths.width_assignments().to_vec(),
             widths.vertical_inters().to_vec(),
@@ -342,14 +385,18 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         };
         let extending = self.extending.clone();
         let limits = self.limits.clone();
+        let completed_brace_prefixes = self.completed_brace_prefixes.clone();
         let parameters = self.parameters;
-        for system in &mut self.systems {
+        for (system_index, system) in self.systems.iter_mut().enumerate() {
             let system_id = system.system_id();
             let result = match Self::staged_system(
                 system,
                 parameters,
                 extending.as_ref(),
                 limits.as_ref(),
+                completed_brace_prefixes
+                    .as_ref()
+                    .and_then(|prefixes| prefixes.get(system_index)),
             ) {
                 Ok(result) => result,
                 Err(source) => {

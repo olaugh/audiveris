@@ -54,9 +54,25 @@ pub struct ProductionGridParameters {
     /// Java `LinesRetriever.constants.purgeCrossingChunks` default (false).
     pub inspect_crossing_chunks: bool,
     pub bars: BarsCoordinatorParameters,
+    pub braces: ProductionBraceParameters,
     /// Java `BarsRetriever.maxDoubleBarGap` = `rint(0.75 * I)`, consumed by
     /// `peak_groups` as the inclusive double-bar grouping gap.
     pub maximum_group_gap: i32,
+}
+
+/// Scale-resolved constants consumed between Java's bar prefix and its
+/// post-brace purges.  Projection thresholds remain staff-specific and live
+/// with each `StaffProjectorProcessOutput`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProductionBraceParameters {
+    pub neutral_gap: i32,
+    pub maximum_peak_width: i32,
+    pub maximum_bar_gap: i32,
+    pub lookup_extension: i32,
+    pub minimum_portion_height: i32,
+    pub maximum_section_width: i32,
+    pub maximum_curvature: i32,
+    pub maximum_alignment_dx: i32,
 }
 
 /// A stage constructor rejected the derived values.
@@ -321,6 +337,24 @@ pub fn production_grid_parameters(
         }),
     )
     .map_err(stage_error("bars coordinator"))?;
+    let braces = ProductionBraceParameters {
+        // BarsRetriever.braceBarNeutralGap = rint(0.1 * I)
+        neutral_gap: rint(0.1 * interline),
+        // BarsRetriever.maxBracePeakWidth = rint(3.0 * I)
+        maximum_peak_width: rint(3.0 * interline),
+        // BarsRetriever.maxBraceBarGap = rint(2.0 * I)
+        maximum_bar_gap: rint(2.0 * interline),
+        // BarsRetriever.braceLookupExtension = rint(0.5 * I)
+        lookup_extension: rint(0.5 * interline),
+        // BarsRetriever.minBracePortionHeight = rint(3.0 * I)
+        minimum_portion_height: rint(3.0 * interline),
+        // BarsRetriever.maxBraceThickness = rint(1.0 * I)
+        maximum_section_width: rint(1.0 * interline),
+        // BarsRetriever.maxBraceCurvature = rint(25.0 * I)
+        maximum_curvature: rint(25.0 * interline),
+        // PeakGraph.maxAlignmentBraceDx = rint(0.75 * I)
+        maximum_alignment_dx: rint(0.75 * interline),
+    };
 
     Ok(ProductionGridParameters {
         raster,
@@ -332,6 +366,7 @@ pub fn production_grid_parameters(
         // purgeCrossingChunks defaults to false in Java
         inspect_crossing_chunks: false,
         bars,
+        braces,
         maximum_group_gap: maximum_double_bar_gap,
     })
 }
@@ -434,6 +469,19 @@ mod tests {
 
         // Bars: maxColumnDx = rint(15.75) = 16, group gap = maxDoubleBarGap.
         assert_eq!(parameters.maximum_group_gap, 16);
+        assert_eq!(
+            parameters.braces,
+            ProductionBraceParameters {
+                neutral_gap: 2,
+                maximum_peak_width: 63,
+                maximum_bar_gap: 42,
+                lookup_extension: 10,
+                minimum_portion_height: 63,
+                maximum_section_width: 21,
+                maximum_curvature: 525,
+                maximum_alignment_dx: 16,
+            }
+        );
     }
 
     #[test]

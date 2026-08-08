@@ -46,6 +46,18 @@ pub struct BarStick {
     pub marked_brace: bool,
 }
 
+/// A source-faithful, non-registered `BarFilamentBuilder.buildFilament`
+/// result.  Brace detection needs these measurements before Java decides
+/// whether to retain and register the candidate filament.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarStickProbe {
+    /// Java `Section.byFullAbscissa` member order.
+    pub members: Vec<LocatedSectionId>,
+    pub bounds: Bounds,
+    pub points: Vec<PeakPoint>,
+    pub mean_curvature: f64,
+}
+
 /// Caller-owned mutable state makes Java's mutation prefix observable if
 /// filament-index registration fails partway through the peak traversal.
 #[derive(Clone, Debug, PartialEq)]
@@ -167,6 +179,47 @@ pub fn build_sub_stick(
 }
 
 impl Error for BarStickError {}
+
+/// Build one filament candidate without registering it or mutating a graph.
+///
+/// `maximum_section_width` is Java's outer `getSectionsByWidth` filter (the
+/// brace path passes `maxBraceThickness`). `BarFilamentBuilder` then applies
+/// the candidate peak's own width while selecting the lookup rectangle; both
+/// filters are preserved, in that order.
+pub fn probe_bar_stick(
+    peak: &crate::staff_peak::StaffPeak,
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    maximum_section_width: i32,
+    parameters: BarStickParameters,
+) -> Result<Option<BarStickProbe>, BarStickError> {
+    if maximum_section_width < 0
+        || parameters.vertical_extension < 0
+        || parameters.minimum_core_section_length == 0
+        || parameters.probe_width == 0
+        || parameters.minimum_probe_weight == 0
+        || parameters.segment_length == 0
+        || !parameters.minimum_mean_curvature.is_finite()
+        || parameters.minimum_mean_curvature < 0.0
+        || parameters.first_filament_id == 0
+    {
+        return Err(BarStickError::InvalidParameters);
+    }
+    let source = locate_sections(
+        vertical_sections,
+        horizontal_sections,
+        maximum_section_width,
+    );
+    let selected = select_peak_sections(peak, parameters.vertical_extension, &source);
+    Ok(
+        construct_stick(peak, &selected, parameters).map(|candidate| BarStickProbe {
+            members: candidate.members,
+            bounds: candidate.bounds,
+            points: candidate.points,
+            mean_curvature: candidate.mean_curvature,
+        }),
+    )
+}
 
 #[derive(Clone, Copy)]
 struct LocatedSection<'a> {
@@ -687,6 +740,36 @@ mod tests {
         assert!(state.removed_peaks().is_empty());
         assert_eq!(graph.vertices().len(), 2);
         assert!(graph.edges().is_empty());
+    }
+
+    #[test]
+    fn detached_probe_reuses_selection_without_registration() {
+        let (vertical, horizontal) = two_bar_sections();
+        let candidate = peak(1, 5, 6);
+        let probe = probe_bar_stick(&candidate, &vertical, &horizontal, 2, parameters(1))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            probe.bounds,
+            Bounds {
+                x: 5,
+                y: 1,
+                width: 2,
+                height: 9,
+            }
+        );
+        assert_eq!(
+            probe
+                .members
+                .iter()
+                .map(|member| member.lag)
+                .collect::<Vec<_>>(),
+            [SectionLag::Horizontal, SectionLag::Vertical]
+        );
+        assert_eq!(probe.points.first().unwrap().y, 1.0);
+        assert_eq!(probe.points.last().unwrap().y, 9.0);
+        assert_eq!(probe.mean_curvature.to_bits(), 0x4050_8b6c_19ac_aa2a);
     }
 
     #[test]

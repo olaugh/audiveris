@@ -171,10 +171,73 @@ pub fn retrieve_beam_glyph(
 }
 
 fn beam_parallelogram_contains(item: BeamItem, x: f64, y: f64) -> bool {
-    x >= item.median.x1
-        && x < item.median.x2
-        && y >= item.median.y_at_x(x) - (item.height / 2.0)
-        && y < item.median.y_at_x(x) + (item.height / 2.0)
+    let half = item.height / 2.0;
+    let vertices = [
+        (item.median.x1, item.median.y1 - half),
+        (item.median.x2, item.median.y2 - half),
+        (item.median.x2, item.median.y2 + half),
+        (item.median.x1, item.median.y1 + half),
+    ];
+    let min_x = vertices
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::INFINITY, f64::min);
+    let max_x = vertices
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = vertices
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::INFINITY, f64::min);
+    let max_y = vertices
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    // `AbstractBeamInter.contains` reaches `Area.contains`, not
+    // `LineUtil.yAtX`.  OpenJDK first applies its cached Rectangle2D bounds,
+    // which are half-open on the far edges, then sums the y-monotone Curve
+    // crossings and tests their parity.  Keep the operation order of
+    // `Curve.crossingsFor` and `Order1.XforY`: the algebraically equivalent
+    // determinant y-at-x form differs by a last bit on boundary ink.
+    if !(x >= min_x && x < max_x && y >= min_y && y < max_y) {
+        return false;
+    }
+    let crossings = vertices
+        .iter()
+        .copied()
+        .zip(vertices.iter().copied().cycle().skip(1))
+        .take(vertices.len())
+        .filter(|&(start, stop)| openjdk_order1_crosses(start, stop, x, y))
+        .count();
+    crossings & 1 != 0
+}
+
+/// OpenJDK 25 `Curve.crossingsFor` + `Order1.XforY` for one line segment.
+fn openjdk_order1_crosses(mut start: (f64, f64), mut stop: (f64, f64), x: f64, y: f64) -> bool {
+    if start.1 == stop.1 {
+        // `Curve.insertLine` drops horizontal segments.
+        return false;
+    }
+    if start.1 > stop.1 {
+        std::mem::swap(&mut start, &mut stop);
+    }
+    let (x0, y0) = start;
+    let (x1, y1) = stop;
+    if !(y >= y0 && y < y1) {
+        return false;
+    }
+    let x_min = x0.min(x1);
+    let x_max = x0.max(x1);
+    let x_for_y = if x0 == x1 || y <= y0 {
+        x0
+    } else if y >= y1 {
+        x1
+    } else {
+        x0 + ((y - y0) * (x1 - x0) / (y1 - y0))
+    };
+    x < x_max && (x < x_min || x < x_for_y)
 }
 
 fn run_table_digest(table: &RunTable) -> u64 {
@@ -723,6 +786,55 @@ mod tests {
             ]
         );
         assert_ne!(glyph.run_digest(), 0);
+    }
+
+    #[test]
+    fn registered_glyph_uses_openjdk_area_crossings_on_batuque_boundary_ink() {
+        // Batuque system 1, beam-only ordinal 1.  The determinant form of
+        // LineUtil.yAtX puts (1649, 308) inside, while the exact JDK25 Area
+        // Order1.XforY crossing puts it on the exterior.  That one pixel was
+        // enough to change the registered fixed-glyph digest without changing
+        // its 117 vertical-run count.
+        let item = BeamItem {
+            median: audiveris_image::beam_structure::Segment {
+                x1: f64::from_bits(0x4098_dc00_0000_0000),
+                y1: f64::from_bits(0x4073_7bd6_4a47_f016),
+                x2: f64::from_bits(0x409a_b000_0000_0000),
+                y2: f64::from_bits(0x4073_be9c_a677_b957),
+            },
+            height: f64::from_bits(0x4027_3c1a_b68a_0530),
+        };
+        let determinant_y = item.median.y_at_x(1649.0);
+        assert!(308.0 >= determinant_y - (item.height / 2.0));
+        assert!(!beam_parallelogram_contains(item, 1649.0, 308.0));
+        assert!(beam_parallelogram_contains(item, 1649.0, 309.0));
+
+        let (width, height) = (1709, 323);
+        let mut binary = vec![BACKGROUND; width * height];
+        binary[(308 * width) + 1649] = FOREGROUND;
+        binary[(309 * width) + 1649] = FOREGROUND;
+        let glyph = retrieve_beam_glyph(item, width, height, &binary)
+            .expect("valid Batuque boundary fixture");
+
+        assert_eq!(
+            glyph.bounds,
+            BeamBounds {
+                x: 1591,
+                y: 305,
+                width: 117,
+                height: 17
+            }
+        );
+        assert_eq!(glyph.weight(), 1);
+        assert_eq!(
+            glyph.run_table.sequence(1649 - 1591),
+            Some(
+                &[audiveris_image::run_table::Run {
+                    start: 309 - 305,
+                    length: 1,
+                }][..]
+            )
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::error::Error;
 use std::fmt;
 
 use audiveris_image::{
-    bar_alignment::{BarAlignment, BarAlignmentKind},
+    bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
     bar_alignments::{
         AlignmentBuildError, AlignmentBuildReport, AlignmentParameters, AlignmentStaff,
         alignment_for_pair, alignment_pairs_for_peak, find_all_alignments,
@@ -33,6 +33,7 @@ use audiveris_image::{
     },
     bar_sticks::{
         BarStickBuildState, BarStickError, BarStickParameters, build_bar_sticks, build_sub_stick,
+        probe_bar_stick,
     },
     bars_coordinator::{
         BarsConnectionGroupParameters, BarsConnectionGroupResult, BarsCoordinatorError,
@@ -46,7 +47,8 @@ use audiveris_image::{
         process_bars_widths_and_inters,
     },
     bars_logic::{
-        BarsLogicError, BracketEndDetection, build_bar_columns_from_graph, detect_bracket_middles,
+        BarsLogicError, BracketEndDetection, LocatedSectionId, build_bar_columns_from_graph,
+        detect_bracket_middles, peak_extension,
     },
     filament::{FilamentError, FilamentGeometry},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
@@ -59,8 +61,8 @@ use audiveris_image::{
         RawLineMetadataStage,
     },
     projection::{
-        BarlineHeightSpec, BarsProjectorRegistry, BraceSearchRequest, PeakCoreGeometry,
-        ProjectionError, ProjectorRegistration, StaffProjectorProcessRequest,
+        BarlineHeightSpec, BarsProjectorRegistry, BraceSearchRequest, NeutralStaffProjectorResult,
+        PeakCoreGeometry, ProjectionError, ProjectorRegistration, StaffProjectorProcessRequest,
         StaffProjectorProcessTuning, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
         barline_height, has_blank_between, process_staff_projection,
     },
@@ -69,6 +71,7 @@ use audiveris_image::{
 };
 
 use audiveris_image::discarded_completion::PreparedCompletionSystem;
+use audiveris_image::prepared_bars::CompletedBracePrefix;
 use audiveris_image::raster_grid_builder::{RasterGridBuildState, RemainingRasterGridStages};
 
 use crate::grid_executor::HeadlessSkew;
@@ -508,6 +511,51 @@ pub struct RawBraceStageParameters {
     pub portions: BracePortionParameters,
     pub filament: BraceFilamentParameters,
     pub maximum_alignment_dx: f64,
+}
+
+/// Live projector evidence needed to probe a brace after Java's bar-prefix
+/// purges have established the actual first and second candidate peaks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetachedBraceProjector {
+    pub staff_id: StaffId,
+    pub staff_left: i32,
+    pub minimum_small_blank_width: i32,
+    pub minimum_wide_blank_width: i32,
+    pub maximum_left_extremum: i32,
+    pub brace_threshold: i32,
+    pub result: NeutralStaffProjectorResult,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DetachedBraceStageParameters {
+    pub portions: BracePortionParameters,
+    pub stick: BarStickParameters,
+    pub maximum_section_width: i32,
+    pub maximum_foreground_thickness: i32,
+    pub maximum_alignment_dx: f64,
+}
+
+/// Accepted candidate-filament evidence remains available for the later full
+/// brace-glyph/SIG promotion milestone; Part ownership itself only consumes
+/// the detached peak and its top/middle/bottom attributes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetachedBraceFilamentEvidence {
+    pub system_id: usize,
+    pub staff_id: StaffId,
+    pub peak: StaffPeak,
+    pub members: Vec<LocatedSectionId>,
+    pub bounds: PeakBounds,
+    pub points: Vec<PeakPoint>,
+    pub mean_curvature: f64,
+    pub extension_top: f64,
+    pub extension_bottom: f64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DetachedBraceStageReport {
+    pub completed_prefixes: Vec<CompletedBracePrefix>,
+    pub filaments: Vec<DetachedBraceFilamentEvidence>,
+    pub portions: Vec<(usize, BracePortionReport)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1288,6 +1336,254 @@ pub fn bridge_raw_projectors_through_bars_prefix(
         system_count: bars.len(),
     };
     Ok(RawBarsPrefixBridge { systems, bars })
+}
+
+/// Advance already grouped live production bar states through the exact
+/// brace-dependent gap in `ProductionProcessBars`.
+///
+/// The prefix must run first because it determines which first/second peaks
+/// `detectBracePortions` probes. Accepted probe filaments are deliberately not
+/// registered or promoted into the SIG yet, but their complete member/curve
+/// evidence is retained and every detached brace peak, replacement, aligned
+/// fallback middle, left purge, and one-staff root update is applied to the
+/// live states before they return to `ProductionProcessBars`.
+#[allow(clippy::too_many_arguments)]
+pub fn advance_live_bars_through_braces(
+    systems: &mut [BarsSystemState],
+    projectors: &[DetachedBraceProjector],
+    vertical_sections: &[Section],
+    horizontal_sections: &[Section],
+    skew: &HeadlessSkew,
+    bars_parameters: BarsCoordinatorParameters,
+    parameters: DetachedBraceStageParameters,
+    mut ordinates_at: impl FnMut(StaffId, i32) -> Result<(i32, i32), String>,
+) -> Result<DetachedBraceStageReport, RawProjectorAdapterError> {
+    if parameters.maximum_section_width < 0
+        || parameters.maximum_foreground_thickness <= 0
+        || !parameters.maximum_alignment_dx.is_finite()
+        || parameters.maximum_alignment_dx < 0.0
+    {
+        return Err(RawProjectorAdapterError::BraceMembers(
+            "invalid detached brace parameters".to_owned(),
+        ));
+    }
+    let mut report = DetachedBraceStageReport::default();
+    for state in systems {
+        let system_id = state.system_id();
+        let prefix = process_bars_through_too_far_left(state, bars_parameters)
+            .map_err(RawProjectorAdapterError::Bars)?;
+        let mut snapshots = [brace_portion_snapshot(state)];
+        let mut portion_report = BracePortionReport::default();
+        let detection = detect_brace_portions(
+            &mut snapshots,
+            parameters.portions,
+            |staff_id, minimum, maximum| {
+                let projector = projectors
+                    .iter()
+                    .find(|projector| projector.staff_id == staff_id)
+                    .ok_or_else(|| format!("staff {} has no live projector", staff_id.value()))?;
+                let candidate = projector
+                    .result
+                    .projection
+                    .find_brace_candidate(
+                        &projector.result.all_blanks,
+                        BraceSearchRequest::new(
+                            projector.staff_left,
+                            minimum,
+                            maximum,
+                            projector.minimum_wide_blank_width,
+                            projector.brace_threshold,
+                        ),
+                    )
+                    .map_err(|error| format!("{error}"))?;
+                let Some(candidate) = candidate else {
+                    return Ok(None);
+                };
+                let ordinate_x = candidate.start.wrapping_add(candidate.stop) / 2;
+                let ordinates = ordinates_at(staff_id, ordinate_x)?;
+                let peak = candidate
+                    .into_staff_peak(staff_id, |_| ordinates, |point| skew.deskewed(point))
+                    .map_err(|error| format!("{error}"))?;
+                let Some(filament) = probe_bar_stick(
+                    &peak,
+                    vertical_sections,
+                    horizontal_sections,
+                    parameters.maximum_section_width,
+                    parameters.stick,
+                )
+                .map_err(|error| format!("{error}"))?
+                else {
+                    return Ok(Some(BraceProbe {
+                        peak,
+                        filament: None,
+                    }));
+                };
+                let bounds = PeakBounds {
+                    x: i32::try_from(filament.bounds.x)
+                        .map_err(|_| "brace filament x overflow".to_owned())?,
+                    y: i32::try_from(filament.bounds.y)
+                        .map_err(|_| "brace filament y overflow".to_owned())?,
+                    width: i32::try_from(filament.bounds.width)
+                        .map_err(|_| "brace filament width overflow".to_owned())?,
+                    height: i32::try_from(filament.bounds.height)
+                        .map_err(|_| "brace filament height overflow".to_owned())?,
+                };
+                let extension_top = peak_extension(
+                    &peak,
+                    bounds,
+                    parameters.maximum_foreground_thickness,
+                    VerticalSide::Top,
+                );
+                let extension_bottom = peak_extension(
+                    &peak,
+                    bounds,
+                    parameters.maximum_foreground_thickness,
+                    VerticalSide::Bottom,
+                );
+                report.filaments.push(DetachedBraceFilamentEvidence {
+                    system_id,
+                    staff_id,
+                    peak: peak.clone(),
+                    members: filament.members,
+                    bounds,
+                    points: filament.points,
+                    mean_curvature: filament.mean_curvature,
+                    extension_top,
+                    extension_bottom,
+                });
+                Ok(Some(BraceProbe {
+                    peak,
+                    filament: Some(crate::brace_portions::BraceFilamentEvidence {
+                        vertical_length: f64::from(bounds.height),
+                        mean_curvature: filament.mean_curvature,
+                        extension_top,
+                        extension_bottom,
+                    }),
+                }))
+            },
+            &mut portion_report,
+        );
+        reconcile_brace_snapshot(state, &snapshots[0])?;
+        detection.map_err(RawProjectorAdapterError::BracePortions)?;
+
+        let mut columns = [BraceColumnSet {
+            system_id,
+            columns: state.columns().to_vec(),
+        }];
+        let (graph, peak_ids) = state.graph_and_peak_ids_mut();
+        let replacement = apply_brace_replacements_with_peak_ids(
+            graph,
+            peak_ids,
+            &mut snapshots,
+            &mut columns,
+            &portion_report.replacements,
+        );
+        state.replace_columns(std::mem::take(&mut columns[0].columns));
+        reconcile_brace_snapshot(state, &snapshots[0])?;
+        replacement.map_err(RawProjectorAdapterError::BracePortions)?;
+        complete_detached_brace_topology(state, parameters.maximum_alignment_dx, skew)?;
+
+        let root_evidence = state
+            .staffs()
+            .iter()
+            .map(|staff| {
+                let projector = projectors
+                    .iter()
+                    .find(|projector| projector.staff_id == staff.staff_id())
+                    .ok_or(RawProjectorAdapterError::MissingPreparedStaff(
+                        staff.staff_id().value(),
+                    ))?;
+                Ok(BarsRootEvidence {
+                    staff_id: staff.staff_id(),
+                    blanks: projector.result.all_blanks.clone(),
+                    minimum_small_blank_width: projector.minimum_small_blank_width,
+                    maximum_left_extremum: projector.maximum_left_extremum,
+                })
+            })
+            .collect::<Result<Vec<_>, RawProjectorAdapterError>>()?;
+        let post = process_bars_after_braces(state, &root_evidence)
+            .map_err(RawProjectorAdapterError::Bars)?;
+        let mut removed_peaks = prefix.removed_peaks().to_vec();
+        removed_peaks.extend_from_slice(post.removed_peaks());
+        report.completed_prefixes.push(CompletedBracePrefix {
+            system_id,
+            start_column_index: prefix.start_column_index(),
+            removed_peaks,
+        });
+        report.portions.push((system_id, portion_report));
+    }
+    Ok(report)
+}
+
+fn complete_detached_brace_topology(
+    state: &mut BarsSystemState,
+    maximum_alignment_dx: f64,
+    skew: &HeadlessSkew,
+) -> Result<(), RawProjectorAdapterError> {
+    if state.staffs().len() <= 1 {
+        return Ok(());
+    }
+    let mut staff_index = 0;
+    while staff_index < state.staffs().len() {
+        let Some(top) = state.staffs()[staff_index].brace_peak().cloned() else {
+            staff_index += 1;
+            continue;
+        };
+        if !top.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceTop) {
+            staff_index += 1;
+            continue;
+        }
+        let mut last_index = staff_index;
+        let mut current_top = top;
+        for lower_index in (staff_index + 1)..state.staffs().len() {
+            let mut lower = state.staffs()[lower_index].brace_peak().cloned();
+            if lower.is_none() {
+                let candidate = state.staffs()[lower_index]
+                    .peaks()
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| {
+                        RawProjectorAdapterError::BraceMembers(format!(
+                            "staff {} has no first peak for brace alignment",
+                            state.staffs()[lower_index].staff_id().value()
+                        ))
+                    })?;
+                if brace_peaks_align(&current_top, &candidate, maximum_alignment_dx, skew) {
+                    let mut middle = candidate;
+                    middle.set(audiveris_image::staff_peak::StaffPeakAttribute::BraceMiddle);
+                    let key = middle.key();
+                    *state
+                        .graph_mut()
+                        .vertex_mut(key)
+                        .expect("fallback brace candidate remains in graph") = middle.clone();
+                    let staff = state
+                        .staff_mut(key.staff_id())
+                        .expect("fallback brace candidate belongs to lower staff");
+                    *staff
+                        .peaks_mut()
+                        .first_mut()
+                        .expect("fallback candidate is the first peak") = middle.clone();
+                    staff
+                        .replace_brace_stage(staff.peaks().to_vec(), Some(middle.clone()))
+                        .map_err(RawProjectorAdapterError::Bars)?;
+                    lower = Some(middle);
+                }
+            }
+            let Some(lower) = lower else { break };
+            if !lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceMiddle)
+                && !lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceBottom)
+            {
+                break;
+            }
+            last_index = lower_index;
+            if lower.is_set(audiveris_image::staff_peak::StaffPeakAttribute::BraceBottom) {
+                break;
+            }
+            current_top = lower;
+        }
+        staff_index = last_index + 1;
+    }
+    Ok(())
 }
 
 /// Continue an existing raw prefix through `detectBracePortions`, replacement,
