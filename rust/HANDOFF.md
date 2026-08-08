@@ -426,8 +426,11 @@ slices/6,759 references. A separate GRID adapter matches 528 source-order bar
 and connector candidates and all 474 frozen obstacles by class, shape, staff,
 raw median/thickness bits, stable ordinate order, and integer Area bounds. The
 other five raw oracle candidates are unfrozen Hove dummy bars created later by
-HEADERS, so they cannot enter the consumed frozen pool. Frozen-bar and final
-competitor slice composition remain next. The fixture remains the base/pre-lookup
+HEADERS, so they cannot enter the consumed frozen pool. Production now also
+composes every scanner's semantic bar band with that frozen pool. The exhaustive
+gate matches all 1,767 slices exactly: 552 are nonempty and retain 5,060 obstacle
+references in Java's stable-by-ordinate order; `getBarAreas` performs no x sort.
+Final competitor pool and slice composition remain next. The fixture remains the base/pre-lookup
 slice: range scanners later see seed-created `HeadInter`
 instances, and actual template rectangles use Java2D area intersection. Those
 decisions belong to the evaluation oracle, not this immutable constructor gate.
