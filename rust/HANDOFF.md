@@ -93,7 +93,7 @@ remains.
 locally under the pinned toolchain, and the whole workspace runs in about 45
 seconds since the dev profile went to `opt-level = 2`.
 
-The first STEM_SEEDS boundary is now native and exact.
+The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
 and reflectively invokes only `VerticalsBuilder.retrieveCandidates()` -- never
 `checkVerticals()`. `oracle/stem-seeds.txt` records exact system inputs and all
@@ -109,17 +109,29 @@ marked processed but is not assigned the filament compound link; only cores and
 stickers receive that link. Two pinned-JDK oracle runs were byte-identical; the
 corpus FNV is `d6ac0c99a5093beb` and fixture SHA-256 is
 `c2ae9a9fe6a593072ede7f98de9073346ff006ccf48a8d5016c58ed4899cebd0`.
-The immediate boundary after it is frozen too. `StemSeedGlyphsProbe` invokes
-the actual private `checkVerticals(Collection)`, captures the private
-`SeedCheckSuite` values, normalized impacts, weights, Clean side effects,
-grades, and threshold, then reads the actual `VERTICAL_SEED` free glyphs and
-hashes their complete run tables. Across the same corpus, 2,003 candidates are
-checked, 1,906 are accepted/materialized, 97 are rejected, and 422 are skipped
-by the header gate. Two full runs were byte-identical; the corpus FNV is
+`recognize_native_stem_seeds` now continues from that raw result and
+oracle-free HEADERS state through Java's closest-staff selection, header and
+tablature gates, concrete `StemChecker`, original fixed-glyph registration,
+minimum-grade gate, `VERTICAL_SEED` grouping, and system free-glyph ownership.
+`StemSeedGlyphsProbe` invokes the actual private
+`checkVerticals(Collection)`, captures the private `SeedCheckSuite` values,
+normalized impacts, weights, Clean side effects, grades, and threshold, then
+reads the actual free glyphs and hashes their complete cropped run tables.
+Across the same corpus, all 422 header skips, 2,003 checks, 97 rejects, and
+1,906 accepted/materialized glyphs match. The gate checks decisions, all seven
+raw values/weights/impacts, Clean black/white/gap counts, bit-exact aggregate
+grades, glyph geometry, run counts, and run-table digests. Two full Java runs
+were byte-identical; the corpus FNV is
 `541b1354720a0d35` and fixture SHA-256 is
 `2e0455b7985a4e9fe68da25a020a0d1fc9f9e2161e6f1a5025e3c69dd1624953`.
 Only profile 1 is exercised, with no tablature or no-staff skip case. These two
 fixtures now grade raw factory output and accepted materialization separately.
+The aggregate grade initially differed by one ULP even though every input and
+impact matched. Java's weighted geometric mean follows OpenJDK fdlibm while
+Rust's platform `pow` does not. `audiveris-core::java_math::java_positive_pow`
+is a narrowed direct port for non-negative bases and finite exponents; it makes
+all 2,003 grades bit-exact and carries a frozen residual regression. The next
+semantic seam is passing these accepted free glyphs into BEAMS' stem extension.
 
 **Nothing through native ledger-line construction is unverified by CI as of
 Rust run `31243273019` and Java run `31243273022`**, both green on

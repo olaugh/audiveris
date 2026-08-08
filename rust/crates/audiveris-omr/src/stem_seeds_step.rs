@@ -8,6 +8,7 @@ use std::fmt;
 
 use audiveris_core::{
     integer_function::IntegerFunction,
+    java_math::java_positive_pow,
     peak_finder::{HiLoPeakFinder, Quorum},
 };
 use audiveris_image::run_table::RunTable;
@@ -427,11 +428,11 @@ pub fn check_native_stem(
             if impact == 0.0 {
                 product = 0.0;
             } else if weight != 0.0 {
-                product *= impact.powf(weight);
+                product *= java_positive_pow(impact, weight);
             }
         }
     }
-    let grade = 0.8 * product.powf(1.0 / total_weight);
+    let grade = 0.8 * java_positive_pow(product, 1.0 / total_weight);
     Ok(NativeStemCheckResult {
         values,
         impacts,

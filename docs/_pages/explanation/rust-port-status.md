@@ -21,8 +21,8 @@ the exact eight-sheet BEAMS and LEDGERS gates: 787 raw beams, 581 final ledger
 inters, and 95 inferred ledger-line paths. JSON preserves selected header
 evidence, system-owned erases, beam/ledger geometry and impacts, exclusions,
 groups, and curved paths; `omrscope` accepts both median forms and bounds-only
-header symbols. Native STEM_SEEDS now reaches the exact 2,425-candidate raw
-`StickFactory` boundary.
+header symbols. Native STEM_SEEDS now composes GRID and HEADERS through the
+exact 2,425-candidate factory, 2,003 checks, and 1,906 accepted glyphs.
 
 Last updated 2026-08-07.
 
@@ -57,7 +57,7 @@ is present but the musical interpretation is not.
 | 3 | `SCALE` | **Native and published** | Line, interline, beam, histogram, derivative, and decision logic are measured from the page. | Small-beam recognition needs a graded corpus case before downstream use. |
 | 4 | `GRID` | **Native and published** | Staff lines, systems, bars, connectors, parts, contextual grades, completed line geometry, and `NO_STAFF` pixels. All 65 staves and 420 barlines in the example corpus match Java. | No known example-corpus gap; continue widening the PDF corpus. |
 | 5 | `HEADERS` | **Native and published** | `recognize_native_headers` composes clef, key, and time columns in Java order from live GRID state alone. All nine pages and 65 staves match for starts/stops and selected evidence, including 34 keys, 17 times, and all 30 downstream erase rectangles. Schema 1 publishes selected inters, lifecycle/classifier evidence, staff ranges, and system-owned erases. | Widen the corpus. |
-| 6 | `STEM_SEEDS` | **Components graded** | Native GRID lag selection, stem-scale parameters, and vertical `StickFactory` reproduce all 30 system inputs and 2,425/2,425 raw candidates bit-exactly, including mixed member order and complete line geometry. The next Java boundary pins 2,003 checks, 1,906 materialized glyphs, 97 rejects, and 422 header skips. | Compose the existing stem checker, staff/header gates, and glyph materialization against the accepted-seed oracle, then connect seeds to BEAMS. |
+| 6 | `STEM_SEEDS` | **Native and graded** | `recognize_native_stem_seeds` composes live GRID and HEADERS state through lag selection, vertical `StickFactory`, staff/header gating, the concrete checker, fixed-glyph materialization, and free-glyph ownership. Across 30 systems, all 2,425 raw candidates, 422 header skips, 2,003 checks, 97 rejects, and 1,906 accepted glyphs match Java, including bit-exact grades and complete run-table digests. | Publish the accepted seeds and connect them to BEAMS' stem extension; widen beyond profile 1 and add tablature/no-staff skip cases. |
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS composition feeds the spot chain, system dispatch, beam creation, measured beam-to-beam extension, hooks, grouping, and schema-1 output. The eight-sheet gate matches 2,739 spots, 30 erases, and 787/787 raw beams. | Connect stem-seed extension and grade small beams. Java's later multiple-rest replacement explains the one retained Bach source beam. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Components graded** | Prolog, spot dispatch contract, classifier mutation order, ownership, cleanup, and quorum scale. | Port and compose the remaining visual spot/classifier internals. |
@@ -78,7 +78,7 @@ is present but the musical interpretation is not.
 | Area | Status | Notes |
 | :--- | :--- | :--- |
 | Rust workspace and CI | **Ported** | Pinned toolchain; formatting, strict Clippy, and workspace tests run on macOS and Ubuntu. |
-| Core math and geometry | **Ported and graded** | Histograms, grades, injection, rational/integer helpers, lines, splines, transforms, and scale conversions have parity gates. |
+| Core math and geometry | **Ported and graded** | Histograms, grades, injection, rational/integer helpers, lines, splines, transforms, scale conversions, and the OpenJDK positive-base `pow` path needed for bit-exact weighted grades have parity gates. |
 | Raster processing | **Ported and graded** | Run tables, projections, median/Gaussian filters, morphology, thresholding, chamfer distance, watershed, masks, and connected components. |
 | Baseline JPEG | **Ported for measured scope** | Pure Rust and bit-exact to Audiveris's bundled libjpeg behavior for supported 8-bit Huffman images. Progressive, arithmetic, 12-bit, and CMYK inputs are refused rather than approximated. |
 | PDF ingest and rendering | **Ported for measured corpus** | All 189 pinned pages match PDFBox through filters, rasters, transforms, placement, and rendered grayscale output. Unmeasured PDF shapes are refused by name. |
@@ -91,8 +91,8 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Reproduce the 1,906 accepted/materialized STEM_SEEDS glyphs from the native
-   raw candidates, then connect accepted seeds to beam-to-stem extension.
+1. Publish the 1,906 accepted STEM_SEEDS glyphs, then connect them to
+   beam-to-stem extension and grade that composed path.
 2. Grade small-beam pages and widen the published HEADERS/BEAMS/LEDGERS corpus.
 3. Close the visual classifier seams needed by `HEADS`, then proceed in pipeline
    order through the semantic stages.
