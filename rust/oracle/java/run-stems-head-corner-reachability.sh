@@ -166,8 +166,8 @@ body_sha256=$(shasum -a 256 "$probe_output" | awk '{print $1}')
 if [ "$full_corpus" = true ]; then
     expected_totals="8:30:3521:14084:36736:1340:1007081:4566:9015:8120:1687:14084:16501"
     observed_totals="$pages:$systems:$heads:$corners:$seeds_scanned:$seeds_kept:$head_scans:$head_targets:$sibling_scans:$beam_targets:$anchors_created:$c_seed_writes:$builder_checks"
-    expected_probe_source_sha256=116241d51a2f52668bdf31b4e7d5abda0191242d9dddeec2c04d17f31977d772
-    expected_body_sha256=30a3b550f375b02491c2aa9a2fe4bc5b147454ac36ae4a6feb971aeb6d6d6399
+    expected_probe_source_sha256=7bac85a2e878d67ccecab9866428a8068b83d1453c2249f49b0c18ae6a17b39f
+    expected_body_sha256=b3f10b53346adac1309d12fa2d245840a88b02c17e399e88d7e5e36f0358889b
     if [ "$observed_totals" != "$expected_totals" ]; then
         echo "unexpected STEMS head-reachability corpus totals" >&2
         echo "expected: $expected_totals" >&2

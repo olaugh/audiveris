@@ -807,19 +807,25 @@ The next boundary is head-corner reachability before CLinker-origin
 `StemBuilder` construction, then the remaining head-origin builders, then
 linking/SIG mutation.
 
-That head-corner reachability boundary is being corrected and refrozen on the
-Java side; it is not yet a native eighth boundary. From the post-linker
-baseline, the oracle replays the beam-anchor prefix visible to CLinkers. It does not
+That head-corner reachability boundary is frozen on the Java side, but it is not
+yet a native eighth boundary. From the post-linker baseline, the oracle replays
+the beam-anchor prefix visible to CLinkers. It does not
 execute the preceding beam `StemBuilder` constructors: their local and registry
 mutations are output-isolated from C reachability, while a later C-builder
 boundary must resume the real registry timeline from the beam-builder product.
-Independent audit found that the first replay sorted a live beam-group member
-list during C inspection, a mutation production does not perform and one that
-could affect later stable sibling ties. The published 79,213-line fixture is
-therefore withdrawn as a grading input. Its replacement clones replay inputs
-and snapshots/asserts every group member order throughout the pass. Rust
-production and exact-gate work are paused at compile-green scaffolds until two
-corrected full runs are byte-identical.
+An audit questioned a replay sort, but `BeamGroupInter.getMembers()` actually
+returns a fresh list; a direct old/new comparison showed all 79,199 production
+semantic rows unchanged. The hardened probe still clones explicitly and
+snapshots/asserts every group member identity/order throughout the pass. It
+visits 3,521 heads / 14,084 corners, retains 1,340 of 36,736 seeds, accepts
+4,566 C and 8,120 B targets, and creates 1,687 anchors. The two-pass fixture is
+79,216 lines / 37,478,914 bytes. Probe, runner, emitted-body, and fixture
+SHA-256 are
+`7bac85a2e878d67ccecab9866428a8068b83d1453c2249f49b0c18ae6a17b39f`,
+`e9016abb44a500e242b81364531b775fe6b724cddf697cfc0bd4cfe21af0f75d`,
+`b3f10b53346adac1309d12fa2d245840a88b02c17e399e88d7e5e36f0358889b`, and
+`537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
+Rust production and exact-gate work are active.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3388,8 +3394,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Finish the corrected STEMS head-corner reachability refreeze, port it before
-   CLinker-origin `StemBuilder` construction, then head-origin builders and later linking/SIG mutation at
+1. Port the frozen STEMS head-corner reachability boundary before CLinker-origin
+   `StemBuilder` construction, then head-origin builders and later linking/SIG mutation at
    separate identity-free boundaries.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.

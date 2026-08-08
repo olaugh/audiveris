@@ -264,17 +264,20 @@ emitted body is 91,211 lines / 29,195,732 bytes and the fixture 91,212 lines /
 `da4226ee2227d6369054fbce2de4252c72347242253a335132883d9cf871bd22`, and
 `a3708e0436184dac5aa63fdb43c70cf05252fa7dbbfd7e9a2d746082e22f2180`.
 
-The next head-corner reachability boundary is being refrozen and is not yet
-native. From the post-linker baseline, the Java oracle replays the beam-anchor
-prefix visible to CLinkers and visits corners in TR/BL/TL/BR inspection order.
+The next head-corner reachability boundary is frozen but not yet native. From
+the post-linker baseline, the Java oracle replays the beam-anchor prefix visible
+to CLinkers and visits 14,084 corners in TR/BL/TL/BR inspection order.
 It deliberately projects out the preceding beam `StemBuilder` constructors:
 their local and registry mutations are not read by later C reachability, but
-must be restored when C builders are ported. An independent audit found that
-the first probe replay sorted a live beam-group member list during inspection,
-a mutation absent from Java production that could affect later stable ties.
-That 79,213-line fixture is withdrawn; the probe now clones replay inputs and
-asserts group order at every boundary before a replacement fixture is frozen.
-Rust production and differential work remain paused at scaffolds meanwhile.
+must be restored when C builders are ported. An audit questioned a replay sort,
+but source inspection proved `BeamGroupInter.getMembers()` returns a fresh
+list, and all 79,199 semantic rows remained byte-identical. The hardened probe
+still clones explicitly and asserts every group's identity/order throughout.
+It retains 1,340 of 36,736 seed scans, accepts 4,566 C and 8,120 B targets, and
+creates 1,687 head-origin anchors. Two fresh JDK 25 runs agree at 79,216 lines /
+37,478,914 bytes, fixture SHA-256
+`537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
+The Rust production compositor and exact gate are in progress.
 
 Last updated 2026-08-08.
 
@@ -343,7 +346,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Finish the corrected STEMS head-corner reachability refreeze, port it before CLinker-origin `StemBuilder` construction, then continue through head-origin builders and linking/SIG mutation at separate boundaries.
+1. Port the frozen STEMS head-corner reachability boundary before CLinker-origin `StemBuilder` construction, then continue through head-origin builders and linking/SIG mutation at separate boundaries.
 2. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.
 3. Complete GRID brace glyph/SIG promotion from the now-retained exact detached filament evidence; Part ownership is already live for downstream stages.
 4. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.

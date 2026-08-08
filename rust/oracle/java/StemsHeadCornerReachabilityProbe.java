@@ -60,9 +60,11 @@ import org.audiveris.omr.util.VerticalSide;
  * Exact identity-free oracle for the prefix of {@code HeadLinker.CLinker.inspect()} ending
  * immediately before {@code new StemBuilder(...)}.
  *
- * <p>The probe first replays the preceding BeamLinker reachability prefix, because its
- * cross-beam anchors are visible to head-origin {@code findLinker} calls. It then visits heads in
- * the stable bounds-x order and corners in {@link HeadCorner#values()} order. Real private
+ * <p>The probe first replays only the preceding BeamLinker reachability prefix (the two private
+ * filters, never the beam-origin StemBuilder), because its cross-beam anchors are visible to
+ * head-origin {@code findLinker} calls. This is therefore not literal post-beam-builder state. It
+ * then visits heads in the stable bounds-x order and corners in {@link HeadCorner#values()} order.
+ * Real private
  * {@code retrieveSeeds} and {@code lookupOtherHeads} calls are independently replayed and checked;
  * the optional sibling-beam path invokes the real {@code findLinker}. No C StemBuilder is
  * constructed.</p>
@@ -337,6 +339,9 @@ public final class StemsHeadCornerReachabilityProbe
         final IdentityHashMap<Object, String> cAliases = new IdentityHashMap<>();
         registerCLinkers(heads, cAliases);
         final int initialBs = registerAllBs(beams, beamSigOrdinals, bAliases);
+        final IdentityHashMap<BeamGroupInter, List<Inter>> groupOrderSnapshot =
+                snapshotGroupOrders(beams);
+        assertGroupOrders(groupOrderSnapshot, "post-constructor baseline");
 
         final SIGraph sig = system.getSig();
         final int glyphCount = sheet.getGlyphIndex().getEntities().size();
@@ -393,6 +398,7 @@ public final class StemsHeadCornerReachabilityProbe
             }
         }
         final int afterBeamBs = registerAllBs(beams, beamSigOrdinals, bAliases);
+        assertGroupOrders(groupOrderSnapshot, "after reachability-only beam prefix");
         emit(String.format(
                 "stemsheadreachbarena %s system %d phase afterBeamPrefix total %d added %d arenas %s",
                 page,
@@ -428,6 +434,7 @@ public final class StemsHeadCornerReachabilityProbe
                 if (C_STEM_BUILDER.get(c) != null || C_SEEDS.get(c) != null) {
                     throw new IllegalStateException("CLinker already crossed reachability seam");
                 }
+                assertGroupOrders(groupOrderSnapshot, "before C inspection replay");
                 final GeometryReplay geometry = replayGeometry(
                         sheet,
                         system,
@@ -440,6 +447,7 @@ public final class StemsHeadCornerReachabilityProbe
                         maxHeadInDx,
                         maxHeadOutDx,
                         slopeMargin);
+                assertGroupOrders(groupOrderSnapshot, "after C geometry replay");
                 emitGeometry(
                         page,
                         system,
@@ -642,6 +650,7 @@ public final class StemsHeadCornerReachabilityProbe
                 if (C_STEM_BUILDER.get(c) != null || C_SEEDS.get(c) != actualSeeds) {
                     throw new IllegalStateException("C reachability crossed builder seam");
                 }
+                assertGroupOrders(groupOrderSnapshot, "after complete C inspection replay");
                 totals.builderChecks++;
                 totals.corners++;
                 inspectOrdinal++;
@@ -649,6 +658,7 @@ public final class StemsHeadCornerReachabilityProbe
         }
 
         final int finalBs = registerAllBs(beams, beamSigOrdinals, bAliases);
+        assertGroupOrders(groupOrderSnapshot, "final reachability epilog");
         if (!sameIdentityList(seeds, seedSnapshot)
                 || sheet.getGlyphIndex().getEntities().size() != glyphCount
                 || sig.vertexSet().size() != vertexCount
@@ -777,7 +787,9 @@ public final class StemsHeadCornerReachabilityProbe
         outer:
         for (int groupOrdinal = 0; groupOrdinal < groupReplay.groups.size(); groupOrdinal++) {
             final BeamGroupInter group = groupReplay.groups.get(groupOrdinal);
-            final List<Inter> members = group.getMembers();
+            // EnsembleHelper currently returns a fresh list, but do not depend on that incidental
+            // implementation detail: replay sorting must never mutate production group order.
+            final List<Inter> members = new ArrayList<>(group.getMembers());
             StemsRetriever.sortBeamsFromRef(ref, yDir, members);
             for (int memberOrdinal = 0; memberOrdinal < members.size(); memberOrdinal++) {
                 final Inter member = members.get(memberOrdinal);
@@ -1232,6 +1244,29 @@ public final class StemsHeadCornerReachabilityProbe
         }
     }
 
+    private static IdentityHashMap<BeamGroupInter, List<Inter>> snapshotGroupOrders (
+            List<Inter> beams)
+    {
+        final IdentityHashMap<BeamGroupInter, List<Inter>> snapshots = new IdentityHashMap<>();
+        for (Inter inter : beams) {
+            final BeamGroupInter group = ((AbstractBeamInter) inter).getGroup();
+            snapshots.putIfAbsent(group, new ArrayList<>(group.getMembers()));
+        }
+        return snapshots;
+    }
+
+    private static void assertGroupOrders (
+            IdentityHashMap<BeamGroupInter, List<Inter>> snapshots,
+            String phase)
+    {
+        for (Map.Entry<BeamGroupInter, List<Inter>> entry : snapshots.entrySet()) {
+            final List<Inter> actual = entry.getKey().getMembers();
+            if (!sameIdentityList(entry.getValue(), actual)) {
+                throw new IllegalStateException("beam-group member order mutated at " + phase);
+            }
+        }
+    }
+
     private static int registerAllBs (List<Inter> beams,
                                       IdentityHashMap<Inter, Integer> beamSigOrdinals,
                                       IdentityHashMap<Object, String> aliases)
@@ -1308,9 +1343,12 @@ public final class StemsHeadCornerReachabilityProbe
                 "# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) STEMS head reachability oracle.");
         System.out.println("#");
         System.out.println("# Fresh Epsilon-GC JVMs reach real HEADS, construct all beam/head linkers in");
-        System.out.println("# production stable-x order, replay beam reachability, then visit heads by x and");
-        System.out.println("# HeadCorner.values order TR,BL,TL,BR. The seam is immediately before each");
-        System.out.println("# CLinker new StemBuilder call; no C builders are constructed.");
+        System.out.println("# production stable-x order, replay the reachability-only beam filter prefix, then");
+        System.out.println("# visit heads by x and HeadCorner.values order TR,BL,TL,BR. This is not literal");
+        System.out.println("# post-beam-builder state: no beam-origin StemBuilder is ever constructed.");
+        System.out.println("# The seam is immediately before each CLinker new StemBuilder call; no C builders");
+        System.out.println("# are constructed. Every beam-group member identity/order is snapshotted and");
+        System.out.println("# asserted unchanged across every replay boundary.");
         System.out.println("# Geometry, lookup groups, seeds, other heads, sibling beams, findLinker");
         System.out.println("# reuse/append, C-before-B targets, and immediate/final B arenas are graded.");
         System.out.println("# Dense rejected scans are count + ordered semantic SHA-256; every accepted");
