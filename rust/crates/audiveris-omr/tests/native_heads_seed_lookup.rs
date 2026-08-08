@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Eight-page Java differential for the provisional HEADS seed lookup kernel.
+//! Eight-page Java differential for HEADS seed lookup and glyph materialization.
 
 use std::{
     collections::BTreeMap,
@@ -17,6 +17,9 @@ use audiveris_omr::{
     native_heads_obstacles::materialize_native_heads_bar_obstacles,
     native_heads_scanner::recognize_native_heads_scanner_context,
     native_heads_scanner_pools::materialize_native_head_scanner_pools,
+    native_heads_seed_glyphs::{
+        NativeHeadSeedGlyph, NativeHeadsSeedGlyphsInput, retrieve_native_heads_seed_glyphs,
+    },
     native_heads_seed_lookup::{
         NativeHeadSeedCandidate, NativeHeadSeedLookupScan, NativeHeadSeedPerformance,
         NativeHeadSeedSearchOutcome, NativeHeadSeedShapeSearch, NativeHeadSeedSide,
@@ -53,6 +56,7 @@ struct ExpectedSystem {
 struct ExpectedStaff {
     summary: Option<StaffSummary>,
     candidates: Vec<ExpectedCandidate>,
+    heads: Vec<ExpectedHead>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -130,8 +134,37 @@ struct ExpectedCandidate {
     outcome: String,
 }
 
+#[derive(Debug)]
+struct ExpectedHead {
+    ordinal: usize,
+    candidate_ordinal: usize,
+    search_ordinal: usize,
+    scanner_ordinal: usize,
+    seed_pool_index: usize,
+    side: String,
+    shape_ordinal: usize,
+    original_shape: String,
+    final_shape: String,
+    selected: [i32; 6],
+    distance_bits: u64,
+    black_to_void: Option<bool>,
+    provisional_bounds: [i32; 4],
+    shape: String,
+    pitch_bits: u64,
+    bounds: [i32; 4],
+    grade_bits: u64,
+    distance_impact_bits: u64,
+    impact_weight_bits: u64,
+    good: bool,
+    glyph_bounds: [i32; 4],
+    glyph_weight: usize,
+    glyph_run_digest: u64,
+    tally_left_bits: Option<u64>,
+    tally_right_bits: Option<u64>,
+}
+
 #[test]
-fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
+fn native_heads_seed_lookup_and_final_glyphs_match_java_corpus() {
     let expected = parse_oracle();
     assert_eq!(expected.pages.len(), expected.summary.pages);
 
@@ -139,6 +172,7 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
     let mut actual_staffs = 0_usize;
     let mut actual_searches = 0_usize;
     let mut actual_candidates = 0_usize;
+    let mut actual_heads = 0_usize;
     let mut actual_performance = ExpectedPerformance::default();
     let mut expected_performance = ExpectedPerformance::default();
 
@@ -184,6 +218,12 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
             stem_seeds: &stem_seeds,
         })
         .unwrap_or_else(|error| panic!("{page_key}: seed lookup failed: {error}"));
+        let glyphs = retrieve_native_heads_seed_glyphs(NativeHeadsSeedGlyphsInput {
+            grid: &grid,
+            heads: &heads,
+            lookup: &actual,
+        })
+        .unwrap_or_else(|error| panic!("{page_key}: seed glyph retrieval failed: {error}"));
 
         assert_eq!(
             actual.systems.len(),
@@ -195,10 +235,12 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
             expected_page.declared_systems,
             "{page_key} oracle system summaries"
         );
+        assert_eq!(glyphs.systems.len(), actual.systems.len(), "{page_key}");
 
         let mut page_staffs = 0_usize;
         let mut page_searches = 0_usize;
         let mut page_candidates = 0_usize;
+        let mut page_heads = 0_usize;
         for (system_ordinal, actual_system) in actual.systems.iter().enumerate() {
             let system_label = format!("{page_key} system {}", actual_system.system_id);
             let expected_system = expected_page
@@ -210,6 +252,16 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
                 .as_ref()
                 .unwrap_or_else(|| panic!("{system_label} has no summary"));
             assert_eq!(actual_system.staffs.len(), summary.staffs, "{system_label}");
+            let glyph_system = &glyphs.systems[system_ordinal];
+            assert_eq!(
+                glyph_system.system_id, actual_system.system_id,
+                "{system_label}"
+            );
+            assert_eq!(
+                glyph_system.staffs.len(),
+                actual_system.staffs.len(),
+                "{system_label}"
+            );
 
             let pool_system = &pools.systems[system_ordinal];
             assert_eq!(
@@ -218,7 +270,8 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
             );
             let mut system_searches = 0_usize;
             let mut system_candidates = 0_usize;
-            for actual_staff in &actual_system.staffs {
+            let mut system_heads = 0_usize;
+            for (staff_ordinal, actual_staff) in actual_system.staffs.iter().enumerate() {
                 let staff_label = format!("{system_label} staff {}", actual_staff.staff_id);
                 let expected_staff = expected_system
                     .staffs
@@ -228,6 +281,8 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
                     .summary
                     .as_ref()
                     .unwrap_or_else(|| panic!("{staff_label} has no summary"));
+                let glyph_staff = &glyph_system.staffs[staff_ordinal];
+                assert_eq!(glyph_staff.staff_id, actual_staff.staff_id, "{staff_label}");
                 let searches = actual_staff
                     .scans
                     .iter()
@@ -272,14 +327,43 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
                     "{staff_label} kernel hash"
                 );
                 assert_candidates(actual_staff, &expected_staff.candidates, &staff_label);
+                assert_eq!(
+                    glyph_staff.candidate_count, candidates,
+                    "{staff_label} glyph candidate count"
+                );
+                assert_eq!(glyph_staff.dropped_count, 0, "{staff_label} dropped glyphs");
+                assert_eq!(
+                    glyph_staff.heads.len(),
+                    expected_staff.heads.len(),
+                    "{staff_label} final head rows"
+                );
+                assert_eq!(
+                    glyph_staff.heads.len(),
+                    candidates,
+                    "{staff_label} survivors"
+                );
+                assert_final_heads(
+                    &glyph_staff.heads,
+                    &expected_staff.heads,
+                    &expected_staff.candidates,
+                    &staff_label,
+                );
                 expected_performance.include(staff_summary.performance);
 
                 system_searches += searches;
                 system_candidates += candidates;
+                system_heads += glyph_staff.heads.len();
                 page_staffs += 1;
             }
             assert_eq!(system_searches, summary.searches, "{system_label}");
             assert_eq!(system_candidates, summary.candidates, "{system_label}");
+            assert_eq!(
+                glyph_system.candidate_count, system_candidates,
+                "{system_label}"
+            );
+            assert_eq!(glyph_system.dropped_count, 0, "{system_label}");
+            assert_eq!(glyph_system.head_count, system_heads, "{system_label}");
+            assert_eq!(system_heads, summary.candidates, "{system_label}");
             assert_performance(
                 actual_system.performance,
                 summary.performance,
@@ -288,6 +372,7 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
 
             page_searches += system_searches;
             page_candidates += system_candidates;
+            page_heads += system_heads;
             actual_systems += 1;
         }
 
@@ -299,9 +384,14 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
         assert_eq!(page_staffs, page_summary.staffs, "{page_key}");
         assert_eq!(page_searches, page_summary.searches, "{page_key}");
         assert_eq!(page_candidates, page_summary.candidates, "{page_key}");
+        assert_eq!(page_heads, page_summary.candidates, "{page_key}");
+        assert_eq!(glyphs.candidate_count, page_candidates, "{page_key}");
+        assert_eq!(glyphs.dropped_count, 0, "{page_key}");
+        assert_eq!(glyphs.head_count, page_heads, "{page_key}");
         actual_staffs += page_staffs;
         actual_searches += page_searches;
         actual_candidates += page_candidates;
+        actual_heads += page_heads;
         actual_performance.include(performance(actual.performance));
     }
 
@@ -310,6 +400,8 @@ fn native_heads_seed_lookup_matches_java_staff_kernels_and_corpus_counts() {
     assert_eq!(actual_searches, expected.summary.searches);
     assert_eq!(actual_candidates, expected.summary.candidates);
     assert_eq!(actual_candidates, expected.summary.heads);
+    assert_eq!(actual_heads, expected.summary.heads);
+    assert_eq!(actual_heads, actual_candidates);
     assert_eq!(actual_performance, expected_performance);
 }
 
@@ -503,6 +595,170 @@ fn assert_candidate(
     );
 }
 
+fn assert_final_heads(
+    actual: &[NativeHeadSeedGlyph],
+    expected: &[ExpectedHead],
+    candidates: &[ExpectedCandidate],
+    staff_label: &str,
+) {
+    assert_eq!(actual.len(), expected.len(), "{staff_label} final heads");
+    for (ordinal, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+        let label = format!("{staff_label} final head {ordinal}");
+        assert_eq!(actual.ordinal, ordinal, "{label} dense order");
+        assert_eq!(actual.ordinal, expected.ordinal, "{label} oracle order");
+        assert_eq!(
+            actual.candidate_ordinal, expected.candidate_ordinal,
+            "{label} candidate"
+        );
+        assert_eq!(actual.candidate_ordinal, ordinal, "{label} survivor order");
+        assert_eq!(
+            actual.search_ordinal, expected.search_ordinal,
+            "{label} search"
+        );
+        assert_eq!(
+            actual.geometry_ordinal, expected.scanner_ordinal,
+            "{label} scanner"
+        );
+        assert_eq!(
+            actual.seed_pool_index, expected.seed_pool_index,
+            "{label} seed"
+        );
+        assert_eq!(side_name(actual.side), expected.side, "{label} side");
+        assert_eq!(actual.anchor, actual.side.anchor(), "{label} anchor");
+        assert_eq!(
+            shape_name(actual.original_shape),
+            expected.original_shape,
+            "{label} original shape"
+        );
+        assert_eq!(
+            shape_name(actual.shape),
+            expected.final_shape,
+            "{label} final shape"
+        );
+        assert_eq!(shape_name(actual.shape), expected.shape, "{label} shape");
+        assert_eq!(
+            [actual.x, actual.y],
+            expected.selected[4..],
+            "{label} pivot"
+        );
+        assert_eq!(
+            actual.distance_bits, expected.distance_bits,
+            "{label} distance"
+        );
+        assert_eq!(actual.pitch_bits, expected.pitch_bits, "{label} pitch");
+        assert_eq!(
+            bounds(actual.provisional_bounds),
+            expected.provisional_bounds,
+            "{label} provisional bounds"
+        );
+        assert_eq!(
+            bounds(actual.bounds),
+            expected.bounds,
+            "{label} inter bounds"
+        );
+        assert_eq!(actual.grade_bits, expected.grade_bits, "{label} grade");
+        assert_eq!(
+            actual.distance_impact_bits, expected.distance_impact_bits,
+            "{label} distance impact"
+        );
+        assert_eq!(
+            actual.raw_distance_impact_bits,
+            impact_of(f64::from_bits(expected.distance_bits)).to_bits(),
+            "{label} raw distance impact"
+        );
+        assert_eq!(
+            expected.impact_weight_bits,
+            1.0_f64.to_bits(),
+            "{label} impact weight"
+        );
+        assert_eq!(
+            actual.minimum_grade_bits,
+            MIN_INTER_GRADE.to_bits(),
+            "{label} minimum grade"
+        );
+        assert_eq!(actual.good, expected.good, "{label} good");
+        assert_eq!(
+            bounds(actual.glyph.glyph_bounds),
+            expected.glyph_bounds,
+            "{label} glyph bounds"
+        );
+        assert_eq!(
+            actual.glyph.new_inter_bounds, actual.bounds,
+            "{label} updated inter bounds"
+        );
+        assert_eq!(
+            actual.glyph.glyph_bounds, actual.bounds,
+            "{label} positioned glyph bounds"
+        );
+        assert_eq!(
+            actual.glyph.weight, expected.glyph_weight,
+            "{label} glyph weight"
+        );
+        assert_eq!(
+            actual.glyph.run_table.weight(),
+            expected.glyph_weight,
+            "{label} run-table weight"
+        );
+        assert_eq!(
+            actual.glyph.run_digest, expected.glyph_run_digest,
+            "{label} glyph run digest"
+        );
+        assert_eq!(
+            actual.tally_left_bits, expected.tally_left_bits,
+            "{label} left tally"
+        );
+        assert_eq!(
+            actual.tally_right_bits, expected.tally_right_bits,
+            "{label} right tally"
+        );
+        match (actual.good, actual.side) {
+            (false, _) => {
+                assert!(actual.tally_left_bits.is_none(), "{label} bad left tally");
+                assert!(actual.tally_right_bits.is_none(), "{label} bad right tally");
+            }
+            (true, NativeHeadSeedSide::Left) => {
+                assert!(actual.tally_left_bits.is_some(), "{label} left tally");
+                assert!(actual.tally_right_bits.is_none(), "{label} right tally");
+            }
+            (true, NativeHeadSeedSide::Right) => {
+                assert!(actual.tally_left_bits.is_none(), "{label} left tally");
+                assert!(actual.tally_right_bits.is_some(), "{label} right tally");
+            }
+        }
+
+        let candidate = candidates
+            .get(actual.candidate_ordinal)
+            .unwrap_or_else(|| panic!("{label} missing provisional candidate"));
+        assert_eq!(candidate.search_ordinal, expected.search_ordinal, "{label}");
+        assert_eq!(
+            candidate.scanner_ordinal, expected.scanner_ordinal,
+            "{label}"
+        );
+        assert_eq!(
+            candidate.seed_pool_index, expected.seed_pool_index,
+            "{label}"
+        );
+        assert_eq!(candidate.side, expected.side, "{label}");
+        assert_eq!(candidate.shape_ordinal, expected.shape_ordinal, "{label}");
+        assert_eq!(candidate.original_shape, expected.original_shape, "{label}");
+        assert_eq!(candidate.final_shape, expected.final_shape, "{label}");
+        assert_eq!(candidate.selected, expected.selected, "{label}");
+        assert_eq!(candidate.distance_bits, expected.distance_bits, "{label}");
+        assert_eq!(candidate.black_to_void, expected.black_to_void, "{label}");
+        assert_eq!(candidate.bounds, expected.provisional_bounds, "{label}");
+        assert_eq!(candidate.pitch_bits, expected.pitch_bits, "{label}");
+        assert_eq!(candidate.grade_bits, expected.grade_bits, "{label}");
+        assert_eq!(
+            candidate.distance_impact_bits, expected.distance_impact_bits,
+            "{label}"
+        );
+        assert_eq!(
+            candidate.impact_weight_bits, expected.impact_weight_bits,
+            "{label}"
+        );
+    }
+}
+
 fn expected_tally_dx(
     candidate: &NativeHeadSeedCandidate,
     search: &NativeHeadSeedShapeSearch,
@@ -647,6 +903,62 @@ fn parse_oracle() -> ExpectedCorpus {
                     "candidate order at line {line_number}"
                 );
                 candidates.push(candidate);
+            }
+            Some("headseedhead") => {
+                let page = page_mut(&mut pages, &fields, line_number);
+                let system_id = parse_field(&fields, "system", line_number);
+                let staff_id = parse_field(&fields, "staff", line_number);
+                let (distance_impact_bits, impact_weight_bits) =
+                    parse_impact(field(&fields, "impacts", line_number));
+                let head = ExpectedHead {
+                    ordinal: parse_field(&fields, "ordinal", line_number),
+                    candidate_ordinal: parse_field(&fields, "candidate", line_number),
+                    search_ordinal: parse_field(&fields, "attempt", line_number),
+                    scanner_ordinal: parse_field(&fields, "scanner", line_number),
+                    seed_pool_index: parse_field(&fields, "seed", line_number),
+                    side: field(&fields, "side", line_number).to_owned(),
+                    shape_ordinal: parse_field(&fields, "shapeOrdinal", line_number),
+                    original_shape: field(&fields, "original", line_number).to_owned(),
+                    final_shape: field(&fields, "finalShape", line_number).to_owned(),
+                    selected: parse_i32_array(field(&fields, "selected", line_number)),
+                    distance_bits: parse_double_bits(field(&fields, "distance", line_number)),
+                    black_to_void: parse_optional_bool(field(&fields, "blackToVoid", line_number)),
+                    provisional_bounds: parse_i32_array(field(&fields, "slim", line_number)),
+                    shape: field(&fields, "shape", line_number).to_owned(),
+                    pitch_bits: parse_double_bits(field(&fields, "pitch", line_number)),
+                    bounds: parse_i32_array(field(&fields, "bounds", line_number)),
+                    grade_bits: parse_double_bits(field(&fields, "grade", line_number)),
+                    distance_impact_bits,
+                    impact_weight_bits,
+                    good: parse_field(&fields, "good", line_number),
+                    glyph_bounds: parse_i32_array(field(&fields, "glyphBounds", line_number)),
+                    glyph_weight: parse_field(&fields, "glyphWeight", line_number),
+                    glyph_run_digest: parse_hex(field(&fields, "glyphRuns", line_number)),
+                    tally_left_bits: parse_optional_double_bits(field(
+                        &fields,
+                        "tallyLeft",
+                        line_number,
+                    )),
+                    tally_right_bits: parse_optional_double_bits(field(
+                        &fields,
+                        "tallyRight",
+                        line_number,
+                    )),
+                };
+                let heads = &mut page
+                    .systems
+                    .entry(system_id)
+                    .or_default()
+                    .staffs
+                    .entry(staff_id)
+                    .or_default()
+                    .heads;
+                assert_eq!(
+                    head.ordinal,
+                    heads.len(),
+                    "head order at line {line_number}"
+                );
+                heads.push(head);
             }
             Some("headseedstaffsummary") => {
                 let page = page_mut(&mut pages, &fields, line_number);
@@ -799,6 +1111,10 @@ fn parse_double_bits(text: &str) -> u64 {
         .rsplit_once('/')
         .unwrap_or_else(|| panic!("double has no raw bits: {text}"));
     parse_hex(bits)
+}
+
+fn parse_optional_double_bits(text: &str) -> Option<u64> {
+    (text != "-").then(|| parse_double_bits(text))
 }
 
 fn parse_impact(text: &str) -> (u64, u64) {

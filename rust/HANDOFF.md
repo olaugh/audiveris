@@ -493,6 +493,22 @@ shape, pitch, bounds, distance, impact, and grade bits. Tablature staffs are
 validated but omitted as in Java. The result deliberately stops before
 `HeadInter.retrieveGlyph`, SIG insertion, and identity-keyed tally storage.
 
+The glyph half of that boundary is now composed too. `head_glyph_retrieval.rs`
+ports `HeadInter.retrieveGlyph`: derive the full template box from provisional
+slim bounds with Java wrapping arithmetic, visit exact-zero template keys in
+factory order against GRID's original BINARY pixels, return null if none are
+foreground, crop inclusive point bounds, build a minimal vertical RunTable,
+and replace the inter bounds with the positioned glyph bounds. The
+`native_heads_seed_glyphs` compositor validates system/staff/catalog and
+candidate/search provenance, preserves dense successful-head order, drops null
+retrievals, and records the good-head side tally only after successful glyph
+creation. The same eight-page differential proves all 3,435 provisional
+candidates survive and matches every final Java row by order, provenance,
+shape, selected distance, pitch, grade/impact bits, pre/post bounds, glyph
+weight/run digest, good flag, and LEFT/RIGHT tally. Java's process-global glyph
+and SIG IDs are intentionally not fabricated; range lookup is the next
+algorithmic boundary.
+
 **Nothing through the preceding retained-prerequisite checkpoint is unverified
 by CI as of Rust run `31254538949` and Java run `31254538976`**, both green on
 both legs with a full step list. That closes the `opt-level = 2` dev profile,
