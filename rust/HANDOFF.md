@@ -105,6 +105,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS head-corner reachability boundary | `materialize_native_stems_head_corner_reachability` is production and exact across 8 pages / 30 systems / 3,521 heads / 14,084 corners. It assigns 1,340 seeds, retains 4,566 C and 8,120 B targets in C-before-B order, writes every C seed list, and creates 1,687 head-origin anchors for 3,948 final BLinkers. Its 16,501 checks preserve the 2,417 V builders and keep all 14,084 C builders null, with zero forbidden SIG/link/registry mutation; the normal gate has 2 tests and 0 ignored |
 | STEMS head-origin `StemBuilder` boundary | `materialize_native_stems_head_builders` is the ninth exact boundary: all 14,084 C-origin builders materialize after the 2,417 beam builders in the real system-interleaved registry chronology. The full stream matches 19,295 head registrations (4,619 new / 14,676 reuse), 29,120 items, 165 gaps, 70,420 profile lengths, and 42,252 sort audits; SIG/system-stem/link/unexpected mutations are zero. The corpus is inspect-profile 1 with no profile divergence or VIP heads; profile divergence and JDK sort inputs at 32 fail closed, while Java's 6,087 non-VIP low-remain keeps and processed-without-compound sticker rule remain live. The normal eight-page gate passed twice (84.48s / 88.93s), and strict integration-test Clippy is green |
 | STEMS beam-origin `VLinker.expand`/link-plan boundary | `materialize_native_stems_beam_link_plans` is the tenth exact boundary: an immutable matrix evaluates profiles 0 through 3/4 for every inspected non-anchor beam builder and stops before `StemBuilder.createStem`. The full eight-page gate matches 11,573 plans, 18,345 final relations, 12,523 final Glyph entries, and all 120,646 body lines (120,636 semantic rows plus the 10-line shared header). It exposes 3,226 downward shared-line/current-attachment deltas, 49 rollback-line divergences, two dynamic-side mismatches, the profile-4 terminal-head 9/632/645 partition, and zero forbidden mutations without applying scheduler state. Eleven focused units, two full runs (32.25s / 32.41s), and strict integration-test Clippy are green |
+| STEMS deterministic beam-scheduler frontier | `materialize_native_stems_beam_scheduler_frontiers` is the eleventh exact boundary: it reconstructs 651 page-global canonical live Glyph aliases and 78 live raw hook/full-beam Exclusions, then replays all 803 beams in stable reverse-width/SIG order across 322 width ties. The 30 systems reach 56 attempts: 26 empty-target skips remove 14 beams from local worklists, then 30 `ReadyForCreateStem` plans stop as typed `AwaitingVLinkTransaction` frontiers. Ready is feasibility, not success. Fourteen pending downward line/attachment deltas remain unapplied; known-false invocation, stump, hook-removal, retry, completion, and persistent-mutation counts are zero. Eight focused units, three active integration tests with one fast diagnostic ignored, the 31.09-second integration run, the independent 31.41-second root full gate, and strict integration-test Clippy are green |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -139,12 +140,12 @@ remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
-eight-page image-pipeline differentials, including complete HEADS and ten
-production semantic STEMS boundaries through the exact isolated beam-origin
-`VLinker.expand`/link-plan prefix. The tenth gate projects all 120,646 body
-lines—120,636 semantic rows plus the 10-line shared header—exactly in independent
-32.25-second and root 32.41-second runs; its 11 focused unit tests and strict
-integration-test Clippy are green.
+eight-page image-pipeline differentials, including complete HEADS and the exact
+semantic STEMS boundaries described below. The eleventh scheduler frontier has
+8/8 focused production units; its normal integration suite is 3 passed / 0
+failed / 1 ignored in 31.09 seconds, with only the faster Chula diagnostic
+ignored. The independent root full gate passes in 31.41 seconds, and strict
+integration-test Clippy is green.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -992,13 +993,72 @@ Eleven focused unit tests and all 120,646 body lines—120,636 semantic rows plu
 the 10-line shared header—pass; independent and root full native runs completed
 in 32.25 and 32.41 seconds, and strict integration-test Clippy is green.
 
-The next boundary is a scheduler-readiness/selection bridge. It must supply
-canonical beam/hook Glyph identity plus live Exclusion/competing-hook topology,
-then replay beam width and SIG order, side/stump profile selection, and
-TOP/BOTTOM attempt order to select among these frozen plans. It still stops
-before `StemBuilder.createStem`. The following milestone, kept deliberately
-separate, is the first stateful `createStem`/GlyphIndex/`systemStems`/SIG
-transaction.
+`materialize_native_stems_beam_scheduler_frontiers` closes the eleventh
+production semantic STEMS boundary. It resumes the live deterministic prefix
+of `StemsRetriever.linkStems` independently for each system, before the first
+operation whose result depends on persistent recognition state. The product
+reconstructs beam/hook SIG order, exact page-global `(bounds, RunTable)` Glyph
+identity, ordered live raw hook/full-beam Exclusions, and the first qualifying
+identity-equal competing hook. It then uses Java's stable decreasing integer-
+width sort (retaining SIG order on ties), LEFT then RIGHT side order, TOP then
+BOTTOM V order, target precheck, and the exact side-profile rule: the system
+profile for hooks or full beams with a competitor, otherwise `BEAM_SIDE` profile
+4. Stump scheduling is represented too, including structural side-stump
+containment, but no frozen system reaches it before its transaction frontier.
+
+Across eight pages and 30 systems, the scheduler sees all 803 beams, 322
+adjacent width ties, 651 page-global canonical live Glyph aliases, and 78 live
+raw hook/full-beam Exclusions. It records 56 attempts. Twenty-six attempts are
+empty-target precheck skips and invoke no isolated plan; they make 14 beams fail
+side linking and disappear only from the local scheduler worklists, not from
+the live SIG. The next invoked plan in every system is one of 30
+`ReadyForCreateStem` plans, so all 30 systems stop at a typed
+`AwaitingVLinkTransaction` in the side pass. `ReadyForCreateStem` means only
+that the frozen expand/link prefix reached the call site: it is not a successful
+V link and does not predict the result of `createStem` or later relation work.
+
+Fourteen of the awaited downward calls carry a pending stored-theoretical-line
+and current-attachment delta. The frontier publishes each exact delta but
+applies none. No known-false plan is invoked on this corpus, so there are zero
+already-deferred known-false line deltas; there are also zero stump rows,
+`AwaitingHookRemovalTransaction` frontiers, shifted-V retries, or completed
+systems. The typed product retains those distinctions and fails closed rather
+than crossing a retry or competing-hook removal whose inputs would already have
+changed. It performs zero `StemBuilder.createStem`, GlyphIndex registration,
+`systemStems` insertion, SIG vertex/edge/removal, relation/link-flag, stored-line,
+attachment, or other persistent mutation.
+
+The eight split fixtures total 1,041 lines / 467,955 bytes. Their combined
+emitted body is 998 lines / 460,651 bytes—993 semantic rows plus the five-line
+shared header—with SHA-256
+`8ff44c35d8c1e2334c56c4d7e546fdaacbcb2964a1ab6103168f25346e041ff1`.
+Manifest, probe, runner, and manifest-body SHA-256 are
+`b6b77cdead537a70b482ae7ef5d5c8312cc5993529382f1f39fb4779afa7abb2`,
+`afb5c564a474bc0c227b9fdc886cf892c60ae39aa62c1d93cef8aaf610b90fba`,
+`2d5609b5c5ef713aa3fda6467d000fad89cd8147e97d1541b5060305b414c99e`, and
+`58a53b185d6e178314ce37014a1b29410278fe2691a5704891412f937fe49f84`.
+The eight fixture SHA-256 values, in manifest order (Chula, Allegretto,
+Batuque, Carmen, Cucaracha, Hove, Zizi, Bach), are
+`5b2c92667118829af8c012c885a576205dc7184a1d6a1cb6440dd83a84561240`,
+`ce8abcc8831c634620171c6652ad77c5ddb0091a3e709e3df66f2cdf2e6314c3`,
+`f6b25b2e83a075542696bdadf68cb59536a52eb4fcab4f0f320affdad6515161`,
+`50c59f895bccf01ee3f560c441819fdae4e9cf338bc2b5d06724f0b364ecb654`,
+`9547f949810b7f80a112e02ea481fd79fc94e4fdd7b2e7969180c0195a426703`,
+`01b448ad3007fa5323d78c4f4d386facada2b05410134b787b4e0ed8218a91f5`,
+`92c32245ce076ce5bec0e4905f5308f87e8bf36d3511f80b5231e2bb22506412`, and
+`ace8244c5ca9921c8841afb2507577cf45a36756c8b0587eec089bbc669b00e9`.
+Eight focused production unit tests pass. The normal integration suite is 3
+passed / 0 failed / 1 ignored in 31.09 seconds: the active tests are the
+fail-closed schema-drift parser, expand-fixture provenance regression, and full
+eight-page exact corpus gate, while only the faster Chula diagnostic is ignored.
+The independent root full gate passes in 31.41 seconds, and strict
+integration-test Clippy is green.
+
+The following milestone must apply any preceding deferred line deltas and
+execute the first awaited V link serially as one stateful
+`VLinker.link`/`StemBuilder.createStem`/GlyphIndex/`systemStems`/SIG transaction.
+Later scheduler attempts, stump linking, competing-hook removal, and head-origin
+linking remain separate continuations.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3576,13 +3636,11 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Build the scheduler-readiness/selection bridge: retain canonical beam/hook
-   Glyph identity plus live Exclusion/competing-hook topology, replay beam
-   width/SIG order, side/stump profile selection, and TOP/BOTTOM attempt order,
-   then select from the frozen expansion plans while still stopping before
-   `StemBuilder.createStem`.
-2. Port the first stateful `StemBuilder.createStem` / GlyphIndex / `systemStems`
-   / SIG transaction as a separate boundary after scheduler selection.
+1. Apply any preceding deferred line deltas and execute the first awaited V link
+   serially as one stateful `VLinker.link` / `StemBuilder.createStem` /
+   GlyphIndex / `systemStems` / SIG transaction.
+2. Continue later beam-scheduler attempts, stump linking, competing-hook
+   removal, and head-origin linking as separately graded boundaries.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

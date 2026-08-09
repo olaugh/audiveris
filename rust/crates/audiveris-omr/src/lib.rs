@@ -80,6 +80,7 @@ pub mod native_stem_seeds;
 pub mod native_stems_beam_builders;
 pub mod native_stems_beam_link_plans;
 pub mod native_stems_beam_reachability;
+pub mod native_stems_beam_scheduler;
 pub mod native_stems_beam_stumps;
 pub mod native_stems_beam_vlinkers;
 pub mod native_stems_head_builders;

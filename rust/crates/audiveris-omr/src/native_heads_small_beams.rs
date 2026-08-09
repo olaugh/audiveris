@@ -382,7 +382,7 @@ fn beam_contextual_grades(
 /// Initial `createBeamInters` inserts an exclusion only for the hook and beam
 /// created from the same item. They are adjacent in the global raw stream,
 /// hook first. Secondary `buildHooks` products are never in such a pair.
-fn raw_hook_beam_exclusion_key(
+pub(crate) fn raw_hook_beam_exclusion_key(
     recognition: &NativeBeamRecognition,
     ordinal: usize,
 ) -> Option<usize> {
