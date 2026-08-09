@@ -647,7 +647,11 @@ fn add_vertical_stickers(
                 continue;
             };
             for neighbor in neighbors(linked, index, reverse).iter().copied() {
-                if !linked[neighbor].processed
+                // Java deliberately checks the `compound` link here, not the
+                // processed flag. A section accepted while thickening is
+                // marked processed without having its compound assigned, so
+                // a later filament can still reuse it as an isolated sticker.
+                if linked[neighbor].compound_id.is_none()
                     && linked[neighbor].section.run_count() == 1
                     && neighbors(linked, neighbor, reverse).is_empty()
                 {
@@ -1117,5 +1121,23 @@ mod tests {
         assert_eq!(outcome.error, None);
         assert_eq!(outcome.result.creation_ids(), [1]);
         assert_eq!(outcome.result.survivors().len(), 1);
+    }
+
+    #[test]
+    fn vertical_sticker_uses_java_compound_state_not_processed_state() {
+        let mut table = RunTable::new(Orientation::Vertical, 2, 5).unwrap();
+        assert!(table.add_run(0, Run::new(0, 4)).unwrap());
+        assert!(table.add_run(1, Run::new(1, 1)).unwrap());
+        let sections = build_sections_from_id(&table, JunctionPolicy::Shift { max_shift: 0 }, 1);
+        assert_eq!(sections.len(), 2);
+        let mut linked = build_graph(&sections);
+        linked[1].processed = true;
+        assert_eq!(linked[1].compound_id, None);
+        let mut members = vec![sections[0].clone()];
+
+        add_vertical_stickers(&mut members, 7, &mut linked, &[], &BTreeMap::new());
+
+        assert_eq!(members.iter().map(Section::id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(linked[1].compound_id, Some(7));
     }
 }

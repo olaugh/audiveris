@@ -103,6 +103,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS source-ordered beam/head reachability boundary | the production compositor visits all 2,417 VLinkers in Java order, performs 1,617 cross-beam searches, creates 145 anchors and reuses 215 anchors, preserves immediate/final B arenas, and accepts 5,059 ordered head corners after exact area/distance/void-side filtering; it precedes the beam-origin builders |
 | STEMS beam-origin `StemBuilder` boundary | every beam-origin V inspection reaches the actual source-ordered `StemBuilder` constructor and V `sb` assignment for 2,417 builders. The direction differs from its V only for Carmen system 2 / builder 56 (1,390 TOP / 1,027 BOTTOM builders); 2,169 seeds become 1,954, 6,676 targets become 6,670 (1,617 B / 5,053 C), 1,442 chunk glyph registrations yield 799 new and 643 reuse, 175 chunks are removed, and 9,419 final items yield 12,085 length rows. The bounded registry has zero external/unmodeled reuse without claiming global novelty; SIG/system-stem/link/C-builder/unexpected mutation counts are all zero |
 | STEMS head-corner reachability boundary | `materialize_native_stems_head_corner_reachability` is production and exact across 8 pages / 30 systems / 3,521 heads / 14,084 corners. It assigns 1,340 seeds, retains 4,566 C and 8,120 B targets in C-before-B order, writes every C seed list, and creates 1,687 head-origin anchors for 3,948 final BLinkers. Its 16,501 checks preserve the 2,417 V builders and keep all 14,084 C builders null, with zero forbidden SIG/link/registry mutation; the normal gate has 2 tests and 0 ignored |
+| STEMS head-origin `StemBuilder` boundary | `materialize_native_stems_head_builders` is the ninth exact boundary: all 14,084 C-origin builders materialize after the 2,417 beam builders in the real system-interleaved registry chronology. The full stream matches 19,295 head registrations (4,619 new / 14,676 reuse), 29,120 items, 165 gaps, 70,420 profile lengths, and 42,252 sort audits; SIG/system-stem/link/unexpected mutations are zero. The corpus is inspect-profile 1 with no profile divergence or VIP heads; profile divergence and JDK sort inputs at 32 fail closed, while Java's 6,087 non-VIP low-remain keeps and processed-without-compound sticker rule remain live. The normal eight-page gate passed twice (84.48s / 88.93s), and strict integration-test Clippy is green |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -137,9 +138,11 @@ remains.
 
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
-eight-page image-pipeline differentials, including complete HEADS and eight
-production semantic STEMS boundaries through exact head-corner reachability
-and head-origin anchor mutation.
+eight-page image-pipeline differentials, including complete HEADS and nine
+production semantic STEMS boundaries through exact head-origin `StemBuilder`
+construction. The normal full semantic-stream gate passed independently in
+84.48 seconds and again in root verification in 88.93 seconds; strict
+integration-test Clippy is green.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -847,8 +850,8 @@ registry mutation counts are zero. Scope remains limited to the standard
 black/void stem-capable heads in the corpus; small-head truncation is not
 implemented. The reachability-only beam prefix intentionally omits prior beam
 `StemBuilder` local/registry mutations because C reachability does not read
-them. The full C-builder boundary must resume the actual registry timeline from
-the beam-builder product. An audit of the replay sort confirmed
+them. The ninth boundary resumes the actual registry timeline from the
+beam-builder product. An audit of the replay sort confirmed
 `BeamGroupInter.getMembers()` returns a fresh list; the hardened probe still
 clones it and snapshots/asserts every group member identity/order throughout.
 
@@ -859,11 +862,70 @@ and fixture SHA-256 are
 `b3f10b53346adac1309d12fa2d245840a88b02c17e399e88d7e5e36f0358889b`, and
 `537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
 The normal CI gate is green with two tests and zero ignored; its semantic run
-completed in 33.18 seconds. Next is the full head-origin CLinker `StemBuilder`
-constructor boundary, followed separately by linking/SIG mutation. The final
-native HEADS product now carries explicit `is_vip = false` evidence from its
+completed in 33.18 seconds. The final native HEADS product now carries explicit
+`is_vip = false` evidence from its
 current creation path; consumers must handle or fail closed on any future true
 value because Java's VIP-only `filterHeadParts` behavior is semantic.
+
+`materialize_native_stems_head_builders` closes the ninth production semantic
+STEMS boundary. It resumes the actual page registry instead of the eighth
+boundary's reachability-only prefix: for each of 30 systems it replays stump
+registrations, all real beam-origin constructor registrations, then every
+head-origin C builder before moving to the next system. The bounded baseline is
+structural and contains only live glyphs after MultipleRest replacement; it is
+not a claim about unrelated entries or Java IDs in the global `GlyphIndex`.
+Across the eight pages, 8,939 stump attempts yield 5,581 New / 3,358 Reuse,
+1,442 beam registrations yield 796 New / 646 Reuse, and 19,295 head registrations
+yield 4,619 New / 14,676 Reuse. The chronology matters: it exposes eight stump
+action differences from isolated order and three later-beam action/reuse changes
+caused by earlier head chunks.
+
+All 14,084 C-origin builders materialize in head-x then TR/BL/TL/BR inspection
+order, split evenly between 7,042 TOP and 7,042 BOTTOM, with no direction
+divergence. The constructor scans 15,953,076 vertical and 14,436,784 horizontal
+sections, accepts 34,526 and 23,787, builds 19,295 filaments from 45,938 members,
+and retains 29,120 final items. Its 35,424 gap checks insert 165 gaps and record
+6,469 truncations; the exact gate reproduces all 70,420 profile-0-through-4
+lengths from the independent Java replay. Its 42,252 sort rows retain all 8
+comparator cycles and 319 equivalence findings. The three frozen list maxima are
+2 retrieve-seed, 7 target,
+and 13 final items; production rejects any JDK sort input of 32 or more rather
+than claiming the unported large-array merge path.
+
+The corpus uses inspect profile 1 in every system and has zero profile
+divergences; production rejects a page inspect profile that differs from the
+effective system profile. It contains no VIP or small heads. The implementation
+nevertheless retains Java's `filterHeadParts` bug exactly: all 6,087 chunks below
+the remaining-weight threshold stay for non-VIP heads, whereas only VIP inputs
+take the removal branch. The shared vertical `StickFactory` also preserves the
+source's processed-without-compound distinction: a side accepted while
+thickening is processed but has no compound link and can therefore be reused by
+a later filament as an isolated sticker. SIG, `systemStems`, link state, and
+unexpected-builder mutation counts are all zero. The seam ends after the C
+linker's `sb` assignment, before `VLinker.expand`, `StemBuilder.createStem`, or
+any relation/SIG mutation.
+
+Two fresh-JVM corpus passes produced byte-identical split fixtures totaling
+593,749 lines / 171,932,512 bytes. Manifest, probe, and runner SHA-256 are
+`21d8d11beb4a8895759198f17a45a981a66f9554c9559d1711db09f3db7b764e`,
+`364ad5d74f15c9cbaf77b67da987f6bc3a309c0bd5c80093f34185d6c4ceadd9`, and
+`215410766e419685c6cf3a5c9c8f2c8e7ac39b0f02ef18780f4a67450ae91b37`.
+The eight full fixture SHA-256 values, in manifest order (Chula, Allegretto,
+Batuque, Carmen, Cucaracha, Hove, Zizi, Bach), are
+`c001dd763ccd8849c6d95379d45ce15f94e6ce7d8bf364e7a9b408f072ff645c`,
+`195a65e77f321aa45758d19e7448f7f1c1458918858a64099936e741d0a456b0`,
+`8320a7b4e645620784d66f67ad7b8e5cee866c72a30e310102f4726542a498bf`,
+`43d94ddb7af2ebd36c29dae70446b27189d9b045afcf4724d79566e2608ff03a`,
+`87c8b9ba51361a777d0529fa8a397263cafce593bd552ddbbf1fe5408758ed21`,
+`c098170dc32bc1773c1d5319a459cbf3b4ba93fa076626a78f2aaa9fbaffcbc4`,
+`745b90cb61b637ab829c9495dd379709479fd7cfbe59b1cdfef73807523cac43`, and
+`66b77dd58f4cf3ac3b8e3971695bb7aab953f95e44cd6ba69625efb7450aa6a6`.
+The normal eight-page full native semantic-stream gate is green twice:
+84.48 seconds in the independent run and 88.93 seconds in root verification.
+Strict integration-test Clippy is also green. The next exact seam is the pure
+beam-origin `VLinker.expand`/link-plan prefix, stopping before
+`StemBuilder.createStem`; persistent linking and SIG mutation remain separate
+later boundaries.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3441,8 +3503,9 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Port the full head-origin CLinker `StemBuilder` constructors, then later
-   linking/SIG mutation at separate identity-free boundaries.
+1. Port the pure beam-origin `VLinker.expand`/link-plan prefix, stopping before
+   `StemBuilder.createStem`; keep persistent linking/SIG mutation as separate
+   identity-free boundaries.
 2. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 3. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the

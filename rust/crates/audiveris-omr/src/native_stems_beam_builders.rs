@@ -8,7 +8,12 @@
 //! bounded model of the sheet glyph registry.  It stops before `VLinker.expand`
 //! can make a `StemInter`, alter SIG, or attach a link.
 
-use std::{cmp::Ordering, collections::BTreeMap, error::Error, fmt};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use audiveris_image::{
     beam_structure::Segment,
@@ -25,7 +30,8 @@ use crate::{
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
     native_stem_seeds::{
-        NativeStemSeedGlyph, NativeStemSeedRecognition, contains_section_centroid,
+        NativeStemSeedDecision, NativeStemSeedGlyph, NativeStemSeedRecognition,
+        contains_section_centroid,
     },
     native_stems_beam_reachability::{
         NativeStemsBeamArenaEntry, NativeStemsBeamHeadCornerRef,
@@ -78,7 +84,16 @@ pub struct NativeStemsBeamBuilderRecognition {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NativeStemsBeamBuilderRegistryBaseline {
     pub staff_line_glyphs: usize,
+    /// All raw StickFactory candidates, including candidates gated before
+    /// `toGlyph`/registration.
+    pub stem_seed_raw_candidates: usize,
+    pub stem_seed_skipped_candidates: usize,
+    /// Every checked candidate registered before the grade decision.
     pub stem_seed_glyphs: usize,
+    pub stem_seed_rejected_glyphs: usize,
+    /// Distinct fixed contents contributed by checked candidates. Structural
+    /// duplicates still count separately in `stem_seed_glyphs` above.
+    pub stem_seed_unique_contents: usize,
     pub beam_glyphs: usize,
     pub ledger_glyphs: usize,
     pub head_glyphs: usize,
@@ -2585,7 +2600,7 @@ fn quad_intersects_bounds(quad: [NativeStemPoint; 4], bounds: JavaRectangle) -> 
 fn java_rint(value: f64) -> i32 {
     value.round_ties_even() as i32
 }
-fn java_double_compare(left: f64, right: f64) -> i32 {
+pub(crate) fn java_double_compare(left: f64, right: f64) -> i32 {
     if left < right {
         -1
     } else if left > right {
@@ -2615,9 +2630,9 @@ fn same_identity(left: &FixedGlyph, right: &FixedGlyph) -> bool {
         && left.modeled_canonical_ordinal.is_some()
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct GlyphKey {
-    bounds: Bounds,
-    run_table: RunTable,
+pub(crate) struct GlyphKey {
+    pub(crate) bounds: Bounds,
+    pub(crate) run_table: RunTable,
 }
 
 #[derive(Clone)]
@@ -2626,23 +2641,61 @@ struct RegisteredGlyph {
     modeled_canonical_ordinal: usize,
 }
 
-struct RegistryRegistration {
-    modeled_canonical_ordinal: usize,
-    action: NativeStemsBeamBuilderRegistrationAction,
+pub(crate) struct RegistryRegistration {
+    pub(crate) modeled_canonical_ordinal: usize,
+    pub(crate) action: NativeStemsBeamBuilderRegistrationAction,
 }
 
-struct GlyphRegistry {
+pub(crate) struct GlyphRegistry {
     entries: Vec<RegisteredGlyph>,
     next_canonical_ordinal: usize,
-    baseline: NativeStemsBeamBuilderRegistryBaseline,
+    pub(crate) baseline: NativeStemsBeamBuilderRegistryBaseline,
 }
 impl GlyphRegistry {
-    fn seeded(
+    pub(crate) fn seeded(
         grid: &GridLinesRecognition,
         beams: &NativeBeamRecognition,
         ledgers: &NativeLedgerRecognition,
         heads: &NativeHeadsRecognition,
         seeds: &NativeStemSeedRecognition,
+    ) -> Result<Self, NativeStemsBeamBuilderError> {
+        Self::seeded_without_raw_beams(grid, beams, ledgers, heads, seeds, &BTreeSet::new())
+    }
+
+    /// Seed the bounded registry visible to the source-ordered head-builder
+    /// replay. Java walks the live SIG here, after `MultipleRestsBuilder` has
+    /// removed each replaced source beam. The standalone beam-builder boundary
+    /// deliberately retains its earlier pre-replacement baseline.
+    pub(crate) fn seeded_for_head_builders(
+        grid: &GridLinesRecognition,
+        beams: &NativeBeamRecognition,
+        ledgers: &NativeLedgerRecognition,
+        heads: &NativeHeadsRecognition,
+        seeds: &NativeStemSeedRecognition,
+    ) -> Result<Self, NativeStemsBeamBuilderError> {
+        let mut removed = BTreeSet::new();
+        for rest in &beams.multiple_rests {
+            let Some((owner, _)) = beams.raw_beam_glyphs.get(rest.source_beam_ordinal) else {
+                return Err(NativeStemsBeamBuilderError::Geometry {
+                    system_id: rest.system_id,
+                });
+            };
+            if *owner != rest.system_id || !removed.insert(rest.source_beam_ordinal) {
+                return Err(NativeStemsBeamBuilderError::Geometry {
+                    system_id: rest.system_id,
+                });
+            }
+        }
+        Self::seeded_without_raw_beams(grid, beams, ledgers, heads, seeds, &removed)
+    }
+
+    fn seeded_without_raw_beams(
+        grid: &GridLinesRecognition,
+        beams: &NativeBeamRecognition,
+        ledgers: &NativeLedgerRecognition,
+        heads: &NativeHeadsRecognition,
+        seeds: &NativeStemSeedRecognition,
+        removed_raw_beams: &BTreeSet<usize>,
     ) -> Result<Self, NativeStemsBeamBuilderError> {
         let mut value = Self {
             entries: Vec::new(),
@@ -2666,13 +2719,44 @@ impl GlyphRegistry {
                 value.baseline.staff_line_glyphs += 1;
             }
         }
+        let mut seed_keys = Vec::new();
         for system in &seeds.systems {
+            value.baseline.stem_seed_raw_candidates += system.decisions.len();
+            value.baseline.stem_seed_skipped_candidates += system
+                .decisions
+                .iter()
+                .filter(|decision| matches!(decision, NativeStemSeedDecision::Skipped { .. }))
+                .count();
+            value.baseline.stem_seed_rejected_glyphs += system
+                .decisions
+                .iter()
+                .filter(|decision| {
+                    matches!(
+                        decision,
+                        NativeStemSeedDecision::Checked {
+                            accepted: false,
+                            ..
+                        }
+                    )
+                })
+                .count();
             for glyph in &system.registered_glyphs {
-                value.insert(glyph.bounds, glyph.run_table.clone());
+                let key = GlyphKey {
+                    bounds: glyph.bounds,
+                    run_table: glyph.run_table.clone(),
+                };
+                if !seed_keys.contains(&key) {
+                    seed_keys.push(key.clone());
+                    value.baseline.stem_seed_unique_contents += 1;
+                }
+                value.insert_key(key);
                 value.baseline.stem_seed_glyphs += 1;
             }
         }
-        for (_, glyph) in &beams.raw_beam_glyphs {
+        for (ordinal, (_, glyph)) in beams.raw_beam_glyphs.iter().enumerate() {
+            if removed_raw_beams.contains(&ordinal) {
+                continue;
+            }
             value.insert(beam_bounds(glyph)?, glyph.run_table.clone());
             value.baseline.beam_glyphs += 1;
         }
@@ -2709,7 +2793,7 @@ impl GlyphRegistry {
         Ok(value)
     }
 
-    fn replay_system_stumps(
+    pub(crate) fn replay_system_stumps(
         &mut self,
         beam_stumps: &crate::native_stems_beam_stumps::NativeStemsBeamStumpSystem,
         head_stumps: &crate::native_stems_head_stumps::NativeStemsHeadStumpSystem,
@@ -2792,7 +2876,7 @@ impl GlyphRegistry {
         rows
     }
 
-    fn find(&self, key: &GlyphKey) -> Option<usize> {
+    pub(crate) fn find(&self, key: &GlyphKey) -> Option<usize> {
         self.entries
             .iter()
             .find(|entry| entry.key == *key)
@@ -2817,7 +2901,11 @@ impl GlyphRegistry {
         modeled_canonical_ordinal
     }
 
-    fn register_parts(&mut self, bounds: Bounds, run_table: RunTable) -> RegistryRegistration {
+    pub(crate) fn register_parts(
+        &mut self,
+        bounds: Bounds,
+        run_table: RunTable,
+    ) -> RegistryRegistration {
         let key = GlyphKey { bounds, run_table };
         if let Some(modeled_canonical_ordinal) = self.find(&key) {
             RegistryRegistration {
@@ -2838,6 +2926,10 @@ impl GlyphRegistry {
                 },
             }
         }
+    }
+
+    pub(crate) fn modeled_count(&self) -> usize {
+        self.entries.len()
     }
 
     fn register(&mut self, glyph: &mut FixedGlyph) -> RegistryRegistration {
