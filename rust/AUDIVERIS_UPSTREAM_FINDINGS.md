@@ -23,9 +23,9 @@ Java source checked into this repository and may move.
   `it.remove()` outside the inner VIP condition while retaining the
   `remain < 15` guard.
 - **Rust parity policy:** preserve the Java behavior until the upstream Java
-  behavior changes and a new oracle fixture is frozen. This branch applies to
-  head-origin builders, not the beam-origin `StemBuilder` boundary currently
-  being ported.
+  behavior changes and a new oracle fixture is frozen. The completed
+  beam-origin `StemBuilder` boundary is unaffected; the next head-origin
+  builder boundary grades this branch explicitly.
 
 ### AV-JAVA-002: `StemItem.lineOf` incorrectly says the `BLinker` branch covers `VLinker`
 
