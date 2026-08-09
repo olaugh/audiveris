@@ -149,6 +149,40 @@ Java source checked into this repository and may move.
   direction derived from the final theoretical line for every StemBuilder
   operation.
 
+### AV-JAVA-RISK-004: compressed MusicXML exports are not byte-reproducible
+
+- **Location:** the Java MusicXML export path that creates `.mxl` ZIP
+  containers.
+- **Behavior:** two otherwise identical Chula exports contain byte-identical
+  MusicXML but have different archive SHA-256 values because ZIP entry
+  timestamps vary between runs.
+- **Live evidence:** the inner `chula.xml` and the direct uncompressed export
+  are identical at 65,354 bytes with SHA-256
+  `317acfee5e54d73a82f97f2a44a6b640e59ad6062b127ceee088420b94d6fa2c`,
+  while repeated `.mxl` container hashes differ.
+- **Impact:** an archive hash is useful for checking one artifact after it is
+  handed between processes, but not as a semantic cache key or deterministic
+  regression pin.
+- **Likely repair:** set deterministic ZIP metadata, including entry
+  timestamps, when reproducible exports are desired.
+- **Rust parity policy:** validate and hash each produced artifact for local
+  integrity, but compare normalized inner MusicXML when judging repeatability.
+
+### AV-JAVA-RISK-005: `Sheet.export(Path)` does not report export failure to callers
+
+- **Location:**
+  `app/src/main/java/org/audiveris/omr/sheet/Sheet.java`, around lines 737–779.
+- **Behavior:** `Sheet.export(Path)` catches export exceptions, logs them, and
+  returns `void`. A programmatic caller cannot distinguish a successful export
+  from a failed one through the method result or an exception.
+- **Impact:** automation can proceed with a missing, stale, or partial output
+  unless it separately validates the requested artifact. This surfaced while
+  adding the Java PAGE-to-MusicXML preview to `omrscope`.
+- **Likely repair:** propagate the exception or return an explicit result while
+  retaining any desired user-facing log message at the UI boundary.
+- **Rust parity policy:** the export probe reopens the exact requested path and
+  validates its format, size, and digest before reporting success.
+
 ## Reporting notes
 
 Findings in test probes, Rust-only code, or oracle normalization are not listed

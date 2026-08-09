@@ -5,6 +5,7 @@
 
 #include <QImage>
 #include <QWidget>
+#include <optional>
 
 namespace omrscope {
 
@@ -27,6 +28,18 @@ public:
     void setShowJava(bool show);
     void setShowRejected(bool show);
     void setShowStaves(bool show);
+    void setShowRelations(bool show);
+    /// A translucent underlay for all rows in the current table filter. The
+    /// ordinary agreement colours are painted after it and remain authoritative.
+    void setShowVisiblePairs(bool show);
+    void setVisiblePairs(const QVector<Pairing> &pairs);
+    /// Select exactly the already paired same-stage row from the Inters table.
+    /// A drawable endpoint is centered; geometry-free rows are left unplaced.
+    void setSelectedPairing(const std::optional<Pairing> &pairing);
+
+    [[nodiscard]] std::optional<QPointF> selectedFocus() const;
+    [[nodiscard]] std::optional<QPointF> selectedFocusInViewport() const;
+    [[nodiscard]] int drawableRelationCount(Engine engine) const;
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -36,6 +49,9 @@ protected:
 
 private:
     QTransform sheetToWidget() const;
+    std::optional<QRectF> visualBounds(const Inter &inter, const EngineResult &result) const;
+    std::optional<QPointF> pairingFocus(const Pairing &pairing) const;
+    void centerOn(const QPointF &point);
 
     QImage image_;
     EngineResult rust_;
@@ -44,6 +60,10 @@ private:
     bool showJava_ = true;
     bool showRejected_ = true;
     bool showStaves_ = true;
+    bool showRelations_ = false;
+    bool showVisiblePairs_ = false;
+    QVector<Pairing> visiblePairs_;
+    std::optional<Pairing> selectedPairing_;
     double zoom_ = 0.0; ///< Zero means fit.
     QPointF pan_;
     QPoint dragFrom_;

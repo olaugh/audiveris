@@ -10,6 +10,7 @@ gradle.projectsEvaluated {
         return
     }
     def outputDir = app.layout.buildDirectory.dir('rust-impacts/classes')
+    def musicXmlExportOutputDir = app.layout.buildDirectory.dir('rust-musicxml-export/classes')
 
     app.tasks.register('compileStaffImpactsProbe', JavaCompile) {
         source = app.fileTree("${gradle.rootProject.projectDir}/rust/oracle/java") {
@@ -18,6 +19,50 @@ gradle.projectsEvaluated {
         classpath = app.sourceSets.test.runtimeClasspath
         destinationDirectory = outputDir
         options.release.set(25)
+    }
+
+    // Compile export independently of the parity-oracle source tree. This keeps the GUI's PAGE
+    // export command available while an unrelated diagnostic probe is being developed.
+    app.tasks.register('compileMusicXmlExportProbe', Exec) {
+        // JavaCompile fingerprints every classpath entry before it invokes javac. On a synced
+        // checkout that scan can take longer than PAGE itself. This explicit one-file compile has
+        // no incremental state to protect and still uses Gradle's exact application classpath.
+        doFirst {
+            def classes = musicXmlExportOutputDir.get().asFile
+            classes.mkdirs()
+            commandLine(
+                    new File(System.getProperty('java.home'), 'bin/javac').absolutePath,
+                    '--release', '25',
+                    '-cp', app.sourceSets.main.runtimeClasspath.asPath,
+                    '-d', classes.absolutePath,
+                    "${gradle.rootProject.projectDir}/rust/oracle/java/org/audiveris/omr/rustport/MusicXmlExportProbe.java")
+        }
+    }
+
+    // A separate task, property set, and stdout prefix keep export additive to both `sigProbe`
+    // and `sigStreamProbe`. Each path is its own Gradle argument, so spaces are unambiguous.
+    app.tasks.register('musicXmlExportProbe', JavaExec) {
+        dependsOn 'compileMusicXmlExportProbe'
+        classpath = app.files(musicXmlExportOutputDir) + app.sourceSets.main.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.MusicXmlExportProbe'
+        workingDir = app.projectDir
+        maxHeapSize = (app.findProperty('musicXmlExportXmx') ?: '8g').toString()
+        doNotTrackState('interactive export writes to the caller path; no reusable task output')
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+
+        def resolve = { String value ->
+            if (value.isEmpty()) {
+                return value
+            }
+            def file = new File(value)
+            return (file.isAbsolute() ? file
+                    : new File(gradle.rootProject.projectDir, value)).absolutePath
+        }
+        def input = (app.findProperty('musicXmlExportInput') ?: '').toString()
+        def sheet = (app.findProperty('musicXmlExportSheet') ?: '').toString()
+        def output = (app.findProperty('musicXmlExportOutput') ?: '').toString()
+        args = [resolve(input), sheet, resolve(output)]
     }
 
     // The probe drives the step engine itself rather than going through

@@ -70,7 +70,7 @@ int main(int argc, char **argv)
                 "incomplete HEADERS bounds are not fabricated with zeroes");
 
     const omrscope::Inter &stemSeed = result.inters[5];
-    ok &= check(stemSeed.id == 0, "STEM_SEEDS parser does not invent an inter id");
+    ok &= check(stemSeed.id == -1, "STEM_SEEDS parser does not invent an inter id");
     ok &= check(stemSeed.kind == QLatin1String("VERTICAL_SEED") && stemSeed.staff == 2,
                 "accepted STEM_SEEDS identity is retained");
     ok &= check(close(stemSeed.grade, 0.88), "accepted STEM_SEEDS grade is retained");
@@ -143,6 +143,25 @@ int main(int argc, char **argv)
                     && heads.inters[0].shape == QLatin1String("NOTEHEAD_BLACK")
                     && heads.inters[0].bounds.has_value(),
                 "identity-free final HEADS records become displayable viewer inters");
+
+    const omrscope::EngineResult rustRelations = omrscope::parseRustJson(QStringLiteral(
+        R"json({"schema":1,"image":{"width":10,"height":20},"inters":[{"id":5,"system":2,"kind":"BEAM","staff":1,"grade":0,"bounds":{"x":1,"y":2,"width":3,"height":4}}],"relations":[{"system":2,"source":5,"target":6,"kind":"bar-group"},{"system":2,"source":5,"target":6}]})json"));
+    ok &= check(rustRelations.inters[0].system == 2 && rustRelations.inters[0].id == 5
+                    && rustRelations.relations.size() == 1
+                    && rustRelations.relations[0].kind == QLatin1String("bar-group"),
+                "Rust relations retain system-scoped ids and reject incomplete edges");
+
+    const omrscope::EngineResult javaRelations = omrscope::parseSigProbe(
+        QStringLiteral("sheet chula.png#1 BEAMS\n"
+                       "inter 4 11 BeamInter BEAM 2 bounds 10 20 30 4 grade 0.8 ctx none frozen false\n"
+                       "relation 4 11 12 BeamStemRelation\n"
+                       "relation bad 11 12 Broken\n"));
+    ok &= check(javaRelations.inters.size() == 1 && javaRelations.inters[0].system == 4
+                    && javaRelations.inters[0].id == 11 && javaRelations.relations.size() == 1
+                    && javaRelations.relationCount == 1
+                    && javaRelations.relations[0].sourceId == 11
+                    && javaRelations.relations[0].targetId == 12,
+                "Java relation endpoints remain system-local and malformed rows are omitted");
 
     // QProcess can split either marker across readyRead calls. The common
     // framer must retain the suffix and only hand complete lines to the marker

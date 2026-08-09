@@ -3,6 +3,7 @@
 
 #include <QLineF>
 #include <QPair>
+#include <QPointF>
 #include <QPolygonF>
 #include <QRectF>
 #include <QString>
@@ -29,7 +30,10 @@ struct Impact
 /// field that is present-but-meaningless on one side is worse than absent.
 struct Inter
 {
-    int id = 0;
+    /// `id` is scoped to a system. -1 means the published product is
+    /// deliberately identity-free (for example final HEADS), not inter #0.
+    int id = -1;
+    int system = -1;
     QString kind;                   ///< BarlineInter, THIN_BARLINE, BEAM...
     QString shape;
     int staff = -1;
@@ -43,6 +47,25 @@ struct Inter
     QVector<Impact> impacts;
     bool rejected = false;          ///< A candidate that lost.
     QString rejectedBy;             ///< The purge that dropped it.
+};
+
+/// A directed SIG edge as one engine reported it. IDs are intentionally kept
+/// engine-local: a Rust id and a Java id do not identify the same inter.
+struct Relation
+{
+    int system = -1;
+    int sourceId = -1;
+    int targetId = -1;
+    QString kind;
+};
+
+/// A relation whose two reported endpoint IDs resolve to one drawable inter
+/// each in the same result snapshot. Ambiguous and geometry-free endpoints
+/// are deliberately absent rather than guessed from nearby marks.
+struct RelationLine
+{
+    QLineF line;
+    QString kind;
 };
 
 struct Staff
@@ -79,6 +102,7 @@ struct EngineResult
     QSize image;
     QVector<Staff> staves;
     QVector<Inter> inters;
+    QVector<Relation> relations;
     int relationCount = 0;
     QString raw;                    ///< Verbatim output, for the log tab.
 };
@@ -135,5 +159,14 @@ struct Pairing
 
     bool agrees() const;
 };
+
+/// The location that a concrete inter reports for an engine-local graph edge.
+/// A candidate whose span has no ordinate has no relation endpoint geometry.
+std::optional<QPointF> interCenter(const Inter &inter);
+
+/// Resolve only unambiguous, engine-local relation endpoint ids. This is the
+/// model boundary for the Page graph overlay: it cannot accidentally make a
+/// cross-engine edge or infer an endpoint by spatial pairing.
+QVector<RelationLine> resolvedRelationLines(const EngineResult &result);
 
 } // namespace omrscope

@@ -15,6 +15,11 @@ const QColor kRustOnly(41, 128, 185);
 const QColor kJavaOnly(192, 57, 43);
 const QColor kRejected(243, 156, 18);
 const QColor kStaff(120, 120, 120);
+const QColor kRustRelation(41, 128, 185, 150);
+const QColor kJavaRelation(192, 57, 43, 150);
+const QColor kVisibleUnderlay(241, 196, 15, 72);
+const QColor kSelectedRust(23, 162, 184);
+const QColor kSelectedJava(155, 89, 182);
 
 double abscissaOf(const Inter &inter)
 {
@@ -49,6 +54,7 @@ void PageView::setResults(const EngineResult &rust, const EngineResult &java)
 {
     rust_ = rust;
     java_ = java;
+    selectedPairing_.reset();
     update();
 }
 
@@ -56,6 +62,101 @@ void PageView::setShowRust(bool show) { showRust_ = show; update(); }
 void PageView::setShowJava(bool show) { showJava_ = show; update(); }
 void PageView::setShowRejected(bool show) { showRejected_ = show; update(); }
 void PageView::setShowStaves(bool show) { showStaves_ = show; update(); }
+void PageView::setShowRelations(bool show) { showRelations_ = show; update(); }
+void PageView::setShowVisiblePairs(bool show) { showVisiblePairs_ = show; update(); }
+
+void PageView::setVisiblePairs(const QVector<Pairing> &pairs)
+{
+    visiblePairs_ = pairs;
+    update();
+}
+
+void PageView::setSelectedPairing(const std::optional<Pairing> &pairing)
+{
+    selectedPairing_ = pairing;
+    if (selectedPairing_) {
+        if (const auto focus = pairingFocus(*selectedPairing_)) {
+            centerOn(*focus);
+            return;
+        }
+    }
+    update();
+}
+
+std::optional<QPointF> PageView::selectedFocus() const
+{
+    return selectedPairing_ ? pairingFocus(*selectedPairing_) : std::nullopt;
+}
+
+std::optional<QPointF> PageView::selectedFocusInViewport() const
+{
+    const auto focus = selectedFocus();
+    return focus ? std::optional<QPointF>(sheetToWidget().map(*focus)) : std::nullopt;
+}
+
+int PageView::drawableRelationCount(Engine engine) const
+{
+    return resolvedRelationLines(engine == Engine::Rust ? rust_ : java_).size();
+}
+
+std::optional<QRectF> PageView::visualBounds(const Inter &inter,
+                                              const EngineResult &result) const
+{
+    if (inter.rejected) {
+        if (!inter.bounds) {
+            return std::nullopt;
+        }
+        const QRectF &span = *inter.bounds;
+        double top = 0.0;
+        double bottom = std::max(24.0, double(result.image.height()) * 0.02);
+        for (const Staff &staff : result.staves) {
+            if (staff.id != inter.staff) {
+                continue;
+            }
+            if (const auto extent = staff.verticalExtent()) {
+                top = extent->first;
+                bottom = extent->second;
+            }
+            break;
+        }
+        return QRectF(span.left(), top, span.width(), bottom - top).normalized();
+    }
+    if (inter.median) {
+        return QRectF(inter.median->p1(), inter.median->p2()).normalized();
+    }
+    return inter.bounds ? std::optional<QRectF>(inter.bounds->normalized()) : std::nullopt;
+}
+
+std::optional<QPointF> PageView::pairingFocus(const Pairing &pairing) const
+{
+    std::optional<QRectF> extent;
+    const auto include = [&](const std::optional<Inter> &inter, const EngineResult &result) {
+        if (!inter) {
+            return;
+        }
+        const auto bounds = visualBounds(*inter, result);
+        if (!bounds) {
+            return;
+        }
+        extent = extent ? extent->united(*bounds) : *bounds;
+    };
+    include(pairing.rust, rust_);
+    include(pairing.java, java_);
+    return extent ? std::optional<QPointF>(extent->center()) : std::nullopt;
+}
+
+void PageView::centerOn(const QPointF &point)
+{
+    if (width() <= 0 || height() <= 0) {
+        return;
+    }
+    const QTransform transform = sheetToWidget();
+    if (transform.m11() <= 0.0 || transform.m22() <= 0.0) {
+        return;
+    }
+    pan_ += rect().center() - transform.map(point);
+    update();
+}
 
 QTransform PageView::sheetToWidget() const
 {
@@ -94,6 +195,57 @@ void PageView::paintEvent(QPaintEvent *)
 
     const double pen = 1.0 / std::max(0.0001, transform.m11());
 
+    const auto drawBounds = [&](const Inter &inter, const EngineResult &result,
+                                const QPen &outline, const QColor &fill = QColor()) {
+        const auto bounds = visualBounds(inter, result);
+        if (!bounds) {
+            return false;
+        }
+        painter.setPen(outline);
+        painter.setBrush(fill);
+        if (inter.median && !inter.rejected) {
+            painter.drawLine(*inter.median);
+        } else {
+            painter.drawRect(*bounds);
+        }
+        return true;
+    };
+
+    // Relations are producer-owned engine-local graph edges. They are drawn
+    // beneath the inter marks and only after their reported ids resolve
+    // uniquely in this exact stage snapshot.
+    if (showRelations_) {
+        const auto drawRelations = [&](const EngineResult &result, const QColor &colour) {
+            QPen relationPen(colour, pen * 1.25);
+            relationPen.setStyle(Qt::DashLine);
+            painter.setPen(relationPen);
+            for (const RelationLine &relation : resolvedRelationLines(result)) {
+                painter.drawLine(relation.line);
+            }
+        };
+        if (showJava_) {
+            drawRelations(java_, kJavaRelation);
+        }
+        if (showRust_) {
+            drawRelations(rust_, kRustRelation);
+        }
+    }
+
+    // The filtered table list is a context layer, not a new comparison
+    // result. Paint it first so green/blue/red agreement strokes remain the
+    // visual answer underneath a translucent yellow halo.
+    if (showVisiblePairs_) {
+        QPen underlay(kVisibleUnderlay, pen * 7.0);
+        for (const Pairing &pairing : visiblePairs_) {
+            if (showJava_ && pairing.java) {
+                drawBounds(*pairing.java, java_, underlay, QColor());
+            }
+            if (showRust_ && pairing.rust) {
+                drawBounds(*pairing.rust, rust_, underlay, QColor());
+            }
+        }
+    }
+
     if (showStaves_) {
         painter.setPen(QPen(kStaff, pen));
         for (const Staff &staff : rust_.staves) {
@@ -112,41 +264,19 @@ void PageView::paintEvent(QPaintEvent *)
     if (showJava_) {
         painter.setPen(QPen(kJavaOnly, pen * 2.0));
         for (const Inter &inter : java_.inters) {
-            if (inter.bounds) {
-                painter.drawRect(*inter.bounds);
-            }
+            drawBounds(inter, java_, QPen(kJavaOnly, pen * 2.0));
         }
     }
 
     if (showRust_) {
         for (const Inter &inter : rust_.inters) {
             if (inter.rejected) {
-                if (!showRejected_ || !inter.bounds) {
+                if (!showRejected_) {
                     continue;
                 }
                 QPen dashed(kRejected, pen * 1.5);
                 dashed.setStyle(Qt::DashLine);
-                painter.setPen(dashed);
-
-                // A rejected candidate carries an abscissa span and a staff id
-                // but no ordinates, so it is drawn over the staff it belongs
-                // to. Drawing it at the top of the sheet instead -- which this
-                // did -- put every rejection in one band and made a page dense
-                // with note stems look like a page of failures at the margin.
-                const QRectF &span = *inter.bounds;
-                double top = 0.0;
-                double bottom = std::max(24.0, double(rust_.image.height()) * 0.02);
-                for (const Staff &staff : rust_.staves) {
-                    if (staff.id != inter.staff) {
-                        continue;
-                    }
-                    if (const auto extent = staff.verticalExtent()) {
-                        top = extent->first;
-                        bottom = extent->second;
-                    }
-                    break;
-                }
-                painter.drawRect(QRectF(span.left(), top, span.width(), bottom - top));
+                drawBounds(inter, rust_, dashed);
                 continue;
             }
 
@@ -164,10 +294,44 @@ void PageView::paintEvent(QPaintEvent *)
             painter.setPen(QPen(matched ? kAgree : kRustOnly, pen * 2.0));
             if (inter.median) {
                 painter.drawLine(*inter.median);
-            } else if (inter.bounds) {
-                painter.drawRect(*inter.bounds);
+            } else {
+                drawBounds(inter, rust_, QPen(matched ? kAgree : kRustOnly, pen * 2.0));
             }
         }
+    }
+
+    // Selection is an interaction overlay, deliberately independent of the
+    // engine visibility toggles: selecting a Java-only table row must still
+    // identify the Java geometry. Its labels make the two endpoint overlays
+    // unambiguous when their bounds are near one another.
+    if (selectedPairing_) {
+        const auto drawSelected = [&](const std::optional<Inter> &inter,
+                                      const EngineResult &result, const QColor &colour,
+                                      const QString &label, double labelOffset) {
+            if (!inter) {
+                return;
+            }
+            const auto bounds = visualBounds(*inter, result);
+            if (!bounds) {
+                return;
+            }
+            QPen outline(colour, pen * 3.5);
+            drawBounds(*inter, result, outline, QColor(colour.red(), colour.green(), colour.blue(), 48));
+            QFont font = painter.font();
+            font.setPointSizeF(std::max(1.0, 9.0 * pen));
+            painter.setFont(font);
+            painter.setPen(QPen(colour, pen));
+            painter.setBrush(Qt::NoBrush);
+            const QPointF anchor(bounds->left(), bounds->top() - (3.0 + labelOffset) * pen);
+            painter.drawText(anchor, label);
+        };
+        const bool both = selectedPairing_->rust && selectedPairing_->java;
+        drawSelected(selectedPairing_->rust, rust_, kSelectedRust,
+                     tr("Selected Rust · %1").arg(selectedPairing_->rust
+                         ? selectedPairing_->rust->kind : QString()), 0.0);
+        drawSelected(selectedPairing_->java, java_, kSelectedJava,
+                     tr("Selected Java · %1").arg(selectedPairing_->java
+                         ? selectedPairing_->java->kind : QString()), both ? 12.0 : 0.0);
     }
 }
 

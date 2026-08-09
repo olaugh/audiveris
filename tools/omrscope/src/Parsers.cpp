@@ -58,7 +58,12 @@ std::optional<QLineF> parseMedian(const QJsonObject &median)
 Inter parseRustInter(const QJsonObject &object)
 {
     Inter inter;
-    inter.id = object.value(QStringLiteral("id")).toInt();
+    if (object.value(QStringLiteral("id")).isDouble()) {
+        inter.id = object.value(QStringLiteral("id")).toInt();
+    }
+    if (object.value(QStringLiteral("system")).isDouble()) {
+        inter.system = object.value(QStringLiteral("system")).toInt();
+    }
     inter.kind = object.value(QStringLiteral("kind")).toString();
     inter.shape = inter.kind;
     inter.staff = object.value(QStringLiteral("staff")).toInt(-1);
@@ -319,7 +324,20 @@ EngineResult parseRustJson(const QString &text)
         result.inters << inter;
     }
 
-    result.relationCount = root.value(QStringLiteral("relations")).toArray().size();
+    for (const QJsonValue &value : root.value(QStringLiteral("relations")).toArray()) {
+        const QJsonObject object = value.toObject();
+        const QJsonValue system = object.value(QStringLiteral("system"));
+        const QJsonValue source = object.value(QStringLiteral("source"));
+        const QJsonValue target = object.value(QStringLiteral("target"));
+        const QString kind = object.value(QStringLiteral("kind")).toString();
+        // The graph is optional viewer evidence. A partial future record must
+        // not become an edge to an invented id 0.
+        if (!system.isDouble() || !source.isDouble() || !target.isDouble() || kind.isEmpty()) {
+            continue;
+        }
+        result.relations << Relation{system.toInt(), source.toInt(), target.toInt(), kind};
+    }
+    result.relationCount = result.relations.size();
     result.ran = true;
     return result;
 }
@@ -356,7 +374,19 @@ EngineResult parseSigProbe(const QString &text)
             continue;
         }
         if (record == QLatin1String("relation")) {
-            result.relationCount++;
+            // relation <system> <source id> <target id> <relation class>
+            if (fields.size() < 5) {
+                continue;
+            }
+            bool systemOk = false;
+            bool sourceOk = false;
+            bool targetOk = false;
+            const int system = fields[1].toInt(&systemOk);
+            const int source = fields[2].toInt(&sourceOk);
+            const int target = fields[3].toInt(&targetOk);
+            if (systemOk && sourceOk && targetOk && !fields[4].isEmpty()) {
+                result.relations << Relation{system, source, target, fields[4]};
+            }
             continue;
         }
         if (record == QLatin1String("staff") && fields.size() >= 5) {
@@ -375,7 +405,13 @@ EngineResult parseSigProbe(const QString &text)
         // inter <system> <id> <class> <shape> <staff> bounds x y w h
         //       grade <g> ctx <c> frozen <b> [impacts <name> <v> ...]
         Inter inter;
-        inter.id = fields[2].toInt();
+        bool systemOk = false;
+        bool idOk = false;
+        inter.system = fields[1].toInt(&systemOk);
+        inter.id = fields[2].toInt(&idOk);
+        if (!systemOk || !idOk) {
+            continue;
+        }
         inter.kind = fields[3];
         inter.shape = fields[4];
         inter.staff = fields[5].toInt();
@@ -406,6 +442,8 @@ EngineResult parseSigProbe(const QString &text)
         }
         result.inters << inter;
     }
+
+    result.relationCount = result.relations.size();
 
     // A Gradle banner or an accidental marker-only frame is not a recognition
     // result. SigProbe's first record is its explicit sheet/stage identity, so

@@ -41,6 +41,22 @@ claims to stream individual recognition items while a stage is executing. The
 opt-in Rust `-stream-json` framing adds flushed `@omrscope` markers around the
 existing schema-1 documents; ordinary `-json` output and the ordinary Java
 oracle probe output remain compatible.
+
+The Page/Inters inspector now gives those retained snapshots a graphical audit
+surface: inspecting a table row highlights the corresponding paired
+interpretations on the page, an opt-in control highlights all filtered rows,
+and optional graph edges are drawn only from an engine's own relations whose
+endpoint IDs resolve uniquely in that same selected snapshot. It does not
+manufacture cross-engine graph topology.
+The separate manual Score tab is deliberately outside that streaming pipeline:
+it runs one selected Java sheet through PAGE, validates the explicit local
+MusicXML/MXL artifact, then asks locally installed Verovio to make SVG pages.
+A sheet requiring Audiveris's sibling multi-page artifacts is rejected rather
+than guessed. The Java engraving is a convenient artifact preview, not a
+visual or semantic Java/Rust parity claim. Rust PAGE, score assembly, and
+MusicXML output remain unimplemented; when they exist, the Rust artifact must
+pass through this same renderer before the tab can become a comparison surface.
+
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
