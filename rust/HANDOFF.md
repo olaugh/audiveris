@@ -109,7 +109,8 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS first awaited beam-V `createStem` transaction | `apply_native_stems_beam_vlink_create_stem_transaction` is the twelfth exact boundary: it applies prior/pending aliased line deltas and exactly executes candidate construction, structural GlyphIndex registration, structural `systemStems` lookup, `StemChecker`, and checked/artificial/reused return. Across 30 transactions it matches 15 compound candidates with pre-registration object ID 0, 15 singletons, 14 line changes, 30 active `ReuseActive` Glyph lookups, 30 Absent real system-stem lookups, and 30 `CreatedChecked` results. Returned median/mean-thickness bits and vertical-ribbon integer bounds are exact; every returned Inter is ID 0, non-abnormal, and SIG-null. Allocator/SIG/relation/link-flag deltas are zero. Eleven focused units and the 5/5 31.98-second gate are green |
 | STEMS beam-V reuse/check boundary | `evaluate_native_stems_beam_vlink_reuse_check` is the thirteenth exact, read-only boundary: it preserves the ordered/lazy head-side stem-reuse loop and exact `BeamStemRelation.checkLink`. All 65 real C entries are unlinked, all 30 checks accept, and real reuse is zero; eight isolated synthetic SIG blocks cover the reuse and numerical branches. It stops at `ReadyBeforeSigMutation` |
 | STEMS beam-V base SIG/BeamStem application | `apply_native_stems_beam_vlink_base_transaction` is the fourteenth exact boundary: it conditionally executes `SIG.addVertex` and then applies the checked base BeamStem relation with exact index/SIG ordering, duplicate suppression, JGraphT callbacks, abnormal/dirty effects, and partial prefixes. All 30 real rows are `NewIdZero` with vertex and edge added, reuse zero, and zero ChordStem matches; 40 supported and 32 envelope cases are isolated evidence, not production-equivalence. Twenty focused units and the 10/10 33.87-second gate are green; it stops at `ReadyBeforeBLinkerFlagMutation` |
-| STEMS beam-V B-linker shared flag assignment | `apply_native_stems_beam_vlink_b_linker_flag_transaction` is the fifteenth exact boundary: it independently reruns boundary 14 from its exact pre-state, resolves the scheduler-selected outer B and its TOP-then-BOTTOM V observers, and executes one plain `linked = true` assignment while retaining the ignored base-link return and fresh draft grade. All 30 real writes change false to true across a guarded Java arena of 3,948 entries (2,116 frozen + 1,832 dynamic anchors). Eight isolated blocks add 32 setter/shared-cell-only Unsafe exact-class envelopes: 24 false-to-true, 8 idempotent, and 8 with `applyReturn=false`. Seven focused units and the 5/5 128.66-second full exact gate are green; it stops at `ReadyBeforeSiblingBeamLinks` |
+| STEMS beam-V B-linker shared flag assignment | `apply_native_stems_beam_vlink_b_linker_flag_transaction` is the fifteenth exact boundary: it independently reruns boundary 14 from its exact pre-state, resolves the scheduler-selected outer B and its TOP-then-BOTTOM V observers, and executes one plain `linked = true` assignment while retaining the ignored base-link return and fresh draft grade. All 30 real writes change false to true across a guarded Java arena of 3,948 entries (2,116 frozen + 1,832 dynamic anchors). Eight isolated blocks add 32 setter/shared-cell-only Unsafe exact-class envelopes: 24 false-to-true, 8 idempotent, and 8 with `applyReturn=false`. Seven focused units and the shared 5/5 126.03-second hydration regression are green; it stops at `ReadyBeforeSiblingBeamLinks` |
+| STEMS beam-V sibling BeamStem links | `apply_native_stems_beam_vlink_sibling_links_transaction` is the sixteenth exact boundary: it exact-replays Boundary 15 and executes the complete serial sibling loop through group ordering, identity/duplicate/shorter branches, fresh BeamStem edge callbacks, zero-Chord validation, beam abnormal/dirty effects, and optional sibling B-cell writes. The 30 real transactions expose 58 non-null native-glyph group members and 11 siblings; all 11 link, add one edge, and write one B cell. Eight isolated blocks add 64 supported branch cases and 16 Java throw envelopes without claiming production equivalence. Twenty-two focused units and the 10/10 126.68-second full exact gate are green; it stops at `ReadyBeforeHeadRelationLoop` |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -145,10 +146,11 @@ remains.
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
 eight-page image-pipeline differentials, including complete HEADS and the exact
-semantic STEMS boundaries described below. The fifteenth beam-V B-linker flag
-boundary has 7/7 focused production units and 5/5 full exact integration tests;
-the 30-system plus isolated setter/shared-cell gate finishes in 128.66 seconds.
-The full library suite is 630 passed / 0 failed / 2 ignored in 12.17 seconds.
+semantic STEMS boundaries described below. The sixteenth beam-V sibling-links
+boundary has 22/22 focused production units and 10/10 full exact integration
+tests; the 30-system plus isolated supplemental gate finishes in 126.68 seconds.
+The shared Boundary-15 hydration regression is 5/5 in 126.03 seconds. The full
+library suite is 652 passed / 0 failed / 2 ignored in 11.92 seconds.
 Strict library/gate Clippy, global formatting, diff-check, and oracle shell syntax
 checks are green.
 
@@ -1321,13 +1323,65 @@ lines / 18,910 bytes. Two byte-identical passes per page use 8 compiler and 60
 runtime foreground/reaped JVMs, maximum Java concurrency 1 within the declared
 runner lock scope, and no background Java process.
 
-Seven focused production tests and all 5 full exact integration tests pass; the
-full gate finishes in 128.66 seconds. The full library suite is 630 passed / 0
-failed / 2 ignored in 12.17 seconds. The terminal is
-`ReadyBeforeSiblingBeamLinks`. Sibling
-BeamStem links are the next exact boundary; the relation-loop/head links follow
-separately before later scheduler attempts, stump linking, and competing-hook
-removal.
+Seven focused production tests and the shared 5/5 exact hydration regression
+pass; the latter finishes in 126.03 seconds. The terminal is
+`ReadyBeforeSiblingBeamLinks`.
+
+`apply_native_stems_beam_vlink_sibling_links_transaction` closes the sixteenth
+exact production semantic STEMS boundary. It starts from an exact pre-Boundary-15
+state, independently reruns the complete flag transaction, and requires the
+supplied Boundary-15 transaction and resulting state to match before touching
+sibling state. It then executes the complete Java `linkSiblings(stem, grade)`
+call and stops immediately before the head-relation entry-set loop.
+
+The transaction reconstructs `BeamGroupInter.getMembers()` from the exhaustive
+outgoing-Containment scan, preserves its insertion order, performs Java's stable
+top-down intersection sort, and removes the base beam by object identity. Each
+sibling is processed serially: exact glyph-object identity can skip it; the
+directed pair lookup stops at the first existing runtime `BeamStemRelation`; the
+shorter-beam ordinate is read only when the inclusive 0.8 ratio predicate holds;
+and a surviving sibling receives a fresh relation with exact extension, portion,
+and preserved base-draft grade. The synchronous callback retains incoming-then-
+outgoing incident order, requires zero `ChordStemRelation` matches in compact v1,
+uses the raw-beam LEFT/RIGHT or hook any-BeamStem abnormal rule, and records any
+SheetStub/Book dirty cascade. Only after that callback does the exact ordered
+`StemBuilder.items` scan select the first source-identical sibling B-linker and
+assign its shared cell. The state/result retain the complete serial
+edge-callback-flag chronology and exact group-member post-state.
+
+Across all 30 real transactions, the live group scans contain 58 Containment
+members. All 58 have non-null native glyph identities and exact run-table tokens.
+There are 11 real sibling candidates; all 11 take `Linked`, add one BeamStem edge,
+complete one callback, and write one B-linker cell. Real same-glyph, existing-
+relation, shorter-wrong-side, and ChordStem counts are zero; the 11 relations and
+callbacks produce 33 ordered seam events. Eight page-local isolated blocks add
+64 supported cases—`SameGlyph`, existing relation, shorter wrong side, full,
+small, and hook beam links, no B linker, and an idempotent B cell—and 16 Java
+throw envelopes. The supplemental cases are gate-only branch/failure evidence,
+not production-equivalent real transactions; a false `addEdge` return remains
+independent-model evidence because stock Java provides no honest live fixture.
+
+The normalized corpus is 717 lines / 580,329 bytes: one shared 8-line / 753-byte
+header plus 709 semantic rows. Its SHA-256 is
+`c6a62f9b98ce55eda2bd142b083a2ff6b14d08dab6b1a2ce3c1a0d643d5efd66`;
+the eight split fixtures total 789 lines / 654,858 bytes. Manifest,
+manifest-body, probe, runner, and effective-classpath SHA-256 are
+`6dcca78c13facf7fa9ee29506eab2961d1410babf396930724dce16f5474e29d`,
+`c5d44bf655814aac1a297d4ad67fe401291449e231d581d11c812e197ef0fba0`,
+`a3ee02cf29f5a8a7c70bd7b2e064d7a1ff0fee2d120bde3b2088c7f2db98eda0`,
+`9d2535980f191105d912ec2e07c99e3f06f55b1c406a68da610f1685ec07e1a5`,
+and `fd4e52c2275675a53459dff2b2e2d89636f3c5fb6ab5a1f7be65f74157663fb3`.
+The complete manifest is 10 lines / 31,471 bytes and its authenticated body is 9
+lines / 23,218 bytes. Two byte-identical passes per page used 8 compiler plus 60
+runtime foreground/reaped JVMs—68 total—with maximum runner-scoped Java
+concurrency 1 and no background Java process.
+
+Twenty-two focused production tests and all 10 full exact integration tests
+pass; the full gate finishes in 126.68 seconds. The full library suite is 652
+passed / 0 failed / 2 ignored in 11.92 seconds. The terminal is
+`ReadyBeforeHeadRelationLoop`. The head-relation loop is the next exact boundary,
+followed separately by later scheduler attempts, stump linking, and competing-
+hook removal.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3905,8 +3959,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Grade sibling BeamStem linking after the now-exact B-linker flag assignment.
-2. Continue the relation-loop/head links, later beam-scheduler attempts, stump
+1. Grade the head-relation loop immediately after the now-exact sibling links.
+2. Continue later beam-scheduler attempts, stump
    linking, and competing-hook removal as separately graded boundaries.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.

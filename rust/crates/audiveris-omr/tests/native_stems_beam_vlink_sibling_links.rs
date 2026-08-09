@@ -1,0 +1,7136 @@
+//! Independent gate scaffold for `BeamLinker.VLinker.linkSiblings`.
+//!
+//! Boundary 16 begins immediately after the selected B-linker's shared
+//! `linked` cell was assigned by boundary 15.  It executes the complete
+//! sibling-beam loop, including graph callbacks and sibling-linker flag
+//! writes, and stops before the first head-relation-loop read.  The model in
+//! this file is deliberately independent from production so that the frozen
+//! Java rows and the native transaction have two separately reviewable
+//! projections.
+
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
+
+use audiveris_image::beam_structure::Segment;
+use audiveris_omr::{
+    native_stems_beam_builders::{
+        NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
+    },
+    native_stems_beam_stumps::NativeStemsBeamSource,
+    native_stems_beam_vlink_base_apply::{
+        NativeStemsBeamBeamIncidentRead, NativeStemsBeamBeamIncidentRule,
+        NativeStemsBeamGroupRuntimeState, NativeStemsBeamIncidentDirection,
+        NativeStemsBeamIncidentOpposite, NativeStemsBeamQueryRelationKind,
+        NativeStemsBeamSheetEditState, NativeStemsBeamSigListenerTopology,
+        NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBeamRuntimeState,
+    },
+    native_stems_beam_vlink_sibling_links::{
+        NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
+        NativeStemsBeamSiblingBeamAbnormalTrace, NativeStemsBeamSiblingBeamIncidentRelation,
+        NativeStemsBeamSiblingBeamIncidentScan, NativeStemsBeamSiblingBranch,
+        NativeStemsBeamSiblingBuilderAction, NativeStemsBeamSiblingBuilderItemRead,
+        NativeStemsBeamSiblingBuilderLinkerIdentity, NativeStemsBeamSiblingBuilderLinkerRead,
+        NativeStemsBeamSiblingBuilderLookupRow, NativeStemsBeamSiblingBuilderLookupScan,
+        NativeStemsBeamSiblingBuilderLookupState, NativeStemsBeamSiblingBuilderLookupTiming,
+        NativeStemsBeamSiblingBuilderSourceRead, NativeStemsBeamSiblingGeometryTrace,
+        NativeStemsBeamSiblingGlyphIdentity, NativeStemsBeamSiblingGroupMemberTrace,
+        NativeStemsBeamSiblingGroupRelation, NativeStemsBeamSiblingGroupRuntimeState,
+        NativeStemsBeamSiblingGroupScan, NativeStemsBeamSiblingGroupTarget,
+        NativeStemsBeamSiblingGroupTargetEvidence, NativeStemsBeamSiblingLiveBeam,
+        NativeStemsBeamSiblingPairClassRead, NativeStemsBeamSiblingPairRelation,
+        NativeStemsBeamSiblingPairScan, NativeStemsBeamSiblingQueryProvenance,
+        NativeStemsBeamSiblingRelationObjectIdentity, NativeStemsBeamSiblingSourceOutgoingRelation,
+        NativeStemsBeamSiblingStemIncidentRelation, NativeStemsBeamSiblingStemIncidentScan,
+        NativeStemsBeamSiblingStepCertificate, NativeStemsBeamVLinkSiblingLinksCertificate,
+        NativeStemsBeamVLinkSiblingLinksOperation, NativeStemsBeamVLinkSiblingLinksOutcome,
+        NativeStemsBeamVLinkSiblingLinksState, NativeStemsBeamVLinkSiblingLinksTransaction,
+        apply_native_stems_beam_vlink_sibling_links_transaction,
+    },
+    native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
+    stems_step::{NativeBeamPortion, NativeStemPoint, NativeStemVerticalSide},
+};
+
+#[path = "common/b15_hydration.rs"]
+mod b15_hydration;
+
+const FIXTURE_SCHEMA: &str = "# schema: stems-beam-vlink-sibling-links-v1";
+const FIXTURE_OVERRIDE_ENV: &str = "AUDIVERIS_B16_SIBLING_LINKS_FIXTURE";
+const CORPUS_PAGES: [(&str, &str); 8] = [
+    ("chula", "chula.png"),
+    ("allegretto", "allegretto.png"),
+    ("batuque", "batuque.png"),
+    ("carmen", "carmen.png"),
+    ("cucaracha", "cucaracha.png"),
+    ("hove", "hove.png"),
+    ("zizi", "zizi.png"),
+    ("BachInvention5", "BachInvention5.jpg"),
+];
+const BOUNDARY_FIFTEEN_MANIFEST_PATH: &str =
+    "rust/oracle/stems-beam-vlink-b-linker-flag-manifest.txt";
+const BOUNDARY_FIFTEEN_MANIFEST_SHA256: &str =
+    "c7032ac4871188ef0cf48ac63d99996e78a0e163bf1470d3be84c5e9b10d1d92";
+const BOUNDARY_FIFTEEN_GATE_PATH: &str =
+    "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_b_linker_flag.rs";
+const BOUNDARY_FIFTEEN_GATE_SHA256: &str =
+    "41601603e4845602135bfeba98ff69e7820c5b0914891bc1f56930052554c0e5";
+const BOUNDARY_FIFTEEN_FIXTURE_PATH: &str = "rust/oracle/stems-beam-vlink-b-linker-flag-chula.txt";
+const BOUNDARY_FIFTEEN_FIXTURE_SHA256: &str =
+    "85681437af5e7a5b3c5fc220fe7ced7299516b9de8c4d95a6c651dd5ebf926d6";
+const PROBE_SOURCE_PATH: &str = "rust/oracle/java/StemsBeamVLinkSiblingLinksProbe.java";
+const RUNNER_SOURCE_PATH: &str = "rust/oracle/java/run-stems-beam-vlink-sibling-links.sh";
+const MANIFEST_SCHEMA: &str = "# schema: stems-beam-vlink-sibling-links-manifest-v1";
+const MANIFEST_PATH: &str = "rust/oracle/stems-beam-vlink-sibling-links-manifest.txt";
+const MANIFEST_OVERRIDE_ENV: &str = "AUDIVERIS_B16_SIBLING_LINKS_MANIFEST";
+const MANIFEST_ENTRY_LABEL: &str = "stemsbeamvlinksiblinglinksmanifestentry";
+const MANIFEST_SUMMARY_LABEL: &str = "stemsbeamvlinksiblinglinksmanifestsummary";
+const MANIFEST_SHA256: &str = "6dcca78c13facf7fa9ee29506eab2961d1410babf396930724dce16f5474e29d";
+const MANIFEST_LINES: usize = 10;
+const MANIFEST_BYTES: usize = 31_471;
+const MANIFEST_BODY_SHA256: &str =
+    "c5d44bf655814aac1a297d4ad67fe401291449e231d581d11c812e197ef0fba0";
+const MANIFEST_BODY_LINES: usize = 9;
+const MANIFEST_BODY_BYTES: usize = 23_218;
+const NORMALIZED_CORPUS_SHA256: &str =
+    "c6a62f9b98ce55eda2bd142b083a2ff6b14d08dab6b1a2ce3c1a0d643d5efd66";
+const NORMALIZED_CORPUS_LINES: usize = 717;
+const NORMALIZED_CORPUS_BYTES: usize = 580_329;
+const SPLIT_FIXTURE_LINES: usize = 789;
+const SPLIT_FIXTURE_BYTES: usize = 654_858;
+
+const FIXTURE_HEADER: &[&str] = &[
+    "# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) beam VLink sibling-links oracle.",
+    FIXTURE_SCHEMA,
+    "# Frozen scheduler/expand/createStem/reuse-check/base-apply/B-linker-flag predecessors are replayed and joined.",
+    "# Group members follow outgoing Containment insertion order then Java stable top-down Double.compare sorting.",
+    "# Siblings execute serially: glyph skip, directed duplicate scan, lazy shorter geometry, edge callback, item lookup, flag write.",
+    "# Fresh BeamStem callbacks require exhaustive zero ChordStem matches in compact v1.",
+    "# Java exception cases are envelope-only evidence and are not production-equivalent transactions.",
+    "# Stop is after linkSiblings returns and immediately before the head-relation entry-set loop.",
+];
+
+const COMMON_FIELDS: &[&str] = &["system", "plan", "scope", "case"];
+const PAGE_FIELDS: &[&str] = &[
+    "systems",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "bLinkerFlagFixtureSha256",
+    "executionMode",
+    "groupOrder",
+    "incidentOrder",
+    "headless",
+    "methodDispatch",
+    "stop",
+];
+const PREDECESSOR_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "join",
+    "b15TransactionRows",
+    "b15TransactionEvidenceSha256",
+    "b15ResultRowSha256",
+    "b15GuardRowSha256",
+    "b15SummaryRowSha256",
+    "predecessorTerminal",
+    "applyReturn",
+    "supportGrade",
+    "stemAlias",
+    "stemInterId",
+    "baseBeamAlias",
+    "targetBAlias",
+    "triggeringVAlias",
+    "targetBLinked",
+];
+const BASELINE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "baseBeamAlias",
+    "baseBeamClass",
+    "baseBeamInterId",
+    "baseBeamVertexOrdinal",
+    "baseBeamGlyphIdentity",
+    "baseBeamGlyph",
+    "baseBeamMedian",
+    "baseBeamHeight",
+    "baseBeamAbnormal",
+    "stemAlias",
+    "stemInterId",
+    "stemMedian",
+    "stemAbnormal",
+    "cachedMedianSameIdentity",
+    "refPt",
+    "yDir",
+    "skewedVertical",
+    "groupAlias",
+    "groupClass",
+    "groupInterId",
+    "groupVertexOrdinal",
+    "groupRemoved",
+    "groupVip",
+    "groupAbnormal",
+    "groupStateHashBefore",
+    "groupObjectStateHash",
+    "groupOutgoingScanned",
+    "groupQueryProvenanceSha256",
+    "groupMembers",
+    "selectedBeforeBaseRemoval",
+    "baseRemoved",
+    "siblings",
+    "maxBeamSideDx",
+    "maxShorterRatio",
+    "interline",
+    "xInGapMaximum0",
+    "maxDxRint",
+    "baseCross",
+    "baseLength",
+    "supportGradeSource",
+    "supportGradeRead",
+    "supportGrade",
+    "graphVertices",
+    "graphEdgesBefore",
+    "graphVertexHashBefore",
+    "graphEdgeHashBefore",
+    "listenerTopologyHash",
+    "soleSigListener",
+    "stemIncidentState",
+    "stemIncidentRows",
+    "chordStemMatches",
+    "stemIncidentHash",
+    "builderItems",
+    "builderItemsHash",
+    "arenaStateHashBefore",
+    "relationInputHashBefore",
+];
+const GROUP_MEMBER_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "groupOutgoingOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "relationClass",
+    "containmentMatch",
+    "targetAlias",
+    "targetRuntimeClass",
+    "targetReadByGetMembers",
+    "targetEvidence",
+    "targetInterId",
+    "targetVertexOrdinal",
+    "memberOrdinal",
+    "beamRuntimeClass",
+    "beamInterId",
+    "interIndexOrdinal",
+    "interIndexObjectMatches",
+    "interIndexIdMatches",
+    "sigMembership",
+    "sigSystemId",
+    "beamRemoved",
+    "beamVip",
+    "beamAbnormal",
+    "beamGroupVertexOrdinal",
+    "beamGroupStateHash",
+    "beamGroupObjectStateHash",
+    "median",
+    "height",
+    "glyphIdentity",
+    "glyph",
+    "verticalCross",
+    "leftLimit",
+    "rightLimit",
+    "inclusiveLeft",
+    "inclusiveRight",
+    "selected",
+    "sortedOrdinal",
+    "baseIdentity",
+    "removeAction",
+];
+const SIBLING_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "sortedOrdinal",
+    "beamAlias",
+    "beamClass",
+    "beamInterId",
+    "beamVertexOrdinal",
+    "glyphIdentity",
+    "glyph",
+    "baseGlyphSameIdentity",
+    "pairState",
+    "sourceOutgoingScanned",
+    "sourceOutgoingProvenanceSha256",
+    "pairRows",
+    "pairProvenanceSha256",
+    "firstBeamStemIdentity",
+    "branch",
+];
+const SOURCE_OUTGOING_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "sourceOutgoingOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+];
+const PAIR_RELATION_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "pairOrdinal",
+    "sourceOutgoingOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "classRead",
+    "matches",
+    "action",
+];
+const GEOMETRY_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "stemMedian",
+    "baseMedian",
+    "siblingMedian",
+    "baseCross",
+    "siblingCross",
+    "baseLength",
+    "siblingLength",
+    "ratio",
+    "maxShorterRatio",
+    "shorterInclusive",
+    "dyRead",
+    "dy",
+    "yDir",
+    "product",
+    "wrongSideStrict",
+    "extension",
+    "beamHalfHeight",
+    "xInGapMaximum0",
+    "maxDxRint",
+    "leftThreshold",
+    "rightThreshold",
+    "strictLeft",
+    "strictRight",
+    "portion",
+    "gradeSource",
+    "gradeRead",
+    "grade",
+    "branch",
+];
+const EDGE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "eventOrdinal",
+    "freshRelationIdentity",
+    "relationClass",
+    "sourceAlias",
+    "sourceInterId",
+    "targetAlias",
+    "targetInterId",
+    "insertionReturn",
+    "returnObservedByCaller",
+    "graphRelationIdentity",
+    "graphInsertionOrdinal",
+    "sourceOutgoingOrdinal",
+    "targetIncomingOrdinal",
+    "extension",
+    "portion",
+    "grade",
+];
+const STEM_INCIDENT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "eventOrdinal",
+    "incidentOrdinal",
+    "direction",
+    "directionOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "classRead",
+    "oppositeReadByGetChords",
+    "oppositeEvidence",
+    "oppositeAlias",
+    "oppositeInterId",
+    "oppositeVertexOrdinal",
+    "chordStemMatch",
+];
+const BEAM_INCIDENT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "eventOrdinal",
+    "incidentOrdinal",
+    "direction",
+    "directionOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "classRead",
+    "oppositeReadByCheckAbnormal",
+    "oppositeEvidence",
+    "oppositeAlias",
+    "oppositeInterId",
+    "oppositeVertexOrdinal",
+    "readState",
+    "relevant",
+    "portion",
+    "contribution",
+];
+const CALLBACK_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "eventOrdinal",
+    "relationAdded",
+    "extensionPrepopulated",
+    "portionPrepopulated",
+    "defaultExtensionBranchRead",
+    "defaultPortionBranchRead",
+    "stemIncidentState",
+    "stemIncidentRows",
+    "chordStemMatches",
+    "stemIncidentHash",
+    "beamIncidentState",
+    "beamRule",
+    "beamIncidentRows",
+    "beamIncidentHash",
+    "requestedAbnormal",
+    "beamAbnormalBefore",
+    "beamAbnormalAfter",
+    "abnormalChanged",
+    "dirtyBefore",
+    "dirtyAfter",
+];
+const LINKER_LOOKUP_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "itemOrdinal",
+    "runtimeClass",
+    "linkerRead",
+    "sourceRead",
+    "linkerAlias",
+    "linkerRuntimeClass",
+    "sourceAlias",
+    "sourceInterId",
+    "identityMatch",
+    "action",
+];
+const LINKER_FLAG_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "eventOrdinal",
+    "lookupState",
+    "selectedAlias",
+    "selectedRuntimeClass",
+    "selectedSourceAlias",
+    "sharedCell",
+    "observerAliases",
+    "linkedBefore",
+    "linkedAfter",
+    "closedBefore",
+    "closedAfter",
+    "requested",
+    "writeCount",
+    "valueChangeCount",
+    "transition",
+];
+const SIBLING_RESULT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "siblingOrdinal",
+    "branch",
+    "edgeCommitted",
+    "linkerLookupRead",
+    "linkerLookupState",
+    "linkerLookupTiming",
+    "linkerLookupRows",
+    "linkerLookupHash",
+    "linkerSelectedAlias",
+    "edgePrefixCount",
+    "flagPrefixCount",
+    "terminal",
+];
+const RESULT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "terminal",
+    "applyReturn",
+    "supportGrade",
+    "stemAlias",
+    "stemInterId",
+    "siblings",
+    "committedEdges",
+    "committedEdgeAliases",
+    "committedFlags",
+    "committedBCells",
+    "eventCount",
+    "groupStateHashAfter",
+    "headRelationLoopRead",
+];
+const DELTA_GUARD_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "allocatorBefore",
+    "allocatorAfter",
+    "glyphActiveHashBefore",
+    "glyphActiveHashAfter",
+    "glyphOriginalsHashBefore",
+    "glyphOriginalsHashAfter",
+    "interIndexCountBefore",
+    "interIndexCountAfter",
+    "sigVertexCountBefore",
+    "sigVertexCountAfter",
+    "sigEdgeCountBefore",
+    "sigEdgeCountAfter",
+    "systemStemsHashBefore",
+    "systemStemsHashAfter",
+    "lineHashBefore",
+    "lineHashAfter",
+    "arenaTopologyHashBefore",
+    "arenaTopologyHashAfter",
+    "builderItemsHashBefore",
+    "builderItemsHashAfter",
+    "relationInputHashBefore",
+    "relationInputHashAfter",
+    "groupStateHashBefore",
+    "groupStateHashAfter",
+    "allowedMutations",
+    "zeroChordStem",
+    "baseBeamStemUnchanged",
+    "unrelatedRelationsUnchanged",
+    "unrelatedLinkerFlagsUnchanged",
+    "headRelationLoopRead",
+    "stopBeforeHeadRelationLoop",
+];
+const SUMMARY_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "groupRows",
+    "siblings",
+    "sameGlyph",
+    "existingBeamStem",
+    "shorterWrongSide",
+    "linked",
+    "edgesAdded",
+    "linkerWrites",
+    "events",
+    "chordStemMatches",
+    "terminal",
+];
+const PAGE_SUMMARY_FIELDS: &[&str] = &[
+    "systems",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "totalTransactions",
+    "groupRows",
+    "siblingCandidates",
+    "sameGlyph",
+    "existingBeamStem",
+    "shorterWrongSide",
+    "linked",
+    "edgesAdded",
+    "linkerWrites",
+    "events",
+    "chordStemMatches",
+    "stopBeforeHeadRelationLoop",
+];
+const SYNTHETIC_CASE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "join",
+    "sourceRealB15EvidenceSha256",
+    "construction",
+    "baseRuntimeClass",
+    "siblingRuntimeClass",
+    "stemAttachedBefore",
+    "baseMedian",
+    "siblingMedian",
+    "stemMedian",
+    "yDir",
+    "sameGlyphIdentity",
+    "pairState",
+    "baseCross",
+    "siblingCross",
+    "baseLength",
+    "siblingLength",
+    "ratioRead",
+    "ratio",
+    "maxShorterRatio",
+    "shorterInclusive",
+    "dyRead",
+    "dy",
+    "product",
+    "wrongSideStrict",
+    "extension",
+    "portion",
+    "supportGrade",
+    "branch",
+    "builderItems",
+    "lookupState",
+    "siblingBLinkedBefore",
+    "siblingBLinkedAfter",
+    "writeCount",
+    "valueChangeCount",
+    "graphEdgesBefore",
+    "graphEdgesAfter",
+    "freshRelationIdentity",
+    "callbackCompleted",
+    "stemIncidentState",
+    "stemIncidentRows",
+    "chordStemMatches",
+    "beamIncidentState",
+    "beamRule",
+    "beamAbnormalBefore",
+    "beamAbnormalAfter",
+    "dirtyBefore",
+    "dirtyAfter",
+    "throwClass",
+    "throwStage",
+    "eventCount",
+    "terminal",
+];
+const SYNTHETIC_EVENT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "eventOrdinal",
+    "kind",
+    "relationIdentity",
+];
+const SYNTHETIC_GUARD_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "graphDelta",
+    "allowedMutations",
+    "baseBeamUnchanged",
+    "stemGeometryUnchanged",
+    "groupObjectUnchanged",
+    "zeroChordStem",
+    "isolatedOnly",
+    "productionEquivalent",
+    "enclosingRealSheetUnchanged",
+    "headRelationLoopRead",
+    "terminal",
+];
+const CORPUS_SUMMARY_FIELDS: &[&str] = &[
+    "schema",
+    "mode",
+    "pages",
+    "pageRefs",
+    "rowCounts",
+    "pageInputSha256",
+    "probeSourceSha256",
+    "runnerSourceSha256",
+    "effectiveClasspathSha256",
+    "jdkReleaseSha256",
+    "javaExecutableSha256",
+    "javaJpegLibrarySha256",
+    "javaModulesSha256",
+    "javaVmLibrarySha256",
+    "javaAwtLibrarySha256",
+    "javaAwtLwawtLibrarySha256",
+    "javaArchitecture",
+    "javaRuntimeVersion",
+    "javaVmVariant",
+    "javaImageType",
+    "beamLinkerClassSha256",
+    "bLinkerClassSha256",
+    "vLinkerClassSha256",
+    "stemLinkerClassSha256",
+    "beamLinkerSourceSha256",
+    "stemLinkerSourceSha256",
+    "linkSourceSha256",
+    "sigraphSourceSha256",
+    "sigListenerSourceSha256",
+    "systemInfoSourceSha256",
+    "sheetSourceSha256",
+    "basicIndexSourceSha256",
+    "entityIndexSourceSha256",
+    "glyphIndexSourceSha256",
+    "interIndexSourceSha256",
+    "abstractEntitySourceSha256",
+    "abstractInterSourceSha256",
+    "interSourceSha256",
+    "stemInterSourceSha256",
+    "abstractChordInterSourceSha256",
+    "headChordInterSourceSha256",
+    "relationSourceSha256",
+    "supportSourceSha256",
+    "beamStemRelationSourceSha256",
+    "beamRestRelationSourceSha256",
+    "chordStemRelationSourceSha256",
+    "abstractBeamInterSourceSha256",
+    "beamInterSourceSha256",
+    "beamHookInterSourceSha256",
+    "smallBeamInterSourceSha256",
+    "beamBeamRelationSourceSha256",
+    "sheetStubSourceSha256",
+    "bookSourceSha256",
+    "horizontalSideSourceSha256",
+    "verticalSideSourceSha256",
+    "stemBuilderSourceSha256",
+    "stemItemSourceSha256",
+    "stemsRetrieverSourceSha256",
+    "beamGroupInterSourceSha256",
+    "ensembleHelperSourceSha256",
+    "containmentSourceSha256",
+    "abstractStemConnectionSourceSha256",
+    "beamPortionSourceSha256",
+    "scaleSourceSha256",
+    "skewSourceSha256",
+    "staffSourceSha256",
+    "staffLineSourceSha256",
+    "lineInfoSourceSha256",
+    "lineUtilSourceSha256",
+    "gradleSourceSha256",
+    "jgraphtCoreVersion",
+    "jgraphtCoreJarSha256",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagFixtureSha256",
+    "bLinkerFlagManifestSha256",
+    "predecessorReplay",
+    "querySerialization",
+    "emittedBodySha256",
+    "emittedBodyLines",
+    "emittedBodyBytes",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "rawPassSha256",
+    "freshJvmPerSystem",
+    "compilerJavaProcesses",
+    "runtimeJavaProcessesPerPass",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "compilerJavaProcessReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "totalTransactions",
+    "siblingCandidates",
+    "sameGlyph",
+    "existingBeamStem",
+    "shorterWrongSide",
+    "linked",
+    "edgesAdded",
+    "linkerWrites",
+    "chordStemMatches",
+    "system1SyntheticBlock",
+    "addEdgeReturnedFalseEvidence",
+    "envelopeEvidenceScope",
+    "stopBeforeHeadRelationLoop",
+];
+const MANIFEST_ENTRY_FIELDS: &[&str] = &[
+    "ordinal",
+    "page",
+    "fixture",
+    "rowCounts",
+    "systems",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "totalTransactions",
+    "groupRows",
+    "groupGlyphRows",
+    "nullGroupGlyphs",
+    "siblingCandidates",
+    "sameGlyph",
+    "existingBeamStem",
+    "shorterWrongSide",
+    "linked",
+    "edgesAdded",
+    "linkerWrites",
+    "events",
+    "chordStemMatches",
+    "pageInputSha256",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagFixtureSha256",
+    "bLinkerFlagManifestSha256",
+    "emittedBodySha256",
+    "emittedBodyLines",
+    "emittedBodyBytes",
+    "rawPassSha256",
+    "fixtureSha256",
+    "fixtureLines",
+    "fixtureBytes",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "compilerJavaProcesses",
+    "runtimeJavaProcessesPerPass",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "freshJvmPerSystem",
+    "compilerJavaProcessReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "system1SyntheticBlock",
+    "addEdgeReturnedFalseEvidence",
+    "envelopeEvidenceScope",
+    "stopBeforeHeadRelationLoop",
+];
+const MANIFEST_SUMMARY_FIELDS: &[&str] = &[
+    "schema",
+    "entries",
+    "probeSourceSha256",
+    "runnerSourceSha256",
+    "effectiveClasspathSha256",
+    "jdkReleaseSha256",
+    "javaExecutableSha256",
+    "javaJpegLibrarySha256",
+    "javaModulesSha256",
+    "javaVmLibrarySha256",
+    "javaAwtLibrarySha256",
+    "javaAwtLwawtLibrarySha256",
+    "javaArchitecture",
+    "javaRuntimeVersion",
+    "javaVmVariant",
+    "javaImageType",
+    "beamLinkerClassSha256",
+    "bLinkerClassSha256",
+    "vLinkerClassSha256",
+    "stemLinkerClassSha256",
+    "beamLinkerSourceSha256",
+    "stemLinkerSourceSha256",
+    "linkSourceSha256",
+    "sigraphSourceSha256",
+    "sigListenerSourceSha256",
+    "systemInfoSourceSha256",
+    "sheetSourceSha256",
+    "basicIndexSourceSha256",
+    "entityIndexSourceSha256",
+    "glyphIndexSourceSha256",
+    "interIndexSourceSha256",
+    "abstractEntitySourceSha256",
+    "abstractInterSourceSha256",
+    "interSourceSha256",
+    "stemInterSourceSha256",
+    "abstractChordInterSourceSha256",
+    "headChordInterSourceSha256",
+    "relationSourceSha256",
+    "supportSourceSha256",
+    "beamStemRelationSourceSha256",
+    "beamRestRelationSourceSha256",
+    "chordStemRelationSourceSha256",
+    "abstractBeamInterSourceSha256",
+    "beamInterSourceSha256",
+    "beamHookInterSourceSha256",
+    "smallBeamInterSourceSha256",
+    "beamBeamRelationSourceSha256",
+    "sheetStubSourceSha256",
+    "bookSourceSha256",
+    "horizontalSideSourceSha256",
+    "verticalSideSourceSha256",
+    "stemBuilderSourceSha256",
+    "stemItemSourceSha256",
+    "stemsRetrieverSourceSha256",
+    "beamGroupInterSourceSha256",
+    "ensembleHelperSourceSha256",
+    "containmentSourceSha256",
+    "abstractStemConnectionSourceSha256",
+    "beamPortionSourceSha256",
+    "scaleSourceSha256",
+    "skewSourceSha256",
+    "staffSourceSha256",
+    "staffLineSourceSha256",
+    "lineInfoSourceSha256",
+    "lineUtilSourceSha256",
+    "gradleSourceSha256",
+    "jgraphtCoreVersion",
+    "jgraphtCoreJarSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagManifestSha256",
+    "predecessorReplay",
+    "querySerialization",
+    "sharedHeaderSha256",
+    "sharedHeaderLines",
+    "sharedHeaderBytes",
+    "corpusBodySha256",
+    "corpusBodyLines",
+    "corpusBodyBytes",
+    "corpusRowCounts",
+    "corpusReconstruction",
+    "semanticRows",
+    "splitFixtureLines",
+    "splitFixtureBytes",
+    "realSystems",
+    "realTransactions",
+    "groupRows",
+    "groupGlyphRows",
+    "nullGroupGlyphs",
+    "realSiblingCandidates",
+    "realSameGlyph",
+    "realExistingBeamStem",
+    "realShorterWrongSide",
+    "realLinked",
+    "realEdgesAdded",
+    "realLinkerWrites",
+    "realEvents",
+    "chordStemMatches",
+    "syntheticBlocks",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "isolatedCases",
+    "totalTransactions",
+    "sameGlyph",
+    "existingBeamStem",
+    "shorterWrongSide",
+    "linked",
+    "edgesAdded",
+    "linkerWrites",
+    "events",
+    "compilerJavaProcesses",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "freshJvmPerSystem",
+    "compilerJavaProcessesReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "system1SyntheticBlock",
+    "addEdgeReturnedFalseEvidence",
+    "supplementalEvidenceScope",
+    "stopBeforeHeadRelationLoop",
+    "manifestBodySha256",
+    "manifestBodyLines",
+    "manifestBodyBytes",
+];
+const CORPUS_SOURCE_PINS: &[(&str, &str)] = &[
+    (
+        "beamLinkerSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/stem/BeamLinker.java",
+    ),
+    (
+        "stemLinkerSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/stem/StemLinker.java",
+    ),
+    (
+        "linkSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/Link.java",
+    ),
+    (
+        "sigraphSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/SIGraph.java",
+    ),
+    (
+        "sigListenerSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/SigListener.java",
+    ),
+    (
+        "systemInfoSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/SystemInfo.java",
+    ),
+    (
+        "sheetSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/Sheet.java",
+    ),
+    (
+        "basicIndexSourceSha256",
+        "app/src/main/java/org/audiveris/omr/util/BasicIndex.java",
+    ),
+    (
+        "entityIndexSourceSha256",
+        "app/src/main/java/org/audiveris/omr/util/EntityIndex.java",
+    ),
+    (
+        "glyphIndexSourceSha256",
+        "app/src/main/java/org/audiveris/omr/glyph/GlyphIndex.java",
+    ),
+    (
+        "interIndexSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/InterIndex.java",
+    ),
+    (
+        "abstractEntitySourceSha256",
+        "app/src/main/java/org/audiveris/omr/util/AbstractEntity.java",
+    ),
+    (
+        "abstractInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/AbstractInter.java",
+    ),
+    (
+        "interSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/Inter.java",
+    ),
+    (
+        "stemInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/StemInter.java",
+    ),
+    (
+        "abstractChordInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/AbstractChordInter.java",
+    ),
+    (
+        "headChordInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/HeadChordInter.java",
+    ),
+    (
+        "relationSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/Relation.java",
+    ),
+    (
+        "supportSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/Support.java",
+    ),
+    (
+        "beamStemRelationSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/BeamStemRelation.java",
+    ),
+    (
+        "beamRestRelationSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/BeamRestRelation.java",
+    ),
+    (
+        "chordStemRelationSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/ChordStemRelation.java",
+    ),
+    (
+        "abstractBeamInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/AbstractBeamInter.java",
+    ),
+    (
+        "beamInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/BeamInter.java",
+    ),
+    (
+        "beamHookInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/BeamHookInter.java",
+    ),
+    (
+        "smallBeamInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/SmallBeamInter.java",
+    ),
+    (
+        "beamBeamRelationSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/BeamBeamRelation.java",
+    ),
+    (
+        "sheetStubSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/SheetStub.java",
+    ),
+    (
+        "bookSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/Book.java",
+    ),
+    (
+        "horizontalSideSourceSha256",
+        "app/src/main/java/org/audiveris/omr/util/HorizontalSide.java",
+    ),
+    (
+        "verticalSideSourceSha256",
+        "app/src/main/java/org/audiveris/omr/util/VerticalSide.java",
+    ),
+    (
+        "stemBuilderSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/stem/StemBuilder.java",
+    ),
+    (
+        "stemItemSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/stem/StemItem.java",
+    ),
+    (
+        "stemsRetrieverSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/stem/StemsRetriever.java",
+    ),
+    (
+        "beamGroupInterSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/BeamGroupInter.java",
+    ),
+    (
+        "ensembleHelperSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/inter/EnsembleHelper.java",
+    ),
+    (
+        "containmentSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/Containment.java",
+    ),
+    (
+        "abstractStemConnectionSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/AbstractStemConnection.java",
+    ),
+    (
+        "beamPortionSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sig/relation/BeamPortion.java",
+    ),
+    (
+        "scaleSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/Scale.java",
+    ),
+    (
+        "skewSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/Skew.java",
+    ),
+    (
+        "staffSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/Staff.java",
+    ),
+    (
+        "staffLineSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/StaffLine.java",
+    ),
+    (
+        "lineInfoSourceSha256",
+        "app/src/main/java/org/audiveris/omr/sheet/grid/LineInfo.java",
+    ),
+    (
+        "lineUtilSourceSha256",
+        "app/src/main/java/org/audiveris/omr/math/LineUtil.java",
+    ),
+    ("gradleSourceSha256", "app/build.gradle"),
+];
+const CORPUS_GLOBAL_FIXTURE_PINS: &[(&str, &str)] = &[
+    (
+        "baseApplyManifestSha256",
+        "rust/oracle/stems-beam-vlink-base-apply-manifest.txt",
+    ),
+    ("bLinkerFlagManifestSha256", BOUNDARY_FIFTEEN_MANIFEST_PATH),
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RowKind {
+    Page,
+    Predecessor,
+    Baseline,
+    GroupMember,
+    Sibling,
+    SourceOutgoing,
+    PairRelation,
+    Geometry,
+    Edge,
+    StemIncident,
+    BeamIncident,
+    Callback,
+    LinkerLookup,
+    LinkerFlag,
+    SiblingResult,
+    Result,
+    DeltaGuard,
+    Summary,
+    SyntheticCase,
+    SyntheticEvent,
+    SyntheticGuard,
+    PageSummary,
+    CorpusSummary,
+}
+
+impl RowKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Page => "stemsbeamvlinksiblinglinkspage",
+            Self::Predecessor => "stemsbeamvlinksiblinglinkspredecessor",
+            Self::Baseline => "stemsbeamvlinksiblinglinksbaseline",
+            Self::GroupMember => "stemsbeamvlinksiblinglinksgroupmember",
+            Self::Sibling => "stemsbeamvlinksiblinglinkssibling",
+            Self::SourceOutgoing => "stemsbeamvlinksiblinglinkssourceoutgoing",
+            Self::PairRelation => "stemsbeamvlinksiblinglinkspairrelation",
+            Self::Geometry => "stemsbeamvlinksiblinglinksgeometry",
+            Self::Edge => "stemsbeamvlinksiblinglinksedge",
+            Self::StemIncident => "stemsbeamvlinksiblinglinksstemincident",
+            Self::BeamIncident => "stemsbeamvlinksiblinglinksbeamincident",
+            Self::Callback => "stemsbeamvlinksiblinglinkscallback",
+            Self::LinkerLookup => "stemsbeamvlinksiblinglinkslinkerlookup",
+            Self::LinkerFlag => "stemsbeamvlinksiblinglinkslinkerflag",
+            Self::SiblingResult => "stemsbeamvlinksiblinglinkssiblingresult",
+            Self::Result => "stemsbeamvlinksiblinglinksresult",
+            Self::DeltaGuard => "stemsbeamvlinksiblinglinksdeltaguard",
+            Self::Summary => "stemsbeamvlinksiblinglinkssummary",
+            Self::SyntheticCase => "stemsbeamvlinksiblinglinkssyntheticcase",
+            Self::SyntheticEvent => "stemsbeamvlinksiblinglinkssyntheticevent",
+            Self::SyntheticGuard => "stemsbeamvlinksiblinglinkssyntheticguard",
+            Self::PageSummary => "stemsbeamvlinksiblinglinkspagesummary",
+            Self::CorpusSummary => "stemsbeamvlinksiblinglinkscorpussummary",
+        }
+    }
+
+    fn parse(label: &str) -> Option<Self> {
+        let suffix = label.strip_prefix("stemsbeamvlinksiblinglinks")?;
+        Some(match suffix {
+            "page" => Self::Page,
+            "predecessor" => Self::Predecessor,
+            "baseline" => Self::Baseline,
+            "groupmember" => Self::GroupMember,
+            "sibling" => Self::Sibling,
+            "sourceoutgoing" => Self::SourceOutgoing,
+            "pairrelation" => Self::PairRelation,
+            "geometry" => Self::Geometry,
+            "edge" => Self::Edge,
+            "stemincident" => Self::StemIncident,
+            "beamincident" => Self::BeamIncident,
+            "callback" => Self::Callback,
+            "linkerlookup" => Self::LinkerLookup,
+            "linkerflag" => Self::LinkerFlag,
+            "siblingresult" => Self::SiblingResult,
+            "result" => Self::Result,
+            "deltaguard" => Self::DeltaGuard,
+            "summary" => Self::Summary,
+            "syntheticcase" => Self::SyntheticCase,
+            "syntheticevent" => Self::SyntheticEvent,
+            "syntheticguard" => Self::SyntheticGuard,
+            "pagesummary" => Self::PageSummary,
+            "corpussummary" => Self::CorpusSummary,
+            _ => return None,
+        })
+    }
+
+    const fn expected_fields(self) -> &'static [&'static str] {
+        match self {
+            Self::Page => PAGE_FIELDS,
+            Self::Predecessor => PREDECESSOR_FIELDS,
+            Self::Baseline => BASELINE_FIELDS,
+            Self::GroupMember => GROUP_MEMBER_FIELDS,
+            Self::Sibling => SIBLING_FIELDS,
+            Self::SourceOutgoing => SOURCE_OUTGOING_FIELDS,
+            Self::PairRelation => PAIR_RELATION_FIELDS,
+            Self::Geometry => GEOMETRY_FIELDS,
+            Self::Edge => EDGE_FIELDS,
+            Self::StemIncident => STEM_INCIDENT_FIELDS,
+            Self::BeamIncident => BEAM_INCIDENT_FIELDS,
+            Self::Callback => CALLBACK_FIELDS,
+            Self::LinkerLookup => LINKER_LOOKUP_FIELDS,
+            Self::LinkerFlag => LINKER_FLAG_FIELDS,
+            Self::SiblingResult => SIBLING_RESULT_FIELDS,
+            Self::Result => RESULT_FIELDS,
+            Self::DeltaGuard => DELTA_GUARD_FIELDS,
+            Self::Summary => SUMMARY_FIELDS,
+            Self::SyntheticCase => SYNTHETIC_CASE_FIELDS,
+            Self::SyntheticEvent => SYNTHETIC_EVENT_FIELDS,
+            Self::SyntheticGuard => SYNTHETIC_GUARD_FIELDS,
+            Self::PageSummary => PAGE_SUMMARY_FIELDS,
+            Self::CorpusSummary => CORPUS_SUMMARY_FIELDS,
+        }
+    }
+}
+
+const CORE_ROW_KINDS: [RowKind; 21] = [
+    RowKind::Page,
+    RowKind::Predecessor,
+    RowKind::Baseline,
+    RowKind::GroupMember,
+    RowKind::Sibling,
+    RowKind::SourceOutgoing,
+    RowKind::PairRelation,
+    RowKind::Geometry,
+    RowKind::Edge,
+    RowKind::StemIncident,
+    RowKind::BeamIncident,
+    RowKind::Callback,
+    RowKind::LinkerLookup,
+    RowKind::LinkerFlag,
+    RowKind::SiblingResult,
+    RowKind::Result,
+    RowKind::DeltaGuard,
+    RowKind::Summary,
+    RowKind::SyntheticCase,
+    RowKind::SyntheticEvent,
+    RowKind::SyntheticGuard,
+];
+
+fn core_row_counts(rows: &[StrictRow]) -> String {
+    CORE_ROW_KINDS
+        .iter()
+        .map(|kind| {
+            format!(
+                "{}:{}",
+                kind.label(),
+                rows.iter().filter(|row| row.kind == *kind).count()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StrictRow {
+    kind: RowKind,
+    page: String,
+    fields: Vec<(String, String)>,
+}
+
+impl StrictRow {
+    fn parse(line: &str) -> Result<Self, String> {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let label = tokens.first().ok_or_else(|| "row is empty".to_owned())?;
+        let kind = RowKind::parse(label).ok_or_else(|| format!("unknown row label {label}"))?;
+        let (page, field_tokens) = if kind == RowKind::CorpusSummary {
+            ("", &tokens[1..])
+        } else {
+            (
+                *tokens
+                    .get(1)
+                    .ok_or_else(|| "row lacks its implicit page token".to_owned())?,
+                &tokens[2..],
+            )
+        };
+        if field_tokens.len() % 2 != 0 {
+            return Err("row does not contain ordered key/value pairs".to_owned());
+        }
+        let mut names = BTreeSet::new();
+        let mut fields = Vec::with_capacity(field_tokens.len() / 2);
+        for pair in field_tokens.chunks_exact(2) {
+            if !names.insert(pair[0]) {
+                return Err(format!("duplicate field {}", pair[0]));
+            }
+            fields.push((pair[0].to_owned(), pair[1].to_owned()));
+        }
+        let actual = fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if actual != kind.expected_fields() {
+            return Err(format!(
+                "wrong field order for {kind:?}: expected {:?}, got {actual:?}",
+                kind.expected_fields()
+            ));
+        }
+        Ok(Self {
+            kind,
+            page: page.to_owned(),
+            fields,
+        })
+    }
+
+    fn value(&self, name: &str) -> Result<&str, String> {
+        self.fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value.as_str()))
+            .ok_or_else(|| format!("missing {name} in {:?}", self.kind))
+    }
+
+    fn usize(&self, name: &str) -> Result<usize, String> {
+        self.value(name)?
+            .parse()
+            .map_err(|error| format!("invalid {name} in {:?}: {error}", self.kind))
+    }
+
+    fn i64(&self, name: &str) -> Result<i64, String> {
+        self.value(name)?
+            .parse()
+            .map_err(|error| format!("invalid {name} in {:?}: {error}", self.kind))
+    }
+
+    fn bool(&self, name: &str) -> Result<bool, String> {
+        match self.value(name)? {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(format!("invalid Boolean {name}={value} in {:?}", self.kind)),
+        }
+    }
+
+    fn key(&self) -> Result<TransactionKey, String> {
+        if matches!(
+            self.kind,
+            RowKind::Page | RowKind::PageSummary | RowKind::CorpusSummary
+        ) {
+            return Err("page row has no transaction key".to_owned());
+        }
+        let actual = self
+            .fields
+            .iter()
+            .take(COMMON_FIELDS.len())
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if actual != COMMON_FIELDS {
+            return Err(format!("transaction prefix differs in {:?}", self.kind));
+        }
+        Ok(TransactionKey {
+            page: self.page.clone(),
+            system: self.usize("system")?,
+            plan: self.usize("plan")?,
+            scope: self.value("scope")?.to_owned(),
+            case_name: self.value("case")?.to_owned(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ManifestRow {
+    label: String,
+    fields: Vec<(String, String)>,
+}
+
+impl ManifestRow {
+    fn parse(line: &str, expected_label: &str, expected_fields: &[&str]) -> Result<Self, String> {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let label = tokens
+            .first()
+            .ok_or_else(|| "manifest row is empty".to_owned())?;
+        if *label != expected_label {
+            return Err(format!(
+                "manifest row label differs: expected {expected_label}, got {label}"
+            ));
+        }
+        let field_tokens = &tokens[1..];
+        if field_tokens.len() % 2 != 0 {
+            return Err("manifest row does not contain ordered key/value pairs".to_owned());
+        }
+        let fields = field_tokens
+            .chunks_exact(2)
+            .map(|pair| (pair[0].to_owned(), pair[1].to_owned()))
+            .collect::<Vec<_>>();
+        let actual = fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if actual != expected_fields {
+            return Err(format!(
+                "wrong field order for {expected_label}: expected {expected_fields:?}, got {actual:?}"
+            ));
+        }
+        let unique = actual.iter().copied().collect::<BTreeSet<_>>();
+        if unique.len() != actual.len() {
+            return Err(format!("duplicate field in {expected_label}"));
+        }
+        Ok(Self {
+            label: (*label).to_owned(),
+            fields,
+        })
+    }
+
+    fn value(&self, name: &str) -> Result<&str, String> {
+        self.fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value.as_str()))
+            .ok_or_else(|| format!("missing {name} in {}", self.label))
+    }
+
+    fn usize(&self, name: &str) -> Result<usize, String> {
+        self.value(name)?
+            .parse()
+            .map_err(|error| format!("invalid {name} in {}: {error}", self.label))
+    }
+
+    fn bool(&self, name: &str) -> Result<bool, String> {
+        match self.value(name)? {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(format!("invalid Boolean {name}={value} in {}", self.label)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TransactionKey {
+    page: String,
+    system: usize,
+    plan: usize,
+    scope: String,
+    case_name: String,
+}
+
+fn parse_scaffold_fixture(text: &str) -> Result<Vec<StrictRow>, String> {
+    if !text.as_bytes().ends_with(b"\n") {
+        return Err("fixture must end with one newline".to_owned());
+    }
+    let lines = text.lines().collect::<Vec<_>>();
+    if lines.len() <= FIXTURE_HEADER.len() || &lines[..FIXTURE_HEADER.len()] != FIXTURE_HEADER {
+        return Err("fixture header differs".to_owned());
+    }
+    lines[FIXTURE_HEADER.len()..]
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if line.is_empty() || line.starts_with('#') {
+                return Err(format!(
+                    "unexpected blank/comment at semantic line {}",
+                    index + FIXTURE_HEADER.len() + 1
+                ));
+            }
+            StrictRow::parse(line)
+                .map_err(|error| format!("line {}: {error}", index + FIXTURE_HEADER.len() + 1))
+        })
+        .collect()
+}
+
+fn java_printf_fields(source: &str, kind: RowKind) -> Result<Vec<String>, String> {
+    if kind == RowKind::PageSummary {
+        return Err("page summary is emitted by the runner, not Java".to_owned());
+    }
+    let marker = format!("\"{} ", kind.label());
+    let start = source
+        .find(&marker)
+        .ok_or_else(|| format!("Java probe lacks {:?} printf", kind))?;
+    let mut format_text = String::new();
+    for line in source[start..].lines() {
+        let Some(first_quote) = line.find('"') else {
+            continue;
+        };
+        let last_quote = line
+            .rfind('"')
+            .ok_or_else(|| format!("unterminated Java format literal for {kind:?}"))?;
+        if last_quote == first_quote {
+            return Err(format!("empty Java format literal for {kind:?}"));
+        }
+        format_text.push_str(&line[first_quote + 1..last_quote]);
+        if line[first_quote + 1..last_quote].contains("%n") {
+            break;
+        }
+    }
+    let format_text = format_text.replace("%n", "");
+    let tokens = format_text.split_ascii_whitespace().collect::<Vec<_>>();
+    if tokens.first().copied() != Some(kind.label()) || tokens.get(1).copied() != Some("%s") {
+        return Err(format!("Java {:?} format lacks label/page prefix", kind));
+    }
+    if (tokens.len() - 2) % 2 != 0 {
+        return Err(format!("Java {:?} format is not key/value shaped", kind));
+    }
+    let mut fields = if kind == RowKind::Page {
+        Vec::new()
+    } else {
+        COMMON_FIELDS
+            .iter()
+            .map(|field| (*field).to_owned())
+            .collect()
+    };
+    fields.extend(tokens[2..].chunks_exact(2).map(|pair| pair[0].to_owned()));
+    Ok(fields)
+}
+
+fn runner_corpus_printf_fields(source: &str) -> Result<Vec<String>, String> {
+    let prefix = format!("printf '{} ", RowKind::CorpusSummary.label());
+    let line = source
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .ok_or_else(|| "runner lacks corpus-summary printf".to_owned())?;
+    let first_quote = line
+        .find('\'')
+        .ok_or_else(|| "runner corpus printf lacks opening quote".to_owned())?;
+    let last_quote = line
+        .rfind('\'')
+        .filter(|last| *last > first_quote)
+        .ok_or_else(|| "runner corpus printf lacks closing quote".to_owned())?;
+    let tokens = line[first_quote + 1..last_quote]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    if tokens.first().copied() != Some(RowKind::CorpusSummary.label())
+        || (tokens.len() - 1) % 2 != 0
+    {
+        return Err("runner corpus printf is not key/value shaped".to_owned());
+    }
+    let mut fields = tokens[1..]
+        .chunks_exact(2)
+        .map(|pair| pair[0].to_owned())
+        .collect::<Vec<_>>();
+    let insertion = fields
+        .iter()
+        .position(|field| field == "stemLinkerClassSha256")
+        .ok_or_else(|| "runner corpus printf lacks class/source boundary".to_owned())?
+        + 1;
+    fields.splice(
+        insertion..insertion,
+        CORPUS_SOURCE_PINS
+            .iter()
+            .map(|(field, _)| (*field).to_owned()),
+    );
+    Ok(fields)
+}
+
+struct RowCursor<'a> {
+    rows: &'a [StrictRow],
+    index: usize,
+}
+
+impl<'a> RowCursor<'a> {
+    fn new(rows: &'a [StrictRow], index: usize) -> Self {
+        Self { rows, index }
+    }
+
+    fn peek_kind(&self) -> Option<RowKind> {
+        self.rows.get(self.index).map(|row| row.kind)
+    }
+
+    fn take(&mut self, kind: RowKind, key: &TransactionKey) -> Result<&'a StrictRow, String> {
+        let row = self
+            .rows
+            .get(self.index)
+            .ok_or_else(|| format!("expected {kind:?}, reached end of fixture"))?;
+        if row.kind != kind {
+            return Err(format!(
+                "expected {kind:?} at semantic row {}, found {:?}",
+                self.index, row.kind
+            ));
+        }
+        if &row.key()? != key {
+            return Err(format!(
+                "transaction key drift at semantic row {}",
+                self.index
+            ));
+        }
+        self.index += 1;
+        Ok(row)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ParsedTransaction {
+    key: TransactionKey,
+    predecessor: StrictRow,
+    rows: Vec<StrictRow>,
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn sha256_rows(rows: impl IntoIterator<Item = String>) -> String {
+    let mut bytes = Vec::new();
+    for row in rows {
+        bytes.extend_from_slice(row.as_bytes());
+        bytes.push(b'\n');
+    }
+    sha256_hex(&bytes)
+}
+
+fn joined_row_token(row: &StrictRow, fields: &[&str]) -> Result<String, String> {
+    fields
+        .iter()
+        .map(|field| row.value(field))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|values| values.join(":"))
+}
+
+fn require_ordinal(row: &StrictRow, field: &str, expected: usize) -> Result<(), String> {
+    if row.usize(field)? != expected {
+        return Err(format!(
+            "{field} chronology differs in {:?}: expected {expected}",
+            row.kind
+        ));
+    }
+    Ok(())
+}
+
+fn validate_page_row(row: &StrictRow) -> Result<(), String> {
+    if row.kind != RowKind::Page
+        || row.usize("systems")? == 0
+        || row.value("executionMode")? != "foregroundJvmPerSystem"
+        || row.value("groupOrder")? != "OutgoingContainmentThenStableTopDown"
+        || row.value("incidentOrder")? != "IncomingThenOutgoing"
+        || !row.bool("headless")?
+        || row.value("methodDispatch")? != "ExactPrivateBeamLinkerVLinkerLinkSiblings"
+        || row.value("stop")? != "ReadyBeforeHeadRelationLoop"
+    {
+        return Err("page execution envelope differs".to_owned());
+    }
+    for field in [
+        "schedulerFixtureSha256",
+        "expandFixtureSha256",
+        "createStemFixtureSha256",
+        "reuseCheckFixtureSha256",
+        "baseApplyFixtureSha256",
+        "bLinkerFlagFixtureSha256",
+    ] {
+        if !is_lower_sha256(row.value(field)?) {
+            return Err(format!("page {field} is not lowercase SHA-256"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_predecessor_row(row: &StrictRow) -> Result<(), String> {
+    if row.value("join")? != "FullBoundary15Replay"
+        || row.usize("b15TransactionRows")? == 0
+        || !is_lower_sha256(row.value("b15TransactionEvidenceSha256")?)
+        || !is_lower_sha256(row.value("b15ResultRowSha256")?)
+        || !is_lower_sha256(row.value("b15GuardRowSha256")?)
+        || !is_lower_sha256(row.value("b15SummaryRowSha256")?)
+        || row.value("predecessorTerminal")? != "ReadyBeforeSiblingBeamLinks"
+        || !row.bool("targetBLinked")?
+        || row.value("stemAlias")?.is_empty()
+        || row.usize("stemInterId")? == 0
+        || row.value("baseBeamAlias")?.is_empty()
+        || row.value("targetBAlias")?.is_empty()
+        || row.value("triggeringVAlias")?.is_empty()
+    {
+        return Err("Boundary-15 predecessor row differs".to_owned());
+    }
+    parse_hex_bits(row.value("supportGrade")?)?;
+    Ok(())
+}
+
+fn parse_hex_bits(value: &str) -> Result<u64, String> {
+    let (java_hex, raw) = value
+        .split_once('/')
+        .ok_or_else(|| format!("missing raw bits in {value}"))?;
+    if java_hex.is_empty() || raw.len() != 16 {
+        return Err(format!("invalid Java hex/raw token {value}"));
+    }
+    let bits = u64::from_str_radix(raw, 16)
+        .map_err(|error| format!("invalid raw f64 bits in {value}: {error}"))?;
+    if !f64::from_bits(bits).is_finite() {
+        return Err(format!("non-finite compact f64 token {value}"));
+    }
+    Ok(bits)
+}
+
+fn parse_f64(value: &str) -> Result<f64, String> {
+    Ok(f64::from_bits(parse_hex_bits(value)?))
+}
+
+fn parse_point(value: &str) -> Result<NativeStemPoint, String> {
+    let values = value.split(':').collect::<Vec<_>>();
+    let [x, y] = values.as_slice() else {
+        return Err(format!("invalid point token {value}"));
+    };
+    Ok(NativeStemPoint {
+        x: parse_f64(x)?,
+        y: parse_f64(y)?,
+    })
+}
+
+fn parse_segment(value: &str) -> Result<Segment, String> {
+    let values = value.split(':').collect::<Vec<_>>();
+    let [x1, y1, x2, y2] = values.as_slice() else {
+        return Err(format!("invalid segment token {value}"));
+    };
+    Ok(Segment {
+        x1: parse_f64(x1)?,
+        y1: parse_f64(y1)?,
+        x2: parse_f64(x2)?,
+        y2: parse_f64(y2)?,
+    })
+}
+
+fn parse_i32_field(row: &StrictRow, field: &str) -> Result<i32, String> {
+    row.value(field)?
+        .parse()
+        .map_err(|error| format!("invalid {field} in {:?}: {error}", row.kind))
+}
+
+fn parse_optional_usize(value: &str) -> Result<Option<usize>, String> {
+    if value == "-" {
+        Ok(None)
+    } else {
+        value
+            .parse()
+            .map(Some)
+            .map_err(|error| format!("invalid optional usize {value}: {error}"))
+    }
+}
+
+fn parse_optional_i32(value: &str) -> Result<Option<i32>, String> {
+    if value == "-" {
+        Ok(None)
+    } else {
+        value
+            .parse()
+            .map(Some)
+            .map_err(|error| format!("invalid optional i32 {value}: {error}"))
+    }
+}
+
+fn parse_optional_bool(value: &str) -> Result<Option<bool>, String> {
+    match value {
+        "-" => Ok(None),
+        "true" => Ok(Some(true)),
+        "false" => Ok(Some(false)),
+        _ => Err(format!("invalid optional Boolean {value}")),
+    }
+}
+
+fn parse_optional_string(value: &str) -> Option<String> {
+    (value != "-").then(|| value.to_owned())
+}
+
+fn parse_sig_edge(value: &str) -> Result<usize, String> {
+    value
+        .strip_prefix("sig-edge:")
+        .ok_or_else(|| format!("invalid SIG edge identity {value}"))?
+        .parse()
+        .map_err(|error| format!("invalid SIG edge identity {value}: {error}"))
+}
+
+fn parse_relation_object(
+    value: &str,
+) -> Result<NativeStemsBeamSiblingRelationObjectIdentity, String> {
+    if let Some(identity) = value.strip_prefix("sig-relation-object:") {
+        return identity
+            .parse()
+            .map(NativeStemsBeamSiblingRelationObjectIdentity::GraphObject)
+            .map_err(|error| format!("invalid graph relation object {value}: {error}"));
+    }
+    if let Some(plan) = value.strip_prefix("base-draft:") {
+        return plan
+            .parse()
+            .map(NativeStemsBeamSiblingRelationObjectIdentity::BaseDraft)
+            .map_err(|error| format!("invalid base draft object {value}: {error}"));
+    }
+    if let Some(suffix) = value.strip_prefix("sibling-draft:") {
+        let values = suffix.split(':').collect::<Vec<_>>();
+        let [plan, sibling] = values.as_slice() else {
+            return Err(format!("invalid sibling draft object {value}"));
+        };
+        return Ok(NativeStemsBeamSiblingRelationObjectIdentity::SiblingDraft {
+            plan_ordinal: plan
+                .parse()
+                .map_err(|error| format!("invalid sibling draft plan {value}: {error}"))?,
+            sibling_ordinal: sibling
+                .parse()
+                .map_err(|error| format!("invalid sibling draft ordinal {value}: {error}"))?,
+        });
+    }
+    Err(format!("unknown relation object identity {value}"))
+}
+
+fn parse_portion(value: &str) -> Result<Option<NativeBeamPortion>, String> {
+    Ok(match value {
+        "-" => None,
+        "LEFT" => Some(NativeBeamPortion::Left),
+        "CENTER" => Some(NativeBeamPortion::Center),
+        "RIGHT" => Some(NativeBeamPortion::Right),
+        _ => return Err(format!("invalid beam portion {value}")),
+    })
+}
+
+fn parse_direction(value: &str) -> Result<NativeStemsBeamIncidentDirection, String> {
+    match value {
+        "Incoming" => Ok(NativeStemsBeamIncidentDirection::Incoming),
+        "Outgoing" => Ok(NativeStemsBeamIncidentDirection::Outgoing),
+        _ => Err(format!("invalid incident direction {value}")),
+    }
+}
+
+fn coarse_relation_kind(class: &str) -> NativeStemsBeamQueryRelationKind {
+    match class {
+        "org.audiveris.omr.sig.relation.BeamStemRelation" => {
+            NativeStemsBeamQueryRelationKind::BeamStem
+        }
+        "org.audiveris.omr.sig.relation.BeamRestRelation" => {
+            NativeStemsBeamQueryRelationKind::BeamRest
+        }
+        "org.audiveris.omr.sig.relation.ChordStemRelation" => {
+            NativeStemsBeamQueryRelationKind::ChordStem
+        }
+        _ => NativeStemsBeamQueryRelationKind::Other,
+    }
+}
+
+fn beam_source_from_alias(
+    alias: &str,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<NativeStemsBeamSource, String> {
+    let sig_ordinal = alias
+        .strip_prefix("beam:")
+        .ok_or_else(|| format!("invalid beam alias {alias}"))?
+        .parse::<usize>()
+        .map_err(|error| format!("invalid beam alias {alias}: {error}"))?;
+    let matches = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .filter(|beam| beam.sig_ordinal == sig_ordinal)
+        .collect::<Vec<_>>();
+    let [beam] = matches.as_slice() else {
+        return Err(format!(
+            "beam alias {alias} has {} stump sig_ordinal matches",
+            matches.len()
+        ));
+    };
+    Ok(beam.source)
+}
+
+fn parse_b_linker_alias(
+    alias: &str,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<NativeStemsBeamBLinkerRef, String> {
+    let (beam_alias, ordinal) = alias
+        .rsplit_once(":b:")
+        .ok_or_else(|| format!("invalid B-linker alias {alias}"))?;
+    let ordinal = ordinal
+        .parse::<usize>()
+        .map_err(|error| format!("invalid B-linker alias {alias}: {error}"))?;
+    Ok(NativeStemsBeamBLinkerRef {
+        beam: beam_source_from_alias(beam_alias, hydrated)?,
+        id: ordinal
+            .checked_add(1)
+            .ok_or_else(|| format!("B-linker ordinal overflow in {alias}"))?,
+    })
+}
+
+fn parse_v_linker_alias(
+    alias: &str,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<NativeStemsBeamVLinkerRef, String> {
+    let (b_alias, side) = alias
+        .rsplit_once(":v:")
+        .ok_or_else(|| format!("invalid V-linker alias {alias}"))?;
+    let side = match side {
+        "TOP" => NativeStemVerticalSide::Top,
+        "BOTTOM" => NativeStemVerticalSide::Bottom,
+        value => return Err(format!("invalid V-linker side {value}")),
+    };
+    Ok(NativeStemsBeamVLinkerRef {
+        b_linker: parse_b_linker_alias(b_alias, hydrated)?,
+        side,
+    })
+}
+
+fn glyph_identity(
+    identity: &str,
+    token: &str,
+) -> Result<Option<NativeStemsBeamSiblingGlyphIdentity>, String> {
+    match (identity, token) {
+        ("null-glyph", "null") => Ok(None),
+        (identity, token) => {
+            let object_identity = identity
+                .strip_prefix("group-glyph:")
+                .ok_or_else(|| format!("invalid group glyph identity {identity}"))?
+                .parse()
+                .map_err(|error| format!("invalid group glyph identity {identity}: {error}"))?;
+            if token == "null" || token.is_empty() {
+                return Err(format!("non-null glyph identity {identity} lacks content"));
+            }
+            Ok(Some(NativeStemsBeamSiblingGlyphIdentity {
+                object_identity,
+                token: token.to_owned(),
+            }))
+        }
+    }
+}
+
+fn only_transaction_row(
+    transaction: &ParsedTransaction,
+    kind: RowKind,
+) -> Result<&StrictRow, String> {
+    let matches = transaction
+        .rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .collect::<Vec<_>>();
+    let [row] = matches.as_slice() else {
+        return Err(format!(
+            "transaction {:?} has {} {kind:?} rows",
+            transaction.key,
+            matches.len()
+        ));
+    };
+    Ok(row)
+}
+
+fn sibling_transaction_rows(
+    transaction: &ParsedTransaction,
+    kind: RowKind,
+    sibling_ordinal: usize,
+) -> Result<Vec<&StrictRow>, String> {
+    transaction
+        .rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .filter(|row| row.usize("siblingOrdinal") == Ok(sibling_ordinal))
+        .map(Ok)
+        .collect()
+}
+
+fn only_sibling_transaction_row(
+    transaction: &ParsedTransaction,
+    kind: RowKind,
+    sibling_ordinal: usize,
+) -> Result<&StrictRow, String> {
+    let matches = sibling_transaction_rows(transaction, kind, sibling_ordinal)?;
+    let [row] = matches.as_slice() else {
+        return Err(format!(
+            "transaction {:?} sibling {sibling_ordinal} has {} {kind:?} rows",
+            transaction.key,
+            matches.len()
+        ));
+    };
+    Ok(row)
+}
+
+struct ProjectedRealGroup {
+    base_glyph: Option<NativeStemsBeamSiblingGlyphIdentity>,
+    scan: NativeStemsBeamSiblingGroupScan,
+    live_members: Vec<NativeStemsBeamSiblingLiveBeam>,
+}
+
+fn query_provenance(value: &str) -> Result<NativeStemsBeamSiblingQueryProvenance, String> {
+    if value == "NotRead" {
+        Ok(NativeStemsBeamSiblingQueryProvenance::NotRead)
+    } else if is_lower_sha256(value) {
+        Ok(NativeStemsBeamSiblingQueryProvenance::ExhaustiveSha256(
+            value.to_owned(),
+        ))
+    } else {
+        Err(format!("invalid sibling query provenance {value}"))
+    }
+}
+
+fn incident_opposite(alias: &str, stem_alias: &str) -> NativeStemsBeamIncidentOpposite {
+    if alias.starts_with("beam:") {
+        NativeStemsBeamIncidentOpposite::Beam
+    } else if alias == stem_alias {
+        NativeStemsBeamIncidentOpposite::Stem
+    } else {
+        NativeStemsBeamIncidentOpposite::OtherInter
+    }
+}
+
+fn same_segment_bits(left: Segment, right: Segment) -> bool {
+    left.x1.to_bits() == right.x1.to_bits()
+        && left.y1.to_bits() == right.y1.to_bits()
+        && left.x2.to_bits() == right.x2.to_bits()
+        && left.y2.to_bits() == right.y2.to_bits()
+}
+
+fn project_real_group(
+    transaction: &ParsedTransaction,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<ProjectedRealGroup, String> {
+    let baseline = only_transaction_row(transaction, RowKind::Baseline)?;
+    let base_glyph = glyph_identity(
+        baseline.value("baseBeamGlyphIdentity")?,
+        baseline.value("baseBeamGlyph")?,
+    )?;
+    let rows = transaction
+        .rows
+        .iter()
+        .filter(|row| row.kind == RowKind::GroupMember)
+        .collect::<Vec<_>>();
+    let mut relations = Vec::with_capacity(rows.len());
+    let mut members = Vec::new();
+    let mut live_members = Vec::new();
+    for row in rows {
+        let containment = row.bool("containmentMatch")?;
+        let target = if containment {
+            NativeStemsBeamSiblingGroupTarget::Beam(beam_source_from_alias(
+                row.value("targetAlias")?,
+                hydrated,
+            )?)
+        } else {
+            NativeStemsBeamSiblingGroupTarget::OtherInter
+        };
+        relations.push(NativeStemsBeamSiblingGroupRelation {
+            outgoing_ordinal: row.usize("groupOutgoingOrdinal")?,
+            graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+            relation_object_identity: parse_relation_object(row.value("relationObjectIdentity")?)?,
+            relation_class: row.value("relationClass")?.to_owned(),
+            containment_match: containment,
+            target,
+            target_read_by_get_members: row.bool("targetReadByGetMembers")?,
+            target_evidence: match row.value("targetEvidence")? {
+                "GetMembersRead" => NativeStemsBeamSiblingGroupTargetEvidence::GetMembersRead,
+                "GraphReconstruction" => {
+                    NativeStemsBeamSiblingGroupTargetEvidence::GraphReconstruction
+                }
+                value => return Err(format!("invalid group target evidence {value}")),
+            },
+            target_alias: row.value("targetAlias")?.to_owned(),
+            target_class: row.value("targetRuntimeClass")?.to_owned(),
+            target_inter_id: parse_i32_field(row, "targetInterId")?,
+            target_vertex_identity: row.usize("targetVertexOrdinal")?,
+            member_ordinal: parse_optional_usize(row.value("memberOrdinal")?)?,
+        });
+        if !containment {
+            continue;
+        }
+        let NativeStemsBeamSiblingGroupTarget::Beam(source) = target else {
+            unreachable!("containment target projected as beam")
+        };
+        let stump_matches = hydrated
+            .stumps
+            .beams_by_abscissa
+            .iter()
+            .filter(|beam| beam.source == source)
+            .collect::<Vec<_>>();
+        let [stump] = stump_matches.as_slice() else {
+            return Err(format!(
+                "group source {source:?} has {} stump rows",
+                stump_matches.len()
+            ));
+        };
+        let emitted_median = parse_segment(row.value("median")?)?;
+        if !same_segment_bits(emitted_median, stump.median)
+            || parse_f64(row.value("height")?)?.to_bits() != stump.height.to_bits()
+        {
+            return Err(format!(
+                "group member {} stump geometry differs",
+                row.value("targetAlias")?
+            ));
+        }
+        let beam_group = NativeStemsBeamGroupRuntimeState {
+            sig_vertex_ordinal: row.usize("beamGroupVertexOrdinal")?,
+            state_sha256: row.value("beamGroupStateHash")?.to_owned(),
+        };
+        let runtime = NativeStemsBeamVLinkBeamRuntimeState {
+            source,
+            sig_vertex_identity: Some(row.usize("targetVertexOrdinal")?),
+            inter_id: parse_i32_field(row, "beamInterId")?,
+            inter_indexed: row.bool("sigMembership")?,
+            sig_system_id: row.usize("sigSystemId")?,
+            removed: row.bool("beamRemoved")?,
+            vip: row.bool("beamVip")?,
+            abnormal: row.bool("beamAbnormal")?,
+            stump_group_ordinal: stump.group_ordinal,
+            beam_group: Some(beam_group),
+        };
+        let member_glyph = glyph_identity(row.value("glyphIdentity")?, row.value("glyph")?)?;
+        live_members.push(NativeStemsBeamSiblingLiveBeam {
+            source,
+            alias: row.value("targetAlias")?.to_owned(),
+            runtime,
+            inter_index_ordinal: row.usize("interIndexOrdinal")?,
+            inter_index_object_matches: row.usize("interIndexObjectMatches")?,
+            inter_index_id_matches: row.usize("interIndexIdMatches")?,
+            glyph: member_glyph,
+        });
+        let cross = parse_point(row.value("verticalCross")?)?;
+        let left_limit = parse_f64(row.value("leftLimit")?)?;
+        let right_limit = parse_f64(row.value("rightLimit")?)?;
+        let inclusive_left = left_limit <= cross.x;
+        let inclusive_right = cross.x <= right_limit;
+        if row.bool("inclusiveLeft")? != inclusive_left
+            || row.bool("inclusiveRight")? != inclusive_right
+            || row.bool("selected")? != (inclusive_left && inclusive_right)
+        {
+            return Err(format!(
+                "group member {} inclusive selection differs",
+                row.value("targetAlias")?
+            ));
+        }
+        members.push(NativeStemsBeamSiblingGroupMemberTrace {
+            member_ordinal: row.usize("memberOrdinal")?,
+            source,
+            cross,
+            left_limit,
+            right_limit,
+            selected: row.bool("selected")?,
+            sorted_ordinal: parse_optional_usize(row.value("sortedOrdinal")?)?,
+            removed_as_base: row.bool("baseIdentity")?
+                && row.value("removeAction")? == "RemoveFirstBase",
+        });
+    }
+    let base_source = beam_source_from_alias(baseline.value("baseBeamAlias")?, hydrated)?;
+    let base_member = live_members
+        .iter()
+        .find(|member| member.source == base_source)
+        .ok_or_else(|| "base beam is absent from projected live group".to_owned())?;
+    if base_member.runtime != hydrated.base_apply.state_after.sig.beam
+        || base_member.glyph != base_glyph
+    {
+        return Err("projected base live member differs from Boundary-14 state".to_owned());
+    }
+    Ok(ProjectedRealGroup {
+        base_glyph,
+        scan: NativeStemsBeamSiblingGroupScan {
+            query_relation_count: baseline.usize("groupOutgoingScanned")?,
+            query_provenance_sha256: baseline.value("groupQueryProvenanceSha256")?.to_owned(),
+            relations,
+            members,
+        },
+        live_members,
+    })
+}
+
+fn project_pair_scan(
+    transaction: &ParsedTransaction,
+    sibling: &StrictRow,
+) -> Result<NativeStemsBeamSiblingPairScan, String> {
+    let sibling_ordinal = sibling.usize("siblingOrdinal")?;
+    let source_rows =
+        sibling_transaction_rows(transaction, RowKind::SourceOutgoing, sibling_ordinal)?;
+    let pair_rows = sibling_transaction_rows(transaction, RowKind::PairRelation, sibling_ordinal)?;
+    let source_outgoing_relations = source_rows
+        .iter()
+        .map(|row| {
+            Ok(NativeStemsBeamSiblingSourceOutgoingRelation {
+                source_outgoing_ordinal: row.usize("sourceOutgoingOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                relation_class: row.value("runtimeClass")?.to_owned(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let relations = pair_rows
+        .iter()
+        .map(|row| {
+            let class_read = match row.value("action")? {
+                "Continue" => NativeStemsBeamSiblingPairClassRead::ExaminedContinue,
+                "SelectBreak" => NativeStemsBeamSiblingPairClassRead::ExaminedMatchBreak,
+                "UnreadAfterBreak" => NativeStemsBeamSiblingPairClassRead::UnreadAfterBreak,
+                value => return Err(format!("invalid pair action {value}")),
+            };
+            Ok(NativeStemsBeamSiblingPairRelation {
+                pair_ordinal: row.usize("pairOrdinal")?,
+                source_outgoing_ordinal: row.usize("sourceOutgoingOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                relation_class: row.value("runtimeClass")?.to_owned(),
+                kind: coarse_relation_kind(row.value("runtimeClass")?),
+                class_read,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(NativeStemsBeamSiblingPairScan {
+        source_outgoing_scanned: sibling.usize("sourceOutgoingScanned")?,
+        source_outgoing_provenance: query_provenance(
+            sibling.value("sourceOutgoingProvenanceSha256")?,
+        )?,
+        source_outgoing_relations,
+        query_relation_count: sibling.usize("pairRows")?,
+        pair_provenance: query_provenance(sibling.value("pairProvenanceSha256")?)?,
+        relations,
+    })
+}
+
+fn project_stem_incident_scan(
+    transaction: &ParsedTransaction,
+    sibling_ordinal: usize,
+    callback: &StrictRow,
+    stem_alias: &str,
+) -> Result<NativeStemsBeamSiblingStemIncidentScan, String> {
+    if callback.value("stemIncidentState")? != "ExhaustiveIncomingThenOutgoingAtCallback" {
+        return Err("real sibling callback stem incident state differs".to_owned());
+    }
+    let rows = sibling_transaction_rows(transaction, RowKind::StemIncident, sibling_ordinal)?;
+    let relations = rows
+        .iter()
+        .map(|row| {
+            let opposite_alias = row.value("oppositeAlias")?;
+            Ok(NativeStemsBeamSiblingStemIncidentRelation {
+                incident_ordinal: row.usize("incidentOrdinal")?,
+                direction: parse_direction(row.value("direction")?)?,
+                direction_ordinal: row.usize("directionOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                relation_class: row.value("runtimeClass")?.to_owned(),
+                kind: coarse_relation_kind(row.value("runtimeClass")?),
+                opposite_vertex_identity: row.usize("oppositeVertexOrdinal")?,
+                opposite: incident_opposite(opposite_alias, stem_alias),
+                opposite_alias: opposite_alias.to_owned(),
+                opposite_inter_id: parse_i32_field(row, "oppositeInterId")?,
+                chord_stem_match: row.bool("chordStemMatch")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(NativeStemsBeamSiblingStemIncidentScan {
+        query_relation_count: callback.usize("stemIncidentRows")?,
+        query_provenance_sha256: callback.value("stemIncidentHash")?.to_owned(),
+        relations,
+    })
+}
+
+fn project_beam_incident_scan(
+    transaction: &ParsedTransaction,
+    sibling_ordinal: usize,
+    callback: &StrictRow,
+    edge: &StrictRow,
+    stem_alias: &str,
+) -> Result<NativeStemsBeamSiblingBeamIncidentScan, String> {
+    let rows = sibling_transaction_rows(transaction, RowKind::BeamIncident, sibling_ordinal)?;
+    let fresh_graph_identity = parse_sig_edge(edge.value("graphRelationIdentity")?)?;
+    let fresh_portion = parse_portion(edge.value("portion")?)?
+        .ok_or_else(|| "fresh sibling edge lacks beam portion".to_owned())?;
+    let relations = rows
+        .iter()
+        .map(|row| {
+            let graph_relation_identity = parse_sig_edge(row.value("graphRelationIdentity")?)?;
+            let projected_portion = parse_portion(row.value("portion")?)?;
+            let relation_class = row.value("runtimeClass")?;
+            let kind_portion = if graph_relation_identity == fresh_graph_identity
+                && relation_class == "org.audiveris.omr.sig.relation.BeamStemRelation"
+            {
+                Some(fresh_portion)
+            } else {
+                projected_portion
+            };
+            let kind = match relation_class {
+                "org.audiveris.omr.sig.relation.BeamStemRelation" => {
+                    NativeStemsBeamSigRelationKind::BeamStem {
+                        beam_portion: kind_portion,
+                    }
+                }
+                "org.audiveris.omr.sig.relation.BeamRestRelation" => {
+                    NativeStemsBeamSigRelationKind::BeamRest {
+                        beam_portion: kind_portion,
+                    }
+                }
+                "org.audiveris.omr.sig.relation.ChordStemRelation" => {
+                    NativeStemsBeamSigRelationKind::ChordStem
+                }
+                _ => NativeStemsBeamSigRelationKind::Other,
+            };
+            let opposite_alias = row.value("oppositeAlias")?;
+            Ok(NativeStemsBeamSiblingBeamIncidentRelation {
+                incident_ordinal: row.usize("incidentOrdinal")?,
+                direction: parse_direction(row.value("direction")?)?,
+                direction_ordinal: row.usize("directionOrdinal")?,
+                graph_relation_identity,
+                relation_object_identity: parse_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                relation_class: relation_class.to_owned(),
+                kind,
+                opposite_vertex_identity: row.usize("oppositeVertexOrdinal")?,
+                opposite: incident_opposite(opposite_alias, stem_alias),
+                opposite_alias: opposite_alias.to_owned(),
+                opposite_inter_id: parse_i32_field(row, "oppositeInterId")?,
+                read: match row.value("readState")? {
+                    "ExaminedClassOnly" | "ExaminedClassAndPortion" => {
+                        NativeStemsBeamBeamIncidentRead::Examined
+                    }
+                    "UnreadAfterBreak" => NativeStemsBeamBeamIncidentRead::UnreadAfterBreak,
+                    value => return Err(format!("invalid beam incident read state {value}")),
+                },
+                relevant: row.bool("relevant")?,
+                beam_portion: projected_portion,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let (rule, expected_state) = match callback.value("beamRule")? {
+        "HookHasAnyBeamStem" => (
+            NativeStemsBeamBeamIncidentRule::HookHasAnyBeamStem,
+            "LazyIncomingThenOutgoing",
+        ),
+        "FullBeamNeedsLeftAndRight" => (
+            NativeStemsBeamBeamIncidentRule::RawBeamLeftAndRight,
+            "ExhaustiveIncomingThenOutgoing",
+        ),
+        value => return Err(format!("invalid sibling beam rule {value}")),
+    };
+    if callback.value("beamIncidentState")? != expected_state {
+        return Err("real sibling callback beam incident state differs".to_owned());
+    }
+    Ok(NativeStemsBeamSiblingBeamIncidentScan {
+        rule,
+        query_relation_count: callback.usize("beamIncidentRows")?,
+        query_provenance_sha256: callback.value("beamIncidentHash")?.to_owned(),
+        relations,
+    })
+}
+
+fn real_builder(
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<&NativeStemsBeamBuilder, String> {
+    let matches = hydrated
+        .builder
+        .builders
+        .iter()
+        .filter(|builder| builder.start == hydrated.triggering)
+        .collect::<Vec<_>>();
+    let [builder] = matches.as_slice() else {
+        return Err(format!(
+            "triggering V-linker has {} builder matches",
+            matches.len()
+        ));
+    };
+    Ok(builder)
+}
+
+fn project_builder_lookup(
+    transaction: &ParsedTransaction,
+    sibling_ordinal: usize,
+    sibling_result: &StrictRow,
+    flag: &StrictRow,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+    builder: &NativeStemsBeamBuilder,
+) -> Result<NativeStemsBeamSiblingBuilderLookupScan, String> {
+    let rows = sibling_transaction_rows(transaction, RowKind::LinkerLookup, sibling_ordinal)?;
+    if rows.len() != builder.items.len() {
+        return Err(format!(
+            "sibling {sibling_ordinal} lookup rows {} differ from builder items {}",
+            rows.len(),
+            builder.items.len()
+        ));
+    }
+    let projected_rows = rows
+        .iter()
+        .zip(&builder.items)
+        .map(|(row, item)| {
+            let action = match row.value("action")? {
+                "Continue" => NativeStemsBeamSiblingBuilderAction::Continue,
+                "SelectBreak" => NativeStemsBeamSiblingBuilderAction::SelectBreak,
+                "UnreadAfterBreak" => NativeStemsBeamSiblingBuilderAction::UnreadAfterBreak,
+                value => return Err(format!("invalid builder action {value}")),
+            };
+            let linker_read = match row.value("linkerRead")? {
+                "NotRead" => NativeStemsBeamSiblingBuilderLinkerRead::NotRead,
+                "NotLinkerItem" => NativeStemsBeamSiblingBuilderLinkerRead::NotLinkerItem,
+                "ReadLinker" => NativeStemsBeamSiblingBuilderLinkerRead::ReadLinker,
+                value => return Err(format!("invalid builder linker read {value}")),
+            };
+            let source_read = match row.value("sourceRead")? {
+                "NotRead" => NativeStemsBeamSiblingBuilderSourceRead::NotRead,
+                "ReadSource" => NativeStemsBeamSiblingBuilderSourceRead::ReadSource,
+                value => return Err(format!("invalid builder source read {value}")),
+            };
+            let read = match (action, linker_read) {
+                (NativeStemsBeamSiblingBuilderAction::UnreadAfterBreak, _) => {
+                    NativeStemsBeamSiblingBuilderItemRead::UnreadAfterBreak
+                }
+                (_, NativeStemsBeamSiblingBuilderLinkerRead::NotLinkerItem) => {
+                    NativeStemsBeamSiblingBuilderItemRead::NotALinker
+                }
+                (NativeStemsBeamSiblingBuilderAction::SelectBreak, _) => {
+                    NativeStemsBeamSiblingBuilderItemRead::ExaminedSelectBreak
+                }
+                (NativeStemsBeamSiblingBuilderAction::Continue, _) => {
+                    NativeStemsBeamSiblingBuilderItemRead::ExaminedContinue
+                }
+            };
+            let linker = if linker_read == NativeStemsBeamSiblingBuilderLinkerRead::ReadLinker {
+                Some(match item.kind {
+                    NativeStemsBeamBuilderItemKind::StartHalfLinker => {
+                        NativeStemsBeamSiblingBuilderLinkerIdentity::StartVLinker
+                    }
+                    NativeStemsBeamBuilderItemKind::BeamLinker => {
+                        let Some(NativeStemsBeamBuilderTargetRef::Beam(reference)) = item.target
+                        else {
+                            return Err("BeamLinker item lacks beam target".to_owned());
+                        };
+                        NativeStemsBeamSiblingBuilderLinkerIdentity::BeamBLinker(reference)
+                    }
+                    NativeStemsBeamBuilderItemKind::HeadHalfLinker => {
+                        NativeStemsBeamSiblingBuilderLinkerIdentity::HeadCLinker
+                    }
+                    NativeStemsBeamBuilderItemKind::SeedGlyph
+                    | NativeStemsBeamBuilderItemKind::ChunkGlyph
+                    | NativeStemsBeamBuilderItemKind::Gap => {
+                        return Err("non-linker builder item was read as linker".to_owned());
+                    }
+                })
+            } else {
+                None
+            };
+            let source_beam = if source_read == NativeStemsBeamSiblingBuilderSourceRead::ReadSource
+            {
+                match item.kind {
+                    NativeStemsBeamBuilderItemKind::StartHalfLinker => {
+                        Some(builder.start.b_linker.beam)
+                    }
+                    NativeStemsBeamBuilderItemKind::BeamLinker => {
+                        let Some(NativeStemsBeamBuilderTargetRef::Beam(reference)) = item.target
+                        else {
+                            return Err("BeamLinker item lacks beam source".to_owned());
+                        };
+                        Some(reference.beam)
+                    }
+                    NativeStemsBeamBuilderItemKind::HeadHalfLinker => None,
+                    NativeStemsBeamBuilderItemKind::SeedGlyph
+                    | NativeStemsBeamBuilderItemKind::ChunkGlyph
+                    | NativeStemsBeamBuilderItemKind::Gap => {
+                        return Err("non-linker builder item read a source".to_owned());
+                    }
+                }
+            } else {
+                None
+            };
+            Ok(NativeStemsBeamSiblingBuilderLookupRow {
+                item_ordinal: row.usize("itemOrdinal")?,
+                item_kind: item.kind,
+                linker,
+                source_beam,
+                read,
+                runtime_class: parse_optional_string(row.value("runtimeClass")?),
+                linker_read,
+                source_read,
+                linker_alias: parse_optional_string(row.value("linkerAlias")?),
+                linker_runtime_class: parse_optional_string(row.value("linkerRuntimeClass")?),
+                source_alias: parse_optional_string(row.value("sourceAlias")?),
+                source_inter_id: parse_optional_i32(row.value("sourceInterId")?)?,
+                identity_match: parse_optional_bool(row.value("identityMatch")?)?,
+                action,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let selected_b_linker = match flag.value("selectedAlias")? {
+        "-" => None,
+        alias => Some(parse_b_linker_alias(alias, hydrated)?),
+    };
+    let state = match flag.value("lookupState")? {
+        "FirstSourceIdentityMatch" => {
+            NativeStemsBeamSiblingBuilderLookupState::FirstSourceIdentityMatch
+        }
+        "ExhaustiveNoMatch" => NativeStemsBeamSiblingBuilderLookupState::ExhaustiveNoMatch,
+        value => return Err(format!("invalid builder lookup state {value}")),
+    };
+    Ok(NativeStemsBeamSiblingBuilderLookupScan {
+        state,
+        timing: NativeStemsBeamSiblingBuilderLookupTiming::ReconstructedFromImmutableItems,
+        query_item_count: sibling_result.usize("linkerLookupRows")?,
+        query_provenance_sha256: sibling_result.value("linkerLookupHash")?.to_owned(),
+        rows: projected_rows,
+        selected_b_linker,
+        selected_alias: parse_optional_string(flag.value("selectedAlias")?),
+    })
+}
+
+struct ProjectedRealSteps {
+    steps: Vec<NativeStemsBeamSiblingStepCertificate>,
+    initial_b_linker_cells: Vec<NativeStemsBeamSiblingBLinkerCell>,
+}
+
+fn project_real_steps(
+    transaction: &ParsedTransaction,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<ProjectedRealSteps, String> {
+    let builder = real_builder(hydrated)?;
+    let stem_alias = transaction.predecessor.value("stemAlias")?;
+    let siblings = transaction
+        .rows
+        .iter()
+        .filter(|row| row.kind == RowKind::Sibling)
+        .collect::<Vec<_>>();
+    let mut steps = Vec::with_capacity(siblings.len());
+    let mut initial_cells = Vec::new();
+    let mut serial_cells: Vec<NativeStemsBeamSiblingBLinkerCell> = Vec::new();
+    for sibling in siblings {
+        let sibling_ordinal = sibling.usize("siblingOrdinal")?;
+        let source = beam_source_from_alias(sibling.value("beamAlias")?, hydrated)?;
+        let directed_pair = project_pair_scan(transaction, sibling)?;
+        let linked = sibling.value("branch")? == "Linked";
+        let (stem_incident_after, beam_incident_after, chord_stem_matches, builder_lookup) =
+            if linked {
+                let edge =
+                    only_sibling_transaction_row(transaction, RowKind::Edge, sibling_ordinal)?;
+                let callback =
+                    only_sibling_transaction_row(transaction, RowKind::Callback, sibling_ordinal)?;
+                let sibling_result = only_sibling_transaction_row(
+                    transaction,
+                    RowKind::SiblingResult,
+                    sibling_ordinal,
+                )?;
+                let flag = only_sibling_transaction_row(
+                    transaction,
+                    RowKind::LinkerFlag,
+                    sibling_ordinal,
+                )?;
+                let lookup = project_builder_lookup(
+                    transaction,
+                    sibling_ordinal,
+                    sibling_result,
+                    flag,
+                    hydrated,
+                    builder,
+                )?;
+                if let Some(reference) = lookup.selected_b_linker {
+                    let linked_before = flag.bool("linkedBefore")?;
+                    let closed_before = flag.bool("closedBefore")?;
+                    let closed_after = flag.bool("closedAfter")?;
+                    if closed_before != closed_after {
+                        return Err(format!(
+                            "sibling {sibling_ordinal} B-linker closed state changed"
+                        ));
+                    }
+                    if let Some(cell) = serial_cells
+                        .iter_mut()
+                        .find(|cell| cell.reference == reference)
+                    {
+                        if cell.linked != linked_before || cell.closed != closed_before {
+                            return Err(format!(
+                                "sibling {sibling_ordinal} serial B-cell before-state differs"
+                            ));
+                        }
+                        cell.linked = true;
+                    } else {
+                        let initial = NativeStemsBeamSiblingBLinkerCell {
+                            reference,
+                            linked: linked_before,
+                            closed: closed_before,
+                        };
+                        initial_cells.push(initial.clone());
+                        serial_cells.push(NativeStemsBeamSiblingBLinkerCell {
+                            linked: true,
+                            ..initial
+                        });
+                    }
+                }
+                (
+                    Some(project_stem_incident_scan(
+                        transaction,
+                        sibling_ordinal,
+                        callback,
+                        stem_alias,
+                    )?),
+                    Some(project_beam_incident_scan(
+                        transaction,
+                        sibling_ordinal,
+                        callback,
+                        edge,
+                        stem_alias,
+                    )?),
+                    callback.usize("chordStemMatches")?,
+                    Some(lookup),
+                )
+            } else {
+                (None, None, 0, None)
+            };
+        steps.push(NativeStemsBeamSiblingStepCertificate {
+            sibling_ordinal,
+            source,
+            directed_pair,
+            stem_incident_after,
+            beam_incident_after,
+            chord_stem_matches,
+            builder_lookup,
+        });
+    }
+    Ok(ProjectedRealSteps {
+        steps,
+        initial_b_linker_cells: initial_cells,
+    })
+}
+
+fn validate_real_baseline_geometry(
+    baseline: &StrictRow,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<(), String> {
+    let b_matches = hydrated
+        .vlinkers
+        .constructors
+        .iter()
+        .flat_map(|constructor| &constructor.b_linkers)
+        .filter(|linker| linker.reference == hydrated.target)
+        .collect::<Vec<_>>();
+    let [b_linker] = b_matches.as_slice() else {
+        return Err(format!(
+            "base B-linker has {} constructor matches",
+            b_matches.len()
+        ));
+    };
+    let v_matches = b_linker
+        .v_linkers
+        .iter()
+        .filter(|linker| linker.reference == hydrated.triggering)
+        .collect::<Vec<_>>();
+    let [v_linker] = v_matches.as_slice() else {
+        return Err(format!(
+            "triggering V-linker has {} child matches",
+            v_matches.len()
+        ));
+    };
+    let base_source = beam_source_from_alias(baseline.value("baseBeamAlias")?, hydrated)?;
+    let stump_matches = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .filter(|beam| beam.source == base_source)
+        .collect::<Vec<_>>();
+    let [base_stump] = stump_matches.as_slice() else {
+        return Err(format!(
+            "base beam has {} stump matches",
+            stump_matches.len()
+        ));
+    };
+    let stem_line = &hydrated.transaction.stem_after.geometry.median;
+    let stem_segment = Segment {
+        x1: stem_line.start.x,
+        y1: stem_line.start.y,
+        x2: stem_line.stop.x,
+        y2: stem_line.stop.y,
+    };
+    let expected_vertical = Segment {
+        x1: b_linker.reference_point.x,
+        y1: b_linker.reference_point.y,
+        x2: b_linker.reference_point.x - (1_000.0 * hydrated.reachability.global_slope),
+        y2: b_linker.reference_point.y + 1_000.0,
+    };
+    let base_runtime = &hydrated.base_apply.state_after.sig.beam;
+    if parse_point(baseline.value("refPt")?)? != b_linker.reference_point
+        || parse_i32_field(baseline, "yDir")? != v_linker.y_direction
+        || !same_segment_bits(
+            parse_segment(baseline.value("skewedVertical")?)?,
+            expected_vertical,
+        )
+        || !same_segment_bits(parse_segment(baseline.value("stemMedian")?)?, stem_segment)
+        || !same_segment_bits(
+            parse_segment(baseline.value("baseBeamMedian")?)?,
+            base_stump.median,
+        )
+        || parse_f64(baseline.value("baseBeamHeight")?)?.to_bits() != base_stump.height.to_bits()
+        || parse_i32_field(baseline, "baseBeamInterId")? != base_runtime.inter_id
+        || baseline.usize("baseBeamVertexOrdinal")?
+            != base_runtime
+                .sig_vertex_identity
+                .ok_or_else(|| "base beam lacks live vertex".to_owned())?
+        || baseline.bool("baseBeamAbnormal")? != base_runtime.abnormal
+        || baseline.bool("stemAbnormal")? != hydrated.transaction.stem_after.abnormal
+        || parse_i32_field(baseline, "interline")? != hydrated.stumps.interline
+        || parse_i32_field(baseline, "maxBeamSideDx")? != hydrated.reachability.max_beam_side_dx
+    {
+        return Err("real baseline geometry/runtime projection differs".to_owned());
+    }
+    Ok(())
+}
+
+fn project_real_state(
+    page: &StrictRow,
+    transaction: &ParsedTransaction,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<NativeStemsBeamVLinkSiblingLinksState, String> {
+    let baseline = only_transaction_row(transaction, RowKind::Baseline)?;
+    validate_real_baseline_geometry(baseline, hydrated)?;
+    let result = only_transaction_row(transaction, RowKind::Result)?;
+    let group = project_real_group(transaction, hydrated)?;
+    let projected_steps = project_real_steps(transaction, hydrated)?;
+    let cached_base_median = parse_segment(baseline.value("baseBeamMedian")?)?;
+    let group_runtime = NativeStemsBeamSiblingGroupRuntimeState {
+        alias: baseline.value("groupAlias")?.to_owned(),
+        runtime_class: baseline.value("groupClass")?.to_owned(),
+        inter_id: parse_i32_field(baseline, "groupInterId")?,
+        sig_vertex_identity: baseline.usize("groupVertexOrdinal")?,
+        removed: baseline.bool("groupRemoved")?,
+        vip: baseline.bool("groupVip")?,
+        abnormal: baseline.bool("groupAbnormal")?,
+        member_state_sha256_before: baseline.value("groupStateHashBefore")?.to_owned(),
+        member_state_sha256: baseline.value("groupStateHashBefore")?.to_owned(),
+        object_state_sha256: baseline.value("groupObjectStateHash")?.to_owned(),
+    };
+    let certificate = NativeStemsBeamVLinkSiblingLinksCertificate {
+        system_id: transaction.key.system,
+        headless: page.bool("headless")?,
+        listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+        interline: parse_i32_field(baseline, "interline")?,
+        x_in_gap_maximum_profile0: parse_f64(baseline.value("xInGapMaximum0")?)?,
+        portion_maximum_dx: parse_i32_field(baseline, "maxDxRint")?,
+        max_beam_side_dx: parse_i32_field(baseline, "maxBeamSideDx")?,
+        max_shorter_ratio: parse_f64(baseline.value("maxShorterRatio")?)?,
+        base_glyph: group.base_glyph.clone(),
+        group_scan: group.scan,
+        expected_group_member_state_sha256_after: result.value("groupStateHashAfter")?.to_owned(),
+        steps: projected_steps.steps,
+    };
+    let base_apply_state_after = hydrated.base_apply.state_after.as_ref().clone();
+    let sheet_edit = base_apply_state_after.sheet_edit;
+    Ok(NativeStemsBeamVLinkSiblingLinksState {
+        b_linker_flag_state_before: hydrated.state_before.clone(),
+        b_linker_flag_state_after: hydrated.state_after.clone(),
+        base_apply_state_after,
+        cached_base_median,
+        cached_base_median_same_identity: baseline.bool("cachedMedianSameIdentity")?,
+        group_runtime,
+        base_glyph: group.base_glyph,
+        stem_alias: baseline.value("stemAlias")?.to_owned(),
+        live_group_members: group.live_members,
+        sibling_b_linker_cells: projected_steps.initial_b_linker_cells,
+        appended_relations: Vec::new(),
+        sheet_edit,
+        certificate: Some(certificate),
+        committed: None,
+    })
+}
+
+fn expected_geometry_from_row(
+    row: &StrictRow,
+) -> Result<NativeStemsBeamSiblingGeometryTrace, String> {
+    let linked = row.value("branch")? == "Linked";
+    let dy_read = row.bool("dyRead")?;
+    Ok(NativeStemsBeamSiblingGeometryTrace {
+        base_cross: parse_point(row.value("baseCross")?)?,
+        sibling_cross: parse_point(row.value("siblingCross")?)?,
+        base_length: parse_f64(row.value("baseLength")?)?,
+        sibling_length: parse_f64(row.value("siblingLength")?)?,
+        length_ratio: parse_f64(row.value("ratio")?)?,
+        shorter_or_equal: row.bool("shorterInclusive")?,
+        delta_y: dy_read
+            .then(|| parse_f64(row.value("dy").expect("dy field")))
+            .transpose()?,
+        directed_delta_y: dy_read
+            .then(|| parse_f64(row.value("product").expect("product field")))
+            .transpose()?,
+        wrong_side: if row.value("wrongSideStrict")? == "-" {
+            None
+        } else {
+            Some(row.bool("wrongSideStrict")?)
+        },
+        extension_point: linked
+            .then(|| parse_point(row.value("extension").expect("extension field")))
+            .transpose()?,
+        portion_maximum_dx: linked
+            .then(|| parse_i32_field(row, "maxDxRint"))
+            .transpose()?,
+        left_threshold: linked
+            .then(|| parse_f64(row.value("leftThreshold").expect("left threshold field")))
+            .transpose()?,
+        right_threshold: linked
+            .then(|| parse_f64(row.value("rightThreshold").expect("right threshold field")))
+            .transpose()?,
+        beam_portion: if linked {
+            parse_portion(row.value("portion")?)?
+        } else {
+            None
+        },
+        support_grade: linked
+            .then(|| parse_f64(row.value("grade").expect("grade field")))
+            .transpose()?,
+    })
+}
+
+fn expected_beam_abnormal_trace(
+    transaction: &ParsedTransaction,
+    sibling_ordinal: usize,
+    callback: &StrictRow,
+) -> Result<NativeStemsBeamSiblingBeamAbnormalTrace, String> {
+    let rows = sibling_transaction_rows(transaction, RowKind::BeamIncident, sibling_ordinal)?;
+    let before = callback.bool("beamAbnormalBefore")?;
+    let after = callback.bool("beamAbnormalAfter")?;
+    Ok(match callback.value("beamRule")? {
+        "HookHasAnyBeamStem" => NativeStemsBeamSiblingBeamAbnormalTrace::HookAnyBeamStem {
+            incident_relation_count: rows.len(),
+            relations_read: rows
+                .iter()
+                .filter(|row| row.value("readState") != Ok("UnreadAfterBreak"))
+                .count(),
+            before,
+            after,
+        },
+        "FullBeamNeedsLeftAndRight" => NativeStemsBeamSiblingBeamAbnormalTrace::RawBeamSides {
+            incident_relation_count: rows.len(),
+            left_found: rows
+                .iter()
+                .any(|row| row.value("contribution") == Ok("Left")),
+            right_found: rows
+                .iter()
+                .any(|row| row.value("contribution") == Ok("Right")),
+            before,
+            after,
+        },
+        value => return Err(format!("invalid sibling beam rule {value}")),
+    })
+}
+
+fn expected_observers(
+    flag: &StrictRow,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+) -> Result<Vec<NativeStemsBeamVLinkerRef>, String> {
+    let selected = flag.value("selectedAlias")?;
+    let aliases = parse_list(flag.value("observerAliases")?)?;
+    if aliases.first().copied() != Some(selected) {
+        return Err("B-linker observer list lacks its parent first".to_owned());
+    }
+    aliases[1..]
+        .iter()
+        .map(|alias| parse_v_linker_alias(alias, hydrated))
+        .collect()
+}
+
+fn sheet_edit_token(state: NativeStemsBeamSheetEditState) -> String {
+    format!(
+        "{}:{}:{}",
+        state.stub_modified, state.book_modified, state.book_dirty
+    )
+}
+
+fn assert_public_transaction_matches_rows(
+    transaction: &ParsedTransaction,
+    hydrated: &b15_hydration::HydratedBoundaryFifteen,
+    state_before: &NativeStemsBeamVLinkSiblingLinksState,
+    state_after: &NativeStemsBeamVLinkSiblingLinksState,
+    public: &NativeStemsBeamVLinkSiblingLinksTransaction,
+) -> Result<(), String> {
+    let baseline = only_transaction_row(transaction, RowKind::Baseline)?;
+    let result = only_transaction_row(transaction, RowKind::Result)?;
+    let summary = only_transaction_row(transaction, RowKind::Summary)?;
+    let consumed = state_before
+        .certificate
+        .as_ref()
+        .ok_or_else(|| "projected real state lacks a certificate".to_owned())?;
+    let base_source = beam_source_from_alias(baseline.value("baseBeamAlias")?, hydrated)?;
+    if public.key != hydrated.transaction.key
+        || public.key.system_id != transaction.key.system
+        || public.key.plan.plan_ordinal != transaction.key.plan
+        || public.stem_after != hydrated.transaction.stem_after
+        || public.state_after.as_ref() != state_after
+        || public.consumed_certificate != *consumed
+        || public.base_beam != base_source
+        || !same_segment_bits(
+            public.cached_base_median,
+            parse_segment(baseline.value("baseBeamMedian")?)?,
+        )
+        || public.cached_base_median_same_identity != baseline.bool("cachedMedianSameIdentity")?
+        || public.continuation_support_grade.to_bits()
+            != parse_f64(transaction.predecessor.value("supportGrade")?)?.to_bits()
+        || public.base_cross != parse_point(baseline.value("baseCross")?)?
+        || public.base_length.to_bits() != parse_f64(baseline.value("baseLength")?)?.to_bits()
+        || public.group_members != consumed.group_scan.members
+        || public.group_member_state_sha256_before != baseline.value("groupStateHashBefore")?
+        || public.group_member_state_sha256_after != result.value("groupStateHashAfter")?
+        || public.group_runtime.member_state_sha256_before
+            != baseline.value("groupStateHashBefore")?
+        || public.group_runtime.member_state_sha256 != result.value("groupStateHashAfter")?
+        || public.group_runtime != state_after.group_runtime
+        || public.siblings.len() != baseline.usize("siblings")?
+        || public.sig_relation_mutation_count != result.usize("committedEdges")?
+        || public.sibling_link_mutation_count != result.usize("committedEdges")?
+        || public.b_linker_write_count != result.usize("committedFlags")?
+        || public.head_link_mutation_count != 0
+    {
+        return Err(
+            "public Boundary-16 transaction header/state differs from Java rows".to_owned(),
+        );
+    }
+    match public.outcome {
+        NativeStemsBeamVLinkSiblingLinksOutcome::ReadyBeforeHeadRelationLoop {
+            stem_identity,
+            continuation_support_grade,
+        } if stem_identity == hydrated.transaction.stem_after.stem_identity
+            && continuation_support_grade.to_bits()
+                == public.continuation_support_grade.to_bits() => {}
+        _ => return Err("public Boundary-16 terminal differs from Java rows".to_owned()),
+    }
+
+    let sibling_rows = transaction
+        .rows
+        .iter()
+        .filter(|row| row.kind == RowKind::Sibling)
+        .collect::<Vec<_>>();
+    let expected_sibling_sources = sibling_rows
+        .iter()
+        .map(|row| beam_source_from_alias(row.value("beamAlias")?, hydrated))
+        .collect::<Result<Vec<_>, String>>()?;
+    if public.sibling_sources != expected_sibling_sources {
+        return Err("public sibling source order differs from Java rows".to_owned());
+    }
+
+    let mut expected_operations = Vec::new();
+    let mut expected_relations = Vec::new();
+    let mut expected_appended_ids = Vec::new();
+    let mut expected_assigned = Vec::new();
+    let mut expected_edge_aliases = Vec::new();
+    let mut expected_b_aliases = Vec::new();
+    let mut expected_value_changes = 0;
+    let mut expected_abnormal_changes = 0;
+    let mut expected_cells_after = state_before.sibling_b_linker_cells.clone();
+    let mut expected_live_after = state_before.live_group_members.clone();
+    let mut expected_sheet_edit = state_before.sheet_edit;
+    for (sibling, (row, step)) in public
+        .siblings
+        .iter()
+        .zip(sibling_rows.iter().zip(&consumed.steps))
+    {
+        let sibling_ordinal = row.usize("siblingOrdinal")?;
+        let expected_branch = match row.value("branch")? {
+            "SameGlyph" => NativeStemsBeamSiblingBranch::SameGlyph,
+            "ExistingBeamStem" => NativeStemsBeamSiblingBranch::ExistingBeamStem,
+            "ShorterWrongSide" => NativeStemsBeamSiblingBranch::ShorterWrongSide,
+            "Linked" => NativeStemsBeamSiblingBranch::Linked,
+            value => return Err(format!("invalid sibling branch {value}")),
+        };
+        let first_match = step
+            .directed_pair
+            .relations
+            .iter()
+            .position(|relation| relation.kind == NativeStemsBeamQueryRelationKind::BeamStem);
+        let expected_pair_reads =
+            first_match.map_or(step.directed_pair.relations.len(), |index| index + 1);
+        if sibling.sibling_ordinal != sibling_ordinal
+            || sibling.source != step.source
+            || sibling.branch != expected_branch
+            || sibling.same_glyph_identity != row.bool("baseGlyphSameIdentity")?
+            || sibling.directed_pair_relations_read != expected_pair_reads
+            || sibling.builder_lookup != step.builder_lookup
+        {
+            return Err(format!(
+                "public sibling {sibling_ordinal} branch/pair/lookup trace differs"
+            ));
+        }
+        if expected_branch == NativeStemsBeamSiblingBranch::SameGlyph
+            || expected_branch == NativeStemsBeamSiblingBranch::ExistingBeamStem
+        {
+            if sibling.geometry.is_some()
+                || sibling.relation.is_some()
+                || sibling.beam_abnormal != NativeStemsBeamSiblingBeamAbnormalTrace::NotRead
+            {
+                return Err(format!(
+                    "public sibling {sibling_ordinal} eagerly projected a lazy branch"
+                ));
+            }
+            continue;
+        }
+        let geometry_row =
+            only_sibling_transaction_row(transaction, RowKind::Geometry, sibling_ordinal)?;
+        if sibling.geometry.as_ref() != Some(&expected_geometry_from_row(geometry_row)?) {
+            return Err(format!("public sibling {sibling_ordinal} geometry differs"));
+        }
+        if expected_branch == NativeStemsBeamSiblingBranch::ShorterWrongSide {
+            if sibling.relation.is_some()
+                || sibling.beam_abnormal != NativeStemsBeamSiblingBeamAbnormalTrace::NotRead
+            {
+                return Err(format!(
+                    "public sibling {sibling_ordinal} wrong-side mutation differs"
+                ));
+            }
+            continue;
+        }
+
+        let edge = only_sibling_transaction_row(transaction, RowKind::Edge, sibling_ordinal)?;
+        let callback =
+            only_sibling_transaction_row(transaction, RowKind::Callback, sibling_ordinal)?;
+        let flag = only_sibling_transaction_row(transaction, RowKind::LinkerFlag, sibling_ordinal)?;
+        let source_member = state_before
+            .live_group_members
+            .iter()
+            .find(|member| member.source == sibling.source)
+            .ok_or_else(|| format!("sibling {sibling_ordinal} lacks live member"))?;
+        let relation = NativeStemsBeamSiblingAppendedRelation {
+            graph_relation_identity: parse_sig_edge(edge.value("graphRelationIdentity")?)?,
+            relation_object_identity: parse_relation_object(edge.value("freshRelationIdentity")?)?,
+            source: sibling.source,
+            source_vertex_identity: source_member
+                .runtime
+                .sig_vertex_identity
+                .ok_or_else(|| "sibling lacks live vertex".to_owned())?,
+            target_stem_identity: public.stem_after.stem_identity,
+            target_vertex_identity: state_before
+                .base_apply_state_after
+                .sig
+                .stem
+                .sig_vertex_identity
+                .ok_or_else(|| "target stem lacks live vertex".to_owned())?,
+            extension_point: parse_point(edge.value("extension")?)?,
+            beam_portion: parse_portion(edge.value("portion")?)?
+                .ok_or_else(|| "linked edge lacks portion".to_owned())?,
+            grade: parse_f64(edge.value("grade")?)?,
+        };
+        let stem_scan = step
+            .stem_incident_after
+            .as_ref()
+            .ok_or_else(|| "linked step lacks stem scan".to_owned())?;
+        let beam_scan = step
+            .beam_incident_after
+            .as_ref()
+            .ok_or_else(|| "linked step lacks beam scan".to_owned())?;
+        let fresh_stem_rows = stem_scan
+            .relations
+            .iter()
+            .filter(|row| row.graph_relation_identity == relation.graph_relation_identity)
+            .collect::<Vec<_>>();
+        let fresh_beam_rows = beam_scan
+            .relations
+            .iter()
+            .filter(|row| row.graph_relation_identity == relation.graph_relation_identity)
+            .collect::<Vec<_>>();
+        let ([fresh_stem], [fresh_beam]) = (fresh_stem_rows.as_slice(), fresh_beam_rows.as_slice())
+        else {
+            return Err(format!(
+                "sibling {sibling_ordinal} fresh incidence cardinality differs"
+            ));
+        };
+        if fresh_stem.direction != NativeStemsBeamIncidentDirection::Incoming
+            || fresh_beam.direction != NativeStemsBeamIncidentDirection::Outgoing
+            || fresh_stem.direction_ordinal != edge.usize("targetIncomingOrdinal")?
+            || fresh_beam.direction_ordinal != edge.usize("sourceOutgoingOrdinal")?
+        {
+            return Err(format!(
+                "sibling {sibling_ordinal} fresh local incidence ordinal differs"
+            ));
+        }
+        if sibling.relation.as_ref() != Some(&relation)
+            || sibling.stem_incident_graph_relation_identities
+                != stem_scan
+                    .relations
+                    .iter()
+                    .map(|row| row.graph_relation_identity)
+                    .collect::<Vec<_>>()
+            || sibling.beam_abnormal
+                != expected_beam_abnormal_trace(transaction, sibling_ordinal, callback)?
+        {
+            return Err(format!(
+                "public sibling {sibling_ordinal} edge/callback trace differs"
+            ));
+        }
+        expected_relations.push(relation.clone());
+        expected_appended_ids.push(relation.graph_relation_identity);
+        expected_edge_aliases.push(edge.value("graphRelationIdentity")?);
+        expected_operations.extend([
+            NativeStemsBeamVLinkSiblingLinksOperation::SigGlobalRelationInserted {
+                sibling_ordinal,
+                graph_relation_identity: relation.graph_relation_identity,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::BeamOutgoingRelationInserted {
+                sibling_ordinal,
+                graph_relation_identity: relation.graph_relation_identity,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::StemIncomingRelationInserted {
+                sibling_ordinal,
+                graph_relation_identity: relation.graph_relation_identity,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::SigEdgeEventDispatched {
+                sibling_ordinal,
+                graph_relation_identity: relation.graph_relation_identity,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::StandardSigListenerEdgeCallbackStarted {
+                sibling_ordinal,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::BeamStemRelationCallbackStarted {
+                sibling_ordinal,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::StemChordIncidentScanCompleted {
+                sibling_ordinal,
+                incident_relation_count: callback.usize("stemIncidentRows")?,
+                chord_stem_matches: callback.usize("chordStemMatches")?,
+            },
+        ]);
+        let abnormal_before = callback.bool("beamAbnormalBefore")?;
+        let abnormal_after = callback.bool("beamAbnormalAfter")?;
+        let abnormal_changed = callback.bool("abnormalChanged")?;
+        if callback.value("dirtyBefore")? != sheet_edit_token(expected_sheet_edit) {
+            return Err(format!(
+                "sibling {sibling_ordinal} dirty before-state differs"
+            ));
+        }
+        let member = expected_live_after
+            .iter_mut()
+            .find(|member| member.source == sibling.source)
+            .ok_or_else(|| format!("sibling {sibling_ordinal} abnormal member missing"))?;
+        if member.runtime.abnormal != abnormal_before
+            || callback.bool("requestedAbnormal")? != abnormal_after
+            || abnormal_changed != (abnormal_before != abnormal_after)
+        {
+            return Err(format!(
+                "sibling {sibling_ordinal} abnormal callback cursor differs"
+            ));
+        }
+        member.runtime.abnormal = abnormal_after;
+        if abnormal_changed {
+            expected_abnormal_changes += 1;
+            expected_sheet_edit.stub_modified = true;
+            expected_sheet_edit.book_modified = true;
+            expected_sheet_edit.book_dirty = true;
+            expected_operations.extend([
+                NativeStemsBeamVLinkSiblingLinksOperation::BeamAbnormalSet {
+                    sibling_ordinal,
+                    before: callback.bool("beamAbnormalBefore")?,
+                    after: callback.bool("beamAbnormalAfter")?,
+                },
+                NativeStemsBeamVLinkSiblingLinksOperation::SheetStubModifiedSetTrue {
+                    sibling_ordinal,
+                },
+                NativeStemsBeamVLinkSiblingLinksOperation::BookModifiedSetTrue { sibling_ordinal },
+                NativeStemsBeamVLinkSiblingLinksOperation::BookDirtySetTrue { sibling_ordinal },
+            ]);
+        }
+        if callback.value("dirtyAfter")? != sheet_edit_token(expected_sheet_edit) {
+            return Err(format!(
+                "sibling {sibling_ordinal} dirty after-state differs"
+            ));
+        }
+        expected_operations.extend([
+            NativeStemsBeamVLinkSiblingLinksOperation::BeamStemRelationCallbackCompleted {
+                sibling_ordinal,
+            },
+            NativeStemsBeamVLinkSiblingLinksOperation::StandardSigListenerEdgeCallbackCompleted {
+                sibling_ordinal,
+            },
+        ]);
+        match flag.value("lookupState")? {
+            "FirstSourceIdentityMatch" => {
+                let reference = parse_b_linker_alias(flag.value("selectedAlias")?, hydrated)?;
+                expected_assigned.push(reference);
+                expected_b_aliases.push(flag.value("selectedAlias")?);
+                expected_value_changes += flag.usize("valueChangeCount")?;
+                let cell = expected_cells_after
+                    .iter_mut()
+                    .find(|cell| cell.reference == reference)
+                    .ok_or_else(|| format!("selected sibling {sibling_ordinal} cell missing"))?;
+                if cell.linked != flag.bool("linkedBefore")?
+                    || cell.closed != flag.bool("closedBefore")?
+                {
+                    return Err(format!(
+                        "sibling {sibling_ordinal} independent B-cell cursor differs"
+                    ));
+                }
+                cell.linked = true;
+                expected_operations.push(
+                    NativeStemsBeamVLinkSiblingLinksOperation::BLinkerLinkedAssigned {
+                        sibling_ordinal,
+                        target: reference,
+                        ordered_observer_v_linkers: expected_observers(flag, hydrated)?,
+                        before: flag.bool("linkedBefore")?,
+                        after: flag.bool("linkedAfter")?,
+                        closed_before: flag.bool("closedBefore")?,
+                        closed_after: flag.bool("closedAfter")?,
+                    },
+                );
+                if sibling.selected_b_linker != Some(reference)
+                    || sibling.linked_before != Some(flag.bool("linkedBefore")?)
+                    || sibling.linked_after != Some(flag.bool("linkedAfter")?)
+                    || sibling.closed_before != Some(flag.bool("closedBefore")?)
+                    || sibling.closed_after != Some(flag.bool("closedAfter")?)
+                {
+                    return Err(format!(
+                        "public sibling {sibling_ordinal} B-cell trace differs"
+                    ));
+                }
+            }
+            "ExhaustiveNoMatch" => {
+                if sibling.selected_b_linker.is_some()
+                    || sibling.linked_before.is_some()
+                    || sibling.linked_after.is_some()
+                    || sibling.closed_before.is_some()
+                    || sibling.closed_after.is_some()
+                {
+                    return Err(format!(
+                        "public sibling {sibling_ordinal} no-match flag trace differs"
+                    ));
+                }
+            }
+            value => return Err(format!("invalid sibling flag lookup state {value}")),
+        }
+    }
+
+    for member in &mut expected_live_after {
+        member
+            .runtime
+            .beam_group
+            .as_mut()
+            .ok_or_else(|| "expected live group member lacks group state".to_owned())?
+            .state_sha256 = result.value("groupStateHashAfter")?.to_owned();
+    }
+    let sheet_edit_mutations =
+        usize::from(state_before.sheet_edit.stub_modified != expected_sheet_edit.stub_modified)
+            + usize::from(
+                state_before.sheet_edit.book_modified != expected_sheet_edit.book_modified,
+            )
+            + usize::from(state_before.sheet_edit.book_dirty != expected_sheet_edit.book_dirty);
+    let result_edge_aliases = parse_list(result.value("committedEdgeAliases")?)?;
+    let result_b_aliases = parse_list(result.value("committedBCells")?)?;
+    let mut expected_group_runtime = state_before.group_runtime.clone();
+    expected_group_runtime.member_state_sha256 = result.value("groupStateHashAfter")?.to_owned();
+
+    if public.operations != expected_operations
+        || public.appended_graph_relation_identities != expected_appended_ids
+        || public.assigned_b_linkers != expected_assigned
+        || public.beam_abnormal_mutation_count != expected_abnormal_changes
+        || public.sheet_edit_mutation_count != sheet_edit_mutations
+        || public.b_linker_value_change_count != expected_value_changes
+        || result_edge_aliases != expected_edge_aliases
+        || result_b_aliases != expected_b_aliases
+        || state_after.appended_relations != expected_relations
+        || state_after.sibling_b_linker_cells != expected_cells_after
+        || state_after.live_group_members != expected_live_after
+        || state_after.sheet_edit != expected_sheet_edit
+        || !same_segment_bits(
+            state_after.cached_base_median,
+            state_before.cached_base_median,
+        )
+        || state_after.cached_base_median_same_identity
+            != state_before.cached_base_median_same_identity
+        || state_after.base_glyph != state_before.base_glyph
+        || state_after.stem_alias != state_before.stem_alias
+        || state_after.group_runtime != expected_group_runtime
+        || public.group_runtime != expected_group_runtime
+        || state_after.certificate.is_some()
+        || state_after.committed != Some(public.key)
+        || state_after.b_linker_flag_state_before != state_before.b_linker_flag_state_before
+        || state_after.b_linker_flag_state_after != state_before.b_linker_flag_state_after
+        || state_after.base_apply_state_after != state_before.base_apply_state_after
+        || state_after.group_runtime.member_state_sha256 != result.value("groupStateHashAfter")?
+        || summary.usize("edgesAdded")? != public.sig_relation_mutation_count
+        || summary.usize("linkerWrites")? != public.b_linker_write_count
+    {
+        return Err("public Boundary-16 mutation/operation/state projection differs".to_owned());
+    }
+    let group_hash_changed =
+        baseline.value("groupStateHashBefore")? != result.value("groupStateHashAfter")?;
+    if (expected_abnormal_changes == 0) == group_hash_changed {
+        return Err("group member hash transition differs from callback mutations".to_owned());
+    }
+    for member in &state_after.live_group_members {
+        if member
+            .runtime
+            .beam_group
+            .as_ref()
+            .is_none_or(|group| group.state_sha256 != result.value("groupStateHashAfter").unwrap())
+        {
+            return Err("live group member did not receive post-state hash".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_baseline_row(row: &StrictRow, predecessor: &StrictRow) -> Result<(), String> {
+    let y_dir = row
+        .value("yDir")?
+        .parse::<i32>()
+        .map_err(|error| format!("invalid yDir: {error}"))?;
+    if row.value("baseBeamAlias")? != predecessor.value("baseBeamAlias")?
+        || row.value("stemAlias")? != predecessor.value("stemAlias")?
+        || row.value("stemInterId")? != predecessor.value("stemInterId")?
+        || row.value("supportGrade")? != predecessor.value("supportGrade")?
+        || !matches!(
+            row.value("baseBeamClass")?,
+            "org.audiveris.omr.sig.inter.BeamInter"
+                | "org.audiveris.omr.sig.inter.BeamHookInter"
+                | "org.audiveris.omr.sig.inter.SmallBeamInter"
+        )
+        || row.value("groupClass")? != "org.audiveris.omr.sig.inter.BeamGroupInter"
+        || !row.bool("cachedMedianSameIdentity")?
+        || !row.bool("baseRemoved")?
+        || row.value("supportGradeSource")? != "FreshBaseBeamStemDraft"
+        || !row.bool("supportGradeRead")?
+        || !row.bool("soleSigListener")?
+        || row.usize("chordStemMatches")? != 0
+        || !matches!(y_dir, -1 | 1)
+        || row.usize("groupMembers")? < row.usize("siblings")? + 1
+        || row.usize("selectedBeforeBaseRemoval")? != row.usize("siblings")? + 1
+        || row.usize("groupOutgoingScanned")? < row.usize("groupMembers")?
+        || row.usize("stemIncidentRows")? == 0
+        || row.usize("builderItems")? == 0
+    {
+        return Err("baseline join/domain differs".to_owned());
+    }
+    for field in [
+        "groupStateHashBefore",
+        "groupObjectStateHash",
+        "groupQueryProvenanceSha256",
+        "graphVertexHashBefore",
+        "graphEdgeHashBefore",
+        "listenerTopologyHash",
+        "stemIncidentHash",
+        "builderItemsHash",
+        "arenaStateHashBefore",
+        "relationInputHashBefore",
+    ] {
+        if !is_lower_sha256(row.value(field)?) {
+            return Err(format!("baseline {field} is not lowercase SHA-256"));
+        }
+    }
+    for field in [
+        "baseBeamHeight",
+        "maxShorterRatio",
+        "xInGapMaximum0",
+        "baseLength",
+        "supportGrade",
+    ] {
+        parse_hex_bits(row.value(field)?)?;
+    }
+    Ok(())
+}
+
+fn validate_group_rows(baseline: &StrictRow, rows: &[&StrictRow]) -> Result<(), String> {
+    if rows.len() != baseline.usize("groupOutgoingScanned")? {
+        return Err("group outgoing row count differs".to_owned());
+    }
+    let mut member_ordinal = 0;
+    let mut selected = 0;
+    let mut base = 0;
+    for (ordinal, row) in rows.iter().enumerate() {
+        require_ordinal(row, "groupOutgoingOrdinal", ordinal)?;
+        let containment = row.bool("containmentMatch")?;
+        if containment {
+            require_ordinal(row, "memberOrdinal", member_ordinal)?;
+            member_ordinal += 1;
+            if row.value("targetReadByGetMembers")? != "true"
+                || row.value("targetEvidence")? != "GetMembersRead"
+                || row.value("beamRuntimeClass")? != row.value("targetRuntimeClass")?
+                || row.value("beamInterId")? != row.value("targetInterId")?
+                || row.value("sigMembership")? != "true"
+                || row.value("beamRemoved")? != "false"
+            {
+                return Err("containment/member live projection differs".to_owned());
+            }
+            for field in ["beamGroupStateHash", "beamGroupObjectStateHash"] {
+                if !is_lower_sha256(row.value(field)?) {
+                    return Err(format!("group member {field} is not lowercase SHA-256"));
+                }
+            }
+            selected += usize::from(row.bool("selected")?);
+            if row.bool("baseIdentity")? {
+                base += 1;
+                if row.value("removeAction")? != "RemoveFirstBase" || !row.bool("selected")? {
+                    return Err("base group member removal differs".to_owned());
+                }
+            } else if row.value("removeAction")? != "Retain" {
+                return Err("non-base group member action differs".to_owned());
+            }
+        } else if row.value("memberOrdinal")? != "-"
+            || row.value("targetReadByGetMembers")? != "false"
+            || row.value("targetEvidence")? != "GraphReconstruction"
+            || row.value("beamRuntimeClass")? != "-"
+            || row.value("selected")? != "-"
+        {
+            return Err("non-containment group reconstruction differs".to_owned());
+        }
+    }
+    if member_ordinal != baseline.usize("groupMembers")?
+        || selected != baseline.usize("selectedBeforeBaseRemoval")?
+        || base != 1
+    {
+        return Err("group member/select/base census differs".to_owned());
+    }
+    let hash = sha256_rows(rows.iter().map(|row| {
+        joined_row_token(
+            row,
+            &[
+                "groupOutgoingOrdinal",
+                "graphRelationIdentity",
+                "relationObjectIdentity",
+                "relationClass",
+                "targetAlias",
+                "targetRuntimeClass",
+                "targetInterId",
+                "targetVertexOrdinal",
+                "containmentMatch",
+                "memberOrdinal",
+            ],
+        )
+        .expect("validated group row fields")
+    }));
+    if hash != baseline.value("groupQueryProvenanceSha256")? {
+        return Err("group query provenance hash differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_source_rows(sibling: &StrictRow, rows: &[&StrictRow]) -> Result<(), String> {
+    if rows.len() != sibling.usize("sourceOutgoingScanned")? {
+        return Err("source-outgoing row count differs".to_owned());
+    }
+    for (ordinal, row) in rows.iter().enumerate() {
+        require_ordinal(row, "sourceOutgoingOrdinal", ordinal)?;
+    }
+    let expected = sibling.value("sourceOutgoingProvenanceSha256")?;
+    if rows.is_empty() && sibling.value("pairState")? == "NotRead" {
+        if expected != "NotRead" {
+            return Err("non-read source-outgoing provenance is not literal NotRead".to_owned());
+        }
+    } else {
+        let hash = sha256_rows(rows.iter().map(|row| {
+            joined_row_token(
+                row,
+                &[
+                    "sourceOutgoingOrdinal",
+                    "graphRelationIdentity",
+                    "relationObjectIdentity",
+                    "runtimeClass",
+                ],
+            )
+            .expect("validated source-outgoing fields")
+        }));
+        if hash != expected {
+            return Err("source-outgoing provenance hash differs".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_pair_rows(sibling: &StrictRow, rows: &[&StrictRow]) -> Result<(), String> {
+    if rows.len() != sibling.usize("pairRows")? {
+        return Err("directed-pair row count differs".to_owned());
+    }
+    let mut first_match = None;
+    for (ordinal, row) in rows.iter().enumerate() {
+        require_ordinal(row, "pairOrdinal", ordinal)?;
+        let matches = row.bool("matches")?;
+        let class_read = row.bool("classRead")?;
+        match (first_match, class_read, matches, row.value("action")?) {
+            (None, true, false, "Continue") => {}
+            (None, true, true, "SelectBreak") => first_match = Some(ordinal),
+            (Some(_), false, false, "UnreadAfterBreak") => {}
+            _ => return Err("directed-pair lazy class-read trace differs".to_owned()),
+        }
+    }
+    let expected = sibling.value("pairProvenanceSha256")?;
+    if rows.is_empty() && sibling.value("pairState")? == "NotRead" {
+        if expected != "NotRead" {
+            return Err("non-read pair provenance is not literal NotRead".to_owned());
+        }
+    } else {
+        let hash = sha256_rows(rows.iter().map(|row| {
+            joined_row_token(
+                row,
+                &[
+                    "pairOrdinal",
+                    "sourceOutgoingOrdinal",
+                    "graphRelationIdentity",
+                    "relationObjectIdentity",
+                    "runtimeClass",
+                ],
+            )
+            .expect("validated pair fields")
+        }));
+        if hash != expected {
+            return Err("directed-pair provenance hash differs".to_owned());
+        }
+    }
+    let first_identity = first_match.map_or("-", |ordinal| {
+        rows[ordinal]
+            .value("graphRelationIdentity")
+            .expect("validated graph identity")
+    });
+    if sibling.value("firstBeamStemIdentity")? != first_identity {
+        return Err("first directed BeamStem identity differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_geometry_row(
+    geometry: &StrictRow,
+    sibling: &StrictRow,
+    baseline: &StrictRow,
+) -> Result<(), String> {
+    let branch = sibling.value("branch")?;
+    if geometry.value("branch")? != branch
+        || geometry.value("stemMedian")? != baseline.value("stemMedian")?
+        || geometry.value("baseMedian")? != baseline.value("baseBeamMedian")?
+        || geometry.value("baseCross")? != baseline.value("baseCross")?
+        || geometry.value("baseLength")? != baseline.value("baseLength")?
+        || geometry.value("maxShorterRatio")? != baseline.value("maxShorterRatio")?
+        || geometry.value("yDir")? != baseline.value("yDir")?
+        || geometry.value("xInGapMaximum0")? != baseline.value("xInGapMaximum0")?
+        || geometry.value("maxDxRint")? != baseline.value("maxDxRint")?
+    {
+        return Err("sibling geometry/baseline join differs".to_owned());
+    }
+    for field in ["baseLength", "siblingLength", "ratio", "maxShorterRatio"] {
+        parse_hex_bits(geometry.value(field)?)?;
+    }
+    let shorter = geometry.bool("shorterInclusive")?;
+    if geometry.bool("dyRead")? != shorter
+        || (shorter
+            && (geometry.value("dy")? == "-"
+                || geometry.value("product")? == "-"
+                || geometry.value("wrongSideStrict")? == "-"))
+        || (!shorter
+            && (geometry.value("dy")? != "-"
+                || geometry.value("product")? != "-"
+                || geometry.value("wrongSideStrict")? != "-"))
+    {
+        return Err("lazy shorter-geometry read trace differs".to_owned());
+    }
+    if shorter {
+        parse_hex_bits(geometry.value("dy")?)?;
+        parse_hex_bits(geometry.value("product")?)?;
+    }
+    match branch {
+        "ShorterWrongSide"
+            if shorter
+                && geometry.bool("wrongSideStrict")?
+                && geometry.value("extension")? == "-"
+                && geometry.value("beamHalfHeight")? == "-"
+                && geometry.value("leftThreshold")? == "-"
+                && geometry.value("rightThreshold")? == "-"
+                && geometry.value("strictLeft")? == "-"
+                && geometry.value("strictRight")? == "-"
+                && geometry.value("portion")? == "-"
+                && geometry.value("gradeSource")? == "NotRead"
+                && geometry.value("gradeRead")? == "false"
+                && geometry.value("grade")? == "-" => {}
+        "Linked"
+            if (!shorter || !geometry.bool("wrongSideStrict")?)
+                && geometry.value("extension")? != "-"
+                && geometry.value("beamHalfHeight")? != "-"
+                && geometry.value("leftThreshold")? != "-"
+                && geometry.value("rightThreshold")? != "-"
+                && matches!(geometry.value("portion")?, "LEFT" | "CENTER" | "RIGHT")
+                && geometry.value("gradeSource")? == "FreshBaseBeamStemDraft"
+                && geometry.bool("gradeRead")?
+                && geometry.value("grade")? == baseline.value("supportGrade")? =>
+        {
+            for field in ["beamHalfHeight", "leftThreshold", "rightThreshold", "grade"] {
+                parse_hex_bits(geometry.value(field)?)?;
+            }
+            geometry.bool("strictLeft")?;
+            geometry.bool("strictRight")?;
+        }
+        _ => return Err("branch-specific geometry laziness differs".to_owned()),
+    }
+    Ok(())
+}
+
+fn validate_edge_row(
+    edge: &StrictRow,
+    sibling: &StrictRow,
+    predecessor: &StrictRow,
+    geometry: &StrictRow,
+) -> Result<(), String> {
+    let expected_draft = format!(
+        "sibling-draft:{}:{}",
+        predecessor.value("plan")?,
+        sibling.value("siblingOrdinal")?
+    );
+    if edge.value("freshRelationIdentity")? != expected_draft
+        || edge.value("relationClass")? != "org.audiveris.omr.sig.relation.BeamStemRelation"
+        || edge.value("sourceAlias")? != sibling.value("beamAlias")?
+        || edge.value("sourceInterId")? != sibling.value("beamInterId")?
+        || edge.value("targetAlias")? != predecessor.value("stemAlias")?
+        || edge.value("targetInterId")? != predecessor.value("stemInterId")?
+        || !edge.bool("insertionReturn")?
+        || edge.bool("returnObservedByCaller")?
+        || edge.value("graphRelationIdentity")?
+            != format!("sig-edge:{}", edge.value("graphInsertionOrdinal")?)
+        || edge.value("extension")? != geometry.value("extension")?
+        || edge.value("portion")? != geometry.value("portion")?
+        || edge.value("grade")? != predecessor.value("supportGrade")?
+    {
+        return Err("fresh sibling edge payload differs".to_owned());
+    }
+    parse_hex_bits(edge.value("grade")?)?;
+    Ok(())
+}
+
+fn validate_incident_chronology(rows: &[&StrictRow]) -> Result<(), String> {
+    let mut incoming = 0;
+    let mut outgoing = 0;
+    let mut saw_outgoing = false;
+    for (incident, row) in rows.iter().enumerate() {
+        require_ordinal(row, "incidentOrdinal", incident)?;
+        match row.value("direction")? {
+            "Incoming" if !saw_outgoing => {
+                require_ordinal(row, "directionOrdinal", incoming)?;
+                incoming += 1;
+            }
+            "Outgoing" => {
+                saw_outgoing = true;
+                require_ordinal(row, "directionOrdinal", outgoing)?;
+                outgoing += 1;
+            }
+            _ => return Err("incident incoming/outgoing chronology differs".to_owned()),
+        }
+    }
+    Ok(())
+}
+
+fn validate_callback_rows(
+    callback: &StrictRow,
+    edge: &StrictRow,
+    stem_rows: &[&StrictRow],
+    beam_rows: &[&StrictRow],
+) -> Result<(), String> {
+    validate_incident_chronology(stem_rows)?;
+    validate_incident_chronology(beam_rows)?;
+    let callback_event = callback.usize("eventOrdinal")?;
+    if callback_event != edge.usize("eventOrdinal")? + 1
+        || stem_rows
+            .iter()
+            .chain(beam_rows)
+            .any(|row| row.usize("eventOrdinal") != Ok(callback_event))
+        || !callback.bool("relationAdded")?
+        || !callback.bool("extensionPrepopulated")?
+        || !callback.bool("portionPrepopulated")?
+        || callback.bool("defaultExtensionBranchRead")?
+        || callback.bool("defaultPortionBranchRead")?
+        || callback.usize("stemIncidentRows")? != stem_rows.len()
+        || callback.usize("beamIncidentRows")? != beam_rows.len()
+        || callback.usize("chordStemMatches")? != 0
+    {
+        return Err("callback envelope/count/event chronology differs".to_owned());
+    }
+    for row in stem_rows {
+        let chord = row.bool("chordStemMatch")?;
+        if !row.bool("classRead")?
+            || row.bool("oppositeReadByGetChords")? != chord
+            || row.value("oppositeEvidence")?
+                != if chord {
+                    "GetChordsRead"
+                } else {
+                    "GraphReconstruction"
+                }
+        {
+            return Err("stem callback read/evidence trace differs".to_owned());
+        }
+    }
+    for row in beam_rows {
+        let class_read = row.value("readState")? != "UnreadAfterBreak";
+        if row.bool("classRead")? != class_read
+            || row.bool("oppositeReadByCheckAbnormal")?
+            || row.value("oppositeEvidence")? != "GraphReconstruction"
+        {
+            return Err("beam callback read/evidence trace differs".to_owned());
+        }
+    }
+    let stem_hash = sha256_rows(stem_rows.iter().map(|row| {
+        joined_row_token(
+            row,
+            &[
+                "incidentOrdinal",
+                "direction",
+                "directionOrdinal",
+                "graphRelationIdentity",
+                "relationObjectIdentity",
+                "runtimeClass",
+                "oppositeAlias",
+                "oppositeInterId",
+                "oppositeVertexOrdinal",
+                "chordStemMatch",
+            ],
+        )
+        .expect("validated stem incident fields")
+    }));
+    let beam_hash = sha256_rows(beam_rows.iter().map(|row| {
+        joined_row_token(
+            row,
+            &[
+                "incidentOrdinal",
+                "direction",
+                "directionOrdinal",
+                "graphRelationIdentity",
+                "relationObjectIdentity",
+                "runtimeClass",
+                "oppositeAlias",
+                "oppositeInterId",
+                "oppositeVertexOrdinal",
+                "readState",
+                "relevant",
+                "portion",
+                "contribution",
+            ],
+        )
+        .expect("validated beam incident fields")
+    }));
+    if callback.value("stemIncidentHash")? != stem_hash
+        || callback.value("beamIncidentHash")? != beam_hash
+    {
+        return Err("callback incident provenance hash differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_lookup_rows(result: &StrictRow, rows: &[&StrictRow]) -> Result<(), String> {
+    if result.usize("linkerLookupRows")? != rows.len() {
+        return Err("builder lookup row count differs".to_owned());
+    }
+    let mut selected = false;
+    for (ordinal, row) in rows.iter().enumerate() {
+        require_ordinal(row, "itemOrdinal", ordinal)?;
+        match (selected, row.value("action")?) {
+            (false, "Continue") => {}
+            (false, "SelectBreak") => selected = true,
+            (true, "UnreadAfterBreak") => {}
+            _ => return Err("builder first-source-identity scan differs".to_owned()),
+        }
+    }
+    let hash = sha256_rows(rows.iter().map(|row| {
+        joined_row_token(
+            row,
+            &[
+                "itemOrdinal",
+                "runtimeClass",
+                "linkerRead",
+                "sourceRead",
+                "linkerAlias",
+                "linkerRuntimeClass",
+                "sourceAlias",
+                "sourceInterId",
+                "identityMatch",
+                "action",
+            ],
+        )
+        .expect("validated builder lookup fields")
+    }));
+    if result.value("linkerLookupHash")? != hash {
+        return Err("builder lookup provenance hash differs".to_owned());
+    }
+    Ok(())
+}
+
+fn parse_list(value: &str) -> Result<Vec<&str>, String> {
+    if value == "-" {
+        return Ok(Vec::new());
+    }
+    let body = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| format!("invalid list token {value}"))?;
+    if body.is_empty() {
+        return Err("empty list must use '-'".to_owned());
+    }
+    Ok(body.split(',').collect())
+}
+
+fn validate_linker_flag_row(flag: &StrictRow, sibling: &StrictRow) -> Result<(), String> {
+    match flag.value("lookupState")? {
+        "FirstSourceIdentityMatch" => {
+            let selected = flag.value("selectedAlias")?;
+            let observers = parse_list(flag.value("observerAliases")?)?;
+            if flag.value("selectedSourceAlias")? != sibling.value("beamAlias")?
+                || flag.value("sharedCell")? != format!("bcell:{selected}")
+                || observers.first().copied() != Some(selected)
+                || !flag.bool("linkedAfter")?
+                || flag.value("closedBefore")? != flag.value("closedAfter")?
+                || !flag.bool("requested")?
+                || flag.usize("writeCount")? != 1
+                || flag.usize("valueChangeCount")? != usize::from(!flag.bool("linkedBefore")?)
+            {
+                return Err("selected sibling B-linker shared-cell trace differs".to_owned());
+            }
+        }
+        "ExhaustiveNoMatch"
+            if flag.value("eventOrdinal")? == "-"
+                && flag.value("selectedAlias")? == "-"
+                && flag.value("observerAliases")? == "-"
+                && flag.value("requested")? == "NotRead"
+                && flag.usize("writeCount")? == 0
+                && flag.usize("valueChangeCount")? == 0
+                && flag.value("transition")? == "NoLinkerNoWrite" => {}
+        _ => return Err("sibling linker-flag outcome differs".to_owned()),
+    }
+    Ok(())
+}
+
+fn validate_delta_guard(
+    guard: &StrictRow,
+    baseline: &StrictRow,
+    result: &StrictRow,
+    edges_added: usize,
+    beam_abnormal_changes: usize,
+) -> Result<(), String> {
+    let unchanged_pairs = [
+        ("allocatorBefore", "allocatorAfter"),
+        ("glyphActiveHashBefore", "glyphActiveHashAfter"),
+        ("glyphOriginalsHashBefore", "glyphOriginalsHashAfter"),
+        ("interIndexCountBefore", "interIndexCountAfter"),
+        ("sigVertexCountBefore", "sigVertexCountAfter"),
+        ("systemStemsHashBefore", "systemStemsHashAfter"),
+        ("lineHashBefore", "lineHashAfter"),
+        ("arenaTopologyHashBefore", "arenaTopologyHashAfter"),
+        ("builderItemsHashBefore", "builderItemsHashAfter"),
+        ("relationInputHashBefore", "relationInputHashAfter"),
+    ];
+    if unchanged_pairs
+        .iter()
+        .any(|(before, after)| guard.value(before) != guard.value(after))
+        || guard.usize("sigEdgeCountBefore")? != baseline.usize("graphEdgesBefore")?
+        || guard.usize("sigEdgeCountAfter")? != guard.usize("sigEdgeCountBefore")? + edges_added
+        || guard.value("groupStateHashBefore")? != baseline.value("groupStateHashBefore")?
+        || guard.value("groupStateHashAfter")? != result.value("groupStateHashAfter")?
+        || !is_lower_sha256(guard.value("groupStateHashBefore")?)
+        || !is_lower_sha256(guard.value("groupStateHashAfter")?)
+        || ((beam_abnormal_changes == 0)
+            != (guard.value("groupStateHashBefore")? == guard.value("groupStateHashAfter")?))
+        || guard.value("allowedMutations")?
+            != "FreshSiblingBeamStemEdgesBeamAbnormalDirtySelectedBCells"
+        || !guard.bool("zeroChordStem")?
+        || !guard.bool("baseBeamStemUnchanged")?
+        || !guard.bool("unrelatedRelationsUnchanged")?
+        || !guard.bool("unrelatedLinkerFlagsUnchanged")?
+        || guard.bool("headRelationLoopRead")?
+        || !guard.bool("stopBeforeHeadRelationLoop")?
+    {
+        return Err("transaction delta guard differs".to_owned());
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SupplementalCensus {
+    supported: usize,
+    envelope: usize,
+    siblings: usize,
+    same_glyph: usize,
+    existing_beam_stem: usize,
+    shorter_wrong_side: usize,
+    linked: usize,
+    edges: usize,
+    flags: usize,
+    events: usize,
+}
+
+#[derive(Clone, Copy)]
+struct SupplementalCaseSpec {
+    name: &'static str,
+    scope: &'static str,
+    sibling_class: &'static str,
+    branch: &'static str,
+    pair_state: &'static str,
+    ratio_read: bool,
+    shorter: Option<bool>,
+    fresh_edge: bool,
+    graph_delta: i64,
+    include_linker: bool,
+    write: bool,
+    linked_before: bool,
+    throw_class: &'static str,
+    throw_stage: &'static str,
+}
+
+const SUPPLEMENTAL_CASES: &[SupplementalCaseSpec] = &[
+    SupplementalCaseSpec {
+        name: "SameGlyph",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "SameGlyph",
+        pair_state: "NotReadSameGlyph",
+        ratio_read: false,
+        shorter: None,
+        fresh_edge: false,
+        graph_delta: 0,
+        include_linker: true,
+        write: false,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "ExistingBeamStem",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "ExistingBeamStem",
+        pair_state: "ExistingBeamStem",
+        ratio_read: false,
+        shorter: None,
+        fresh_edge: false,
+        graph_delta: 0,
+        include_linker: true,
+        write: false,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "ShorterWrongSide",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "ShorterWrongSide",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(true),
+        fresh_edge: false,
+        graph_delta: 0,
+        include_linker: true,
+        write: false,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "LinkedBeam",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: true,
+        write: true,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "LinkedSmallBeam",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.SmallBeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: true,
+        write: true,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "LinkedHook",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamHookInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: true,
+        write: true,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "LinkedNoBLinker",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: false,
+        write: false,
+        linked_before: false,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "LinkedIdempotentBCell",
+        scope: "synthetic",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: true,
+        write: true,
+        linked_before: true,
+        throw_class: "-",
+        throw_stage: "-",
+    },
+    SupplementalCaseSpec {
+        name: "ThrowBeforeInsertion",
+        scope: "envelope",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: false,
+        graph_delta: 0,
+        include_linker: true,
+        write: false,
+        linked_before: false,
+        throw_class: "java.lang.IllegalArgumentException",
+        throw_stage: "AddEdgeBeforeInsertion",
+    },
+    SupplementalCaseSpec {
+        name: "ThrowDuringCallback",
+        scope: "envelope",
+        sibling_class: "org.audiveris.omr.sig.inter.BeamInter",
+        branch: "Linked",
+        pair_state: "Absent",
+        ratio_read: true,
+        shorter: Some(false),
+        fresh_edge: true,
+        graph_delta: 1,
+        include_linker: true,
+        write: false,
+        linked_before: false,
+        throw_class: "org.audiveris.omr.rustport.StemsBeamVLinkSiblingLinksProbe$SyntheticListenerException",
+        throw_stage: "LaterListenerAfterRelationCallback",
+    },
+];
+
+fn validate_supplemental_case(
+    row: &StrictRow,
+    spec: SupplementalCaseSpec,
+    real_predecessor: &StrictRow,
+) -> Result<(), String> {
+    let key = row.key()?;
+    let expected_terminal = if spec.scope == "envelope" {
+        format!("Threw:{}", spec.throw_stage)
+    } else {
+        "ReadyBeforeHeadRelationLoop".to_owned()
+    };
+    let expected_lookup = match spec.name {
+        "LinkedBeam" | "LinkedSmallBeam" | "LinkedHook" | "LinkedIdempotentBCell" => {
+            "FirstSourceIdentityMatch"
+        }
+        "LinkedNoBLinker" => "ExhaustiveNoMatch",
+        _ => "NotRead",
+    };
+    let expected_events = usize::from(spec.fresh_edge) * 2
+        + usize::from(spec.write)
+        + usize::from(spec.scope == "envelope");
+    if key.system != 1
+        || key.plan != real_predecessor.usize("plan")?
+        || key.scope != spec.scope
+        || key.case_name != spec.name
+        || row.value("join")? != "IsolatedBoundary15Replay"
+        || row.value("sourceRealB15EvidenceSha256")?
+            != real_predecessor.value("b15TransactionEvidenceSha256")?
+        || row.value("construction")? != "RealBookSheetSystemSIG"
+        || row.value("baseRuntimeClass")? != "org.audiveris.omr.sig.inter.BeamInter"
+        || row.value("siblingRuntimeClass")? != spec.sibling_class
+        || row.bool("stemAttachedBefore")? != (spec.name != "ThrowBeforeInsertion")
+        || row.value("yDir")? != "1"
+        || row.bool("sameGlyphIdentity")? != (spec.branch == "SameGlyph")
+        || row.value("pairState")? != spec.pair_state
+        || row.bool("ratioRead")? != spec.ratio_read
+        || row.value("branch")? != spec.branch
+        || row.usize("builderItems")? != usize::from(spec.include_linker)
+        || row.value("lookupState")? != expected_lookup
+        || row.bool("siblingBLinkedBefore")? != spec.linked_before
+        || row.bool("siblingBLinkedAfter")? != (spec.linked_before || spec.write)
+        || row.usize("writeCount")? != usize::from(spec.write)
+        || row.usize("valueChangeCount")? != usize::from(spec.write && !spec.linked_before)
+        || row.i64("graphEdgesAfter")? - row.i64("graphEdgesBefore")? != spec.graph_delta
+        || (row.value("freshRelationIdentity")? != "-") != spec.fresh_edge
+        || row.bool("callbackCompleted")? != spec.fresh_edge
+        || row.usize("chordStemMatches")? != 0
+        || row.value("throwClass")? != spec.throw_class
+        || row.value("throwStage")? != spec.throw_stage
+        || row.usize("eventCount")? != expected_events
+        || row.value("terminal")? != expected_terminal
+        || row.value("supportGrade")? != real_predecessor.value("supportGrade")?
+    {
+        return Err(format!("isolated case {} topology differs", spec.name));
+    }
+    for field in [
+        "baseLength",
+        "siblingLength",
+        "maxShorterRatio",
+        "supportGrade",
+    ] {
+        parse_hex_bits(row.value(field)?)?;
+    }
+    if spec.ratio_read {
+        parse_hex_bits(row.value("ratio")?)?;
+    } else if row.value("ratio")? != "-" {
+        return Err(format!("isolated case {} eagerly read ratio", spec.name));
+    }
+    match spec.shorter {
+        None if row.value("shorterInclusive")? == "-"
+            && !row.bool("dyRead")?
+            && row.value("dy")? == "-"
+            && row.value("product")? == "-"
+            && row.value("wrongSideStrict")? == "-" => {}
+        Some(true)
+            if row.bool("shorterInclusive")?
+                && row.bool("dyRead")?
+                && row.bool("wrongSideStrict")? =>
+        {
+            parse_hex_bits(row.value("dy")?)?;
+            parse_hex_bits(row.value("product")?)?;
+        }
+        Some(false)
+            if !row.bool("shorterInclusive")?
+                && !row.bool("dyRead")?
+                && row.value("dy")? == "-"
+                && row.value("product")? == "-"
+                && row.value("wrongSideStrict")? == "-" => {}
+        _ => {
+            return Err(format!(
+                "isolated case {} shorter laziness differs",
+                spec.name
+            ));
+        }
+    }
+    if spec.branch == "Linked" {
+        if row.value("extension")? == "-"
+            || !matches!(row.value("portion")?, "LEFT" | "CENTER" | "RIGHT")
+        {
+            return Err(format!("isolated case {} link geometry differs", spec.name));
+        }
+    } else if row.value("extension")? != "-" || row.value("portion")? != "-" {
+        return Err(format!(
+            "isolated case {} eagerly read link geometry",
+            spec.name
+        ));
+    }
+    if spec.fresh_edge {
+        if row.value("stemIncidentState")? != "ExhaustiveIncomingThenOutgoing"
+            || row.usize("stemIncidentRows")? == 0
+            || row.value("beamIncidentState")? == "NotRead"
+            || row.value("beamRule")? == "NotRead"
+        {
+            return Err(format!("isolated case {} callback scan differs", spec.name));
+        }
+    } else if row.value("stemIncidentState")? != "NotRead"
+        || row.usize("stemIncidentRows")? != 0
+        || row.value("beamIncidentState")? != "NotRead"
+        || row.value("beamRule")? != "NotRead"
+    {
+        return Err(format!("isolated case {} eagerly read callback", spec.name));
+    }
+    row.bool("beamAbnormalBefore")?;
+    row.bool("beamAbnormalAfter")?;
+    if row.value("dirtyBefore")?.is_empty() || row.value("dirtyAfter")?.is_empty() {
+        return Err(format!(
+            "isolated case {} lacks dirty-state evidence",
+            spec.name
+        ));
+    }
+    Ok(())
+}
+
+fn validate_supplemental_rows(
+    cursor: &mut RowCursor<'_>,
+    page: &StrictRow,
+    parsed: &[ParsedTransaction],
+) -> Result<SupplementalCensus, String> {
+    let real_predecessor = parsed
+        .iter()
+        .find(|transaction| transaction.key.scope == "real" && transaction.key.system == 1)
+        .map(|transaction| &transaction.predecessor)
+        .ok_or_else(|| "supplemental cases lack the real system-1 predecessor".to_owned())?;
+    let mut census = SupplementalCensus::default();
+    for spec in SUPPLEMENTAL_CASES {
+        let case = cursor
+            .rows
+            .get(cursor.index)
+            .ok_or_else(|| format!("missing isolated case {}", spec.name))?;
+        if case.kind != RowKind::SyntheticCase || case.page != page.page {
+            return Err(format!("isolated case order differs before {}", spec.name));
+        }
+        let key = case.key()?;
+        validate_supplemental_case(case, *spec, real_predecessor)?;
+        cursor.index += 1;
+
+        let mut event_ordinal = 0;
+        let mut event_kinds = Vec::new();
+        while cursor.peek_kind() == Some(RowKind::SyntheticEvent) {
+            let event = cursor.take(RowKind::SyntheticEvent, &key)?;
+            require_ordinal(event, "eventOrdinal", event_ordinal)?;
+            event_ordinal += 1;
+            let kind = event.value("kind")?;
+            if !matches!(
+                kind,
+                "SigEdgeInserted" | "RelationCallbackCompleted" | "BLinkerLinkedAssigned" | "Throw"
+            ) {
+                return Err(format!("unknown isolated event kind {kind}"));
+            }
+            event_kinds.push((kind, event.value("relationIdentity")?));
+        }
+        if event_ordinal != case.usize("eventCount")? {
+            return Err(format!("isolated case {} event count differs", spec.name));
+        }
+        let fresh = case.value("freshRelationIdentity")?;
+        let mut expected_events = Vec::new();
+        if spec.fresh_edge {
+            expected_events.push(("SigEdgeInserted", fresh));
+            expected_events.push(("RelationCallbackCompleted", fresh));
+        }
+        if spec.write {
+            expected_events.push(("BLinkerLinkedAssigned", "-"));
+        }
+        if spec.scope == "envelope" {
+            expected_events.push(("Throw", fresh));
+        }
+        if event_kinds != expected_events {
+            return Err(format!("isolated case {} event prefix differs", spec.name));
+        }
+
+        let guard = cursor.take(RowKind::SyntheticGuard, &key)?;
+        if guard.i64("graphDelta")? != spec.graph_delta
+            || guard.value("allowedMutations")?
+                != "FreshSiblingBeamStemBeamAbnormalDirtySelectedBCell"
+            || !guard.bool("baseBeamUnchanged")?
+            || !guard.bool("stemGeometryUnchanged")?
+            || !guard.bool("groupObjectUnchanged")?
+            || !guard.bool("zeroChordStem")?
+            || !guard.bool("isolatedOnly")?
+            || guard.bool("productionEquivalent")?
+            || !guard.bool("enclosingRealSheetUnchanged")?
+            || guard.bool("headRelationLoopRead")?
+            || guard.value("terminal")? != case.value("terminal")?
+        {
+            return Err(format!("isolated case {} guard differs", spec.name));
+        }
+
+        census.supported += usize::from(spec.scope == "synthetic");
+        census.envelope += usize::from(spec.scope == "envelope");
+        census.siblings += 1;
+        census.same_glyph += usize::from(spec.branch == "SameGlyph");
+        census.existing_beam_stem += usize::from(spec.branch == "ExistingBeamStem");
+        census.shorter_wrong_side += usize::from(spec.branch == "ShorterWrongSide");
+        census.linked += usize::from(spec.branch == "Linked");
+        census.edges += usize::from(spec.fresh_edge);
+        census.flags += usize::from(spec.write);
+        census.events += event_ordinal;
+    }
+    Ok(census)
+}
+
+fn validate_core_rows(rows: &[StrictRow]) -> Result<Vec<ParsedTransaction>, String> {
+    let page = rows
+        .first()
+        .ok_or_else(|| "fixture has no semantic rows".to_owned())?;
+    validate_page_row(page)?;
+    if rows.iter().skip(1).any(|row| row.kind == RowKind::Page) {
+        return Err("fixture contains more than one page row".to_owned());
+    }
+    let mut cursor = RowCursor::new(rows, 1);
+    let mut parsed = Vec::new();
+    let mut real_systems = BTreeSet::new();
+    let mut real_transactions = 0;
+    let mut supported_synthetic_cases = 0;
+    let mut envelope_cases = 0;
+    let mut total_group_rows = 0;
+    let mut total_siblings = 0;
+    let mut total_branches = BTreeMap::from([
+        ("SameGlyph", 0usize),
+        ("ExistingBeamStem", 0),
+        ("ShorterWrongSide", 0),
+        ("Linked", 0),
+    ]);
+    let mut total_edges = 0;
+    let mut total_flags = 0;
+    let mut total_events = 0;
+    let mut supplemental = None;
+    while cursor.peek_kind() == Some(RowKind::Predecessor) {
+        let transaction_start = cursor.index;
+        let first = &rows[cursor.index];
+        if first.kind != RowKind::Predecessor {
+            return Err(format!(
+                "transaction does not start with predecessor at semantic row {}",
+                cursor.index
+            ));
+        }
+        let key = first.key()?;
+        if key.page != page.page {
+            return Err("transaction page differs from page row".to_owned());
+        }
+        let predecessor = cursor.take(RowKind::Predecessor, &key)?;
+        validate_predecessor_row(predecessor)?;
+        let baseline = cursor.take(RowKind::Baseline, &key)?;
+        validate_baseline_row(baseline, predecessor)?;
+
+        let mut group_rows = Vec::new();
+        for _ in 0..baseline.usize("groupOutgoingScanned")? {
+            group_rows.push(cursor.take(RowKind::GroupMember, &key)?);
+        }
+        validate_group_rows(baseline, &group_rows)?;
+
+        let mut branch_counts = BTreeMap::from([
+            ("SameGlyph", 0usize),
+            ("ExistingBeamStem", 0),
+            ("ShorterWrongSide", 0),
+            ("Linked", 0),
+        ]);
+        let mut committed_edges = 0;
+        let mut committed_flags = 0;
+        let mut beam_abnormal_changes = 0;
+        let mut event_count = 0;
+        for sibling_ordinal in 0..baseline.usize("siblings")? {
+            let sibling = cursor.take(RowKind::Sibling, &key)?;
+            require_ordinal(sibling, "siblingOrdinal", sibling_ordinal)?;
+            let branch = sibling.value("branch")?;
+            let count = branch_counts
+                .get_mut(branch)
+                .ok_or_else(|| format!("unknown sibling branch {branch}"))?;
+            *count += 1;
+
+            let mut source_rows = Vec::new();
+            for _ in 0..sibling.usize("sourceOutgoingScanned")? {
+                let row = cursor.take(RowKind::SourceOutgoing, &key)?;
+                require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                source_rows.push(row);
+            }
+            validate_source_rows(sibling, &source_rows)?;
+
+            let mut pair_rows = Vec::new();
+            for _ in 0..sibling.usize("pairRows")? {
+                let row = cursor.take(RowKind::PairRelation, &key)?;
+                require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                pair_rows.push(row);
+            }
+            validate_pair_rows(sibling, &pair_rows)?;
+
+            let geometry = match branch {
+                "SameGlyph" | "ExistingBeamStem" => None,
+                "ShorterWrongSide" | "Linked" => {
+                    let row = cursor.take(RowKind::Geometry, &key)?;
+                    require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                    validate_geometry_row(row, sibling, baseline)?;
+                    Some(row)
+                }
+                _ => unreachable!("branch domain checked above"),
+            };
+
+            let mut lookup_rows = Vec::new();
+            let mut linker_flag = None;
+            if branch == "Linked" {
+                let edge = cursor.take(RowKind::Edge, &key)?;
+                require_ordinal(edge, "siblingOrdinal", sibling_ordinal)?;
+                if edge.usize("eventOrdinal")? != event_count {
+                    return Err("edge global event ordinal differs".to_owned());
+                }
+                validate_edge_row(
+                    edge,
+                    sibling,
+                    predecessor,
+                    geometry.expect("Linked branch has geometry"),
+                )?;
+                committed_edges += 1;
+                event_count += 1;
+
+                let mut stem_rows = Vec::new();
+                while cursor.peek_kind() == Some(RowKind::StemIncident) {
+                    let row = cursor.take(RowKind::StemIncident, &key)?;
+                    require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                    stem_rows.push(row);
+                }
+                let mut beam_rows = Vec::new();
+                while cursor.peek_kind() == Some(RowKind::BeamIncident) {
+                    let row = cursor.take(RowKind::BeamIncident, &key)?;
+                    require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                    beam_rows.push(row);
+                }
+                let callback = cursor.take(RowKind::Callback, &key)?;
+                require_ordinal(callback, "siblingOrdinal", sibling_ordinal)?;
+                validate_callback_rows(callback, edge, &stem_rows, &beam_rows)?;
+                beam_abnormal_changes += usize::from(callback.bool("abnormalChanged")?);
+                event_count += 1;
+
+                while cursor.peek_kind() == Some(RowKind::LinkerLookup) {
+                    let row = cursor.take(RowKind::LinkerLookup, &key)?;
+                    require_ordinal(row, "siblingOrdinal", sibling_ordinal)?;
+                    lookup_rows.push(row);
+                }
+                let flag = cursor.take(RowKind::LinkerFlag, &key)?;
+                require_ordinal(flag, "siblingOrdinal", sibling_ordinal)?;
+                validate_linker_flag_row(flag, sibling)?;
+                if flag.value("lookupState")? == "FirstSourceIdentityMatch" {
+                    if flag.usize("eventOrdinal")? != event_count {
+                        return Err("linker-flag global event ordinal differs".to_owned());
+                    }
+                    event_count += 1;
+                    committed_flags += 1;
+                }
+                linker_flag = Some(flag);
+            }
+
+            let sibling_result = cursor.take(RowKind::SiblingResult, &key)?;
+            require_ordinal(sibling_result, "siblingOrdinal", sibling_ordinal)?;
+            if sibling_result.value("branch")? != branch
+                || sibling_result.value("terminal")? != "Continue"
+                || sibling_result.bool("edgeCommitted")? != (branch == "Linked")
+                || sibling_result.bool("linkerLookupRead")? != (branch == "Linked")
+                || sibling_result.usize("edgePrefixCount")? != committed_edges
+                || sibling_result.usize("flagPrefixCount")? != committed_flags
+            {
+                return Err("sibling terminal/prefix census differs".to_owned());
+            }
+            if branch == "Linked" {
+                validate_lookup_rows(sibling_result, &lookup_rows)?;
+                let flag = linker_flag.expect("Linked branch has linker-flag row");
+                if sibling_result.value("linkerLookupState")? != flag.value("lookupState")?
+                    || sibling_result.value("linkerSelectedAlias")?
+                        != flag.value("selectedAlias")?
+                {
+                    return Err("sibling lookup/result join differs".to_owned());
+                }
+            } else if sibling_result.value("linkerLookupState")? != "NotRead"
+                || sibling_result.value("linkerLookupTiming")? != "NotRead"
+                || sibling_result.usize("linkerLookupRows")? != 0
+                || sibling_result.value("linkerLookupHash")? != "NotRead"
+                || sibling_result.value("linkerSelectedAlias")? != "-"
+            {
+                return Err("non-linked sibling lookup was not lazy".to_owned());
+            }
+        }
+
+        let result = cursor.take(RowKind::Result, &key)?;
+        let guard = cursor.take(RowKind::DeltaGuard, &key)?;
+        let summary = cursor.take(RowKind::Summary, &key)?;
+        if result.value("terminal")? != "ReadyBeforeHeadRelationLoop"
+            || result.value("supportGrade")? != predecessor.value("supportGrade")?
+            || result.value("stemAlias")? != predecessor.value("stemAlias")?
+            || result.value("stemInterId")? != predecessor.value("stemInterId")?
+            || result.usize("siblings")? != baseline.usize("siblings")?
+            || result.usize("committedEdges")? != committed_edges
+            || result.usize("committedFlags")? != committed_flags
+            || result.usize("eventCount")? != event_count
+            || result.bool("headRelationLoopRead")?
+            || summary.usize("groupRows")? != group_rows.len()
+            || summary.usize("siblings")? != baseline.usize("siblings")?
+            || summary.usize("sameGlyph")? != branch_counts["SameGlyph"]
+            || summary.usize("existingBeamStem")? != branch_counts["ExistingBeamStem"]
+            || summary.usize("shorterWrongSide")? != branch_counts["ShorterWrongSide"]
+            || summary.usize("linked")? != branch_counts["Linked"]
+            || summary.usize("edgesAdded")? != committed_edges
+            || summary.usize("linkerWrites")? != committed_flags
+            || summary.usize("events")? != event_count
+            || summary.usize("chordStemMatches")? != 0
+            || summary.value("terminal")? != "ReadyBeforeHeadRelationLoop"
+        {
+            return Err("transaction result/summary census differs".to_owned());
+        }
+        validate_delta_guard(
+            guard,
+            baseline,
+            result,
+            committed_edges,
+            beam_abnormal_changes,
+        )?;
+        if key.scope == "real" && key.case_name == "-" {
+            real_transactions += 1;
+            real_systems.insert(key.system);
+        } else {
+            return Err(format!(
+                "core transaction is not a real whole-page transaction: {:?}",
+                key
+            ));
+        }
+        total_group_rows += group_rows.len();
+        total_siblings += baseline.usize("siblings")?;
+        for branch in [
+            "SameGlyph",
+            "ExistingBeamStem",
+            "ShorterWrongSide",
+            "Linked",
+        ] {
+            total_branches.insert(branch, total_branches[branch] + branch_counts[branch]);
+        }
+        total_edges += committed_edges;
+        total_flags += committed_flags;
+        total_events += event_count;
+        parsed.push(ParsedTransaction {
+            key,
+            predecessor: predecessor.clone(),
+            rows: rows[transaction_start..cursor.index].to_vec(),
+        });
+        if cursor.peek_kind() == Some(RowKind::SyntheticCase) {
+            if supplemental.is_some() {
+                return Err("fixture contains more than one isolated system-1 block".to_owned());
+            }
+            supplemental = Some(validate_supplemental_rows(&mut cursor, page, &parsed)?);
+        }
+    }
+    if parsed.is_empty() {
+        return Err("fixture has no transactions".to_owned());
+    }
+    let supplemental = supplemental
+        .ok_or_else(|| "fixture lacks its isolated system-1 supplemental block".to_owned())?;
+    supported_synthetic_cases += supplemental.supported;
+    envelope_cases += supplemental.envelope;
+    total_siblings += supplemental.siblings;
+    total_branches.insert(
+        "SameGlyph",
+        total_branches["SameGlyph"] + supplemental.same_glyph,
+    );
+    total_branches.insert(
+        "ExistingBeamStem",
+        total_branches["ExistingBeamStem"] + supplemental.existing_beam_stem,
+    );
+    total_branches.insert(
+        "ShorterWrongSide",
+        total_branches["ShorterWrongSide"] + supplemental.shorter_wrong_side,
+    );
+    total_branches.insert("Linked", total_branches["Linked"] + supplemental.linked);
+    total_edges += supplemental.edges;
+    total_flags += supplemental.flags;
+    total_events += supplemental.events;
+    if cursor.peek_kind() == Some(RowKind::PageSummary) {
+        let summary = &rows[cursor.index];
+        cursor.index += 1;
+        if summary.page != page.page
+            || summary.usize("systems")? != page.usize("systems")?
+            || summary.usize("systems")? != real_systems.len()
+            || summary.usize("realTransactions")? != real_transactions
+            || summary.usize("supportedSyntheticCases")? != supported_synthetic_cases
+            || summary.usize("envelopeCases")? != envelope_cases
+            || summary.usize("totalTransactions")?
+                != parsed.len() + supported_synthetic_cases + envelope_cases
+            || summary.usize("groupRows")? != total_group_rows
+            || summary.usize("siblingCandidates")? != total_siblings
+            || summary.usize("sameGlyph")? != total_branches["SameGlyph"]
+            || summary.usize("existingBeamStem")? != total_branches["ExistingBeamStem"]
+            || summary.usize("shorterWrongSide")? != total_branches["ShorterWrongSide"]
+            || summary.usize("linked")? != total_branches["Linked"]
+            || summary.usize("edgesAdded")? != total_edges
+            || summary.usize("linkerWrites")? != total_flags
+            || summary.usize("events")? != total_events
+            || summary.usize("chordStemMatches")? != 0
+            || !summary.bool("stopBeforeHeadRelationLoop")?
+        {
+            return Err("page-summary census differs".to_owned());
+        }
+    } else {
+        return Err("fixture lacks its page-summary trailer".to_owned());
+    }
+    if cursor.peek_kind() == Some(RowKind::CorpusSummary) {
+        cursor.index += 1;
+    } else {
+        return Err("fixture lacks its corpus-summary trailer".to_owned());
+    }
+    if cursor.index != rows.len() {
+        return Err(format!(
+            "unexpected semantic row after core/page summary: {:?}",
+            rows[cursor.index].kind
+        ));
+    }
+    Ok(parsed)
+}
+
+fn raw_fields(line: &str) -> Result<(String, BTreeMap<String, String>), String> {
+    let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+    let page = tokens
+        .get(1)
+        .ok_or_else(|| "predecessor row lacks page token".to_owned())?;
+    if (tokens.len() - 2) % 2 != 0 {
+        return Err("predecessor row lacks key/value pairs".to_owned());
+    }
+    let mut fields = BTreeMap::new();
+    for pair in tokens[2..].chunks_exact(2) {
+        if fields
+            .insert(pair[0].to_owned(), pair[1].to_owned())
+            .is_some()
+        {
+            return Err(format!("duplicate predecessor field {}", pair[0]));
+        }
+    }
+    Ok(((*page).to_owned(), fields))
+}
+
+fn required_map<'a>(fields: &'a BTreeMap<String, String>, name: &str) -> Result<&'a str, String> {
+    fields
+        .get(name)
+        .map(String::as_str)
+        .ok_or_else(|| format!("missing predecessor field {name}"))
+}
+
+fn validate_manifest_fixture_entry(key: &str, expected_sha256: &str) -> Result<(), String> {
+    let manifest = std::fs::read_to_string(repo_root().join(BOUNDARY_FIFTEEN_MANIFEST_PATH))
+        .map_err(|error| format!("cannot read Boundary-15 manifest: {error}"))?;
+    let matches = manifest
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamvlinkblinkerflagmanifestentry "))
+        .filter_map(|line| {
+            let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+            ((tokens.len() - 1) % 2 == 0).then(|| {
+                tokens[1..]
+                    .chunks_exact(2)
+                    .map(|pair| (pair[0].to_owned(), pair[1].to_owned()))
+                    .collect::<BTreeMap<_, _>>()
+            })
+        })
+        .filter(|fields| fields.get("page").is_some_and(|page| page == key))
+        .collect::<Vec<_>>();
+    let [entry] = matches.as_slice() else {
+        return Err(format!("Boundary-15 manifest lacks one {key} entry"));
+    };
+    if required_map(entry, "fixture")? != format!("stems-beam-vlink-b-linker-flag-{key}.txt")
+        || required_map(entry, "fixtureSha256")? != expected_sha256
+    {
+        return Err(format!("Boundary-15 {key} manifest fixture pin differs"));
+    }
+    Ok(())
+}
+
+fn validate_manifest_fixture_pin() -> Result<(), String> {
+    validate_manifest_fixture_entry("chula", BOUNDARY_FIFTEEN_FIXTURE_SHA256)
+}
+
+fn validate_boundary_fifteen_bundle(
+    transaction: &ParsedTransaction,
+    fixture: &str,
+) -> Result<(), String> {
+    let predecessor = &transaction.predecessor;
+    let mut ordered = Vec::new();
+    let mut result_row = None;
+    let mut guard_row = None;
+    let mut summary_row = None;
+    let mut b15_predecessor = None;
+    for line in fixture.lines() {
+        if !line.starts_with("stemsbeamvlinkblinkerflag")
+            || line.starts_with("stemsbeamvlinkblinkerflagpage ")
+            || line.starts_with("stemsbeamvlinkblinkerflagpagesummary ")
+            || line.starts_with("stemsbeamvlinkblinkerflagcorpussummary ")
+        {
+            continue;
+        }
+        let (page, fields) = raw_fields(line)?;
+        if page != transaction.key.page
+            || required_map(&fields, "scope")? != "real"
+            || required_map(&fields, "system")? != transaction.key.system.to_string()
+        {
+            continue;
+        }
+        if required_map(&fields, "plan")? != transaction.key.plan.to_string()
+            || required_map(&fields, "case")? != "-"
+        {
+            return Err("Boundary-15 real system row key differs".to_owned());
+        }
+        ordered.push(line.to_owned());
+        if line.starts_with("stemsbeamvlinkblinkerflagpredecessor ") {
+            if b15_predecessor.replace(fields).is_some() {
+                return Err("duplicate Boundary-15 predecessor row".to_owned());
+            }
+        } else if line.starts_with("stemsbeamvlinkblinkerflagresult ") {
+            if result_row.replace((line, fields)).is_some() {
+                return Err("duplicate Boundary-15 result row".to_owned());
+            }
+        } else if line.starts_with("stemsbeamvlinkblinkerflagdeltaguard ") {
+            if guard_row.replace(line).is_some() {
+                return Err("duplicate Boundary-15 guard row".to_owned());
+            }
+        } else if line.starts_with("stemsbeamvlinkblinkerflagsummary ")
+            && summary_row.replace(line).is_some()
+        {
+            return Err("duplicate Boundary-15 summary row".to_owned());
+        }
+    }
+    let b15_predecessor =
+        b15_predecessor.ok_or_else(|| "missing Boundary-15 predecessor row".to_owned())?;
+    let (result_raw, result) =
+        result_row.ok_or_else(|| "missing Boundary-15 result row".to_owned())?;
+    let guard_raw = guard_row.ok_or_else(|| "missing Boundary-15 guard row".to_owned())?;
+    let summary_raw = summary_row.ok_or_else(|| "missing Boundary-15 summary row".to_owned())?;
+    let base_beam_alias = required_map(&result, "bAlias")?
+        .split_once(":b:")
+        .map(|(beam, _)| beam)
+        .ok_or_else(|| "Boundary-15 B alias lacks beam prefix".to_owned())?;
+    if predecessor.usize("b15TransactionRows")? != ordered.len()
+        || predecessor.value("b15TransactionEvidenceSha256")?
+            != sha256_rows(ordered.iter().cloned())
+        || predecessor.value("b15ResultRowSha256")? != sha256_rows([result_raw.to_owned()])
+        || predecessor.value("b15GuardRowSha256")? != sha256_rows([guard_raw.to_owned()])
+        || predecessor.value("b15SummaryRowSha256")? != sha256_rows([summary_raw.to_owned()])
+        || predecessor.value("predecessorTerminal")? != required_map(&result, "terminal")?
+        || predecessor.value("applyReturn")? != required_map(&result, "applyReturn")?
+        || predecessor.value("supportGrade")? != required_map(&result, "supportGrade")?
+        || predecessor.value("stemAlias")? != required_map(&result, "stemAlias")?
+        || predecessor.value("stemInterId")? != required_map(&result, "stemInterId")?
+        || predecessor.value("baseBeamAlias")? != base_beam_alias
+        || predecessor.value("targetBAlias")? != required_map(&result, "bAlias")?
+        || predecessor.value("triggeringVAlias")? != required_map(&b15_predecessor, "vAlias")?
+        || predecessor.value("targetBLinked")? != required_map(&result, "linked")?
+        || predecessor.value("targetBLinked")? != "true"
+    {
+        return Err("Boundary-15 canonical all-row bundle/full terminal join differs".to_owned());
+    }
+    Ok(())
+}
+
+fn boundary_fifteen_linked_before(
+    fixture: &str,
+    transaction: &ParsedTransaction,
+) -> Result<bool, String> {
+    let matches = fixture
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamvlinkblinkerflagtarget "))
+        .filter_map(|line| raw_fields(line).ok())
+        .filter(|(page, fields)| {
+            page == &transaction.key.page
+                && fields
+                    .get("system")
+                    .is_some_and(|value| value == &transaction.key.system.to_string())
+                && fields
+                    .get("plan")
+                    .is_some_and(|value| value == &transaction.key.plan.to_string())
+                && fields.get("scope").is_some_and(|value| value == "real")
+                && fields.get("case").is_some_and(|value| value == "-")
+        })
+        .collect::<Vec<_>>();
+    let [(_, fields)] = matches.as_slice() else {
+        return Err(format!(
+            "Boundary-15 fixture has {} target rows for {:?}",
+            matches.len(),
+            transaction.key
+        ));
+    };
+    match required_map(fields, "linkedBefore")? {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        value => Err(format!("invalid Boundary-15 linkedBefore {value}")),
+    }
+}
+
+fn validate_boundary_fifteen_predecessors(
+    page_row: &StrictRow,
+    transactions: &[ParsedTransaction],
+) -> Result<(), String> {
+    let (page_key, _) = corpus_page_for_token(&page_row.page)?;
+    let fixture_path = boundary_fifteen_fixture_path(page_key);
+    let fixture_sha256 = read_sha256(&fixture_path)?;
+    if read_sha256(BOUNDARY_FIFTEEN_MANIFEST_PATH)? != BOUNDARY_FIFTEEN_MANIFEST_SHA256
+        || read_sha256(BOUNDARY_FIFTEEN_GATE_PATH)? != BOUNDARY_FIFTEEN_GATE_SHA256
+        || page_row.value("bLinkerFlagFixtureSha256")? != fixture_sha256
+    {
+        return Err("Boundary-15 manifest/gate/fixture source pin differs".to_owned());
+    }
+    validate_manifest_fixture_entry(page_key, &fixture_sha256)?;
+    let fixture = std::fs::read_to_string(repo_root().join(&fixture_path))
+        .map_err(|error| format!("cannot read Boundary-15 {page_key} fixture: {error}"))?;
+    let b15_page = fixture
+        .lines()
+        .find(|line| line.starts_with("stemsbeamvlinkblinkerflagpage "))
+        .ok_or_else(|| "Boundary-15 fixture lacks page row".to_owned())?;
+    let (b15_page_name, b15_page_fields) = raw_fields(b15_page)?;
+    if b15_page_name != page_row.page {
+        return Err("Boundary-15/B16 page identity differs".to_owned());
+    }
+    for field in [
+        "schedulerFixtureSha256",
+        "expandFixtureSha256",
+        "createStemFixtureSha256",
+        "reuseCheckFixtureSha256",
+        "baseApplyFixtureSha256",
+    ] {
+        if page_row.value(field)? != required_map(&b15_page_fields, field)? {
+            return Err(format!("Boundary-15/B16 {field} predecessor pin differs"));
+        }
+    }
+    for transaction in transactions {
+        validate_boundary_fifteen_bundle(transaction, &fixture)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct BeamId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct StemId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct LinkerCellId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct LinkerId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum Vertex {
+    Beam(BeamId),
+    Stem(StemId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Line {
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BeamRuntimeClass {
+    Beam,
+    Hook,
+    SmallBeam,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BeamPortion {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RelationPayload {
+    BeamStem {
+        portion: BeamPortion,
+        grade_bits: u64,
+    },
+    BeamRest {
+        portion: BeamPortion,
+    },
+    ChordStem,
+    Other,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GraphEdge {
+    relation_identity: usize,
+    source: Vertex,
+    target: Vertex,
+    payload: RelationPayload,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct BeamState {
+    runtime_class: BeamRuntimeClass,
+    /// Java object identity. `None == None` deliberately models two null
+    /// glyphs satisfying `b.getGlyph() == beam.getGlyph()`.
+    glyph_identity: Option<usize>,
+    median: Line,
+    height: f64,
+    abnormal: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BuilderItem {
+    NonLinker,
+    Linker {
+        source: BeamId,
+        linker: LinkerId,
+        linked_cell: LinkerCellId,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AddEdgeBehavior {
+    Added,
+    ReturnedFalse,
+    ThrowBeforeInsertion,
+    ThrowDuringCallback,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct IndependentState {
+    vertices: BTreeSet<Vertex>,
+    /// JGraphT global insertion order. Incident and directed-pair scans are
+    /// stable filters over this order in the independent model.
+    edges: Vec<GraphEdge>,
+    beams: BTreeMap<BeamId, BeamState>,
+    builder_items: Vec<BuilderItem>,
+    linked_cells: BTreeMap<LinkerCellId, bool>,
+    /// Exact sibling B-linker first, then its V children in TOP/BOTTOM order.
+    /// The selected ordinary `LinkerItem` owns this shared cell directly.
+    linked_cell_observers: BTreeMap<LinkerCellId, Vec<LinkerId>>,
+    stub_modified: bool,
+    book_modified: bool,
+    book_dirty: bool,
+    next_relation_identity: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct IndependentInput {
+    base_beam: BeamId,
+    stem: StemId,
+    ref_point: Point,
+    skewed_vertical: Line,
+    stem_median: Line,
+    group_members: Vec<BeamId>,
+    max_beam_side_dx: f64,
+    max_shorter_ratio: f64,
+    portion_max_dx: i32,
+    y_dir: i32,
+    continuation_support_grade_bits: u64,
+    add_edge_behavior: BTreeMap<BeamId, AddEdgeBehavior>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SiblingBranch {
+    SameGlyph,
+    ExistingBeamStem,
+    ShorterWrongSide,
+    Linked,
+}
+
+const fn native_branch(branch: SiblingBranch) -> NativeStemsBeamSiblingBranch {
+    match branch {
+        SiblingBranch::SameGlyph => NativeStemsBeamSiblingBranch::SameGlyph,
+        SiblingBranch::ExistingBeamStem => NativeStemsBeamSiblingBranch::ExistingBeamStem,
+        SiblingBranch::ShorterWrongSide => NativeStemsBeamSiblingBranch::ShorterWrongSide,
+        SiblingBranch::Linked => NativeStemsBeamSiblingBranch::Linked,
+    }
+}
+
+fn assert_public_baseline_projection(transaction: &NativeStemsBeamVLinkSiblingLinksTransaction) {
+    let _ = (
+        &transaction.cached_base_median,
+        transaction.cached_base_median_same_identity,
+        &transaction.group_runtime,
+        transaction.base_cross,
+        transaction.base_length,
+    );
+    for sibling in &transaction.siblings {
+        let _ = (
+            &sibling.builder_lookup,
+            sibling.closed_before,
+            sibling.closed_after,
+        );
+    }
+    for operation in &transaction.operations {
+        if let NativeStemsBeamVLinkSiblingLinksOperation::BLinkerLinkedAssigned {
+            ordered_observer_v_linkers,
+            closed_before,
+            closed_after,
+            ..
+        } = operation
+        {
+            let _ = (ordered_observer_v_linkers, closed_before, closed_after);
+        }
+    }
+}
+
+fn assert_public_state_projection(
+    state: &NativeStemsBeamVLinkSiblingLinksState,
+    live: &NativeStemsBeamSiblingLiveBeam,
+) {
+    let _ = (
+        &state.b_linker_flag_state_after,
+        live.inter_index_ordinal,
+        live.inter_index_object_matches,
+        live.inter_index_id_matches,
+    );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ThrowStage {
+    AddEdgeBeforeInsertion,
+    RelationCallbackAfterInsertion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Terminal {
+    ReadyBeforeHeadRelationLoop,
+    Threw(ThrowStage),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct DiscoveryTrace {
+    group_ordinal: usize,
+    beam: BeamId,
+    cross: Point,
+    within_margin: bool,
+    sorted_ordinal: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PairRelationTrace {
+    pair_ordinal: usize,
+    relation_identity: usize,
+    payload: RelationPayload,
+    class_read: bool,
+    matched_beam_stem: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct GeometryTrace {
+    base_cross: Point,
+    sibling_cross: Point,
+    base_length: f64,
+    sibling_length: f64,
+    ratio: f64,
+    shorter_branch_read: bool,
+    dy: Option<f64>,
+    dy_times_y_dir: Option<f64>,
+    extension: Option<Point>,
+    left_threshold: Option<f64>,
+    right_threshold: Option<f64>,
+    portion: Option<BeamPortion>,
+    grade_bits: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct CallbackTrace {
+    stem_incident_relation_identities: Vec<usize>,
+    beam_incident_relation_identities: Vec<usize>,
+    extension_was_populated: bool,
+    portion_was_populated: bool,
+    chord_stem_matches: usize,
+    abnormal_before: bool,
+    abnormal_after: bool,
+    stub_modified_before: bool,
+    stub_modified_after: bool,
+    book_modified_before: bool,
+    book_modified_after: bool,
+    book_dirty_before: bool,
+    book_dirty_after: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LinkerLookupTrace {
+    examined_item_ordinals: Vec<usize>,
+    matched_item_ordinal: Option<usize>,
+    unread_suffix: usize,
+    selected_linker: Option<LinkerId>,
+    linked_cell: Option<LinkerCellId>,
+    linked_before: Option<bool>,
+    linked_after: Option<bool>,
+    write_count: usize,
+    value_change_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SiblingTrace {
+    sibling_ordinal: usize,
+    beam: BeamId,
+    pair_relations: Vec<PairRelationTrace>,
+    geometry: Option<GeometryTrace>,
+    callback: Option<CallbackTrace>,
+    linker_lookup: Option<LinkerLookupTrace>,
+    branch: SiblingBranch,
+    first_event_ordinal: usize,
+    event_count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SerialEvent {
+    EdgeInserted {
+        sibling_ordinal: usize,
+        relation_identity: usize,
+    },
+    CallbackCompleted {
+        sibling_ordinal: usize,
+        relation_identity: usize,
+    },
+    LinkerFlagAssigned {
+        sibling_ordinal: usize,
+        selected_linker: LinkerId,
+        cell: LinkerCellId,
+        ordered_observers: Vec<LinkerId>,
+        before: bool,
+        after: bool,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct IndependentTransaction {
+    ref_point: Point,
+    discoveries: Vec<DiscoveryTrace>,
+    sorted_siblings_before_base_removal: Vec<BeamId>,
+    base_removal_index: Option<usize>,
+    sibling_traces: Vec<SiblingTrace>,
+    events: Vec<SerialEvent>,
+    terminal: Terminal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IndependentError {
+    InvalidDirection,
+    MissingBaseBeam,
+    MissingStem,
+    MissingGroupBeam,
+    InvalidRelationAllocator,
+    ChordBearingStem,
+    MissingLinkerCell,
+}
+
+fn java_double_bits(value: f64) -> u64 {
+    if value.is_nan() {
+        0x7ff8_0000_0000_0000
+    } else {
+        value.to_bits()
+    }
+}
+
+fn java_double_compare(left: f64, right: f64) -> Ordering {
+    if left < right {
+        Ordering::Less
+    } else if left > right {
+        Ordering::Greater
+    } else {
+        (java_double_bits(left) as i64).cmp(&(java_double_bits(right) as i64))
+    }
+}
+
+fn intersection(a: Line, b: Line) -> Point {
+    // Preserve the operation order in Java LineUtil.intersection. Keeping the
+    // intermediates named also makes exact-bit divergences diagnosable.
+    let denominator = ((a.x1 - a.x2) * (b.y1 - b.y2)) - ((a.y1 - a.y2) * (b.x1 - b.x2));
+    let v12 = (a.x1 * a.y2) - (a.y1 * a.x2);
+    let v34 = (b.x1 * b.y2) - (b.y1 * b.x2);
+    let x = ((v12 * (b.x1 - b.x2)) - ((a.x1 - a.x2) * v34)) / denominator;
+    let y = ((v12 * (b.y1 - b.y2)) - ((a.y1 - a.y2) * v34)) / denominator;
+    Point { x, y }
+}
+
+fn beam_portion(median: Line, x: f64, max_dx: i32) -> BeamPortion {
+    let max_dx = f64::from(max_dx);
+    if x < median.x1 + max_dx {
+        BeamPortion::Left
+    } else if x > median.x2 - max_dx {
+        BeamPortion::Right
+    } else {
+        BeamPortion::Center
+    }
+}
+
+fn preflight(input: &IndependentInput, state: &IndependentState) -> Result<(), IndependentError> {
+    if !matches!(input.y_dir, -1 | 1) {
+        return Err(IndependentError::InvalidDirection);
+    }
+    if !state.beams.contains_key(&input.base_beam) {
+        return Err(IndependentError::MissingBaseBeam);
+    }
+    if !state.vertices.contains(&Vertex::Stem(input.stem)) {
+        return Err(IndependentError::MissingStem);
+    }
+    if input
+        .group_members
+        .iter()
+        .any(|beam| !state.beams.contains_key(beam))
+    {
+        return Err(IndependentError::MissingGroupBeam);
+    }
+    if state.next_relation_identity == 0
+        || state
+            .edges
+            .iter()
+            .any(|edge| edge.relation_identity >= state.next_relation_identity)
+    {
+        return Err(IndependentError::InvalidRelationAllocator);
+    }
+    for item in &state.builder_items {
+        let BuilderItem::Linker {
+            linker,
+            linked_cell,
+            ..
+        } = item
+        else {
+            continue;
+        };
+        let Some(observers) = state.linked_cell_observers.get(linked_cell) else {
+            return Err(IndependentError::MissingLinkerCell);
+        };
+        if !state.linked_cells.contains_key(linked_cell)
+            || observers.first() != Some(linker)
+            || observers.iter().collect::<BTreeSet<_>>().len() != observers.len()
+        {
+            return Err(IndependentError::MissingLinkerCell);
+        }
+    }
+    // Compact v1 intentionally excludes the substantial chord cache mutation
+    // branch. This checks live state, not a predecessor aggregate.
+    if state.edges.iter().any(|edge| {
+        edge.payload == RelationPayload::ChordStem
+            && (edge.source == Vertex::Stem(input.stem) || edge.target == Vertex::Stem(input.stem))
+    }) {
+        return Err(IndependentError::ChordBearingStem);
+    }
+    Ok(())
+}
+
+fn directed_pair_trace(
+    state: &IndependentState,
+    sibling: BeamId,
+    stem: StemId,
+) -> Vec<PairRelationTrace> {
+    let mut traces = Vec::new();
+    let mut class_read = true;
+    for edge in state
+        .edges
+        .iter()
+        .filter(|edge| edge.source == Vertex::Beam(sibling) && edge.target == Vertex::Stem(stem))
+    {
+        let matched_beam_stem =
+            class_read && matches!(edge.payload, RelationPayload::BeamStem { .. });
+        traces.push(PairRelationTrace {
+            pair_ordinal: traces.len(),
+            relation_identity: edge.relation_identity,
+            payload: edge.payload,
+            class_read,
+            matched_beam_stem,
+        });
+        if matched_beam_stem {
+            class_read = false;
+        }
+    }
+    traces
+}
+
+fn complete_relation_callback(
+    sibling: BeamId,
+    stem: StemId,
+    state: &mut IndependentState,
+) -> CallbackTrace {
+    let beam_before = state.beams[&sibling].clone();
+    let stub_before = state.stub_modified;
+    let book_modified_before = state.book_modified;
+    let book_dirty_before = state.book_dirty;
+    let stem_incident = state
+        .edges
+        .iter()
+        .filter(|edge| edge.source == Vertex::Stem(stem) || edge.target == Vertex::Stem(stem))
+        .map(|edge| edge.relation_identity)
+        .collect::<Vec<_>>();
+    let chord_stem_matches = state
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.payload == RelationPayload::ChordStem
+                && (edge.source == Vertex::Stem(stem) || edge.target == Vertex::Stem(stem))
+        })
+        .count();
+    let beam_incident_edges = state
+        .edges
+        .iter()
+        .filter(|edge| edge.source == Vertex::Beam(sibling) || edge.target == Vertex::Beam(sibling))
+        .collect::<Vec<_>>();
+    let beam_incident = beam_incident_edges
+        .iter()
+        .map(|edge| edge.relation_identity)
+        .collect::<Vec<_>>();
+    let abnormal_after = match beam_before.runtime_class {
+        BeamRuntimeClass::Hook => !beam_incident_edges
+            .iter()
+            .any(|edge| matches!(edge.payload, RelationPayload::BeamStem { .. })),
+        BeamRuntimeClass::Beam | BeamRuntimeClass::SmallBeam => {
+            let mut left = false;
+            let mut right = false;
+            for edge in &beam_incident_edges {
+                let portion = match edge.payload {
+                    RelationPayload::BeamStem { portion, .. }
+                    | RelationPayload::BeamRest { portion } => portion,
+                    RelationPayload::ChordStem | RelationPayload::Other => continue,
+                };
+                left |= portion == BeamPortion::Left;
+                right |= portion == BeamPortion::Right;
+            }
+            !left || !right
+        }
+    };
+    if abnormal_after != beam_before.abnormal {
+        state
+            .beams
+            .get_mut(&sibling)
+            .expect("validated beam")
+            .abnormal = abnormal_after;
+        state.stub_modified = true;
+        state.book_modified = true;
+        state.book_dirty = true;
+    }
+    CallbackTrace {
+        stem_incident_relation_identities: stem_incident,
+        beam_incident_relation_identities: beam_incident,
+        extension_was_populated: true,
+        portion_was_populated: true,
+        chord_stem_matches,
+        abnormal_before: beam_before.abnormal,
+        abnormal_after,
+        stub_modified_before: stub_before,
+        stub_modified_after: state.stub_modified,
+        book_modified_before,
+        book_modified_after: state.book_modified,
+        book_dirty_before,
+        book_dirty_after: state.book_dirty,
+    }
+}
+
+fn lookup_and_assign_linker(
+    sibling: BeamId,
+    state: &mut IndependentState,
+) -> Result<LinkerLookupTrace, IndependentError> {
+    let mut examined = Vec::new();
+    let mut matched = None;
+    for (ordinal, item) in state.builder_items.iter().enumerate() {
+        examined.push(ordinal);
+        if matches!(item, BuilderItem::Linker { source, .. } if *source == sibling) {
+            matched = Some((ordinal, *item));
+            break;
+        }
+    }
+    let Some((
+        ordinal,
+        BuilderItem::Linker {
+            linker,
+            linked_cell,
+            ..
+        },
+    )) = matched
+    else {
+        return Ok(LinkerLookupTrace {
+            examined_item_ordinals: examined,
+            matched_item_ordinal: None,
+            unread_suffix: 0,
+            selected_linker: None,
+            linked_cell: None,
+            linked_before: None,
+            linked_after: None,
+            write_count: 0,
+            value_change_count: 0,
+        });
+    };
+    let Some(linked) = state.linked_cells.get_mut(&linked_cell) else {
+        return Err(IndependentError::MissingLinkerCell);
+    };
+    let before = *linked;
+    *linked = true;
+    Ok(LinkerLookupTrace {
+        examined_item_ordinals: examined,
+        matched_item_ordinal: Some(ordinal),
+        unread_suffix: state.builder_items.len() - ordinal - 1,
+        selected_linker: Some(linker),
+        linked_cell: Some(linked_cell),
+        linked_before: Some(before),
+        linked_after: Some(true),
+        write_count: 1,
+        value_change_count: usize::from(!before),
+    })
+}
+
+fn apply_independent(
+    input: &IndependentInput,
+    state: &mut IndependentState,
+) -> Result<IndependentTransaction, IndependentError> {
+    preflight(input, state)?;
+    let base = state.beams[&input.base_beam].clone();
+    let base_cross = intersection(input.stem_median, base.median);
+    let base_length = base.median.x2 - base.median.x1;
+    let mut discoveries = Vec::with_capacity(input.group_members.len());
+    let mut accepted = Vec::<(usize, BeamId, Point)>::new();
+    for (group_ordinal, beam_id) in input.group_members.iter().copied().enumerate() {
+        let beam = &state.beams[&beam_id];
+        let cross = intersection(input.skewed_vertical, beam.median);
+        let within = beam.median.x1 - input.max_beam_side_dx <= cross.x
+            && cross.x <= beam.median.x2 + input.max_beam_side_dx;
+        if within {
+            accepted.push((group_ordinal, beam_id, cross));
+        }
+        discoveries.push(DiscoveryTrace {
+            group_ordinal,
+            beam: beam_id,
+            cross,
+            within_margin: within,
+            sorted_ordinal: None,
+        });
+    }
+    accepted.sort_by(|left, right| java_double_compare(left.2.y, right.2.y));
+    for (sorted_ordinal, (group_ordinal, _, _)) in accepted.iter().enumerate() {
+        discoveries[*group_ordinal].sorted_ordinal = Some(sorted_ordinal);
+    }
+    let sorted_siblings_before_base_removal = accepted
+        .iter()
+        .map(|(_, beam, _)| *beam)
+        .collect::<Vec<_>>();
+    let base_removal_index = accepted
+        .iter()
+        .position(|(_, beam, _)| *beam == input.base_beam);
+    if let Some(index) = base_removal_index {
+        accepted.remove(index);
+    }
+
+    let mut sibling_traces = Vec::with_capacity(accepted.len());
+    let mut events = Vec::new();
+    let mut terminal = Terminal::ReadyBeforeHeadRelationLoop;
+    for (sibling_ordinal, (_, sibling, _)) in accepted.into_iter().enumerate() {
+        let first_event_ordinal = events.len();
+        let sibling_state = state.beams[&sibling].clone();
+        if sibling_state.glyph_identity == base.glyph_identity {
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations: Vec::new(),
+                geometry: None,
+                callback: None,
+                linker_lookup: None,
+                branch: SiblingBranch::SameGlyph,
+                first_event_ordinal,
+                event_count: 0,
+            });
+            continue;
+        }
+        let pair_relations = directed_pair_trace(state, sibling, input.stem);
+        if pair_relations
+            .iter()
+            .any(|relation| relation.matched_beam_stem)
+        {
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations,
+                geometry: None,
+                callback: None,
+                linker_lookup: None,
+                branch: SiblingBranch::ExistingBeamStem,
+                first_event_ordinal,
+                event_count: 0,
+            });
+            continue;
+        }
+
+        let sibling_cross = intersection(input.stem_median, sibling_state.median);
+        let sibling_length = sibling_state.median.x2 - sibling_state.median.x1;
+        let ratio = sibling_length / base_length;
+        let shorter_branch_read = ratio <= input.max_shorter_ratio;
+        let (dy, dy_times_y_dir) = if shorter_branch_read {
+            let dy = sibling_cross.y - base_cross.y;
+            (Some(dy), Some(dy * f64::from(input.y_dir)))
+        } else {
+            (None, None)
+        };
+        let mut geometry = GeometryTrace {
+            base_cross,
+            sibling_cross,
+            base_length,
+            sibling_length,
+            ratio,
+            shorter_branch_read,
+            dy,
+            dy_times_y_dir,
+            extension: None,
+            left_threshold: None,
+            right_threshold: None,
+            portion: None,
+            grade_bits: None,
+        };
+        if matches!(dy_times_y_dir, Some(product) if product < 0.0) {
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations,
+                geometry: Some(geometry),
+                callback: None,
+                linker_lookup: None,
+                branch: SiblingBranch::ShorterWrongSide,
+                first_event_ordinal,
+                event_count: 0,
+            });
+            continue;
+        }
+
+        let extension = Point {
+            x: sibling_cross.x,
+            y: sibling_cross.y - f64::from(input.y_dir) * (sibling_state.height / 2.0),
+        };
+        let portion = beam_portion(sibling_state.median, sibling_cross.x, input.portion_max_dx);
+        geometry.extension = Some(extension);
+        geometry.left_threshold = Some(sibling_state.median.x1 + f64::from(input.portion_max_dx));
+        geometry.right_threshold = Some(sibling_state.median.x2 - f64::from(input.portion_max_dx));
+        geometry.portion = Some(portion);
+        geometry.grade_bits = Some(input.continuation_support_grade_bits);
+
+        let relation_identity = state.next_relation_identity;
+        state.next_relation_identity += 1;
+        let behavior = input
+            .add_edge_behavior
+            .get(&sibling)
+            .copied()
+            .unwrap_or(AddEdgeBehavior::Added);
+        if behavior == AddEdgeBehavior::ThrowBeforeInsertion {
+            terminal = Terminal::Threw(ThrowStage::AddEdgeBeforeInsertion);
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations,
+                geometry: Some(geometry),
+                callback: None,
+                linker_lookup: None,
+                branch: SiblingBranch::Linked,
+                first_event_ordinal,
+                event_count: 0,
+            });
+            break;
+        }
+        if behavior == AddEdgeBehavior::ReturnedFalse {
+            let linker_lookup = lookup_and_assign_linker(sibling, state)?;
+            if let (Some(selected_linker), Some(cell), Some(before), Some(after)) = (
+                linker_lookup.selected_linker,
+                linker_lookup.linked_cell,
+                linker_lookup.linked_before,
+                linker_lookup.linked_after,
+            ) {
+                events.push(SerialEvent::LinkerFlagAssigned {
+                    sibling_ordinal,
+                    selected_linker,
+                    cell,
+                    ordered_observers: state.linked_cell_observers[&cell].clone(),
+                    before,
+                    after,
+                });
+            }
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations,
+                geometry: Some(geometry),
+                callback: None,
+                linker_lookup: Some(linker_lookup),
+                branch: SiblingBranch::Linked,
+                first_event_ordinal,
+                event_count: events.len() - first_event_ordinal,
+            });
+            continue;
+        }
+        state.edges.push(GraphEdge {
+            relation_identity,
+            source: Vertex::Beam(sibling),
+            target: Vertex::Stem(input.stem),
+            payload: RelationPayload::BeamStem {
+                portion,
+                grade_bits: input.continuation_support_grade_bits,
+            },
+        });
+        events.push(SerialEvent::EdgeInserted {
+            sibling_ordinal,
+            relation_identity,
+        });
+        if behavior == AddEdgeBehavior::ThrowDuringCallback {
+            terminal = Terminal::Threw(ThrowStage::RelationCallbackAfterInsertion);
+            sibling_traces.push(SiblingTrace {
+                sibling_ordinal,
+                beam: sibling,
+                pair_relations,
+                geometry: Some(geometry),
+                callback: None,
+                linker_lookup: None,
+                branch: SiblingBranch::Linked,
+                first_event_ordinal,
+                event_count: 1,
+            });
+            break;
+        }
+        let callback = complete_relation_callback(sibling, input.stem, state);
+        events.push(SerialEvent::CallbackCompleted {
+            sibling_ordinal,
+            relation_identity,
+        });
+        let linker_lookup = lookup_and_assign_linker(sibling, state)?;
+        if let (Some(selected_linker), Some(cell), Some(before), Some(after)) = (
+            linker_lookup.selected_linker,
+            linker_lookup.linked_cell,
+            linker_lookup.linked_before,
+            linker_lookup.linked_after,
+        ) {
+            events.push(SerialEvent::LinkerFlagAssigned {
+                sibling_ordinal,
+                selected_linker,
+                cell,
+                ordered_observers: state.linked_cell_observers[&cell].clone(),
+                before,
+                after,
+            });
+        }
+        sibling_traces.push(SiblingTrace {
+            sibling_ordinal,
+            beam: sibling,
+            pair_relations,
+            geometry: Some(geometry),
+            callback: Some(callback),
+            linker_lookup: Some(linker_lookup),
+            branch: SiblingBranch::Linked,
+            first_event_ordinal,
+            event_count: events.len() - first_event_ordinal,
+        });
+    }
+    Ok(IndependentTransaction {
+        ref_point: input.ref_point,
+        discoveries,
+        sorted_siblings_before_base_removal,
+        base_removal_index,
+        sibling_traces,
+        events,
+        terminal,
+    })
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+fn corpus_page_for_token(page: &str) -> Result<(&'static str, &'static str), String> {
+    CORPUS_PAGES
+        .iter()
+        .copied()
+        .find(|(_, image)| page == format!("{image}#1"))
+        .ok_or_else(|| format!("unknown Boundary-16 page token {page}"))
+}
+
+fn boundary_sixteen_fixture_path(key: &str) -> String {
+    format!("rust/oracle/stems-beam-vlink-sibling-links-{key}.txt")
+}
+
+fn boundary_fifteen_fixture_path(key: &str) -> String {
+    format!("rust/oracle/stems-beam-vlink-b-linker-flag-{key}.txt")
+}
+
+fn predecessor_fixture_path(family: &str, key: &str) -> String {
+    format!("rust/oracle/{family}-{key}.txt")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut padded = bytes.to_vec();
+    let bit_len = u64::try_from(bytes.len()).expect("fixture length fits u64") * 8;
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+    let mut state = [
+        0x6a09e667_u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    for chunk in padded.chunks_exact(64) {
+        let mut words = [0_u32; 64];
+        for (index, word) in words[..16].iter_mut().enumerate() {
+            let offset = index * 4;
+            *word = u32::from_be_bytes([
+                chunk[offset],
+                chunk[offset + 1],
+                chunk[offset + 2],
+                chunk[offset + 3],
+            ]);
+        }
+        for index in 16..64 {
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(words[index - 7])
+                .wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        for index in 0..64 {
+            let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ ((!e) & g);
+            let temporary1 = h
+                .wrapping_add(sigma1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(words[index]);
+            let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let temporary2 = sigma0.wrapping_add(majority);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temporary1);
+            d = c;
+            c = b;
+            b = a;
+            a = temporary1.wrapping_add(temporary2);
+        }
+        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *slot = slot.wrapping_add(value);
+        }
+    }
+    state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn read_sha256(relative: &str) -> Result<String, String> {
+    let path = repo_root().join(relative);
+    let bytes = std::fs::read(&path)
+        .map_err(|error| format!("cannot read provenance path {}: {error}", path.display()))?;
+    Ok(sha256_hex(&bytes))
+}
+
+fn validate_corpus_summary(rows: &[StrictRow], text: &str) -> Result<(), String> {
+    let page = rows
+        .first()
+        .filter(|row| row.kind == RowKind::Page)
+        .ok_or_else(|| "corpus validation lacks its page row".to_owned())?;
+    let page_summaries = rows
+        .iter()
+        .filter(|row| row.kind == RowKind::PageSummary)
+        .collect::<Vec<_>>();
+    let corpus_summaries = rows
+        .iter()
+        .filter(|row| row.kind == RowKind::CorpusSummary)
+        .collect::<Vec<_>>();
+    let [page_summary] = page_summaries.as_slice() else {
+        return Err("fixture does not contain exactly one page summary".to_owned());
+    };
+    let [corpus] = corpus_summaries.as_slice() else {
+        return Err("fixture does not contain exactly one corpus summary".to_owned());
+    };
+    let (page_key, image) = corpus_page_for_token(&page.page)?;
+    if rows.last() != Some(*corpus)
+        || corpus.value("schema")? != "stems-beam-vlink-sibling-links-v1"
+        || corpus.value("mode")? != page_key
+        || corpus.usize("pages")? != 1
+        || corpus.value("pageRefs")? != page.page
+        || page.page != format!("{image}#1")
+    {
+        return Err("corpus page/schema envelope differs".to_owned());
+    }
+
+    let expected_row_counts = core_row_counts(rows);
+    if corpus.value("rowCounts")? != expected_row_counts {
+        return Err("corpus ordered core-family row counts differ".to_owned());
+    }
+
+    if corpus.value("pageInputSha256")? != read_sha256(&format!("data/examples/{image}"))?
+        || corpus.value("probeSourceSha256")? != read_sha256(PROBE_SOURCE_PATH)?
+        || corpus.value("runnerSourceSha256")? != read_sha256(RUNNER_SOURCE_PATH)?
+    {
+        return Err("corpus page/probe/runner source pin differs".to_owned());
+    }
+    for (field, path) in CORPUS_SOURCE_PINS {
+        if corpus.value(field)? != read_sha256(path)? {
+            return Err(format!("corpus active source pin differs for {field}"));
+        }
+    }
+    for (field, path) in CORPUS_GLOBAL_FIXTURE_PINS {
+        if corpus.value(field)? != read_sha256(path)? {
+            return Err(format!("corpus predecessor pin differs for {field}"));
+        }
+    }
+    for (field, family) in [
+        ("schedulerFixtureSha256", "stems-beam-scheduler"),
+        ("expandFixtureSha256", "stems-beam-expand"),
+        ("createStemFixtureSha256", "stems-beam-create-stem"),
+        ("reuseCheckFixtureSha256", "stems-beam-vlink-reuse-check"),
+        ("baseApplyFixtureSha256", "stems-beam-vlink-base-apply"),
+    ] {
+        let path = predecessor_fixture_path(family, page_key);
+        if corpus.value(field)? != read_sha256(&path)? {
+            return Err(format!("corpus predecessor pin differs for {field}"));
+        }
+    }
+    let b15_path = boundary_fifteen_fixture_path(page_key);
+    if corpus.value("bLinkerFlagFixtureSha256")? != read_sha256(&b15_path)? {
+        return Err("corpus Boundary-15 fixture pin differs".to_owned());
+    }
+    for field in [
+        "schedulerFixtureSha256",
+        "expandFixtureSha256",
+        "createStemFixtureSha256",
+        "reuseCheckFixtureSha256",
+        "baseApplyFixtureSha256",
+        "bLinkerFlagFixtureSha256",
+    ] {
+        if corpus.value(field)? != page.value(field)? {
+            return Err(format!("page/corpus predecessor join differs for {field}"));
+        }
+    }
+    for field in [
+        "effectiveClasspathSha256",
+        "jdkReleaseSha256",
+        "javaExecutableSha256",
+        "javaJpegLibrarySha256",
+        "javaModulesSha256",
+        "javaVmLibrarySha256",
+        "javaAwtLibrarySha256",
+        "javaAwtLwawtLibrarySha256",
+        "beamLinkerClassSha256",
+        "bLinkerClassSha256",
+        "vLinkerClassSha256",
+        "stemLinkerClassSha256",
+        "jgraphtCoreJarSha256",
+    ] {
+        if !is_lower_sha256(corpus.value(field)?) {
+            return Err(format!("corpus runtime {field} is not lowercase SHA-256"));
+        }
+    }
+    if corpus.value("javaArchitecture")? != "aarch64"
+        || corpus.value("javaRuntimeVersion")? != "25.0.3+9-LTS"
+        || corpus.value("javaVmVariant")? != "Hotspot"
+        || corpus.value("javaImageType")? != "JDK"
+        || corpus.value("jgraphtCoreVersion")? != "1.5.2"
+        || corpus.value("jgraphtCoreJarSha256")?
+            != "dfa596e9f0d0838f1b5e81dd0cd60e3a76c2c290ac25a0a029ffde58cf5e4c14"
+        || corpus.value("predecessorReplay")? != "FullBoundary15TypedReplayAndExactJavaRowJoin"
+        || corpus.value("querySerialization")? != "UTF8ColonTokensLF-LazyNotReadLiteral"
+    {
+        return Err("corpus runtime/predecessor constants differ".to_owned());
+    }
+
+    let page_summary_marker = format!("{} ", RowKind::PageSummary.label());
+    let body_end = text
+        .match_indices(&page_summary_marker)
+        .find_map(|(index, _)| {
+            (index == 0 || text.as_bytes().get(index.wrapping_sub(1)) == Some(&b'\n'))
+                .then_some(index)
+        })
+        .ok_or_else(|| "fixture lacks a line-aligned page summary".to_owned())?;
+    let emitted_body = &text.as_bytes()[..body_end];
+    let emitted_body_sha = sha256_hex(emitted_body);
+    let emitted_body_lines = emitted_body.iter().filter(|byte| **byte == b'\n').count();
+    if corpus.value("emittedBodySha256")? != emitted_body_sha
+        || corpus.value("rawPassSha256")? != emitted_body_sha
+        || corpus.usize("emittedBodyLines")? != emitted_body_lines
+        || corpus.usize("emittedBodyBytes")? != emitted_body.len()
+    {
+        return Err("corpus two-pass emitted-body evidence differs".to_owned());
+    }
+
+    let systems = page.usize("systems")?;
+    if corpus.usize("freshRunsPerPage")? != 2
+        || !corpus.bool("freshRunsByteIdentical")?
+        || !corpus.bool("freshJvmPerSystem")?
+        || corpus.usize("compilerJavaProcesses")? != 1
+        || corpus.usize("runtimeJavaProcessesPerPass")? != systems
+        || corpus.usize("runtimeJavaProcesses")? != 2 * systems
+        || corpus.usize("totalJavaProcesses")? != 2 * systems + 1
+        || corpus.usize("maximumConcurrentJavaProcesses")? != 1
+        || corpus.value("concurrencyScope")? != "Boundary16RunnerLockedInvocation"
+        || !corpus.bool("compilerJavaProcessReaped")?
+        || !corpus.bool("runtimeJavaProcessesReaped")?
+        || !corpus.bool("foregroundJavaProcessesOnly")?
+        || corpus.usize("backgroundJavaProcessesStarted")? != 0
+    {
+        return Err("corpus fresh-process/two-pass census differs".to_owned());
+    }
+
+    for field in [
+        "realTransactions",
+        "supportedSyntheticCases",
+        "envelopeCases",
+        "totalTransactions",
+        "siblingCandidates",
+        "sameGlyph",
+        "existingBeamStem",
+        "shorterWrongSide",
+        "linked",
+        "edgesAdded",
+        "linkerWrites",
+        "chordStemMatches",
+    ] {
+        if corpus.value(field)? != page_summary.value(field)? {
+            return Err(format!("page/corpus census join differs for {field}"));
+        }
+    }
+    if !corpus.bool("system1SyntheticBlock")?
+        || corpus.value("addEdgeReturnedFalseEvidence")? != "IndependentModelOnlyNoStockJavaFixture"
+        || corpus.value("envelopeEvidenceScope")? != "JavaOnlyNotProductionEquivalent"
+        || !corpus.bool("stopBeforeHeadRelationLoop")?
+    {
+        return Err("corpus synthetic/envelope/terminal evidence differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_real_public_transactions(
+    page: &StrictRow,
+    transactions: &[ParsedTransaction],
+) -> Result<(), String> {
+    let (page_key, image) = corpus_page_for_token(&page.page)?;
+    let b15_path = boundary_fifteen_fixture_path(page_key);
+    let base_apply_path = predecessor_fixture_path("stems-beam-vlink-base-apply", page_key);
+    let create_path = predecessor_fixture_path("stems-beam-create-stem", page_key);
+    let reuse_path = predecessor_fixture_path("stems-beam-vlink-reuse-check", page_key);
+    let b15_fixture = std::fs::read_to_string(repo_root().join(&b15_path))
+        .map_err(|error| format!("cannot read Boundary-15 {page_key} fixture: {error}"))?;
+    let base_apply_text = std::fs::read_to_string(repo_root().join(&base_apply_path))
+        .map_err(|error| format!("cannot read {page_key} base-apply fixture: {error}"))?;
+    let create_text = std::fs::read_to_string(repo_root().join(&create_path))
+        .map_err(|error| format!("cannot read {page_key} create-stem fixture: {error}"))?;
+    let reuse_text = std::fs::read_to_string(repo_root().join(&reuse_path))
+        .map_err(|error| format!("cannot read {page_key} reuse-check fixture: {error}"))?;
+    for transaction in transactions {
+        let linked_before = boundary_fifteen_linked_before(&b15_fixture, transaction)?;
+        let hydrated = b15_hydration::run_real(
+            image,
+            transaction.key.system,
+            &base_apply_text,
+            &create_text,
+            &reuse_text,
+            linked_before,
+        )?;
+        let mut state = project_real_state(page, transaction, &hydrated)?;
+        let state_before = state.clone();
+        let public = apply_native_stems_beam_vlink_sibling_links_transaction(
+            &hydrated.scheduler,
+            &hydrated.plans,
+            &hydrated.stumps,
+            &hydrated.vlinkers,
+            &hydrated.reachability,
+            &hydrated.builder,
+            &hydrated.create_transaction,
+            &hydrated.reuse_live_state,
+            hydrated.relation_parameters,
+            &hydrated.reuse_check,
+            &hydrated.base_apply,
+            &hydrated.transaction,
+            &mut state,
+        )
+        .map_err(|error| {
+            format!(
+                "system {} production Boundary-16 apply failed: {error}",
+                transaction.key.system
+            )
+        })?;
+        assert_public_transaction_matches_rows(
+            transaction,
+            &hydrated,
+            &state_before,
+            &state,
+            &public,
+        )?;
+    }
+    Ok(())
+}
+
+fn exactly_one_row(rows: &[StrictRow], kind: RowKind) -> Result<&StrictRow, String> {
+    let matches = rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .collect::<Vec<_>>();
+    let [row] = matches.as_slice() else {
+        return Err(format!(
+            "fixture contains {} {kind:?} rows, expected one",
+            matches.len()
+        ));
+    };
+    Ok(row)
+}
+
+fn compare_manifest_and_strict_fields(
+    manifest: &ManifestRow,
+    strict: &StrictRow,
+    fields: &[&str],
+) -> Result<(), String> {
+    for field in fields {
+        if manifest.value(field)? != strict.value(field)? {
+            return Err(format!(
+                "manifest/fixture {} join differs for {field}",
+                manifest.value("page").unwrap_or("summary")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_boundary_sixteen_manifest(path: &std::path::Path) -> Result<(), String> {
+    let manifest_bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let manifest = std::str::from_utf8(&manifest_bytes)
+        .map_err(|error| format!("{} is not UTF-8: {error}", path.display()))?;
+    if !manifest_bytes.ends_with(b"\n") {
+        return Err("Boundary-16 manifest must end with one newline".to_owned());
+    }
+    let lines = manifest.lines().collect::<Vec<_>>();
+    if sha256_hex(&manifest_bytes) != MANIFEST_SHA256
+        || lines.len() != MANIFEST_LINES
+        || manifest_bytes.len() != MANIFEST_BYTES
+        || MANIFEST_ENTRY_FIELDS.len() != 54
+        || MANIFEST_SUMMARY_FIELDS.len() != 128
+        || lines.len() != CORPUS_PAGES.len() + 2
+        || lines.first().copied() != Some(MANIFEST_SCHEMA)
+    {
+        return Err("Boundary-16 manifest schema/line envelope differs".to_owned());
+    }
+    let entries = lines[1..=CORPUS_PAGES.len()]
+        .iter()
+        .map(|line| ManifestRow::parse(line, MANIFEST_ENTRY_LABEL, MANIFEST_ENTRY_FIELDS))
+        .collect::<Result<Vec<_>, _>>()?;
+    let summary = ManifestRow::parse(
+        lines
+            .last()
+            .ok_or_else(|| "Boundary-16 manifest lacks summary".to_owned())?,
+        MANIFEST_SUMMARY_LABEL,
+        MANIFEST_SUMMARY_FIELDS,
+    )?;
+
+    let expected_header = format!("{}\n", FIXTURE_HEADER.join("\n"));
+    let mut normalized_corpus = expected_header.as_bytes().to_vec();
+    let mut all_rows = Vec::new();
+    let mut split_fixture_lines = 0;
+    let mut split_fixture_bytes = 0;
+    let mut semantic_rows = 0;
+    let mut first_corpus = None;
+    let mut real_systems = 0;
+    let mut real_transactions = 0;
+    let mut group_rows_total = 0;
+    let mut group_glyph_rows_total = 0;
+    let mut null_group_glyphs_total = 0;
+    let mut real_sibling_candidates = 0;
+    let mut real_same_glyph = 0;
+    let mut real_existing_beam_stem = 0;
+    let mut real_shorter_wrong_side = 0;
+    let mut real_linked = 0;
+    let mut real_edges_added = 0;
+    let mut real_linker_writes = 0;
+    let mut real_events = 0;
+    let mut chord_stem_matches = 0;
+    let mut supported_synthetic_cases = 0;
+    let mut envelope_cases = 0;
+    let mut total_transactions = 0;
+    let mut same_glyph = 0;
+    let mut existing_beam_stem = 0;
+    let mut shorter_wrong_side = 0;
+    let mut linked = 0;
+    let mut edges_added = 0;
+    let mut linker_writes = 0;
+    let mut events = 0;
+    let mut compiler_java_processes = 0;
+    let mut runtime_java_processes = 0;
+    let mut total_java_processes = 0;
+    let mut maximum_concurrent_java_processes = 0;
+
+    for (ordinal, ((page_key, _), entry)) in CORPUS_PAGES.iter().zip(&entries).enumerate() {
+        let expected_fixture = format!("stems-beam-vlink-sibling-links-{page_key}.txt");
+        if entry.usize("ordinal")? != ordinal
+            || entry.value("page")? != *page_key
+            || entry.value("fixture")? != expected_fixture
+        {
+            return Err(format!("manifest entry {ordinal} identity/order differs"));
+        }
+        let fixture_path = repo_root().join("rust/oracle").join(&expected_fixture);
+        let fixture_bytes = std::fs::read(&fixture_path)
+            .map_err(|error| format!("cannot read {}: {error}", fixture_path.display()))?;
+        let fixture = std::str::from_utf8(&fixture_bytes)
+            .map_err(|error| format!("{} is not UTF-8: {error}", fixture_path.display()))?;
+        let rows = parse_scaffold_fixture(fixture)?;
+        let transactions = validate_core_rows(&rows)?;
+        validate_corpus_summary(&rows, fixture)?;
+        validate_boundary_fifteen_predecessors(&rows[0], &transactions)?;
+        let page = exactly_one_row(&rows, RowKind::Page)?;
+        let page_summary = exactly_one_row(&rows, RowKind::PageSummary)?;
+        let corpus = exactly_one_row(&rows, RowKind::CorpusSummary)?;
+        first_corpus.get_or_insert_with(|| corpus.clone());
+
+        if entry.value("rowCounts")? != core_row_counts(&rows)
+            || entry.usize("systems")? != page.usize("systems")?
+        {
+            return Err(format!("manifest {page_key} row/system census differs"));
+        }
+        compare_manifest_and_strict_fields(
+            entry,
+            page_summary,
+            &[
+                "realTransactions",
+                "supportedSyntheticCases",
+                "envelopeCases",
+                "totalTransactions",
+                "groupRows",
+                "siblingCandidates",
+                "sameGlyph",
+                "existingBeamStem",
+                "shorterWrongSide",
+                "linked",
+                "edgesAdded",
+                "linkerWrites",
+                "events",
+                "chordStemMatches",
+            ],
+        )?;
+        compare_manifest_and_strict_fields(
+            entry,
+            corpus,
+            &[
+                "pageInputSha256",
+                "schedulerFixtureSha256",
+                "expandFixtureSha256",
+                "createStemFixtureSha256",
+                "reuseCheckFixtureSha256",
+                "baseApplyFixtureSha256",
+                "baseApplyManifestSha256",
+                "bLinkerFlagFixtureSha256",
+                "bLinkerFlagManifestSha256",
+                "emittedBodySha256",
+                "emittedBodyLines",
+                "emittedBodyBytes",
+                "rawPassSha256",
+                "freshRunsPerPage",
+                "freshRunsByteIdentical",
+                "compilerJavaProcesses",
+                "runtimeJavaProcessesPerPass",
+                "runtimeJavaProcesses",
+                "totalJavaProcesses",
+                "maximumConcurrentJavaProcesses",
+                "concurrencyScope",
+                "freshJvmPerSystem",
+                "compilerJavaProcessReaped",
+                "runtimeJavaProcessesReaped",
+                "foregroundJavaProcessesOnly",
+                "backgroundJavaProcessesStarted",
+                "system1SyntheticBlock",
+                "addEdgeReturnedFalseEvidence",
+                "envelopeEvidenceScope",
+                "stopBeforeHeadRelationLoop",
+            ],
+        )?;
+
+        let group_rows = rows
+            .iter()
+            .filter(|row| row.kind == RowKind::GroupMember)
+            .collect::<Vec<_>>();
+        let group_glyph_rows = group_rows
+            .iter()
+            .filter(|row| {
+                row.value("containmentMatch") == Ok("true") && row.value("glyph") != Ok("-")
+            })
+            .count();
+        let null_group_glyphs = group_rows
+            .iter()
+            .filter(|row| row.value("glyph") == Ok("null"))
+            .count();
+        if entry.usize("groupRows")? != group_rows.len()
+            || entry.usize("groupGlyphRows")? != group_glyph_rows
+            || entry.usize("nullGroupGlyphs")? != null_group_glyphs
+        {
+            return Err(format!("manifest {page_key} group/glyph census differs"));
+        }
+
+        let fixture_lines = fixture_bytes.iter().filter(|byte| **byte == b'\n').count();
+        if entry.value("fixtureSha256")? != sha256_hex(&fixture_bytes)
+            || entry.usize("fixtureLines")? != fixture_lines
+            || entry.usize("fixtureBytes")? != fixture_bytes.len()
+        {
+            return Err(format!("manifest {page_key} fixture identity differs"));
+        }
+        if !fixture.starts_with(&expected_header) {
+            return Err(format!("manifest {page_key} shared header differs"));
+        }
+        for line in fixture.lines().skip(FIXTURE_HEADER.len()) {
+            if line.starts_with(RowKind::PageSummary.label())
+                || line.starts_with(RowKind::CorpusSummary.label())
+            {
+                continue;
+            }
+            normalized_corpus.extend_from_slice(line.as_bytes());
+            normalized_corpus.push(b'\n');
+            semantic_rows += 1;
+        }
+        split_fixture_lines += fixture_lines;
+        split_fixture_bytes += fixture_bytes.len();
+        all_rows.extend(rows.iter().cloned());
+
+        real_systems += entry.usize("systems")?;
+        real_transactions += entry.usize("realTransactions")?;
+        group_rows_total += group_rows.len();
+        group_glyph_rows_total += group_glyph_rows;
+        null_group_glyphs_total += null_group_glyphs;
+        supported_synthetic_cases += entry.usize("supportedSyntheticCases")?;
+        envelope_cases += entry.usize("envelopeCases")?;
+        total_transactions += entry.usize("totalTransactions")?;
+        same_glyph += entry.usize("sameGlyph")?;
+        existing_beam_stem += entry.usize("existingBeamStem")?;
+        shorter_wrong_side += entry.usize("shorterWrongSide")?;
+        linked += entry.usize("linked")?;
+        edges_added += entry.usize("edgesAdded")?;
+        linker_writes += entry.usize("linkerWrites")?;
+        events += entry.usize("events")?;
+        chord_stem_matches += entry.usize("chordStemMatches")?;
+        compiler_java_processes += entry.usize("compilerJavaProcesses")?;
+        runtime_java_processes += entry.usize("runtimeJavaProcesses")?;
+        total_java_processes += entry.usize("totalJavaProcesses")?;
+        maximum_concurrent_java_processes =
+            maximum_concurrent_java_processes.max(entry.usize("maximumConcurrentJavaProcesses")?);
+        for row in rows.iter().filter(|row| row.kind == RowKind::Summary) {
+            real_sibling_candidates += row.usize("siblings")?;
+            real_same_glyph += row.usize("sameGlyph")?;
+            real_existing_beam_stem += row.usize("existingBeamStem")?;
+            real_shorter_wrong_side += row.usize("shorterWrongSide")?;
+            real_linked += row.usize("linked")?;
+            real_edges_added += row.usize("edgesAdded")?;
+            real_linker_writes += row.usize("linkerWrites")?;
+            real_events += row.usize("events")?;
+        }
+    }
+
+    if summary.value("schema")? != "stems-beam-vlink-sibling-links-manifest-v1"
+        || summary.usize("entries")? != entries.len()
+    {
+        return Err("manifest summary schema/entry count differs".to_owned());
+    }
+    let first_corpus = first_corpus.ok_or_else(|| "manifest has no corpus rows".to_owned())?;
+    for field in MANIFEST_SUMMARY_FIELDS
+        .iter()
+        .skip(2)
+        .take_while(|field| **field != "sharedHeaderSha256")
+    {
+        let expected = first_corpus.value(field)?;
+        if summary.value(field)? != expected {
+            return Err(format!("manifest shared provenance differs for {field}"));
+        }
+        for (page_key, _) in CORPUS_PAGES {
+            let path = repo_root().join(boundary_sixteen_fixture_path(page_key));
+            let fixture = std::fs::read_to_string(&path)
+                .map_err(|error| format!("cannot reread {}: {error}", path.display()))?;
+            let rows = parse_scaffold_fixture(&fixture)?;
+            if exactly_one_row(&rows, RowKind::CorpusSummary)?.value(field)? != expected {
+                return Err(format!("manifest per-page provenance differs for {field}"));
+            }
+        }
+    }
+
+    if summary.value("sharedHeaderSha256")? != sha256_hex(expected_header.as_bytes())
+        || summary.usize("sharedHeaderLines")? != FIXTURE_HEADER.len()
+        || summary.usize("sharedHeaderBytes")? != expected_header.len()
+        || summary.value("corpusBodySha256")? != sha256_hex(&normalized_corpus)
+        || summary.usize("corpusBodyLines")?
+            != normalized_corpus
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count()
+        || summary.usize("corpusBodyBytes")? != normalized_corpus.len()
+        || summary.value("corpusRowCounts")? != core_row_counts(&all_rows)
+        || summary.value("corpusReconstruction")? != "SharedHeaderOnceThenPageSemanticRows"
+        || summary.usize("semanticRows")? != semantic_rows
+        || summary.usize("splitFixtureLines")? != split_fixture_lines
+        || summary.usize("splitFixtureBytes")? != split_fixture_bytes
+        || sha256_hex(&normalized_corpus) != NORMALIZED_CORPUS_SHA256
+        || normalized_corpus
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            != NORMALIZED_CORPUS_LINES
+        || normalized_corpus.len() != NORMALIZED_CORPUS_BYTES
+        || split_fixture_lines != SPLIT_FIXTURE_LINES
+        || split_fixture_bytes != SPLIT_FIXTURE_BYTES
+    {
+        return Err("manifest corpus reconstruction differs".to_owned());
+    }
+
+    for (field, actual) in [
+        ("realSystems", real_systems),
+        ("realTransactions", real_transactions),
+        ("groupRows", group_rows_total),
+        ("groupGlyphRows", group_glyph_rows_total),
+        ("nullGroupGlyphs", null_group_glyphs_total),
+        ("realSiblingCandidates", real_sibling_candidates),
+        ("realSameGlyph", real_same_glyph),
+        ("realExistingBeamStem", real_existing_beam_stem),
+        ("realShorterWrongSide", real_shorter_wrong_side),
+        ("realLinked", real_linked),
+        ("realEdgesAdded", real_edges_added),
+        ("realLinkerWrites", real_linker_writes),
+        ("realEvents", real_events),
+        ("chordStemMatches", chord_stem_matches),
+        ("syntheticBlocks", entries.len()),
+        ("supportedSyntheticCases", supported_synthetic_cases),
+        ("envelopeCases", envelope_cases),
+        ("isolatedCases", supported_synthetic_cases + envelope_cases),
+        ("totalTransactions", total_transactions),
+        ("sameGlyph", same_glyph),
+        ("existingBeamStem", existing_beam_stem),
+        ("shorterWrongSide", shorter_wrong_side),
+        ("linked", linked),
+        ("edgesAdded", edges_added),
+        ("linkerWrites", linker_writes),
+        ("events", events),
+        ("compilerJavaProcesses", compiler_java_processes),
+        ("runtimeJavaProcesses", runtime_java_processes),
+        ("totalJavaProcesses", total_java_processes),
+        (
+            "maximumConcurrentJavaProcesses",
+            maximum_concurrent_java_processes,
+        ),
+    ] {
+        if summary.usize(field)? != actual {
+            return Err(format!("manifest aggregate {field} differs"));
+        }
+    }
+    if summary.value("concurrencyScope")? != "Boundary16RunnerLockedInvocation"
+        || summary.usize("freshRunsPerPage")? != 2
+        || !summary.bool("freshRunsByteIdentical")?
+        || !summary.bool("freshJvmPerSystem")?
+        || !summary.bool("compilerJavaProcessesReaped")?
+        || !summary.bool("runtimeJavaProcessesReaped")?
+        || !summary.bool("foregroundJavaProcessesOnly")?
+        || summary.usize("backgroundJavaProcessesStarted")? != 0
+        || !summary.bool("system1SyntheticBlock")?
+        || summary.value("addEdgeReturnedFalseEvidence")?
+            != "IndependentModelOnlyNoStockJavaFixture"
+        || summary.value("supplementalEvidenceScope")?
+            != "IsolatedJavaGateOnlyNotProductionEquivalent"
+        || !summary.bool("stopBeforeHeadRelationLoop")?
+    {
+        return Err("manifest execution/supplemental constants differ".to_owned());
+    }
+
+    let summary_marker = format!("{MANIFEST_SUMMARY_LABEL} ");
+    let body_end = manifest
+        .match_indices(&summary_marker)
+        .find_map(|(index, _)| {
+            (index == 0 || manifest_bytes.get(index.wrapping_sub(1)) == Some(&b'\n'))
+                .then_some(index)
+        })
+        .ok_or_else(|| "manifest lacks a line-aligned summary".to_owned())?;
+    let body = &manifest_bytes[..body_end];
+    if summary.value("manifestBodySha256")? != sha256_hex(body)
+        || summary.usize("manifestBodyLines")? != body.iter().filter(|byte| **byte == b'\n').count()
+        || summary.usize("manifestBodyBytes")? != body.len()
+        || sha256_hex(body) != MANIFEST_BODY_SHA256
+        || body.iter().filter(|byte| **byte == b'\n').count() != MANIFEST_BODY_LINES
+        || body.len() != MANIFEST_BODY_BYTES
+    {
+        return Err("manifest self-pinned body differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_installed_boundary_sixteen_fixture(path: &std::path::Path) -> Result<(), String> {
+    let bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("{} is not UTF-8: {error}", path.display()))?;
+    let rows = parse_scaffold_fixture(text)?;
+    let transactions = validate_core_rows(&rows)?;
+    validate_corpus_summary(&rows, text)?;
+    validate_boundary_fifteen_predecessors(&rows[0], &transactions)?;
+    validate_real_public_transactions(&rows[0], &transactions)?;
+    Ok(())
+}
+
+#[test]
+fn installed_boundary_sixteen_prefix_is_strictly_replayed() {
+    if let Some(path) = std::env::var_os(FIXTURE_OVERRIDE_ENV).map(PathBuf::from) {
+        validate_installed_boundary_sixteen_fixture(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        return;
+    }
+    let mut installed = 0;
+    let mut saw_missing = false;
+    for (key, _) in CORPUS_PAGES {
+        let path = repo_root().join(boundary_sixteen_fixture_path(key));
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {
+                assert!(
+                    !saw_missing,
+                    "installed Boundary-16 corpus has a gap before {key}"
+                );
+                validate_installed_boundary_sixteen_fixture(&path)
+                    .unwrap_or_else(|error| panic!("{key} exact replay: {error}"));
+                installed += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => saw_missing = true,
+            Ok(_) => panic!("{} is not a file", path.display()),
+            Err(error) => panic!("cannot inspect {}: {error}", path.display()),
+        }
+    }
+    assert!(installed > 0, "Boundary-16 installed prefix is empty");
+}
+
+#[test]
+fn installed_boundary_sixteen_manifest_is_exactly_reconstructed_and_pinned() {
+    let path = std::env::var_os(MANIFEST_OVERRIDE_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join(MANIFEST_PATH));
+    validate_boundary_sixteen_manifest(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+}
+
+#[test]
+fn frozen_java_printf_field_arrays_match_the_strict_parser() {
+    let source = std::fs::read_to_string(repo_root().join(PROBE_SOURCE_PATH))
+        .expect("Boundary-16 Java probe source");
+    for kind in [
+        RowKind::Page,
+        RowKind::Predecessor,
+        RowKind::Baseline,
+        RowKind::GroupMember,
+        RowKind::Sibling,
+        RowKind::SourceOutgoing,
+        RowKind::PairRelation,
+        RowKind::Geometry,
+        RowKind::Edge,
+        RowKind::StemIncident,
+        RowKind::BeamIncident,
+        RowKind::Callback,
+        RowKind::LinkerLookup,
+        RowKind::LinkerFlag,
+        RowKind::SiblingResult,
+        RowKind::Result,
+        RowKind::DeltaGuard,
+        RowKind::Summary,
+        RowKind::SyntheticCase,
+        RowKind::SyntheticEvent,
+        RowKind::SyntheticGuard,
+    ] {
+        assert_eq!(
+            java_printf_fields(&source, kind).expect("Java printf field extraction"),
+            kind.expected_fields(),
+            "{kind:?} parser/source field order differs"
+        );
+    }
+    let runner = std::fs::read_to_string(repo_root().join(RUNNER_SOURCE_PATH))
+        .expect("Boundary-16 oracle runner source");
+    assert_eq!(
+        runner_corpus_printf_fields(&runner).expect("runner corpus printf field extraction"),
+        CORPUS_SUMMARY_FIELDS,
+        "CorpusSummary parser/runner field order differs"
+    );
+}
+
+#[test]
+fn boundary_fifteen_fixture_manifest_and_typed_gate_are_exactly_pinned() {
+    assert_eq!(
+        read_sha256(BOUNDARY_FIFTEEN_MANIFEST_PATH).expect("Boundary-15 manifest"),
+        BOUNDARY_FIFTEEN_MANIFEST_SHA256
+    );
+    assert_eq!(
+        read_sha256(BOUNDARY_FIFTEEN_FIXTURE_PATH).expect("Boundary-15 Chula fixture"),
+        BOUNDARY_FIFTEEN_FIXTURE_SHA256
+    );
+    assert_eq!(
+        read_sha256(BOUNDARY_FIFTEEN_GATE_PATH).expect("Boundary-15 typed replay gate"),
+        BOUNDARY_FIFTEEN_GATE_SHA256
+    );
+    validate_manifest_fixture_pin().expect("Boundary-15 manifest split pin");
+}
+
+fn horizontal(x1: f64, x2: f64, y: f64) -> Line {
+    Line {
+        x1,
+        y1: y,
+        x2,
+        y2: y,
+    }
+}
+
+fn serial_fixture() -> (IndependentInput, IndependentState) {
+    let base = BeamId(10);
+    let same_glyph = BeamId(11);
+    let existing = BeamId(12);
+    let shorter_wrong_side = BeamId(13);
+    let full_link = BeamId(14);
+    let hook_link = BeamId(15);
+    let stem = StemId(20);
+    let beams = BTreeMap::from([
+        (
+            base,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Beam,
+                glyph_identity: Some(100),
+                median: horizontal(0.0, 10.0, 10.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            same_glyph,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Beam,
+                glyph_identity: Some(100),
+                median: horizontal(0.0, 10.0, 0.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            existing,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Beam,
+                glyph_identity: Some(102),
+                median: horizontal(0.0, 10.0, 25.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            shorter_wrong_side,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Beam,
+                glyph_identity: Some(103),
+                median: horizontal(1.0, 9.0, 5.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            full_link,
+            BeamState {
+                runtime_class: BeamRuntimeClass::SmallBeam,
+                glyph_identity: Some(104),
+                median: horizontal(0.0, 10.0, 15.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            hook_link,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Hook,
+                glyph_identity: Some(105),
+                median: horizontal(0.0, 10.0, 20.0),
+                height: 2.0,
+                abnormal: true,
+            },
+        ),
+    ]);
+    let vertices = beams
+        .keys()
+        .copied()
+        .map(Vertex::Beam)
+        .chain([Vertex::Stem(stem)])
+        .collect();
+    let grade_bits = 0.75_f64.to_bits();
+    let state = IndependentState {
+        vertices,
+        edges: vec![
+            GraphEdge {
+                relation_identity: 1,
+                source: Vertex::Beam(existing),
+                target: Vertex::Stem(stem),
+                payload: RelationPayload::Other,
+            },
+            GraphEdge {
+                relation_identity: 2,
+                source: Vertex::Beam(existing),
+                target: Vertex::Stem(stem),
+                payload: RelationPayload::BeamStem {
+                    portion: BeamPortion::Left,
+                    grade_bits,
+                },
+            },
+            GraphEdge {
+                relation_identity: 3,
+                source: Vertex::Beam(existing),
+                target: Vertex::Stem(stem),
+                payload: RelationPayload::Other,
+            },
+            GraphEdge {
+                relation_identity: 4,
+                source: Vertex::Beam(full_link),
+                target: Vertex::Beam(base),
+                payload: RelationPayload::BeamRest {
+                    portion: BeamPortion::Left,
+                },
+            },
+        ],
+        beams,
+        builder_items: vec![
+            BuilderItem::NonLinker,
+            BuilderItem::Linker {
+                source: full_link,
+                linker: LinkerId(10),
+                linked_cell: LinkerCellId(1),
+            },
+            BuilderItem::Linker {
+                source: full_link,
+                linker: LinkerId(20),
+                linked_cell: LinkerCellId(2),
+            },
+            BuilderItem::Linker {
+                source: hook_link,
+                linker: LinkerId(30),
+                linked_cell: LinkerCellId(3),
+            },
+        ],
+        linked_cells: BTreeMap::from([
+            (LinkerCellId(1), false),
+            (LinkerCellId(2), false),
+            (LinkerCellId(3), true),
+        ]),
+        linked_cell_observers: BTreeMap::from([
+            (
+                LinkerCellId(1),
+                vec![LinkerId(10), LinkerId(11), LinkerId(13)],
+            ),
+            (LinkerCellId(2), vec![LinkerId(20), LinkerId(21)]),
+            (
+                LinkerCellId(3),
+                vec![LinkerId(30), LinkerId(31), LinkerId(32)],
+            ),
+        ]),
+        stub_modified: false,
+        book_modified: false,
+        book_dirty: false,
+        next_relation_identity: 5,
+    };
+    let input = IndependentInput {
+        base_beam: base,
+        stem,
+        ref_point: Point { x: 5.0, y: 10.0 },
+        skewed_vertical: Line {
+            x1: 5.0,
+            y1: -100.0,
+            x2: 5.0,
+            y2: 100.0,
+        },
+        stem_median: Line {
+            x1: 5.0,
+            y1: -100.0,
+            x2: 5.0,
+            y2: 100.0,
+        },
+        // Deliberately not top-to-bottom. Discovery must sort stably by
+        // intersection ordinate before removing only the first base identity.
+        group_members: vec![
+            existing,
+            hook_link,
+            base,
+            shorter_wrong_side,
+            same_glyph,
+            full_link,
+        ],
+        max_beam_side_dx: 2.0,
+        max_shorter_ratio: 0.8,
+        portion_max_dx: 2,
+        y_dir: 1,
+        continuation_support_grade_bits: grade_bits,
+        add_edge_behavior: BTreeMap::new(),
+    };
+    (input, state)
+}
+
+#[test]
+fn public_boundary_shape_pins_four_branches_and_head_loop_terminal() {
+    assert_eq!(
+        [
+            SiblingBranch::SameGlyph,
+            SiblingBranch::ExistingBeamStem,
+            SiblingBranch::ShorterWrongSide,
+            SiblingBranch::Linked,
+        ]
+        .map(native_branch),
+        [
+            NativeStemsBeamSiblingBranch::SameGlyph,
+            NativeStemsBeamSiblingBranch::ExistingBeamStem,
+            NativeStemsBeamSiblingBranch::ShorterWrongSide,
+            NativeStemsBeamSiblingBranch::Linked,
+        ]
+    );
+    let outcome = NativeStemsBeamVLinkSiblingLinksOutcome::ReadyBeforeHeadRelationLoop {
+        stem_identity: 17,
+        continuation_support_grade: 0.75,
+    };
+    let NativeStemsBeamVLinkSiblingLinksOutcome::ReadyBeforeHeadRelationLoop {
+        stem_identity,
+        continuation_support_grade,
+    } = outcome;
+    assert_eq!(stem_identity, 17);
+    assert_eq!(continuation_support_grade.to_bits(), 0.75_f64.to_bits());
+
+    let _entry_point = apply_native_stems_beam_vlink_sibling_links_transaction;
+    let _certificate_binding: Option<NativeStemsBeamVLinkSiblingLinksCertificate> = None;
+    let _state_binding: Option<NativeStemsBeamVLinkSiblingLinksState> = None;
+    let _transaction_binding: Option<NativeStemsBeamVLinkSiblingLinksTransaction> = None;
+    let _baseline_projection: fn(&NativeStemsBeamVLinkSiblingLinksTransaction) =
+        assert_public_baseline_projection;
+    let _state_projection: fn(
+        &NativeStemsBeamVLinkSiblingLinksState,
+        &NativeStemsBeamSiblingLiveBeam,
+    ) = assert_public_state_projection;
+}
+
+#[test]
+fn supplemental_case_matrix_is_eight_supported_then_two_envelopes() {
+    assert_eq!(
+        SUPPLEMENTAL_CASES
+            .iter()
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>(),
+        [
+            "SameGlyph",
+            "ExistingBeamStem",
+            "ShorterWrongSide",
+            "LinkedBeam",
+            "LinkedSmallBeam",
+            "LinkedHook",
+            "LinkedNoBLinker",
+            "LinkedIdempotentBCell",
+            "ThrowBeforeInsertion",
+            "ThrowDuringCallback",
+        ]
+    );
+    assert_eq!(
+        SUPPLEMENTAL_CASES
+            .iter()
+            .filter(|spec| spec.scope == "synthetic")
+            .count(),
+        8
+    );
+    assert_eq!(
+        SUPPLEMENTAL_CASES
+            .iter()
+            .filter(|spec| spec.scope == "envelope")
+            .count(),
+        2
+    );
+    assert_eq!(
+        SUPPLEMENTAL_CASES
+            .iter()
+            .filter(|spec| spec.sibling_class.ends_with("SmallBeamInter"))
+            .map(|spec| spec.name)
+            .collect::<Vec<_>>(),
+        ["LinkedSmallBeam"]
+    );
+}
+
+#[test]
+fn independent_model_preserves_branches_callback_and_flag_interleaving() {
+    let (input, mut state) = serial_fixture();
+    let transaction = apply_independent(&input, &mut state).expect("independent sibling loop");
+    assert_eq!(transaction.ref_point, input.ref_point);
+    assert_eq!(transaction.terminal, Terminal::ReadyBeforeHeadRelationLoop);
+    assert_eq!(
+        transaction.sorted_siblings_before_base_removal,
+        vec![
+            BeamId(11),
+            BeamId(13),
+            BeamId(10),
+            BeamId(14),
+            BeamId(15),
+            BeamId(12),
+        ]
+    );
+    assert_eq!(transaction.base_removal_index, Some(2));
+    assert_eq!(
+        transaction
+            .sibling_traces
+            .iter()
+            .map(|trace| trace.branch)
+            .collect::<Vec<_>>(),
+        vec![
+            SiblingBranch::SameGlyph,
+            SiblingBranch::ShorterWrongSide,
+            SiblingBranch::Linked,
+            SiblingBranch::Linked,
+            SiblingBranch::ExistingBeamStem,
+        ]
+    );
+    let shorter = &transaction.sibling_traces[1];
+    let shorter_geometry = shorter.geometry.as_ref().expect("shorter geometry");
+    assert_eq!(shorter_geometry.ratio.to_bits(), 0.8_f64.to_bits());
+    assert!(shorter_geometry.shorter_branch_read);
+    assert_eq!(shorter_geometry.dy, Some(-5.0));
+    assert_eq!(shorter_geometry.dy_times_y_dir, Some(-5.0));
+    assert_eq!(shorter_geometry.extension, None);
+    assert_eq!(shorter_geometry.portion, None);
+    assert_eq!(shorter_geometry.grade_bits, None);
+
+    let full = &transaction.sibling_traces[2];
+    assert_eq!(full.first_event_ordinal, 0);
+    assert_eq!(full.event_count, 3);
+    assert_eq!(
+        full.geometry.as_ref().and_then(|geometry| geometry.portion),
+        Some(BeamPortion::Center)
+    );
+    let full_callback = full.callback.as_ref().expect("full callback");
+    assert_eq!(full_callback.beam_incident_relation_identities, vec![4, 5]);
+    assert_eq!(
+        (full_callback.abnormal_before, full_callback.abnormal_after),
+        (true, true)
+    );
+    let full_lookup = full.linker_lookup.as_ref().expect("full lookup");
+    assert_eq!(full_lookup.examined_item_ordinals, vec![0, 1]);
+    assert_eq!(full_lookup.matched_item_ordinal, Some(1));
+    assert_eq!(full_lookup.unread_suffix, 2);
+    assert_eq!(
+        (full_lookup.write_count, full_lookup.value_change_count),
+        (1, 1)
+    );
+
+    let hook = &transaction.sibling_traces[3];
+    assert_eq!(hook.first_event_ordinal, 3);
+    assert_eq!(hook.event_count, 3);
+    let hook_callback = hook.callback.as_ref().expect("hook callback");
+    assert_eq!(
+        (hook_callback.abnormal_before, hook_callback.abnormal_after),
+        (true, false)
+    );
+    assert!(!hook_callback.stub_modified_before);
+    assert!(hook_callback.stub_modified_after);
+    assert!(hook_callback.book_modified_after);
+    assert!(hook_callback.book_dirty_after);
+    let hook_lookup = hook.linker_lookup.as_ref().expect("hook lookup");
+    assert_eq!(hook_lookup.examined_item_ordinals, vec![0, 1, 2, 3]);
+    assert_eq!(hook_lookup.matched_item_ordinal, Some(3));
+    assert_eq!(
+        (hook_lookup.write_count, hook_lookup.value_change_count),
+        (1, 0)
+    );
+
+    let existing = &transaction.sibling_traces[4];
+    assert_eq!(existing.pair_relations.len(), 3);
+    assert!(existing.pair_relations[0].class_read);
+    assert!(!existing.pair_relations[0].matched_beam_stem);
+    assert!(existing.pair_relations[1].class_read);
+    assert!(existing.pair_relations[1].matched_beam_stem);
+    assert!(!existing.pair_relations[2].class_read);
+    assert!(!existing.pair_relations[2].matched_beam_stem);
+    assert_eq!(
+        transaction.events,
+        vec![
+            SerialEvent::EdgeInserted {
+                sibling_ordinal: 2,
+                relation_identity: 5,
+            },
+            SerialEvent::CallbackCompleted {
+                sibling_ordinal: 2,
+                relation_identity: 5,
+            },
+            SerialEvent::LinkerFlagAssigned {
+                sibling_ordinal: 2,
+                selected_linker: LinkerId(10),
+                cell: LinkerCellId(1),
+                ordered_observers: vec![LinkerId(10), LinkerId(11), LinkerId(13)],
+                before: false,
+                after: true,
+            },
+            SerialEvent::EdgeInserted {
+                sibling_ordinal: 3,
+                relation_identity: 6,
+            },
+            SerialEvent::CallbackCompleted {
+                sibling_ordinal: 3,
+                relation_identity: 6,
+            },
+            SerialEvent::LinkerFlagAssigned {
+                sibling_ordinal: 3,
+                selected_linker: LinkerId(30),
+                cell: LinkerCellId(3),
+                ordered_observers: vec![LinkerId(30), LinkerId(31), LinkerId(32)],
+                before: true,
+                after: true,
+            },
+        ]
+    );
+    assert_eq!(state.edges.len(), 6);
+    assert!(state.linked_cells[&LinkerCellId(1)]);
+    assert!(!state.linked_cells[&LinkerCellId(2)]);
+    assert!(state.linked_cells[&LinkerCellId(3)]);
+}
+
+#[test]
+fn java_double_order_is_stable_and_canonicalizes_nan() {
+    assert_eq!(java_double_compare(-0.0, 0.0), Ordering::Less);
+    assert_eq!(java_double_compare(0.0, -0.0), Ordering::Greater);
+    assert_eq!(java_double_compare(f64::NEG_INFINITY, -0.0), Ordering::Less);
+    let negative_nan = f64::from_bits(0xfff0_0000_0000_0001);
+    let payload_nan = f64::from_bits(0x7ff0_0000_0000_0042);
+    assert_eq!(
+        java_double_compare(negative_nan, payload_nan),
+        Ordering::Equal
+    );
+    let mut stable = vec![(0, payload_nan), (1, negative_nan), (2, payload_nan)];
+    stable.sort_by(|left, right| java_double_compare(left.1, right.1));
+    assert_eq!(
+        stable.into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+}
+
+fn one_sibling_fixture() -> (IndependentInput, IndependentState) {
+    let base = BeamId(1);
+    let sibling = BeamId(2);
+    let stem = StemId(1);
+    let beams = BTreeMap::from([
+        (
+            base,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Beam,
+                glyph_identity: None,
+                median: horizontal(0.0, 10.0, 0.0),
+                height: 4.0,
+                abnormal: true,
+            },
+        ),
+        (
+            sibling,
+            BeamState {
+                runtime_class: BeamRuntimeClass::Hook,
+                glyph_identity: Some(2),
+                median: horizontal(0.0, 10.0, 10.0),
+                height: 2.0,
+                abnormal: true,
+            },
+        ),
+    ]);
+    let state = IndependentState {
+        vertices: BTreeSet::from([
+            Vertex::Beam(base),
+            Vertex::Beam(sibling),
+            Vertex::Stem(stem),
+        ]),
+        edges: Vec::new(),
+        beams,
+        builder_items: vec![BuilderItem::Linker {
+            source: sibling,
+            linker: LinkerId(1),
+            linked_cell: LinkerCellId(1),
+        }],
+        linked_cells: BTreeMap::from([(LinkerCellId(1), false)]),
+        linked_cell_observers: BTreeMap::from([(LinkerCellId(1), vec![LinkerId(1), LinkerId(2)])]),
+        stub_modified: false,
+        book_modified: false,
+        book_dirty: false,
+        next_relation_identity: 1,
+    };
+    let input = IndependentInput {
+        base_beam: base,
+        stem,
+        ref_point: Point { x: 5.0, y: 0.0 },
+        skewed_vertical: Line {
+            x1: 5.0,
+            y1: -100.0,
+            x2: 5.0,
+            y2: 100.0,
+        },
+        stem_median: Line {
+            x1: 5.0,
+            y1: -100.0,
+            x2: 5.0,
+            y2: 100.0,
+        },
+        group_members: vec![base, sibling],
+        max_beam_side_dx: 2.0,
+        max_shorter_ratio: 0.8,
+        portion_max_dx: 2,
+        y_dir: 1,
+        continuation_support_grade_bits: 1.0_f64.to_bits(),
+        add_edge_behavior: BTreeMap::new(),
+    };
+    (input, state)
+}
+
+#[test]
+fn add_edge_return_and_throw_prefixes_are_not_atomic() {
+    let (mut input, initial) = one_sibling_fixture();
+    input
+        .add_edge_behavior
+        .insert(BeamId(2), AddEdgeBehavior::ReturnedFalse);
+    let mut returned_false = initial.clone();
+    let transaction =
+        apply_independent(&input, &mut returned_false).expect("ignored false addEdge result");
+    assert_eq!(transaction.terminal, Terminal::ReadyBeforeHeadRelationLoop);
+    assert!(returned_false.edges.is_empty());
+    assert_eq!(
+        transaction.events,
+        vec![SerialEvent::LinkerFlagAssigned {
+            sibling_ordinal: 0,
+            selected_linker: LinkerId(1),
+            cell: LinkerCellId(1),
+            ordered_observers: vec![LinkerId(1), LinkerId(2)],
+            before: false,
+            after: true,
+        }]
+    );
+
+    input
+        .add_edge_behavior
+        .insert(BeamId(2), AddEdgeBehavior::ThrowBeforeInsertion);
+    let mut before_insert = initial.clone();
+    let transaction = apply_independent(&input, &mut before_insert).expect("throw envelope");
+    assert_eq!(
+        transaction.terminal,
+        Terminal::Threw(ThrowStage::AddEdgeBeforeInsertion)
+    );
+    assert!(transaction.events.is_empty());
+    assert!(before_insert.edges.is_empty());
+    assert!(!before_insert.linked_cells[&LinkerCellId(1)]);
+
+    input
+        .add_edge_behavior
+        .insert(BeamId(2), AddEdgeBehavior::ThrowDuringCallback);
+    let mut callback_throw = initial;
+    let transaction = apply_independent(&input, &mut callback_throw).expect("callback envelope");
+    assert_eq!(
+        transaction.terminal,
+        Terminal::Threw(ThrowStage::RelationCallbackAfterInsertion)
+    );
+    assert_eq!(callback_throw.edges.len(), 1);
+    assert_eq!(
+        transaction.events,
+        vec![SerialEvent::EdgeInserted {
+            sibling_ordinal: 0,
+            relation_identity: 1,
+        }]
+    );
+    assert!(!callback_throw.linked_cells[&LinkerCellId(1)]);
+}
+
+#[test]
+fn compact_model_fails_closed_on_live_chords_and_malformed_state() {
+    let (input, initial) = one_sibling_fixture();
+    let mut chord_state = initial.clone();
+    chord_state.edges.push(GraphEdge {
+        relation_identity: 1,
+        source: Vertex::Beam(BeamId(1)),
+        target: Vertex::Stem(StemId(1)),
+        payload: RelationPayload::ChordStem,
+    });
+    chord_state.next_relation_identity = 2;
+    let before = chord_state.clone();
+    assert_eq!(
+        apply_independent(&input, &mut chord_state),
+        Err(IndependentError::ChordBearingStem)
+    );
+    assert_eq!(chord_state, before);
+
+    let mut invalid_direction = input.clone();
+    invalid_direction.y_dir = 0;
+    let mut state = initial.clone();
+    assert_eq!(
+        apply_independent(&invalid_direction, &mut state),
+        Err(IndependentError::InvalidDirection)
+    );
+    assert_eq!(state, initial);
+
+    let mut missing_base = input.clone();
+    missing_base.base_beam = BeamId(99);
+    let mut state = initial.clone();
+    assert_eq!(
+        apply_independent(&missing_base, &mut state),
+        Err(IndependentError::MissingBaseBeam)
+    );
+
+    let mut missing_stem_state = initial.clone();
+    missing_stem_state
+        .vertices
+        .remove(&Vertex::Stem(input.stem));
+    let missing_stem_before = missing_stem_state.clone();
+    assert_eq!(
+        apply_independent(&input, &mut missing_stem_state),
+        Err(IndependentError::MissingStem)
+    );
+    assert_eq!(missing_stem_state, missing_stem_before);
+
+    let mut missing_group = input.clone();
+    missing_group.group_members.push(BeamId(99));
+    let mut state = initial.clone();
+    assert_eq!(
+        apply_independent(&missing_group, &mut state),
+        Err(IndependentError::MissingGroupBeam)
+    );
+
+    let mut invalid_allocator = initial.clone();
+    invalid_allocator.next_relation_identity = 0;
+    let invalid_allocator_before = invalid_allocator.clone();
+    assert_eq!(
+        apply_independent(&input, &mut invalid_allocator),
+        Err(IndependentError::InvalidRelationAllocator)
+    );
+    assert_eq!(invalid_allocator, invalid_allocator_before);
+
+    let mut missing_cell = initial.clone();
+    missing_cell.linked_cells.clear();
+    let missing_cell_before = missing_cell.clone();
+    assert_eq!(
+        apply_independent(&input, &mut missing_cell),
+        Err(IndependentError::MissingLinkerCell)
+    );
+    assert_eq!(missing_cell, missing_cell_before);
+}
