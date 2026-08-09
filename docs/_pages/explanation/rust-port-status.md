@@ -61,9 +61,13 @@ stem-reuse loop, and reproduces public `BeamStemRelation.checkLink` through the
 exact relation draft or rejection. All 65 real relation entries are unlinked,
 so the 30-system corpus performs zero reuse; eight isolated synthetic SIG blocks
 provide the exact zero/unique/multiple reuse and numerical edge coverage. It
-stops before conditional SIG vertex insertion, base BeamStem link application,
-linker flags, sibling beams, or relation-loop/head links. The human-readable
-text report remains at `GRID`. HEADERS is an
+stops before SIG mutation. The fourteenth conditionally runs `SIG.addVertex` for
+an ID-zero selected stem, then applies the already-checked base BeamStem link
+through `Link.applyTo` and its synchronous callbacks. All 30 real first
+transactions insert a new stem and add the edge; isolated sheets cover the
+existing/suppressed and partial-failure prefixes. It stops before
+`getBLinker().setLinked(true)`, sibling beams, or relation-loop/head links. The
+human-readable text report remains at `GRID`. HEADERS is an
 oracle-free production call from live GRID state: all 65 staff headers, 34 keys,
 17 times, and 30 erase rectangles match Java. The CLI now composes GRID ->
 HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in Java order into the exact
@@ -186,7 +190,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first thirteen semantic `STEMS` boundaries are production-shaped and graded.
+The first fourteen semantic `STEMS` boundaries are production-shaped and graded.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -518,14 +522,70 @@ the manifest body is 9 lines / 9,202 bytes. The manifest pins Java
 Two byte-identical runs per page used 8 compiler plus 60 runtime foreground and
 reaped JVMs, maximum Java concurrency 1, and no background Java process. Eight
 focused production tests and all 8 exact integration tests pass; the independent
-root gate finishes in 32.66 seconds. The full library suite is
-603 passed / 0 failed / 2 ignored in 12.58 seconds, with strict library/gate Clippy and global
-formatting green.
+root gate finishes in 32.66 seconds, with strict boundary-13 library/gate Clippy
+and global formatting green.
 
-The next seam is limited to conditional insertion of the selected stem as a SIG
-vertex and application of the already-checked base BeamStem relation. Sibling
-beams and relation-loop/head links remain separate stateful continuations, as do
-later scheduler attempts, stump linking, and competing-hook removal.
+`apply_native_stems_beam_vlink_base_transaction` closes the fourteenth exact
+production boundary at Java's first stateful continuation. Starting from
+boundary 13's `ReadyBeforeSigMutation`, an ID-zero selected stem takes the
+conditional `SIG.addVertex(stem)` prefix through shared InterIndex allocation,
+VIP lookup, source-ordered vertex insertion, `setSig`, the sole `SigListener`,
+`StemInter.added`, abnormal-state change, and SheetStub/Book modified and dirty
+propagation. An already attached positive-ID stem skips that prefix.
+
+It then applies the fresh checked `BeamStemRelation` to the beam with
+`Link.applyTo`. Source/target-removed suppression, the ordered outgoing duplicate
+scan, separate draft-object and graph-edge identities, exact endpoint/incidence
+mirror joins, raw nullable BeamStem/BeamRest portions, JGraphT insertion order,
+and synchronous callbacks remain exact. `BeamStemRelation.added` scans the
+post-edge stem incidence and certifies zero `ChordStemRelation` matches in
+compact v1, then invokes the beam's virtual abnormal check. Full beams inspect
+ordered BeamStem/BeamRest portions; hooks use their class-only any-BeamStem rule
+without reading a portion. The ignored Java apply result, actual abnormal/dirty
+side effects, and no-rollback exception prefixes are explicit.
+
+All 30 real first-frontier transactions across eight pages are `NewIdZero`:
+all 30 conditionally insert a stem, all 30 base BeamStem edges are added, reuse
+is zero, and ChordStem matches are zero. Each page also contributes five
+supported cases and four envelope-only cases on a truly isolated Sheet/System/SIG,
+for 40 supported branch cases and 32 partial-failure prefixes. Those 72 cases
+are isolated evidence, not naturally occurring corpus behavior or a blanket
+production-equivalence claim.
+
+The normalized corpus is 1,314 lines / 1,185,901 bytes—one shared eight-line
+header plus 1,306 semantic rows—with SHA-256
+`ece76c038ef1b2017d2f356dd6ead59379376ffc5ab0306e8c5e8c34a9471e53`;
+the eight split fixtures total 1,386 lines / 1,227,749 bytes. Manifest, probe,
+runner, and manifest-body SHA-256 are
+`5da20f701d38bf9b81c6000ed4e8aba4fadd285c85d81753ef4a862f0a4875bc`,
+`2139f0f5c2aba399d2eb8bc10ccbc2ec1221ce00ae2fdeb50782c80622f982e3`,
+`88091fd27bef445f7045b721a6258da9652bac2f68d1ced277bbe82c1640d9b5`, and
+`8bbd189d9c7e82702ce8513347841cfe5aff2f96f8b39bf9dd07e05bea4e6b35`;
+the manifest body is 9 lines / 16,479 bytes. It pins all four predecessor
+fixtures per page, the complete active Java/Gradle source set, and JGraphT core
+1.5.2 at
+`dfa596e9f0d0838f1b5e81dd0cd60e3a76c2c290ac25a0a029ffde58cf5e4c14`.
+Seam-critical `BeamLinker`, `Link`, `SIGraph`, `SigListener`, `BasicIndex`,
+`InterIndex`, `StemInter`, and `BeamStemRelation` source hashes are
+`131f91f6605ecf03463ef4b6021a461240f99d7dfe2b1a1b94b0213d158d1747`,
+`e27734fa0f4273db91527ed969ef1881605cda32eb970bb464ea037b0f0ed34e`,
+`6b6ff3172d1f194566a7f59aa2c854cb62ea9c4deab79a43b6b0b85e1d4c4c2f`,
+`19b42c96257bd78fc9d4bc428242590ae01832b395aebdeefe26e081ceadc08d`,
+`7c747248365477c9381d004891e88f96273c0796a26f7417192fdaaeac8d3707`,
+`830ee77262bd9b631d352e49ddc150055e621ad9cd76c2a0671fc2233b662b7a`,
+`bcdb1b67694f45de89a9ad8712222e77af7c6e29247f5edd487d8dcabd11eeec`, and
+`3ceff58fa9b298d97f325372d0e5a9b363755f3ad47cac7b66b07bd8d1e735f1`.
+Two byte-identical passes per page used 8 compiler plus 60 runtime
+foreground/reaped JVMs, maximum Java concurrency 1, and no background Java.
+Twenty focused production tests and all 10 full exact integration tests pass;
+the latter finish in 33.87 seconds. The full library suite is 623 passed / 0
+failed / 2 ignored in 12.47 seconds. Strict Clippy, global formatting,
+diff-check, and oracle `sh -n` are green.
+
+The terminal is `ReadyBeforeBLinkerFlagMutation`. The next boundary is exactly
+`getBLinker().setLinked(true)`. Sibling-beam linking and relation-loop/head links
+remain following stateful boundaries, as do later scheduler attempts, stump
+linking, and competing-hook removal.
 
 Last updated 2026-08-09.
 
@@ -564,7 +624,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with exact median, grade, height, staff, pitch, and two-serif evidence. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Thirteen exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without fabricating Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. The seventh completes 2,417 beam-origin `StemBuilder` constructors. The eighth assigns all 14,084 C seed lists, retains 4,566 C and 8,120 B targets in C-before-B order, adds 1,687 head anchors, and closes at 3,948 BLinkers. The ninth exactly completes all 14,084 C-origin constructors through 19,295 registrations, 29,120 final items, and 70,420 profile lengths. The tenth matches all 11,573 isolated beam-origin expand/link plans, 18,345 final relations, and 12,523 final Glyph entries before `createStem`, including shared-line and rollback asymmetries. The eleventh replays the deterministic scheduler prefix across 803 beams, 322 width ties, and 78 live hook/full-beam pairs, stopping all 30 systems at typed V-link transaction frontiers without persistent mutation. The twelfth applies aliased line deltas and exactly executes the first `createStem` transaction in all 30 systems, including structural GlyphIndex/`systemStems` handling, checker grade, returned median/thickness/ribbon geometry, and pre-SIG state. The thirteenth evaluates the ordered/lazy head-side reuse loop and exact `BeamStemRelation.checkLink`; all 65 real entries are unlinked and all 30 checks accept, while eight isolated synthetic SIG blocks grade the reuse and numerical branches. | Grade conditional SIG vertex insertion and application of the already-checked base BeamStem relation. Sibling-beam and relation-loop/head links remain separate, followed by later scheduler, stump, and competing-hook paths. |
+| 10 | `STEMS` | **Components graded** | Fourteen exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state without fabricating Java IDs. The first three match 3,521 heads and all 14,084 corners; purge 1,906 seeds to 1,749 survivors; make 4,182 existing-seed selections; and execute all 9,902 section fallbacks through 18,398 exact section/compound steps, 3,660 subsection attempts, and 8,933 registered candidates. The fourth matches stump preparation for 803 BeamLinkers through 1,821 final stumps. The fifth matches constructor B/V topology and reachability through 2,116 BLinkers, 2,417 VLinkers, 9,186 alien decisions, and 12,491 seed checks. The sixth preserves all 2,417 source-ordered V inspections, 145 cross-beam anchor creations, 215 anchor reuses, and 5,059 accepted head corners. The seventh completes 2,417 beam-origin `StemBuilder` constructors. The eighth assigns all 14,084 C seed lists, retains 4,566 C and 8,120 B targets in C-before-B order, adds 1,687 head anchors, and closes at 3,948 BLinkers. The ninth exactly completes all 14,084 C-origin constructors through 19,295 registrations, 29,120 final items, and 70,420 profile lengths. The tenth matches all 11,573 isolated beam-origin expand/link plans, 18,345 final relations, and 12,523 final Glyph entries before `createStem`, including shared-line and rollback asymmetries. The eleventh replays the deterministic scheduler prefix across 803 beams, 322 width ties, and 78 live hook/full-beam pairs, stopping all 30 systems at typed V-link transaction frontiers without persistent mutation. The twelfth applies aliased line deltas and exactly executes the first `createStem` transaction in all 30 systems, including structural GlyphIndex/`systemStems` handling, checker grade, returned median/thickness/ribbon geometry, and pre-SIG state. The thirteenth evaluates the ordered/lazy head-side reuse loop and exact `BeamStemRelation.checkLink`; all 65 real entries are unlinked and all 30 checks accept, while eight isolated synthetic SIG blocks grade the reuse and numerical branches. The fourteenth conditionally inserts the selected stem into the SIG and applies the checked base BeamStem relation through edge callbacks; all 30 real transactions are `NewIdZero`, add the vertex and edge, reuse zero stems, and find zero ChordStem matches, while 40 supported and 32 envelope cases remain isolated evidence rather than production-equivalence claims. | Grade exactly `getBLinker().setLinked(true)`. Sibling-beam and relation-loop/head links remain separate, followed by later scheduler, stump, and competing-hook paths. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -595,11 +655,10 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Grade conditional insertion of the selected stem as a SIG vertex and
-   application of the already-checked base BeamStem relation as the next narrow
-   stateful boundary.
+1. Grade exactly `getBLinker().setLinked(true)` after the now-exact base
+   BeamStem application.
 2. Grade sibling-beam linking and the relation-loop/head links separately; do
-   not fold them into the base-relation seam.
+   not fold them into the linker-flag seam.
 3. Continue the later beam-scheduler, stump, and competing-hook-removal paths as
    separately graded boundaries.
 4. Allocate stable MultipleRest/serif SIG, glyph, and relation identities without changing the graded decision state.

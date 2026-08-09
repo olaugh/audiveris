@@ -107,6 +107,8 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS beam-origin `VLinker.expand`/link-plan boundary | `materialize_native_stems_beam_link_plans` is the tenth exact boundary: an immutable matrix evaluates profiles 0 through 3/4 for every inspected non-anchor beam builder and stops before `StemBuilder.createStem`. The full eight-page gate matches 11,573 plans, 18,345 final relations, 12,523 final Glyph entries, and all 120,646 body lines (120,636 semantic rows plus the 10-line shared header). It exposes 3,226 downward shared-line/current-attachment deltas, 49 rollback-line divergences, two dynamic-side mismatches, the profile-4 terminal-head 9/632/645 partition, and zero forbidden mutations without applying scheduler state. Eleven focused units, two full runs (32.25s / 32.41s), and strict integration-test Clippy are green |
 | STEMS deterministic beam-scheduler frontier | `materialize_native_stems_beam_scheduler_frontiers` is the eleventh exact boundary: it reconstructs 651 page-global canonical live Glyph aliases and 78 live raw hook/full-beam Exclusions, then replays all 803 beams in stable reverse-width/SIG order across 322 width ties. The 30 systems reach 56 attempts: 26 empty-target skips remove 14 beams from local worklists, then 30 `ReadyForCreateStem` plans stop as typed `AwaitingVLinkTransaction` frontiers. Ready is feasibility, not success. Fourteen pending downward line/attachment deltas remain unapplied; known-false invocation, stump, hook-removal, retry, completion, and persistent-mutation counts are zero. Eight focused units, three active integration tests with one fast diagnostic ignored, the 31.09-second integration run, the independent 31.41-second root full gate, and strict integration-test Clippy are green |
 | STEMS first awaited beam-V `createStem` transaction | `apply_native_stems_beam_vlink_create_stem_transaction` is the twelfth exact boundary: it applies prior/pending aliased line deltas and exactly executes candidate construction, structural GlyphIndex registration, structural `systemStems` lookup, `StemChecker`, and checked/artificial/reused return. Across 30 transactions it matches 15 compound candidates with pre-registration object ID 0, 15 singletons, 14 line changes, 30 active `ReuseActive` Glyph lookups, 30 Absent real system-stem lookups, and 30 `CreatedChecked` results. Returned median/mean-thickness bits and vertical-ribbon integer bounds are exact; every returned Inter is ID 0, non-abnormal, and SIG-null. Allocator/SIG/relation/link-flag deltas are zero. Eleven focused units and the 5/5 31.98-second gate are green |
+| STEMS beam-V reuse/check boundary | `evaluate_native_stems_beam_vlink_reuse_check` is the thirteenth exact, read-only boundary: it preserves the ordered/lazy head-side stem-reuse loop and exact `BeamStemRelation.checkLink`. All 65 real C entries are unlinked, all 30 checks accept, and real reuse is zero; eight isolated synthetic SIG blocks cover the reuse and numerical branches. It stops at `ReadyBeforeSigMutation` |
+| STEMS beam-V base SIG/BeamStem application | `apply_native_stems_beam_vlink_base_transaction` is the fourteenth exact boundary: it conditionally executes `SIG.addVertex` and then applies the checked base BeamStem relation with exact index/SIG ordering, duplicate suppression, JGraphT callbacks, abnormal/dirty effects, and partial prefixes. All 30 real rows are `NewIdZero` with vertex and edge added, reuse zero, and zero ChordStem matches; 40 supported and 32 envelope cases are isolated evidence, not production-equivalence. Twenty focused units and the 10/10 33.87-second gate are green; it stops at `ReadyBeforeBLinkerFlagMutation` |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -142,13 +144,12 @@ remains.
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
 eight-page image-pipeline differentials, including complete HEADS and the exact
-semantic STEMS boundaries described below. The thirteenth beam-V reuse/checkLink
-boundary has 8/8 focused production units and 8/8 exact integration tests; the
-complete 30-system plus eight-isolated-synthetic gate finishes in 32.66 seconds.
-The twelfth `createStem` regression remains 11/11 focused and 5/5 exact in 33.98
-seconds. The full library suite is 603 passed / 0 failed / 2 ignored in 12.58
-seconds, and strict library/integration-test Clippy and global formatting are
-green.
+semantic STEMS boundaries described below. The fourteenth beam-V base-application
+boundary has 20/20 focused production units and 10/10 full exact integration
+tests; the 30-system plus isolated supported/envelope gate finishes in 33.87
+seconds. The full library suite is 623 passed / 0 failed / 2 ignored in 12.47
+seconds. Strict library/gate Clippy, global formatting, diff-check, and oracle
+shell syntax checks are green.
 
 The accepted STEM_SEEDS boundary is now native and exact.
 `StemSeedsProbe` reaches HEADERS, installs the production `StemScaler` result,
@@ -1197,14 +1198,91 @@ Every page was generated twice byte-identically. The runner used 8 compiler and
 60 runtime foreground/reaped JVMs, maximum Java concurrency 1, and no background
 process. Eight focused production tests pass with 597 filtered; all 8 exact
 integration tests pass in 32.66 seconds under independent root verification.
-Strict library/gate Clippy and global formatting are green, and
-the full library suite is 603 passed / 0 failed / 2 ignored in 12.58 seconds.
+Strict boundary-13 library/gate Clippy and global formatting are green.
 
-The next seam is intentionally narrower than the rest of `VLinker.link`: add
-the selected stem to the SIG only when its ID is zero, then apply the already
-checked base BeamStem relation. Sibling-beam linking and the later relation-loop
-head links are not included; they remain separate stateful boundaries before
-later scheduler attempts, stump linking, and competing-hook removal.
+`apply_native_stems_beam_vlink_base_transaction` closes the fourteenth exact
+production semantic STEMS boundary. It begins at boundary 13's accepted
+`ReadyBeforeSigMutation` result. When the selected stem has ID zero, it executes
+the conditional `SIG.addVertex(stem)` prefix: shared InterIndex allocation and
+VIP membership lookup, SIG vertex insertion in source order, `setSig`, the sole
+`SigListener`, `StemInter.added`, its abnormal-state transition, and the
+resulting SheetStub/Book modified and dirty propagation. A positive-ID,
+already-attached stem skips that prefix.
+
+The boundary then calls the base `Link.applyTo(beam)` with the fresh checked
+`BeamStemRelation`. It preserves source/target-removed lazy suppression, the
+source-outgoing duplicate scan and first same-runtime-class `isInstance` match,
+separate fresh relation-object and graph-relation identities, exact
+endpoint/incidence mirror joins, raw nullable BeamStem/BeamRest portions,
+JGraphT edge insertion order, and synchronous callback order. The Java return
+value is ignored by the caller,
+so the continuation retains the fresh draft grade even when insertion is
+suppressed. `BeamStemRelation.added` runs after edge insertion: it scans the
+stem's incident relations and finds zero `ChordStemRelation` matches in compact
+v1, then dispatches the beam's virtual `checkAbnormal`. Full beams scan ordered
+BeamStem/BeamRest portions; hooks use the class-only any-BeamStem rule and do
+not read a portion. Stem/beam abnormal requests and actual changes, allocator,
+index and SIG deltas, listener/callback prefixes, and SheetStub/Book flags are
+all explicit. Four isolated listener/callback/missing-target fault envelopes
+retain Java's partial commits and no-rollback behavior without granting that
+unsupported fault authority to production.
+
+All 30 real first-frontier transactions across eight pages are `NewIdZero`:
+Java inserts all 30 stems, adds all 30 base BeamStem edges, reuses zero stems,
+and finds zero ChordStem matches. The 30 `predecessorcompat` certificates join
+the frozen boundary-13 pre-mutation state despite the newer structural hash
+domains. Each page's system-1 output also contains five supported cases and four
+envelope-only cases on truly isolated Sheet/System/SIG instances. The corpus
+therefore holds 40 supported branch cases and 32 failure-prefix envelopes. They
+are isolated evidence, not naturally occurring corpus behavior or a blanket
+production-equivalence claim.
+
+The normalized corpus is 1,314 lines / 1,185,901 bytes: one shared eight-line
+header plus 1,306 semantic rows, with SHA-256
+`ece76c038ef1b2017d2f356dd6ead59379376ffc5ab0306e8c5e8c34a9471e53`.
+The eight complete split fixtures total 1,386 lines / 1,227,749 bytes. Manifest,
+probe, runner, and manifest-body SHA-256 are
+`5da20f701d38bf9b81c6000ed4e8aba4fadd285c85d81753ef4a862f0a4875bc`,
+`2139f0f5c2aba399d2eb8bc10ccbc2ec1221ce00ae2fdeb50782c80622f982e3`,
+`88091fd27bef445f7045b721a6258da9652bac2f68d1ced277bbe82c1640d9b5`, and
+`8bbd189d9c7e82702ce8513347841cfe5aff2f96f8b39bf9dd07e05bea4e6b35`;
+the manifest body is 9 lines / 16,479 bytes. The eight complete fixture hashes,
+in manifest order (Chula, Allegretto, Batuque, Carmen, Cucaracha, Hove, Zizi,
+Bach Invention 5), are
+`fa52b363ee03cf25b86c082fe69d9d9f8ad6449744e8d96d58f50353eb4dfa3a`,
+`3ce50d5897774d9fff28f8148c5567407df9ad2ddee58de734e8e6c472659cf9`,
+`a3eaaec9621958fc27bc781b917ce8f157898792bd837986c248f06e3b590c84`,
+`2c0bb4e8b4fe0ed0b521aeb6e9a1e2354bdec0895e0d0795268cf675ec235356`,
+`5eb50879dedcd435f552d8a63b21fec9a9ef5f4c290abde21be93baf5eeb26ca`,
+`6fe4c59eb013fd733881ab7dade3ca22c2519f04c07eab58625fa01ab282c006`,
+`d931f3e7eea1704925fcaf4278527ae35b71eda2b70d63fdd682e6602799bd00`, and
+`d1961d7bd5db98ace4012e12dc8f04a7f60e045252cf934ce5b9764a7d9feee3`.
+
+The manifest pins every page's scheduler, expand, `createStem`, and reuse/check
+predecessor fixture; the complete active Java/Gradle source set; and JGraphT
+core 1.5.2 at
+`dfa596e9f0d0838f1b5e81dd0cd60e3a76c2c290ac25a0a029ffde58cf5e4c14`.
+The seam-critical `BeamLinker`, `Link`, `SIGraph`, `SigListener`, `BasicIndex`,
+`InterIndex`, `StemInter`, and `BeamStemRelation` source SHA-256 values are
+`131f91f6605ecf03463ef4b6021a461240f99d7dfe2b1a1b94b0213d158d1747`,
+`e27734fa0f4273db91527ed969ef1881605cda32eb970bb464ea037b0f0ed34e`,
+`6b6ff3172d1f194566a7f59aa2c854cb62ea9c4deab79a43b6b0b85e1d4c4c2f`,
+`19b42c96257bd78fc9d4bc428242590ae01832b395aebdeefe26e081ceadc08d`,
+`7c747248365477c9381d004891e88f96273c0796a26f7417192fdaaeac8d3707`,
+`830ee77262bd9b631d352e49ddc150055e621ad9cd76c2a0671fc2233b662b7a`,
+`bcdb1b67694f45de89a9ad8712222e77af7c6e29247f5edd487d8dcabd11eeec`, and
+`3ceff58fa9b298d97f325372d0e5a9b363755f3ad47cac7b66b07bd8d1e735f1`.
+Every page was generated twice byte-identically with 8 compiler plus 60 runtime
+foreground/reaped JVMs, maximum Java concurrency 1, and no background Java.
+Twenty focused production tests and all 10 exact integration tests pass; the
+gate finishes in 33.87 seconds. The full library suite is 623 passed / 0 failed /
+2 ignored in 12.47 seconds. Strict Clippy, global formatting, diff-check, and
+oracle `sh -n` are green.
+
+The terminal is `ReadyBeforeBLinkerFlagMutation`. The next boundary is exactly
+`getBLinker().setLinked(true)`. Sibling-beam linking and the relation-loop/head
+links remain following boundaries before later scheduler attempts, stump
+linking, and competing-hook removal.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3782,9 +3860,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Grade the first stateful continuation: conditional SIG vertex insertion for
-   the selected stem plus application of the already-checked base BeamStem
-   relation. Keep sibling-beam and relation-loop/head links out of this seam.
+1. Grade exactly `getBLinker().setLinked(true)` after the now-exact base
+   BeamStem application; keep sibling and head-link mutations outside that seam.
 2. Continue sibling-beam linking, relation-loop/head links, later
    beam-scheduler attempts, stump linking, and competing-hook removal as
    separately graded boundaries.

@@ -1559,8 +1559,23 @@ pub(crate) fn generic_intersection(one: Segment, two: Segment) -> NativeStemPoin
     let one_cross = (one.x1 * one.y2) - (one.y1 * one.x2);
     let two_cross = (two.x1 * two.y2) - (two.y1 * two.x2);
     NativeStemPoint {
-        x: ((one_cross * (two.x1 - two.x2)) - ((one.x1 - one.x2) * two_cross)) / denominator,
-        y: ((one_cross * (two.y1 - two.y2)) - ((one.y1 - one.y2) * two_cross)) / denominator,
+        x: java_canonical_divide(
+            (one_cross * (two.x1 - two.x2)) - ((one.x1 - one.x2) * two_cross),
+            denominator,
+        ),
+        y: java_canonical_divide(
+            (one_cross * (two.y1 - two.y2)) - ((one.y1 - one.y2) * two_cross),
+            denominator,
+        ),
+    }
+}
+
+fn java_canonical_divide(numerator: f64, denominator: f64) -> f64 {
+    let quotient = numerator / denominator;
+    if quotient.is_nan() {
+        f64::NAN
+    } else {
+        quotient
     }
 }
 
@@ -1946,6 +1961,23 @@ mod tests {
         );
         assert_eq!(crossing.x.to_bits(), 0x4030_2c00_0000_0000);
         assert_eq!(crossing.y.to_bits(), 0x405f_d800_0000_0000);
+
+        let parallel = generic_intersection(
+            Segment {
+                x1: 10.0,
+                y1: 10.0,
+                x2: 30.0,
+                y2: 10.0,
+            },
+            Segment {
+                x1: 10.0,
+                y1: 22.0,
+                x2: 30.0,
+                y2: 22.0,
+            },
+        );
+        assert_eq!(parallel.x.to_bits(), 0xfff0_0000_0000_0000);
+        assert_eq!(parallel.y.to_bits(), 0x7ff8_0000_0000_0000);
     }
 
     #[test]

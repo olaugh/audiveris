@@ -5291,8 +5291,23 @@ fn determinant_intersection(one: Segment, two: Segment) -> NativeStemPoint {
     let one_cross = (one.x1 * one.y2) - (one.y1 * one.x2);
     let two_cross = (two.x1 * two.y2) - (two.y1 * two.x2);
     NativeStemPoint {
-        x: ((one_cross * (two.x1 - two.x2)) - ((one.x1 - one.x2) * two_cross)) / denominator,
-        y: ((one_cross * (two.y1 - two.y2)) - ((one.y1 - one.y2) * two_cross)) / denominator,
+        x: java_canonical_divide(
+            (one_cross * (two.x1 - two.x2)) - ((one.x1 - one.x2) * two_cross),
+            denominator,
+        ),
+        y: java_canonical_divide(
+            (one_cross * (two.y1 - two.y2)) - ((one.y1 - one.y2) * two_cross),
+            denominator,
+        ),
+    }
+}
+
+fn java_canonical_divide(numerator: f64, denominator: f64) -> f64 {
+    let quotient = numerator / denominator;
+    if quotient.is_nan() {
+        f64::NAN
+    } else {
+        quotient
     }
 }
 
@@ -5411,8 +5426,8 @@ fn independent_check_relation(
     let y_numerator =
         (v12 * (beam_border.y1 - beam_border.y2)) - ((stem_segment.y1 - stem_segment.y2) * v34);
     let cross = NativeStemPoint {
-        x: x_numerator / intersection_denominator,
-        y: y_numerator / intersection_denominator,
+        x: java_canonical_divide(x_numerator, intersection_denominator),
+        y: java_canonical_divide(y_numerator, intersection_denominator),
     };
     debug_assert!(same_point(
         cross,
@@ -6050,7 +6065,8 @@ fn independent_relation_model_pins_java_boundary_arithmetic() {
         0,
         &JAVA_RELATION_PARAMETERS,
     );
-    assert!(parallel.cross.x.is_infinite() && parallel.cross.y.is_nan());
+    assert_eq!(parallel.cross.x.to_bits(), 0xfff0_0000_0000_0000);
+    assert_eq!(parallel.cross.y.to_bits(), 0x7ff8_0000_0000_0000);
     assert_eq!(parallel.portion, IndependentBeamPortion::Left);
     assert!(parallel.dy.is_nan() && parallel.grade.is_nan());
     assert!(!parallel.accepted && parallel.extension_point.is_none());
