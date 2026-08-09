@@ -121,7 +121,7 @@ head. Chula has no surviving relation past a rewound return and no rollback-line
 divergence; the full eight-page freeze remains responsible for broader branch
 coverage.
 
-## Eight-page exploratory checkpoint
+## Eight-page frozen checkpoint
 
 The complete corpus covers 30 systems, 2,417 builders, and 11,573 plans. Outcome
 counts are 2,903 `NoHeadTarget`, 289 `ExpandFailed`, 2 `NoRelations`, 58
