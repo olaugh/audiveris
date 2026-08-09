@@ -82,6 +82,7 @@ pub mod native_stems_beam_link_plans;
 pub mod native_stems_beam_reachability;
 pub mod native_stems_beam_scheduler;
 pub mod native_stems_beam_stumps;
+pub mod native_stems_beam_vlink_b_linker_flag;
 pub mod native_stems_beam_vlink_base_apply;
 pub mod native_stems_beam_vlink_reuse_check;
 pub mod native_stems_beam_vlink_transaction;
