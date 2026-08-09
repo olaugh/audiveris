@@ -57,6 +57,22 @@ visual or semantic Java/Rust parity claim. Rust PAGE, score assembly, and
 MusicXML output remain unimplemented; when they exist, the Rust artifact must
 pass through this same renderer before the tab can become a comparison surface.
 
+Direct MEI now has an additive serializer foundation, separate from parity.
+The new `audiveris-mei` workspace crate writes deterministic MEI 5.1 CMN from
+an explicitly resolved semantic model and has no dependency on `audiveris-omr`
+or a Java oracle. It covers score definitions, measures/layers,
+notes/rests/chords/beams/barlines, semantic-ID-derived `xml:id` values,
+cross-staff targeting, application/source provenance, validation-before-write,
+and exact output counts. Its checked-in, metrically conformant two-staff golden
+passes 13 focused tests and the pinned offline CMN Relax NG gate; a manual local
+Verovio 6.2.1 smoke renders without errors. This is not yet recognition output:
+the current native PAGE,
+RHYTHMS, CHORDS, and MEASURES products do not contain ordered export-ready
+events with resolved pitch, duration, voice, measure, and sheet-global stable
+identity. Do not adapt HEADS geometry or opaque `.omr` XML to fill those gaps.
+The honest next MEI seam is a thin PAGE-to-MEI adapter after those semantics
+are native; facsimile/zones and certainty annotations remain Phase 2.
+
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
@@ -3876,6 +3892,10 @@ Commit each slice separately after the full verification block above.
    `../../data/synth/...` from this parent OMR checkout.
 7. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
    differing stage so later agreement cannot hide an upstream mismatch.
+8. Keep direct MEI additive and independent: once native PAGE exposes resolved
+   measures, layers, pitch, duration, and sheet-global semantic identities,
+   add the thin adapter into `audiveris-mei` and only then freeze the 65-staff
+   corpus. Do not infer those semantics from HEADS geometry or opaque `.omr` XML.
 
 ## Differential fixture plan
 

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model href="https://music-encoding.org/schema/5.1/mei-CMN.rng" schematypens="http://relaxng.org/ns/structure/1.0" type="application/xml"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.1+CMN" xml:id="mei.sheet1">
+  <meiHead>
+    <fileDesc>
+      <titleStmt>
+        <title>Étude &lt;One&gt; &amp; Two</title>
+      </titleStmt>
+      <pubStmt/>
+      <sourceDesc>
+        <source xml:id="source.sheet1" target="file:///scores/etude-01.png">
+          <bibl>
+            <title>Scan &amp; source</title>
+          </bibl>
+        </source>
+      </sourceDesc>
+    </fileDesc>
+    <encodingDesc>
+      <appInfo>
+        <application xml:id="app.audiveris-rust" version="0.1.0">
+          <name>Audiveris Rust</name>
+          <p>Source commit abc123</p>
+        </application>
+      </appInfo>
+    </encodingDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv xml:id="mdiv.sheet1">
+        <score xml:id="score.sheet1">
+          <scoreDef xml:id="scoredef.sheet1">
+            <staffGrp xml:id="staffgrp.sheet1">
+              <staffGrp xml:id="part.i10">
+                <label>Piano</label>
+                <staffDef xml:id="staff.i11" n="1" lines="5" clef.shape="G" clef.line="2" keysig="0" meter.count="4" meter.unit="4"/>
+                <staffDef xml:id="staff.i12" n="2" lines="5" clef.shape="F" clef.line="4" keysig="0" meter.count="4" meter.unit="4"/>
+              </staffGrp>
+            </staffGrp>
+          </scoreDef>
+          <section xml:id="section.sheet1">
+            <measure xml:id="measure.i20" n="1" metcon="true" right="dbl">
+              <staff xml:id="measurestaff.m20.s11" n="1">
+                <layer xml:id="layer.m20.s11.n1" n="1">
+                  <note xml:id="note.i100" pname="c" oct="4" dur="4" resp="#app.audiveris-rust"/>
+                  <beam xml:id="beam.i101" resp="#app.audiveris-rust">
+                    <note xml:id="note.i102" pname="e" oct="4" dur="8" resp="#app.audiveris-rust"/>
+                    <note xml:id="note.i103" pname="f" oct="4" accid="s" dur="8" resp="#app.audiveris-rust"/>
+                  </beam>
+                  <chord xml:id="chord.i104" dur="2" resp="#app.audiveris-rust">
+                    <note xml:id="note.i105" pname="a" oct="4" resp="#app.audiveris-rust"/>
+                    <note xml:id="note.i106" pname="c" oct="5" resp="#app.audiveris-rust"/>
+                  </chord>
+                  <barLine xml:id="barline.i107" form="dbldashed" resp="#app.audiveris-rust"/>
+                </layer>
+              </staff>
+              <staff xml:id="measurestaff.m20.s12" n="2">
+                <layer xml:id="layer.m20.s12.n1" n="1">
+                  <mRest xml:id="mrest.i200" resp="#app.audiveris-rust"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure xml:id="measure.i21" n="2" metcon="true" right="end">
+              <staff xml:id="measurestaff.m21.s11" n="1">
+                <layer xml:id="layer.m21.s11.n1" n="1">
+                  <note xml:id="note.i300" pname="d" oct="5" dur="1" staff="2" resp="#app.audiveris-rust"/>
+                </layer>
+              </staff>
+              <staff xml:id="measurestaff.m21.s12" n="2">
+                <layer xml:id="layer.m21.s12.n1" n="1">
+                  <mRest xml:id="mrest.i301" resp="#app.audiveris-rust"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

@@ -651,6 +651,7 @@ is present but the musical interpretation is not.
 | CLI, JSON, and live comparison | **JSON published through `HEADS`; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in native Java order for the applicable JSON target; GRID keeps its text report. Ordinary `-json` remains the schema-1 JSONL interface. The opt-in `-stream-json` protocol adds flushed boundary markers around unchanged completed-stage documents for `omrscope`, which starts Java and Rust independently, retains every completed snapshot, and lets the user select it. It deliberately provides no intra-stage or per-item stream. The Page/Inters UI graphically highlights an inspected table row without native table selection, offers opt-in filtered-row highlighting, and shows only engine-local relation edges whose endpoints resolve in the selected snapshot. HEADS documents retain all upstream products and add identity-free final heads, complete seed/range provenance, exact head glyphs, source-resolved beam decisions, counts, and tally-scale rows. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
 | Manual Java score preview | **Inspection only; not a parity gate** | A separate Score tab explicitly runs one selected Java sheet through PAGE, validates its single local MusicXML/MXL artifact, and renders it with locally installed Verovio to SVG. Sheets requiring sibling multi-page artifacts are rejected rather than guessed. It is not part of recognition streaming, which still stops at HEADS, and it makes no Java/Rust visual or semantic comparison claim. Future Rust MusicXML will use the same renderer path. |
 | MusicXML output | **Rust not ported end to end** | The manual Java preview does not imply Rust PAGE, score assembly, or MusicXML export. The differential export suite remains queued behind semantic page completion. |
+| Direct MEI output | **Serializer foundation; not recognition-wired** | The additive `audiveris-mei` crate deterministically writes the Audiveris MEI 5.1 CMN Phase 1 profile from a validated semantic model, with caller-owned event IDs, derived wrapper IDs, provenance, parts/staves, metrically checked measures/layers, notes/rests/measure-rests/chords/beams/barlines, and explicit cross-staff targets. Its two-staff golden is byte-exact, independently parsed, count-pinned, and validated offline against the vendored CMN schema on both CI legs; Verovio 6.2.1 rendering is currently a manual local smoke. It has no Java oracle or `audiveris-omr` dependency. Native PAGE/RHYTHMS/CHORDS/MEASURES still cannot supply resolved events, so no corpus/PAGE export claim is made and no musical data is fabricated. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 
 ## Next work queue
@@ -665,6 +666,10 @@ is present but the musical interpretation is not.
 5. Complete GRID brace glyph/SIG promotion from the now-retained exact detached filament evidence; Part ownership is already live for downstream stages.
 6. Grade additional small-beam pages and widen the published HEADERS/BEAMS/LEDGERS/HEADS corpus.
 7. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
+8. Once native PAGE exposes resolved measures, voices, pitch, duration, and
+   sheet-global semantic identities, add the thin PAGE-to-`audiveris-mei`
+   adapter; then grade the 65-staff corpus before claiming direct recognition
+   export. Facsimile/certainty remains the following additive MEI phase.
 
 ## Maintenance rule
 

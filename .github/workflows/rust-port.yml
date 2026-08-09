@@ -68,6 +68,17 @@ jobs:
           cargo fmt --version
           cargo clippy --version
 
+      - name: Install the MEI schema validator on Linux
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v xmllint >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes libxml2-utils
+          fi
+
+      - name: Validate MEI golden files
+        run: ./scripts/validate-mei-schema.sh
+
       - name: Cache cargo registry and build
         uses: actions/cache@v4
         with:

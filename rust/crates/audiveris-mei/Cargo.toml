@@ -1,0 +1,14 @@
+[package]
+name = "audiveris-mei"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Deterministic MEI 5.1 CMN serialization for native Audiveris score data"
+
+[dependencies]
+quick-xml = { version = "=0.39.4", default-features = false }
+
+[lints]
+workspace = true
