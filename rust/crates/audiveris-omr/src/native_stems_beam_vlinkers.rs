@@ -1823,7 +1823,14 @@ fn segment_intersects(one: Segment, two: Segment) -> bool {
             <= 0
 }
 
-fn relative_ccw(x1: f64, y1: f64, x2: f64, y2: f64, mut point_x: f64, mut point_y: f64) -> i32 {
+pub(crate) fn relative_ccw(
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+    mut point_x: f64,
+    mut point_y: f64,
+) -> i32 {
     let delta_x = x2 - x1;
     let delta_y = y2 - y1;
     point_x -= x1;

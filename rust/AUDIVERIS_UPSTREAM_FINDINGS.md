@@ -24,8 +24,8 @@ Java source checked into this repository and may move.
   `remain < 15` guard.
 - **Rust parity policy:** preserve the Java behavior until the upstream Java
   behavior changes and a new oracle fixture is frozen. The completed
-  beam-origin `StemBuilder` boundary is unaffected; the next head-origin
-  builder boundary grades this branch explicitly.
+  head-origin `StemBuilder` boundary grades this branch explicitly and keeps all
+  6,087 low-remain non-VIP corpus chunks.
 
 ### AV-JAVA-002: `StemItem.lineOf` incorrectly says the `BLinker` branch covers `VLinker`
 
@@ -68,9 +68,67 @@ Java source checked into this repository and may move.
   itself and continues.
 - **Likely repair:** change `sb.get(i)` to `sb.get(j)` and freeze a linking test
   covering both “no later beam” and “later same-group beam” cases.
-- **Rust parity policy:** the current constructor boundary does not execute
-  `expand`; a later linking oracle must quantify corpus impact before deciding
-  whether compatibility mode preserves the typo or follows an upstream fix.
+- **Rust parity policy:** the completed beam-origin expansion boundary does not
+  execute this separate head-origin `CLinker.expand`; a later head-linking oracle
+  must quantify corpus impact before deciding whether compatibility mode
+  preserves the typo or follows an upstream fix.
+
+### AV-JAVA-004: downward beam expansion mutates its stored theoretical line
+
+- **Locations:**
+  `app/src/main/java/org/audiveris/omr/sheet/stem/BeamLinker.java`,
+  `VLinker.buildLuArea` and `VLinker.expand`, around lines 1148 and 1185; and
+  `app/src/main/java/org/audiveris/omr/sheet/stem/StemHalfLinker.java`,
+  `updateStemLine`, around lines 72–103.
+- **Observed behavior:** for a downward VLinker, `expand` assigns
+  `stemLine = theoLine` rather than making a copy. `updateStemLine` then calls
+  `setLine` on that object for each new structural Glyph. The same object is
+  retained by the VLinker, by its `StemBuilder`, and, when that V is the current
+  value for the BLinker's attachment key, by the beam's `theo-<id>` diagnostic
+  attachment. Upward expansion reverses the endpoints into a new `Line2D` and
+  therefore does not mutate the stored line.
+- **Live evidence:** the isolated eight-page expansion matrix observes 3,226
+  downward stored-line mutations, all mirrored by the current beam attachment.
+  The largest horizontal shift is about 8.48613 pixels on Chula. The probe
+  restores the exact pre-call bits between matrix variants; normal Java linking
+  does not perform that restoration.
+- **Impact:** an ostensibly local feasibility pass changes later geometry and
+  diagnostic state. Its result is path-dependent if the same VLinker is tried
+  again or inspected after a failed attempt, and a visual attachment can move as
+  a side effect of recognition rather than merely displaying the originally
+  constructed lookup geometry.
+- **Likely repair:** make the working line an explicit copy in both directions,
+  then commit an accepted line deliberately if persistent adjustment is wanted.
+  If persistence is intentional, document it and test retry/failure ordering.
+- **Rust parity policy:** the isolated planner remains immutable but emits the
+  exact stored-line and attachment delta. A later serial scheduler must apply
+  that delta in Java order until upstream behavior is deliberately changed and
+  re-frozen.
+
+### AV-JAVA-005: `BEAM_SIDE` expansion does not enforce its documented terminal head
+
+- **Location:**
+  `app/src/main/java/org/audiveris/omr/sheet/stem/BeamLinker.java`,
+  `VLinker.expand` and `VLinker.link`, around lines 1159–1271 and 1576–1615.
+- **Observed behavior:** the `expand` javadoc says a `Profiles.BEAM_SIDE` stem
+  must end at a head on the correct horizontal side. The loop tracks such a
+  stopping head, but ordinary exhaustion returns `maxIndex` unconditionally.
+  `link` checks only the returned index, nonempty relations, and nonempty Glyphs;
+  it never requires or rewinds to the tracked stopping head.
+- **Live evidence:** among 1,286 ready profile-4 rows in the eight-page matrix,
+  9 have no valid stopping head at all, 632 have one but return beyond it, and
+  only 645 return at the last valid stopping head.
+- **Impact:** a beam-side stem can be accepted despite violating the method's
+  stated terminal invariant, or can include material beyond the last head that
+  satisfies it. A caller cannot infer the documented condition from a
+  successful `link` prefix.
+- **Likely repair:** on profile 4, fail if no acceptable stopping head exists and
+  otherwise return the stopping snapshot rather than `maxIndex`; add tests for
+  no-stop, trailing-material, and exact-stop cases. Confirm the desired relation
+  rollback at the same time.
+- **Rust parity policy:** preserve the observed three-way result partition in
+  compatibility mode. Do not silently enforce the javadoc until Java changes
+  and a new oracle is frozen.
 
 ## Risks under audit
 
@@ -182,6 +240,28 @@ Java source checked into this repository and may move.
   retaining any desired user-facing log message at the UI boundary.
 - **Rust parity policy:** the export probe reopens the exact requested path and
   validates its format, size, and digest before reporting success.
+
+### AV-JAVA-RISK-006: beam expansion rewind is only a partial rollback
+
+- **Location:**
+  `app/src/main/java/org/audiveris/omr/sheet/stem/BeamLinker.java`,
+  `VLinker.expand`, around lines 1194–1231.
+- **Behavior:** when a later gap or separated head rewinds to the most recent
+  valid stopping head, Java restores the saved Glyph set and returned item
+  index. It does not restore the working stem line and does not remove relation
+  entries accumulated after that snapshot.
+- **Live evidence:** the frozen corpus currently has no relation whose item lies
+  beyond the returned index, but 49 gap rewinds retain a bit-different working
+  line after Glyph restoration. The maximum coordinate residual is
+  `0x1.0p-39` (about 1.82e-12 pixels).
+- **Impact:** returned Glyphs, relations, and geometry are not guaranteed to
+  describe one common prefix. The present corpus makes the geometric difference
+  tiny, but another input can expose a larger line or relation inconsistency.
+- **Likely repair:** snapshot and restore all three outputs together, or make the
+  asymmetric contract explicit and cover a case with a relation after the
+  stopping point.
+- **Rust parity policy:** retain the asymmetric rollback and grade the divergence
+  explicitly; do not reconstruct the final line solely from returned Glyphs.
 
 ## Reporting notes
 

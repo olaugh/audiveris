@@ -78,6 +78,7 @@ pub mod native_heads_staff_epilog;
 pub mod native_ledgers;
 pub mod native_stem_seeds;
 pub mod native_stems_beam_builders;
+pub mod native_stems_beam_link_plans;
 pub mod native_stems_beam_reachability;
 pub mod native_stems_beam_stumps;
 pub mod native_stems_beam_vlinkers;
