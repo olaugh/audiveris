@@ -153,6 +153,9 @@ const BASE_APPLY_SPLIT_FIXTURE_LINES: usize = 1_386;
 const BASE_APPLY_SPLIT_FIXTURE_BYTES: usize = 1_227_749;
 const JGRAPHT_CORE_VERSION: &str = "1.5.2";
 const JGRAPHT_CORE_JAR: &str = "jgrapht-core-1.5.2.jar";
+const JGRAPHT_CORE_JAR_SHA256: &str =
+    "dfa596e9f0d0838f1b5e81dd0cd60e3a76c2c290ac25a0a029ffde58cf5e4c14";
+const JGRAPHT_CORE_GRADLE_DECLARATION: &str = "\"org.jgrapht:jgrapht-core:1.5.2\",";
 
 const PREDECESSOR_PATHS: &[(&str, &str)] = &[
     (
@@ -1350,8 +1353,7 @@ fn validate_fixture_trailer(fixture: &StrictFixture, bytes: &[u8]) -> Result<(),
     for (field, relative) in SOURCE_PATHS {
         validate_provenance_pin(&repo_root().join(relative), corpus.value(field)?)?;
     }
-    let jgrapht = active_jgrapht_core_jar()?;
-    validate_provenance_pin(&jgrapht, corpus.value("jgraphtCoreJarSha256")?)?;
+    validate_jgrapht_core_provenance(corpus.value("jgraphtCoreJarSha256")?)?;
 
     let marker = format!("{BASE_APPLY_ROW_PREFIX}pagesummary ");
     let starts = bytes
@@ -1701,8 +1703,7 @@ fn validate_base_apply_manifest_corpus(bytes: &[u8]) -> Result<StrictManifest, S
     if summary.value("jgraphtCoreVersion")? != JGRAPHT_CORE_VERSION {
         return Err("manifest JGraphT version differs".to_owned());
     }
-    let jgrapht = active_jgrapht_core_jar()?;
-    validate_provenance_pin(&jgrapht, summary.value("jgraphtCoreJarSha256")?)?;
+    validate_jgrapht_core_provenance(summary.value("jgraphtCoreJarSha256")?)?;
 
     let summary_marker = format!("{BASE_APPLY_MANIFEST_SUMMARY} ");
     let summary_start = unique_marker(
@@ -7337,39 +7338,150 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-fn active_jgrapht_core_jar() -> Result<PathBuf, String> {
-    let gradle_root = if let Some(root) = std::env::var_os("GRADLE_USER_HOME") {
-        PathBuf::from(root)
-    } else {
-        PathBuf::from(
-            std::env::var_os("HOME")
-                .ok_or_else(|| "neither GRADLE_USER_HOME nor HOME is defined".to_owned())?,
-        )
-        .join(".gradle")
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ActiveJGraphTCoreArtifact {
+    Absent { artifact_root: Option<PathBuf> },
+    Present(PathBuf),
+}
+
+fn active_jgrapht_core_artifact() -> Result<ActiveJGraphTCoreArtifact, String> {
+    let gradle_root = std::env::var_os("GRADLE_USER_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".gradle")));
+    let Some(gradle_root) = gradle_root else {
+        return Ok(ActiveJGraphTCoreArtifact::Absent {
+            artifact_root: None,
+        });
     };
+    locate_jgrapht_core_artifact(&gradle_root)
+}
+
+fn locate_jgrapht_core_artifact(gradle_root: &Path) -> Result<ActiveJGraphTCoreArtifact, String> {
     let artifact_root = gradle_root
         .join("caches/modules-2/files-2.1/org.jgrapht/jgrapht-core")
         .join(JGRAPHT_CORE_VERSION);
-    let mut candidates = std::fs::read_dir(&artifact_root)
-        .map_err(|error| {
-            format!(
+    let entries = match std::fs::read_dir(&artifact_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::symlink_metadata(&artifact_root) {
+                Ok(_) => {
+                    return Err(format!(
+                        "JGraphT cache {} exists but cannot be followed",
+                        artifact_root.display()
+                    ));
+                }
+                Err(metadata_error) if metadata_error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(metadata_error) => {
+                    return Err(format!(
+                        "cannot inspect JGraphT cache {}: {metadata_error}",
+                        artifact_root.display()
+                    ));
+                }
+            }
+            return Ok(ActiveJGraphTCoreArtifact::Absent {
+                artifact_root: Some(artifact_root),
+            });
+        }
+        Err(error) => {
+            return Err(format!(
                 "cannot read JGraphT cache {}: {error}",
                 artifact_root.display()
+            ));
+        }
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "cannot enumerate JGraphT cache {}: {error}",
+                artifact_root.display()
             )
-        })?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path().join(JGRAPHT_CORE_JAR))
-        .filter(|path| path.is_file())
-        .collect::<Vec<_>>();
+        })?;
+        let candidate = entry.path().join(JGRAPHT_CORE_JAR);
+        match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => candidates.push(candidate),
+            Ok(_) => {
+                return Err(format!(
+                    "JGraphT artifact candidate {} is not a file",
+                    candidate.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::symlink_metadata(&candidate) {
+                    Ok(_) => {
+                        return Err(format!(
+                            "JGraphT artifact candidate {} exists but cannot be followed",
+                            candidate.display()
+                        ));
+                    }
+                    Err(metadata_error)
+                        if metadata_error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(metadata_error) => {
+                        return Err(format!(
+                            "cannot inspect JGraphT artifact {}: {metadata_error}",
+                            candidate.display()
+                        ));
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect JGraphT artifact {}: {error}",
+                    candidate.display()
+                ));
+            }
+        }
+    }
     candidates.sort();
     candidates.dedup();
     match candidates.as_slice() {
-        [path] => Ok(path.clone()),
+        [] => Ok(ActiveJGraphTCoreArtifact::Absent {
+            artifact_root: Some(artifact_root),
+        }),
+        [path] => Ok(ActiveJGraphTCoreArtifact::Present(path.clone())),
         _ => Err(format!(
             "expected one active {JGRAPHT_CORE_JAR}, found {}",
             candidates.len()
         )),
     }
+}
+
+fn validate_jgrapht_gradle_declaration() -> Result<(), String> {
+    let path = repo_root().join("app/build.gradle");
+    let source = std::fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read provenance path {}: {error}", path.display()))?;
+    let declarations = source
+        .lines()
+        .filter(|line| line.trim() == JGRAPHT_CORE_GRADLE_DECLARATION)
+        .count();
+    if declarations != 1 {
+        return Err(format!(
+            "expected one exact {JGRAPHT_CORE_GRADLE_DECLARATION} declaration, found {declarations}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_active_jgrapht_core_artifact(
+    artifact: &ActiveJGraphTCoreArtifact,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    match artifact {
+        ActiveJGraphTCoreArtifact::Absent { .. } => Ok(()),
+        ActiveJGraphTCoreArtifact::Present(path) => validate_provenance_pin(path, expected_sha256),
+    }
+}
+
+fn validate_jgrapht_core_provenance(
+    expected_sha256: &str,
+) -> Result<ActiveJGraphTCoreArtifact, String> {
+    if expected_sha256 != JGRAPHT_CORE_JAR_SHA256 {
+        return Err("JGraphT core fixture/manifest SHA differs from the audited pin".to_owned());
+    }
+    validate_jgrapht_gradle_declaration()?;
+    let artifact = active_jgrapht_core_artifact()?;
+    validate_active_jgrapht_core_artifact(&artifact, expected_sha256)?;
+    Ok(artifact)
 }
 
 fn actual_file_sha256(relative: &str) -> Result<String, String> {
@@ -8362,15 +8474,98 @@ fn active_source_and_predecessor_provenance_helpers_reject_drift() {
         assert!(validate_provenance_pin(&path, &actual).is_ok());
         assert!(validate_provenance_pin(&path, &"0".repeat(64)).is_err());
     }
-    let jgrapht = active_jgrapht_core_jar().expect("active JGraphT core artifact is installed");
-    assert_eq!(
-        jgrapht.file_name().and_then(|name| name.to_str()),
-        Some(JGRAPHT_CORE_JAR)
-    );
-    let jar_sha = sha256_hex(&std::fs::read(&jgrapht).expect("JGraphT artifact is readable"));
-    assert_eq!(jar_sha.len(), 64);
-    assert!(validate_provenance_pin(&jgrapht, &jar_sha).is_ok());
-    assert!(validate_provenance_pin(&jgrapht, &"0".repeat(64)).is_err());
+    let artifact = validate_jgrapht_core_provenance(JGRAPHT_CORE_JAR_SHA256)
+        .expect("declared and frozen JGraphT provenance is valid");
+    if let ActiveJGraphTCoreArtifact::Present(jgrapht) = artifact {
+        assert_eq!(
+            jgrapht.file_name().and_then(|name| name.to_str()),
+            Some(JGRAPHT_CORE_JAR)
+        );
+        assert!(validate_provenance_pin(&jgrapht, JGRAPHT_CORE_JAR_SHA256).is_ok());
+        assert!(validate_provenance_pin(&jgrapht, &"0".repeat(64)).is_err());
+    }
+    assert!(validate_jgrapht_core_provenance(&"0".repeat(64)).is_err());
+}
+
+#[test]
+fn jgrapht_cache_absence_and_present_corruption_are_distinguished() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock follows the Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "audiveris-b14-jgrapht-{}-{nonce}",
+        std::process::id()
+    ));
+    let absent = locate_jgrapht_core_artifact(&root).expect("missing cache is an explicit mode");
+    assert!(matches!(
+        absent,
+        ActiveJGraphTCoreArtifact::Absent {
+            artifact_root: Some(_)
+        }
+    ));
+    assert!(validate_active_jgrapht_core_artifact(&absent, JGRAPHT_CORE_JAR_SHA256).is_ok());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let broken_root = root.join("broken-root");
+        let broken_artifact_root = broken_root
+            .join("caches/modules-2/files-2.1/org.jgrapht/jgrapht-core")
+            .join(JGRAPHT_CORE_VERSION);
+        std::fs::create_dir_all(
+            broken_artifact_root
+                .parent()
+                .expect("artifact root has a parent"),
+        )
+        .expect("create broken-root cache parent");
+        symlink("missing-version-directory", &broken_artifact_root)
+            .expect("create broken artifact-root symlink");
+        assert!(locate_jgrapht_core_artifact(&broken_root).is_err());
+
+        let broken_candidate_root = root.join("broken-candidate");
+        let broken_candidate = broken_candidate_root
+            .join("caches/modules-2/files-2.1/org.jgrapht/jgrapht-core")
+            .join(JGRAPHT_CORE_VERSION)
+            .join("entry")
+            .join(JGRAPHT_CORE_JAR);
+        std::fs::create_dir_all(
+            broken_candidate
+                .parent()
+                .expect("artifact candidate has a parent"),
+        )
+        .expect("create broken-candidate cache parent");
+        symlink("missing-jgrapht-core.jar", &broken_candidate)
+            .expect("create broken artifact symlink");
+        assert!(locate_jgrapht_core_artifact(&broken_candidate_root).is_err());
+    }
+
+    let normal_root = root.join("normal");
+    let first = normal_root
+        .join("caches/modules-2/files-2.1/org.jgrapht/jgrapht-core")
+        .join(JGRAPHT_CORE_VERSION)
+        .join("first")
+        .join(JGRAPHT_CORE_JAR);
+    std::fs::create_dir_all(first.parent().expect("artifact has a parent"))
+        .expect("create isolated fake Gradle cache");
+    std::fs::write(&first, b"not the audited JGraphT artifact")
+        .expect("write isolated corrupt artifact");
+    let corrupt = locate_jgrapht_core_artifact(&normal_root).expect("one artifact is discoverable");
+    assert!(matches!(corrupt, ActiveJGraphTCoreArtifact::Present(_)));
+    assert!(validate_active_jgrapht_core_artifact(&corrupt, JGRAPHT_CORE_JAR_SHA256).is_err());
+
+    let second = normal_root
+        .join("caches/modules-2/files-2.1/org.jgrapht/jgrapht-core")
+        .join(JGRAPHT_CORE_VERSION)
+        .join("second")
+        .join(JGRAPHT_CORE_JAR);
+    std::fs::create_dir_all(second.parent().expect("artifact has a parent"))
+        .expect("create second isolated fake cache entry");
+    std::fs::write(&second, b"another artifact").expect("write second isolated artifact");
+    assert!(locate_jgrapht_core_artifact(&normal_root).is_err());
+
+    std::fs::remove_dir_all(&root).expect("remove isolated fake Gradle cache");
 }
 
 fn project_frozen_base_apply_page(page_key: &str, bytes: &[u8]) -> Result<usize, String> {
