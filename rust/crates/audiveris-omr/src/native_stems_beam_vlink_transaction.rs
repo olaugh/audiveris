@@ -627,7 +627,7 @@ fn validate_checker_context(
     Ok(())
 }
 
-fn validate_transaction_state(
+pub(crate) fn validate_transaction_state(
     state: &NativeStemsBeamVLinkTransactionState,
 ) -> Result<(), NativeStemsBeamVLinkTransactionError> {
     let ids = state.glyph_index.persistent_ids;
@@ -892,7 +892,10 @@ fn validate_glyph_scan(
 }
 
 fn valid_sha256(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_system_stems(
@@ -953,7 +956,7 @@ fn validate_system_stems(
     Ok(())
 }
 
-fn validate_known_stem(
+pub(crate) fn validate_known_stem(
     stem: &NativeStemsBeamKnownSystemStem,
     last_id: i32,
 ) -> Result<(), NativeStemsBeamVLinkTransactionError> {
@@ -990,7 +993,7 @@ fn validate_known_stem(
     Ok(())
 }
 
-fn valid_stem_grade(grade: &NativeStemsBeamStemGrade) -> bool {
+pub(crate) fn valid_stem_grade(grade: &NativeStemsBeamStemGrade) -> bool {
     match grade {
         NativeStemsBeamStemGrade::Artificial(grade) => (0.0..=1.0).contains(grade),
         NativeStemsBeamStemGrade::Checked(check) => {
@@ -1277,7 +1280,7 @@ fn materialize_candidate(
     })
 }
 
-fn build_compound(
+pub(crate) fn build_compound(
     selected: &[&NativeStemsBeamSelectedGlyphBinding],
 ) -> Result<NativeStemsBeamFixedGlyphContent, NativeStemsBeamVLinkTransactionError> {
     let first = selected
@@ -1929,6 +1932,12 @@ mod tests {
         assert!(
             validate_glyph_scan(&scan, 20, NativeStemsBeamGlyphAliasOrder::JavaGlyphId, 9).is_ok()
         );
+
+        scan.baseline_active_sha256 = "A".repeat(64);
+        assert!(
+            validate_glyph_scan(&scan, 20, NativeStemsBeamGlyphAliasOrder::JavaGlyphId, 9).is_err()
+        );
+        scan.baseline_active_sha256 = "0".repeat(64);
 
         scan.lookup = NativeStemsBeamExhaustiveGlyphLookup::Present {
             canonical_alias: 7,
