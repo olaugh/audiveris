@@ -63,6 +63,7 @@ struct Staff
 struct EngineResult
 {
     QString engine;                 ///< "rust" or "java"
+    QString declaredStage;          ///< Stage named by the payload itself.
     bool ran = false;
     QString error;
 
@@ -80,6 +81,49 @@ struct EngineResult
     QVector<Inter> inters;
     int relationCount = 0;
     QString raw;                    ///< Verbatim output, for the log tab.
+};
+
+/// The producer of one stream of stage snapshots.
+enum class Engine
+{
+    Rust,
+    Java,
+};
+
+/// A stage is kept after it reaches a terminal state.  That is intentional:
+/// losing GRID merely because a later HEADS attempt fails is the opposite of
+/// useful when the window is being used to diagnose a port.
+enum class StageState
+{
+    NotRequested,
+    Queued,
+    Starting,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+};
+
+/// A marker emitted by a streaming engine process. The recognition payload is
+/// deliberately not nested in the marker: it is the existing byte-stable
+/// stage report framed between `stage_started` and `stage_completed` markers.
+struct StreamEvent
+{
+    QString event;
+    QString stage;
+    int sequence = -1;
+    std::optional<double> elapsedMillis;
+    std::optional<bool> success;
+    QString message;
+};
+
+/// One immutable observation of one engine at one stage in one attempt.
+struct StageSnapshot
+{
+    StageState state = StageState::Queued;
+    EngineResult result;
+    QString message;
+    int sequence = -1;
 };
 
 /// One row of the comparison: the same thing as each engine saw it.

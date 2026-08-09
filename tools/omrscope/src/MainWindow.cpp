@@ -6,7 +6,6 @@
 
 #include <QApplication>
 #include <QCheckBox>
-#include <QtConcurrent/QtConcurrentRun>
 #include <QComboBox>
 #include <QFile>
 #include <QFileInfo>
@@ -24,6 +23,7 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTextBrowser>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 
 namespace omrscope {
@@ -47,11 +47,11 @@ constexpr StageStatus kStages[] = {
     {"BINARY", "native", "adaptive threshold; 9/9 example rasters bit-identical"},
     {"SCALE", "native", "line, interline and beam estimates exact on 4 pages and the branch cases"},
     {"GRID", "native", "staves, lines, barlines, systems, SIG; 420/420 barlines, all grades exact"},
-    {"HEADERS", "lifecycle", "candidate sourcing, classifier ranking and glyph components all native; needs them wired to the clef/key/time recognizers"},
-    {"STEM_SEEDS", "lifecycle", "stem scale and checker native; raw StickFactory geometry is a seam"},
-    {"BEAMS", "native", "beam recognition exact on all 8 sheets: 787/787 raw beams, geometry and six impacts and grade. The only end-of-step gap is multiple-rest detection, a separate recogniser that consumes one beam. extendToStem awaits STEM_SEEDS"},
-    {"LEDGERS", "lifecycle", "filter, candidates and all seven impacts ported; blocked on BEAMS"},
-    {"HEADS", "lifecycle", "blocked on MusicFont: head recognition template-matches font-derived symbols, and Java itself cannot reach HEADS without them"},
+    {"HEADERS", "native", "clef, key and time columns compose from live GRID state and publish schema-1 products"},
+    {"STEM_SEEDS", "native", "native checker/materialization consumes GRID and HEADERS and publishes accepted seed evidence"},
+    {"BEAMS", "native", "beam recognition exact on all 8 sheets: 787/787 raw beams, geometry and six impacts and grade; native STEM_SEEDS feed measured extension, hooks and grouping"},
+    {"LEDGERS", "native", "native candidates, filtering and seven-impact grading compose after BEAMS"},
+    {"HEADS", "native", "native GRID → HEADERS → STEM_SEEDS → BEAMS → LEDGERS → HEADS composition publishes identity-free final heads"},
     {"STEMS", "lifecycle", ""},
     {"REDUCTION", "lifecycle", ""},
     {"CUE_BEAMS", "lifecycle", ""},
@@ -64,6 +64,59 @@ constexpr StageStatus kStages[] = {
     {"RHYTHMS", "lifecycle", ""},
     {"PAGE", "lifecycle", "no MusicXML export at all"},
 };
+
+const QStringList &streamStages()
+{
+    static const QStringList stages{
+        QStringLiteral("GRID"), QStringLiteral("HEADERS"), QStringLiteral("STEM_SEEDS"),
+        QStringLiteral("BEAMS"), QStringLiteral("LEDGERS"), QStringLiteral("HEADS"),
+    };
+    return stages;
+}
+
+QString stateText(StageState state)
+{
+    switch (state) {
+    case StageState::NotRequested: return QObject::tr("Not selected");
+    case StageState::Queued: return QObject::tr("Queued");
+    case StageState::Starting: return QObject::tr("Starting");
+    case StageState::Running: return QObject::tr("Running");
+    case StageState::Completed: return QObject::tr("Complete");
+    case StageState::Failed: return QObject::tr("Failed");
+    case StageState::Cancelled: return QObject::tr("Cancelled");
+    }
+    return {};
+}
+
+QString stageCell(const StageSnapshot &snapshot)
+{
+    QString text = stateText(snapshot.state);
+    if (snapshot.state == StageState::Completed) {
+        text += QStringLiteral(" · %1 inters · %2 ms")
+                    .arg(snapshot.result.inters.size())
+                    .arg(QString::number(snapshot.result.millis, 'f', 1));
+    } else if ((snapshot.state == StageState::Failed || snapshot.state == StageState::Cancelled)
+               && !snapshot.message.isEmpty()) {
+        text += QStringLiteral(" · %1").arg(snapshot.message.left(90));
+    }
+    return text;
+}
+
+QString comparisonCell(const StageSnapshot &rust, const StageSnapshot &java)
+{
+    if (rust.state == StageState::Completed && java.state == StageState::Completed) {
+        const QVector<Pairing> rows = pair(rust.result, java.result, QString());
+        int different = 0;
+        for (const Pairing &row : rows) {
+            if (row.rust && row.java && !row.agrees()) {
+                ++different;
+            }
+        }
+        return different == 0 ? QObject::tr("Same-stage ready · no grade differences")
+                              : QObject::tr("Same-stage ready · %1 grade differences").arg(different);
+    }
+    return QObject::tr("Waiting for both engines");
+}
 
 QString colourFor(const QString &state)
 {
@@ -89,10 +142,8 @@ MainWindow::MainWindow(QDir repository, QWidget *parent)
     loadInputs();
     loadStatus();
 
-    connect(&rustWatcher_, &QFutureWatcher<EngineResult>::finished, this,
-            &MainWindow::rustFinished);
-    connect(&javaWatcher_, &QFutureWatcher<EngineResult>::finished, this,
-            &MainWindow::javaFinished);
+    connect(&runner_, &EngineRunner::stageEvent, this, &MainWindow::stageEvent);
+    connect(&runner_, &EngineRunner::streamFinished, this, &MainWindow::streamFinished);
 }
 
 void MainWindow::buildUi()
@@ -104,27 +155,37 @@ void MainWindow::buildUi()
     auto *controls = new QHBoxLayout;
     input_ = new QComboBox;
     input_->setMinimumWidth(360);
+    input_->setAccessibleName(tr("Recognition input"));
     sheet_ = new QSpinBox;
     sheet_->setRange(1, 999);
     sheet_->setPrefix(tr("sheet "));
+    sheet_->setAccessibleName(tr("Sheet number"));
     step_ = new QComboBox;
     step_->addItems({QStringLiteral("GRID"), QStringLiteral("HEADERS"),
                      QStringLiteral("STEM_SEEDS"), QStringLiteral("BEAMS"),
-                     QStringLiteral("LEDGERS")});
+                     QStringLiteral("LEDGERS"), QStringLiteral("HEADS")});
+    step_->setAccessibleName(tr("Last recognition stage to run"));
     withRust_ = new QCheckBox(tr("Rust"));
     withRust_->setChecked(true);
+    withRust_->setAccessibleName(tr("Run Rust recognition"));
     withJava_ = new QCheckBox(tr("Java"));
     withJava_->setChecked(true);
+    withJava_->setAccessibleName(tr("Run Java recognition"));
     runButton_ = new QPushButton(tr("Run"));
+    runButton_->setAccessibleName(tr("Run recognition"));
+    cancelButton_ = new QPushButton(tr("Cancel"));
+    cancelButton_->setEnabled(false);
+    cancelButton_->setAccessibleName(tr("Cancel running recognition"));
 
     controls->addWidget(new QLabel(tr("Sheet:")));
     controls->addWidget(input_, 1);
     controls->addWidget(sheet_);
-    controls->addWidget(new QLabel(tr("Java step:")));
+    controls->addWidget(new QLabel(tr("Through stage:")));
     controls->addWidget(step_);
     controls->addWidget(withRust_);
     controls->addWidget(withJava_);
     controls->addWidget(runButton_);
+    controls->addWidget(cancelButton_);
     outer->addLayout(controls);
 
     progress_ = new QProgressBar;
@@ -136,7 +197,22 @@ void MainWindow::buildUi()
     summary_ = new QLabel(tr("Nothing run yet."));
     summary_->setTextFormat(Qt::RichText);
     summary_->setWordWrap(true);
+    summary_->setAccessibleName(tr("Recognition status"));
     outer->addWidget(summary_);
+
+    // A persistent, selectable timeline is the live state of the run. It is
+    // separate from the results tabs so a later failure cannot erase useful
+    // completed-stage evidence.
+    timeline_ = new QTreeWidget;
+    timeline_->setColumnCount(4);
+    timeline_->setHeaderLabels({tr("Stage"), tr("Rust"), tr("Java"), tr("Comparison")});
+    timeline_->setRootIsDecorated(false);
+    timeline_->setSelectionMode(QAbstractItemView::SingleSelection);
+    timeline_->setAccessibleName(tr("Recognition stage timeline"));
+    timeline_->setAccessibleDescription(
+        tr("Select a completed or failed stage to inspect its Rust and Java snapshots."));
+    timeline_->setMaximumHeight(205);
+    outer->addWidget(timeline_);
 
     // --- tabs -----------------------------------------------------------
     auto *tabs = new QTabWidget;
@@ -188,6 +264,7 @@ void MainWindow::buildUi()
     table_ = new QTableWidget;
     table_->setAlternatingRowColors(true);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table_->setAccessibleName(tr("Same-stage recognition comparison"));
     interLayout->addWidget(table_, 1);
     tabs->addTab(interTab, tr("Inters"));
     connect(filter_, &QComboBox::currentTextChanged, this, &MainWindow::refreshFilter);
@@ -207,6 +284,8 @@ void MainWindow::buildUi()
     setCentralWidget(central);
 
     connect(runButton_, &QPushButton::clicked, this, &MainWindow::run);
+    connect(cancelButton_, &QPushButton::clicked, this, &MainWindow::cancel);
+    connect(timeline_, &QTreeWidget::itemSelectionChanged, this, &MainWindow::stageSelected);
 }
 
 void MainWindow::loadInputs()
@@ -235,7 +314,7 @@ void MainWindow::loadStatus()
 {
     QString html = QStringLiteral(
         "<h2>Port status</h2>"
-        "<p>Four of the twenty pipeline stages are native. The rest have their "
+        "<p>Nine of the twenty pipeline stages are native and published through HEADS. The rest have their "
         "step lifecycle, ownership and failure semantics ported, but not the "
         "recognition inside them &mdash; so they run, and produce nothing.</p>"
         "<table cellpadding='6' cellspacing='0' width='100%'>"
@@ -307,6 +386,7 @@ void MainWindow::setBusy(bool busy, const QString &what)
     withRust_->setEnabled(!busy);
     withJava_->setEnabled(!busy);
     progress_->setVisible(busy);
+    cancelButton_->setEnabled(busy);
     if (busy) {
         progress_->setFormat(what);
     }
@@ -314,7 +394,7 @@ void MainWindow::setBusy(bool busy, const QString &what)
 
 void MainWindow::run()
 {
-    if (rustWatcher_.isRunning() || javaWatcher_.isRunning()) {
+    if (runner_.isRunning(Engine::Rust) || runner_.isRunning(Engine::Java)) {
         return;
     }
     pendingInput_ = input_->currentText();
@@ -326,6 +406,36 @@ void MainWindow::run()
 
     rust_ = EngineResult{};
     java_ = EngineResult{};
+    stageSnapshots_.clear();
+    timelineRows_.clear();
+    timeline_->clear();
+    const int through = streamStages().indexOf(pendingStep_);
+    if (through < 0) {
+        summary_->setText(tr("Unsupported streaming stage: %1").arg(pendingStep_));
+        return;
+    }
+    followLatest_ = true;
+    selectedStage_.clear();
+    rustRequested_ = withRust_->isChecked();
+    javaRequested_ = withJava_->isChecked();
+    rustFinished_ = false;
+    javaFinished_ = false;
+    rustSucceeded_ = false;
+    javaSucceeded_ = false;
+    cancellationRequested_ = false;
+    rustTerminalMessage_.clear();
+    javaTerminalMessage_.clear();
+    for (int at = 0; at <= through; ++at) {
+        StagePair pair;
+        if (!rustRequested_) {
+            pair.rust.state = StageState::NotRequested;
+        }
+        if (!javaRequested_) {
+            pair.java.state = StageState::NotRequested;
+        }
+        stageSnapshots_.insert(streamStages()[at], pair);
+    }
+    updateTimeline();
     // The sheet is rasterised on the UI thread on purpose: it is Qt decoding an
     // image, it takes milliseconds, and having the page appear immediately is
     // most of what makes the wait for the engines tolerable.
@@ -333,45 +443,231 @@ void MainWindow::run()
     page_->setResults(rust_, java_);
     table_->setRowCount(0);
 
-    if (withRust_->isChecked()) {
-        setBusy(true, tr("Running Rust…"));
-        summary_->setText(tr("Running Rust…"));
-        rustWatcher_.setFuture(QtConcurrent::run([this] {
-            // Only reads immutable state on the runner, so it is safe off the
-            // UI thread; the QProcess it creates lives entirely in this task.
-            return runner_.runRust(pendingInput_, pendingSheet_);
-        }));
+    if (!rustRequested_ && !javaRequested_) {
+        summary_->setText(tr("Choose Rust, Java, or both."));
         return;
     }
-    startJava();
+    setBusy(true, tr("Starting Rust and Java recognition…"));
+    summary_->setText(tr("Rust and Java are running concurrently; completed stages remain selectable."));
+    if (rustRequested_) {
+        runner_.startRust(pendingInput_, pendingSheet_, pendingStep_);
+    }
+    if (javaRequested_) {
+        runner_.startJava(pendingInput_, pendingSheet_, pendingStep_);
+    }
 }
 
-void MainWindow::rustFinished()
+void MainWindow::cancel()
 {
-    rust_ = rustWatcher_.result();
-    // Show the Rust half at once rather than making it wait on Gradle, which
-    // can take a minute and has nothing to do with it.
-    showResults();
-    startJava();
+    cancellationRequested_ = true;
+    runner_.cancel(Engine::Rust);
+    runner_.cancel(Engine::Java);
+    summary_->setText(tr("Cancelling active stages. Completed snapshots remain available."));
 }
 
-void MainWindow::startJava()
+void MainWindow::setStageState(Engine engine, const StreamEvent &event,
+                               const EngineResult &result)
 {
-    if (!withJava_->isChecked()) {
-        setBusy(false);
-        showResults();
+    if (event.stage.isEmpty() || !stageSnapshots_.contains(event.stage)) {
         return;
     }
-    setBusy(true, tr("Running Java (Gradle startup dominates this)…"));
-    javaWatcher_.setFuture(QtConcurrent::run([this] {
-        return runner_.runJava(pendingInput_, pendingSheet_, pendingStep_);
-    }));
+    StagePair &pair = stageSnapshots_[event.stage];
+    StageSnapshot &snapshot = engine == Engine::Rust ? pair.rust : pair.java;
+    if (snapshot.state == StageState::Completed) {
+        // A completed snapshot is immutable even if a corrupt producer sends
+        // a later conflicting marker for the same stage.
+        return;
+    }
+    pair.comparisonReady = false;
+    snapshot.result = result;
+    snapshot.message = event.message;
+    snapshot.sequence = event.sequence;
+    if (event.event == QLatin1String("stage_started")) {
+        snapshot.state = StageState::Running;
+    } else if (event.event == QLatin1String("stage_completed")) {
+        snapshot.state = StageState::Completed;
+    } else if (event.event == QLatin1String("stage_cancelled")) {
+        snapshot.state = StageState::Cancelled;
+    } else if (event.event == QLatin1String("stage_failed")) {
+        snapshot.state = StageState::Failed;
+    }
 }
 
-void MainWindow::javaFinished()
+void MainWindow::stageEvent(Engine engine, StreamEvent event, EngineResult result)
 {
-    java_ = javaWatcher_.result();
-    setBusy(false);
+    setStageState(engine, event, result);
+    updateTimeline();
+    if (followLatest_) {
+        followNewestCommonStage();
+        if (selectedStage_.isEmpty() && !event.stage.isEmpty()) {
+            selectStage(event.stage);
+        }
+    }
+
+    const QString engineName = engine == Engine::Rust ? tr("Rust") : tr("Java");
+    if (event.event == QLatin1String("stage_started")) {
+        summary_->setText(tr("%1 is running %2.").arg(engineName, event.stage));
+    } else if (event.event == QLatin1String("stage_failed")) {
+        summary_->setText(tr("%1 failed at %2: %3").arg(engineName, event.stage, event.message));
+    }
+}
+
+void MainWindow::streamFinished(Engine engine, bool success, bool cancelled,
+                                const QString &message)
+{
+    if (engine == Engine::Rust) {
+        rustFinished_ = true;
+        rustSucceeded_ = success;
+        rustTerminalMessage_ = message;
+    } else {
+        javaFinished_ = true;
+        javaSucceeded_ = success;
+        javaTerminalMessage_ = message;
+    }
+    // A stopped stream can leave later rows queued. They were not executed;
+    // make that explicit while preserving all completed predecessors.
+    for (const QString &stage : streamStages()) {
+        if (!stageSnapshots_.contains(stage)) {
+            continue;
+        }
+        StageSnapshot &snapshot = engine == Engine::Rust
+            ? stageSnapshots_[stage].rust : stageSnapshots_[stage].java;
+        if (snapshot.state == StageState::Queued || snapshot.state == StageState::Starting
+            || snapshot.state == StageState::Running) {
+            snapshot.state = cancelled ? StageState::Cancelled : StageState::Failed;
+            snapshot.message = cancelled ? tr("not reached after cancellation")
+                                         : message;
+        }
+    }
+    updateTimeline();
+    if (followLatest_) {
+        followNewestCommonStage();
+    }
+    const bool busy = (rustRequested_ && !rustFinished_) || (javaRequested_ && !javaFinished_);
+    setBusy(busy, tr("Recognition running…"));
+    if (!busy) {
+        if (!selectedStage_.isEmpty()) {
+            selectStage(selectedStage_);
+        } else {
+            summary_->setText(terminalSummaryHtml());
+        }
+    } else if (!success) {
+        const QString engineLabel = engine == Engine::Rust ? tr("Rust") : tr("Java");
+        summary_->setText(tr("%1 run failed while the other engine continues: %2")
+                              .arg(engineLabel, message.toHtmlEscaped()));
+    }
+}
+
+QString MainWindow::terminalSummaryHtml() const
+{
+    const bool finished = (!rustRequested_ || rustFinished_)
+        && (!javaRequested_ || javaFinished_);
+    if (!finished) {
+        return {};
+    }
+    if (cancellationRequested_) {
+        return tr("<b>Run</b>: cancelled; completed stages are retained.");
+    }
+    QStringList failures;
+    if (rustRequested_ && !rustSucceeded_) {
+        failures << tr("Rust: %1").arg(rustTerminalMessage_.toHtmlEscaped());
+    }
+    if (javaRequested_ && !javaSucceeded_) {
+        failures << tr("Java: %1").arg(javaTerminalMessage_.toHtmlEscaped());
+    }
+    if (!failures.isEmpty()) {
+        return tr("<b>Run failed</b>: %1").arg(failures.join(QStringLiteral("; ")));
+    }
+    return tr("<b>Run</b>: complete.");
+}
+
+void MainWindow::updateTimeline()
+{
+    for (const QString &stage : streamStages()) {
+        if (!stageSnapshots_.contains(stage)) {
+            continue;
+        }
+        QTreeWidgetItem *row = timelineRows_.value(stage, nullptr);
+        if (!row) {
+            row = new QTreeWidgetItem(timeline_);
+            row->setData(0, Qt::UserRole, stage);
+            timelineRows_.insert(stage, row);
+        }
+        StagePair &pair = stageSnapshots_[stage];
+        if (!pair.comparisonReady && pair.rust.state == StageState::Completed
+            && pair.java.state == StageState::Completed) {
+            pair.comparison = comparisonCell(pair.rust, pair.java);
+            pair.comparisonReady = true;
+        }
+        row->setText(0, stage);
+        row->setText(1, stageCell(pair.rust));
+        row->setText(2, stageCell(pair.java));
+        row->setText(3, pair.comparisonReady ? pair.comparison
+                                             : comparisonCell(pair.rust, pair.java));
+        row->setToolTip(1, pair.rust.message);
+        row->setToolTip(2, pair.java.message);
+    }
+    timeline_->resizeColumnToContents(0);
+    timeline_->resizeColumnToContents(1);
+    timeline_->resizeColumnToContents(2);
+}
+
+void MainWindow::followNewestCommonStage()
+{
+    QString newest;
+    for (const QString &stage : streamStages()) {
+        if (!stageSnapshots_.contains(stage)) {
+            continue;
+        }
+        const StagePair &pair = stageSnapshots_[stage];
+        const bool ready = rustRequested_ && javaRequested_
+            ? pair.rust.state == StageState::Completed && pair.java.state == StageState::Completed
+            : rustRequested_ ? pair.rust.state == StageState::Completed
+                             : pair.java.state == StageState::Completed;
+        if (ready) {
+            newest = stage;
+        }
+    }
+    if (!newest.isEmpty()) {
+        selectStage(newest);
+    }
+}
+
+void MainWindow::stageSelected()
+{
+    const QList<QTreeWidgetItem *> selected = timeline_->selectedItems();
+    if (selected.isEmpty()) {
+        return;
+    }
+    selectStage(selected.first()->data(0, Qt::UserRole).toString(), !selectingProgrammatically_);
+}
+
+void MainWindow::selectStage(const QString &stage, bool fromUser)
+{
+    if (!stageSnapshots_.contains(stage)) {
+        return;
+    }
+    if (fromUser) {
+        followLatest_ = false;
+    }
+    selectedStage_ = stage;
+    QTreeWidgetItem *row = timelineRows_.value(stage, nullptr);
+    if (row && timeline_->currentItem() != row) {
+        selectingProgrammatically_ = true;
+        timeline_->setCurrentItem(row);
+        selectingProgrammatically_ = false;
+    }
+    const StagePair &pair = stageSnapshots_[stage];
+    rust_ = pair.rust.result;
+    java_ = pair.java.result;
+    rust_.engine = QStringLiteral("rust");
+    java_.engine = QStringLiteral("java");
+    if (pair.rust.state != StageState::Completed && rust_.error.isEmpty()) {
+        rust_.error = stateText(pair.rust.state);
+    }
+    if (pair.java.state != StageState::Completed && java_.error.isEmpty()) {
+        java_.error = stateText(pair.java.state);
+    }
     showResults();
 }
 
@@ -408,7 +704,8 @@ void MainWindow::showResults()
             .arg(QString::number(result.millis, 'f', 1), result.timingNote);
     };
 
-    QString summary = describeEngine(rust_, QStringLiteral("Rust"))
+    QString summary = QStringLiteral("<b>%1</b><br>").arg(selectedStage_.toHtmlEscaped())
+        + describeEngine(rust_, QStringLiteral("Rust"))
         + QStringLiteral("<br>") + describeEngine(java_, QStringLiteral("Java"));
 
     if (rust_.ran && java_.ran && rust_.millis > 0.0 && java_.millis > 0.0) {
@@ -416,10 +713,14 @@ void MainWindow::showResults()
                                   " (like for like on the engine, not the process).")
                        .arg(QString::number(java_.millis / rust_.millis, 'f', 1));
     }
+    const QString terminal = terminalSummaryHtml();
+    if (!terminal.isEmpty()) {
+        summary += QStringLiteral("<br>") + terminal;
+    }
     summary_->setText(summary);
 
-    log_->setPlainText(QStringLiteral("=== Rust ===\n%1\n\n=== Java ===\n%2")
-                           .arg(rust_.raw.isEmpty() ? rust_.error : rust_.raw,
+    log_->setPlainText(QStringLiteral("=== Rust %1 ===\n%2\n\n=== Java %1 ===\n%3")
+                           .arg(selectedStage_, rust_.raw.isEmpty() ? rust_.error : rust_.raw,
                                 java_.raw.isEmpty() ? java_.error : java_.raw));
     refreshFilter();
 }

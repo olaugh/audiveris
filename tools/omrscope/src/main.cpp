@@ -41,7 +41,7 @@ int compare(const QDir &repository, const QString &input, int sheet, const QStri
     QTextStream out(stdout);
     omrscope::EngineRunner runner(repository);
 
-    const omrscope::EngineResult rust = runner.runRust(input, sheet);
+    const omrscope::EngineResult rust = runner.runRust(input, sheet, step);
     const omrscope::EngineResult java = runner.runJava(input, sheet, step);
 
     auto report = [&out](const omrscope::EngineResult &result) {

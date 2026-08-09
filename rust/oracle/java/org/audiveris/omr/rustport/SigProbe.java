@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 import org.audiveris.omr.CLI;
 import org.audiveris.omr.Main;
@@ -66,6 +67,15 @@ public class SigProbe
     public static void main (String[] args)
         throws Exception
     {
+        // Keep the established three-part target invocation byte-for-byte
+        // unchanged. The explicit leading argument is installed only by the
+        // new `sigStreamProbe` Gradle task below.
+        if ((args.length > 0) && "--stream".equals(args[0])) {
+            runStream(args, 1);
+            System.exit(0);
+            return;
+        }
+
         // The step engine reads Main.getCli() mid-step; driving a Book directly
         // leaves it null. See StaffImpactsProbe for why the -run hook cannot be
         // used instead.
@@ -184,6 +194,287 @@ public class SigProbe
         }
 
         System.exit(0);
+    }
+
+    /**
+     * Run the published port-comparison stages one at a time and frame each
+     * existing SigProbe snapshot with small JSON control records.
+     *
+     * <p>The payload is deliberately still this probe's ordinary line-oriented
+     * text. A front end can buffer everything strictly between the markers and
+     * feed it into the legacy parser; no second, lossy Java result schema is
+     * introduced just to make the transport live.
+     */
+    private static void runStream (String[] args,
+                                   int firstTarget)
+        throws Exception
+    {
+        final StreamEvents events = new StreamEvents();
+        final long runStartedAt = System.nanoTime();
+        boolean success = false;
+        events.runStarted();
+
+        try {
+            if (firstTarget >= args.length) {
+                throw new IllegalArgumentException("omrscope stream requires at least one target");
+            }
+            // The step engine reads Main.getCli() mid-step; driving a Book
+            // directly leaves it null. This matches the ordinary probe setup.
+            final CLI cli = new CLI(WellKnowns.TOOL_NAME);
+            cli.parseParameters("-batch", "-step", "GRID");
+            final Field field = Main.class.getDeclaredField("cli");
+            field.setAccessible(true);
+            field.set(null, cli);
+            org.audiveris.omr.ui.symbol.MusicFont.checkMusicFont();
+
+            for (int index = firstTarget; index < args.length; index++) {
+                final String arg = args[index];
+                final String[] parts = arg.split(":");
+                final Path path = Paths.get(parts[0]).toAbsolutePath();
+                final int wanted = Integer.parseInt(parts[1]);
+                final OmrStep target = OmrStep.valueOf(parts[2]);
+                if ((target.compareTo(OmrStep.GRID) < 0)
+                        || (target.compareTo(OmrStep.HEADS) > 0)) {
+                    throw new IllegalArgumentException(
+                            "omrscope stream supports GRID through HEADS, not " + target);
+                }
+
+                final Book book = new Book(path);
+                book.createStubs();
+
+                boolean found = false;
+                for (SheetStub stub : book.getValidStubs()) {
+                    if (stub.getNumber() != wanted) {
+                        continue;
+                    }
+                    found = true;
+
+                    // Calling reachStep on each successive target keeps one
+                    // live Java sheet and the source's own reset/step ordering.
+                    // Each printed snapshot is therefore precisely the state
+                    // the engine leaves when that stage is complete.
+                    for (OmrStep stage : streamStagesThrough(target)) {
+                        streamStage(events, path, wanted, stub, stage);
+                    }
+                }
+                if (!found) {
+                    throw new IllegalArgumentException(
+                            "omrscope stream selected no sheet " + wanted + " in " + path);
+                }
+            }
+            success = true;
+        } finally {
+            events.runFinished(success, System.nanoTime() - runStartedAt);
+        }
+    }
+
+    private static List<OmrStep> streamStagesThrough (OmrStep target)
+    {
+        final List<OmrStep> stages = new ArrayList<>();
+        for (OmrStep stage : new OmrStep[] {
+                OmrStep.GRID,
+                OmrStep.HEADERS,
+                OmrStep.STEM_SEEDS,
+                OmrStep.BEAMS,
+                OmrStep.LEDGERS,
+                OmrStep.HEADS }) {
+            stages.add(stage);
+            if (stage == target) {
+                break;
+            }
+        }
+        return stages;
+    }
+
+    private static void streamStage (StreamEvents events,
+                                     Path path,
+                                     int wanted,
+                                     SheetStub stub,
+                                     OmrStep stage)
+        throws Exception
+    {
+        events.stageStarted(stage);
+        final long startedAt = System.nanoTime();
+        try {
+            stub.reachStep(stage, false);
+        } catch (Exception ex) {
+            events.stageFailed(stage, System.nanoTime() - startedAt, rootMessage(ex));
+            throw ex;
+        }
+
+        // Recognition timing is captured before serialising the payload into
+        // the pipe. The viewer labels it as engine time, not UI I/O time.
+        final long recognitionNanos = System.nanoTime() - startedAt;
+        printStreamSnapshot(path, wanted, stage, stub, recognitionNanos);
+        // `println` is normally auto-flushed on the console, but a QProcess
+        // pipe is the point of this mode, so make the visibility guarantee
+        // explicit before advertising a completed stage.
+        System.out.flush();
+        events.stageCompleted(stage, recognitionNanos);
+    }
+
+    /** Prints the ordinary SigProbe text block, unchanged, for one checkpoint. */
+    private static void printStreamSnapshot (Path path,
+                                             int wanted,
+                                             OmrStep step,
+                                             SheetStub stub,
+                                             long recognitionNanos)
+    {
+        System.out.println("sheet " + path.getFileName() + "#" + wanted + " " + step);
+        System.out.println(String.format(
+                "timing %.3f", recognitionNanos / 1_000_000.0));
+
+        final Sheet sheet = stub.getSheet();
+        final ByteProcessor noStaff = sheet.getPicture().getSource(Picture.SourceKey.NO_STAFF);
+        if (noStaff != null) {
+            long hash = 0xcbf29ce484222325L;
+            for (int i = 0, n = noStaff.getWidth() * noStaff.getHeight(); i < n; i++) {
+                hash = (hash ^ (noStaff.get(i) & 0xff)) * 0x100000001b3L;
+            }
+            System.out.println(String.format("nostaff %d %d %016x",
+                    noStaff.getWidth(), noStaff.getHeight(), hash));
+        }
+
+        for (org.audiveris.omr.sheet.Staff staff : sheet.getStaffManager().getStaves()) {
+            System.out.println("staff " + staff.getId() + " "
+                    + staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.LEFT) + " "
+                    + staff.getAbscissa(org.audiveris.omr.util.HorizontalSide.RIGHT) + " "
+                    + staff.getLines().size());
+        }
+
+        final java.util.List<org.audiveris.omr.sheet.Staff> allStaves =
+                sheet.getStaffManager().getStaves();
+        for (int y = 0; y < sheet.getHeight(); y += 64) {
+            for (int x = 0; x < sheet.getWidth(); x += 64) {
+                final org.audiveris.omr.sheet.Staff closest =
+                        org.audiveris.omr.sheet.StaffManager.getClosestStaff(
+                                new java.awt.geom.Point2D.Double(x, y), allStaves);
+                System.out.println("closest " + x + " " + y + " "
+                        + ((closest != null) ? closest.getId() : 0));
+            }
+        }
+
+        for (SystemInfo system : sheet.getSystems()) {
+            final SIGraph sig = system.getSig();
+            final List<Inter> inters = new ArrayList<>(sig.vertexSet());
+            inters.sort(Comparator.comparingInt(Inter::getId));
+            for (Inter inter : inters) {
+                System.out.println(inter(system.getId(), inter));
+            }
+
+            final List<Relation> relations = new ArrayList<>(sig.edgeSet());
+            relations.sort(
+                    Comparator.comparingInt((Relation r) -> sig.getEdgeSource(r).getId())
+                            .thenComparingInt(r -> sig.getEdgeTarget(r).getId())
+                            .thenComparing(r -> r.getClass().getSimpleName()));
+            for (Relation relation : relations) {
+                System.out.println("relation " + system.getId() + " "
+                        + sig.getEdgeSource(relation).getId() + " "
+                        + sig.getEdgeTarget(relation).getId() + " "
+                        + relation.getClass().getSimpleName());
+            }
+        }
+    }
+
+    private static String rootMessage (Exception ex)
+    {
+        Throwable cause = ex;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return String.valueOf(cause.getMessage());
+    }
+
+    /** Emits only protocol framing; stdout payloads remain the legacy records. */
+    private static class StreamEvents
+    {
+        private long sequence;
+
+        void runStarted ()
+        {
+            marker("run_started", "");
+        }
+
+        void stageStarted (OmrStep stage)
+        {
+            marker("stage_started", "\"stage\":\"" + stage + "\"");
+        }
+
+        void stageCompleted (OmrStep stage,
+                             long elapsedNanos)
+        {
+            marker(
+                    "stage_completed",
+                    "\"stage\":\"" + stage + "\",\"elapsed_ms\":"
+                            + elapsedMillis(elapsedNanos));
+        }
+
+        void stageFailed (OmrStep stage,
+                          long elapsedNanos,
+                          String message)
+        {
+            marker(
+                    "stage_failed",
+                    "\"stage\":\"" + stage + "\",\"elapsed_ms\":"
+                            + elapsedMillis(elapsedNanos) + ",\"message\":" + json(message));
+        }
+
+        void runFinished (boolean success,
+                          long elapsedNanos)
+        {
+            marker("run_finished", "\"success\":" + success + ",\"elapsed_ms\":"
+                    + elapsedMillis(elapsedNanos));
+        }
+
+        private void marker (String event,
+                             String fields)
+        {
+            sequence++;
+            final String suffix = fields.isEmpty() ? "" : "," + fields;
+            System.out.println("@omrscope {\"stream_schema\":1,\"engine\":\"java\",\"event\":\""
+                    + event + "\",\"sequence\":" + sequence + suffix + "}");
+            System.out.flush();
+        }
+
+        private static String elapsedMillis (long elapsedNanos)
+        {
+            return String.format(Locale.ROOT, "%.3f", elapsedNanos / 1_000_000.0);
+        }
+
+        private static String json (String value)
+        {
+            final StringBuilder quoted = new StringBuilder(value.length() + 2);
+            quoted.append('"');
+            for (int index = 0; index < value.length(); index++) {
+                final char character = value.charAt(index);
+                switch (character) {
+                case '"':
+                    quoted.append("\\\"");
+                    break;
+                case '\\':
+                    quoted.append("\\\\");
+                    break;
+                case '\n':
+                    quoted.append("\\n");
+                    break;
+                case '\r':
+                    quoted.append("\\r");
+                    break;
+                case '\t':
+                    quoted.append("\\t");
+                    break;
+                default:
+                    if (character < 0x20) {
+                        quoted.append(String.format(Locale.ROOT, "\\u%04x", (int) character));
+                    } else {
+                        quoted.append(character);
+                    }
+                    break;
+                }
+            }
+            quoted.append('"');
+            return quoted.toString();
+        }
     }
 
     private static String inter (int system,

@@ -3,6 +3,7 @@
 
 #include "Model.h"
 
+#include <QByteArray>
 #include <QSize>
 #include <QString>
 #include <QVector>
@@ -14,6 +15,17 @@ EngineResult parseRustJson(const QString &text);
 
 /// Parses `SigProbe`'s line-oriented records.
 EngineResult parseSigProbe(const QString &text);
+
+/// Parses the JSON after an `@omrscope ` marker. The marker frames the
+/// unchanged per-stage payload, so only marker lines go through this parser.
+/// Both the early `stream_schema` spelling and the final `schema` spelling are
+/// accepted while producers are upgraded together.
+std::optional<StreamEvent> parseStreamMarker(const QString &json, Engine expectedEngine,
+                                             QString *error = nullptr);
+
+/// Pull complete UTF-8 lines from a chunked QProcess stream. The remaining
+/// unterminated suffix stays in `pending` for the next readyRead callback.
+QVector<QString> takeCompleteLines(QByteArray &pending);
 
 /// Matches the two engines' inters by staff and abscissa.
 ///

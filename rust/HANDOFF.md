@@ -32,6 +32,15 @@ invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
 -> LEDGERS -> HEADS, retains every upstream product, and adds identity-free
 final heads, source provenance, exact glyph evidence, beam decisions, and
 tally-scale rows without fabricating Java SIG or glyph IDs.
+
+`omrscope` now compares the two producers while they run: Rust and Java start
+independently, each publishes an immutable snapshot once it completes GRID,
+HEADERS, STEM_SEEDS, BEAMS, LEDGERS, or HEADS, and the viewer can select any
+retained snapshot. This is stage-boundary visibility only -- neither producer
+claims to stream individual recognition items while a stage is executing. The
+opt-in Rust `-stream-json` framing adds flushed `@omrscope` markers around the
+existing schema-1 documents; ordinary `-json` output and the ordinary Java
+oracle probe output remain compatible.
 `recognize_native_headers` now closes the integration issue that audit found:
 it accepts only live GRID state, derives real `HeadlessHeaderSystem` bar/group
 ownership, header starts, specific interlines, and connected-bar browse limits,
@@ -976,10 +985,19 @@ without disturbing a Homebrew or distribution `cargo`.
 
 ## Structured output
 
-`audiveris-cli -batch -step GRID|HEADERS|STEM_SEEDS|BEAMS|LEDGERS -json
+`audiveris-cli -batch -step GRID|HEADERS|STEM_SEEDS|BEAMS|LEDGERS|HEADS -json
 <input>` emits one JSON document per sheet, one per line. This is the
 interchange format, not a debug dump. It is shaped for an evaluation harness
 comparing several OMR systems and a repair loop that proposes corrections.
+
+For the desktop comparison tool only, adding `-stream-json` turns stdout into
+an additive line protocol. It flushes `@omrscope` schema-1 control markers for
+run and completed/failed stage boundaries, with the ordinary unchanged
+schema-1 document between a completed stage's start and completion markers.
+It emits one complete snapshot after each of GRID -> HEADERS -> STEM_SEEDS ->
+BEAMS -> LEDGERS -> HEADS up to the requested target. This is deliberately not
+an item-event feed: no partial or per-item recognition results are promised.
+Existing `-json` consumers must continue using the unframed default output.
 
 The checked-in `omrscope` consumer accepts the three schema-1 geometry forms:
 HEADERS' bounds-only `x/y/width/height` symbols, GRID's vertical

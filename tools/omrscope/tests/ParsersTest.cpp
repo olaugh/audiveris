@@ -2,6 +2,7 @@
 #include "Parsers.h"
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QTextStream>
 #include <cmath>
 
@@ -28,11 +29,13 @@ int main(int argc, char **argv)
     Q_UNUSED(application);
 
     const QString json = QStringLiteral(
-        R"json({"schema":1,"image":{"width":100,"height":200},"inters":[{"id":1,"kind":"THIN_BARLINE","staff":2,"grade":0.9,"median":{"x":12.5,"top":20.25,"bottom":80.75}},{"id":2,"kind":"BEAM","staff":2,"grade":0.8,"median":{"x1":10.25,"y1":30.5,"x2":50.75,"y2":31.5}},{"id":3,"kind":"LEDGER","staff":2,"grade":0.7,"median":{"x1":60.0,"y1":90.0,"x2":80.0}},{"id":4,"kind":"F_CLEF","staff":2,"grade":0.95,"bounds":{"x":21.25,"y":40.5,"width":17.5,"height":42.25}},{"id":5,"kind":"KEY_SIGNATURE","staff":2,"grade":0.6,"bounds":{"x":50.0,"y":40.0,"width":12.0}}],"stem_seeds":[{"system":1,"ordinal":7,"status":"accepted","kind":"VERTICAL_SEED","staff":2,"grade":0.88,"bounds":{"x":70.0,"y":50.0,"width":2.0,"height":40.0},"median":{"x1":70.5,"y1":50.0,"x2":71.5,"y2":89.0},"evidence":{"impacts":{"slope":0.91,"gap":0.82}}},{"system":1,"ordinal":8,"status":"accepted","kind":"VERTICAL_SEED","staff":2,"grade":0.4,"bounds":{"x":80.0,"y":50.0,"width":2.0},"median":{"x1":80.5,"y1":50.0,"x2":81.0}},{"system":1,"ordinal":9,"status":"rejected","kind":"VERTICAL_SEED","staff":2,"grade":0.1,"bounds":{"x":90.0,"y":50.0,"width":2.0,"height":40.0},"median":{"x1":90.5,"y1":50.0,"x2":91.0,"y2":89.0}}]})json");
+        R"json({"schema":1,"producer":{"name":"audiveris-rust","stage":"GRID"},"image":{"width":100,"height":200},"inters":[{"id":1,"kind":"THIN_BARLINE","staff":2,"grade":0.9,"median":{"x":12.5,"top":20.25,"bottom":80.75}},{"id":2,"kind":"BEAM","staff":2,"grade":0.8,"median":{"x1":10.25,"y1":30.5,"x2":50.75,"y2":31.5}},{"id":3,"kind":"LEDGER","staff":2,"grade":0.7,"median":{"x1":60.0,"y1":90.0,"x2":80.0}},{"id":4,"kind":"F_CLEF","staff":2,"grade":0.95,"bounds":{"x":21.25,"y":40.5,"width":17.5,"height":42.25}},{"id":5,"kind":"KEY_SIGNATURE","staff":2,"grade":0.6,"bounds":{"x":50.0,"y":40.0,"width":12.0}}],"stem_seeds":[{"system":1,"ordinal":7,"status":"accepted","kind":"VERTICAL_SEED","staff":2,"grade":0.88,"bounds":{"x":70.0,"y":50.0,"width":2.0,"height":40.0},"median":{"x1":70.5,"y1":50.0,"x2":71.5,"y2":89.0},"evidence":{"impacts":{"slope":0.91,"gap":0.82}}},{"system":1,"ordinal":8,"status":"accepted","kind":"VERTICAL_SEED","staff":2,"grade":0.4,"bounds":{"x":80.0,"y":50.0,"width":2.0},"median":{"x1":80.5,"y1":50.0,"x2":81.0}},{"system":1,"ordinal":9,"status":"rejected","kind":"VERTICAL_SEED","staff":2,"grade":0.1,"bounds":{"x":90.0,"y":50.0,"width":2.0,"height":40.0},"median":{"x1":90.5,"y1":50.0,"x2":91.0,"y2":89.0}}]})json");
 
     const omrscope::EngineResult result = omrscope::parseRustJson(json);
     bool ok = true;
     ok &= check(result.ran, "schema-1 document parses");
+    ok &= check(result.declaredStage == QLatin1String("GRID"),
+                "Rust payload retains its producer-declared stage");
     ok &= check(result.inters.size() == 7,
                 "inters and accepted stem-seed records are retained");
 
@@ -133,6 +136,67 @@ int main(int argc, char **argv)
         QStringLiteral(R"json({"schema":1,"image":{"width":10,"height":20}})json"));
     ok &= check(withoutSeeds.ran && withoutSeeds.inters.isEmpty(),
                 "absent STEM_SEEDS array contributes no zero geometry");
+
+    const omrscope::EngineResult heads = omrscope::parseRustJson(QStringLiteral(
+        R"json({"schema":1,"producer":{"stage":"HEADS"},"image":{"width":100,"height":200},"heads":{"systems":[{"system":4,"final_heads":[{"staff":9,"shape":"NOTEHEAD_BLACK","grade":0.8125,"bounds":{"x":11,"y":22,"width":9,"height":8}}]}]}})json"));
+    ok &= check(heads.ran && heads.inters.size() == 1 && heads.inters[0].kind == QLatin1String("HEAD")
+                    && heads.inters[0].shape == QLatin1String("NOTEHEAD_BLACK")
+                    && heads.inters[0].bounds.has_value(),
+                "identity-free final HEADS records become displayable viewer inters");
+
+    // QProcess can split either marker across readyRead calls. The common
+    // framer must retain the suffix and only hand complete lines to the marker
+    // parser or payload collector.
+    const QByteArray started =
+        "@omrscope {\"schema\":1,\"engine\":\"rust\",\"event\":\"stage_started\",\"stage\":\"GRID\",\"sequence\":1}\n";
+    const QByteArray payload = "{\"schema\":1,\"image\":{\"width\":1,\"height\":1}}\n";
+    const QByteArray completed =
+        "@omrscope {\"stream_schema\":1,\"engine\":\"rust\",\"event\":\"stage_completed\",\"stage\":\"GRID\",\"sequence\":2,\"elapsed_ms\":1.25}\n";
+    QByteArray pending;
+    QVector<QString> framed;
+    const QByteArray wire = started + payload + completed;
+    for (int at = 0; at < wire.size(); at += 7) {
+        pending += wire.mid(at, 7);
+        framed += omrscope::takeCompleteLines(pending);
+    }
+    ok &= check(pending.isEmpty() && framed.size() == 3,
+                "marker framing survives arbitrary QProcess chunk boundaries");
+    QString markerError;
+    const auto startMarker = omrscope::parseStreamMarker(framed[0].mid(10), omrscope::Engine::Rust,
+                                                           &markerError);
+    const auto completedMarker = omrscope::parseStreamMarker(framed[2].mid(10),
+                                                               omrscope::Engine::Rust, &markerError);
+    ok &= check(startMarker && completedMarker && startMarker->stage == QLatin1String("GRID")
+                    && completedMarker->elapsedMillis && close(*completedMarker->elapsedMillis, 1.25),
+                "both schema spellings frame a stage payload with timing");
+    const auto wrongEngine = omrscope::parseStreamMarker(framed[0].mid(10), omrscope::Engine::Java,
+                                                           &markerError);
+    ok &= check(!wrongEngine && !markerError.isEmpty(),
+                "wrong-engine marker is rejected instead of contaminating the other column");
+    const auto failedRun = omrscope::parseStreamMarker(
+        QStringLiteral("{\"schema\":1,\"engine\":\"rust\",\"event\":\"run_finished\",\"sequence\":3,\"success\":false}"),
+        omrscope::Engine::Rust, &markerError);
+    ok &= check(failedRun && failedRun->success && !*failedRun->success,
+                "run_finished false is retained as an explicit terminal verdict");
+    const omrscope::EngineResult validJava = omrscope::parseSigProbe(
+        QStringLiteral("sheet chula.png#1 HEADS\ntiming 2.5\n"));
+    ok &= check(validJava.ran && validJava.declaredStage == QLatin1String("HEADS"),
+                "Java payload retains the sheet record's declared stage");
+    const omrscope::EngineResult markerOnlyJava = omrscope::parseSigProbe(
+        QStringLiteral("timing 1.25\nthis is Gradle noise\n"));
+    ok &= check(!markerOnlyJava.ran && markerOnlyJava.error == QLatin1String("no sheet record"),
+                "marker-only or log-only Java completion cannot masquerade as a snapshot");
+
+    // Completed snapshots are values, not a single mutable whole-run result:
+    // later terminal state must leave the earlier selection available.
+    QHash<QString, omrscope::StageSnapshot> snapshots;
+    snapshots[QStringLiteral("GRID")].state = omrscope::StageState::Completed;
+    snapshots[QStringLiteral("GRID")].result = result;
+    snapshots[QStringLiteral("BEAMS")].state = omrscope::StageState::Cancelled;
+    ok &= check(snapshots.value(QStringLiteral("GRID")).state == omrscope::StageState::Completed
+                    && snapshots.value(QStringLiteral("GRID")).result.inters.size() == result.inters.size()
+                    && snapshots.value(QStringLiteral("BEAMS")).state == omrscope::StageState::Cancelled,
+                "a later cancellation retains the selectable completed predecessor snapshot");
 
     return ok ? 0 : 1;
 }

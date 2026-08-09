@@ -17,7 +17,7 @@ if(APPLE AND NOT DEFINED CMAKE_PREFIX_PATH)
     endif()
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Pdf Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Pdf)
 
 include(CTest)
 
@@ -29,7 +29,7 @@ add_executable(omrscope
     src/EngineRunner.cpp
 )
 
-target_link_libraries(omrscope PRIVATE Qt6::Widgets Qt6::Pdf Qt6::Concurrent)
+target_link_libraries(omrscope PRIVATE Qt6::Widgets Qt6::Pdf)
 target_compile_options(omrscope PRIVATE -Wall -Wextra)
 
 if(BUILD_TESTING)
@@ -41,4 +41,14 @@ if(BUILD_TESTING)
     target_link_libraries(omrscope-parser-tests PRIVATE Qt6::Widgets)
     target_compile_options(omrscope-parser-tests PRIVATE -Wall -Wextra)
     add_test(NAME omrscope-parser-tests COMMAND omrscope-parser-tests)
+
+    add_executable(omrscope-runner-tests
+        tests/EngineRunnerTest.cpp
+        src/EngineRunner.cpp
+        src/Parsers.cpp
+    )
+    target_include_directories(omrscope-runner-tests PRIVATE src)
+    target_link_libraries(omrscope-runner-tests PRIVATE Qt6::Widgets)
+    target_compile_options(omrscope-runner-tests PRIVATE -Wall -Wextra)
+    add_test(NAME omrscope-runner-tests COMMAND omrscope-runner-tests)
 endif()

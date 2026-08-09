@@ -5,7 +5,7 @@
 #include "Model.h"
 
 #include <QDir>
-#include <QFutureWatcher>
+#include <QHash>
 #include <QMainWindow>
 
 class QCheckBox;
@@ -17,6 +17,8 @@ class QPushButton;
 class QSpinBox;
 class QTableWidget;
 class QTextBrowser;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 namespace omrscope {
 
@@ -36,22 +38,33 @@ public:
 
 private slots:
     void run();
+    void cancel();
     void refreshFilter();
-    void rustFinished();
-    void javaFinished();
+    void stageEvent(omrscope::Engine engine, omrscope::StreamEvent event,
+                    omrscope::EngineResult result);
+    void streamFinished(omrscope::Engine engine, bool success, bool cancelled,
+                        const QString &message);
+    void stageSelected();
 
 private:
     void buildUi();
-    /// Engines run on a worker thread. They take between a hundred
-    /// milliseconds and a minute -- Gradle dominates the Java side -- and
-    /// blocking the UI thread for that turns a slow tool into a broken-looking
-    /// one.
-    void startJava();
     void setBusy(bool busy, const QString &what = {});
     void loadInputs();
     void loadStatus();
     void showResults();
+    void updateTimeline();
+    void selectStage(const QString &stage, bool fromUser = false);
+    void followNewestCommonStage();
+    void setStageState(Engine engine, const StreamEvent &event, const EngineResult &result);
+    QString terminalSummaryHtml() const;
     QImage renderInput(const QString &input, int sheet) const;
+
+    struct StagePair {
+        StageSnapshot rust;
+        StageSnapshot java;
+        QString comparison;
+        bool comparisonReady = false;
+    };
 
     QDir repository_;
     EngineRunner runner_;
@@ -72,12 +85,26 @@ private:
     QLabel *summary_ = nullptr;
     QProgressBar *progress_ = nullptr;
     QPushButton *runButton_ = nullptr;
+    QPushButton *cancelButton_ = nullptr;
+    QTreeWidget *timeline_ = nullptr;
+    QHash<QString, QTreeWidgetItem *> timelineRows_;
 
-    QFutureWatcher<EngineResult> rustWatcher_;
-    QFutureWatcher<EngineResult> javaWatcher_;
+    QHash<QString, StagePair> stageSnapshots_;
     QString pendingInput_;
     int pendingSheet_ = 1;
     QString pendingStep_;
+    QString selectedStage_;
+    bool followLatest_ = true;
+    bool selectingProgrammatically_ = false;
+    bool rustRequested_ = false;
+    bool javaRequested_ = false;
+    bool rustFinished_ = false;
+    bool javaFinished_ = false;
+    bool rustSucceeded_ = false;
+    bool javaSucceeded_ = false;
+    bool cancellationRequested_ = false;
+    QString rustTerminalMessage_;
+    QString javaTerminalMessage_;
 };
 
 } // namespace omrscope

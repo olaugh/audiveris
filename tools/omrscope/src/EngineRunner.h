@@ -5,6 +5,9 @@
 
 #include <QDir>
 #include <QObject>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QSet>
 #include <QString>
 
 namespace omrscope {
@@ -27,7 +30,7 @@ public:
     /// Its startup is a few milliseconds, so the process time is a fair
     /// measure of recognition. If the release binary is absent the result
     /// carries the command that would build it rather than a bare failure.
-    EngineResult runRust(const QString &input, int sheet);
+    EngineResult runRust(const QString &input, int sheet, const QString &step);
 
     /// Java through Gradle, timed *inside* the probe.
     ///
@@ -37,6 +40,14 @@ public:
     /// Comparing the two wall clocks would say nothing about either engine.
     EngineResult runJava(const QString &input, int sheet, const QString &step);
 
+    /// Start both producers without blocking the event loop.  A producer
+    /// writes marker lines around its unchanged stage payload; snapshots are
+    /// emitted as each `stage_completed` marker arrives.
+    void startRust(const QString &input, int sheet, const QString &through);
+    void startJava(const QString &input, int sheet, const QString &through);
+    void cancel(Engine engine);
+    bool isRunning(Engine engine) const;
+
     void setJavaHome(const QString &path) { javaHome_ = path; }
     QString javaHome() const { return javaHome_; }
 
@@ -45,9 +56,53 @@ public:
 
     static QString findJavaHome();
 
+signals:
+    /// `result` is meaningful for completed/failed events.  It is copied so
+    /// the MainWindow can retain a completed stage after a later event.
+    void stageEvent(omrscope::Engine engine, omrscope::StreamEvent event,
+                    omrscope::EngineResult result);
+    void streamFinished(omrscope::Engine engine, bool success, bool cancelled,
+                        QString message);
+
 private:
+    struct ActiveRun {
+        QProcess *process = nullptr;
+        QByteArray pendingStdout;
+        QString activeStage;
+        QString activePayload;
+        QString diagnostics;
+        QSet<QString> startedStages;
+        QSet<QString> completedStages;
+        QStringList expectedStages;
+        int nextStageIndex = 0;
+        int lastSequence = 0;
+        bool sawRunStarted = false;
+        bool sawRunFinished = false;
+        bool runFinishedSuccess = false;
+        bool sawStageFailure = false;
+        bool cancelled = false;
+        bool protocolFailed = false;
+        QString protocolMessage;
+        bool terminalEmitted = false;
+    };
+
+    ActiveRun &active(Engine engine);
+    const ActiveRun &active(Engine engine) const;
+    void start(Engine engine, const QString &program, const QStringList &arguments,
+               const QString &workingDirectory, const QProcessEnvironment &environment = {});
+    void reset(Engine engine);
+    void consumeStdout(Engine engine);
+    void consumeLine(Engine engine, const QString &line);
+    void appendDiagnostic(ActiveRun &run, const QString &text);
+    void protocolFailure(Engine engine, const QString &message,
+                         const QString &activeStage = {});
+    void finish(Engine engine, int exitCode, QProcess::ExitStatus status);
+    void failStart(Engine engine, const QString &message);
+
     QDir repository_;
     QString javaHome_;
+    ActiveRun rustRun_;
+    ActiveRun javaRun_;
 };
 
 } // namespace omrscope

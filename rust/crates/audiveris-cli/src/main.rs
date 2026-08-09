@@ -14,6 +14,11 @@ use audiveris_omr::recognize::{
 use audiveris_omr::report::{
     beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json,
 };
+use std::{
+    fmt::Write as _,
+    io::Write as _,
+    time::{Duration, Instant},
+};
 
 fn usage() {
     println!(
@@ -210,6 +215,420 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
     Ok(true)
 }
 
+/// The additive, line-oriented control channel used by `omrscope`.
+///
+/// The schema-1 recognition documents deliberately remain their own lines
+/// between `stage_started` and `stage_completed` markers. Keeping the payload
+/// byte-for-byte identical to ordinary `-json` output means existing consumers
+/// can keep using their normal parser, while a live viewer can use the markers
+/// for ordering and timing. Stdout is flushed after every line because it is a
+/// pipe to a GUI, not an interactive terminal.
+struct OmrscopeStream {
+    output: std::io::Stdout,
+    sequence: u64,
+}
+
+impl OmrscopeStream {
+    fn new() -> Self {
+        Self {
+            output: std::io::stdout(),
+            sequence: 0,
+        }
+    }
+
+    fn marker(&mut self, event: &str, fields: &str) -> Result<(), String> {
+        self.sequence = self.sequence.saturating_add(1);
+        let line = omrscope_marker_line("rust", event, self.sequence, fields);
+        self.output
+            .write_all(line.as_bytes())
+            .and_then(|()| self.output.flush())
+            .map_err(|error| format!("cannot write omrscope stream marker: {error}"))
+    }
+
+    fn run_started(&mut self, target: OmrStep) -> Result<(), String> {
+        self.marker(
+            "run_started",
+            &format!("\"target\":{}", json_string(&target.to_string())),
+        )
+    }
+
+    fn stage_started(&mut self, stage: OmrStep, input: &str, sheet: usize) -> Result<(), String> {
+        self.marker(
+            "stage_started",
+            &format!(
+                "\"stage\":{},\"input\":{},\"sheet\":{sheet}",
+                json_string(&stage.to_string()),
+                json_string(input),
+            ),
+        )
+    }
+
+    fn snapshot(&mut self, payload: &str) -> Result<(), String> {
+        self.output
+            .write_all(payload.as_bytes())
+            .and_then(|()| self.output.flush())
+            .map_err(|error| format!("cannot write omrscope stage payload: {error}"))
+    }
+
+    fn stage_completed(
+        &mut self,
+        stage: OmrStep,
+        input: &str,
+        sheet: usize,
+        elapsed: Duration,
+    ) -> Result<(), String> {
+        self.marker(
+            "stage_completed",
+            &format!(
+                "\"stage\":{},\"input\":{},\"sheet\":{sheet},\"elapsed_ms\":{}",
+                json_string(&stage.to_string()),
+                json_string(input),
+                elapsed_millis(elapsed),
+            ),
+        )
+    }
+
+    fn stage_failed(
+        &mut self,
+        stage: OmrStep,
+        input: &str,
+        sheet: usize,
+        elapsed: Duration,
+        message: &str,
+    ) -> Result<(), String> {
+        self.marker(
+            "stage_failed",
+            &format!(
+                "\"stage\":{},\"input\":{},\"sheet\":{sheet},\"elapsed_ms\":{},\"message\":{}",
+                json_string(&stage.to_string()),
+                json_string(input),
+                elapsed_millis(elapsed),
+                json_string(message),
+            ),
+        )
+    }
+
+    fn run_finished(&mut self, success: bool, elapsed: Duration) -> Result<(), String> {
+        self.marker(
+            "run_finished",
+            &format!(
+                "\"success\":{success},\"elapsed_ms\":{}",
+                elapsed_millis(elapsed),
+            ),
+        )
+    }
+}
+
+fn omrscope_marker_line(engine: &str, event: &str, sequence: u64, fields: &str) -> String {
+    let suffix = if fields.is_empty() {
+        String::new()
+    } else {
+        format!(",{fields}")
+    };
+    format!(
+        "@omrscope {{\"stream_schema\":1,\"engine\":{},\"event\":{},\"sequence\":{sequence}{suffix}}}\n",
+        json_string(engine),
+        json_string(event),
+    )
+}
+
+fn elapsed_millis(elapsed: Duration) -> String {
+    // A duration is diagnostic rather than a parity value, but decimal rather
+    // than Debug formatting keeps the line valid JSON on every platform.
+    format!("{:.3}", elapsed.as_secs_f64() * 1_000.0)
+}
+
+fn json_string(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            control if (control as u32) < 0x20 => {
+                let _ = write!(quoted, "\\u{:04x}", control as u32);
+            }
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn stream_stages_through(target: OmrStep) -> Result<&'static [OmrStep], String> {
+    const STAGES: [OmrStep; 6] = [
+        OmrStep::Grid,
+        OmrStep::Headers,
+        OmrStep::StemSeeds,
+        OmrStep::Beams,
+        OmrStep::Ledgers,
+        OmrStep::Heads,
+    ];
+    let Some(index) = STAGES.iter().position(|stage| *stage == target) else {
+        return Err(format!(
+            "native omrscope stream begins at -step GRID and currently ends at -step HEADS, not -step {target}"
+        ));
+    };
+    Ok(&STAGES[..=index])
+}
+
+/// Streams every currently published native stage through `parameters.step`.
+///
+/// This intentionally has a separate implementation from [`run_native`]. The
+/// ordinary path is an established public text/JSON interface, so refactoring
+/// it just to add marker lines would create an unnecessary compatibility risk.
+fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String> {
+    let Some(target) = parameters.step else {
+        return Ok(false);
+    };
+    if !is_native_step(target) {
+        return Ok(false);
+    }
+    if !json {
+        return Err("native omrscope stream output requires -json".to_owned());
+    }
+    let _stages = stream_stages_through(target)?;
+    if parameters.arguments.is_empty() {
+        return Err(format!(
+            "-step {target:?} requires at least one input image"
+        ));
+    }
+
+    let mut stream = OmrscopeStream::new();
+    let run_started = Instant::now();
+    stream.run_started(target)?;
+
+    let result = (|| {
+        let mut processed_sheets = 0_usize;
+        for input in &parameters.arguments {
+            // As in the legacy path, open a book only once and then process its
+            // selected sheets in source order.
+            let loader =
+                Loader::open(input).map_err(|error| format!("{}: {error}", input.display()))?;
+            let count = loader.image_count();
+            for sheet in sheets_to_process(&parameters.sheets, count) {
+                processed_sheets = processed_sheets.saturating_add(1);
+                let raster = loader
+                    .image(sheet)
+                    .map_err(|error| format!("{}: {error}", input.display()))?;
+                let input_name = input.display().to_string();
+
+                // GRID -------------------------------------------------------
+                stream.stage_started(OmrStep::Grid, &input_name, sheet)?;
+                let started = Instant::now();
+                let recognition = match recognize_grid_lines_raster(&raster) {
+                    Ok(recognition) => recognition,
+                    Err(error) => {
+                        let message = format!("{} sheet {sheet}: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Grid,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&grid_json(&recognition, &input_name, sheet))?;
+                stream.stage_completed(OmrStep::Grid, &input_name, sheet, recognition_elapsed)?;
+                if target == OmrStep::Grid {
+                    continue;
+                }
+
+                // HEADERS ----------------------------------------------------
+                stream.stage_started(OmrStep::Headers, &input_name, sheet)?;
+                let started = Instant::now();
+                let headers = match recognize_native_headers(&recognition) {
+                    Ok(headers) => headers,
+                    Err(error) => {
+                        let message = format!("{} sheet {sheet}: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Headers,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&headers_json(&recognition, &headers, &input_name, sheet))?;
+                stream.stage_completed(
+                    OmrStep::Headers,
+                    &input_name,
+                    sheet,
+                    recognition_elapsed,
+                )?;
+                if target == OmrStep::Headers {
+                    continue;
+                }
+
+                // STEM_SEEDS -------------------------------------------------
+                stream.stage_started(OmrStep::StemSeeds, &input_name, sheet)?;
+                let started = Instant::now();
+                let stem_seeds = match recognize_native_stem_seeds(&recognition, &headers) {
+                    Ok(stem_seeds) => stem_seeds,
+                    Err(error) => {
+                        let message = format!(
+                            "{} sheet {sheet}: STEM_SEEDS failed: {error}",
+                            input.display()
+                        );
+                        stream.stage_failed(
+                            OmrStep::StemSeeds,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&stem_seeds_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(
+                    OmrStep::StemSeeds,
+                    &input_name,
+                    sheet,
+                    recognition_elapsed,
+                )?;
+                if target == OmrStep::StemSeeds {
+                    continue;
+                }
+
+                // BEAMS ------------------------------------------------------
+                stream.stage_started(OmrStep::Beams, &input_name, sheet)?;
+                let started = Instant::now();
+                let beams = match recognize_native_beams_with_stem_seeds(
+                    &recognition,
+                    headers.beam_erases(),
+                    &stem_seeds,
+                ) {
+                    Ok(beams) => beams,
+                    Err(error) => {
+                        let message =
+                            format!("{} sheet {sheet}: BEAMS failed: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Beams,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&beams_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(OmrStep::Beams, &input_name, sheet, recognition_elapsed)?;
+                if target == OmrStep::Beams {
+                    continue;
+                }
+
+                // LEDGERS ----------------------------------------------------
+                stream.stage_started(OmrStep::Ledgers, &input_name, sheet)?;
+                let started = Instant::now();
+                let ledgers = match recognize_native_ledgers(&recognition, &beams) {
+                    Ok(ledgers) => ledgers,
+                    Err(error) => {
+                        let message =
+                            format!("{} sheet {sheet}: LEDGERS failed: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Ledgers,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&ledgers_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(
+                    OmrStep::Ledgers,
+                    &input_name,
+                    sheet,
+                    recognition_elapsed,
+                )?;
+                if target == OmrStep::Ledgers {
+                    continue;
+                }
+
+                // HEADS ------------------------------------------------------
+                stream.stage_started(OmrStep::Heads, &input_name, sheet)?;
+                let started = Instant::now();
+                let heads = match recognize_native_heads(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                ) {
+                    Ok(heads) => heads,
+                    Err(error) => {
+                        let message =
+                            format!("{} sheet {sheet}: HEADS failed: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Heads,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&heads_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                    &heads.epilog,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(OmrStep::Heads, &input_name, sheet, recognition_elapsed)?;
+            }
+        }
+        if processed_sheets == 0 {
+            return Err("native omrscope stream selected no sheets".to_owned());
+        }
+        Ok(true)
+    })();
+
+    stream.run_finished(result.is_ok(), run_started.elapsed())?;
+    result
+}
+
 /// The sheet ids to process, honouring `-sheets` as Java's `Book` does.
 ///
 /// An empty selection means every sheet. Ids outside the input's range are
@@ -237,12 +656,25 @@ fn take_json_flag(args: &mut Vec<String>) -> bool {
     args.len() != before
 }
 
+/// `-stream-json` is likewise a port extension, kept outside the Java-mirroring
+/// parser. It changes stdout framing only when explicitly present.
+fn take_stream_json_flag(args: &mut Vec<String>) -> bool {
+    let before = args.len();
+    args.retain(|argument| argument != "-stream-json");
+    args.len() != before
+}
+
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let json = take_json_flag(&mut args);
+    let stream_json = take_stream_json_flag(&mut args);
     match parse(&args) {
         Ok(parameters) if parameters.help => usage(),
-        Ok(parameters) => match run_native(&parameters, json) {
+        Ok(parameters) => match if stream_json {
+            run_native_stream(&parameters, json)
+        } else {
+            run_native(&parameters, json)
+        } {
             Ok(true) => {}
             Ok(false) => println!("{parameters:#?}"),
             Err(error) => {
@@ -259,7 +691,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_native_step, run_native, sheets_to_process};
+    use super::{
+        is_native_step, json_string, omrscope_marker_line, run_native, run_native_stream,
+        sheets_to_process, stream_stages_through, take_stream_json_flag,
+    };
     use audiveris_cli::Parameters;
     use audiveris_core::step::OmrStep;
 
@@ -322,5 +757,74 @@ mod tests {
             ..Parameters::default()
         };
         assert!(!run_native(&parameters, true).expect("unsupported handoff"));
+    }
+
+    #[test]
+    fn stream_flag_is_additive_and_never_reaches_the_java_compatible_parser() {
+        let legacy = vec![
+            "-batch".to_owned(),
+            "-step".to_owned(),
+            "GRID".to_owned(),
+            "chula.png".to_owned(),
+        ];
+        let mut unchanged = legacy.clone();
+        assert!(!take_stream_json_flag(&mut unchanged));
+        assert_eq!(unchanged, legacy);
+
+        let mut extended = legacy.clone();
+        extended.insert(3, "-stream-json".to_owned());
+        assert!(take_stream_json_flag(&mut extended));
+        assert_eq!(extended, legacy);
+    }
+
+    #[test]
+    fn stream_markers_escape_json_and_carry_a_monotonic_sequence_field() {
+        assert_eq!(
+            json_string("path\nwith \"quotes\""),
+            "\"path\\nwith \\\"quotes\\\"\""
+        );
+        assert_eq!(
+            omrscope_marker_line("rust", "stage_started", 17, r#""stage":"GRID""#),
+            "@omrscope {\"stream_schema\":1,\"engine\":\"rust\",\"event\":\"stage_started\",\"sequence\":17,\"stage\":\"GRID\"}\n"
+        );
+    }
+
+    #[test]
+    fn stream_stage_plan_is_java_pipeline_order_and_refuses_unpublished_stages() {
+        assert_eq!(
+            stream_stages_through(OmrStep::Heads).expect("HEADS stream plan"),
+            [
+                OmrStep::Grid,
+                OmrStep::Headers,
+                OmrStep::StemSeeds,
+                OmrStep::Beams,
+                OmrStep::Ledgers,
+                OmrStep::Heads,
+            ]
+        );
+        assert!(
+            stream_stages_through(OmrStep::Scale)
+                .expect_err("SCALE has no schema-1 stage snapshot")
+                .contains("GRID")
+        );
+
+        let no_json = Parameters {
+            step: Some(OmrStep::Grid),
+            ..Parameters::default()
+        };
+        assert_eq!(
+            run_native_stream(&no_json, false).expect_err("stream needs JSON"),
+            "native omrscope stream output requires -json"
+        );
+
+        let no_input = Parameters {
+            step: Some(OmrStep::Heads),
+            ..Parameters::default()
+        };
+        assert!(
+            run_native_stream(&no_input, true)
+                .expect_err("stream needs an input")
+                .contains("requires at least one input image")
+        );
     }
 }

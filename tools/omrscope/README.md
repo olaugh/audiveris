@@ -2,6 +2,8 @@
 
 A Qt6 window over the Audiveris Rust port: run both engines on the same sheet,
 see what each made of it, and see how much of the pipeline is actually ported.
+Both engines run concurrently and publish a retained, immutable result whenever
+they finish a native recognition stage from `GRID` through `HEADS`.
 
 Built for one person's use. It is a debugging instrument and a piece of
 documentation that cannot go stale, because it reads the engines rather than
@@ -40,6 +42,32 @@ paired 58, agree 58, differ 0, only-one-side 29, not comparable 26
 
 Exit code is 0 when nothing differs, 2 when something does.
 
+## Live stage comparison
+
+The window starts the Rust and Java producers independently. Each producer
+emits a completed-stage snapshot in pipeline order. The **Through stage**
+selector offers `GRID`, `HEADERS`, `STEM_SEEDS`, `BEAMS`, `LEDGERS`, and
+`HEADS`; the **Recognition stage timeline** shows `Stage`, `Rust`, `Java`, and
+`Comparison`. It follows the newest completed common stage when both engines
+are selected (or the newest completed selected engine otherwise). Selecting a
+row freezes that stage's Page, Inters, and Raw output snapshots. A later
+failure does not discard an earlier completed snapshot, which makes the first
+divergent stage inspectable. Pressing **Run** starts a fresh attempt and clears
+the prior timeline; retention is within one attempt, not a run-history store.
+
+This is deliberately **completed-stage** streaming, not a claim of live
+per-item recognition. A page changes after `GRID`, `HEADERS`, `STEM_SEEDS`,
+`BEAMS`, `LEDGERS`, or `HEADS` completes; items inside a running stage are not
+sent to the window.
+
+The ordinary `audiveris-cli ... -json` output remains the schema-1 JSONL
+interchange contract. The viewer opts into the additive `-stream-json` mode:
+`@omrscope` schema-1 control markers bracket the unchanged JSON stage document.
+That separation keeps existing JSONL readers compatible and lets the viewer
+receive boundaries and elapsed times without redefining recognition payloads.
+Java uses the equivalent probe stream privately through `omrscope`; its normal
+oracle output remains unchanged.
+
 ## Reading the numbers
 
 **The two timings are not the same measurement, and the tool never puts them in
@@ -66,6 +94,9 @@ finding.
 - **Inters** — every interpretation side by side with its grade, its contextual
   grade, and the impacts the grade is a weighted geometric mean of. Only
   disagreement is coloured; agreement should be quiet.
+- **Stage timeline** — the Rust and Java state for each stage and a selector for
+  its immutable completed snapshot. It reports stage boundaries, not
+  intra-stage item progress.
 - **Port status** — the twenty pipeline stages and which are native, which have
   only their lifecycle ported, and what blocks each. This one is a hand-kept
   snapshot rather than parsed from `PORTING.md`, because a dashboard that

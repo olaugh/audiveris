@@ -19,8 +19,13 @@ Java implementation are kept separately in the
 including the evidence and the Rust parity policy for each finding.
 
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
-through `HEADS`, including accepted STEM_SEEDS and identity-free final heads;
-native `STEMS` now continues through no-stem seed purging and existing-seed
+through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.
+`omrscope` now runs Java and Rust concurrently and retains selectable immutable
+snapshots as each completes GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS
+-> HEADS. The live view is completed-stage streaming only: it does not claim
+intra-stage or per-item recognition events, and its opt-in framing leaves the
+ordinary schema-1 JSONL interface unchanged. Native `STEMS` now continues
+through no-stem seed purging and existing-seed
 selection, exact section-built stump materialization and registration for every
 head corner, constructor-time `BeamLinker` stump preparation, and exact
 `equipStumps`/`equipOrphanSides` B/V topology, lookup geometry, closer-beam
@@ -352,7 +357,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are exact and production-wired through every graded staff. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI and JSON | **JSON published through `HEADS`** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in native Java order for the applicable JSON target; GRID keeps its text report. HEADS documents retain all upstream products and add identity-free final heads, complete seed/range provenance, exact head glyphs, source-resolved beam decisions, counts, and tally-scale rows. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
+| CLI, JSON, and live comparison | **JSON published through `HEADS`; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in native Java order for the applicable JSON target; GRID keeps its text report. Ordinary `-json` remains the schema-1 JSONL interface. The opt-in `-stream-json` protocol adds flushed boundary markers around unchanged completed-stage documents for `omrscope`, which starts Java and Rust independently, retains every completed snapshot, and lets the user select it. It deliberately provides no intra-stage or per-item stream. HEADS documents retain all upstream products and add identity-free final heads, complete seed/range provenance, exact head glyphs, source-resolved beam decisions, counts, and tally-scale rows. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
 | MusicXML output | **Not ported end to end** | The differential export suite is queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |
 

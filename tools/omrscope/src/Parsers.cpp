@@ -84,6 +84,22 @@ Inter parseRustInter(const QJsonObject &object)
     return inter;
 }
 
+Inter parseRustFinalHead(const QJsonObject &object)
+{
+    Inter head;
+    // Final HEADS deliberately do not claim Java's sparse Inter ids.  Their
+    // published source ordinal remains provenance, not a viewer-made id.
+    head.kind = QStringLiteral("HEAD");
+    head.shape = object.value(QStringLiteral("shape")).toString();
+    head.staff = object.value(QStringLiteral("staff")).toInt(-1);
+    head.grade = object.value(QStringLiteral("grade")).toDouble();
+    const QJsonObject bounds = object.value(QStringLiteral("bounds")).toObject();
+    if (!bounds.isEmpty()) {
+        head.bounds = parseBounds(bounds);
+    }
+    return head;
+}
+
 /// A grade with no contextual value is not a grade of zero.
 QString formatMissing()
 {
@@ -95,6 +111,78 @@ QString formatMissing()
 QString describe(const std::optional<double> &value)
 {
     return value ? QString::number(*value, 'f', 6) : formatMissing();
+}
+
+std::optional<StreamEvent> parseStreamMarker(const QString &json, Engine expectedEngine,
+                                             QString *error)
+{
+    if (error) {
+        error->clear();
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &parseError);
+    if (document.isNull() || !document.isObject()) {
+        if (error) {
+            *error = QStringLiteral("unparsable stream marker: %1").arg(parseError.errorString());
+        }
+        return std::nullopt;
+    }
+
+    const QJsonObject object = document.object();
+    const QJsonValue schema = object.contains(QStringLiteral("schema"))
+        ? object.value(QStringLiteral("schema"))
+        : object.value(QStringLiteral("stream_schema"));
+    if (!schema.isDouble() || schema.toInt() != 1) {
+        if (error) {
+            *error = QStringLiteral("unsupported stream marker schema");
+        }
+        return std::nullopt;
+    }
+    const QString expected = expectedEngine == Engine::Rust
+        ? QStringLiteral("rust") : QStringLiteral("java");
+    if (object.value(QStringLiteral("engine")).toString() != expected) {
+        if (error) {
+            *error = QStringLiteral("stream marker belongs to a different engine");
+        }
+        return std::nullopt;
+    }
+    StreamEvent marker;
+    marker.event = object.value(QStringLiteral("event")).toString();
+    marker.stage = object.value(QStringLiteral("stage")).toString();
+    marker.sequence = object.value(QStringLiteral("sequence")).toInt(-1);
+    if (object.value(QStringLiteral("elapsed_ms")).isDouble()) {
+        marker.elapsedMillis = object.value(QStringLiteral("elapsed_ms")).toDouble();
+    }
+    marker.message = object.value(QStringLiteral("message")).toString();
+    if (marker.message.isEmpty()) {
+        marker.message = object.value(QStringLiteral("error")).toString();
+    }
+    if (object.value(QStringLiteral("success")).isBool()) {
+        marker.success = object.value(QStringLiteral("success")).toBool();
+    }
+    const bool hasStage = marker.event == QLatin1String("stage_started")
+        || marker.event == QLatin1String("stage_completed")
+        || marker.event == QLatin1String("stage_failed");
+    if (marker.event.isEmpty() || (hasStage && marker.stage.isEmpty())) {
+        if (error) {
+            *error = QStringLiteral("stream marker is missing its event or stage");
+        }
+        return std::nullopt;
+    }
+    return marker;
+}
+
+QVector<QString> takeCompleteLines(QByteArray &pending)
+{
+    QVector<QString> lines;
+    for (;;) {
+        const qsizetype newline = pending.indexOf('\n');
+        if (newline < 0) {
+            return lines;
+        }
+        lines << QString::fromUtf8(pending.left(newline));
+        pending.remove(0, newline + 1);
+    }
 }
 
 std::optional<QPair<double, double>> Staff::verticalExtent() const
@@ -150,6 +238,10 @@ EngineResult parseRustJson(const QString &text)
     }
 
     const QJsonObject root = document.object();
+    result.declaredStage = root.value(QStringLiteral("producer"))
+                               .toObject()
+                               .value(QStringLiteral("stage"))
+                               .toString();
     const QJsonObject image = root.value(QStringLiteral("image")).toObject();
     result.image = QSize(image.value(QStringLiteral("width")).toInt(),
                          image.value(QStringLiteral("height")).toInt());
@@ -194,6 +286,20 @@ EngineResult parseRustJson(const QString &text)
         result.inters << parseRustInter(object);
     }
 
+    // HEADS publish final, identity-free head products under a stage-owned
+    // systems array rather than pretending to have allocated Java SIG ids.
+    // They are still ordinary displayable/pairable interpretations.
+    const QJsonObject heads = root.value(QStringLiteral("heads")).toObject();
+    for (const QJsonValue &systemValue : heads.value(QStringLiteral("systems")).toArray()) {
+        const QJsonObject system = systemValue.toObject();
+        for (const QJsonValue &headValue : system.value(QStringLiteral("final_heads")).toArray()) {
+            const Inter head = parseRustFinalHead(headValue.toObject());
+            if (head.bounds) {
+                result.inters << head;
+            }
+        }
+    }
+
     // The candidates that lost. A recogniser judged only on what it emitted
     // cannot be judged on what it missed, so they are first-class here.
     for (const QJsonValue &value : root.value(QStringLiteral("candidates")).toArray()) {
@@ -223,6 +329,7 @@ EngineResult parseSigProbe(const QString &text)
     EngineResult result;
     result.engine = QStringLiteral("java");
     result.raw = text;
+    bool sawSheet = false;
 
     for (const QString &line : text.split(QLatin1Char('\n'))) {
         const QStringList fields = line.trimmed().split(QLatin1Char(' '), Qt::SkipEmptyParts);
@@ -231,6 +338,11 @@ EngineResult parseSigProbe(const QString &text)
         }
         const QString &record = fields.first();
 
+        if (record == QLatin1String("sheet") && fields.size() >= 3) {
+            sawSheet = true;
+            result.declaredStage = fields[2];
+            continue;
+        }
         if (record == QLatin1String("failed")) {
             result.error = fields.mid(1).join(QLatin1Char(' '));
             continue;
@@ -295,7 +407,13 @@ EngineResult parseSigProbe(const QString &text)
         result.inters << inter;
     }
 
-    result.ran = result.error.isEmpty();
+    // A Gradle banner or an accidental marker-only frame is not a recognition
+    // result. SigProbe's first record is its explicit sheet/stage identity, so
+    // require it before a streamed completion can become a green snapshot.
+    result.ran = result.error.isEmpty() && sawSheet;
+    if (!result.ran && result.error.isEmpty()) {
+        result.error = QStringLiteral("no sheet record");
+    }
     return result;
 }
 
