@@ -116,6 +116,14 @@ pub enum NativeHeadStaffEpilogProvenance {
 pub struct NativeHeadStaffEpilogHead {
     pub origin: NativeHeadStaffEpilogOrigin,
     pub provenance: NativeHeadStaffEpilogProvenance,
+    /// Whether this head's source glyph carries Java's debugging-only VIP mark.
+    ///
+    /// The native recognizer has no external VIP-annotation channel yet, so
+    /// production construction currently emits `false`. A future source which
+    /// can produce `true` must be handled explicitly by each consumer and
+    /// fail closed where parity is not defined; consumers must not normalize it
+    /// back to `false`.
+    pub is_vip: bool,
     /// Monotonic order among heads successfully added in this system. Actual
     /// Java IDs can contain gaps from glyph/other-entity registration, but
     /// this has the exact relative order used by `byFullAbscissa` ties.
@@ -574,6 +582,7 @@ fn push_head<'a>(
     heads.push(NativeHeadStaffEpilogHead {
         origin,
         provenance,
+        is_vip: false,
         relative_java_id,
         system_creation_ordinal,
         input_ordinal: usize::MAX,
@@ -865,6 +874,33 @@ mod tests {
             ]
         );
         assert_eq!(system.attachment_order, system.retained_creation_order);
+    }
+
+    #[test]
+    fn native_head_creation_emits_false_without_a_vip_annotation_channel() {
+        let (seed_glyphs, range_glyphs) = inputs(
+            vec![seed(
+                0,
+                10,
+                HeadTemplateShape::NoteheadBlack,
+                0.9,
+                HeadSeedTally::default(),
+            )],
+            vec![range(0, 30, HeadTemplateShape::NoteheadVoid, 0.8)],
+        );
+
+        let result = compose_native_heads_staff_epilog(NativeHeadsStaffEpilogInput {
+            seed_glyphs: &seed_glyphs,
+            range_glyphs: &range_glyphs,
+        })
+        .expect("valid epilog");
+
+        assert!(
+            result.systems[0].staffs[0]
+                .heads
+                .iter()
+                .all(|head| !head.is_vip)
+        );
     }
 
     #[test]

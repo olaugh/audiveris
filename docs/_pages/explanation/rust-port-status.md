@@ -279,7 +279,10 @@ truncation. Its reachability-only beam prefix omits the prior beam-builder
 registry mutations, so future C builders must resume the actual beam-builder
 registry timeline. `BeamGroupInter.getMembers()` was confirmed to return a
 fresh list; the hardened replay still clones and audits identity/order. The
-fixture is 79,216 lines / 37,478,914 bytes; probe, runner, emitted-body, and
+final native HEADS product now also retains explicit non-VIP evidence for every
+head; a future true VIP input must be handled or rejected rather than silently
+normalized, because Java's `filterHeadParts` bug changes recognition by VIP.
+The fixture is 79,216 lines / 37,478,914 bytes; probe, runner, emitted-body, and
 fixture SHA-256 values are
 `7bac85a2e878d67ccecab9866428a8068b83d1453c2249f49b0c18ae6a17b39f`,
 `e9016abb44a500e242b81364531b775fe6b724cddf697cfc0bd4cfe21af0f75d`,

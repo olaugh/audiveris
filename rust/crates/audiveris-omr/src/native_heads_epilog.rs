@@ -463,6 +463,7 @@ mod tests {
                 seed_pool_index: 0,
                 seed_source_ordinal: 0,
             },
+            is_vip: false,
             relative_java_id: 1,
             system_creation_ordinal: 0,
             input_ordinal: 0,

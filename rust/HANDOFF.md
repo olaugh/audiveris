@@ -835,7 +835,10 @@ and fixture SHA-256 are
 `537cae86c19de20af35a246e03b6edd7f324d0f08c5768b319ed0557a7e28921`.
 The normal CI gate is green with two tests and zero ignored; its semantic run
 completed in 33.18 seconds. Next is the full head-origin CLinker `StemBuilder`
-constructor boundary, followed separately by linking/SIG mutation.
+constructor boundary, followed separately by linking/SIG mutation. The final
+native HEADS product now carries explicit `is_vip = false` evidence from its
+current creation path; consumers must handle or fail closed on any future true
+value because Java's VIP-only `filterHeadParts` behavior is semantic.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on

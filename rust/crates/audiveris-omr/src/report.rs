@@ -2271,6 +2271,7 @@ pub(crate) mod tests {
                 seed_pool_index: 43,
                 seed_source_ordinal: 53,
             },
+            is_vip: false,
             relative_java_id: 99,
             system_creation_ordinal: 0,
             input_ordinal: 0,
