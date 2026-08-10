@@ -38,12 +38,13 @@ use audiveris_omr::{
     native_stems_beam_reachability::materialize_native_stems_beam_reachability,
     native_stems_beam_scheduler::{
         NativeStemsBeamAwaitingHookRemovalTransaction, NativeStemsBeamAwaitingVLinkTransaction,
-        NativeStemsBeamCanonicalGlyph, NativeStemsBeamDeferredLineDelta,
-        NativeStemsBeamLiveExclusion, NativeStemsBeamPlanRef, NativeStemsBeamScheduledBeam,
-        NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
-        NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerStatus,
-        NativeStemsBeamSchedulerSystem, NativeStemsBeamWorklistSnapshot,
-        materialize_native_stems_beam_scheduler_frontiers,
+        NativeStemsBeamCanonicalGlyph, NativeStemsBeamCompletedVLinkEvidence,
+        NativeStemsBeamDeferredLineDelta, NativeStemsBeamLiveExclusion, NativeStemsBeamPlanRef,
+        NativeStemsBeamScheduledBeam, NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
+        NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerResumeStatus,
+        NativeStemsBeamSchedulerStatus, NativeStemsBeamSchedulerSystem,
+        NativeStemsBeamWorklistSnapshot, materialize_native_stems_beam_scheduler_frontiers,
+        resume_native_stems_beam_scheduler_after_transaction,
     },
     native_stems_beam_stumps::{
         NativeStemsBeamSource, NativeStemsBeamStumpBeam, NativeStemsBeamStumpRecognition,
@@ -3414,4 +3415,270 @@ fn repo_root() -> PathBuf {
         .and_then(std::path::Path::parent)
         .expect("workspace root")
         .to_path_buf()
+}
+
+// ---------------------------------------------------------------------------
+// Boundary 19: SIDES-pass resume after the first executed transaction.
+// Fast evidence per rust/PORTING.md: chula and BachInvention5, one fresh-JVM
+// pass each; the runner required the re-emitted Boundary-17 and Boundary-18
+// rows to match their frozen fixtures byte-for-byte before writing anything.
+// ---------------------------------------------------------------------------
+
+fn resume_row_field<'a>(row: &'a str, name: &str) -> &'a str {
+    let mut tokens = row.split(' ');
+    while let Some(token) = tokens.next() {
+        if token == name {
+            return tokens
+                .next()
+                .unwrap_or_else(|| panic!("field {name} lacks value: {row}"));
+        }
+    }
+    panic!("row lacks {name}: {row}");
+}
+
+fn resume_pre_tremolo_sig(
+    system: &NativeStemsBeamSchedulerSystem,
+    source: NativeStemsBeamSource,
+) -> usize {
+    system
+        .glyphs_in_sig_order
+        .iter()
+        .find(|glyph| glyph.source == source)
+        .unwrap_or_else(|| panic!("source missing from scheduler glyphs"))
+        .pre_tremolo_sig_ordinal
+}
+
+fn resume_b_alias(
+    system: &NativeStemsBeamSchedulerSystem,
+    reference: audiveris_omr::native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
+) -> String {
+    format!(
+        "beam:{}:b:{}",
+        resume_pre_tremolo_sig(system, reference.beam),
+        reference
+            .id
+            .checked_sub(1)
+            .expect("B-linker id is one-based"),
+    )
+}
+
+#[test]
+fn native_stems_beam_scheduler_resume_matches_java_on_fast_corpus() {
+    let root = repo_root();
+    let mut checked_pages = 0;
+    for (key, image) in [
+        ("chula", "chula.png"),
+        ("BachInvention5", "BachInvention5.jpg"),
+    ] {
+        let path = root.join(format!("rust/oracle/stems-beam-scheduler-resume-{key}.txt"));
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        let b18_path = root.join(format!(
+            "rust/oracle/stems-beam-vlink-outer-blinker-{key}.txt"
+        ));
+        let b18_bytes = std::fs::read(&b18_path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", b18_path.display()));
+        let body: Vec<&str> = text.lines().filter(|line| !line.starts_with('#')).collect();
+        let page_row = body.first().expect("resume fixture has a page row");
+        assert!(
+            page_row.starts_with(&format!("stemsbeamschedulerresumepage {image}#1 ")),
+            "{key}: bad page row"
+        );
+        assert_eq!(
+            resume_row_field(page_row, "outerBLinkerFixtureSha256"),
+            sha256_hex(&b18_bytes),
+            "{key}: resume fixture does not pin its exact Boundary-18 fixture"
+        );
+        assert_eq!(resume_row_field(page_row, "phaseScope"), "SidesOnly");
+
+        let inputs = native_scheduler_inputs(image);
+        let recognition = materialize_native_stems_beam_scheduler_frontiers(
+            &inputs.beams,
+            &inputs.beam_stumps,
+            &inputs.beam_vlinkers,
+            &inputs.beam_builders,
+            &inputs.link_plans,
+        )
+        .unwrap_or_else(|error| panic!("{key}: scheduler frontiers failed: {error}"));
+
+        for (index, system) in recognition.systems.iter().enumerate() {
+            let system_id = system.system_id;
+            let marker = format!(" system {system_id} ");
+            let rows: Vec<&str> = body[1..]
+                .iter()
+                .copied()
+                .filter(|row| row.contains(&marker))
+                .collect();
+            assert!(
+                !rows.is_empty(),
+                "{key}: no resume rows for system {system_id}"
+            );
+            let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(awaiting) = &system.status
+            else {
+                panic!("{key} system {system_id}: prefix did not stop at a V-link frontier");
+            };
+            let completed = NativeStemsBeamCompletedVLinkEvidence {
+                plan: awaiting.plan,
+                b_linker: awaiting.b_linker,
+                v_linker: awaiting.v_linker,
+                // Boundary 18's gate proves the outer flag is true after every
+                // real transaction on this same corpus.
+                outer_b_linked_after: true,
+            };
+            let resume = resume_native_stems_beam_scheduler_after_transaction(
+                system,
+                &inputs.beam_vlinkers.systems[index],
+                &inputs.beam_builders.systems[index],
+                &inputs.link_plans.systems[index],
+                &completed,
+            )
+            .unwrap_or_else(|error| panic!("{key} system {system_id}: resume failed: {error}"));
+
+            let mut events = resume.resume_events.iter();
+            let mut saw_terminal = false;
+            for row in &rows {
+                if row.starts_with("stemsbeamschedulerresumeside ") {
+                    let Some(NativeStemsBeamSchedulerEvent::SideBLinkerResult {
+                        beam,
+                        side,
+                        b_linker,
+                        logical_success,
+                        linked_flag_after,
+                        ..
+                    }) = events.next()
+                    else {
+                        panic!("{key} system {system_id}: fixture side row without typed event");
+                    };
+                    assert_eq!(
+                        resume_row_field(row, "beamSig").parse::<usize>().unwrap(),
+                        resume_pre_tremolo_sig(system, *beam),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "bAlias"),
+                        resume_b_alias(system, *b_linker)
+                    );
+                    let side_token = match side {
+                        NativeStemHeadSide::Left => "LEFT",
+                        NativeStemHeadSide::Right => "RIGHT",
+                    };
+                    assert_eq!(resume_row_field(row, "hSide"), side_token);
+                    assert_eq!(
+                        resume_row_field(row, "logicalResult"),
+                        if *logical_success { "true" } else { "false" },
+                    );
+                    assert!(
+                        *linked_flag_after,
+                        "{key} system {system_id}: resumed side must carry the linked flag",
+                    );
+                } else if row.starts_with("stemsbeamschedulerresumefrontier ") {
+                    saw_terminal = true;
+                    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(frontier) =
+                        &resume.status
+                    else {
+                        panic!("{key} system {system_id}: fixture frontier without typed frontier");
+                    };
+                    assert_eq!(
+                        resume_row_field(row, "beamSig").parse::<usize>().unwrap(),
+                        resume_pre_tremolo_sig(system, frontier.beam),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "bAlias"),
+                        resume_b_alias(system, frontier.b_linker),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "vSide"),
+                        match frontier.vertical_side {
+                            NativeStemVerticalSide::Top => "TOP",
+                            NativeStemVerticalSide::Bottom => "BOTTOM",
+                        },
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "plan").parse::<usize>().unwrap(),
+                        frontier.plan.plan_ordinal,
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "stemProfile").parse::<i32>().unwrap(),
+                        frontier.plan.stem_profile,
+                    );
+                    let plan_system = &inputs.link_plans.systems[index];
+                    let attempt = plan_system
+                        .builders
+                        .iter()
+                        .find(|builder| builder.builder_ordinal == frontier.plan.builder_ordinal)
+                        .and_then(|builder| {
+                            builder
+                                .attempts
+                                .iter()
+                                .find(|attempt| attempt.stem_profile == frontier.plan.stem_profile)
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("{key} system {system_id}: frontier plan missing from matrix")
+                        });
+                    assert_eq!(
+                        resume_row_field(row, "lastIndex").parse::<i32>().unwrap(),
+                        attempt
+                            .expand_last_index
+                            .expect("ready plan has a last index"),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "relationEntries")
+                            .parse::<usize>()
+                            .unwrap(),
+                        attempt.relations.len(),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "glyphs").parse::<usize>().unwrap(),
+                        attempt.glyphs.len(),
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "lineChanged"),
+                        if frontier.would_apply_stored_line_delta.is_some() {
+                            "true"
+                        } else {
+                            "false"
+                        },
+                    );
+                } else if row.starts_with("stemsbeamschedulerresumeexhausted ") {
+                    saw_terminal = true;
+                    assert!(
+                        matches!(
+                            resume.status,
+                            NativeStemsBeamSchedulerResumeStatus
+                                ::SidesExhaustedBeforeSecondFrontier { .. }
+                        ),
+                        "{key} system {system_id}: fixture exhaustion without typed exhaustion",
+                    );
+                } else if row.starts_with("stemsbeamschedulerresumesummary ") {
+                    let fixture_events = resume_row_field(row, "resumeEvents")
+                        .parse::<usize>()
+                        .unwrap();
+                    assert_eq!(
+                        fixture_events,
+                        resume.resume_events.len() + 1,
+                        "{key} system {system_id}: event count differs (fixture counts its \
+                         terminal row; the typed terminal is the status)",
+                    );
+                    assert_eq!(
+                        resume_row_field(row, "secondFrontier") == "true",
+                        matches!(
+                            resume.status,
+                            NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(_)
+                        ),
+                    );
+                } else {
+                    panic!("{key} system {system_id}: unmodeled resume row kind: {row}");
+                }
+            }
+            assert!(
+                saw_terminal,
+                "{key} system {system_id}: fixture lacks a terminal row"
+            );
+            assert!(
+                events.next().is_none(),
+                "{key} system {system_id}: typed resume produced unfixtured events",
+            );
+        }
+        checked_pages += 1;
+    }
+    assert_eq!(checked_pages, 2);
 }
