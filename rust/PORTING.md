@@ -28,6 +28,40 @@ differential tests against the frozen Java executable.
 5. Whole-score MusicXML and recognition metrics are evaluated separately from unit
    test parity.
 
+## Boundary evidence: full and fast modes
+
+STEMS is ported as a chain of exact boundaries, each replaying its predecessors and
+stopping one step further along. Two evidence levels are sanctioned; the parity claim
+is identical in both, only the amount of corroborating detail differs.
+
+**Full evidence** is what boundaries 1-17 carry: all eight beam sheets, two fresh-JVM
+runs required to be byte-identical, per-row predecessor SHA-256 chaining, hex-exact
+double bit patterns, and isolated synthetic envelopes for Java branches the corpus does
+not reach.
+
+**Fast evidence** may be used for a boundary whose behaviour is small and whose state
+effects are already modelled by its predecessors. It keeps everything that can falsify
+parity and drops what only corroborates it:
+
+- kept: the Java oracle from the frozen baseline; the exact Rust gate against it; count
+  assertions on every comparison loop; one page-level predecessor hash so a stale
+  predecessor cannot go unnoticed; both CI legs.
+- dropped: per-row predecessor hash chains; synthetic envelopes for unreached branches;
+  hex bit patterns for values that are integers, booleans or identities.
+- reduced: two representative sheets rather than eight, and a single JVM run.
+
+Adjacent boundaries that form one control-flow unit may be ported together under fast
+evidence rather than separately.
+
+**Checkpoints restore full evidence.** At least every fourth boundary, and always before
+leaving a stage, regenerate all eight sheets from two fresh JVMs, require byte-identical
+output, and run the whole gate. A divergence introduced under fast evidence is found
+here, and the blast radius is the boundaries since the previous checkpoint.
+
+Fast evidence is a deliberate speed/latency trade made by the project owner, not a
+lowering of the parity bar: a fast-evidence boundary is still bit-exact against Java on
+the sheets it freezes, or it does not land.
+
 ## Pipeline
 
 `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->`
