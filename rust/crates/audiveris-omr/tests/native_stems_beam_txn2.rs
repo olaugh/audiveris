@@ -26,8 +26,17 @@ use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
     NativeStemsBeamOuterBLinkerCell, NativeStemsBeamOuterVLinkerFact,
     apply_native_stems_beam_vlink_outer_b_linker_transaction,
 };
-const PAGES: [(&str, &str, usize); 2] = [
+/// The beam corpus in its usual order. The gate grades every sheet whose
+/// fixtures are installed and tolerates a gap only at the end, so a sheet that
+/// is frozen but ungraded cannot hide between two graded ones.
+const PAGES: [(&str, &str, usize); 8] = [
     ("chula", "chula.png", 3),
+    ("allegretto", "allegretto.png", 3),
+    ("batuque", "batuque.png", 3),
+    ("carmen", "carmen.png", 5),
+    ("cucaracha", "cucaracha.png", 3),
+    ("hove", "hove.png", 5),
+    ("zizi", "zizi.png", 2),
     ("BachInvention5", "BachInvention5.jpg", 6),
 ];
 
@@ -143,7 +152,19 @@ fn family_rows<'a>(text: &'a str, family: &str, system_id: usize) -> Vec<&'a str
 
 #[test]
 fn second_transaction_replays_through_production_chain() {
+    let mut graded = 0;
+    let mut saw_missing = false;
     for (key, image, expected_systems) in PAGES {
+        let manifest_path =
+            repo_root().join(format!("rust/oracle/stems-beam-txn2-manifest-{key}.txt"));
+        if !manifest_path.is_file() {
+            saw_missing = true;
+            continue;
+        }
+        assert!(
+            !saw_missing,
+            "installed Boundary-20 corpus has a gap before {key}"
+        );
         let manifest = txn2_text("manifest", key);
         let resume_fixture_path =
             repo_root().join(format!("rust/oracle/stems-beam-scheduler-resume-{key}.txt"));
@@ -331,5 +352,24 @@ fn second_transaction_replays_through_production_chain() {
                 "{key} system {system_id}: head predecessor row must pin the sibling bundle"
             );
         }
+        graded += 1;
     }
+    // Count what is on disk rather than trusting a floor: a gate that grades
+    // two sheets of eight would satisfy `>= 2` while quietly ignoring six.
+    let installed = PAGES
+        .iter()
+        .filter(|(key, _, _)| {
+            repo_root()
+                .join(format!("rust/oracle/stems-beam-txn2-manifest-{key}.txt"))
+                .is_file()
+        })
+        .count();
+    assert!(
+        installed >= 2,
+        "Boundary-20 has only {installed} sheets frozen"
+    );
+    assert_eq!(
+        graded, installed,
+        "Boundary-20 graded {graded} of {installed} installed sheets"
+    );
 }

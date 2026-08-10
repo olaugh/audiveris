@@ -1,0 +1,13 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) beam VLink outer B-linker oracle.
+# schema: stems-beam-vlink-outer-blinker-v1
+# Fast evidence per rust/PORTING.md: one fresh-JVM pass per system; before this file
+# was written, the boundary-17 rows the probe re-emits were required to match the
+# frozen head-links fixture byte-for-byte, pinning every predecessor.
+# Each system executes one real transaction: after VLinker.link returns true, the
+# caller BLinker.link performs one idempotent setLinked(true) on the outer BLinker.
+# Stop is AssignedOuterBLinkerBeforeNextVIteration.
+stemsbeamvlinkouterblinkerpage zizi.png#1 systems 2 headLinksFixtureSha256 9dff3e4afcae55885cd5f4879d9ec38e8937b4a64ed148553e7e3eb39433b806 executionMode foregroundJvmPerSystem methodDispatch ExactConcreteBLinkerSetLinked stop AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinker zizi.png#1 system 1 plan 74 scope real case - bAlias beam:0:b:0 vSide BOTTOM entryGuardReplayed true linkedBefore true writeExecuted true linkedAfter true valueChanged false closedBefore false closedAfter false arenaOtherCellsUnchanged true persistentStateUnchanged true vMapSize 1 currentVOrdinal 0 remainingWithTargets 0 remainingSkipped 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinkersummary zizi.png#1 system 1 plan 74 scope real case - transactions 1 idempotentWrites 1 valueChanges 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinker zizi.png#1 system 2 plan 214 scope real case - bAlias beam:17:b:0 vSide TOP entryGuardReplayed true linkedBefore true writeExecuted true linkedAfter true valueChanged false closedBefore false closedAfter false arenaOtherCellsUnchanged true persistentStateUnchanged true vMapSize 1 currentVOrdinal 0 remainingWithTargets 0 remainingSkipped 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinkersummary zizi.png#1 system 2 plan 214 scope real case - transactions 1 idempotentWrites 1 valueChanges 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration

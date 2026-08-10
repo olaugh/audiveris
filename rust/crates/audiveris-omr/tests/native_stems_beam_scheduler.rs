@@ -3463,16 +3463,35 @@ fn resume_b_alias(
 }
 
 #[test]
-fn native_stems_beam_scheduler_resume_matches_java_on_fast_corpus() {
+fn native_stems_beam_scheduler_resume_matches_java_on_corpus() {
     let root = repo_root();
     let mut checked_pages = 0;
-    for (key, image) in [
-        ("chula", "chula.png"),
-        ("BachInvention5", "BachInvention5.jpg"),
-    ] {
+    // Every installed sheet, not a fixed pair: a fixture that is frozen but
+    // ungraded is the failure this loop exists to prevent. A gap is only
+    // tolerated at the end of the corpus order, so a half-installed sheet
+    // cannot hide between two graded ones.
+    let mut saw_missing = false;
+    for page in PAGES {
+        let key = page
+            .fixture
+            .trim_start_matches("stems-beam-scheduler-")
+            .trim_end_matches(".txt");
+        let image = page.image;
         let path = root.join(format!("rust/oracle/stems-beam-scheduler-resume-{key}.txt"));
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                assert!(
+                    !saw_missing,
+                    "installed Boundary-19 corpus has a gap before {key}"
+                );
+                text
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                saw_missing = true;
+                continue;
+            }
+            Err(error) => panic!("cannot read {}: {error}", path.display()),
+        };
         let b18_path = root.join(format!(
             "rust/oracle/stems-beam-vlink-outer-blinker-{key}.txt"
         ));
@@ -3680,5 +3699,25 @@ fn native_stems_beam_scheduler_resume_matches_java_on_fast_corpus() {
         }
         checked_pages += 1;
     }
-    assert_eq!(checked_pages, 2);
+    // Count what is on disk rather than trusting a floor: a gate that grades
+    // two sheets of eight would satisfy `>= 2` while quietly ignoring six.
+    let installed = PAGES
+        .iter()
+        .filter(|page| {
+            let key = page
+                .fixture
+                .trim_start_matches("stems-beam-scheduler-")
+                .trim_end_matches(".txt");
+            root.join(format!("rust/oracle/stems-beam-scheduler-resume-{key}.txt"))
+                .is_file()
+        })
+        .count();
+    assert!(
+        installed >= 2,
+        "Boundary-19 has only {installed} sheets frozen"
+    );
+    assert_eq!(
+        checked_pages, installed,
+        "Boundary-19 graded {checked_pages} of {installed} installed sheets"
+    );
 }

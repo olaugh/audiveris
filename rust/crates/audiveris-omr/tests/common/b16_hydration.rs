@@ -1527,6 +1527,71 @@ struct HydratedBoundarySixteen {
     transaction: NativeStemsBeamVLinkSiblingLinksTransaction,
 }
 
+/// Boundary-20 entry: hydrate Boundary 16 at a frontier other than the first.
+///
+/// Identical to `hydrate_real_boundary_sixteen` except that the caller supplies
+/// the predecessor evidence and a native page whose scheduler already stands at
+/// the wanted frontier, rather than the frozen first-frontier fixtures being
+/// looked up by page key.
+// Used by the Boundary-17 gate's second-frontier replay; the sibling-links
+// gate includes this file too and does not need it.
+#[allow(dead_code, clippy::too_many_arguments)]
+fn hydrate_real_boundary_sixteen_on_page(
+    page: &StrictRow,
+    transaction: &ParsedTransaction,
+    native_page: &b15_hydration::NativePredecessorPage,
+    b15_text: &str,
+    base_apply_text: &str,
+    create_text: &str,
+    reuse_text: &str,
+) -> Result<HydratedBoundarySixteen, String> {
+    let linked_before = boundary_fifteen_linked_before(b15_text, transaction)?;
+    let predecessor = b15_hydration::run_real_on_page(
+        native_page,
+        transaction.key.system,
+        base_apply_text,
+        create_text,
+        reuse_text,
+        linked_before,
+    )?;
+    let mut state_after = project_real_state(page, transaction, &predecessor)?;
+    let state_before = state_after.clone();
+    let public = apply_native_stems_beam_vlink_sibling_links_transaction(
+        &predecessor.scheduler,
+        &predecessor.plans,
+        &predecessor.stumps,
+        &predecessor.vlinkers,
+        &predecessor.reachability,
+        &predecessor.builder,
+        &predecessor.create_transaction,
+        &predecessor.reuse_live_state,
+        predecessor.relation_parameters,
+        &predecessor.reuse_check,
+        &predecessor.base_apply,
+        &predecessor.transaction,
+        &mut state_after,
+    )
+    .map_err(|error| {
+        format!(
+            "system {} production Boundary-16 apply failed at this frontier: {error}",
+            transaction.key.system
+        )
+    })?;
+    assert_public_transaction_matches_rows(
+        transaction,
+        &predecessor,
+        &state_before,
+        &state_after,
+        &public,
+    )?;
+    Ok(HydratedBoundarySixteen {
+        predecessor,
+        state_before,
+        state_after,
+        transaction: public,
+    })
+}
+
 fn hydrate_real_boundary_sixteen(
     page: &StrictRow,
     transaction: &ParsedTransaction,

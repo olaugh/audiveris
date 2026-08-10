@@ -1,0 +1,13 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
+# schema: stems-beam-txn2-manifest-v1
+stemsbeamtxn2page allegretto.png#1 systems 3 schedulerResumeFixtureSha256 9251ac99cb0d0c4c383ff0f074ef270dcdf0b174888444f5fd183c126e97890d executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage allegretto.png#1 systems 3 outerBLinkerFixtureSha256 6c044f006fb4b1b0f2ba2d4bc76059673b5ce1fca24f7d8c1b673804f9908b09 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumeside allegretto.png#1 system 1 event 0 beamSig 10 bAlias beam:10:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 1 event 1 beamSig 10 bAlias beam:10:b:2 hSide RIGHT vSide TOP plan 318 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 2 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside allegretto.png#1 system 2 event 0 beamSig 4 bAlias beam:4:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 2 event 1 beamSig 4 bAlias beam:4:b:3 hSide RIGHT vSide TOP plan 289 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 2 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside allegretto.png#1 system 3 event 0 beamSig 5 bAlias beam:5:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 3 event 1 beamSig 5 bAlias beam:5:b:3 hSide RIGHT vSide TOP plan 247 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 3 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 3 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

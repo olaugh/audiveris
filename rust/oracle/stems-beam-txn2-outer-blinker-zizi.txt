@@ -1,0 +1,10 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 second-transaction rows.
+# schema: stems-beam-vlink-outer-blinker-v1
+# Fast evidence per rust/PORTING.md: fresh-evidence second transaction; every fresh
+# emitter reproduced the frozen first-transaction rows byte-for-byte in this same
+# run (replay-on-frozen), and the txn1 head/outer/resume subsequences matched their
+# frozen fixtures before this file was written.
+stemsbeamvlinkouterblinker zizi.png#1 system 1 plan 79 scope real case - bAlias beam:0:b:1 vSide BOTTOM entryGuardReplayed true linkedBefore true writeExecuted true linkedAfter true valueChanged false closedBefore false closedAfter false arenaOtherCellsUnchanged true persistentStateUnchanged true vMapSize 1 currentVOrdinal 0 remainingWithTargets 0 remainingSkipped 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinkersummary zizi.png#1 system 1 plan 79 scope real case - transactions 1 idempotentWrites 1 valueChanges 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinker zizi.png#1 system 2 plan 219 scope real case - bAlias beam:17:b:1 vSide TOP entryGuardReplayed true linkedBefore true writeExecuted true linkedAfter true valueChanged false closedBefore false closedAfter false arenaOtherCellsUnchanged true persistentStateUnchanged true vMapSize 1 currentVOrdinal 0 remainingWithTargets 0 remainingSkipped 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration
+stemsbeamvlinkouterblinkersummary zizi.png#1 system 2 plan 219 scope real case - transactions 1 idempotentWrites 1 valueChanges 0 impliedLinkReturn true terminal AssignedOuterBLinkerBeforeNextVIteration

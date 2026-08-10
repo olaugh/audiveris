@@ -1,0 +1,19 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
+# schema: stems-beam-txn2-manifest-v1
+stemsbeamtxn2page carmen.png#1 systems 5 schedulerResumeFixtureSha256 cbdb9532fbfd4bcc903e160bb8b2cca9ce2b53f9a9c3297b973279cbf1edc3fc executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage carmen.png#1 systems 5 outerBLinkerFixtureSha256 30aeb7b4f23e33e3746dcfd78e35a55b84227fe22331bbc5336eb23028bd917d executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumeside carmen.png#1 system 1 event 0 beamSig 12 bAlias beam:12:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier carmen.png#1 system 1 event 1 beamSig 12 bAlias beam:12:b:1 hSide RIGHT vSide BOTTOM plan 229 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary carmen.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside carmen.png#1 system 2 event 0 beamSig 16 bAlias beam:16:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier carmen.png#1 system 2 event 1 beamSig 16 bAlias beam:16:b:1 hSide RIGHT vSide BOTTOM plan 23 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 3 glyphs 1 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary carmen.png#1 system 2 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside carmen.png#1 system 3 event 0 beamSig 21 bAlias beam:21:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier carmen.png#1 system 3 event 1 beamSig 21 bAlias beam:21:b:1 hSide RIGHT vSide BOTTOM plan 23 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary carmen.png#1 system 3 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside carmen.png#1 system 4 event 0 beamSig 2 bAlias beam:2:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier carmen.png#1 system 4 event 1 beamSig 2 bAlias beam:2:b:3 hSide RIGHT vSide BOTTOM plan 217 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 2 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary carmen.png#1 system 4 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside carmen.png#1 system 5 event 0 beamSig 14 bAlias beam:14:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier carmen.png#1 system 5 event 1 beamSig 14 bAlias beam:14:b:1 hSide RIGHT vSide TOP plan 109 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 2 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary carmen.png#1 system 5 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

@@ -1,0 +1,13 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
+# schema: stems-beam-txn2-manifest-v1
+stemsbeamtxn2page cucaracha.png#1 systems 3 schedulerResumeFixtureSha256 453860759a3c0b69b7e8039be64ef2fd7f4d5b0ef3c57f5e1960436a3ddb67ae executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage cucaracha.png#1 systems 3 outerBLinkerFixtureSha256 d96e0725cba6cc81e21f4535912e1454ce3a38a3cf7257a2b82d27aee0fb0cf1 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumeside cucaracha.png#1 system 1 event 0 beamSig 1 bAlias beam:1:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier cucaracha.png#1 system 1 event 1 beamSig 1 bAlias beam:1:b:1 hSide RIGHT vSide BOTTOM plan 9 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 3 glyphs 2 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary cucaracha.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside cucaracha.png#1 system 2 event 0 beamSig 7 bAlias beam:7:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier cucaracha.png#1 system 2 event 1 beamSig 7 bAlias beam:7:b:1 hSide RIGHT vSide TOP plan 99 stemProfile 4 linkProfile 1 lastIndex 2 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary cucaracha.png#1 system 2 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside cucaracha.png#1 system 3 event 0 beamSig 4 bAlias beam:4:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier cucaracha.png#1 system 3 event 1 beamSig 4 bAlias beam:4:b:1 hSide RIGHT vSide TOP plan 49 stemProfile 4 linkProfile 1 lastIndex 2 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary cucaracha.png#1 system 3 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

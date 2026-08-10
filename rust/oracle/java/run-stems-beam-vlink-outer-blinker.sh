@@ -80,28 +80,46 @@ probe_classes=$(mktemp -d /private/tmp/stems-beam-vlink-outer-blinker-classes.XX
 trap 'rm -rf "$probe_classes"' EXIT
 "$JAVA_HOME/bin/javac" -Xlint:all,-path -cp "$probe_cp" -d "$probe_classes" "$probe_source"
 
-pass_out=$(mktemp /private/tmp/stems-beam-vlink-outer-blinker-pass.XXXXXX)
-system_id=1
-while [ "$system_id" -le "$expected_systems" ]; do
-    (
-        cd "$repo_root/app"
-        env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
-            "$JAVA_HOME/bin/java" \
-            -XX:+UnlockExperimentalVMOptions \
-            -XX:+UseEpsilonGC \
-            -Xmx48g \
-            -Djava.awt.headless=true \
-            -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
-            -cp "$probe_classes:$probe_cp" \
-            org.audiveris.omr.rustport.StemsBeamVLinkOuterBLinkerProbe \
-            --system "$system_id" \
-            "$repo_root/data/examples/$page_file:1" \
-            "$scheduler_fixture" "$expand_fixture" "$create_stem_fixture" \
-            "$reuse_check_fixture" "$base_apply_fixture" "$b_linker_flag_fixture" \
-            "$sibling_links_fixture" "$head_links_fixture"
-    ) >> "$pass_out"
-    system_id=$((system_id + 1))
-done
+# Full evidence per rust/PORTING.md: two fresh-JVM passes, required to be
+# byte-identical before anything is frozen. A fixture that differs between two
+# runs of the same binary on the same input is not an oracle, and the cheapest
+# place to find that out is here rather than in a gate three boundaries later.
+run_fresh_pass()
+{
+    pass_target=$1
+    system_id=1
+    while [ "$system_id" -le "$expected_systems" ]; do
+        (
+            cd "$repo_root/app"
+            env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
+                "$JAVA_HOME/bin/java" \
+                -XX:+UnlockExperimentalVMOptions \
+                -XX:+UseEpsilonGC \
+                -Xmx48g \
+                -Djava.awt.headless=true \
+                -Dlogback.configurationFile="$repo_root/rust/oracle/java/logback-quiet.xml" \
+                -cp "$probe_classes:$probe_cp" \
+                org.audiveris.omr.rustport.StemsBeamVLinkOuterBLinkerProbe \
+                --system "$system_id" \
+                "$repo_root/data/examples/$page_file:1" \
+                "$scheduler_fixture" "$expand_fixture" "$create_stem_fixture" \
+                "$reuse_check_fixture" "$base_apply_fixture" "$b_linker_flag_fixture" \
+                "$sibling_links_fixture" "$head_links_fixture"
+        ) >> "$pass_target"
+        system_id=$((system_id + 1))
+    done
+}
+pass_one=$(mktemp /private/tmp/stems-beam-vlink-outer-blinker-pass1.XXXXXX)
+pass_two=$(mktemp /private/tmp/stems-beam-vlink-outer-blinker-pass2.XXXXXX)
+run_fresh_pass "$pass_one"
+run_fresh_pass "$pass_two"
+if ! cmp -s "$pass_one" "$pass_two"; then
+    echo "two fresh $page_key passes are not byte-identical" >&2
+    diff "$pass_one" "$pass_two" | head -8 >&2
+    exit 1
+fi
+rm -f "$pass_two"
+pass_out=$pass_one
 
 # Predecessor pin: the re-emitted boundary-17 rows must equal the frozen fixture exactly.
 # Two sanctioned differences only: the pagesummary/corpussummary rows are composed by the

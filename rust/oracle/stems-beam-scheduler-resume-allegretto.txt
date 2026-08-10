@@ -1,0 +1,19 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) beam scheduler resume oracle.
+# schema: stems-beam-scheduler-resume-v1
+# Fast evidence per rust/PORTING.md: one fresh-JVM pass per system; before this file
+# was written, the boundary-17 and boundary-18 rows the probe re-emits were required
+# to match their frozen fixtures byte-for-byte, pinning every predecessor.
+# After the first transaction and its outer assignment, the SIDES scheduler resumes
+# with exact Java loop semantics and stops at the second ReadyForCreateStem frontier
+# (recorded, not executed) or SIDES-worklist exhaustion.
+# Post-frontier expands run against the mutated SIG; lineChanged records their effect.
+stemsbeamschedulerresumepage allegretto.png#1 systems 3 outerBLinkerFixtureSha256 6c044f006fb4b1b0f2ba2d4bc76059673b5ce1fca24f7d8c1b673804f9908b09 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumeside allegretto.png#1 system 1 event 0 beamSig 10 bAlias beam:10:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 1 event 1 beamSig 10 bAlias beam:10:b:2 hSide RIGHT vSide TOP plan 318 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 2 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside allegretto.png#1 system 2 event 0 beamSig 4 bAlias beam:4:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 2 event 1 beamSig 4 bAlias beam:4:b:3 hSide RIGHT vSide TOP plan 289 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 2 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside allegretto.png#1 system 3 event 0 beamSig 5 bAlias beam:5:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier allegretto.png#1 system 3 event 1 beamSig 5 bAlias beam:5:b:3 hSide RIGHT vSide TOP plan 247 stemProfile 4 linkProfile 1 lastIndex 5 relationEntries 3 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary allegretto.png#1 system 3 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction

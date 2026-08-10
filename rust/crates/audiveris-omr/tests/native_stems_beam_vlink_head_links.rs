@@ -15,6 +15,10 @@ use std::{
 };
 
 use audiveris_image::beam_structure::Segment;
+use audiveris_omr::native_stems_beam_scheduler::{
+    NativeStemsBeamCompletedVLinkEvidence, NativeStemsBeamSchedulerResumeStatus,
+    NativeStemsBeamSchedulerStatus, resume_native_stems_beam_scheduler_after_transaction,
+};
 use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
     NativeStemsBeamOuterBLinkerCell, NativeStemsBeamOuterVLinkerFact,
     NativeStemsBeamVLinkOuterBLinkerOutcome,
@@ -2842,11 +2846,34 @@ fn validate_supplemental_rows(
     Ok(census)
 }
 
+/// Parse a fixture's transactions without imposing the first-frontier corpus
+/// contract.
+///
+/// `validate_core_rows` additionally requires the isolated system-1 synthetic
+/// block and cross-checks the page census, both of which describe a whole
+/// frozen first-frontier fixture. A later frontier's rows are the same shape
+/// transaction by transaction but carry neither, so the checkpoint replay
+/// parses through here and grades the transactions themselves. Splitting this
+/// out keeps both frontiers on one parser rather than giving the second a
+/// weaker private copy.
+fn parse_core_transactions(rows: &[StrictRow]) -> Result<Vec<ParsedTransaction>, String> {
+    validate_core_rows_inner(rows, false).map(|(parsed, _)| parsed)
+}
+
 fn validate_core_rows(rows: &[StrictRow]) -> Result<Vec<ParsedTransaction>, String> {
+    validate_core_rows_inner(rows, true).map(|(parsed, _)| parsed)
+}
+
+fn validate_core_rows_inner(
+    rows: &[StrictRow],
+    require_corpus_contract: bool,
+) -> Result<(Vec<ParsedTransaction>, Option<SupplementalCensus>), String> {
     let page = rows
         .first()
         .ok_or_else(|| "fixture has no semantic rows".to_owned())?;
-    validate_page_row(page)?;
+    if require_corpus_contract {
+        validate_page_row(page)?;
+    }
     if rows.iter().skip(1).any(|row| row.kind == RowKind::Page) {
         return Err("fixture contains more than one page row".to_owned());
     }
@@ -3091,6 +3118,11 @@ fn validate_core_rows(rows: &[StrictRow]) -> Result<Vec<ParsedTransaction>, Stri
     if parsed.is_empty() {
         return Err("fixture has no transactions".to_owned());
     }
+    if !require_corpus_contract {
+        // A later frontier emits transactions only: no page census to reconcile
+        // and no isolated block, by design.
+        return Ok((parsed, supplemental));
+    }
     let supplemental = supplemental
         .ok_or_else(|| "fixture lacks its isolated system-1 supplemental block".to_owned())?;
     supported_synthetic_cases += supplemental.supported;
@@ -3151,7 +3183,7 @@ fn validate_core_rows(rows: &[StrictRow]) -> Result<Vec<ParsedTransaction>, Stri
             rows[cursor.index].kind
         ));
     }
-    Ok(parsed)
+    Ok((parsed, Some(supplemental)))
 }
 
 fn raw_fields(line: &str) -> Result<(String, BTreeMap<String, String>), String> {
@@ -9800,5 +9832,278 @@ fn installed_boundary_eighteen_outer_b_linker_is_exactly_replayed() {
     assert!(
         installed >= 2,
         "Boundary-18 fast evidence requires at least chula and BachInvention5"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint: Boundary 16 and 17 typed replay at the SECOND frontier.
+//
+// Boundary 20 froze the second transaction's evidence but graded only
+// boundaries 12-15 and 18 against it; 16 and 17 were pinned structurally and
+// the typed replay recorded as owed. This closes that debt. It reuses the row
+// parsers and hydration that grade the first frontier, so the two frontiers
+// are held to one implementation rather than a second, weaker one.
+// ---------------------------------------------------------------------------
+
+fn txn2_family_text(family: &str, key: &str) -> Option<String> {
+    let path = repo_root().join(format!("rust/oracle/stems-beam-txn2-{family}-{key}.txt"));
+    std::fs::read_to_string(path).ok()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hydrate_boundary_sixteen_for_head_at_frontier(
+    frozen_page_row: &StrictRow,
+    head_transaction: &ParsedHeadTransaction,
+    native_page: &b15_hydration::NativePredecessorPage,
+    sibling_text: &str,
+    b15_text: &str,
+    base_apply_text: &str,
+    create_text: &str,
+    reuse_text: &str,
+) -> Result<HydratedBoundarySixteen, String> {
+    let rows = parse_scaffold_fixture(sibling_text)?;
+    let transactions = parse_core_transactions(&rows)?;
+    let matches = transactions
+        .iter()
+        .filter(|candidate| {
+            candidate.key.system == head_transaction.key.system
+                && candidate.key.plan == head_transaction.key.plan
+                && candidate.key.scope == "real"
+                && candidate.key.case_name == "-"
+        })
+        .collect::<Vec<_>>();
+    let [b16] = matches.as_slice() else {
+        return Err(format!(
+            "second-frontier Boundary-17 key has {} Boundary-16 matches",
+            matches.len()
+        ));
+    };
+
+    // The head row's self-computed predecessor pin must describe exactly the
+    // sibling rows this same run emitted: the probe hashed its own bundle
+    // rather than a frozen one, so a mismatch here means the two families
+    // disagree about what happened in the transaction between them.
+    let mut ordered_lines = Vec::new();
+    let mut result_line = None;
+    let mut guard_line = None;
+    let mut summary_line = None;
+    for line in sibling_text.lines() {
+        if !line.starts_with("stemsbeamvlinksiblinglinks")
+            || line.starts_with("stemsbeamvlinksiblinglinkspage ")
+            || line.starts_with("stemsbeamvlinksiblinglinkspagesummary ")
+            || line.starts_with("stemsbeamvlinksiblinglinkscorpussummary ")
+            || line.contains("synthetic")
+        {
+            continue;
+        }
+        let row = StrictRow::parse(line)?;
+        let Ok(key) = row.key() else {
+            continue;
+        };
+        if key.system != head_transaction.key.system
+            || key.plan != head_transaction.key.plan
+            || key.scope != "real"
+            || key.case_name != "-"
+        {
+            continue;
+        }
+        ordered_lines.push(line.to_owned());
+        match row.kind {
+            RowKind::Result => result_line = Some(line),
+            RowKind::DeltaGuard => guard_line = Some(line),
+            RowKind::Summary => summary_line = Some(line),
+            _ => {}
+        }
+    }
+    let row_sha = |line: Option<&str>, family: &str| -> Result<String, String> {
+        line.map(|line| sha256_rows([line.to_owned()]))
+            .ok_or_else(|| format!("second-frontier Boundary-16 lacks its {family} row"))
+    };
+    if head_transaction.predecessor.value("join")? != "FullBoundary16Replay"
+        || head_transaction.predecessor.usize("b16TransactionRows")? != ordered_lines.len()
+        || head_transaction
+            .predecessor
+            .value("b16TransactionEvidenceSha256")?
+            != sha256_rows(ordered_lines)
+        || head_transaction.predecessor.value("b16ResultRowSha256")?
+            != row_sha(result_line, "result")?
+        || head_transaction.predecessor.value("b16GuardRowSha256")? != row_sha(guard_line, "guard")?
+        || head_transaction.predecessor.value("b16SummaryRowSha256")?
+            != row_sha(summary_line, "summary")?
+        || head_transaction.predecessor.value("predecessorTerminal")?
+            != "ReadyBeforeHeadRelationLoop"
+    {
+        return Err("second-frontier Boundary-17/16 row bundle join differs".to_owned());
+    }
+
+    hydrate_real_boundary_sixteen_on_page(
+        frozen_page_row,
+        b16,
+        native_page,
+        b15_text,
+        base_apply_text,
+        create_text,
+        reuse_text,
+    )
+}
+
+#[test]
+fn boundaries_sixteen_and_seventeen_replay_at_the_second_frontier() {
+    let mut graded = 0;
+    for (key, image) in CORPUS_PAGES {
+        let Some(sibling_text) = txn2_family_text("sibling-links", key) else {
+            continue;
+        };
+        let head_text = txn2_family_text("head-links", key)
+            .unwrap_or_else(|| panic!("{key}: txn2 sibling rows without head rows"));
+        let b15_text = txn2_family_text("b-linker-flag", key)
+            .unwrap_or_else(|| panic!("{key}: txn2 head rows without flag rows"));
+        let base_apply_text = txn2_family_text("base-apply", key)
+            .unwrap_or_else(|| panic!("{key}: txn2 head rows without base-apply rows"));
+        let create_text = txn2_family_text("create-stem", key)
+            .unwrap_or_else(|| panic!("{key}: txn2 head rows without create rows"));
+        let reuse_text = txn2_family_text("reuse-check", key)
+            .unwrap_or_else(|| panic!("{key}: txn2 head rows without reuse rows"));
+
+        // `headless` is the only page-row field the state projector reads, and
+        // it describes the run environment rather than the frontier, so the
+        // frozen first-frontier page row is the right source for it.
+        let frozen_b16 =
+            std::fs::read_to_string(repo_root().join(boundary_sixteen_fixture_path(key)))
+                .unwrap_or_else(|error| panic!("{key}: cannot read frozen Boundary-16: {error}"));
+        let frozen_rows = parse_scaffold_fixture(&frozen_b16)
+            .unwrap_or_else(|error| panic!("{key}: frozen Boundary-16 unparsable: {error}"));
+        let frozen_page_row = frozen_rows
+            .into_iter()
+            .find(|row| row.kind == RowKind::Page)
+            .unwrap_or_else(|| panic!("{key}: frozen Boundary-16 lacks its page row"));
+
+        let mut page = b15_hydration::native_predecessor_page(image);
+        for index in 0..page.scheduler.systems.len() {
+            let system = &page.scheduler.systems[index];
+            let system_id = system.system_id;
+            let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(first) = &system.status
+            else {
+                panic!("{key} system {system_id}: no first frontier");
+            };
+            let completed = NativeStemsBeamCompletedVLinkEvidence {
+                plan: first.plan,
+                b_linker: first.b_linker,
+                v_linker: first.v_linker,
+                outer_b_linked_after: true,
+            };
+            let resume = resume_native_stems_beam_scheduler_after_transaction(
+                system,
+                &page.beam_vlinkers.systems[index],
+                &page.beam_builders.systems[index],
+                &page.plans.systems[index],
+                &completed,
+            )
+            .unwrap_or_else(|error| panic!("{key} system {system_id}: resume failed: {error}"));
+            let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(second) =
+                resume.status
+            else {
+                panic!("{key} system {system_id}: resume reached no second frontier");
+            };
+            page.scheduler.systems[index].status =
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(second);
+        }
+
+        // The txn2 files carry only txn2 rows: the page row belongs to the run,
+        // not to a transaction, so it stayed in the frozen first-frontier
+        // prefix. Supply it here rather than duplicating it into the fixture,
+        // which would blur which rows the second transaction actually produced.
+        let frozen_head =
+            std::fs::read_to_string(repo_root().join(boundary_seventeen_fixture_path(key)))
+                .unwrap_or_else(|error| panic!("{key}: cannot read frozen Boundary-17: {error}"));
+        let frozen_head_page = frozen_head
+            .lines()
+            .find(|line| line.starts_with("stemsbeamvlinkheadlinkspage "))
+            .unwrap_or_else(|| panic!("{key}: frozen Boundary-17 lacks its page row"));
+        // Reuse the frozen header verbatim so the strict parser sees the schema
+        // it requires. Composed in memory only: the txn2 file on disk keeps
+        // carrying exactly the rows the second transaction produced.
+        let frozen_header = frozen_head.lines().take(8).collect::<Vec<_>>().join("\n");
+        let head_body = head_text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let head_text = format!("{frozen_header}\n{frozen_head_page}\n{head_body}");
+        // Same composition for the sibling family, whose parser is equally
+        // strict about its own header.
+        let frozen_sibling =
+            std::fs::read_to_string(repo_root().join(boundary_sixteen_fixture_path(key)))
+                .unwrap_or_else(|error| panic!("{key}: cannot read frozen Boundary-16: {error}"));
+        let sibling_header = FIXTURE_HEADER.join("\n");
+        let sibling_page = frozen_sibling
+            .lines()
+            .find(|line| line.starts_with("stemsbeamvlinksiblinglinkspage "))
+            .unwrap_or_else(|| panic!("{key}: frozen Boundary-16 lacks its page row"));
+        let sibling_body = sibling_text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let sibling_text = format!("{sibling_header}\n{sibling_page}\n{sibling_body}\n");
+        let head_rows = parse_head_links_rows(&head_text)
+            .unwrap_or_else(|error| panic!("{key}: txn2 head rows unparsable: {error}"));
+        let (_, head_transactions, _) = parse_real_head_transactions(&head_rows)
+            .unwrap_or_else(|error| panic!("{key}: txn2 head transactions unparsable: {error}"));
+        assert!(
+            !head_transactions.is_empty(),
+            "{key}: txn2 head fixture has no real transactions"
+        );
+
+        for head_transaction in &head_transactions {
+            let system_id = head_transaction.key.system;
+            let hydrated = hydrate_boundary_sixteen_for_head_at_frontier(
+                &frozen_page_row,
+                head_transaction,
+                &page,
+                &sibling_text,
+                &b15_text,
+                &base_apply_text,
+                &create_text,
+                &reuse_text,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{key} system {system_id}: second-frontier Boundary-16 replay: {error}")
+            });
+
+            let mut state =
+                project_head_links_state(head_transaction, &hydrated).unwrap_or_else(|error| {
+                    panic!("{key} system {system_id}: second-frontier head state: {error}")
+                });
+            let before = state.clone();
+            let public = apply_native_stems_beam_vlink_head_links_transaction(
+                &hydrated.predecessor.scheduler,
+                &hydrated.predecessor.plans,
+                &hydrated.predecessor.stumps,
+                &hydrated.predecessor.vlinkers,
+                &hydrated.predecessor.reachability,
+                &hydrated.predecessor.builder,
+                &hydrated.predecessor.create_transaction,
+                &hydrated.predecessor.reuse_live_state,
+                hydrated.predecessor.relation_parameters,
+                &hydrated.predecessor.reuse_check,
+                &hydrated.predecessor.base_apply,
+                &hydrated.predecessor.transaction,
+                &hydrated.transaction,
+                &mut state,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{key} system {system_id}: second-frontier Boundary-17 apply: {error}")
+            });
+            assert_head_public_matches_rows(head_transaction, &hydrated, &before, &state, &public)
+                .unwrap_or_else(|error| {
+                    panic!("{key} system {system_id}: second-frontier Boundary-17 rows: {error}")
+                });
+            graded += 1;
+        }
+    }
+    assert!(
+        graded >= 2,
+        "second-frontier 16/17 replay graded only {graded} transactions"
     );
 }
