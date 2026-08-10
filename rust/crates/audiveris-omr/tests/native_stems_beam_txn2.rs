@@ -376,3 +376,256 @@ fn second_transaction_replays_through_production_chain() {
         "Boundary-20 graded {graded} of {installed} installed sheets"
     );
 }
+
+/// Spike: can the typed chain run the second transaction from the first
+/// transaction's carried state, with no second-transaction fixture at all?
+///
+/// This decides the shape of the remaining STEMS work. The SIDES pass is ~30
+/// transactions per system; hydrating each from Java rows costs roughly 276
+/// rows and 157KB apiece, so the corpus would need on the order of 100MB of
+/// fixtures. If the chain can carry its own state instead, Java evidence
+/// becomes a compact per-step oracle and the fixtures collapse by orders of
+/// magnitude.
+///
+/// The state types suggested it should work: `known_canonical_glyphs` is
+/// documented as "learned by earlier transactions", `prepare_registration`
+/// decides reuse by searching those carried entries rather than reading Java's
+/// scan, and `exhaustive_lookup` is optional corroboration that the code clears
+/// per transaction.
+///
+/// **Result: nothing per-transaction is missing. Everything missing is a
+/// registry that has not been declared complete.**
+///
+/// Feeding each blocker in turn and re-running walks through four, in order:
+///
+/// 1. `MissingLineState` for the new frontier's V linker -- **derivable**. The
+///    hydration builds a line state purely from `stored_theoretical_line_before`,
+///    `initial_stem_line` and the attachment-alias flag, all typed plan-attempt
+///    fields, with no Java row. Seeded here from the plan matrix.
+/// 2. `MissingSelectedGlyph` for the plan's pre-existing beam-stump glyph --
+///    **page-level identity**. Content comes from the typed attempt; only the
+///    Java GlyphIndex id is external, and the probe assigns the canonical alias
+///    as `"glyph:" + glyph.getId()`, so alias and id are the same number by
+///    construction (85 of 85 certificates across every frozen fixture agree).
+/// 3. `AwaitingCompleteGlyphRegistry` -- `prepare_registration` searches
+///    `known_canonical_glyphs` by content and only falls back to Java's
+///    exhaustive scan when nothing matches. Seeding the registry, not just the
+///    binding, gets past it.
+/// 4. `AwaitingCompleteSystemStems` -- the same shape one level over, in
+///    `known_stems`.
+///
+/// The two registries differ in what completeness costs, which is the useful
+/// part. `systemStems` starts **empty** at STEMS (the frozen create-stem
+/// baseline records `systemStems 0`), so a chain that tracks every insertion
+/// already holds the whole truth and its absences are proofs. The glyph index
+/// does not -- chula starts with 1,650 active glyphs -- so it needs a one-time
+/// page-level bootstrap of id and flags, keyed by content.
+///
+/// So the remaining obstacle is not evidence but *authority*: the model has no
+/// way to say "this registry is complete, so absence is proof". Adding that,
+/// with the existing fail-closed guards kept for the non-authoritative case,
+/// is what would let the chain self-drive -- turning ~276 rows and 157KB per
+/// transaction into one page-level identity table plus the compact per-step
+/// oracle the census probe already emits. Claiming authority wrongly would
+/// silently mis-register a stem, so it belongs in its own boundary with its own
+/// evidence, not bolted on here.
+///
+/// Ignored by default: it reports a finding rather than guarding a contract.
+/// It is kept because the finding is the kind that gets re-litigated, and this
+/// re-runs in six seconds.
+#[test]
+#[ignore = "spike: reports whether the chain can self-drive, not a contract"]
+fn spike_second_transaction_from_carried_state() {
+    let image = "chula.png";
+    let key = "chula";
+    let system_id = 1;
+    let index = 0;
+
+    let base_text = txn2_text("base-apply", key);
+    let create_text = txn2_text("create-stem", key);
+    let reuse_text = txn2_text("reuse-check", key);
+
+    let page = b15_hydration::native_predecessor_page(image);
+
+    // Transaction 1, hydrated the ordinary way from its frozen fixtures.
+    let first = b15_hydration::run_real(
+        image,
+        system_id,
+        &std::fs::read_to_string(
+            repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
+        )
+        .expect("frozen base-apply"),
+        &std::fs::read_to_string(repo_root().join("rust/oracle/stems-beam-create-stem-chula.txt"))
+            .expect("frozen create-stem"),
+        &std::fs::read_to_string(
+            repo_root().join("rust/oracle/stems-beam-vlink-reuse-check-chula.txt"),
+        )
+        .expect("frozen reuse-check"),
+        false,
+    )
+    .expect("transaction 1 hydrates");
+
+    // The state transaction 1 left behind: glyph registry, allocator, system
+    // stems, line states.
+    let carried = first.base_apply.state_after.transaction_state.clone();
+    println!(
+        "carried after txn1: {} known glyphs, {} known stems, union {}",
+        carried.glyph_index.known_canonical_glyphs.len(),
+        carried.system_stems.known_stems.len(),
+        carried.glyph_index.union_size
+    );
+
+    // Advance the scheduler to the second frontier.
+    let scheduler = {
+        let system = &page.scheduler.systems[index];
+        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &system.status
+        else {
+            panic!("no first frontier");
+        };
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: true,
+            sibling_linked_b_linkers: Vec::new(),
+        };
+        *resume_native_stems_beam_scheduler_after_transaction(
+            system,
+            &page.beam_vlinkers.systems[index],
+            &page.beam_builders.systems[index],
+            &page.plans.systems[index],
+            &completed,
+        )
+        .expect("resume to frontier 2")
+        .advanced_system
+    };
+    let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(second) = &scheduler.status else {
+        panic!("resume reached no second frontier");
+    };
+    println!("second frontier plan {}", second.plan.plan_ordinal);
+
+    // Seed the second V linker's line state from the plan matrix. The
+    // hydration builds this purely from the plan attempt --
+    // stored_theoretical_line_before, initial_stem_line and the attachment
+    // alias flag -- with no Java row involved, so a chained transaction can
+    // derive it from the typed product rather than a fixture.
+    let mut state = carried;
+    let attempt = page.plans.systems[index]
+        .builders
+        .iter()
+        .find(|builder| builder.builder_ordinal == second.plan.builder_ordinal)
+        .and_then(|builder| {
+            builder
+                .attempts
+                .iter()
+                .find(|attempt| attempt.stem_profile == second.plan.stem_profile)
+        })
+        .expect("second frontier has a plan attempt");
+    state.line_states.push(
+        audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamVLinkLineState {
+            v_linker: second.v_linker,
+            stored_theoretical_line: attempt.stored_theoretical_line_before,
+            builder_line: attempt.initial_stem_line,
+            current_attachment_line: attempt
+                .attachment_aliases_stored_theoretical_line
+                .then_some(attempt.stored_theoretical_line_before),
+        },
+    );
+    // Supply only the page-level glyph identities -- canonical alias and Java
+    // GlyphIndex id -- for the plan's pre-existing glyphs, taking their content
+    // from the typed plan attempt. These identities are assigned before the
+    // transaction chain begins, so a self-driving chain would need them once
+    // per page rather than once per transaction. What fails after this is what
+    // is genuinely per-transaction.
+    let certificate = family_rows(&create_text, "stemsbeamcreatestemfrontier", system_id)
+        .first()
+        .copied()
+        .map(|row| row_field(row, "selectedGlyphRefs").to_owned())
+        .unwrap_or_default();
+    let identities = certificate
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(',')
+        .filter_map(|token| {
+            let parts = token.split(':').collect::<Vec<_>>();
+            let alias = parts.get(1)?.parse::<usize>().ok()?;
+            let id = parts.get(3)?.strip_prefix("id=")?.parse::<i32>().ok()?;
+            Some((alias, id))
+        })
+        .collect::<Vec<_>>();
+    println!("page-level glyph identities supplied: {identities:?}");
+    for (glyph, (alias, id)) in attempt.glyphs.iter().zip(&identities) {
+        state.selected_glyph_bindings.push(
+            audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamSelectedGlyphBinding {
+                reference: glyph.reference,
+                canonical_alias: *alias,
+                glyph_id: *id,
+                content:
+                    audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                        bounds: glyph.bounds,
+                        weight: glyph.weight,
+                        run_table: glyph.structural_key.run_table.clone(),
+                    },
+            },
+        );
+    }
+
+    // The registry itself, not just the binding. `prepare_registration` decides
+    // reuse by searching `known_canonical_glyphs` for matching content, and
+    // only falls back to Java's exhaustive scan when nothing matches. Seeding
+    // the page's glyphs here is what a bootstrapped chain would do once.
+    for (glyph, (alias, id)) in attempt.glyphs.iter().zip(&identities) {
+        state.glyph_index.known_canonical_glyphs.push(
+            audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
+                canonical_alias: *alias,
+                glyph_id: *id,
+                content:
+                    audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                        bounds: glyph.bounds,
+                        weight: glyph.weight,
+                        run_table: glyph.structural_key.run_table.clone(),
+                    },
+                active_in_index: true,
+                strongly_retained: true,
+            },
+        );
+    }
+
+    let outcome = audiveris_omr::native_stems_beam_vlink_transaction
+        ::apply_native_stems_beam_vlink_create_stem_transaction(
+            &scheduler,
+            &page.beam_builders.systems[index],
+            &page.plans.systems[index],
+            &mut state,
+            &b15_hydration::checker_context_for_page(&page),
+        );
+
+    match outcome {
+        Ok(transaction) => {
+            println!(
+                "SELF-DRIVE OK: plan {} registration {:?} disposition {:?}",
+                transaction.plan.plan_ordinal,
+                transaction.registration.action,
+                transaction.disposition
+            );
+            // What the frozen txn2 fixture says this must be.
+            let expected = family_rows(&create_text, "stemsbeamcreatestemresult", system_id);
+            if let Some(row) = expected.first() {
+                println!(
+                    "  fixture says: registration {} disposition {}",
+                    row_field(row, "registration"),
+                    row_field(row, "disposition")
+                );
+            }
+        }
+        Err(error) => {
+            println!("SELF-DRIVE BLOCKED: {error:?}");
+            println!(
+                "  (txn2 fixture inputs available but unused: base {} bytes, create {} bytes, \
+                 reuse {} bytes)",
+                base_text.len(),
+                create_text.len(),
+                reuse_text.len()
+            );
+        }
+    }
+}

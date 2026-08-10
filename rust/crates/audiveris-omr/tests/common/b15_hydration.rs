@@ -1249,6 +1249,15 @@ fn independently_build_candidate(
     Ok(fixed_glyph(bounds, run_table.weight(), run_table))
 }
 
+/// Exposed for the self-drive spike: the checker context is a page property,
+/// identical at every frontier, so a chained transaction can reuse it.
+#[allow(dead_code)]
+pub(super) fn checker_context_for_page(
+    page: &NativePredecessorPage,
+) -> NativeStemsBeamStemCheckerContext {
+    create_stem_checker_context(page)
+}
+
 fn create_stem_checker_context(page: &NativePredecessorPage) -> NativeStemsBeamStemCheckerContext {
     let interline = page.grid.scale.scale.interline.main;
     NativeStemsBeamStemCheckerContext {
