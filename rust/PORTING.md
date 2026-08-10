@@ -62,6 +62,25 @@ Fast evidence is a deliberate speed/latency trade made by the project owner, not
 lowering of the parity bar: a fast-evidence boundary is still bit-exact against Java on
 the sheets it freezes, or it does not land.
 
+### Replay-on-frozen: validating re-implemented emitters and replayed machinery
+
+When a boundary needs to reproduce machinery that already ran at an earlier frontier --
+an oracle emitter written fresh, a replayed executor, a ported helper -- do not argue
+its correctness; **run it against the earlier frontier first, where frozen fixtures
+already exist, and require byte-identity with the frozen rows before trusting it on the
+new frontier.** A fresh emitter that reproduces transaction 1's frozen rows exactly is
+proven to encode the same field semantics, value formats, and ordering as the original;
+only then may its output for transaction 2 be frozen as a new oracle.
+
+This turns the largest silent risk in oracle extension -- an emitter that produces
+plausible but subtly different evidence -- into a mechanical check that fails loudly.
+The same principle already guards probe extension: a probe that extends a predecessor
+re-emits the predecessor's rows verbatim, and the runner byte-compares them against the
+frozen predecessor fixture before writing anything new (see the Boundary 18/19/20
+runners). Prefer this over review-by-eye every time a frozen twin exists to compare
+against; where none exists, say so in the fixture header rather than implying the
+stronger check ran.
+
 ## Pipeline
 
 `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->`
