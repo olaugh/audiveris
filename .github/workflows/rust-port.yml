@@ -41,18 +41,32 @@ defaults:
   run:
     working-directory: rust
 
+env:
+  # Six splits the suite to roughly ten minutes a shard. The floor is the
+  # single heaviest binary, about six minutes, so more shards buy little.
+  TEST_SHARDS: 6
+
 jobs:
   check:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # Roughly triple the expected shard time. The unsharded job used to sit at
+    # 60 and reached it, which is how a passing suite turned into a cancelled
+    # macOS leg; leaving that much headroom keeps a slow runner from reading as
+    # a failure while still killing a genuine hang.
+    timeout-minutes: 30
     strategy:
-      # Report both legs. A divergence that appears on one host and not the
+      # Report every leg. A divergence that appears on one host and not the
       # other is the most interesting result this workflow can produce, and
-      # cancelling the other leg would hide half of it.
+      # cancelling the rest would hide most of it.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        # `cargo test` runs test binaries one after another and this suite is
+        # compute-bound -- each corpus binary drives the real pipeline over a
+        # multi-megapixel page -- so splitting by binary is close to a linear
+        # win. `rust/ci/select-test-shard.py` does the assignment.
+        shard: [0, 1, 2, 3, 4, 5]
 
     steps:
       - name: Checkout code
@@ -84,11 +98,64 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml', 'rust/rust-toolchain.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      # Whole-workspace checks are fast and shard-independent, so one shard
+      # runs them rather than all six repeating the same work.
       - name: Formatting
+        if: matrix.shard == 0
         run: cargo fmt --all --check
 
       - name: Clippy
+        if: matrix.shard == 0
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Build every target, not just this shard's. It keeps the cached
+      # `target/` complete whichever shard saves it, and it means a compile
+      # error fails every shard rather than only the one that owns the file.
+      - name: Build all test targets
+        run: cargo test --workspace --no-run
+
+      # The sharding's one real hazard is a silent gap: a target kind the
+      # assignment does not know about would stop running with nothing to say
+      # so. Compare the plan against the binaries cargo actually built, and
+      # fail if they differ. (This caught `--bin` unit tests when the split was
+      # first written.)
+      - name: Verify the shards cover every target
+        if: matrix.shard == 0
+        run: |
+          python3 - <<'PY' > /tmp/actual.txt
+          import json, subprocess
+          out = subprocess.run(
+              ["cargo", "test", "--workspace", "--no-run", "--message-format=json"],
+              capture_output=True, text=True, check=True).stdout
+          names = set()
+          for line in out.splitlines():
+              try:
+                  message = json.loads(line)
+              except ValueError:
+                  continue
+              if message.get("profile", {}).get("test") and message.get("executable"):
+                  names.add(message["target"]["name"])
+          print("\n".join(sorted(names)))
+          PY
+          for index in $(seq 0 $((TEST_SHARDS - 1))); do
+            python3 ci/select-test-shard.py --shards "$TEST_SHARDS" --shard "$index"
+          done | python3 -c '
+          import sys
+          planned = set()
+          for line in sys.stdin:
+              tokens = line.split()
+              if "--test" in tokens:
+                  planned.add(tokens[tokens.index("--test") + 1])
+              elif "--bin" in tokens:
+                  planned.add(tokens[tokens.index("--bin") + 1])
+              elif "--lib" in tokens:
+                  planned.add(tokens[tokens.index("-p") + 1].replace("-", "_"))
+          print("\n".join(sorted(planned)))' > /tmp/planned.txt
+          if ! diff -u /tmp/actual.txt /tmp/planned.txt; then
+            echo "::error::shard plan does not cover every test target" >&2
+            exit 1
+          fi
+          echo "shard plan covers all $(wc -l < /tmp/actual.txt | tr -d ' ') targets"
 
       # Over 95% of this workflow's wall clock is here, and it is compute, not
       # compilation: the corpus tests run the real pipeline over
@@ -97,7 +164,18 @@ jobs:
       # minutes to well under one while keeping debug assertions and overflow
       # checks live.
       - name: Tests
-        run: cargo test --workspace
+        run: |
+          python3 ci/select-test-shard.py --shards "$TEST_SHARDS" --plan
+          status=0
+          while read -r args; do
+            [ -n "$args" ] || continue
+            echo "::group::cargo test $args"
+            # shellcheck disable=SC2086
+            cargo test $args || status=1
+            echo "::endgroup::"
+          done < <(python3 ci/select-test-shard.py --shards "$TEST_SHARDS" --shard "${{ matrix.shard }}")
+          exit $status
+        shell: bash
 
       # `cargo test` captures the output of tests that pass, and the PDF corpus
       # test passes by *skipping* when `AUDIVERIS_PDF_CORPUS` is unset -- which
@@ -106,4 +184,5 @@ jobs:
       # says which of the two it did. See `rust/HANDOFF.md` for running it with
       # the corpus present.
       - name: Report the PDF corpus test's coverage
+        if: matrix.shard == 0
         run: cargo test -p audiveris-pdf --test corpus -- --nocapture
