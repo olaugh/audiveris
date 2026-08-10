@@ -15,6 +15,10 @@ use std::{
 };
 
 use audiveris_image::beam_structure::Segment;
+use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
+    apply_native_stems_beam_vlink_outer_b_linker_transaction, NativeStemsBeamOuterBLinkerCell,
+    NativeStemsBeamOuterVLinkerFact, NativeStemsBeamVLinkOuterBLinkerOutcome,
+};
 use audiveris_omr::{
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
@@ -9488,4 +9492,293 @@ fn compact_model_fails_closed_on_live_chords_and_malformed_state() {
         Err(IndependentError::MissingLinkerCell)
     );
     assert_eq!(missing_cell, missing_cell_before);
+}
+
+// ---------------------------------------------------------------------------
+// Boundary 18: the outer BLinker assignment in the caller (`BLinker.link`).
+//
+// Fast evidence per rust/PORTING.md: the frozen fixture covers chula and
+// BachInvention5 with a single fresh-JVM pass each, and its runner required
+// the re-emitted Boundary-17 rows to match the frozen head-links fixture
+// byte-for-byte before writing anything.  This gate re-pins that fixture by
+// hash, replays Boundaries 12-17 through the production functions exactly as
+// the Boundary-17 gate does, and then drives the production Boundary-18
+// function, comparing every field with the frozen rows.
+// ---------------------------------------------------------------------------
+
+fn boundary_eighteen_fixture_path(key: &str) -> String {
+    format!("rust/oracle/stems-beam-vlink-outer-blinker-{key}.txt")
+}
+
+struct OuterBLinkerRow {
+    fields: std::collections::BTreeMap<String, String>,
+    line: String,
+}
+
+impl OuterBLinkerRow {
+    fn parse(line: &str, label: &str, page_token: &str) -> Result<Self, String> {
+        let mut tokens = line.split(' ');
+        if tokens.next() != Some(label) {
+            return Err(format!("Boundary-18 row is not a {label} row: {line}"));
+        }
+        if tokens.next() != Some(page_token) {
+            return Err(format!("Boundary-18 row names a foreign page: {line}"));
+        }
+        let mut fields = std::collections::BTreeMap::new();
+        while let Some(name) = tokens.next() {
+            let value = tokens
+                .next()
+                .ok_or_else(|| format!("Boundary-18 row field {name} lacks a value: {line}"))?;
+            if fields.insert(name.to_owned(), value.to_owned()).is_some() {
+                return Err(format!("Boundary-18 row repeats field {name}: {line}"));
+            }
+        }
+        Ok(Self {
+            fields,
+            line: line.to_owned(),
+        })
+    }
+
+    fn value(&self, name: &str) -> Result<&str, String> {
+        self.fields
+            .get(name)
+            .map(String::as_str)
+            .ok_or_else(|| format!("Boundary-18 row lacks {name}: {}", self.line))
+    }
+
+    fn usize(&self, name: &str) -> Result<usize, String> {
+        self.value(name)?
+            .parse::<usize>()
+            .map_err(|error| format!("Boundary-18 row {name} is not a count: {error}"))
+    }
+
+    fn bool(&self, name: &str) -> Result<bool, String> {
+        match self.value(name)? {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(format!("Boundary-18 row {name} is not a boolean: {value}")),
+        }
+    }
+}
+
+fn validate_outer_b_linker_body(
+    b18_text: &str,
+    b17_bytes: &[u8],
+    image: &str,
+) -> Result<(), String> {
+    let page_token = format!("{image}#1");
+    let mut lines = b18_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return Err("Boundary-18 fixture has no rows".to_owned());
+    }
+    let page_row = OuterBLinkerRow::parse(
+        lines.remove(0),
+        "stemsbeamvlinkouterblinkerpage",
+        &page_token,
+    )?;
+    if page_row.value("headLinksFixtureSha256")? != sha256_hex(b17_bytes) {
+        return Err("Boundary-18 page does not pin its exact Boundary-17 fixture".to_owned());
+    }
+    if page_row.value("stop")? != "AssignedOuterBLinkerBeforeNextVIteration"
+        || page_row.value("methodDispatch")? != "ExactConcreteBLinkerSetLinked"
+    {
+        return Err("Boundary-18 page contract differs".to_owned());
+    }
+    let systems = page_row.usize("systems")?;
+    if lines.len() != systems * 2 {
+        return Err(format!(
+            "Boundary-18 fixture has {} body rows for {systems} systems",
+            lines.len()
+        ));
+    }
+
+    let b17_text = std::str::from_utf8(b17_bytes)
+        .map_err(|error| format!("Boundary-17 fixture is not UTF-8: {error}"))?;
+    let rows = parse_head_links_rows(b17_text)?;
+    let body_rows = &rows[..rows.len().saturating_sub(2)];
+    let (head_page, transactions, _) = parse_real_head_transactions(body_rows)?;
+
+    for pair in lines.chunks(2) {
+        let row = OuterBLinkerRow::parse(pair[0], "stemsbeamvlinkouterblinker", &page_token)?;
+        let summary =
+            OuterBLinkerRow::parse(pair[1], "stemsbeamvlinkouterblinkersummary", &page_token)?;
+        let system = row.usize("system")?;
+        let plan = row.usize("plan")?;
+        if summary.usize("system")? != system || summary.usize("plan")? != plan {
+            return Err(format!(
+                "Boundary-18 summary row disagrees with its transaction row for system {system}"
+            ));
+        }
+        let head_transaction = transactions
+            .iter()
+            .find(|candidate| candidate.key.system == system)
+            .ok_or_else(|| format!("Boundary-17 fixture lacks real system {system}"))?;
+        if head_transaction.key.plan != plan {
+            return Err(format!(
+                "Boundary-18 plan {plan} differs from the Boundary-17 plan {} for system {system}",
+                head_transaction.key.plan
+            ));
+        }
+
+        let hydrated = hydrate_boundary_sixteen_for_head(head_page, head_transaction)?;
+        let mut state = project_head_links_state(head_transaction, &hydrated)?;
+        let head_public = apply_native_stems_beam_vlink_head_links_transaction(
+            &hydrated.predecessor.scheduler,
+            &hydrated.predecessor.plans,
+            &hydrated.predecessor.stumps,
+            &hydrated.predecessor.vlinkers,
+            &hydrated.predecessor.reachability,
+            &hydrated.predecessor.builder,
+            &hydrated.predecessor.create_transaction,
+            &hydrated.predecessor.reuse_live_state,
+            hydrated.predecessor.relation_parameters,
+            &hydrated.predecessor.reuse_check,
+            &hydrated.predecessor.base_apply,
+            &hydrated.predecessor.transaction,
+            &hydrated.transaction,
+            &mut state,
+        )
+        .map_err(|error| {
+            format!("system {system} production Boundary-17 apply failed: {error}")
+        })?;
+        if !head_public.returned_true {
+            return Err(format!(
+                "system {system} Boundary-17 replay did not return true"
+            ));
+        }
+
+        let flag = &hydrated.predecessor.transaction;
+        if !row.bool("closedBefore")? {
+        } else {
+            return Err(format!(
+                "system {system} Boundary-18 row claims a closed outer BLinker"
+            ));
+        }
+        let mut cell = NativeStemsBeamOuterBLinkerCell {
+            target_b_linker: flag.target_b_linker,
+            linked: hydrated.predecessor.state_after.linked,
+            closed: false,
+            committed_by_flag_boundary: hydrated.predecessor.state_after.committed,
+        };
+        let facts = flag
+            .ordered_observer_v_linkers
+            .iter()
+            .map(|observer| {
+                if *observer == flag.triggering_v_linker {
+                    Ok(NativeStemsBeamOuterVLinkerFact {
+                        v_linker: *observer,
+                        has_target_linkers: true,
+                    })
+                } else {
+                    Err(format!(
+                        "system {system} has a non-current observer V; fast evidence has no \
+                         target fact for it, extend the oracle before accepting this page"
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
+        let outer = apply_native_stems_beam_vlink_outer_b_linker_transaction(
+            flag.key,
+            head_public.returned_true,
+            flag.triggering_v_linker,
+            &facts,
+            &mut cell,
+        )
+        .map_err(|error| {
+            format!("system {system} production Boundary-18 apply failed: {error}")
+        })?;
+
+        let expected_b = parse_b_linker_alias(row.value("bAlias")?, &hydrated.predecessor)?;
+        if expected_b != outer.target_b_linker {
+            return Err(format!("system {system} Boundary-18 bAlias differs"));
+        }
+        let side = match outer.current_v_linker.side {
+            NativeStemVerticalSide::Top => "TOP",
+            NativeStemVerticalSide::Bottom => "BOTTOM",
+        };
+        let summary_idempotent =
+            usize::from(outer.linked_before == outer.linked_after && outer.linked_after);
+        let checks: [(&str, bool); 16] = [
+            ("vSide", row.value("vSide")? == side),
+            ("entryGuardReplayed", row.bool("entryGuardReplayed")?),
+            ("linkedBefore", row.bool("linkedBefore")? == outer.linked_before),
+            ("writeExecuted", row.bool("writeExecuted")? == (outer.linked_write_count == 1)),
+            ("linkedAfter", row.bool("linkedAfter")? == outer.linked_after),
+            (
+                "valueChanged",
+                row.bool("valueChanged")? == (outer.linked_value_change_count > 0),
+            ),
+            ("closedAfter", row.bool("closedAfter")? == outer.closed_after),
+            ("arenaOtherCellsUnchanged", row.bool("arenaOtherCellsUnchanged")?),
+            ("persistentStateUnchanged", row.bool("persistentStateUnchanged")?),
+            ("vMapSize", row.usize("vMapSize")? == outer.v_map_size),
+            ("currentVOrdinal", row.usize("currentVOrdinal")? == outer.current_v_ordinal),
+            (
+                "remainingWithTargets",
+                row.usize("remainingWithTargets")? == outer.remaining_with_targets,
+            ),
+            (
+                "remainingSkipped",
+                row.usize("remainingSkipped")? == outer.remaining_skipped,
+            ),
+            (
+                "impliedLinkReturn",
+                row.bool("impliedLinkReturn")?
+                    == matches!(
+                        outer.outcome,
+                        NativeStemsBeamVLinkOuterBLinkerOutcome
+                            ::AssignedOuterBLinkerBeforeNextVIteration {
+                            implied_link_return: true,
+                        }
+                    ),
+            ),
+            (
+                "terminal",
+                row.value("terminal")? == "AssignedOuterBLinkerBeforeNextVIteration",
+            ),
+            ("summaryTransactions", summary.usize("transactions")? == 1),
+        ];
+        for (name, ok) in checks {
+            if !ok {
+                return Err(format!("system {system} Boundary-18 {name} differs"));
+            }
+        }
+        if summary.usize("idempotentWrites")? != summary_idempotent
+            || summary.usize("valueChanges")? != outer.linked_value_change_count
+            || !summary.bool("impliedLinkReturn")?
+        {
+            return Err(format!("system {system} Boundary-18 summary differs"));
+        }
+        if !cell.linked {
+            return Err(format!("system {system} Boundary-18 left the cell unlinked"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn installed_boundary_eighteen_outer_b_linker_is_exactly_replayed() {
+    let mut installed = 0;
+    for (key, image) in CORPUS_PAGES {
+        let path = repo_root().join(boundary_eighteen_fixture_path(key));
+        let b18_text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("cannot read {}: {error}", path.display()),
+        };
+        let b17_path = repo_root().join(boundary_seventeen_fixture_path(key));
+        let b17_bytes = std::fs::read(&b17_path)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", b17_path.display()));
+        validate_outer_b_linker_body(&b18_text, &b17_bytes, image)
+            .unwrap_or_else(|error| panic!("{key} Boundary-18 exact replay: {error}"));
+        installed += 1;
+    }
+    assert!(
+        installed >= 2,
+        "Boundary-18 fast evidence requires at least chula and BachInvention5"
+    );
 }

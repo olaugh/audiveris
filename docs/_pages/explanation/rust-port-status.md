@@ -205,7 +205,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first sixteen semantic `STEMS` boundaries are production-shaped and graded.
+The first eighteen semantic `STEMS` boundaries are production-shaped and graded (the eighteenth under the fast-evidence policy documented in `rust/PORTING.md`).
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without

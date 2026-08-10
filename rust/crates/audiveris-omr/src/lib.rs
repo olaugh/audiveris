@@ -85,6 +85,7 @@ pub mod native_stems_beam_stumps;
 pub mod native_stems_beam_vlink_b_linker_flag;
 pub mod native_stems_beam_vlink_base_apply;
 pub mod native_stems_beam_vlink_head_links;
+pub mod native_stems_beam_vlink_outer_b_linker;
 pub mod native_stems_beam_vlink_reuse_check;
 pub mod native_stems_beam_vlink_sibling_links;
 pub mod native_stems_beam_vlink_transaction;
