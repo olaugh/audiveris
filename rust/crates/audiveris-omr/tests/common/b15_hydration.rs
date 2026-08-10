@@ -737,18 +737,18 @@ impl PredecessorFixture {
     }
 }
 
-struct NativePredecessorPage {
-    grid: GridLinesRecognition,
-    stem_seeds: NativeStemSeedRecognition,
-    beam_stumps: NativeStemsBeamStumpRecognition,
-    beam_vlinkers: NativeStemsBeamVLinkerRecognition,
-    beam_reachability: NativeStemsBeamReachabilityRecognition,
-    beam_builders: NativeStemsBeamBuilderRecognition,
-    plans: NativeStemsBeamLinkPlanRecognition,
-    scheduler: NativeStemsBeamSchedulerRecognition,
+pub(super) struct NativePredecessorPage {
+    pub(super) grid: GridLinesRecognition,
+    pub(super) stem_seeds: NativeStemSeedRecognition,
+    pub(super) beam_stumps: NativeStemsBeamStumpRecognition,
+    pub(super) beam_vlinkers: NativeStemsBeamVLinkerRecognition,
+    pub(super) beam_reachability: NativeStemsBeamReachabilityRecognition,
+    pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
+    pub(super) plans: NativeStemsBeamLinkPlanRecognition,
+    pub(super) scheduler: NativeStemsBeamSchedulerRecognition,
 }
 
-fn native_predecessor_page(image: &str) -> NativePredecessorPage {
+pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
     let path = repo_root().join("data/examples").join(image);
     let grid =
         recognize_grid_lines(path).unwrap_or_else(|error| panic!("{image}: GRID failed: {error}"));
@@ -2365,6 +2365,7 @@ pub(super) struct HydratedBoundaryFifteen {
     pub ordered_observers: Vec<NativeStemsBeamVLinkerRef>,
 }
 
+#[allow(dead_code)] // The Boundary-16/17 gates call this; the txn2 gate uses run_real_on_page.
 pub(super) fn run_real(
     image: &str,
     system_id: usize,
@@ -2374,10 +2375,30 @@ pub(super) fn run_real(
     linked_before: bool,
 ) -> Result<HydratedBoundaryFifteen, String> {
     let page = native_predecessor_page(image);
+    run_real_on_page(
+        &page,
+        system_id,
+        base_apply_text,
+        create_text,
+        reuse_text,
+        linked_before,
+    )
+}
+
+/// Boundary-20 entry: identical to `run_real` but on a caller-supplied page whose
+/// scheduler status may already be advanced to a later frontier.
+pub(super) fn run_real_on_page(
+    page: &NativePredecessorPage,
+    system_id: usize,
+    base_apply_text: &str,
+    create_text: &str,
+    reuse_text: &str,
+    linked_before: bool,
+) -> Result<HydratedBoundaryFifteen, String> {
     let create_fixture = PredecessorFixture::parse(create_text, CREATE_STEM_SCHEMA)?;
     let reuse_fixture = PredecessorFixture::parse(reuse_text, REUSE_CHECK_SCHEMA)?;
     let (oracle_page, rows) = parse_real_rows(base_apply_text, system_id)?;
-    let predecessor = replay_boundary_thirteen(&page, &create_fixture, &reuse_fixture, system_id)?;
+    let predecessor = replay_boundary_thirteen(page, &create_fixture, &reuse_fixture, system_id)?;
     validate_boundary_thirteen_continuity(&rows, &reuse_fixture)?;
     let scheduler = page
         .scheduler
@@ -2419,7 +2440,7 @@ pub(super) fn run_real(
         NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
         _ => return Err(format!("system {system_id} lacks V transaction frontier")),
     };
-    let mut base_state = build_real_base_state(&page, &oracle_page, &rows, &predecessor)?;
+    let mut base_state = build_real_base_state(page, &oracle_page, &rows, &predecessor)?;
     let base_state_before = base_state.clone();
     let base_apply = apply_native_stems_beam_vlink_base_transaction(
         scheduler,

@@ -1,0 +1,22 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) boundary-20 manifest.
+# schema: stems-beam-txn2-manifest-v1
+stemsbeamtxn2page BachInvention5.jpg#1 systems 6 schedulerResumeFixtureSha256 a7cce0f4a039a21ce9fb6df6706d334393d816e731fd1cb8de36f6e3429e0ad6 executionMode foregroundJvmPerSystem evidence FreshSelfPinnedPerFamily stop SecondTransactionOuterAssignmentComplete
+stemsbeamschedulerresumepage BachInvention5.jpg#1 systems 6 outerBLinkerFixtureSha256 7a4334449ab87fe4afa6174c6f39d4963014a0afb357d061e3e0e4e751f22702 executionMode foregroundJvmPerSystem phaseScope SidesOnly stop SecondFrontierOrSidesExhaustion
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 1 event 0 beamSig 12 bAlias beam:12:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 1 event 1 beamSig 12 bAlias beam:12:b:3 hSide RIGHT vSide TOP plan 263 stemProfile 4 linkProfile 1 lastIndex 4 relationEntries 2 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 1 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 2 event 0 beamSig 1 bAlias beam:1:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 2 event 1 beamSig 1 bAlias beam:1:b:3 hSide RIGHT vSide BOTTOM plan 53 stemProfile 4 linkProfile 1 lastIndex 1 relationEntries 1 glyphs 1 lineChanged true terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 2 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 3 event 0 beamSig 33 bAlias beam:33:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 3 event 1 beamSig 33 bAlias beam:33:b:3 hSide RIGHT vSide TOP plan 227 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 2 glyphs 2 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 3 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 4 event 0 beamSig 12 bAlias beam:12:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 4 event 1 beamSig 12 bAlias beam:12:b:3 hSide RIGHT vSide TOP plan 123 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 4 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 5 event 0 beamSig 31 bAlias beam:31:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 5 event 1 beamSig 31 bAlias beam:31:b:3 hSide RIGHT vSide TOP plan 420 stemProfile 4 linkProfile 1 lastIndex 2 relationEntries 2 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 5 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumeside BachInvention5.jpg#1 system 6 event 0 beamSig 28 bAlias beam:28:b:0 hSide LEFT stemProfile 4 linkProfile 1 logicalResult true linkedSidesBefore []
+stemsbeamschedulerresumefrontier BachInvention5.jpg#1 system 6 event 1 beamSig 28 bAlias beam:28:b:3 hSide RIGHT vSide TOP plan 53 stemProfile 4 linkProfile 1 lastIndex 3 relationEntries 3 glyphs 1 lineChanged false terminal AwaitingVLinkTransaction
+stemsbeamschedulerresumesummary BachInvention5.jpg#1 system 6 resumeEvents 2 secondFrontier true sidesExhausted false terminal AwaitingVLinkTransaction
