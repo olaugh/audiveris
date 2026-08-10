@@ -3861,3 +3861,287 @@ fn scheduler_resume_chain_composes_without_repeating_a_v_linker() {
     }
     assert!(systems_driven >= 3, "chained only {systems_driven} systems");
 }
+
+/// One chained SIDES pass over a system, with the facts the resume tests assert.
+struct ChainOutcome {
+    transactions: usize,
+    terminal: &'static str,
+    /// A resumed side whose completed V had another V after it in the same B
+    /// linker, so Java's loop keeps going rather than stopping at the success.
+    multi_v_continuations: usize,
+}
+
+fn chain_one_system(
+    inputs: &NativeSchedulerInputs,
+    prefix_system: &NativeStemsBeamSchedulerSystem,
+    index: usize,
+    linked_before: &[NativeStemsBeamBLinkerRef],
+    link_succeeds: bool,
+    limit: usize,
+) -> ChainOutcome {
+    let mut system = prefix_system.clone();
+    system.linked_b_linkers = linked_before.to_vec();
+    let mut transactions = 0;
+    let mut multi_v_continuations = 0;
+    for _ in 0..limit {
+        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &system.status
+        else {
+            break;
+        };
+        let constructor = inputs.beam_vlinkers.systems[index]
+            .constructors
+            .iter()
+            .find(|constructor| constructor.source == frontier.beam)
+            .expect("frontier beam has a constructor");
+        if let Some(b) = constructor
+            .b_linkers
+            .iter()
+            .find(|b| b.reference == frontier.b_linker)
+        {
+            let position = b
+                .v_linkers
+                .iter()
+                .position(|v| v.reference == frontier.v_linker);
+            if let Some(position) = position {
+                if position + 1 < b.v_linkers.len() {
+                    multi_v_continuations += 1;
+                }
+            }
+        }
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: link_succeeds,
+            sibling_linked_b_linkers: Vec::new(),
+        };
+        let resume = resume_native_stems_beam_scheduler_after_transaction(
+            &system,
+            &inputs.beam_vlinkers.systems[index],
+            &inputs.beam_builders.systems[index],
+            &inputs.link_plans.systems[index],
+            &completed,
+        )
+        .expect("resume");
+        transactions += 1;
+        system = *resume.advanced_system;
+    }
+    ChainOutcome {
+        transactions,
+        terminal: match &system.status {
+            NativeStemsBeamSchedulerStatus::Completed { .. } => "Completed",
+            NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => "HookRemoval",
+            NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => "Awaiting",
+        },
+        multi_v_continuations,
+    }
+}
+
+/// The resume's terminals and its multi-V continuation are corpus behaviour,
+/// not hypotheses.
+///
+/// These three paths were carried as owed "synthetic units". Synthesising them
+/// would have meant fabricating whole VLinker/builder/plan products; real pages
+/// exercise all three, and real topology is better evidence than a struct built
+/// to satisfy the code under test.
+///
+/// Exhaustion and hook-removal are plentiful -- chaining the eight-sheet corpus
+/// reaches Completed on most systems and AwaitingHookRemoval on allegretto 1
+/// and 3. The multi-V continuation is not: across all 24 chained systems it
+/// happens **three times in two systems**, batuque 1 (once) and BachInvention5
+/// 6 (twice). Multi-V B linkers themselves are common -- 35 on chula system 1
+/// alone -- but they are almost never the frontier's own B, which is a side
+/// linker and normally carries a single V. So this assertion is deliberately a
+/// floor of one: the path is real and reached, but the corpus barely covers it,
+/// and a future page that changes beam grouping could move the count. Treat a
+/// failure here as "the corpus stopped covering this", not as a regression in
+/// the resume.
+#[test]
+fn resume_reaches_exhaustion_hook_removal_and_multi_v_continuation_on_the_corpus() {
+    let mut completed = 0;
+    let mut hook_removal = 0;
+    let mut multi_v = 0;
+    for page in PAGES {
+        let inputs = native_scheduler_inputs(page.image);
+        let recognition = materialize_native_stems_beam_scheduler_frontiers(
+            &inputs.beams,
+            &inputs.beam_stumps,
+            &inputs.beam_vlinkers,
+            &inputs.beam_builders,
+            &inputs.link_plans,
+        )
+        .expect("frontiers");
+        for (index, system) in recognition.systems.iter().enumerate() {
+            if !matches!(
+                system.status,
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_)
+            ) {
+                continue;
+            }
+            let outcome = chain_one_system(&inputs, system, index, &[], true, 200);
+            match outcome.terminal {
+                "Completed" => completed += 1,
+                "HookRemoval" => hook_removal += 1,
+                other => panic!("{}: chain did not terminate: {other}", page.image),
+            }
+            multi_v += outcome.multi_v_continuations;
+        }
+    }
+    assert!(completed > 0, "no system exhausted its SIDES worklist");
+    assert!(
+        hook_removal > 0,
+        "no system stopped at a competing-hook removal"
+    );
+    assert!(
+        multi_v > 0,
+        "no resumed side continued past its completed V linker; the corpus \
+         covered this three times across two systems when written"
+    );
+}
+
+/// A link that returns false leaves the B unlinked, and the side fails.
+///
+/// Java's `if (vLinker.link(...)) setLinked(true)` makes failure a live branch
+/// even though this corpus never takes it: all 189 recorded chula steps link.
+/// Driving the same real frontier both ways isolates the difference to the one
+/// bit, which a fabricated system could not do as convincingly.
+#[test]
+fn a_failed_link_leaves_the_side_unlinked_and_shortens_the_pass() {
+    let inputs = native_scheduler_inputs("chula.png");
+    let recognition = materialize_native_stems_beam_scheduler_frontiers(
+        &inputs.beams,
+        &inputs.beam_stumps,
+        &inputs.beam_vlinkers,
+        &inputs.beam_builders,
+        &inputs.link_plans,
+    )
+    .expect("frontiers");
+    let index = 0;
+    let system = &recognition.systems[index];
+    let succeeded = chain_one_system(&inputs, system, index, &[], true, 200);
+    let failed = chain_one_system(&inputs, system, index, &[], false, 200);
+    assert!(
+        failed.transactions < succeeded.transactions,
+        "failing every link ran {} transactions against {} for success",
+        failed.transactions,
+        succeeded.transactions
+    );
+    assert_eq!(
+        failed.terminal, "Completed",
+        "a pass whose links all fail still exhausts its worklist"
+    );
+}
+
+/// A B linker another transaction already linked takes Java's early return.
+///
+/// `BLinker.link` opens with `if (vLinkers.isEmpty() || isLinked()) return
+/// true`, and `linkSiblings` can set that flag on a beam no transaction of its
+/// own ever touched. Pre-linking the B linkers a pass would otherwise visit
+/// has to shorten it.
+#[test]
+fn an_already_linked_b_linker_is_skipped_without_a_transaction() {
+    let inputs = native_scheduler_inputs("chula.png");
+    let recognition = materialize_native_stems_beam_scheduler_frontiers(
+        &inputs.beams,
+        &inputs.beam_stumps,
+        &inputs.beam_vlinkers,
+        &inputs.beam_builders,
+        &inputs.link_plans,
+    )
+    .expect("frontiers");
+    let index = 0;
+    let system = &recognition.systems[index];
+    let baseline = chain_one_system(&inputs, system, index, &[], true, 200);
+
+    // Every B linker the untouched pass would visit, pre-marked as linked.
+    let mut visited = Vec::new();
+    let mut walker = system.clone();
+    for _ in 0..baseline.transactions {
+        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &walker.status
+        else {
+            break;
+        };
+        if !visited.contains(&frontier.b_linker) {
+            visited.push(frontier.b_linker);
+        }
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: true,
+            sibling_linked_b_linkers: Vec::new(),
+        };
+        walker = *resume_native_stems_beam_scheduler_after_transaction(
+            &walker,
+            &inputs.beam_vlinkers.systems[index],
+            &inputs.beam_builders.systems[index],
+            &inputs.link_plans.systems[index],
+            &completed,
+        )
+        .expect("resume")
+        .advanced_system;
+    }
+    assert!(visited.len() > 1, "baseline pass visited too few B linkers");
+
+    let skipped = chain_one_system(&inputs, system, index, &visited, true, 200);
+    assert!(
+        skipped.transactions < baseline.transactions,
+        "pre-linking {} B linkers did not shorten the pass ({} vs {})",
+        visited.len(),
+        skipped.transactions,
+        baseline.transactions
+    );
+}
+
+#[test]
+#[ignore = "diagnostic: prints the magnitudes the resume-path tests assert on"]
+fn resume_path_magnitudes() {
+    let inputs = native_scheduler_inputs("chula.png");
+    let recognition = materialize_native_stems_beam_scheduler_frontiers(
+        &inputs.beams,
+        &inputs.beam_stumps,
+        &inputs.beam_vlinkers,
+        &inputs.beam_builders,
+        &inputs.link_plans,
+    )
+    .expect("frontiers");
+    let system = &recognition.systems[0];
+    let ok = chain_one_system(&inputs, system, 0, &[], true, 200);
+    let failed = chain_one_system(&inputs, system, 0, &[], false, 200);
+    println!(
+        "success: {} txns, terminal {}, multi-V continuations {}",
+        ok.transactions, ok.terminal, ok.multi_v_continuations
+    );
+    println!(
+        "all-fail: {} txns, terminal {}",
+        failed.transactions, failed.terminal
+    );
+    for page in PAGES {
+        let inputs = native_scheduler_inputs(page.image);
+        let recognition = materialize_native_stems_beam_scheduler_frontiers(
+            &inputs.beams,
+            &inputs.beam_stumps,
+            &inputs.beam_vlinkers,
+            &inputs.beam_builders,
+            &inputs.link_plans,
+        )
+        .expect("frontiers");
+        for (index, system) in recognition.systems.iter().enumerate() {
+            if !matches!(
+                system.status,
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_)
+            ) {
+                continue;
+            }
+            let outcome = chain_one_system(&inputs, system, index, &[], true, 200);
+            println!(
+                "{} sys {}: {} txns, {}, multi-V {}",
+                page.image,
+                system.system_id,
+                outcome.transactions,
+                outcome.terminal,
+                outcome.multi_v_continuations
+            );
+        }
+    }
+}
