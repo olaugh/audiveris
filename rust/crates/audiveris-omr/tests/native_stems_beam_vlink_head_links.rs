@@ -9991,6 +9991,9 @@ fn boundaries_sixteen_and_seventeen_replay_at_the_second_frontier() {
                 b_linker: first.b_linker,
                 v_linker: first.v_linker,
                 outer_b_linked_after: true,
+                // One frontier advance: no later side consults this
+                // transaction's sibling writes.
+                sibling_linked_b_linkers: Vec::new(),
             };
             let resume = resume_native_stems_beam_scheduler_after_transaction(
                 system,

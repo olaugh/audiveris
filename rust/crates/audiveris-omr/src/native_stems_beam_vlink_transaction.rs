@@ -2610,6 +2610,8 @@ mod tests {
             beams_by_reverse_width: Vec::new(),
             prefix_events: Vec::new(),
             deferred_line_deltas: vec![prior_delta.clone(), second_delta.clone()],
+            consumed_v_linkers: Vec::new(),
+            linked_b_linkers: Vec::new(),
             status: NativeStemsBeamSchedulerStatus::Completed {
                 retained_for_stumps: Vec::new(),
                 final_local_worklist: Vec::new(),

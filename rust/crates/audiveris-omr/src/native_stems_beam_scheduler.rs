@@ -77,6 +77,18 @@ pub struct NativeStemsBeamSchedulerSystem {
     pub prefix_events: Vec<NativeStemsBeamSchedulerEvent>,
     /// Definite Java line-alias writes made by known-false prefix attempts.
     pub deferred_line_deltas: Vec<NativeStemsBeamDeferredLineDelta>,
+    /// V linkers whose transaction already executed earlier in a resume chain.
+    /// Empty for the prefix product; only chained resumes append to it.
+    pub consumed_v_linkers: Vec<NativeStemsBeamVLinkerRef>,
+    /// B linkers left linked by an earlier transaction in the chain.
+    ///
+    /// `BLinker.link` opens with `if (vLinkers.isEmpty() || isLinked()) return
+    /// true`, and that flag survives the whole pass. Because B linkers are
+    /// shared -- a beam's side can carry an anchor another beam already linked
+    /// -- the guard fires for sides no transaction of their own ever touched.
+    /// On chula system 1 it fires 21 times, which is exactly the number of
+    /// spurious transactions a chain runs without it.
+    pub linked_b_linkers: Vec<NativeStemsBeamBLinkerRef>,
     pub status: NativeStemsBeamSchedulerStatus,
 }
 
@@ -772,6 +784,9 @@ fn materialize_system(
         beams_by_reverse_width,
         prefix_events: state.events,
         deferred_line_deltas: state.deferred_line_deltas,
+        // The prefix has executed no transaction yet.
+        consumed_v_linkers: Vec::new(),
+        linked_b_linkers: Vec::new(),
         status,
     })
 }
@@ -1657,13 +1672,26 @@ fn validate_inline_built_stump(
 /// Evidence that the awaited transaction at the prefix frontier ran to its
 /// Boundary-18 completion: the executed plan identity and the outer B-linker
 /// flag state it left behind.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeStemsBeamCompletedVLinkEvidence {
     pub plan: NativeStemsBeamPlanRef,
     pub b_linker: NativeStemsBeamBLinkerRef,
     pub v_linker: NativeStemsBeamVLinkerRef,
-    /// `BLinker.isLinked()` after the Boundary-18 outer assignment.
+    /// `BLinker.isLinked()` after the Boundary-18 outer assignment, which is
+    /// `false` when `VLinker.link` returned false and the outer assignment
+    /// never ran. Both outcomes continue the pass; they differ in whether the
+    /// beam survives its side.
     pub outer_b_linked_after: bool,
+    /// Every *other* B linker this transaction left linked.
+    ///
+    /// `linkSiblings` writes B cells on sibling beams in the group, so a
+    /// transaction can link B linkers far from its own. Those sides then take
+    /// `BLinker.link`'s `isLinked()` early return and run no transaction at
+    /// all. Measured on chula system 1: 21 sides are skipped that way, with
+    /// zero overlap between the skipped B aliases and the executed ones -- so
+    /// a chain fed only `b_linker` runs exactly 21 transactions too many.
+    /// Boundary 16 reports these as its sibling B-linker cells.
+    pub sibling_linked_b_linkers: Vec<NativeStemsBeamBLinkerRef>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1682,6 +1710,15 @@ pub struct NativeStemsBeamSchedulerResume {
     /// Events after the prefix, in order; ordinals continue the prefix stream.
     pub resume_events: Vec<NativeStemsBeamSchedulerEvent>,
     pub status: NativeStemsBeamSchedulerResumeStatus,
+    /// The system advanced to `status`, with this resume's events folded into
+    /// the prefix and its line deltas carried.
+    ///
+    /// The SIDES pass is roughly thirty transactions per system, so resuming
+    /// has to compose: resuming again from the *original* system would replay
+    /// against a stale prefix, restarting invocation ordinals and forgetting
+    /// which V linkers already shifted their theoretical line. Feeding this
+    /// system to the next resume is what keeps a chain exact.
+    pub advanced_system: Box<NativeStemsBeamSchedulerSystem>,
 }
 
 /// Gate/plan handling for one V attempt during the resume, shared by the
@@ -1787,7 +1824,6 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
         || awaiting.plan != completed.plan
         || awaiting.b_linker != completed.b_linker
         || awaiting.v_linker != completed.v_linker
-        || !completed.outer_b_linked_after
     {
         return Err(NativeStemsBeamSchedulerError::SystemOrder);
     }
@@ -1797,11 +1833,13 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
         deferred_line_deltas: scheduler_system.deferred_line_deltas.clone(),
         // The executed transaction consumed its own expand; a repeated attempt
         // on that V would consult a stale matrix row, so it is rejected like
-        // any post-delta repeat.
+        // any post-delta repeat. Every V that a previous link in the chain
+        // executed is already recorded in the system's own consumed list.
         shifted_v_linkers: scheduler_system
             .deferred_line_deltas
             .iter()
             .map(|delta| delta.v_linker)
+            .chain(scheduler_system.consumed_v_linkers.iter().copied())
             .chain(std::iter::once(completed.v_linker))
             .collect(),
         invocation_ordinal: awaiting
@@ -1899,6 +1937,23 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
                     reference: b_reference,
                 },
             )?;
+            if !resumed_here && scheduler_system.linked_b_linkers.contains(&b_reference) {
+                // Java's `isLinked()` early return: the side succeeds without
+                // inspecting a single V linker.
+                let event_ordinal = state.events.len();
+                state
+                    .events
+                    .push(NativeStemsBeamSchedulerEvent::SideBLinkerResult {
+                        event_ordinal,
+                        beam: source,
+                        side,
+                        b_linker: b_reference,
+                        logical_success: true,
+                        linked_flag_after: true,
+                    });
+                linked_sides.push(side);
+                continue;
+            }
             let logical_success = if resumed_here {
                 if b_reference != completed.b_linker {
                     return Err(NativeStemsBeamSchedulerError::SystemOrder);
@@ -1935,7 +1990,15 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
                 if !seen_completed {
                     return Err(NativeStemsBeamSchedulerError::SystemOrder);
                 }
-                true
+                // `BLinker.link` returns `isLinked()`, and only a V whose
+                // `link` returned true ever sets that flag. A V linker after
+                // the completed one can only link by reaching its own frontier,
+                // which returns above, so this side's result is exactly what
+                // the executed transaction reported. A failed transaction
+                // leaves the B unlinked and, for a non-hook beam, drops the
+                // beam from the worklist below -- which is why a chain that
+                // assumes success runs far more transactions than Java does.
+                completed.outer_b_linked_after
             } else if b_linker.v_linkers.is_empty() {
                 let event_ordinal = state.events.len();
                 state
@@ -1979,7 +2042,7 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
                     side,
                     b_linker: b_reference,
                     logical_success,
-                    linked_flag_after: resumed_here,
+                    linked_flag_after: resumed_here && completed.outer_b_linked_after,
                 });
             if logical_success {
                 linked_sides.push(side);
@@ -2040,10 +2103,45 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
         index += 1;
     };
 
+    let resume_events = state.events[prefix_event_count..].to_vec();
+    let mut consumed_v_linkers = scheduler_system.consumed_v_linkers.clone();
+    consumed_v_linkers.push(completed.v_linker);
+    let mut linked_b_linkers = scheduler_system.linked_b_linkers.clone();
+    if completed.outer_b_linked_after && !linked_b_linkers.contains(&completed.b_linker) {
+        linked_b_linkers.push(completed.b_linker);
+    }
+    for sibling in &completed.sibling_linked_b_linkers {
+        if !linked_b_linkers.contains(sibling) {
+            linked_b_linkers.push(*sibling);
+        }
+    }
+    let advanced_system = NativeStemsBeamSchedulerSystem {
+        prefix_events: state.events.clone(),
+        deferred_line_deltas: state.deferred_line_deltas.clone(),
+        consumed_v_linkers,
+        linked_b_linkers,
+        status: match &status {
+            NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(next) => {
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(next.clone())
+            }
+            NativeStemsBeamSchedulerResumeStatus::AwaitingHookRemovalTransaction(next) => {
+                NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(next.clone())
+            }
+            NativeStemsBeamSchedulerResumeStatus::SidesExhaustedBeforeSecondFrontier {
+                retained_for_stumps,
+                final_local_worklist,
+            } => NativeStemsBeamSchedulerStatus::Completed {
+                retained_for_stumps: retained_for_stumps.clone(),
+                final_local_worklist: final_local_worklist.clone(),
+            },
+        },
+        ..scheduler_system.clone()
+    };
     Ok(NativeStemsBeamSchedulerResume {
         system_id,
-        resume_events: state.events[prefix_event_count..].to_vec(),
+        resume_events,
         status,
+        advanced_system: Box::new(advanced_system),
     })
 }
 

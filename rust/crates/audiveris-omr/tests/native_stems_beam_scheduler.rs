@@ -951,6 +951,9 @@ fn gate_scheduler_system(
         beams_by_reverse_width,
         prefix_events,
         deferred_line_deltas,
+        // The gate reconstructs the prefix product, which has executed nothing.
+        consumed_v_linkers: Vec::new(),
+        linked_b_linkers: Vec::new(),
         status,
     }
 }
@@ -3543,6 +3546,9 @@ fn native_stems_beam_scheduler_resume_matches_java_on_corpus() {
                 // Boundary 18's gate proves the outer flag is true after every
                 // real transaction on this same corpus.
                 outer_b_linked_after: true,
+                // One frontier advance: no later side consults this
+                // transaction's sibling writes.
+                sibling_linked_b_linkers: Vec::new(),
             };
             let resume = resume_native_stems_beam_scheduler_after_transaction(
                 system,
@@ -3720,4 +3726,138 @@ fn native_stems_beam_scheduler_resume_matches_java_on_corpus() {
         checked_pages, installed,
         "Boundary-19 graded {checked_pages} of {installed} installed sheets"
     );
+}
+
+/// Chain resumes across the whole SIDES pass and check the chain composes.
+///
+/// The pass is roughly thirty transactions per system, so the port cannot model
+/// one transaction per boundary; it has to iterate. Iterating is only sound if
+/// each resume starts from the *advanced* system rather than the original
+/// prefix, which is what `advanced_system` carries. This drives that chain to
+/// its terminal state on every installed sheet and checks the invariants that a
+/// stale-prefix chain would break: strictly growing event streams, never a
+/// repeated V, and a terminal that is reached rather than run past.
+///
+/// **What this does not prove.** It feeds every transaction a synthetic
+/// success with no sibling writes, so the chain it drives is longer than the
+/// pass Java actually runs. Measured against the Java oracle on chula system 1:
+/// Java executes 32 transactions and then exhausts its worklist, while this
+/// chain executes 53. The first 32 plan ordinals agree exactly -- 143, 152,
+/// 618, 627, ... 558, 563 -- and the extra 21 correspond one-for-one to the 21
+/// sides Java skips through `BLinker.link`'s `isLinked()` early return, whose B
+/// aliases have zero overlap with the executed ones because `linkSiblings`
+/// linked them. Closing that gap means feeding `sibling_linked_b_linkers` from
+/// each transaction's Boundary-16 result, which needs the full chain of typed
+/// applies this test deliberately does not run. Until then, read this as a test
+/// of composition mechanics, not of transaction-count parity.
+#[test]
+fn scheduler_resume_chain_composes_without_repeating_a_v_linker() {
+    let mut systems_driven = 0;
+    for page in PAGES {
+        let key = page
+            .fixture
+            .trim_start_matches("stems-beam-scheduler-")
+            .trim_end_matches(".txt");
+        // Only the sheets whose beam products are already installed; the census
+        // fixtures are not needed here because the chain is self-driving.
+        if !repo_root()
+            .join(format!("rust/oracle/stems-beam-scheduler-{key}.txt"))
+            .is_file()
+        {
+            continue;
+        }
+        let inputs = native_scheduler_inputs(page.image);
+        let recognition = materialize_native_stems_beam_scheduler_frontiers(
+            &inputs.beams,
+            &inputs.beam_stumps,
+            &inputs.beam_vlinkers,
+            &inputs.beam_builders,
+            &inputs.link_plans,
+        )
+        .unwrap_or_else(|error| panic!("{key}: scheduler frontiers failed: {error}"));
+
+        for (index, prefix_system) in recognition.systems.iter().enumerate() {
+            let system_id = prefix_system.system_id;
+            let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) = &prefix_system.status
+            else {
+                continue;
+            };
+            let mut system = prefix_system.clone();
+            let mut executed = Vec::new();
+            let mut previous_events = system.prefix_events.len();
+            // Well above the ~37 the census measured, low enough to fail fast
+            // if the chain ever stops converging.
+            for step in 0..200 {
+                let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) =
+                    &system.status
+                else {
+                    break;
+                };
+                let completed = NativeStemsBeamCompletedVLinkEvidence {
+                    plan: frontier.plan,
+                    b_linker: frontier.b_linker,
+                    v_linker: frontier.v_linker,
+                    // Boundary 18 proved the outer flag is true after every real
+                    // transaction on this corpus.
+                    outer_b_linked_after: true,
+                    // Deliberately empty: see this test's doc comment on what
+                    // it does and does not prove.
+                    sibling_linked_b_linkers: Vec::new(),
+                };
+                assert!(
+                    !executed.contains(&frontier.v_linker),
+                    "{key} system {system_id}: V linker repeated at step {step}"
+                );
+                executed.push(frontier.v_linker);
+                if std::env::var_os("AUDIVERIS_CHAIN_TRACE").is_some() {
+                    println!("plan {key} {system_id} {}", frontier.plan.plan_ordinal);
+                }
+                let resume = resume_native_stems_beam_scheduler_after_transaction(
+                    &system,
+                    &inputs.beam_vlinkers.systems[index],
+                    &inputs.beam_builders.systems[index],
+                    &inputs.link_plans.systems[index],
+                    &completed,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("{key} system {system_id}: resume {step} failed: {error}")
+                });
+                assert!(
+                    resume.advanced_system.prefix_events.len() >= previous_events,
+                    "{key} system {system_id}: event stream shrank at step {step}"
+                );
+                previous_events = resume.advanced_system.prefix_events.len();
+                assert_eq!(
+                    resume.advanced_system.consumed_v_linkers.len(),
+                    executed.len(),
+                    "{key} system {system_id}: consumed list lost a transaction"
+                );
+                system = *resume.advanced_system;
+            }
+            assert!(
+                !matches!(
+                    system.status,
+                    NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_)
+                ),
+                "{key} system {system_id}: chain did not terminate within 200 transactions"
+            );
+            assert!(
+                executed.len() >= 2,
+                "{key} system {system_id}: chain ran only {} transactions",
+                executed.len()
+            );
+            println!(
+                "chain {key} system {system_id}: {} transactions, terminal {}",
+                executed.len(),
+                match &system.status {
+                    NativeStemsBeamSchedulerStatus::Completed { .. } => "Completed",
+                    NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) =>
+                        "AwaitingHookRemoval",
+                    NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => "Awaiting",
+                }
+            );
+            systems_driven += 1;
+        }
+    }
+    assert!(systems_driven >= 3, "chained only {systems_driven} systems");
 }
