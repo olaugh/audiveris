@@ -119,8 +119,11 @@ jobs:
       # so. Compare the plan against the binaries cargo actually built, and
       # fail if they differ. (This caught `--bin` unit tests when the split was
       # first written.)
+      # `--doc` items build nothing, so they are absent from cargo's executable
+      # list by design and are filtered out of the comparison below.
       - name: Verify the shards cover every target
         if: matrix.shard == 0
+        shell: bash
         run: |
           python3 - <<'PY' > /tmp/actual.txt
           import json, subprocess

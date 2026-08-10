@@ -68,12 +68,12 @@ def work_items() -> list[tuple[str, list[str]]]:
                 items.append(
                     (target["name"], ["-p", name, "--test", target["name"]])
                 )
-            elif "lib" in kinds and target.get("doctest", False):
-                # One item covers the crate's unit tests and its doctests; both
-                # are small next to the corpus binaries.
-                items.append((name.replace("-", "_"), ["-p", name, "--lib", "--doc"]))
             elif "lib" in kinds:
                 items.append((name.replace("-", "_"), ["-p", name, "--lib"]))
+                if target.get("doctest", False):
+                    # Cargo refuses `--doc` alongside any other target
+                    # selector, so doctests are always their own invocation.
+                    items.append((f"{name}::doc", ["-p", name, "--doc"]))
             elif "bin" in kinds:
                 # Binaries carry unit tests too; `--workspace` ran them, so the
                 # shards must. The coverage check below fails loudly if a target
