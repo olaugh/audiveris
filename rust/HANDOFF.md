@@ -111,6 +111,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS beam-V base SIG/BeamStem application | `apply_native_stems_beam_vlink_base_transaction` is the fourteenth exact boundary: it conditionally executes `SIG.addVertex` and then applies the checked base BeamStem relation with exact index/SIG ordering, duplicate suppression, JGraphT callbacks, abnormal/dirty effects, and partial prefixes. All 30 real rows are `NewIdZero` with vertex and edge added, reuse zero, and zero ChordStem matches; 40 supported and 32 envelope cases are isolated evidence, not production-equivalence. Twenty focused units and the 10/10 33.87-second gate are green; it stops at `ReadyBeforeBLinkerFlagMutation` |
 | STEMS beam-V B-linker shared flag assignment | `apply_native_stems_beam_vlink_b_linker_flag_transaction` is the fifteenth exact boundary: it independently reruns boundary 14 from its exact pre-state, resolves the scheduler-selected outer B and its TOP-then-BOTTOM V observers, and executes one plain `linked = true` assignment while retaining the ignored base-link return and fresh draft grade. All 30 real writes change false to true across a guarded Java arena of 3,948 entries (2,116 frozen + 1,832 dynamic anchors). Eight isolated blocks add 32 setter/shared-cell-only Unsafe exact-class envelopes: 24 false-to-true, 8 idempotent, and 8 with `applyReturn=false`. Seven focused units and the shared 5/5 126.03-second hydration regression are green; it stops at `ReadyBeforeSiblingBeamLinks` |
 | STEMS beam-V sibling BeamStem links | `apply_native_stems_beam_vlink_sibling_links_transaction` is the sixteenth exact boundary: it exact-replays Boundary 15 and executes the complete serial sibling loop through group ordering, identity/duplicate/shorter branches, fresh BeamStem edge callbacks, zero-Chord validation, beam abnormal/dirty effects, and optional sibling B-cell writes. The 30 real transactions expose 58 non-null native-glyph group members and 11 siblings; all 11 link, add one edge, and write one B cell. Eight isolated blocks add 64 supported branch cases and 16 Java throw envelopes without claiming production equivalence. Twenty-two focused units and the 10/10 126.68-second full exact gate are green; it stops at `ReadyBeforeHeadRelationLoop` |
+| STEMS beam-V head relations | `apply_native_stems_beam_vlink_head_links_transaction` is the seventeenth exact boundary: it exact-replays Boundary 16 and executes the insertion-ordered head map through unconditional shared S-cell assignment, exact directed duplicate lookup, lazy consistency mutation of the existing plan draft, direct HeadStem insertion, and synchronous head/stem abnormal and dirty callbacks. The 30 real transactions contain 65 entries, zero duplicates, 65 inserts, 65 S-cell and consistency writes, and 260 ordered events. Eight isolated blocks add 16 supported and 40 envelope transactions without claiming production equivalence. Twenty-four focused units, the 13/13 148.82-second full exact gate, and the 1/1 129.11-second manifest validator are green; it stops at `ReturnedTrueBeforeOuterBLinkerAssignment` |
 
 `recognize_native_beams` consumes the GRID report and the `HeaderErase` list
 returned by `recognize_native_headers`: it measures `maxStem`, runs the spot
@@ -146,11 +147,11 @@ remains.
 `cargo fmt --all --check`, strict Clippy, and `cargo test --workspace` are green
 locally under the pinned toolchain. The full suite includes several independent
 eight-page image-pipeline differentials, including complete HEADS and the exact
-semantic STEMS boundaries described below. The sixteenth beam-V sibling-links
-boundary has 22/22 focused production units and 10/10 full exact integration
-tests; the 30-system plus isolated supplemental gate finishes in 126.68 seconds.
-The shared Boundary-15 hydration regression is 5/5 in 126.03 seconds. The full
-library suite is 652 passed / 0 failed / 2 ignored in 11.92 seconds.
+semantic STEMS boundaries described below. The seventeenth beam-V head-links
+boundary has 24/24 focused production units and 13/13 full exact integration
+tests; the 30-system plus isolated supplemental gate finishes in 148.82 seconds,
+and the standalone manifest validator passes 1/1 in 129.11 seconds. The full
+library suite is 676 passed / 0 failed / 2 ignored in 12.18 seconds.
 Strict library/gate Clippy, global formatting, diff-check, and oracle shell syntax
 checks are green.
 
@@ -1379,9 +1380,59 @@ concurrency 1 and no background Java process.
 Twenty-two focused production tests and all 10 full exact integration tests
 pass; the full gate finishes in 126.68 seconds. The full library suite is 652
 passed / 0 failed / 2 ignored in 11.92 seconds. The terminal is
-`ReadyBeforeHeadRelationLoop`. The head-relation loop is the next exact boundary,
-followed separately by later scheduler attempts, stump linking, and competing-
-hook removal.
+`ReadyBeforeHeadRelationLoop`.
+
+`apply_native_stems_beam_vlink_head_links_transaction` closes the seventeenth
+exact production semantic STEMS boundary. It independently reruns the complete
+Boundary-16 transaction from its typed predecessor and requires the supplied
+transaction and resulting state to match before touching head-link state. It
+then executes the insertion-ordered Java head-relation map and stops after the
+method returns true, immediately before the caller assigns the outer B-linker.
+
+Each entry writes the shared parent S-linker cell before reading the graph. The
+complete source-outgoing snapshot and exact head-to-stem filter preserve the
+first assignable `HeadStemRelation` break. An existing relation skips every
+later read. A missing relation lazily reads small-head and stem-length evidence,
+mutates consistency on the already-created plan draft, inserts that same draft,
+and synchronously runs the relation callback. Compact production requires exact
+live endpoints, sole standard listener topology, prepopulated head side and
+extension, and non-manual relation/head/stem state. It preserves head-then-stem
+abnormal scans and ordered SheetStub/Book cascades; default metadata, manual
+chord rewiring, and Java failure prefixes are isolated gate evidence. The final
+`lastIndex < maxIndex` comparison remains explicit, its commented-out split does
+not mutate state, and the method returns true.
+
+Across all 30 real transactions, 65 ordered entries perform zero duplicate
+suppression, 65 relation inserts, 65 S-cell writes, 65 consistency writes, and
+260 ordered events. Eight isolated blocks add 16 supported and 40 envelope
+transactions—56 total / 304 events—with 40 graph deltas, 16 throws, 16 manual
+cases, and 8 chord rewires. These supplemental cases grade supported branches
+and Java-only failure/manual prefixes without claiming production equivalence.
+
+The normalized corpus is 1,583 lines / 785,671 bytes with SHA-256
+`b57ec3f2bf401fce6d6d62c7522285dd3288b35b40d7c5c453468cf5dde4ce48`.
+Emitted split bodies are 1,639 lines / 790,438 bytes with SHA-256
+`044631a9dc5177b3fbe074a03cc031f52cb6087b3ea3491377f820d633b44d01`;
+the full split fixtures are 1,655 lines / 873,975 bytes with SHA-256
+`6e9abd60f5274622bd9638cc6e1cd6c489ee5fdc36ec96769507ef9f16f418aa`.
+Manifest, manifest-body, probe, runner, and effective-classpath SHA-256 are
+`87b1f5fb459551cb247f4702449128f35d94ac5ee738d764e25e523dd21955ab`,
+`a7934a066b47654b56184e6506825d9f1f5986d96f25b3eb52b2281308185a08`,
+`3e6dd42af58f074d6f9a146dd00c3573fc4c79c445eda629bc82f93d175df61a`,
+`932084cef5c8d5b700cdda1ce3ddb48e5454fe8f65775a9d7fed52070c7a1d42`,
+and `fd4e52c2275675a53459dff2b2e2d89636f3c5fb6ab5a1f7be65f74157663fb3`.
+The complete manifest is 10 lines / 35,839 bytes and its authenticated body is 9
+lines / 25,997 bytes. Two byte-identical passes per page used 8 compiler plus 60
+runtime foreground/reaped JVMs—68 total—with maximum runner-scoped Java
+concurrency 1 and no background Java process.
+
+Twenty-four focused production tests and all 13 full exact integration tests
+pass; the full gate finishes in 148.82 seconds and the standalone manifest
+validator passes 1/1 in 129.11 seconds. The full library suite is 676 passed / 0
+failed / 2 ignored in 12.18 seconds. The terminal is
+`ReturnedTrueBeforeOuterBLinkerAssignment`. The next exact seam is the caller's
+outer B-linker assignment and scheduling, followed separately by later scheduler
+attempts, stump linking, and competing-hook removal.
 
 **The earlier retained-prerequisite checkpoint remains verified by CI as of
 Rust run `31254538949` and Java run `31254538976`**, both green on
@@ -3959,7 +4010,8 @@ it does not duplicate production Java implementations in the harness.
 
 Commit each slice separately after the full verification block above.
 
-1. Grade the head-relation loop immediately after the now-exact sibling links.
+1. Grade the caller's outer B-linker assignment and scheduling immediately after
+   the now-exact head-relation loop.
 2. Continue later beam-scheduler attempts, stump
    linking, and competing-hook removal as separately graded boundaries.
 3. Extend `.omr` typing only through bounded read-only views that preserve every

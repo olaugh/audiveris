@@ -27,6 +27,22 @@ use audiveris_omr::{
         NativeStemsBeamSheetEditState, NativeStemsBeamSigListenerTopology,
         NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBeamRuntimeState,
     },
+    native_stems_beam_vlink_head_links::{
+        NativeStemsBeamHeadAbnormalScan, NativeStemsBeamHeadAppendedRelation,
+        NativeStemsBeamHeadDirectedPairScan, NativeStemsBeamHeadDirtySubject,
+        NativeStemsBeamHeadIncidentClassRead, NativeStemsBeamHeadIncidentOpposite,
+        NativeStemsBeamHeadIncidentRelation, NativeStemsBeamHeadIncidentScan,
+        NativeStemsBeamHeadLinkBranch, NativeStemsBeamHeadLinkHeadRef,
+        NativeStemsBeamHeadLinkHeadState, NativeStemsBeamHeadLinkStepCertificate,
+        NativeStemsBeamHeadPairClassRead, NativeStemsBeamHeadPairRelation,
+        NativeStemsBeamHeadPlanDraft, NativeStemsBeamHeadQueryRelationKind,
+        NativeStemsBeamHeadRelationObjectIdentity, NativeStemsBeamHeadSLinkerCell,
+        NativeStemsBeamHeadSLinkerRef, NativeStemsBeamHeadSourceOutgoingRelation,
+        NativeStemsBeamVLinkHeadLinksCertificate, NativeStemsBeamVLinkHeadLinksOperation,
+        NativeStemsBeamVLinkHeadLinksOutcome, NativeStemsBeamVLinkHeadLinksState,
+        NativeStemsBeamVLinkHeadLinksTransaction,
+        apply_native_stems_beam_vlink_head_links_transaction,
+    },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
         NativeStemsBeamSiblingBeamAbnormalTrace, NativeStemsBeamSiblingBeamIncidentRelation,
@@ -50,8 +66,47 @@ use audiveris_omr::{
         apply_native_stems_beam_vlink_sibling_links_transaction,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
-    stems_step::{NativeBeamPortion, NativeStemPoint, NativeStemVerticalSide},
+    stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemPoint, NativeStemVerticalSide},
 };
+
+const HEAD_LINKS_FIXTURE_SCHEMA: &str = "# schema: stems-beam-vlink-head-links-v1";
+const HEAD_LINKS_PROBE_SOURCE_PATH: &str = "rust/oracle/java/StemsBeamVLinkHeadLinksProbe.java";
+const HEAD_LINKS_RUNNER_SOURCE_PATH: &str = "rust/oracle/java/run-stems-beam-vlink-head-links.sh";
+const HEAD_LINKS_MANIFEST_SCHEMA: &str = "# schema: stems-beam-vlink-head-links-manifest-v1";
+const HEAD_LINKS_MANIFEST_PATH: &str = "rust/oracle/stems-beam-vlink-head-links-manifest.txt";
+const HEAD_LINKS_MANIFEST_OVERRIDE_ENV: &str = "AUDIVERIS_B17_HEAD_LINKS_MANIFEST";
+const HEAD_LINKS_MANIFEST_ENTRY_LABEL: &str = "stemsbeamvlinkheadlinksmanifestentry";
+const HEAD_LINKS_MANIFEST_SUMMARY_LABEL: &str = "stemsbeamvlinkheadlinksmanifestsummary";
+const HEAD_LINKS_MANIFEST_SHA256: &str =
+    "87b1f5fb459551cb247f4702449128f35d94ac5ee738d764e25e523dd21955ab";
+const HEAD_LINKS_MANIFEST_LINES: usize = 10;
+const HEAD_LINKS_MANIFEST_BYTES: usize = 35_839;
+const HEAD_LINKS_MANIFEST_BODY_SHA256: &str =
+    "a7934a066b47654b56184e6506825d9f1f5986d96f25b3eb52b2281308185a08";
+const HEAD_LINKS_MANIFEST_BODY_LINES: usize = 9;
+const HEAD_LINKS_MANIFEST_BODY_BYTES: usize = 25_997;
+const HEAD_LINKS_NORMALIZED_CORPUS_SHA256: &str =
+    "b57ec3f2bf401fce6d6d62c7522285dd3288b35b40d7c5c453468cf5dde4ce48";
+const HEAD_LINKS_NORMALIZED_CORPUS_LINES: usize = 1_583;
+const HEAD_LINKS_NORMALIZED_CORPUS_BYTES: usize = 785_671;
+const HEAD_LINKS_SPLIT_EMITTED_BODY_SHA256: &str =
+    "044631a9dc5177b3fbe074a03cc031f52cb6087b3ea3491377f820d633b44d01";
+const HEAD_LINKS_SPLIT_EMITTED_BODY_LINES: usize = 1_639;
+const HEAD_LINKS_SPLIT_EMITTED_BODY_BYTES: usize = 790_438;
+const HEAD_LINKS_SPLIT_FIXTURE_SHA256: &str =
+    "6e9abd60f5274622bd9638cc6e1cd6c489ee5fdc36ec96769507ef9f16f418aa";
+const HEAD_LINKS_SPLIT_FIXTURE_LINES: usize = 1_655;
+const HEAD_LINKS_SPLIT_FIXTURE_BYTES: usize = 873_975;
+const HEAD_LINKS_FIXTURE_HEADER: &[&str] = &[
+    "# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) beam VLink head-links oracle.",
+    "# schema: stems-beam-vlink-head-links-v1",
+    "# Frozen scheduler through sibling-links predecessors are replayed and joined exactly.",
+    "# Head plans follow the original LinkedHashMap first-insertion order with latest payload values.",
+    "# Each entry writes its shared SLinker before the directed HeadStem duplicate lookup.",
+    "# Missing pairs mutate the existing plan draft, insert it directly, and run the synchronous callback.",
+    "# Isolated manual, chord, duplicate, and exception evidence is gate-only, not production-equivalent.",
+    "# Stop is after return true and immediately before the caller outer BLinker assignment.",
+];
 
 #[path = "common/b15_hydration.rs"]
 mod b15_hydration;
@@ -4152,6 +4207,10 @@ fn boundary_sixteen_fixture_path(key: &str) -> String {
     format!("rust/oracle/stems-beam-vlink-sibling-links-{key}.txt")
 }
 
+fn boundary_seventeen_fixture_path(key: &str) -> String {
+    format!("rust/oracle/stems-beam-vlink-head-links-{key}.txt")
+}
+
 fn boundary_fifteen_fixture_path(key: &str) -> String {
     format!("rust/oracle/stems-beam-vlink-b-linker-flag-{key}.txt")
 }
@@ -4836,6 +4895,3867 @@ fn validate_installed_boundary_sixteen_fixture(path: &std::path::Path) -> Result
     validate_boundary_fifteen_predecessors(&rows[0], &transactions)?;
     validate_real_public_transactions(&rows[0], &transactions)?;
     Ok(())
+}
+
+const HEAD_LINKS_COMMON_FIELDS: &[&str] = &["system", "plan", "scope", "case"];
+const HEAD_LINKS_ENTRY_COMMON_FIELDS: &[&str] = &["system", "plan", "scope", "case", "mapOrdinal"];
+const HEAD_LINKS_PAGE_FIELDS: &[&str] = &[
+    "systems",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "bLinkerFlagFixtureSha256",
+    "siblingLinksFixtureSha256",
+    "executionMode",
+    "relationOrder",
+    "incidentOrder",
+    "headless",
+    "methodDispatch",
+    "stop",
+];
+const HEAD_LINKS_PREDECESSOR_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "join",
+    "b16TransactionRows",
+    "b16TransactionEvidenceSha256",
+    "b16ResultRowSha256",
+    "b16GuardRowSha256",
+    "b16SummaryRowSha256",
+    "predecessorTerminal",
+    "stemAlias",
+    "stemInterId",
+    "relationInputHash",
+    "javaPredecessorStateSha256",
+    "proofDomain",
+];
+const HEAD_LINKS_BASELINE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "interline",
+    "neutralStemLength",
+    "relationEntries",
+    "relationInputHash",
+    "headPlanStateSha256",
+    "stemAlias",
+    "stemInterId",
+    "stemManual",
+    "stemAbnormal",
+    "graphVertices",
+    "graphVertexSha256",
+    "graphEdges",
+    "graphEdgeSha256",
+    "interIndexEntries",
+    "interIndexSha256",
+    "builderItems",
+    "builderItemsSha256",
+    "lastIndex",
+    "maxIndex",
+    "listenerTopologySha256",
+    "soleSigListener",
+    "headless",
+    "stubModified",
+    "bookModified",
+    "bookDirty",
+    "eventStart",
+];
+const HEAD_LINKS_HEAD_ENTRY_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "cAlias",
+    "cRuntimeClass",
+    "evidenceTiming",
+    "sAlias",
+    "sRuntimeClass",
+    "horizontalSide",
+    "verticalSide",
+    "observerAliases",
+    "headAlias",
+    "headSigOrdinal",
+    "headXOrdinal",
+    "headRuntimeClass",
+    "headInterId",
+    "headIndexOrdinal",
+    "headIndexObjectMatches",
+    "headIndexIdMatches",
+    "headVertexOrdinal",
+    "headVertexObjectMatches",
+    "headSigSystemId",
+    "shape",
+    "small",
+    "stemHead",
+    "glyph",
+    "staff",
+    "center",
+    "manual",
+    "removed",
+    "vip",
+    "abnormalBefore",
+    "sLinkedBefore",
+    "sClosedBefore",
+    "planDraftIdentity",
+    "draftRuntimeClass",
+    "draftManual",
+    "draftHeadSide",
+    "draftExtension",
+    "draftConsistencyBeforeState",
+    "draftConsistencyBeforeValue",
+    "draftDx",
+    "draftDy",
+    "draftGrade",
+    "draftImpacts",
+    "draftGraphMatches",
+    "branch",
+];
+const HEAD_LINKS_S_WRITE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "eventOrdinal",
+    "receiverAlias",
+    "receiverRuntimeClass",
+    "declaringClass",
+    "requested",
+    "before",
+    "after",
+    "writeCount",
+    "valueChangeCount",
+    "closedBefore",
+    "closedAfter",
+    "observerAliases",
+    "completed",
+];
+const HEAD_LINKS_SOURCE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "sourceOutgoingOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "targetVertexOrdinal",
+];
+const HEAD_LINKS_PAIR_RELATION_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "pairOrdinal",
+    "sourceOutgoingOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "classRead",
+    "matches",
+    "action",
+];
+const HEAD_LINKS_PAIR_SCAN_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "state",
+    "sourceOutgoingCount",
+    "sourceOutgoingSha256",
+    "pairCount",
+    "pairSha256",
+    "selectedGraphRelationIdentity",
+    "selectedRelationObjectIdentity",
+    "selectedRuntimeClass",
+];
+const HEAD_LINKS_CONSISTENCY_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "eventOrdinal",
+    "shapeRead",
+    "shape",
+    "small",
+    "stemMedianRead",
+    "stemMedian",
+    "interlineRead",
+    "interline",
+    "scaledStemLength",
+    "neutralStemLength",
+    "ratio",
+    "consistencyBeforeState",
+    "consistencyBeforeValue",
+    "consistencyAfterState",
+    "consistencyAfterValue",
+    "debugEnabled",
+    "completed",
+];
+const HEAD_LINKS_EDGE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "eventOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "sourceAlias",
+    "sourceInterId",
+    "sourceVertexOrdinal",
+    "targetAlias",
+    "targetInterId",
+    "targetVertexOrdinal",
+    "graphInsertionOrdinal",
+    "insertionReturned",
+    "callbackSynchronous",
+];
+const HEAD_LINKS_INCIDENT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "incidentOrdinal",
+    "direction",
+    "directionOrdinal",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "runtimeClass",
+    "oppositeAlias",
+    "oppositeInterId",
+    "oppositeVertexOrdinal",
+    "classRead",
+    "matches",
+    "action",
+];
+const HEAD_LINKS_INCIDENT_SCAN_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "state",
+    "incidentCount",
+    "incidentSha256",
+    "requestedAbnormal",
+];
+const HEAD_LINKS_CALLBACK_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "eventOrdinal",
+    "relationObjectIdentity",
+    "headSideWasNull",
+    "headSideAfter",
+    "extensionWasNull",
+    "extensionAfter",
+    "relationManual",
+    "headManualRead",
+    "headManual",
+    "stemManualRead",
+    "stemManual",
+    "chordBranch",
+    "headScanState",
+    "headAbnormalRequested",
+    "stemScanState",
+    "stemAbnormalRequested",
+    "headAbnormalBefore",
+    "headAbnormalAfter",
+    "stemAbnormalBefore",
+    "stemAbnormalAfter",
+    "stubModifiedBefore",
+    "stubModifiedAfter",
+    "bookModifiedBefore",
+    "bookModifiedAfter",
+    "bookDirtyBefore",
+    "bookDirtyAfter",
+    "completed",
+];
+const HEAD_LINKS_ENTRY_RESULT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "mapOrdinal",
+    "branch",
+    "sLinkedAfter",
+    "sClosedAfter",
+    "draftConsistencyAfterState",
+    "draftConsistencyAfterValue",
+    "graphRelationIdentity",
+    "relationObjectIdentity",
+    "insertionReturned",
+    "callbackCompleted",
+    "headAbnormalAfter",
+    "stemAbnormalAfter",
+    "relationStateBeforeSha256",
+    "relationStateAfterSha256",
+];
+const HEAD_LINKS_REMAINDER_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "lastIndex",
+    "maxIndex",
+    "builderItemCount",
+    "comparisonEvaluated",
+    "remainderPresent",
+    "splitBody",
+    "splitCalls",
+    "returnedTrue",
+];
+const HEAD_LINKS_RESULT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "headEntries",
+    "duplicateEntries",
+    "relationsInserted",
+    "sWriteCount",
+    "sValueChangeCount",
+    "consistencyWriteCount",
+    "headAbnormalChangeCount",
+    "stemAbnormalChangeCount",
+    "dirtyCascadeCount",
+    "sheetEditMutationCount",
+    "eventCount",
+    "returnedTrue",
+    "terminal",
+    "relationInputHash",
+    "headPlanStateSha256",
+    "stateAfterSha256",
+];
+const HEAD_LINKS_GUARD_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "allocatorUnchanged",
+    "glyphRegistryUnchanged",
+    "interIndexIdentityUnchanged",
+    "sigVertexIdentityOrderUnchanged",
+    "baselineEdgeIdentityOrderUnchanged",
+    "appendedEdgesExactly",
+    "systemStemsMapIdentityUnchanged",
+    "beamLinesUnchanged",
+    "builderItemsUnchanged",
+    "relationMapIdentityOrderUnchanged",
+    "legacyRelationInputPayloadHashChanged",
+    "onlySelectedSCellsMayChange",
+    "onlyHeadStemAbnormalMayChange",
+    "manualChordBranchRead",
+    "splitCalls",
+    "outerBLinkerAssignmentRead",
+    "stopBeforeOuterBLinkerAssignment",
+    "headPlanStateChangedByConsistency",
+];
+const HEAD_LINKS_SUMMARY_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "headEntries",
+    "duplicateEntries",
+    "relationsInserted",
+    "sWrites",
+    "returnedTrue",
+    "terminal",
+];
+const HEAD_LINKS_SYNTHETIC_CASE_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "join",
+    "sourceRealB16EvidenceSha256",
+    "construction",
+    "shape",
+    "small",
+    "stemAttachedBefore",
+    "soleSigListener",
+    "sLinkedBefore",
+    "sLinkedAfter",
+    "sClosedBefore",
+    "sClosedAfter",
+    "pairState",
+    "selectedGraphRelationIdentity",
+    "selectedRuntimeClass",
+    "draftConsistencyBefore",
+    "draftConsistencyAfter",
+    "scaledStemLength",
+    "neutralStemLength",
+    "expectedConsistency",
+    "headSideBefore",
+    "headSideAfter",
+    "extensionBefore",
+    "extensionAfter",
+    "draftAttachedBefore",
+    "draftAttachedAfter",
+    "relationManual",
+    "headManual",
+    "stemManual",
+    "sideFallbackTaken",
+    "extensionFallbackTaken",
+    "manualBranchRead",
+    "chordBranchRead",
+    "headAbnormalRead",
+    "stemAbnormalRead",
+    "graphEdgesBefore",
+    "graphEdgesAfter",
+    "headStemBefore",
+    "headStemAfter",
+    "chordStemBefore",
+    "chordStemAfter",
+    "oldChordStemRetained",
+    "newChordStemCount",
+    "chordTargetsNewStem",
+    "addEdgeReturned",
+    "callbackState",
+    "headAbnormalBefore",
+    "headAbnormalAfter",
+    "stemAbnormalBefore",
+    "stemAbnormalAfter",
+    "dirtyBefore",
+    "dirtyAfter",
+    "throwClass",
+    "throwStage",
+    "eventCount",
+    "terminal",
+];
+const HEAD_LINKS_SYNTHETIC_EVENT_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "eventOrdinal",
+    "kind",
+    "relationIdentity",
+];
+const HEAD_LINKS_SYNTHETIC_GUARD_FIELDS: &[&str] = &[
+    "system",
+    "plan",
+    "scope",
+    "case",
+    "graphDelta",
+    "allowedMutations",
+    "headPayloadUnchanged",
+    "stemPayloadUnchanged",
+    "closedFlagsUnchanged",
+    "unrelatedGraphPreserved",
+    "isolatedOnly",
+    "productionEquivalent",
+    "enclosingRealSheetUnchanged",
+    "outerBLinkerAssignmentRead",
+    "terminal",
+];
+const HEAD_LINKS_PAGE_SUMMARY_FIELDS: &[&str] = &[
+    "systems",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "isolatedCases",
+    "totalTransactions",
+    "headEntries",
+    "duplicateEntries",
+    "relationsInserted",
+    "sWrites",
+    "sValueChanges",
+    "consistencyWrites",
+    "headAbnormalChanges",
+    "stemAbnormalChanges",
+    "dirtyCascades",
+    "sheetEditMutations",
+    "realEvents",
+    "isolatedEvents",
+    "isolatedGraphDelta",
+    "isolatedThrows",
+    "isolatedManualCases",
+    "chordRewires",
+    "stopBeforeOuterBLinkerAssignment",
+];
+const HEAD_LINKS_CORPUS_SUMMARY_FIELDS: &[&str] = &[
+    "schema",
+    "mode",
+    "pages",
+    "pageRefs",
+    "rowCounts",
+    "pageInputSha256",
+    "probeSourceSha256",
+    "runnerSourceSha256",
+    "effectiveClasspathSha256",
+    "jdkReleaseSha256",
+    "javaExecutableSha256",
+    "javaJpegLibrarySha256",
+    "javaModulesSha256",
+    "javaVmLibrarySha256",
+    "javaAwtLibrarySha256",
+    "javaAwtLwawtLibrarySha256",
+    "javaArchitecture",
+    "javaRuntimeVersion",
+    "javaVmVariant",
+    "javaImageType",
+    "beamLinkerClassSha256",
+    "bLinkerClassSha256",
+    "vLinkerClassSha256",
+    "stemLinkerClassSha256",
+    "headLinkerClassSha256",
+    "sLinkerClassSha256",
+    "cLinkerClassSha256",
+    "headInterClassSha256",
+    "stemInterClassSha256",
+    "headStemRelationClassSha256",
+    "headChordInterClassSha256",
+    "chordStemRelationClassSha256",
+    "partClassSha256",
+    "sigraphClassSha256",
+    "beamLinkerSourceSha256",
+    "stemLinkerSourceSha256",
+    "linkSourceSha256",
+    "sigraphSourceSha256",
+    "sigListenerSourceSha256",
+    "systemInfoSourceSha256",
+    "sheetSourceSha256",
+    "basicIndexSourceSha256",
+    "entityIndexSourceSha256",
+    "glyphIndexSourceSha256",
+    "interIndexSourceSha256",
+    "abstractEntitySourceSha256",
+    "abstractInterSourceSha256",
+    "interSourceSha256",
+    "stemInterSourceSha256",
+    "abstractChordInterSourceSha256",
+    "headChordInterSourceSha256",
+    "relationSourceSha256",
+    "supportSourceSha256",
+    "beamStemRelationSourceSha256",
+    "beamRestRelationSourceSha256",
+    "chordStemRelationSourceSha256",
+    "abstractBeamInterSourceSha256",
+    "beamInterSourceSha256",
+    "beamHookInterSourceSha256",
+    "smallBeamInterSourceSha256",
+    "beamBeamRelationSourceSha256",
+    "sheetStubSourceSha256",
+    "bookSourceSha256",
+    "horizontalSideSourceSha256",
+    "verticalSideSourceSha256",
+    "stemBuilderSourceSha256",
+    "stemItemSourceSha256",
+    "stemsRetrieverSourceSha256",
+    "beamGroupInterSourceSha256",
+    "ensembleHelperSourceSha256",
+    "containmentSourceSha256",
+    "abstractStemConnectionSourceSha256",
+    "beamPortionSourceSha256",
+    "scaleSourceSha256",
+    "skewSourceSha256",
+    "staffSourceSha256",
+    "staffLineSourceSha256",
+    "lineInfoSourceSha256",
+    "lineUtilSourceSha256",
+    "headLinkerSourceSha256",
+    "headInterSourceSha256",
+    "headStemRelationSourceSha256",
+    "partSourceSha256",
+    "gradleSourceSha256",
+    "jgraphtCoreVersion",
+    "jgraphtCoreJarSha256",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagFixtureSha256",
+    "bLinkerFlagManifestSha256",
+    "siblingLinksFixtureSha256",
+    "siblingLinksManifestSha256",
+    "predecessorReplay",
+    "querySerialization",
+    "emittedBodySha256",
+    "emittedBodyLines",
+    "emittedBodyBytes",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "rawPassSha256",
+    "freshJvmPerSystem",
+    "compilerJavaProcesses",
+    "runtimeJavaProcessesPerPass",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "compilerJavaProcessReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "isolatedCases",
+    "totalTransactions",
+    "headEntries",
+    "duplicateEntries",
+    "relationsInserted",
+    "sWrites",
+    "sValueChanges",
+    "consistencyWrites",
+    "headAbnormalChanges",
+    "stemAbnormalChanges",
+    "dirtyCascades",
+    "sheetEditMutations",
+    "realEvents",
+    "isolatedEvents",
+    "isolatedGraphDelta",
+    "isolatedThrows",
+    "isolatedManualCases",
+    "chordRewires",
+    "system1IsolatedBlock",
+    "supportedSyntheticEvidenceScope",
+    "envelopeEvidenceScope",
+    "stopBeforeOuterBLinkerAssignment",
+];
+const HEAD_LINKS_MANIFEST_ENTRY_FIELDS: &[&str] = &[
+    "ordinal",
+    "page",
+    "fixture",
+    "rowCounts",
+    "systems",
+    "realTransactions",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "isolatedCases",
+    "totalTransactions",
+    "headEntries",
+    "duplicateEntries",
+    "relationsInserted",
+    "sWrites",
+    "sValueChanges",
+    "consistencyWrites",
+    "headAbnormalChanges",
+    "stemAbnormalChanges",
+    "dirtyCascades",
+    "sheetEditMutations",
+    "realEvents",
+    "isolatedEvents",
+    "isolatedGraphDelta",
+    "isolatedThrows",
+    "isolatedManualCases",
+    "chordRewires",
+    "pageInputSha256",
+    "schedulerFixtureSha256",
+    "expandFixtureSha256",
+    "createStemFixtureSha256",
+    "reuseCheckFixtureSha256",
+    "baseApplyFixtureSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagFixtureSha256",
+    "bLinkerFlagManifestSha256",
+    "siblingLinksFixtureSha256",
+    "siblingLinksManifestSha256",
+    "emittedBodySha256",
+    "emittedBodyLines",
+    "emittedBodyBytes",
+    "rawPassSha256",
+    "fixtureSha256",
+    "fixtureLines",
+    "fixtureBytes",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "compilerJavaProcesses",
+    "runtimeJavaProcessesPerPass",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "freshJvmPerSystem",
+    "compilerJavaProcessReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "system1IsolatedBlock",
+    "supportedSyntheticEvidenceScope",
+    "envelopeEvidenceScope",
+    "stopBeforeOuterBLinkerAssignment",
+];
+const HEAD_LINKS_MANIFEST_SUMMARY_FIELDS: &[&str] = &[
+    "schema",
+    "entries",
+    "probeSourceSha256",
+    "runnerSourceSha256",
+    "effectiveClasspathSha256",
+    "jdkReleaseSha256",
+    "javaExecutableSha256",
+    "javaJpegLibrarySha256",
+    "javaModulesSha256",
+    "javaVmLibrarySha256",
+    "javaAwtLibrarySha256",
+    "javaAwtLwawtLibrarySha256",
+    "javaArchitecture",
+    "javaRuntimeVersion",
+    "javaVmVariant",
+    "javaImageType",
+    "beamLinkerClassSha256",
+    "bLinkerClassSha256",
+    "vLinkerClassSha256",
+    "stemLinkerClassSha256",
+    "headLinkerClassSha256",
+    "sLinkerClassSha256",
+    "cLinkerClassSha256",
+    "headInterClassSha256",
+    "stemInterClassSha256",
+    "headStemRelationClassSha256",
+    "headChordInterClassSha256",
+    "chordStemRelationClassSha256",
+    "partClassSha256",
+    "sigraphClassSha256",
+    "beamLinkerSourceSha256",
+    "stemLinkerSourceSha256",
+    "linkSourceSha256",
+    "sigraphSourceSha256",
+    "sigListenerSourceSha256",
+    "systemInfoSourceSha256",
+    "sheetSourceSha256",
+    "basicIndexSourceSha256",
+    "entityIndexSourceSha256",
+    "glyphIndexSourceSha256",
+    "interIndexSourceSha256",
+    "abstractEntitySourceSha256",
+    "abstractInterSourceSha256",
+    "interSourceSha256",
+    "stemInterSourceSha256",
+    "abstractChordInterSourceSha256",
+    "headChordInterSourceSha256",
+    "relationSourceSha256",
+    "supportSourceSha256",
+    "beamStemRelationSourceSha256",
+    "beamRestRelationSourceSha256",
+    "chordStemRelationSourceSha256",
+    "abstractBeamInterSourceSha256",
+    "beamInterSourceSha256",
+    "beamHookInterSourceSha256",
+    "smallBeamInterSourceSha256",
+    "beamBeamRelationSourceSha256",
+    "sheetStubSourceSha256",
+    "bookSourceSha256",
+    "horizontalSideSourceSha256",
+    "verticalSideSourceSha256",
+    "stemBuilderSourceSha256",
+    "stemItemSourceSha256",
+    "stemsRetrieverSourceSha256",
+    "beamGroupInterSourceSha256",
+    "ensembleHelperSourceSha256",
+    "containmentSourceSha256",
+    "abstractStemConnectionSourceSha256",
+    "beamPortionSourceSha256",
+    "scaleSourceSha256",
+    "skewSourceSha256",
+    "staffSourceSha256",
+    "staffLineSourceSha256",
+    "lineInfoSourceSha256",
+    "lineUtilSourceSha256",
+    "headLinkerSourceSha256",
+    "headInterSourceSha256",
+    "headStemRelationSourceSha256",
+    "partSourceSha256",
+    "gradleSourceSha256",
+    "jgraphtCoreVersion",
+    "jgraphtCoreJarSha256",
+    "baseApplyManifestSha256",
+    "bLinkerFlagManifestSha256",
+    "siblingLinksManifestSha256",
+    "predecessorReplay",
+    "querySerialization",
+    "sharedHeaderSha256",
+    "sharedHeaderLines",
+    "sharedHeaderBytes",
+    "corpusBodySha256",
+    "corpusBodyLines",
+    "corpusBodyBytes",
+    "corpusRowCounts",
+    "corpusReconstruction",
+    "semanticRows",
+    "splitEmittedBodySha256",
+    "splitEmittedBodyLines",
+    "splitEmittedBodyBytes",
+    "splitFixtureSha256",
+    "splitFixtureLines",
+    "splitFixtureBytes",
+    "realSystems",
+    "realTransactions",
+    "realHeadEntries",
+    "realDuplicateEntries",
+    "realRelationsInserted",
+    "realSWrites",
+    "realSValueChanges",
+    "realConsistencyWrites",
+    "realHeadAbnormalChanges",
+    "realStemAbnormalChanges",
+    "realDirtyCascades",
+    "realSheetEditMutations",
+    "realEvents",
+    "syntheticBlocks",
+    "supportedSyntheticCases",
+    "envelopeCases",
+    "isolatedCases",
+    "totalTransactions",
+    "isolatedEvents",
+    "isolatedGraphDelta",
+    "isolatedThrows",
+    "isolatedManualCases",
+    "chordRewires",
+    "compilerJavaProcesses",
+    "runtimeJavaProcesses",
+    "totalJavaProcesses",
+    "maximumConcurrentJavaProcesses",
+    "concurrencyScope",
+    "freshRunsPerPage",
+    "freshRunsByteIdentical",
+    "freshJvmPerSystem",
+    "compilerJavaProcessesReaped",
+    "runtimeJavaProcessesReaped",
+    "foregroundJavaProcessesOnly",
+    "backgroundJavaProcessesStarted",
+    "system1IsolatedBlock",
+    "supportedSyntheticEvidenceScope",
+    "envelopeEvidenceScope",
+    "stopBeforeOuterBLinkerAssignment",
+    "manifestBodySha256",
+    "manifestBodyLines",
+    "manifestBodyBytes",
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HeadRowKind {
+    Page,
+    Predecessor,
+    Baseline,
+    HeadEntry,
+    SLinkerWrite,
+    SourceOutgoing,
+    PairRelation,
+    PairScan,
+    Consistency,
+    Edge,
+    HeadIncident,
+    HeadIncidentScan,
+    StemIncident,
+    StemIncidentScan,
+    Callback,
+    EntryResult,
+    Remainder,
+    Result,
+    DeltaGuard,
+    Summary,
+    SyntheticCase,
+    SyntheticEvent,
+    SyntheticGuard,
+    PageSummary,
+    CorpusSummary,
+}
+
+impl HeadRowKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Page => "stemsbeamvlinkheadlinkspage",
+            Self::Predecessor => "stemsbeamvlinkheadlinkspredecessor",
+            Self::Baseline => "stemsbeamvlinkheadlinksbaseline",
+            Self::HeadEntry => "stemsbeamvlinkheadlinksheadentry",
+            Self::SLinkerWrite => "stemsbeamvlinkheadlinksslinkerwrite",
+            Self::SourceOutgoing => "stemsbeamvlinkheadlinkssourceoutgoing",
+            Self::PairRelation => "stemsbeamvlinkheadlinkspairrelation",
+            Self::PairScan => "stemsbeamvlinkheadlinkspairscan",
+            Self::Consistency => "stemsbeamvlinkheadlinksconsistency",
+            Self::Edge => "stemsbeamvlinkheadlinksedge",
+            Self::HeadIncident => "stemsbeamvlinkheadlinksheadincident",
+            Self::HeadIncidentScan => "stemsbeamvlinkheadlinksheadincidentscan",
+            Self::StemIncident => "stemsbeamvlinkheadlinksstemincident",
+            Self::StemIncidentScan => "stemsbeamvlinkheadlinksstemincidentscan",
+            Self::Callback => "stemsbeamvlinkheadlinkscallback",
+            Self::EntryResult => "stemsbeamvlinkheadlinksentryresult",
+            Self::Remainder => "stemsbeamvlinkheadlinksremainder",
+            Self::Result => "stemsbeamvlinkheadlinksresult",
+            Self::DeltaGuard => "stemsbeamvlinkheadlinksdeltaguard",
+            Self::Summary => "stemsbeamvlinkheadlinkssummary",
+            Self::SyntheticCase => "stemsbeamvlinkheadlinkssyntheticcase",
+            Self::SyntheticEvent => "stemsbeamvlinkheadlinkssyntheticevent",
+            Self::SyntheticGuard => "stemsbeamvlinkheadlinkssyntheticguard",
+            Self::PageSummary => "stemsbeamvlinkheadlinkspagesummary",
+            Self::CorpusSummary => "stemsbeamvlinkheadlinkscorpussummary",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Self> {
+        Some(match label {
+            "stemsbeamvlinkheadlinkspage" => Self::Page,
+            "stemsbeamvlinkheadlinkspredecessor" => Self::Predecessor,
+            "stemsbeamvlinkheadlinksbaseline" => Self::Baseline,
+            "stemsbeamvlinkheadlinksheadentry" => Self::HeadEntry,
+            "stemsbeamvlinkheadlinksslinkerwrite" => Self::SLinkerWrite,
+            "stemsbeamvlinkheadlinkssourceoutgoing" => Self::SourceOutgoing,
+            "stemsbeamvlinkheadlinkspairrelation" => Self::PairRelation,
+            "stemsbeamvlinkheadlinkspairscan" => Self::PairScan,
+            "stemsbeamvlinkheadlinksconsistency" => Self::Consistency,
+            "stemsbeamvlinkheadlinksedge" => Self::Edge,
+            "stemsbeamvlinkheadlinksheadincident" => Self::HeadIncident,
+            "stemsbeamvlinkheadlinksheadincidentscan" => Self::HeadIncidentScan,
+            "stemsbeamvlinkheadlinksstemincident" => Self::StemIncident,
+            "stemsbeamvlinkheadlinksstemincidentscan" => Self::StemIncidentScan,
+            "stemsbeamvlinkheadlinkscallback" => Self::Callback,
+            "stemsbeamvlinkheadlinksentryresult" => Self::EntryResult,
+            "stemsbeamvlinkheadlinksremainder" => Self::Remainder,
+            "stemsbeamvlinkheadlinksresult" => Self::Result,
+            "stemsbeamvlinkheadlinksdeltaguard" => Self::DeltaGuard,
+            "stemsbeamvlinkheadlinkssummary" => Self::Summary,
+            "stemsbeamvlinkheadlinkssyntheticcase" => Self::SyntheticCase,
+            "stemsbeamvlinkheadlinkssyntheticevent" => Self::SyntheticEvent,
+            "stemsbeamvlinkheadlinkssyntheticguard" => Self::SyntheticGuard,
+            "stemsbeamvlinkheadlinkspagesummary" => Self::PageSummary,
+            "stemsbeamvlinkheadlinkscorpussummary" => Self::CorpusSummary,
+            _ => return None,
+        })
+    }
+
+    fn fields(self) -> &'static [&'static str] {
+        match self {
+            Self::Page => HEAD_LINKS_PAGE_FIELDS,
+            Self::Predecessor => HEAD_LINKS_PREDECESSOR_FIELDS,
+            Self::Baseline => HEAD_LINKS_BASELINE_FIELDS,
+            Self::HeadEntry => HEAD_LINKS_HEAD_ENTRY_FIELDS,
+            Self::SLinkerWrite => HEAD_LINKS_S_WRITE_FIELDS,
+            Self::SourceOutgoing => HEAD_LINKS_SOURCE_FIELDS,
+            Self::PairRelation => HEAD_LINKS_PAIR_RELATION_FIELDS,
+            Self::PairScan => HEAD_LINKS_PAIR_SCAN_FIELDS,
+            Self::Consistency => HEAD_LINKS_CONSISTENCY_FIELDS,
+            Self::Edge => HEAD_LINKS_EDGE_FIELDS,
+            Self::HeadIncident | Self::StemIncident => HEAD_LINKS_INCIDENT_FIELDS,
+            Self::HeadIncidentScan | Self::StemIncidentScan => HEAD_LINKS_INCIDENT_SCAN_FIELDS,
+            Self::Callback => HEAD_LINKS_CALLBACK_FIELDS,
+            Self::EntryResult => HEAD_LINKS_ENTRY_RESULT_FIELDS,
+            Self::Remainder => HEAD_LINKS_REMAINDER_FIELDS,
+            Self::Result => HEAD_LINKS_RESULT_FIELDS,
+            Self::DeltaGuard => HEAD_LINKS_GUARD_FIELDS,
+            Self::Summary => HEAD_LINKS_SUMMARY_FIELDS,
+            Self::SyntheticCase => HEAD_LINKS_SYNTHETIC_CASE_FIELDS,
+            Self::SyntheticEvent => HEAD_LINKS_SYNTHETIC_EVENT_FIELDS,
+            Self::SyntheticGuard => HEAD_LINKS_SYNTHETIC_GUARD_FIELDS,
+            Self::PageSummary => HEAD_LINKS_PAGE_SUMMARY_FIELDS,
+            Self::CorpusSummary => HEAD_LINKS_CORPUS_SUMMARY_FIELDS,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HeadStrictRow {
+    kind: HeadRowKind,
+    page: String,
+    values: BTreeMap<String, String>,
+}
+
+impl HeadStrictRow {
+    fn value(&self, field: &str) -> Result<&str, String> {
+        self.values
+            .get(field)
+            .map(String::as_str)
+            .ok_or_else(|| format!("missing Boundary-17 {field} field"))
+    }
+
+    fn usize(&self, field: &str) -> Result<usize, String> {
+        self.value(field)?
+            .parse()
+            .map_err(|error| format!("invalid Boundary-17 {field}: {error}"))
+    }
+
+    fn bool(&self, field: &str) -> Result<bool, String> {
+        match self.value(field)? {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            value => Err(format!("invalid Boundary-17 Boolean {field}={value}")),
+        }
+    }
+
+    fn i32(&self, field: &str) -> Result<i32, String> {
+        self.value(field)?
+            .parse()
+            .map_err(|error| format!("invalid Boundary-17 {field}: {error}"))
+    }
+
+    fn key(&self) -> Result<TransactionKey, String> {
+        Ok(TransactionKey {
+            page: self.page.clone(),
+            system: self.usize("system")?,
+            plan: self.usize("plan")?,
+            scope: self.value("scope")?.to_owned(),
+            case_name: self.value("case")?.to_owned(),
+        })
+    }
+}
+
+fn parse_head_links_rows(text: &str) -> Result<Vec<HeadStrictRow>, String> {
+    let mut lines = text.lines();
+    let header = lines.by_ref().take(8).collect::<Vec<_>>();
+    if header.len() != 8 || header.get(1).copied() != Some(HEAD_LINKS_FIXTURE_SCHEMA) {
+        return Err("Boundary-17 fixture header/schema differs".to_owned());
+    }
+    let mut rows = Vec::new();
+    for (offset, line) in lines.enumerate() {
+        if line.is_empty() {
+            return Err(format!("empty Boundary-17 semantic line {}", offset + 9));
+        }
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        if tokens.len() < 2 {
+            return Err(format!("short Boundary-17 semantic line {}", offset + 9));
+        }
+        let kind = HeadRowKind::from_label(tokens[0]).ok_or_else(|| {
+            format!(
+                "unknown Boundary-17 row {} at line {}",
+                tokens[0],
+                offset + 9
+            )
+        })?;
+        let expected = kind.fields();
+        let pair_start = if kind == HeadRowKind::CorpusSummary {
+            1
+        } else {
+            2
+        };
+        if tokens.len() != pair_start + expected.len() * 2 {
+            return Err(format!(
+                "Boundary-17 {kind:?} line {} has {} tokens, expected {}",
+                offset + 9,
+                tokens.len(),
+                pair_start + expected.len() * 2
+            ));
+        }
+        let mut values = BTreeMap::new();
+        for (ordinal, pair) in tokens[pair_start..].chunks_exact(2).enumerate() {
+            if pair[0] != expected[ordinal] {
+                return Err(format!(
+                    "Boundary-17 {kind:?} line {} field {} is {}, expected {}",
+                    offset + 9,
+                    ordinal,
+                    pair[0],
+                    expected[ordinal]
+                ));
+            }
+            if values
+                .insert(pair[0].to_owned(), pair[1].to_owned())
+                .is_some()
+            {
+                return Err(format!(
+                    "duplicate Boundary-17 field {} at line {}",
+                    pair[0],
+                    offset + 9
+                ));
+            }
+        }
+        rows.push(HeadStrictRow {
+            kind,
+            page: if kind == HeadRowKind::CorpusSummary {
+                "-".to_owned()
+            } else {
+                tokens[1].to_owned()
+            },
+            values,
+        });
+    }
+    Ok(rows)
+}
+
+#[derive(Clone, Debug)]
+struct ParsedHeadEntry {
+    head: HeadStrictRow,
+    s_write: HeadStrictRow,
+    source_outgoing: Vec<HeadStrictRow>,
+    pair_relations: Vec<HeadStrictRow>,
+    pair_scan: HeadStrictRow,
+    consistency: Option<HeadStrictRow>,
+    edge: Option<HeadStrictRow>,
+    head_incidents: Vec<HeadStrictRow>,
+    head_incident_scan: Option<HeadStrictRow>,
+    stem_incidents: Vec<HeadStrictRow>,
+    stem_incident_scan: Option<HeadStrictRow>,
+    callback: Option<HeadStrictRow>,
+    result: HeadStrictRow,
+}
+
+#[derive(Clone, Debug)]
+struct ParsedHeadTransaction {
+    key: TransactionKey,
+    predecessor: HeadStrictRow,
+    baseline: HeadStrictRow,
+    entries: Vec<ParsedHeadEntry>,
+    remainder: HeadStrictRow,
+    result: HeadStrictRow,
+    guard: HeadStrictRow,
+    summary: HeadStrictRow,
+}
+
+#[derive(Clone, Debug)]
+struct ParsedSyntheticHeadCase {
+    key: TransactionKey,
+    case: HeadStrictRow,
+    events: Vec<HeadStrictRow>,
+    guard: HeadStrictRow,
+}
+
+fn require_head_key(row: &HeadStrictRow, key: &TransactionKey) -> Result<(), String> {
+    if &row.key()? != key {
+        return Err(format!(
+            "Boundary-17 transaction key drift at {:?}",
+            row.kind
+        ));
+    }
+    Ok(())
+}
+
+fn parse_real_head_transactions(
+    rows: &[HeadStrictRow],
+) -> Result<
+    (
+        &HeadStrictRow,
+        Vec<ParsedHeadTransaction>,
+        Vec<ParsedSyntheticHeadCase>,
+    ),
+    String,
+> {
+    let (page, semantic) = rows
+        .split_first()
+        .ok_or_else(|| "Boundary-17 fixture lacks page row".to_owned())?;
+    if page.kind != HeadRowKind::Page {
+        return Err("Boundary-17 first semantic row is not page".to_owned());
+    }
+    let mut index = 0;
+    let mut transactions: Vec<ParsedHeadTransaction> = Vec::new();
+    let mut supplemental = Vec::new();
+    while index < semantic.len() {
+        if semantic[index].kind == HeadRowKind::SyntheticCase {
+            if transactions.len() != 1 || transactions[0].key.system != 1 {
+                return Err(
+                    "Boundary-17 supplemental block is not immediately after system 1".to_owned(),
+                );
+            }
+            let case = semantic[index].clone();
+            let key = case.key()?;
+            if key.system != 1 || key.plan != transactions[0].key.plan {
+                return Err("Boundary-17 supplemental key differs from system 1".to_owned());
+            }
+            index += 1;
+            let mut events = Vec::new();
+            while semantic.get(index).is_some_and(|row| {
+                row.kind == HeadRowKind::SyntheticEvent
+                    && row.values.get("scope") == Some(&key.scope)
+                    && row.values.get("case") == Some(&key.case_name)
+            }) {
+                let row = semantic[index].clone();
+                require_head_key(&row, &key)?;
+                if row.usize("eventOrdinal")? != events.len() {
+                    return Err(format!(
+                        "Boundary-17 supplemental {} event order differs",
+                        key.case_name
+                    ));
+                }
+                events.push(row);
+                index += 1;
+            }
+            let guard = semantic
+                .get(index)
+                .ok_or_else(|| format!("Boundary-17 supplemental {} lacks guard", key.case_name))?
+                .clone();
+            if guard.kind != HeadRowKind::SyntheticGuard {
+                return Err(format!(
+                    "Boundary-17 supplemental {} guard order differs",
+                    key.case_name
+                ));
+            }
+            require_head_key(&guard, &key)?;
+            index += 1;
+            supplemental.push(ParsedSyntheticHeadCase {
+                key,
+                case,
+                events,
+                guard,
+            });
+            continue;
+        }
+        let predecessor = semantic[index].clone();
+        if predecessor.kind != HeadRowKind::Predecessor {
+            return Err(format!(
+                "Boundary-17 expected predecessor at transaction row {index}, found {:?}",
+                predecessor.kind
+            ));
+        }
+        let key = predecessor.key()?;
+        if key.scope != "real" || key.case_name != "-" {
+            break;
+        }
+        index += 1;
+        let baseline = semantic
+            .get(index)
+            .ok_or_else(|| "Boundary-17 transaction lacks baseline".to_owned())?
+            .clone();
+        if baseline.kind != HeadRowKind::Baseline {
+            return Err("Boundary-17 predecessor is not followed by baseline".to_owned());
+        }
+        require_head_key(&baseline, &key)?;
+        index += 1;
+        let expected_entries = baseline.usize("relationEntries")?;
+        let mut entries = Vec::with_capacity(expected_entries);
+        for map_ordinal in 0..expected_entries {
+            let head = semantic
+                .get(index)
+                .ok_or_else(|| "Boundary-17 transaction lacks head entry".to_owned())?
+                .clone();
+            if head.kind != HeadRowKind::HeadEntry || head.usize("mapOrdinal")? != map_ordinal {
+                return Err(format!("Boundary-17 head entry {map_ordinal} order drift"));
+            }
+            require_head_key(&head, &key)?;
+            index += 1;
+            let s_write = semantic
+                .get(index)
+                .ok_or_else(|| "Boundary-17 head entry lacks S write".to_owned())?
+                .clone();
+            if s_write.kind != HeadRowKind::SLinkerWrite
+                || s_write.usize("mapOrdinal")? != map_ordinal
+            {
+                return Err(format!("Boundary-17 S write {map_ordinal} order drift"));
+            }
+            require_head_key(&s_write, &key)?;
+            index += 1;
+
+            let mut source_outgoing = Vec::new();
+            while semantic.get(index).is_some_and(|row| {
+                row.kind == HeadRowKind::SourceOutgoing
+                    && row.values.get("mapOrdinal") == Some(&map_ordinal.to_string())
+            }) {
+                let row = semantic[index].clone();
+                require_head_key(&row, &key)?;
+                if row.usize("sourceOutgoingOrdinal")? != source_outgoing.len() {
+                    return Err(format!(
+                        "Boundary-17 source-outgoing ordinal drift at map {map_ordinal}"
+                    ));
+                }
+                source_outgoing.push(row);
+                index += 1;
+            }
+            let mut pair_relations = Vec::new();
+            while semantic.get(index).is_some_and(|row| {
+                row.kind == HeadRowKind::PairRelation
+                    && row.values.get("mapOrdinal") == Some(&map_ordinal.to_string())
+            }) {
+                let row = semantic[index].clone();
+                require_head_key(&row, &key)?;
+                if row.usize("pairOrdinal")? != pair_relations.len() {
+                    return Err(format!(
+                        "Boundary-17 pair ordinal drift at map {map_ordinal}"
+                    ));
+                }
+                pair_relations.push(row);
+                index += 1;
+            }
+            let pair_scan = semantic
+                .get(index)
+                .ok_or_else(|| "Boundary-17 entry lacks pair scan".to_owned())?
+                .clone();
+            if pair_scan.kind != HeadRowKind::PairScan
+                || pair_scan.usize("mapOrdinal")? != map_ordinal
+            {
+                return Err(format!("Boundary-17 pair scan {map_ordinal} order drift"));
+            }
+            require_head_key(&pair_scan, &key)?;
+            if pair_scan.usize("sourceOutgoingCount")? != source_outgoing.len()
+                || pair_scan.usize("pairCount")? != pair_relations.len()
+            {
+                return Err(format!("Boundary-17 pair scan {map_ordinal} count drift"));
+            }
+            index += 1;
+
+            let linked = head.value("branch")? == "Linked";
+            let mut consistency = None;
+            let mut edge = None;
+            let mut head_incidents = Vec::new();
+            let mut head_incident_scan = None;
+            let mut stem_incidents = Vec::new();
+            let mut stem_incident_scan = None;
+            let mut callback = None;
+            if linked {
+                for (kind, slot) in [
+                    (HeadRowKind::Consistency, &mut consistency),
+                    (HeadRowKind::Edge, &mut edge),
+                ] {
+                    let row = semantic
+                        .get(index)
+                        .ok_or_else(|| format!("Boundary-17 linked entry lacks {kind:?}"))?
+                        .clone();
+                    if row.kind != kind || row.usize("mapOrdinal")? != map_ordinal {
+                        return Err(format!(
+                            "Boundary-17 linked entry {map_ordinal} {kind:?} order drift"
+                        ));
+                    }
+                    require_head_key(&row, &key)?;
+                    *slot = Some(row);
+                    index += 1;
+                }
+                while semantic.get(index).is_some_and(|row| {
+                    row.kind == HeadRowKind::HeadIncident
+                        && row.values.get("mapOrdinal") == Some(&map_ordinal.to_string())
+                }) {
+                    let row = semantic[index].clone();
+                    require_head_key(&row, &key)?;
+                    if row.usize("incidentOrdinal")? != head_incidents.len() {
+                        return Err(format!(
+                            "Boundary-17 head incident ordinal drift at map {map_ordinal}"
+                        ));
+                    }
+                    head_incidents.push(row);
+                    index += 1;
+                }
+                let row = semantic
+                    .get(index)
+                    .ok_or_else(|| "Boundary-17 linked entry lacks head scan".to_owned())?
+                    .clone();
+                if row.kind != HeadRowKind::HeadIncidentScan
+                    || row.usize("mapOrdinal")? != map_ordinal
+                {
+                    return Err(format!("Boundary-17 head scan {map_ordinal} order drift"));
+                }
+                require_head_key(&row, &key)?;
+                if row.usize("incidentCount")? != head_incidents.len() {
+                    return Err(format!("Boundary-17 head scan {map_ordinal} count drift"));
+                }
+                head_incident_scan = Some(row);
+                index += 1;
+                while semantic.get(index).is_some_and(|row| {
+                    row.kind == HeadRowKind::StemIncident
+                        && row.values.get("mapOrdinal") == Some(&map_ordinal.to_string())
+                }) {
+                    let row = semantic[index].clone();
+                    require_head_key(&row, &key)?;
+                    if row.usize("incidentOrdinal")? != stem_incidents.len() {
+                        return Err(format!(
+                            "Boundary-17 stem incident ordinal drift at map {map_ordinal}"
+                        ));
+                    }
+                    stem_incidents.push(row);
+                    index += 1;
+                }
+                let row = semantic
+                    .get(index)
+                    .ok_or_else(|| "Boundary-17 linked entry lacks stem scan".to_owned())?
+                    .clone();
+                if row.kind != HeadRowKind::StemIncidentScan
+                    || row.usize("mapOrdinal")? != map_ordinal
+                {
+                    return Err(format!("Boundary-17 stem scan {map_ordinal} order drift"));
+                }
+                require_head_key(&row, &key)?;
+                if row.usize("incidentCount")? != stem_incidents.len() {
+                    return Err(format!("Boundary-17 stem scan {map_ordinal} count drift"));
+                }
+                stem_incident_scan = Some(row);
+                index += 1;
+                let row = semantic
+                    .get(index)
+                    .ok_or_else(|| "Boundary-17 linked entry lacks callback".to_owned())?
+                    .clone();
+                if row.kind != HeadRowKind::Callback || row.usize("mapOrdinal")? != map_ordinal {
+                    return Err(format!("Boundary-17 callback {map_ordinal} order drift"));
+                }
+                require_head_key(&row, &key)?;
+                callback = Some(row);
+                index += 1;
+            } else if head.value("branch")? != "ExistingHeadStem" {
+                return Err(format!(
+                    "unknown Boundary-17 branch {}",
+                    head.value("branch")?
+                ));
+            }
+            let result = semantic
+                .get(index)
+                .ok_or_else(|| "Boundary-17 entry lacks result".to_owned())?
+                .clone();
+            if result.kind != HeadRowKind::EntryResult
+                || result.usize("mapOrdinal")? != map_ordinal
+                || result.value("branch")? != head.value("branch")?
+            {
+                return Err(format!(
+                    "Boundary-17 entry result {map_ordinal} order drift"
+                ));
+            }
+            require_head_key(&result, &key)?;
+            index += 1;
+            entries.push(ParsedHeadEntry {
+                head,
+                s_write,
+                source_outgoing,
+                pair_relations,
+                pair_scan,
+                consistency,
+                edge,
+                head_incidents,
+                head_incident_scan,
+                stem_incidents,
+                stem_incident_scan,
+                callback,
+                result,
+            });
+        }
+        let take_terminal =
+            |index: &mut usize, expected: HeadRowKind| -> Result<HeadStrictRow, String> {
+                let row = semantic
+                    .get(*index)
+                    .ok_or_else(|| format!("Boundary-17 transaction lacks {expected:?}"))?
+                    .clone();
+                if row.kind != expected {
+                    return Err(format!(
+                        "Boundary-17 expected {expected:?}, found {:?}",
+                        row.kind
+                    ));
+                }
+                require_head_key(&row, &key)?;
+                *index += 1;
+                Ok(row)
+            };
+        let remainder = take_terminal(&mut index, HeadRowKind::Remainder)?;
+        let result = take_terminal(&mut index, HeadRowKind::Result)?;
+        let guard = take_terminal(&mut index, HeadRowKind::DeltaGuard)?;
+        let summary = take_terminal(&mut index, HeadRowKind::Summary)?;
+        transactions.push(ParsedHeadTransaction {
+            key,
+            predecessor,
+            baseline,
+            entries,
+            remainder,
+            result,
+            guard,
+            summary,
+        });
+    }
+    Ok((page, transactions, supplemental))
+}
+
+fn parse_head_side(value: &str) -> Result<NativeStemHeadSide, String> {
+    match value {
+        "LEFT" => Ok(NativeStemHeadSide::Left),
+        "RIGHT" => Ok(NativeStemHeadSide::Right),
+        _ => Err(format!("invalid Boundary-17 horizontal side {value}")),
+    }
+}
+
+fn parse_head_vertical(value: &str) -> Result<NativeStemVerticalSide, String> {
+    match value {
+        "TOP" => Ok(NativeStemVerticalSide::Top),
+        "BOTTOM" => Ok(NativeStemVerticalSide::Bottom),
+        _ => Err(format!("invalid Boundary-17 vertical side {value}")),
+    }
+}
+
+fn parse_head_center(value: &str) -> Result<(i32, i32), String> {
+    let values = value.split(':').collect::<Vec<_>>();
+    let [x, y] = values.as_slice() else {
+        return Err(format!("invalid Boundary-17 head center {value}"));
+    };
+    Ok((
+        x.parse()
+            .map_err(|error| format!("invalid Boundary-17 center x: {error}"))?,
+        y.parse()
+            .map_err(|error| format!("invalid Boundary-17 center y: {error}"))?,
+    ))
+}
+
+fn parse_head_relation_object(
+    value: &str,
+) -> Result<NativeStemsBeamHeadRelationObjectIdentity, String> {
+    if let Some(value) = value.strip_prefix("sig-relation-object:") {
+        return value
+            .parse()
+            .map(NativeStemsBeamHeadRelationObjectIdentity::GraphObject)
+            .map_err(|error| format!("invalid Boundary-17 graph object identity: {error}"));
+    }
+    if let Some(value) = value.strip_prefix("base-draft:") {
+        return value
+            .parse()
+            .map(NativeStemsBeamHeadRelationObjectIdentity::BaseDraft)
+            .map_err(|error| format!("invalid Boundary-17 base draft identity: {error}"));
+    }
+    if let Some(value) = value.strip_prefix("sibling-draft:") {
+        let values = value.split(':').collect::<Vec<_>>();
+        let [plan, sibling] = values.as_slice() else {
+            return Err(format!("invalid Boundary-17 sibling draft {value}"));
+        };
+        return Ok(NativeStemsBeamHeadRelationObjectIdentity::SiblingDraft {
+            plan_ordinal: plan
+                .parse()
+                .map_err(|error| format!("invalid sibling draft plan: {error}"))?,
+            sibling_ordinal: sibling
+                .parse()
+                .map_err(|error| format!("invalid sibling draft ordinal: {error}"))?,
+        });
+    }
+    if let Some(value) = value.strip_prefix("head-draft:") {
+        let values = value.split(':').collect::<Vec<_>>();
+        let [plan, map] = values.as_slice() else {
+            return Err(format!("invalid Boundary-17 head draft {value}"));
+        };
+        return Ok(NativeStemsBeamHeadRelationObjectIdentity::HeadDraft {
+            plan_ordinal: plan
+                .parse()
+                .map_err(|error| format!("invalid head draft plan: {error}"))?,
+            map_ordinal: map
+                .parse()
+                .map_err(|error| format!("invalid head draft map ordinal: {error}"))?,
+        });
+    }
+    Err(format!("unknown Boundary-17 relation object {value}"))
+}
+
+fn head_query_kind(class: &str) -> NativeStemsBeamHeadQueryRelationKind {
+    if class == "org.audiveris.omr.sig.relation.HeadStemRelation" {
+        NativeStemsBeamHeadQueryRelationKind::HeadStem
+    } else {
+        NativeStemsBeamHeadQueryRelationKind::Other
+    }
+}
+
+fn parse_head_pair_read(row: &HeadStrictRow) -> Result<NativeStemsBeamHeadPairClassRead, String> {
+    match (
+        row.bool("classRead")?,
+        row.bool("matches")?,
+        row.value("action")?,
+    ) {
+        (true, false, "Continue") => Ok(NativeStemsBeamHeadPairClassRead::ExaminedContinue),
+        (true, true, "SelectBreak") => Ok(NativeStemsBeamHeadPairClassRead::ExaminedMatchBreak),
+        (false, false, "UnreadAfterBreak") => {
+            Ok(NativeStemsBeamHeadPairClassRead::UnreadAfterBreak)
+        }
+        values => Err(format!(
+            "invalid Boundary-17 pair class-read tuple {values:?}"
+        )),
+    }
+}
+
+fn parse_head_incident_read(
+    row: &HeadStrictRow,
+) -> Result<NativeStemsBeamHeadIncidentClassRead, String> {
+    match (
+        row.bool("classRead")?,
+        row.bool("matches")?,
+        row.value("action")?,
+    ) {
+        (true, false, "Continue") => Ok(NativeStemsBeamHeadIncidentClassRead::ExaminedContinue),
+        (true, true, "SelectBreak") => Ok(NativeStemsBeamHeadIncidentClassRead::ExaminedMatchBreak),
+        (false, false, "UnreadAfterBreak") => {
+            Ok(NativeStemsBeamHeadIncidentClassRead::UnreadAfterBreak)
+        }
+        values => Err(format!(
+            "invalid Boundary-17 incident class-read tuple {values:?}"
+        )),
+    }
+}
+
+fn parse_head_direction(value: &str) -> Result<NativeStemsBeamIncidentDirection, String> {
+    match value {
+        "Incoming" => Ok(NativeStemsBeamIncidentDirection::Incoming),
+        "Outgoing" => Ok(NativeStemsBeamIncidentDirection::Outgoing),
+        _ => Err(format!("invalid Boundary-17 incident direction {value}")),
+    }
+}
+
+fn head_ref_from_entry(
+    row: &HeadStrictRow,
+    relation: &audiveris_omr::native_stems_beam_link_plans::NativeStemsBeamHeadRelation,
+) -> Result<NativeStemsBeamHeadLinkHeadRef, String> {
+    if row.usize("headSigOrdinal")? != relation.corner.sig_ordinal
+        || row.usize("headXOrdinal")? != relation.corner.x_ordinal
+        || parse_head_side(row.value("horizontalSide")?)? != relation.corner.horizontal
+        || parse_head_vertical(row.value("verticalSide")?)? != relation.corner.vertical
+        || row.value("cAlias")?
+            != format!(
+                "h:{}:{}:{}",
+                relation.corner.x_ordinal,
+                row.value("horizontalSide")?,
+                row.value("verticalSide")?
+            )
+        || row.value("headAlias")? != format!("head:{}", relation.corner.x_ordinal)
+    {
+        return Err(format!(
+            "Boundary-17 map {} head/corner alias differs from typed plan",
+            relation.map_ordinal
+        ));
+    }
+    Ok(NativeStemsBeamHeadLinkHeadRef {
+        reference: relation.corner.head,
+        sig_ordinal: relation.corner.sig_ordinal,
+        x_ordinal: relation.corner.x_ordinal,
+    })
+}
+
+fn head_plan_attempt(
+    hydrated: &HydratedBoundarySixteen,
+) -> Result<&audiveris_omr::native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt, String> {
+    let plan = hydrated.transaction.key.plan;
+    let builder = hydrated
+        .predecessor
+        .plans
+        .builders
+        .get(plan.builder_ordinal)
+        .ok_or_else(|| "Boundary-17 plan builder ordinal is absent".to_owned())?;
+    let attempts = builder
+        .attempts
+        .iter()
+        .filter(|attempt| attempt.stem_profile == plan.stem_profile)
+        .collect::<Vec<_>>();
+    let [attempt] = attempts.as_slice() else {
+        return Err(format!(
+            "Boundary-17 plan has {} matching stem-profile attempts",
+            attempts.len()
+        ));
+    };
+    Ok(attempt)
+}
+
+fn hydrate_boundary_sixteen_for_head(
+    head_page: &HeadStrictRow,
+    transaction: &ParsedHeadTransaction,
+) -> Result<HydratedBoundarySixteen, String> {
+    let (page_key, _) = corpus_page_for_token(&head_page.page)?;
+    let path = boundary_sixteen_fixture_path(page_key);
+    let bytes = std::fs::read(repo_root().join(&path))
+        .map_err(|error| format!("cannot read Boundary-16 {page_key} fixture: {error}"))?;
+    if head_page.value("siblingLinksFixtureSha256")? != sha256_hex(&bytes) {
+        return Err("Boundary-17 page does not pin its exact Boundary-16 fixture".to_owned());
+    }
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("Boundary-16 {page_key} fixture is not UTF-8: {error}"))?;
+    let rows = parse_scaffold_fixture(text)?;
+    let b16_transactions = validate_core_rows(&rows)?;
+    validate_corpus_summary(&rows, text)?;
+    validate_boundary_fifteen_predecessors(&rows[0], &b16_transactions)?;
+    let matches = b16_transactions
+        .iter()
+        .filter(|candidate| {
+            candidate.key.system == transaction.key.system
+                && candidate.key.plan == transaction.key.plan
+                && candidate.key.scope == "real"
+                && candidate.key.case_name == "-"
+        })
+        .collect::<Vec<_>>();
+    let [b16] = matches.as_slice() else {
+        return Err(format!(
+            "Boundary-17 key has {} exact Boundary-16 transaction matches",
+            matches.len()
+        ));
+    };
+
+    let mut ordered_lines = Vec::new();
+    let mut result_line = None;
+    let mut guard_line = None;
+    let mut summary_line = None;
+    for line in text.lines() {
+        if !line.starts_with("stemsbeamvlinksiblinglinks")
+            || line.starts_with("stemsbeamvlinksiblinglinkspage ")
+            || line.starts_with("stemsbeamvlinksiblinglinkspagesummary ")
+            || line.starts_with("stemsbeamvlinksiblinglinkscorpussummary ")
+            || line.contains("synthetic")
+        {
+            continue;
+        }
+        let row = StrictRow::parse(line)?;
+        let Ok(key) = row.key() else {
+            continue;
+        };
+        if key.system != transaction.key.system
+            || key.plan != transaction.key.plan
+            || key.scope != "real"
+            || key.case_name != "-"
+        {
+            continue;
+        }
+        ordered_lines.push(line.to_owned());
+        match row.kind {
+            RowKind::Result => result_line = Some(line),
+            RowKind::DeltaGuard => guard_line = Some(line),
+            RowKind::Summary => summary_line = Some(line),
+            _ => {}
+        }
+    }
+    let row_sha = |line: Option<&str>, family: &str| -> Result<String, String> {
+        line.map(|line| sha256_rows([line.to_owned()]))
+            .ok_or_else(|| format!("Boundary-16 transaction lacks {family} row"))
+    };
+    let result_sha = row_sha(result_line, "result")?;
+    let guard_sha = row_sha(guard_line, "guard")?;
+    let summary_sha = row_sha(summary_line, "summary")?;
+    if transaction.predecessor.value("join")? != "FullBoundary16Replay"
+        || transaction.predecessor.usize("b16TransactionRows")? != ordered_lines.len()
+        || transaction
+            .predecessor
+            .value("b16TransactionEvidenceSha256")?
+            != sha256_rows(ordered_lines)
+        || transaction.predecessor.value("b16ResultRowSha256")? != result_sha
+        || transaction.predecessor.value("b16GuardRowSha256")? != guard_sha
+        || transaction.predecessor.value("b16SummaryRowSha256")? != summary_sha
+        || transaction.predecessor.value("predecessorTerminal")? != "ReadyBeforeHeadRelationLoop"
+        || transaction.predecessor.value("proofDomain")? != "JavaOpaqueGuardRustFullTypedReplay"
+    {
+        return Err("Boundary-17 exact Boundary-16 row bundle join differs".to_owned());
+    }
+    let b16_result = only_transaction_row(b16, RowKind::Result)?;
+    let b16_guard = only_transaction_row(b16, RowKind::DeltaGuard)?;
+    if transaction.predecessor.value("stemAlias")? != b16_result.value("stemAlias")?
+        || transaction.predecessor.value("stemInterId")? != b16_result.value("stemInterId")?
+        || transaction.predecessor.value("relationInputHash")?
+            != b16_guard.value("relationInputHashAfter")?
+        || transaction.baseline.value("relationInputHash")?
+            != transaction.predecessor.value("relationInputHash")?
+    {
+        return Err("Boundary-17 semantic Boundary-16 predecessor join differs".to_owned());
+    }
+    hydrate_real_boundary_sixteen(&rows[0], b16)
+}
+
+fn parse_head_outgoing_rows(
+    entry: &ParsedHeadEntry,
+) -> Result<Vec<NativeStemsBeamHeadSourceOutgoingRelation>, String> {
+    entry
+        .source_outgoing
+        .iter()
+        .map(|row| {
+            Ok(NativeStemsBeamHeadSourceOutgoingRelation {
+                source_outgoing_ordinal: row.usize("sourceOutgoingOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_head_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                relation_class: row.value("runtimeClass")?.to_owned(),
+                target_vertex_identity: row.usize("targetVertexOrdinal")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_head_pair_rows(
+    entry: &ParsedHeadEntry,
+) -> Result<Vec<NativeStemsBeamHeadPairRelation>, String> {
+    entry
+        .pair_relations
+        .iter()
+        .map(|row| {
+            let relation_class = row.value("runtimeClass")?.to_owned();
+            Ok(NativeStemsBeamHeadPairRelation {
+                pair_ordinal: row.usize("pairOrdinal")?,
+                source_outgoing_ordinal: row.usize("sourceOutgoingOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_head_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                kind: head_query_kind(&relation_class),
+                relation_class,
+                class_read: parse_head_pair_read(row)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_head_incident_rows(
+    rows: &[HeadStrictRow],
+    head_aliases: &BTreeMap<String, NativeStemsBeamHeadLinkHeadRef>,
+    stem_alias: &str,
+) -> Result<Vec<NativeStemsBeamHeadIncidentRelation>, String> {
+    rows.iter()
+        .map(|row| {
+            let opposite_alias = row.value("oppositeAlias")?.to_owned();
+            let opposite = if opposite_alias == stem_alias {
+                NativeStemsBeamHeadIncidentOpposite::Stem
+            } else if let Some(head) = head_aliases.get(&opposite_alias) {
+                NativeStemsBeamHeadIncidentOpposite::Head(*head)
+            } else {
+                NativeStemsBeamHeadIncidentOpposite::OtherInter
+            };
+            let relation_class = row.value("runtimeClass")?.to_owned();
+            Ok(NativeStemsBeamHeadIncidentRelation {
+                incident_ordinal: row.usize("incidentOrdinal")?,
+                direction: parse_head_direction(row.value("direction")?)?,
+                direction_ordinal: row.usize("directionOrdinal")?,
+                graph_relation_identity: parse_sig_edge(row.value("graphRelationIdentity")?)?,
+                relation_object_identity: parse_head_relation_object(
+                    row.value("relationObjectIdentity")?,
+                )?,
+                kind: head_query_kind(&relation_class),
+                relation_class,
+                opposite,
+                opposite_alias,
+                opposite_inter_id: row.i32("oppositeInterId")?,
+                opposite_vertex_identity: row.usize("oppositeVertexOrdinal")?,
+                class_read: parse_head_incident_read(row)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_head_incident_scan(
+    rows: &[HeadStrictRow],
+    summary: &HeadStrictRow,
+    head_aliases: &BTreeMap<String, NativeStemsBeamHeadLinkHeadRef>,
+    stem_alias: &str,
+) -> Result<NativeStemsBeamHeadIncidentScan, String> {
+    if summary.usize("incidentCount")? != rows.len()
+        || !is_lower_sha256(summary.value("incidentSha256")?)
+    {
+        return Err("Boundary-17 incident scan count/provenance differs".to_owned());
+    }
+    Ok(NativeStemsBeamHeadIncidentScan {
+        query_relation_count: rows.len(),
+        query_provenance_sha256: summary.value("incidentSha256")?.to_owned(),
+        relations: parse_head_incident_rows(rows, head_aliases, stem_alias)?,
+    })
+}
+
+fn project_head_links_state(
+    transaction: &ParsedHeadTransaction,
+    hydrated: &HydratedBoundarySixteen,
+) -> Result<NativeStemsBeamVLinkHeadLinksState, String> {
+    let attempt = head_plan_attempt(hydrated)?;
+    if attempt.relations.len() != transaction.entries.len()
+        || transaction.baseline.usize("relationEntries")? != attempt.relations.len()
+        || transaction.key.system != hydrated.transaction.key.system_id
+        || transaction.key.plan != hydrated.transaction.key.plan.plan_ordinal
+    {
+        return Err("Boundary-17 typed plan/transaction cardinality differs".to_owned());
+    }
+
+    let mut live_heads = Vec::<NativeStemsBeamHeadLinkHeadState>::new();
+    let mut s_linker_cells = Vec::<NativeStemsBeamHeadSLinkerCell>::new();
+    let mut head_aliases = BTreeMap::new();
+    for (map_ordinal, (entry, relation)) in transaction
+        .entries
+        .iter()
+        .zip(&attempt.relations)
+        .enumerate()
+    {
+        if relation.map_ordinal != map_ordinal
+            || entry.head.usize("mapOrdinal")? != map_ordinal
+            || entry.head.value("headRuntimeClass")? != "org.audiveris.omr.sig.inter.HeadInter"
+            || entry.head.value("cRuntimeClass")?
+                != "org.audiveris.omr.sheet.stem.HeadLinker$SLinker$CLinker"
+            || entry.head.value("sRuntimeClass")?
+                != "org.audiveris.omr.sheet.stem.HeadLinker$SLinker"
+            || entry.head.value("evidenceTiming")? != "BeforeEntryMutationSnapshot"
+        {
+            return Err(format!(
+                "Boundary-17 map {map_ordinal} runtime/order differs"
+            ));
+        }
+        let head_ref = head_ref_from_entry(&entry.head, relation)?;
+        let head_alias = entry.head.value("headAlias")?.to_owned();
+        if let Some(previous) = head_aliases.insert(head_alias.clone(), head_ref)
+            && previous != head_ref
+        {
+            return Err("Boundary-17 head alias resolves to multiple typed heads".to_owned());
+        }
+        if !live_heads.iter().any(|head| head.reference == head_ref) {
+            let state = NativeStemsBeamHeadLinkHeadState {
+                reference: head_ref,
+                alias: head_alias,
+                runtime_class: entry.head.value("headRuntimeClass")?.to_owned(),
+                inter_id: entry.head.i32("headInterId")?,
+                inter_index_ordinal: entry.head.usize("headIndexOrdinal")?,
+                inter_index_object_matches: entry.head.usize("headIndexObjectMatches")?,
+                inter_index_id_matches: entry.head.usize("headIndexIdMatches")?,
+                sig_vertex_identity: entry.head.usize("headVertexOrdinal")?,
+                sig_object_matches: entry.head.usize("headVertexObjectMatches")?,
+                sig_system_id: entry.head.usize("headSigSystemId")?,
+                removed: entry.head.bool("removed")?,
+                vip: entry.head.bool("vip")?,
+                manual: entry.head.bool("manual")?,
+                abnormal: entry.head.bool("abnormalBefore")?,
+                center: parse_head_center(entry.head.value("center")?)?,
+                shape: entry.head.value("shape")?.to_owned(),
+                is_small: entry.head.bool("small")?,
+                is_stem_head: entry.head.bool("stemHead")?,
+            };
+            if state.center != relation.check.head_center {
+                return Err(format!(
+                    "Boundary-17 map {map_ordinal} head center differs from plan"
+                ));
+            }
+            live_heads.push(state);
+        }
+
+        let s_ref = NativeStemsBeamHeadSLinkerRef {
+            head: head_ref,
+            horizontal: relation.corner.horizontal,
+        };
+        let expected_s_alias = format!(
+            "s:{}:{}",
+            relation.corner.x_ordinal,
+            entry.head.value("horizontalSide")?
+        );
+        let observer_tokens = parse_list(entry.head.value("observerAliases")?)?;
+        let expected_observers = [
+            format!(
+                "h:{}:{}:TOP",
+                relation.corner.x_ordinal,
+                entry.head.value("horizontalSide")?
+            ),
+            format!(
+                "h:{}:{}:BOTTOM",
+                relation.corner.x_ordinal,
+                entry.head.value("horizontalSide")?
+            ),
+        ];
+        if entry.head.value("sAlias")? != expected_s_alias
+            || observer_tokens
+                != expected_observers
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+            || entry.s_write.value("receiverAlias")? != expected_s_alias
+            || entry.s_write.value("observerAliases")? != entry.head.value("observerAliases")?
+        {
+            return Err(format!(
+                "Boundary-17 map {map_ordinal} shared S/C topology differs"
+            ));
+        }
+        if !s_linker_cells.iter().any(|cell| cell.reference == s_ref) {
+            s_linker_cells.push(NativeStemsBeamHeadSLinkerCell {
+                reference: s_ref,
+                linked: entry.head.bool("sLinkedBefore")?,
+                closed: entry.head.bool("sClosedBefore")?,
+                ordered_observer_corners: vec![
+                    audiveris_omr::native_stems_beam_reachability::NativeStemsBeamHeadCornerRef {
+                        vertical: NativeStemVerticalSide::Top,
+                        ..relation.corner
+                    },
+                    audiveris_omr::native_stems_beam_reachability::NativeStemsBeamHeadCornerRef {
+                        vertical: NativeStemVerticalSide::Bottom,
+                        ..relation.corner
+                    },
+                ],
+            });
+        }
+
+        let expected_object = NativeStemsBeamHeadRelationObjectIdentity::HeadDraft {
+            plan_ordinal: hydrated.transaction.key.plan.plan_ordinal,
+            map_ordinal,
+        };
+        let row_object = parse_head_relation_object(entry.head.value("planDraftIdentity")?)?;
+        if row_object != expected_object
+            || entry.head.value("draftRuntimeClass")?
+                != "org.audiveris.omr.sig.relation.HeadStemRelation"
+            || entry.head.bool("draftManual")?
+            || entry.head.value("draftConsistencyBeforeState")? != "Unset"
+            || entry.head.value("draftConsistencyBeforeValue")? != "-"
+            || entry.head.usize("draftGraphMatches")? != 0
+            || parse_head_side(entry.head.value("draftHeadSide")?)?
+                != relation.check.derived_horizontal
+            || parse_point(entry.head.value("draftExtension")?)?
+                != relation
+                    .check
+                    .extension_point
+                    .ok_or_else(|| format!("Boundary-17 map {map_ordinal} plan lacks extension"))?
+            || parse_f64(entry.head.value("draftDx")?)?.to_bits() != relation.check.dx.to_bits()
+            || parse_f64(entry.head.value("draftDy")?)?.to_bits() != relation.check.dy.to_bits()
+            || parse_f64(entry.head.value("draftGrade")?)?.to_bits()
+                != relation.check.grade.to_bits()
+        {
+            return Err(format!(
+                "Boundary-17 map {map_ordinal} plan draft differs from typed plan"
+            ));
+        }
+    }
+
+    let stem_alias = transaction.baseline.value("stemAlias")?;
+    let mut steps = Vec::with_capacity(transaction.entries.len());
+    for (map_ordinal, (entry, relation)) in transaction
+        .entries
+        .iter()
+        .zip(&attempt.relations)
+        .enumerate()
+    {
+        let head_ref = head_ref_from_entry(&entry.head, relation)?;
+        let s_ref = NativeStemsBeamHeadSLinkerRef {
+            head: head_ref,
+            horizontal: relation.corner.horizontal,
+        };
+        let directed_pair = NativeStemsBeamHeadDirectedPairScan {
+            source_outgoing_scanned: entry.pair_scan.usize("sourceOutgoingCount")?,
+            source_outgoing_provenance_sha256: entry
+                .pair_scan
+                .value("sourceOutgoingSha256")?
+                .to_owned(),
+            source_outgoing_relations: parse_head_outgoing_rows(entry)?,
+            query_relation_count: entry.pair_scan.usize("pairCount")?,
+            pair_provenance_sha256: entry.pair_scan.value("pairSha256")?.to_owned(),
+            relations: parse_head_pair_rows(entry)?,
+        };
+        if !is_lower_sha256(&directed_pair.source_outgoing_provenance_sha256)
+            || !is_lower_sha256(&directed_pair.pair_provenance_sha256)
+        {
+            return Err(format!(
+                "Boundary-17 map {map_ordinal} pair provenance is not SHA-256"
+            ));
+        }
+        let linked = entry.head.value("branch")? == "Linked";
+        let (
+            expected_consistency_after,
+            consistency_debug_enabled,
+            add_edge_returned,
+            head_incident_after,
+            stem_incident_after,
+        ) = if linked {
+            let consistency = entry
+                .consistency
+                .as_ref()
+                .ok_or_else(|| "Boundary-17 linked entry lacks consistency".to_owned())?;
+            let head_scan = entry
+                .head_incident_scan
+                .as_ref()
+                .ok_or_else(|| "Boundary-17 linked entry lacks head incident scan".to_owned())?;
+            let head_abnormal = match head_scan.value("state")? {
+                "NotReadNonStemHead" => {
+                    if !entry.head_incidents.is_empty()
+                        || head_scan.usize("incidentCount")? != 0
+                        || head_scan.bool("requestedAbnormal")?
+                    {
+                        return Err("Boundary-17 unread head scan has read evidence".to_owned());
+                    }
+                    NativeStemsBeamHeadAbnormalScan::NotReadNonStemHead
+                }
+                "LazyIncomingThenOutgoing" => {
+                    NativeStemsBeamHeadAbnormalScan::Read(parse_head_incident_scan(
+                        &entry.head_incidents,
+                        head_scan,
+                        &head_aliases,
+                        stem_alias,
+                    )?)
+                }
+                value => return Err(format!("invalid Boundary-17 head scan state {value}")),
+            };
+            let stem_scan = entry
+                .stem_incident_scan
+                .as_ref()
+                .ok_or_else(|| "Boundary-17 linked entry lacks stem incident scan".to_owned())?;
+            if stem_scan.value("state")? != "LazyIncomingThenOutgoing" {
+                return Err("Boundary-17 stem callback scan is not lazy incident order".to_owned());
+            }
+            (
+                Some(parse_f64(consistency.value("consistencyAfterValue")?)?),
+                Some(consistency.bool("debugEnabled")?),
+                Some(
+                    entry
+                        .edge
+                        .as_ref()
+                        .ok_or_else(|| "Boundary-17 linked entry lacks edge".to_owned())?
+                        .bool("insertionReturned")?,
+                ),
+                Some(head_abnormal),
+                Some(parse_head_incident_scan(
+                    &entry.stem_incidents,
+                    stem_scan,
+                    &head_aliases,
+                    stem_alias,
+                )?),
+            )
+        } else {
+            if entry.pair_scan.value("state")? != "FirstHeadStemMatch" {
+                return Err("Boundary-17 duplicate branch lacks first-match query".to_owned());
+            }
+            (None, None, None, None, None)
+        };
+        if linked && entry.pair_scan.value("state")? != "ExhaustiveNoMatch" {
+            return Err("Boundary-17 linked branch pair query is not exhaustive".to_owned());
+        }
+        steps.push(NativeStemsBeamHeadLinkStepCertificate {
+            map_ordinal,
+            corner: relation.corner,
+            s_linker: s_ref,
+            plan_draft: NativeStemsBeamHeadPlanDraft {
+                relation_object_identity: NativeStemsBeamHeadRelationObjectIdentity::HeadDraft {
+                    plan_ordinal: hydrated.transaction.key.plan.plan_ordinal,
+                    map_ordinal,
+                },
+                relation_class: entry.head.value("draftRuntimeClass")?.to_owned(),
+                relation: relation.clone(),
+                manual: entry.head.bool("draftManual")?,
+                head_side_before: Some(parse_head_side(entry.head.value("draftHeadSide")?)?),
+                extension_point_before: Some(parse_point(entry.head.value("draftExtension")?)?),
+                consistency_before: None,
+                graph_matches_before: entry.head.usize("draftGraphMatches")?,
+            },
+            directed_pair,
+            expected_consistency_after,
+            consistency_debug_enabled,
+            add_edge_returned,
+            head_incident_after,
+            stem_incident_after,
+        });
+    }
+
+    let listener_topology = if transaction.baseline.bool("soleSigListener")? {
+        NativeStemsBeamSigListenerTopology::SoleStandardSigListener
+    } else {
+        return Err("Boundary-17 compact fixture lacks sole SigListener".to_owned());
+    };
+    let sheet_edit = NativeStemsBeamSheetEditState {
+        stub_modified: transaction.baseline.bool("stubModified")?,
+        book_modified: transaction.baseline.bool("bookModified")?,
+        book_dirty: transaction.baseline.bool("bookDirty")?,
+    };
+    Ok(NativeStemsBeamVLinkHeadLinksState {
+        sibling_links_state_before: hydrated.state_before.clone(),
+        sibling_links_state_after: hydrated.state_after.clone(),
+        live_heads,
+        s_linker_cells,
+        stem_manual: transaction.baseline.bool("stemManual")?,
+        stem_abnormal: transaction.baseline.bool("stemAbnormal")?,
+        appended_relations: Vec::new(),
+        sheet_edit,
+        certificate: Some(NativeStemsBeamVLinkHeadLinksCertificate {
+            system_id: transaction.key.system,
+            headless: transaction.baseline.bool("headless")?,
+            listener_topology,
+            interline: transaction.baseline.i32("interline")?,
+            neutral_stem_length: parse_f64(transaction.baseline.value("neutralStemLength")?)?,
+            steps,
+        }),
+        committed: None,
+    })
+}
+
+fn head_appended_from_rows(
+    entry: &ParsedHeadEntry,
+    relation: &audiveris_omr::native_stems_beam_link_plans::NativeStemsBeamHeadRelation,
+    hydrated: &HydratedBoundarySixteen,
+) -> Result<NativeStemsBeamHeadAppendedRelation, String> {
+    let edge = entry
+        .edge
+        .as_ref()
+        .ok_or_else(|| "Boundary-17 linked entry lacks edge row".to_owned())?;
+    let consistency = entry
+        .consistency
+        .as_ref()
+        .ok_or_else(|| "Boundary-17 linked entry lacks consistency row".to_owned())?;
+    Ok(NativeStemsBeamHeadAppendedRelation {
+        graph_relation_identity: parse_sig_edge(edge.value("graphRelationIdentity")?)?,
+        relation_object_identity: parse_head_relation_object(
+            edge.value("relationObjectIdentity")?,
+        )?,
+        source_head: head_ref_from_entry(&entry.head, relation)?,
+        source_vertex_identity: edge.usize("sourceVertexOrdinal")?,
+        target_stem_identity: hydrated.transaction.stem_after.stem_identity,
+        target_vertex_identity: edge.usize("targetVertexOrdinal")?,
+        relation: relation.clone(),
+        consistency: parse_f64(consistency.value("consistencyAfterValue")?)?,
+    })
+}
+
+fn expected_head_operations(
+    transaction: &ParsedHeadTransaction,
+    hydrated: &HydratedBoundarySixteen,
+) -> Result<Vec<NativeStemsBeamVLinkHeadLinksOperation>, String> {
+    let attempt = head_plan_attempt(hydrated)?;
+    let mut operations = Vec::new();
+    for (map_ordinal, (entry, relation)) in transaction
+        .entries
+        .iter()
+        .zip(&attempt.relations)
+        .enumerate()
+    {
+        let head_ref = head_ref_from_entry(&entry.head, relation)?;
+        let s_ref = NativeStemsBeamHeadSLinkerRef {
+            head: head_ref,
+            horizontal: relation.corner.horizontal,
+        };
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::SLinkerLinkedAssigned {
+                map_ordinal,
+                target: s_ref,
+                before: entry.s_write.bool("before")?,
+                after: entry.s_write.bool("after")?,
+                closed_before: entry.s_write.bool("closedBefore")?,
+                closed_after: entry.s_write.bool("closedAfter")?,
+            },
+        );
+        let matched = entry
+            .pair_relations
+            .iter()
+            .any(|row| row.bool("matches").unwrap_or(false));
+        let relations_read = entry
+            .pair_relations
+            .iter()
+            .filter(|row| row.bool("classRead").unwrap_or(false))
+            .count();
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::DirectedPairLookupCompleted {
+                map_ordinal,
+                relations_read,
+                matched,
+            },
+        );
+        if entry.head.value("branch")? == "ExistingHeadStem" {
+            continue;
+        }
+        let consistency = entry
+            .consistency
+            .as_ref()
+            .ok_or_else(|| "Boundary-17 linked entry lacks consistency".to_owned())?;
+        let consistency_value = parse_f64(consistency.value("consistencyAfterValue")?)?;
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::HeadStemConsistencyAssigned {
+                map_ordinal,
+                value: consistency_value,
+            },
+        );
+        let edge = entry
+            .edge
+            .as_ref()
+            .ok_or_else(|| "Boundary-17 linked entry lacks edge".to_owned())?;
+        let graph_relation_identity = parse_sig_edge(edge.value("graphRelationIdentity")?)?;
+        operations.extend([
+            NativeStemsBeamVLinkHeadLinksOperation::SigGlobalRelationInserted {
+                map_ordinal,
+                graph_relation_identity,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::HeadOutgoingRelationInserted {
+                map_ordinal,
+                graph_relation_identity,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::StemIncomingRelationInserted {
+                map_ordinal,
+                graph_relation_identity,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::SigEdgeEventDispatched {
+                map_ordinal,
+                graph_relation_identity,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::StandardSigListenerEdgeCallbackStarted {
+                map_ordinal,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::HeadStemRelationCallbackStarted { map_ordinal },
+        ]);
+        let callback = entry
+            .callback
+            .as_ref()
+            .ok_or_else(|| "Boundary-17 linked entry lacks callback".to_owned())?;
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::AutomaticManualFlagsRead {
+                map_ordinal,
+                relation_manual_read: true,
+                relation_manual: callback.bool("relationManual")?,
+                head_manual_read: callback.bool("headManualRead")?,
+                head_manual: callback.bool("headManual")?,
+                stem_manual_read: callback.bool("stemManualRead")?,
+                stem_manual: callback.bool("stemManual")?,
+                chord_branch_read: callback.value("chordBranch")? != "NotReadAuto",
+            },
+        );
+        let head_before = callback.bool("headAbnormalBefore")?;
+        let head_after = callback.bool("headAbnormalAfter")?;
+        if callback.value("headScanState")? == "NotReadNonStemHead" {
+            operations.push(
+                NativeStemsBeamVLinkHeadLinksOperation::HeadAbnormalScanNotReadNonStemHead {
+                    map_ordinal,
+                },
+            );
+        } else {
+            let reads = entry
+                .head_incidents
+                .iter()
+                .filter(|row| row.bool("classRead").unwrap_or(false))
+                .count();
+            operations.push(
+                NativeStemsBeamVLinkHeadLinksOperation::HeadAbnormalScanCompleted {
+                    map_ordinal,
+                    relations_read: reads,
+                },
+            );
+            operations.push(
+                NativeStemsBeamVLinkHeadLinksOperation::HeadAbnormalAssigned {
+                    map_ordinal,
+                    before: head_before,
+                    after: head_after,
+                },
+            );
+            if head_before != head_after {
+                operations.extend([
+                    NativeStemsBeamVLinkHeadLinksOperation::SheetStubModifiedSetTrue {
+                        map_ordinal,
+                        subject: NativeStemsBeamHeadDirtySubject::Head,
+                    },
+                    NativeStemsBeamVLinkHeadLinksOperation::BookModifiedSetTrue {
+                        map_ordinal,
+                        subject: NativeStemsBeamHeadDirtySubject::Head,
+                    },
+                    NativeStemsBeamVLinkHeadLinksOperation::BookDirtySetTrue {
+                        map_ordinal,
+                        subject: NativeStemsBeamHeadDirtySubject::Head,
+                    },
+                ]);
+            }
+        }
+        let stem_reads = entry
+            .stem_incidents
+            .iter()
+            .filter(|row| row.bool("classRead").unwrap_or(false))
+            .count();
+        let stem_before = callback.bool("stemAbnormalBefore")?;
+        let stem_after = callback.bool("stemAbnormalAfter")?;
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::StemAbnormalScanCompleted {
+                map_ordinal,
+                relations_read: stem_reads,
+            },
+        );
+        operations.push(
+            NativeStemsBeamVLinkHeadLinksOperation::StemAbnormalAssigned {
+                map_ordinal,
+                before: stem_before,
+                after: stem_after,
+            },
+        );
+        if stem_before != stem_after {
+            operations.extend([
+                NativeStemsBeamVLinkHeadLinksOperation::SheetStubModifiedSetTrue {
+                    map_ordinal,
+                    subject: NativeStemsBeamHeadDirtySubject::Stem,
+                },
+                NativeStemsBeamVLinkHeadLinksOperation::BookModifiedSetTrue {
+                    map_ordinal,
+                    subject: NativeStemsBeamHeadDirtySubject::Stem,
+                },
+                NativeStemsBeamVLinkHeadLinksOperation::BookDirtySetTrue {
+                    map_ordinal,
+                    subject: NativeStemsBeamHeadDirtySubject::Stem,
+                },
+            ]);
+        }
+        operations.extend([
+            NativeStemsBeamVLinkHeadLinksOperation::HeadStemRelationCallbackCompleted {
+                map_ordinal,
+            },
+            NativeStemsBeamVLinkHeadLinksOperation::StandardSigListenerEdgeCallbackCompleted {
+                map_ordinal,
+            },
+        ]);
+    }
+    operations.extend([
+        NativeStemsBeamVLinkHeadLinksOperation::RemainderCompared {
+            last_index: transaction.remainder.i32("lastIndex")?,
+            max_index: transaction.remainder.i32("maxIndex")?,
+            less_than: transaction.remainder.bool("remainderPresent")?,
+            split_mutation_count: transaction.remainder.usize("splitCalls")?,
+        },
+        NativeStemsBeamVLinkHeadLinksOperation::VLinkerReturnedTrue,
+    ]);
+    Ok(operations)
+}
+
+fn assert_head_public_matches_rows(
+    transaction: &ParsedHeadTransaction,
+    hydrated: &HydratedBoundarySixteen,
+    state_before: &NativeStemsBeamVLinkHeadLinksState,
+    state_after: &NativeStemsBeamVLinkHeadLinksState,
+    public: &NativeStemsBeamVLinkHeadLinksTransaction,
+) -> Result<(), String> {
+    let attempt = head_plan_attempt(hydrated)?;
+    let consumed = state_before
+        .certificate
+        .as_ref()
+        .ok_or_else(|| "Boundary-17 projected state lacks certificate".to_owned())?;
+    let linked_entries = transaction
+        .entries
+        .iter()
+        .filter(|entry| entry.head.value("branch") == Ok("Linked"))
+        .count();
+    let duplicate_entries = transaction.entries.len() - linked_entries;
+    let head_changes = transaction
+        .entries
+        .iter()
+        .filter_map(|entry| entry.callback.as_ref())
+        .filter(|callback| {
+            callback.bool("headAbnormalBefore").ok() != callback.bool("headAbnormalAfter").ok()
+        })
+        .count();
+    let stem_changes = transaction
+        .entries
+        .iter()
+        .filter_map(|entry| entry.callback.as_ref())
+        .filter(|callback| {
+            callback.bool("stemAbnormalBefore").ok() != callback.bool("stemAbnormalAfter").ok()
+        })
+        .count();
+    let s_value_changes = transaction
+        .entries
+        .iter()
+        .filter(|entry| entry.s_write.usize("valueChangeCount") == Ok(1))
+        .count();
+    let head_assignments = transaction
+        .entries
+        .iter()
+        .filter(|entry| entry.callback.is_some() && entry.head.bool("stemHead").unwrap_or(false))
+        .count();
+    let expected_appended = transaction
+        .entries
+        .iter()
+        .zip(&attempt.relations)
+        .filter(|(entry, _)| entry.head.value("branch") == Ok("Linked"))
+        .map(|(entry, relation)| head_appended_from_rows(entry, relation, hydrated))
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_graph_ids = expected_appended
+        .iter()
+        .map(|relation| relation.graph_relation_identity)
+        .collect::<Vec<_>>();
+    let expected_s = attempt
+        .relations
+        .iter()
+        .map(|relation| NativeStemsBeamHeadSLinkerRef {
+            head: NativeStemsBeamHeadLinkHeadRef {
+                reference: relation.corner.head,
+                sig_ordinal: relation.corner.sig_ordinal,
+                x_ordinal: relation.corner.x_ordinal,
+            },
+            horizontal: relation.corner.horizontal,
+        })
+        .collect::<Vec<_>>();
+    let expected_operations = expected_head_operations(transaction, hydrated)?;
+    if public.key != hydrated.transaction.key
+        || public.consumed_certificate != *consumed
+        || public.continuation_support_grade.to_bits()
+            != hydrated.transaction.continuation_support_grade.to_bits()
+        || public.state_after.as_ref() != state_after
+        || public.appended_graph_relation_identities != expected_graph_ids
+        || public.assigned_s_linkers != expected_s
+        || public.s_linker_write_count != transaction.entries.len()
+        || public.s_linker_value_change_count != s_value_changes
+        || public.consistency_mutation_count != linked_entries
+        || public.sig_relation_mutation_count != linked_entries
+        || public.head_abnormal_assignment_count != head_assignments
+        || public.head_abnormal_mutation_count != head_changes
+        || public.stem_abnormal_assignment_count != linked_entries
+        || public.stem_abnormal_mutation_count != stem_changes
+        || public.dirty_cascade_count != head_changes + stem_changes
+        || public.sheet_edit_mutation_count != transaction.result.usize("sheetEditMutationCount")?
+        || public.event_count != transaction.result.usize("eventCount")?
+        || public.sibling_link_mutation_count != 0
+        || public.head_link_mutation_count != linked_entries
+        || public.last_index != transaction.remainder.i32("lastIndex")?
+        || public.max_index != transaction.remainder.i32("maxIndex")?
+        || public.remainder_less_than != transaction.remainder.bool("remainderPresent")?
+        || public.split_mutation_count != 0
+        || !public.returned_true
+        || public.operations != expected_operations
+        || state_after.appended_relations != expected_appended
+        || state_after.certificate.is_some()
+        || state_after.committed != Some(public.key)
+    {
+        return Err(
+            "public Boundary-17 transaction/state header differs from Java rows".to_owned(),
+        );
+    }
+    match public.outcome {
+        NativeStemsBeamVLinkHeadLinksOutcome::ReturnedTrueBeforeOuterBLinkerAssignment {
+            stem_identity,
+            continuation_support_grade,
+        } if stem_identity == hydrated.transaction.stem_after.stem_identity
+            && continuation_support_grade.to_bits()
+                == public.continuation_support_grade.to_bits() => {}
+        _ => return Err("public Boundary-17 terminal outcome differs".to_owned()),
+    }
+    if public.steps.len() != transaction.entries.len() {
+        return Err("public Boundary-17 trace cardinality differs".to_owned());
+    }
+    let mut serial_stem_abnormal = transaction.baseline.bool("stemAbnormal")?;
+    for (map_ordinal, ((trace, entry), relation)) in public
+        .steps
+        .iter()
+        .zip(&transaction.entries)
+        .zip(&attempt.relations)
+        .enumerate()
+    {
+        let expected_head = head_ref_from_entry(&entry.head, relation)?;
+        let expected_appended = if entry.head.value("branch")? == "Linked" {
+            Some(head_appended_from_rows(entry, relation, hydrated)?)
+        } else {
+            None
+        };
+        let expected_branch = if expected_appended.is_some() {
+            NativeStemsBeamHeadLinkBranch::Linked
+        } else {
+            NativeStemsBeamHeadLinkBranch::ExistingHeadStem
+        };
+        let consistency_after = entry
+            .consistency
+            .as_ref()
+            .map(|row| parse_f64(row.value("consistencyAfterValue").unwrap()))
+            .transpose()?;
+        let callback = entry.callback.as_ref();
+        let expected_graph_relation = if let Some(edge) = &entry.edge {
+            edge.value("graphRelationIdentity")?
+        } else {
+            entry.pair_scan.value("selectedGraphRelationIdentity")?
+        };
+        let expected_consistency_state = if consistency_after.is_some() {
+            "Set"
+        } else {
+            "Unset"
+        };
+        let expected_consistency_value = entry
+            .consistency
+            .as_ref()
+            .map(|row| row.value("consistencyAfterValue"))
+            .transpose()?
+            .unwrap_or("-");
+        let expected_insertion_returned = entry
+            .edge
+            .as_ref()
+            .map(|row| row.value("insertionReturned"))
+            .transpose()?
+            .unwrap_or("NotRead");
+        let expected_head_abnormal_after = callback
+            .map(|row| row.value("headAbnormalAfter"))
+            .transpose()?
+            .unwrap_or(entry.head.value("abnormalBefore")?);
+        if let Some(callback) = callback {
+            if callback.bool("stemAbnormalBefore")? != serial_stem_abnormal {
+                return Err(format!(
+                    "Boundary-17 entry {map_ordinal} stem abnormal serial prefix differs"
+                ));
+            }
+            serial_stem_abnormal = callback.bool("stemAbnormalAfter")?;
+        }
+        let expected_stem_abnormal_after = serial_stem_abnormal.to_string();
+        if entry.result.value("branch")? != entry.head.value("branch")?
+            || entry.result.value("sLinkedAfter")? != entry.s_write.value("after")?
+            || entry.result.value("sClosedAfter")? != entry.s_write.value("closedAfter")?
+            || entry.result.value("draftConsistencyAfterState")? != expected_consistency_state
+            || entry.result.value("draftConsistencyAfterValue")? != expected_consistency_value
+            || entry.result.value("graphRelationIdentity")? != expected_graph_relation
+            || entry.result.value("relationObjectIdentity")?
+                != entry.head.value("planDraftIdentity")?
+            || entry.result.value("insertionReturned")? != expected_insertion_returned
+            || entry.result.bool("callbackCompleted")? != callback.is_some()
+            || entry.result.value("headAbnormalAfter")? != expected_head_abnormal_after
+            || entry.result.value("stemAbnormalAfter")? != expected_stem_abnormal_after
+            || !is_lower_sha256(entry.result.value("relationStateBeforeSha256")?)
+            || !is_lower_sha256(entry.result.value("relationStateAfterSha256")?)
+            || (expected_appended.is_some()
+                == (entry.result.value("relationStateBeforeSha256")?
+                    == entry.result.value("relationStateAfterSha256")?))
+        {
+            return Err(format!(
+                "Boundary-17 entry result {map_ordinal} differs from its serial trace"
+            ));
+        }
+        if trace.map_ordinal != map_ordinal
+            || trace.s_write_event_ordinal != entry.s_write.usize("eventOrdinal")?
+            || trace.consistency_event_ordinal
+                != entry
+                    .consistency
+                    .as_ref()
+                    .map(|row| row.usize("eventOrdinal"))
+                    .transpose()?
+            || trace.edge_event_ordinal
+                != entry
+                    .edge
+                    .as_ref()
+                    .map(|row| row.usize("eventOrdinal"))
+                    .transpose()?
+            || trace.callback_event_ordinal
+                != callback.map(|row| row.usize("eventOrdinal")).transpose()?
+            || trace.corner != relation.corner
+            || trace.head != expected_head
+            || trace.s_linker.head != expected_head
+            || trace.s_linked_before != entry.s_write.bool("before")?
+            || trace.s_linked_after != entry.s_write.bool("after")?
+            || trace.s_closed_before != entry.s_write.bool("closedBefore")?
+            || trace.s_closed_after != entry.s_write.bool("closedAfter")?
+            || trace.branch != expected_branch
+            || trace.directed_pair_relations_read
+                != entry
+                    .pair_relations
+                    .iter()
+                    .filter(|row| row.bool("classRead").unwrap_or(false))
+                    .count()
+            || trace.consistency_before.is_some()
+            || trace.consistency_after.map(f64::to_bits) != consistency_after.map(f64::to_bits)
+            || trace.default_head_side_branch_read != callback.map(|_| false)
+            || trace.default_extension_branch_read != callback.map(|_| false)
+            || trace.manual_chord_branch_read != callback.map(|_| false)
+            || trace.appended_relation != expected_appended
+            || trace.add_edge_returned != callback.map(|_| true)
+            || trace.callback_completed != callback.is_some()
+            || trace.head_abnormal_before
+                != callback
+                    .map(|row| row.bool("headAbnormalBefore"))
+                    .transpose()?
+            || trace.head_abnormal_after
+                != callback
+                    .map(|row| row.bool("headAbnormalAfter"))
+                    .transpose()?
+            || trace.stem_abnormal_before
+                != callback
+                    .map(|row| row.bool("stemAbnormalBefore"))
+                    .transpose()?
+            || trace.stem_abnormal_after
+                != callback
+                    .map(|row| row.bool("stemAbnormalAfter"))
+                    .transpose()?
+        {
+            return Err(format!(
+                "public Boundary-17 trace {map_ordinal} differs from Java rows"
+            ));
+        }
+    }
+    if transaction.result.usize("headEntries")? != transaction.entries.len()
+        || transaction.result.usize("duplicateEntries")? != duplicate_entries
+        || transaction.result.usize("relationsInserted")? != linked_entries
+        || transaction.result.usize("sWriteCount")? != transaction.entries.len()
+        || transaction.result.usize("sValueChangeCount")? != s_value_changes
+        || transaction.result.usize("consistencyWriteCount")? != linked_entries
+        || transaction.result.usize("headAbnormalChangeCount")? != head_changes
+        || transaction.result.usize("stemAbnormalChangeCount")? != stem_changes
+        || transaction.result.usize("dirtyCascadeCount")? != head_changes + stem_changes
+        || !transaction.result.bool("returnedTrue")?
+        || transaction.result.value("terminal")? != "ReturnedTrueBeforeOuterBLinkerAssignment"
+        || transaction.summary.usize("headEntries")? != transaction.entries.len()
+        || transaction.summary.usize("duplicateEntries")? != duplicate_entries
+        || transaction.summary.usize("relationsInserted")? != linked_entries
+        || transaction.summary.usize("sWrites")? != transaction.entries.len()
+        || !transaction.summary.bool("returnedTrue")?
+        || transaction.summary.value("terminal")? != "ReturnedTrueBeforeOuterBLinkerAssignment"
+        || transaction.remainder.usize("builderItemCount")?
+            != transaction.baseline.usize("builderItems")?
+        || !transaction.remainder.bool("comparisonEvaluated")?
+        || transaction.remainder.value("splitBody")? != "CommentOnly"
+        || transaction.remainder.usize("splitCalls")? != 0
+        || !transaction.remainder.bool("returnedTrue")?
+        || !transaction.guard.bool("stopBeforeOuterBLinkerAssignment")?
+        || transaction.guard.bool("outerBLinkerAssignmentRead")?
+        || transaction.guard.usize("splitCalls")? != 0
+    {
+        return Err("Boundary-17 result/remainder/guard algebra differs".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_isolated_head_cases(
+    supplemental: &[ParsedSyntheticHeadCase],
+    system_one: &ParsedHeadTransaction,
+) -> Result<(), String> {
+    const CASES: &[&str] = &[
+        "Duplicate",
+        "SmallHeadConsistency",
+        "NullSideExtension",
+        "ManualNoChord",
+        "ManualChordRewire",
+        "PreInsertThrow",
+        "CallbackThrow",
+    ];
+    if supplemental.len() != CASES.len() {
+        return Err(format!(
+            "Boundary-17 supplemental case count is {}, expected {}",
+            supplemental.len(),
+            CASES.len()
+        ));
+    }
+    for (ordinal, (block, expected_name)) in supplemental.iter().zip(CASES).enumerate() {
+        let case = &block.case;
+        let duplicate = *expected_name == "Duplicate";
+        let small = *expected_name == "SmallHeadConsistency";
+        let null_fallback = *expected_name == "NullSideExtension";
+        let manual = matches!(*expected_name, "ManualNoChord" | "ManualChordRewire");
+        let chord = *expected_name == "ManualChordRewire";
+        let pre_insert_throw = *expected_name == "PreInsertThrow";
+        let callback_throw = *expected_name == "CallbackThrow";
+        let successful_insert = !duplicate && !pre_insert_throw && !callback_throw;
+        let expected_scope = if duplicate || small {
+            "synthetic"
+        } else {
+            "envelope"
+        };
+        let expected_terminal = if pre_insert_throw {
+            "Threw:AddEdgeBeforeInsertion"
+        } else if callback_throw {
+            "Threw:HeadCheckAbnormalDuringRelationCallback"
+        } else {
+            "IsolatedEntryCompleted"
+        };
+        let expected_callback = if duplicate {
+            "NotReadDuplicate"
+        } else if pre_insert_throw {
+            "NotReadPreInsertionThrow"
+        } else if callback_throw {
+            "StartedThrewInHeadAbnormal"
+        } else {
+            "Completed"
+        };
+        let expected_events: Vec<&str> = match *expected_name {
+            "Duplicate" => vec!["SLinkerLinkedAssigned", "DirectedPairLookupCompleted"],
+            "ManualChordRewire" => vec![
+                "SLinkerLinkedAssigned",
+                "DirectedPairLookupCompleted",
+                "ConsistencyAssigned",
+                "SigEdgeInserted",
+                "HeadStemCallbackStarted",
+                "OldChordStemRemoved",
+                "NewChordStemInserted",
+                "HeadStemCallbackCompleted",
+            ],
+            "PreInsertThrow" => vec![
+                "SLinkerLinkedAssigned",
+                "DirectedPairLookupCompleted",
+                "ConsistencyAssigned",
+                "Throw",
+            ],
+            "CallbackThrow" => vec![
+                "SLinkerLinkedAssigned",
+                "DirectedPairLookupCompleted",
+                "ConsistencyAssigned",
+                "SigEdgeInserted",
+                "HeadStemCallbackStarted",
+                "Throw",
+            ],
+            _ => vec![
+                "SLinkerLinkedAssigned",
+                "DirectedPairLookupCompleted",
+                "ConsistencyAssigned",
+                "SigEdgeInserted",
+                "HeadStemCallbackStarted",
+                "HeadStemCallbackCompleted",
+            ],
+        };
+        if block.key.case_name != *expected_name
+            || block.key.scope != expected_scope
+            || block.key.system != 1
+            || block.key.plan != system_one.key.plan
+            || case.value("join")? != "IsolatedBoundary16Replay"
+            || case.value("sourceRealB16EvidenceSha256")?
+                != system_one
+                    .predecessor
+                    .value("b16TransactionEvidenceSha256")?
+            || case.value("construction")? != "RealBookSheetSystemSIGHeadLinker"
+            || case.value("shape")?
+                != if small {
+                    "NOTEHEAD_BLACK_SMALL"
+                } else {
+                    "NOTEHEAD_BLACK"
+                }
+            || case.bool("small")? != small
+            || case.bool("stemAttachedBefore")? == pre_insert_throw
+            || !case.bool("soleSigListener")?
+            || case.bool("sLinkedBefore")?
+            || !case.bool("sLinkedAfter")?
+            || case.bool("sClosedBefore")?
+            || case.bool("sClosedAfter")?
+            || case.value("pairState")?
+                != if duplicate {
+                    "FirstHeadStemMatch"
+                } else {
+                    "ExhaustiveNoMatch"
+                }
+            || (case.value("selectedGraphRelationIdentity")? == "-") == duplicate
+            || case.value("selectedRuntimeClass")?
+                != if duplicate {
+                    "org.audiveris.omr.sig.relation.HeadStemRelation"
+                } else {
+                    "-"
+                }
+            || case.value("draftConsistencyBefore")? != "Unset"
+            || (case.value("draftConsistencyAfter")? == "Unset") != duplicate
+            || (case.value("scaledStemLength")? == "NotRead") != duplicate
+            || (case.value("expectedConsistency")? == "NotRead") != duplicate
+            || case.bool("draftAttachedBefore")?
+            || case.bool("draftAttachedAfter")? != (!duplicate && !pre_insert_throw)
+            || case.bool("relationManual")? != manual
+            || case.bool("headManual")?
+            || case.bool("stemManual")?
+            || case.bool("sideFallbackTaken")? != null_fallback
+            || case.bool("extensionFallbackTaken")? != null_fallback
+            || case.bool("manualBranchRead")? != (!duplicate && !pre_insert_throw)
+            || case.bool("chordBranchRead")? != manual
+            || case.bool("headAbnormalRead")? != (!duplicate && !pre_insert_throw)
+            || case.bool("stemAbnormalRead")? != successful_insert
+            || case.usize("graphEdgesAfter")? as i64 - case.usize("graphEdgesBefore")? as i64
+                != if duplicate || pre_insert_throw { 0 } else { 1 }
+            || case.usize("headStemAfter")? as i64 - case.usize("headStemBefore")? as i64
+                != if duplicate || pre_insert_throw { 0 } else { 1 }
+            || case.usize("chordStemAfter")? != case.usize("chordStemBefore")?
+            || case.bool("oldChordStemRetained")?
+            || case.usize("newChordStemCount")? != usize::from(chord)
+            || case.bool("chordTargetsNewStem")? != chord
+            || case.value("addEdgeReturned")? != if successful_insert { "true" } else { "NotRead" }
+            || case.value("callbackState")? != expected_callback
+            || case.bool("headAbnormalBefore")? == duplicate
+            || case.bool("headAbnormalAfter")? != (!duplicate && !successful_insert)
+            || case.bool("stemAbnormalBefore")? == duplicate
+            || case.bool("stemAbnormalAfter")? != (!duplicate && !successful_insert)
+            || case.value("dirtyBefore")? != "false:false:false"
+            || case.value("dirtyAfter")?
+                != if successful_insert {
+                    "true:true:true"
+                } else {
+                    "false:false:false"
+                }
+            || case.value("throwClass")?
+                != if pre_insert_throw {
+                    "java.lang.IllegalArgumentException"
+                } else if callback_throw {
+                    "org.audiveris.omr.rustport.StemsBeamVLinkHeadLinksProbe$SyntheticHeadCallbackException"
+                } else {
+                    "-"
+                }
+            || case.value("throwStage")?
+                != if pre_insert_throw {
+                    "AddEdgeBeforeInsertion"
+                } else if callback_throw {
+                    "HeadCheckAbnormalDuringRelationCallback"
+                } else {
+                    "-"
+                }
+            || case.usize("eventCount")? != expected_events.len()
+            || case.value("terminal")? != expected_terminal
+            || block.events.len() != expected_events.len()
+        {
+            return Err(format!(
+                "Boundary-17 supplemental {ordinal} ({expected_name}) branch/state differs"
+            ));
+        }
+        if !duplicate {
+            let scaled = parse_f64(case.value("scaledStemLength")?)?;
+            let neutral = parse_f64(case.value("neutralStemLength")?)?;
+            let expected = if small {
+                1.0 / (scaled / neutral)
+            } else {
+                scaled / neutral
+            };
+            if parse_f64(case.value("draftConsistencyAfter")?)?.to_bits() != expected.to_bits()
+                || parse_f64(case.value("expectedConsistency")?)?.to_bits() != expected.to_bits()
+                || neutral.to_bits()
+                    != parse_f64(system_one.baseline.value("neutralStemLength")?)?.to_bits()
+            {
+                return Err(format!(
+                    "Boundary-17 supplemental {expected_name} consistency algebra differs"
+                ));
+            }
+        }
+        if null_fallback {
+            if case.value("headSideBefore")? != "-"
+                || case.value("headSideAfter")? != "RIGHT"
+                || case.value("extensionBefore")? != "-"
+                || case.value("extensionAfter")? == "-"
+            {
+                return Err("Boundary-17 null fallback payload differs".to_owned());
+            }
+        } else if case.value("headSideBefore")? != "RIGHT"
+            || case.value("headSideAfter")? != "RIGHT"
+            || case.value("extensionBefore")? == "-"
+            || case.value("extensionAfter")? != case.value("extensionBefore")?
+        {
+            return Err(format!(
+                "Boundary-17 supplemental {expected_name} prepopulated payload differs"
+            ));
+        }
+        for (event, expected_kind) in block.events.iter().zip(&expected_events) {
+            if event.value("kind")? != *expected_kind {
+                return Err(format!(
+                    "Boundary-17 supplemental {expected_name} event order differs"
+                ));
+            }
+        }
+        let guard = &block.guard;
+        if guard.i32("graphDelta")? != if duplicate || pre_insert_throw { 0 } else { 1 }
+            || guard.value("allowedMutations")?
+                != "SelectedSSharedCellDraftConsistencyHeadStemCallbackManualChordRewireAbnormalDirty"
+            || !guard.bool("headPayloadUnchanged")?
+            || !guard.bool("stemPayloadUnchanged")?
+            || !guard.bool("closedFlagsUnchanged")?
+            || !guard.bool("unrelatedGraphPreserved")?
+            || !guard.bool("isolatedOnly")?
+            || guard.bool("productionEquivalent")?
+            || !guard.bool("enclosingRealSheetUnchanged")?
+            || guard.bool("outerBLinkerAssignmentRead")?
+            || guard.value("terminal")? != expected_terminal
+        {
+            return Err(format!(
+                "Boundary-17 supplemental {expected_name} guard differs"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_head_links_trailers(
+    text: &str,
+    body_rows: &[HeadStrictRow],
+    page: &HeadStrictRow,
+    transactions: &[ParsedHeadTransaction],
+    supplemental: &[ParsedSyntheticHeadCase],
+    page_summary: &HeadStrictRow,
+    corpus_summary: &HeadStrictRow,
+) -> Result<(), String> {
+    const BODY_KINDS: &[HeadRowKind] = &[
+        HeadRowKind::Page,
+        HeadRowKind::Predecessor,
+        HeadRowKind::Baseline,
+        HeadRowKind::HeadEntry,
+        HeadRowKind::SLinkerWrite,
+        HeadRowKind::SourceOutgoing,
+        HeadRowKind::PairRelation,
+        HeadRowKind::PairScan,
+        HeadRowKind::Consistency,
+        HeadRowKind::Edge,
+        HeadRowKind::HeadIncident,
+        HeadRowKind::HeadIncidentScan,
+        HeadRowKind::StemIncident,
+        HeadRowKind::StemIncidentScan,
+        HeadRowKind::Callback,
+        HeadRowKind::EntryResult,
+        HeadRowKind::Remainder,
+        HeadRowKind::Result,
+        HeadRowKind::DeltaGuard,
+        HeadRowKind::Summary,
+        HeadRowKind::SyntheticCase,
+        HeadRowKind::SyntheticEvent,
+        HeadRowKind::SyntheticGuard,
+    ];
+    if page_summary.page != page.page {
+        return Err("Boundary-17 page summary refers to another page".to_owned());
+    }
+    let head_entries = transactions
+        .iter()
+        .map(|transaction| transaction.entries.len())
+        .sum::<usize>();
+    let duplicate_entries = transactions
+        .iter()
+        .flat_map(|transaction| &transaction.entries)
+        .filter(|entry| entry.head.value("branch") == Ok("ExistingHeadStem"))
+        .count();
+    let relations_inserted = head_entries - duplicate_entries;
+    let s_value_changes = transactions
+        .iter()
+        .flat_map(|transaction| &transaction.entries)
+        .map(|entry| entry.s_write.usize("valueChangeCount"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<usize>();
+    let head_abnormal_changes = transactions
+        .iter()
+        .flat_map(|transaction| &transaction.entries)
+        .filter_map(|entry| entry.callback.as_ref())
+        .map(|callback| {
+            Ok(usize::from(
+                callback.bool("headAbnormalBefore")? != callback.bool("headAbnormalAfter")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .into_iter()
+        .sum::<usize>();
+    let stem_abnormal_changes = transactions
+        .iter()
+        .flat_map(|transaction| &transaction.entries)
+        .filter_map(|entry| entry.callback.as_ref())
+        .map(|callback| {
+            Ok(usize::from(
+                callback.bool("stemAbnormalBefore")? != callback.bool("stemAbnormalAfter")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?
+        .into_iter()
+        .sum::<usize>();
+    let sheet_edit_mutations = transactions
+        .iter()
+        .map(|transaction| transaction.result.usize("sheetEditMutationCount"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<usize>();
+    let real_events = transactions
+        .iter()
+        .map(|transaction| transaction.result.usize("eventCount"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<usize>();
+    let supported = supplemental
+        .iter()
+        .filter(|case| case.key.scope == "synthetic")
+        .count();
+    let envelopes = supplemental.len() - supported;
+    let isolated_events = supplemental
+        .iter()
+        .map(|case| case.events.len())
+        .sum::<usize>();
+    let isolated_graph_delta = supplemental
+        .iter()
+        .map(|case| case.guard.i32("graphDelta"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<i32>();
+    let isolated_throws = supplemental
+        .iter()
+        .filter(|case| case.case.value("throwClass") != Ok("-"))
+        .count();
+    let isolated_manual = supplemental
+        .iter()
+        .map(|case| case.case.bool("relationManual"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|manual| *manual)
+        .count();
+    let chord_rewires = supplemental
+        .iter()
+        .map(|case| case.case.usize("newChordStemCount"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum::<usize>();
+    let total_transactions = transactions.len() + supplemental.len();
+    let census = [
+        ("systems", transactions.len().to_string()),
+        ("realTransactions", transactions.len().to_string()),
+        ("supportedSyntheticCases", supported.to_string()),
+        ("envelopeCases", envelopes.to_string()),
+        ("isolatedCases", supplemental.len().to_string()),
+        ("totalTransactions", total_transactions.to_string()),
+        ("headEntries", head_entries.to_string()),
+        ("duplicateEntries", duplicate_entries.to_string()),
+        ("relationsInserted", relations_inserted.to_string()),
+        ("sWrites", head_entries.to_string()),
+        ("sValueChanges", s_value_changes.to_string()),
+        ("consistencyWrites", relations_inserted.to_string()),
+        ("headAbnormalChanges", head_abnormal_changes.to_string()),
+        ("stemAbnormalChanges", stem_abnormal_changes.to_string()),
+        (
+            "dirtyCascades",
+            (head_abnormal_changes + stem_abnormal_changes).to_string(),
+        ),
+        ("sheetEditMutations", sheet_edit_mutations.to_string()),
+        ("realEvents", real_events.to_string()),
+        ("isolatedEvents", isolated_events.to_string()),
+        ("isolatedGraphDelta", isolated_graph_delta.to_string()),
+        ("isolatedThrows", isolated_throws.to_string()),
+        ("isolatedManualCases", isolated_manual.to_string()),
+        ("chordRewires", chord_rewires.to_string()),
+    ];
+    for (field, expected) in &census {
+        if page_summary.value(field)? != expected {
+            return Err(format!("Boundary-17 page summary {field} differs"));
+        }
+        if *field != "systems" && corpus_summary.value(field)? != expected {
+            return Err(format!("Boundary-17 corpus summary {field} differs"));
+        }
+    }
+    if !page_summary.bool("stopBeforeOuterBLinkerAssignment")?
+        || corpus_summary.value("schema")? != "stems-beam-vlink-head-links-v1"
+        || corpus_summary.usize("pages")? != 1
+        || corpus_summary.value("pageRefs")? != page.page
+        || corpus_summary.value("predecessorReplay")?
+            != "FullBoundary16TypedReplayAndExactJavaRowJoin"
+        || corpus_summary.value("querySerialization")? != "UTF8ColonTokensLF-LazyNotReadLiteral"
+        || corpus_summary.usize("freshRunsPerPage")? != 2
+        || !corpus_summary.bool("freshRunsByteIdentical")?
+        || !corpus_summary.bool("freshJvmPerSystem")?
+        || corpus_summary.usize("compilerJavaProcesses")? != 1
+        || corpus_summary.usize("runtimeJavaProcessesPerPass")? != transactions.len()
+        || corpus_summary.usize("runtimeJavaProcesses")? != 2 * transactions.len()
+        || corpus_summary.usize("totalJavaProcesses")? != 2 * transactions.len() + 1
+        || corpus_summary.usize("maximumConcurrentJavaProcesses")? != 1
+        || corpus_summary.value("concurrencyScope")? != "Boundary17RunnerLockedInvocation"
+        || !corpus_summary.bool("compilerJavaProcessReaped")?
+        || !corpus_summary.bool("runtimeJavaProcessesReaped")?
+        || !corpus_summary.bool("foregroundJavaProcessesOnly")?
+        || corpus_summary.usize("backgroundJavaProcessesStarted")? != 0
+        || !corpus_summary.bool("system1IsolatedBlock")?
+        || corpus_summary.value("supportedSyntheticEvidenceScope")?
+            != "IsolatedJavaGateOnlyNotProductionEquivalent"
+        || corpus_summary.value("envelopeEvidenceScope")?
+            != "IsolatedJavaGateOnlyNotProductionEquivalent"
+        || !corpus_summary.bool("stopBeforeOuterBLinkerAssignment")?
+    {
+        return Err("Boundary-17 terminal corpus contract differs".to_owned());
+    }
+    let (page_key, page_file) = corpus_page_for_token(&page.page)?;
+    if corpus_summary.value("mode")? != page_key {
+        return Err("Boundary-17 corpus mode differs from its page token".to_owned());
+    }
+    let row_counts = BODY_KINDS
+        .iter()
+        .map(|kind| {
+            format!(
+                "{}:{}",
+                kind.label(),
+                body_rows.iter().filter(|row| row.kind == *kind).count()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    if corpus_summary.value("rowCounts")? != row_counts {
+        return Err("Boundary-17 rowCounts differs from the authenticated body".to_owned());
+    }
+    let marker = format!("\n{} {} ", HeadRowKind::PageSummary.label(), page.page);
+    let marker_offset = text
+        .rfind(&marker)
+        .ok_or_else(|| "Boundary-17 page summary marker is absent".to_owned())?;
+    let body = &text.as_bytes()[..marker_offset + 1];
+    if corpus_summary.value("emittedBodySha256")? != sha256_hex(body)
+        || corpus_summary.value("rawPassSha256")? != sha256_hex(body)
+        || corpus_summary.usize("emittedBodyLines")? != body.iter().filter(|b| **b == b'\n').count()
+        || corpus_summary.usize("emittedBodyBytes")? != body.len()
+    {
+        return Err("Boundary-17 emitted-body provenance differs".to_owned());
+    }
+    let expected_fixture_fields = [
+        "schedulerFixtureSha256",
+        "expandFixtureSha256",
+        "createStemFixtureSha256",
+        "reuseCheckFixtureSha256",
+        "baseApplyFixtureSha256",
+        "bLinkerFlagFixtureSha256",
+        "siblingLinksFixtureSha256",
+    ];
+    for field in expected_fixture_fields {
+        if corpus_summary.value(field)? != page.value(field)? {
+            return Err(format!("Boundary-17 page/corpus {field} join differs"));
+        }
+    }
+    let current_pins = [
+        ("probeSourceSha256", HEAD_LINKS_PROBE_SOURCE_PATH),
+        ("runnerSourceSha256", HEAD_LINKS_RUNNER_SOURCE_PATH),
+        (
+            "baseApplyManifestSha256",
+            "rust/oracle/stems-beam-vlink-base-apply-manifest.txt",
+        ),
+        ("bLinkerFlagManifestSha256", BOUNDARY_FIFTEEN_MANIFEST_PATH),
+        ("siblingLinksManifestSha256", MANIFEST_PATH),
+    ];
+    for (field, path) in current_pins {
+        if corpus_summary.value(field)? != read_sha256(path)? {
+            return Err(format!("Boundary-17 active {field} differs"));
+        }
+    }
+    if corpus_summary.value("pageInputSha256")?
+        != read_sha256(&format!("data/examples/{page_file}"))?
+        || corpus_summary.value("jgraphtCoreVersion")? != "1.5.2"
+        || corpus_summary.value("jgraphtCoreJarSha256")?
+            != "dfa596e9f0d0838f1b5e81dd0cd60e3a76c2c290ac25a0a029ffde58cf5e4c14"
+    {
+        return Err("Boundary-17 page/JGraphT provenance differs".to_owned());
+    }
+    for field in HEAD_LINKS_CORPUS_SUMMARY_FIELDS
+        .iter()
+        .filter(|field| field.ends_with("Sha256"))
+    {
+        let value = corpus_summary.value(field)?;
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(format!("Boundary-17 {field} is not lowercase SHA-256"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_head_links_public_body(text: &str) -> Result<(), String> {
+    let rows = parse_head_links_rows(text)?;
+    let (corpus_summary, preceding) = rows
+        .split_last()
+        .ok_or_else(|| "Boundary-17 fixture lacks its corpus summary".to_owned())?;
+    let (page_summary, body_rows) = preceding
+        .split_last()
+        .ok_or_else(|| "Boundary-17 fixture lacks its page summary".to_owned())?;
+    if page_summary.kind != HeadRowKind::PageSummary
+        || corpus_summary.kind != HeadRowKind::CorpusSummary
+    {
+        return Err("Boundary-17 fixture lacks unique ordered terminal summaries".to_owned());
+    }
+    let (page, transactions, supplemental) = parse_real_head_transactions(body_rows)?;
+    if page.value("stop")? != "ReturnedTrueBeforeOuterBLinkerAssignment"
+        || page.value("relationOrder")? != "LinkedHashMapFirstInsertionLatestPayload"
+        || page.value("incidentOrder")? != "IncomingThenOutgoing"
+        || !page.bool("headless")?
+        || page.usize("systems")? != transactions.len()
+    {
+        return Err("Boundary-17 page contract differs".to_owned());
+    }
+    let system_one = transactions
+        .iter()
+        .find(|transaction| transaction.key.system == 1)
+        .ok_or_else(|| "Boundary-17 fixture lacks real system 1".to_owned())?;
+    validate_isolated_head_cases(&supplemental, system_one)?;
+    for transaction in &transactions {
+        let hydrated = hydrate_boundary_sixteen_for_head(page, transaction)?;
+        let mut state = project_head_links_state(transaction, &hydrated)?;
+        let before = state.clone();
+        let public = apply_native_stems_beam_vlink_head_links_transaction(
+            &hydrated.predecessor.scheduler,
+            &hydrated.predecessor.plans,
+            &hydrated.predecessor.stumps,
+            &hydrated.predecessor.vlinkers,
+            &hydrated.predecessor.reachability,
+            &hydrated.predecessor.builder,
+            &hydrated.predecessor.create_transaction,
+            &hydrated.predecessor.reuse_live_state,
+            hydrated.predecessor.relation_parameters,
+            &hydrated.predecessor.reuse_check,
+            &hydrated.predecessor.base_apply,
+            &hydrated.predecessor.transaction,
+            &hydrated.transaction,
+            &mut state,
+        )
+        .map_err(|error| {
+            format!(
+                "system {} production Boundary-17 apply failed: {error}",
+                transaction.key.system
+            )
+        })?;
+        assert_head_public_matches_rows(transaction, &hydrated, &before, &state, &public)?;
+    }
+    validate_head_links_trailers(
+        text,
+        body_rows,
+        page,
+        &transactions,
+        &supplemental,
+        page_summary,
+        corpus_summary,
+    )?;
+    Ok(())
+}
+
+fn compare_head_manifest_and_strict_fields(
+    manifest: &ManifestRow,
+    strict: &HeadStrictRow,
+    fields: &[&str],
+) -> Result<(), String> {
+    for field in fields {
+        if manifest.value(field)? != strict.value(field)? {
+            return Err(format!(
+                "Boundary-17 manifest/fixture {} join differs for {field}",
+                manifest.value("page").unwrap_or("summary")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_boundary_seventeen_manifest(path: &std::path::Path) -> Result<(), String> {
+    const BODY_KINDS: &[HeadRowKind] = &[
+        HeadRowKind::Page,
+        HeadRowKind::Predecessor,
+        HeadRowKind::Baseline,
+        HeadRowKind::HeadEntry,
+        HeadRowKind::SLinkerWrite,
+        HeadRowKind::SourceOutgoing,
+        HeadRowKind::PairRelation,
+        HeadRowKind::PairScan,
+        HeadRowKind::Consistency,
+        HeadRowKind::Edge,
+        HeadRowKind::HeadIncident,
+        HeadRowKind::HeadIncidentScan,
+        HeadRowKind::StemIncident,
+        HeadRowKind::StemIncidentScan,
+        HeadRowKind::Callback,
+        HeadRowKind::EntryResult,
+        HeadRowKind::Remainder,
+        HeadRowKind::Result,
+        HeadRowKind::DeltaGuard,
+        HeadRowKind::Summary,
+        HeadRowKind::SyntheticCase,
+        HeadRowKind::SyntheticEvent,
+        HeadRowKind::SyntheticGuard,
+    ];
+    const PAGE_COUNTER_FIELDS: &[&str] = &[
+        "systems",
+        "realTransactions",
+        "supportedSyntheticCases",
+        "envelopeCases",
+        "isolatedCases",
+        "totalTransactions",
+        "headEntries",
+        "duplicateEntries",
+        "relationsInserted",
+        "sWrites",
+        "sValueChanges",
+        "consistencyWrites",
+        "headAbnormalChanges",
+        "stemAbnormalChanges",
+        "dirtyCascades",
+        "sheetEditMutations",
+        "realEvents",
+        "isolatedEvents",
+        "isolatedGraphDelta",
+        "isolatedThrows",
+        "isolatedManualCases",
+        "chordRewires",
+        "stopBeforeOuterBLinkerAssignment",
+    ];
+    const CORPUS_ENTRY_FIELDS: &[&str] = &[
+        "rowCounts",
+        "pageInputSha256",
+        "schedulerFixtureSha256",
+        "expandFixtureSha256",
+        "createStemFixtureSha256",
+        "reuseCheckFixtureSha256",
+        "baseApplyFixtureSha256",
+        "baseApplyManifestSha256",
+        "bLinkerFlagFixtureSha256",
+        "bLinkerFlagManifestSha256",
+        "siblingLinksFixtureSha256",
+        "siblingLinksManifestSha256",
+        "emittedBodySha256",
+        "emittedBodyLines",
+        "emittedBodyBytes",
+        "rawPassSha256",
+        "freshRunsPerPage",
+        "freshRunsByteIdentical",
+        "compilerJavaProcesses",
+        "runtimeJavaProcessesPerPass",
+        "runtimeJavaProcesses",
+        "totalJavaProcesses",
+        "maximumConcurrentJavaProcesses",
+        "concurrencyScope",
+        "freshJvmPerSystem",
+        "compilerJavaProcessReaped",
+        "runtimeJavaProcessesReaped",
+        "foregroundJavaProcessesOnly",
+        "backgroundJavaProcessesStarted",
+        "system1IsolatedBlock",
+        "supportedSyntheticEvidenceScope",
+        "envelopeEvidenceScope",
+        "stopBeforeOuterBLinkerAssignment",
+    ];
+    const AGGREGATE_FIELDS: &[(&str, &str)] = &[
+        ("realSystems", "systems"),
+        ("realTransactions", "realTransactions"),
+        ("realHeadEntries", "headEntries"),
+        ("realDuplicateEntries", "duplicateEntries"),
+        ("realRelationsInserted", "relationsInserted"),
+        ("realSWrites", "sWrites"),
+        ("realSValueChanges", "sValueChanges"),
+        ("realConsistencyWrites", "consistencyWrites"),
+        ("realHeadAbnormalChanges", "headAbnormalChanges"),
+        ("realStemAbnormalChanges", "stemAbnormalChanges"),
+        ("realDirtyCascades", "dirtyCascades"),
+        ("realSheetEditMutations", "sheetEditMutations"),
+        ("realEvents", "realEvents"),
+        ("supportedSyntheticCases", "supportedSyntheticCases"),
+        ("envelopeCases", "envelopeCases"),
+        ("isolatedCases", "isolatedCases"),
+        ("totalTransactions", "totalTransactions"),
+        ("isolatedEvents", "isolatedEvents"),
+        ("isolatedGraphDelta", "isolatedGraphDelta"),
+        ("isolatedThrows", "isolatedThrows"),
+        ("isolatedManualCases", "isolatedManualCases"),
+        ("chordRewires", "chordRewires"),
+    ];
+
+    let manifest_bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let manifest = std::str::from_utf8(&manifest_bytes)
+        .map_err(|error| format!("{} is not UTF-8: {error}", path.display()))?;
+    if !manifest_bytes.ends_with(b"\n") {
+        return Err("Boundary-17 manifest must end with one newline".to_owned());
+    }
+    let lines = manifest.lines().collect::<Vec<_>>();
+    if sha256_hex(&manifest_bytes) != HEAD_LINKS_MANIFEST_SHA256
+        || lines.len() != HEAD_LINKS_MANIFEST_LINES
+        || manifest_bytes.len() != HEAD_LINKS_MANIFEST_BYTES
+        || HEAD_LINKS_MANIFEST_ENTRY_FIELDS.len() != 61
+        || HEAD_LINKS_MANIFEST_SUMMARY_FIELDS.len() != 144
+        || lines.len() != CORPUS_PAGES.len() + 2
+        || lines.first().copied() != Some(HEAD_LINKS_MANIFEST_SCHEMA)
+    {
+        return Err("Boundary-17 manifest schema/line envelope differs".to_owned());
+    }
+    let entries = lines[1..=CORPUS_PAGES.len()]
+        .iter()
+        .map(|line| {
+            ManifestRow::parse(
+                line,
+                HEAD_LINKS_MANIFEST_ENTRY_LABEL,
+                HEAD_LINKS_MANIFEST_ENTRY_FIELDS,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let summary = ManifestRow::parse(
+        lines
+            .last()
+            .ok_or_else(|| "Boundary-17 manifest lacks summary".to_owned())?,
+        HEAD_LINKS_MANIFEST_SUMMARY_LABEL,
+        HEAD_LINKS_MANIFEST_SUMMARY_FIELDS,
+    )?;
+
+    let expected_header = format!("{}\n", HEAD_LINKS_FIXTURE_HEADER.join("\n"));
+    let mut normalized_corpus = expected_header.as_bytes().to_vec();
+    let mut split_emitted_body = Vec::new();
+    let mut split_fixture = Vec::new();
+    let mut row_totals = vec![0usize; BODY_KINDS.len()];
+    let mut semantic_rows = 0usize;
+    let mut strict_corpora = Vec::new();
+    let mut aggregate_totals = BTreeMap::<&str, usize>::new();
+    let mut compiler_java_processes = 0usize;
+    let mut runtime_java_processes = 0usize;
+    let mut total_java_processes = 0usize;
+    let mut maximum_concurrent_java_processes = 0usize;
+
+    for (ordinal, ((page_key, _), entry)) in CORPUS_PAGES.iter().zip(&entries).enumerate() {
+        let expected_fixture = format!("stems-beam-vlink-head-links-{page_key}.txt");
+        if entry.usize("ordinal")? != ordinal
+            || entry.value("page")? != *page_key
+            || entry.value("fixture")? != expected_fixture
+        {
+            return Err(format!(
+                "Boundary-17 manifest entry {ordinal} identity/order differs"
+            ));
+        }
+        let fixture_path = repo_root().join("rust/oracle").join(&expected_fixture);
+        let fixture_bytes = std::fs::read(&fixture_path)
+            .map_err(|error| format!("cannot read {}: {error}", fixture_path.display()))?;
+        let fixture = std::str::from_utf8(&fixture_bytes)
+            .map_err(|error| format!("{} is not UTF-8: {error}", fixture_path.display()))?;
+        if !fixture_bytes.ends_with(b"\n") || !fixture.starts_with(&expected_header) {
+            return Err(format!(
+                "Boundary-17 manifest {page_key} fixture envelope differs"
+            ));
+        }
+        validate_head_links_public_body(fixture)?;
+        let rows = parse_head_links_rows(fixture)?;
+        let (corpus_summary, preceding) = rows
+            .split_last()
+            .ok_or_else(|| format!("Boundary-17 manifest {page_key} lacks corpus summary"))?;
+        let (page_summary, body_rows) = preceding
+            .split_last()
+            .ok_or_else(|| format!("Boundary-17 manifest {page_key} lacks page summary"))?;
+        if page_summary.kind != HeadRowKind::PageSummary
+            || corpus_summary.kind != HeadRowKind::CorpusSummary
+        {
+            return Err(format!(
+                "Boundary-17 manifest {page_key} terminal row order differs"
+            ));
+        }
+        let (page, _, _) = parse_real_head_transactions(body_rows)?;
+        if corpus_summary.value("mode")? != *page_key
+            || page_summary.page != page.page
+            || entry.value("rowCounts")? != corpus_summary.value("rowCounts")?
+        {
+            return Err(format!(
+                "Boundary-17 manifest {page_key} page identity differs"
+            ));
+        }
+        compare_head_manifest_and_strict_fields(entry, page_summary, PAGE_COUNTER_FIELDS)?;
+        compare_head_manifest_and_strict_fields(entry, corpus_summary, CORPUS_ENTRY_FIELDS)?;
+
+        let fixture_lines = fixture_bytes.iter().filter(|byte| **byte == b'\n').count();
+        if entry.value("fixtureSha256")? != sha256_hex(&fixture_bytes)
+            || entry.usize("fixtureLines")? != fixture_lines
+            || entry.usize("fixtureBytes")? != fixture_bytes.len()
+        {
+            return Err(format!(
+                "Boundary-17 manifest {page_key} fixture identity differs"
+            ));
+        }
+        let marker = format!(
+            "\n{} {} ",
+            HeadRowKind::PageSummary.label(),
+            page_summary.page
+        );
+        let body_end = fixture
+            .rfind(&marker)
+            .ok_or_else(|| format!("Boundary-17 manifest {page_key} body marker is absent"))?
+            + 1;
+        let emitted_body = &fixture_bytes[..body_end];
+        if entry.value("emittedBodySha256")? != sha256_hex(emitted_body)
+            || entry.value("rawPassSha256")? != sha256_hex(emitted_body)
+            || entry.usize("emittedBodyLines")?
+                != emitted_body.iter().filter(|byte| **byte == b'\n').count()
+            || entry.usize("emittedBodyBytes")? != emitted_body.len()
+        {
+            return Err(format!(
+                "Boundary-17 manifest {page_key} emitted-body identity differs"
+            ));
+        }
+        normalized_corpus.extend_from_slice(&emitted_body[expected_header.len()..]);
+        split_emitted_body.extend_from_slice(emitted_body);
+        split_fixture.extend_from_slice(&fixture_bytes);
+        semantic_rows += body_rows.len();
+        for (index, kind) in BODY_KINDS.iter().enumerate() {
+            row_totals[index] += body_rows.iter().filter(|row| row.kind == *kind).count();
+        }
+        for (_, page_field) in AGGREGATE_FIELDS {
+            *aggregate_totals.entry(page_field).or_default() += page_summary.usize(page_field)?;
+        }
+        compiler_java_processes += corpus_summary.usize("compilerJavaProcesses")?;
+        runtime_java_processes += corpus_summary.usize("runtimeJavaProcesses")?;
+        total_java_processes += corpus_summary.usize("totalJavaProcesses")?;
+        maximum_concurrent_java_processes = maximum_concurrent_java_processes
+            .max(corpus_summary.usize("maximumConcurrentJavaProcesses")?);
+        strict_corpora.push(corpus_summary.clone());
+    }
+
+    if summary.value("schema")? != "stems-beam-vlink-head-links-manifest-v1"
+        || summary.usize("entries")? != entries.len()
+    {
+        return Err("Boundary-17 manifest summary schema/entry count differs".to_owned());
+    }
+    let first_corpus = strict_corpora
+        .first()
+        .ok_or_else(|| "Boundary-17 manifest has no corpus summaries".to_owned())?;
+    for field in HEAD_LINKS_MANIFEST_SUMMARY_FIELDS
+        .iter()
+        .skip(2)
+        .take_while(|field| **field != "sharedHeaderSha256")
+    {
+        let expected = first_corpus.value(field)?;
+        if summary.value(field)? != expected
+            || strict_corpora
+                .iter()
+                .any(|corpus| corpus.value(field) != Ok(expected))
+        {
+            return Err(format!(
+                "Boundary-17 manifest shared provenance differs for {field}"
+            ));
+        }
+    }
+    let corpus_row_counts = BODY_KINDS
+        .iter()
+        .zip(&row_totals)
+        .map(|(kind, count)| format!("{}:{count}", kind.label()))
+        .collect::<Vec<_>>()
+        .join(",");
+    if summary.value("sharedHeaderSha256")? != sha256_hex(expected_header.as_bytes())
+        || summary.usize("sharedHeaderLines")? != HEAD_LINKS_FIXTURE_HEADER.len()
+        || summary.usize("sharedHeaderBytes")? != expected_header.len()
+        || summary.value("corpusBodySha256")? != sha256_hex(&normalized_corpus)
+        || summary.usize("corpusBodyLines")?
+            != normalized_corpus
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count()
+        || summary.usize("corpusBodyBytes")? != normalized_corpus.len()
+        || summary.value("corpusRowCounts")? != corpus_row_counts
+        || summary.value("corpusReconstruction")? != "SharedHeaderOnceThenPageSemanticRows"
+        || summary.usize("semanticRows")? != semantic_rows
+        || summary.value("splitEmittedBodySha256")? != sha256_hex(&split_emitted_body)
+        || summary.usize("splitEmittedBodyLines")?
+            != split_emitted_body
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count()
+        || summary.usize("splitEmittedBodyBytes")? != split_emitted_body.len()
+        || summary.value("splitFixtureSha256")? != sha256_hex(&split_fixture)
+        || summary.usize("splitFixtureLines")?
+            != split_fixture.iter().filter(|byte| **byte == b'\n').count()
+        || summary.usize("splitFixtureBytes")? != split_fixture.len()
+        || sha256_hex(&normalized_corpus) != HEAD_LINKS_NORMALIZED_CORPUS_SHA256
+        || normalized_corpus
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            != HEAD_LINKS_NORMALIZED_CORPUS_LINES
+        || normalized_corpus.len() != HEAD_LINKS_NORMALIZED_CORPUS_BYTES
+        || sha256_hex(&split_emitted_body) != HEAD_LINKS_SPLIT_EMITTED_BODY_SHA256
+        || split_emitted_body
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            != HEAD_LINKS_SPLIT_EMITTED_BODY_LINES
+        || split_emitted_body.len() != HEAD_LINKS_SPLIT_EMITTED_BODY_BYTES
+        || sha256_hex(&split_fixture) != HEAD_LINKS_SPLIT_FIXTURE_SHA256
+        || split_fixture.iter().filter(|byte| **byte == b'\n').count()
+            != HEAD_LINKS_SPLIT_FIXTURE_LINES
+        || split_fixture.len() != HEAD_LINKS_SPLIT_FIXTURE_BYTES
+    {
+        return Err("Boundary-17 manifest corpus reconstruction differs".to_owned());
+    }
+
+    for (summary_field, page_field) in AGGREGATE_FIELDS {
+        if summary.usize(summary_field)?
+            != aggregate_totals
+                .get(page_field)
+                .copied()
+                .unwrap_or_default()
+        {
+            return Err(format!(
+                "Boundary-17 manifest aggregate {summary_field} differs"
+            ));
+        }
+    }
+    if summary.usize("syntheticBlocks")? != entries.len()
+        || summary.usize("compilerJavaProcesses")? != compiler_java_processes
+        || summary.usize("runtimeJavaProcesses")? != runtime_java_processes
+        || summary.usize("totalJavaProcesses")? != total_java_processes
+        || summary.usize("maximumConcurrentJavaProcesses")? != maximum_concurrent_java_processes
+        || summary.value("concurrencyScope")? != "Boundary17RunnerLockedInvocation"
+        || summary.usize("freshRunsPerPage")? != 2
+        || !summary.bool("freshRunsByteIdentical")?
+        || !summary.bool("freshJvmPerSystem")?
+        || !summary.bool("compilerJavaProcessesReaped")?
+        || !summary.bool("runtimeJavaProcessesReaped")?
+        || !summary.bool("foregroundJavaProcessesOnly")?
+        || summary.usize("backgroundJavaProcessesStarted")? != 0
+        || !summary.bool("system1IsolatedBlock")?
+        || summary.value("supportedSyntheticEvidenceScope")?
+            != "IsolatedJavaGateOnlyNotProductionEquivalent"
+        || summary.value("envelopeEvidenceScope")? != "IsolatedJavaGateOnlyNotProductionEquivalent"
+        || !summary.bool("stopBeforeOuterBLinkerAssignment")?
+    {
+        return Err("Boundary-17 manifest execution/evidence constants differ".to_owned());
+    }
+
+    let summary_marker = format!("{HEAD_LINKS_MANIFEST_SUMMARY_LABEL} ");
+    let body_matches = manifest
+        .match_indices(&summary_marker)
+        .filter(|(index, _)| {
+            *index == 0 || manifest_bytes.get(index.wrapping_sub(1)) == Some(&b'\n')
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if body_matches.len() != 1 {
+        return Err("Boundary-17 manifest lacks one line-aligned summary".to_owned());
+    }
+    let body = &manifest_bytes[..body_matches[0]];
+    if summary.value("manifestBodySha256")? != sha256_hex(body)
+        || summary.usize("manifestBodyLines")? != body.iter().filter(|byte| **byte == b'\n').count()
+        || summary.usize("manifestBodyBytes")? != body.len()
+        || sha256_hex(body) != HEAD_LINKS_MANIFEST_BODY_SHA256
+        || body.iter().filter(|byte| **byte == b'\n').count() != HEAD_LINKS_MANIFEST_BODY_LINES
+        || body.len() != HEAD_LINKS_MANIFEST_BODY_BYTES
+    {
+        return Err("Boundary-17 manifest self-pinned body differs".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn installed_boundary_seventeen_prefix_is_strictly_replayed() {
+    let mut installed = 0;
+    let mut saw_missing = false;
+    for (key, _) in CORPUS_PAGES {
+        let path = repo_root().join(boundary_seventeen_fixture_path(key));
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {
+                assert!(
+                    !saw_missing,
+                    "installed Boundary-17 corpus has a gap before {key}"
+                );
+                let text = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+                validate_head_links_public_body(&text)
+                    .unwrap_or_else(|error| panic!("{key} exact replay: {error}"));
+                installed += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => saw_missing = true,
+            Ok(_) => panic!("{} is not a file", path.display()),
+            Err(error) => panic!("cannot inspect {}: {error}", path.display()),
+        }
+    }
+    assert!(installed > 0, "Boundary-17 installed prefix is empty");
+}
+
+#[test]
+fn installed_boundary_seventeen_manifest_is_exactly_reconstructed_and_pinned() {
+    let path = std::env::var_os(HEAD_LINKS_MANIFEST_OVERRIDE_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join(HEAD_LINKS_MANIFEST_PATH));
+    validate_boundary_seventeen_manifest(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+}
+
+fn head_java_printf_fields(source: &str, kind: HeadRowKind) -> Result<Vec<String>, String> {
+    let dynamic_incident = matches!(
+        kind,
+        HeadRowKind::HeadIncident
+            | HeadRowKind::HeadIncidentScan
+            | HeadRowKind::StemIncident
+            | HeadRowKind::StemIncidentScan
+    );
+    let dynamic_label = match kind {
+        HeadRowKind::HeadIncident | HeadRowKind::StemIncident => {
+            "stemsbeamvlinkheadlinks%sincident"
+        }
+        HeadRowKind::HeadIncidentScan | HeadRowKind::StemIncidentScan => {
+            "stemsbeamvlinkheadlinks%sincidentscan"
+        }
+        _ => kind.label(),
+    };
+    let marker = format!("\"{dynamic_label} ");
+    let start = source
+        .find(&marker)
+        .ok_or_else(|| format!("Java probe lacks Boundary-17 {kind:?} printf"))?;
+    let mut format_text = String::new();
+    for line in source[start..].lines() {
+        let Some(first_quote) = line.find('"') else {
+            continue;
+        };
+        let last_quote = line
+            .rfind('"')
+            .ok_or_else(|| format!("unterminated Boundary-17 {kind:?} format literal"))?;
+        format_text.push_str(&line[first_quote + 1..last_quote]);
+        if line[first_quote + 1..last_quote].contains("%n") {
+            break;
+        }
+    }
+    let format_text = format_text.replace("%n", "");
+    let tokens = format_text.split_ascii_whitespace().collect::<Vec<_>>();
+    if tokens.first().copied() != Some(dynamic_label)
+        || tokens.get(1).copied() != Some("%s")
+        || (dynamic_incident && !tokens[0].contains("%s"))
+    {
+        return Err(format!(
+            "Boundary-17 {kind:?} format lacks label/page prefix"
+        ));
+    }
+    if (tokens.len() - 2) % 2 != 0 {
+        return Err(format!(
+            "Boundary-17 {kind:?} format is not key/value shaped"
+        ));
+    }
+    let mut fields = match kind {
+        HeadRowKind::Page => Vec::new(),
+        HeadRowKind::Predecessor
+        | HeadRowKind::Baseline
+        | HeadRowKind::Remainder
+        | HeadRowKind::Result
+        | HeadRowKind::DeltaGuard
+        | HeadRowKind::Summary => HEAD_LINKS_COMMON_FIELDS
+            .iter()
+            .map(|field| (*field).to_owned())
+            .collect(),
+        HeadRowKind::SyntheticCase | HeadRowKind::SyntheticEvent | HeadRowKind::SyntheticGuard => {
+            HEAD_LINKS_COMMON_FIELDS
+                .iter()
+                .map(|field| (*field).to_owned())
+                .collect()
+        }
+        _ => HEAD_LINKS_ENTRY_COMMON_FIELDS
+            .iter()
+            .map(|field| (*field).to_owned())
+            .collect(),
+    };
+    fields.extend(tokens[2..].chunks_exact(2).map(|pair| pair[0].to_owned()));
+    Ok(fields)
+}
+
+fn head_runner_printf_fields(source: &str, kind: HeadRowKind) -> Result<Vec<String>, String> {
+    if !matches!(kind, HeadRowKind::PageSummary | HeadRowKind::CorpusSummary) {
+        return Err("Boundary-17 runner field extraction requires a trailer kind".to_owned());
+    }
+    let prefix = format!("printf '{} ", kind.label());
+    let line = source
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .ok_or_else(|| format!("Boundary-17 runner lacks {kind:?} printf"))?;
+    let first_quote = line
+        .find('\'')
+        .ok_or_else(|| format!("Boundary-17 {kind:?} printf lacks opening quote"))?;
+    let last_quote = line
+        .rfind('\'')
+        .filter(|last| *last > first_quote)
+        .ok_or_else(|| format!("Boundary-17 {kind:?} printf lacks closing quote"))?;
+    let tokens = line[first_quote + 1..last_quote]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let pair_start = if kind == HeadRowKind::CorpusSummary {
+        1
+    } else {
+        2
+    };
+    if tokens.first().copied() != Some(kind.label()) || (tokens.len() - pair_start) % 2 != 0 {
+        return Err(format!(
+            "Boundary-17 {kind:?} printf is not ordered key/value data"
+        ));
+    }
+    let mut fields = tokens[pair_start..]
+        .chunks_exact(2)
+        .map(|pair| pair[0].to_owned())
+        .collect::<Vec<_>>();
+    if kind == HeadRowKind::CorpusSummary {
+        let insertion = fields
+            .iter()
+            .position(|field| field == "sigraphClassSha256")
+            .ok_or_else(|| "Boundary-17 corpus printf lacks class/source boundary".to_owned())?
+            + 1;
+        let mut source_fields = CORPUS_SOURCE_PINS[..CORPUS_SOURCE_PINS.len() - 1]
+            .iter()
+            .map(|(field, _)| (*field).to_owned())
+            .collect::<Vec<_>>();
+        source_fields.extend(
+            [
+                "headLinkerSourceSha256",
+                "headInterSourceSha256",
+                "headStemRelationSourceSha256",
+                "partSourceSha256",
+            ]
+            .map(str::to_owned),
+        );
+        source_fields.push("gradleSourceSha256".to_owned());
+        fields.splice(insertion..insertion, source_fields);
+    }
+    Ok(fields)
+}
+
+#[test]
+fn boundary_seventeen_java_core_printf_fields_match_strict_arrays() {
+    let source = std::fs::read_to_string(repo_root().join(HEAD_LINKS_PROBE_SOURCE_PATH))
+        .expect("read Boundary-17 Java probe");
+    assert!(repo_root().join(HEAD_LINKS_RUNNER_SOURCE_PATH).is_file());
+    for kind in [
+        HeadRowKind::Page,
+        HeadRowKind::Predecessor,
+        HeadRowKind::Baseline,
+        HeadRowKind::HeadEntry,
+        HeadRowKind::SLinkerWrite,
+        HeadRowKind::SourceOutgoing,
+        HeadRowKind::PairRelation,
+        HeadRowKind::PairScan,
+        HeadRowKind::Consistency,
+        HeadRowKind::Edge,
+        HeadRowKind::HeadIncident,
+        HeadRowKind::HeadIncidentScan,
+        HeadRowKind::StemIncident,
+        HeadRowKind::StemIncidentScan,
+        HeadRowKind::Callback,
+        HeadRowKind::EntryResult,
+        HeadRowKind::Remainder,
+        HeadRowKind::Result,
+        HeadRowKind::DeltaGuard,
+        HeadRowKind::Summary,
+        HeadRowKind::SyntheticCase,
+        HeadRowKind::SyntheticEvent,
+        HeadRowKind::SyntheticGuard,
+    ] {
+        assert_eq!(
+            head_java_printf_fields(&source, kind).unwrap(),
+            kind.fields(),
+            "Boundary-17 {kind:?} Java/Rust field drift"
+        );
+    }
+    let runner = std::fs::read_to_string(repo_root().join(HEAD_LINKS_RUNNER_SOURCE_PATH))
+        .expect("read Boundary-17 oracle runner");
+    for kind in [HeadRowKind::PageSummary, HeadRowKind::CorpusSummary] {
+        assert_eq!(
+            head_runner_printf_fields(&runner, kind).unwrap(),
+            kind.fields(),
+            "Boundary-17 {kind:?} runner/Rust field drift"
+        );
+    }
 }
 
 #[test]
