@@ -16,8 +16,9 @@ use std::{
 
 use audiveris_image::beam_structure::Segment;
 use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
-    apply_native_stems_beam_vlink_outer_b_linker_transaction, NativeStemsBeamOuterBLinkerCell,
-    NativeStemsBeamOuterVLinkerFact, NativeStemsBeamVLinkOuterBLinkerOutcome,
+    NativeStemsBeamOuterBLinkerCell, NativeStemsBeamOuterVLinkerFact,
+    NativeStemsBeamVLinkOuterBLinkerOutcome,
+    apply_native_stems_beam_vlink_outer_b_linker_transaction,
 };
 use audiveris_omr::{
     native_stems_beam_builders::{
@@ -9641,9 +9642,7 @@ fn validate_outer_b_linker_body(
             &hydrated.transaction,
             &mut state,
         )
-        .map_err(|error| {
-            format!("system {system} production Boundary-17 apply failed: {error}")
-        })?;
+        .map_err(|error| format!("system {system} production Boundary-17 apply failed: {error}"))?;
         if !head_public.returned_true {
             return Err(format!(
                 "system {system} Boundary-17 replay did not return true"
@@ -9688,9 +9687,7 @@ fn validate_outer_b_linker_body(
             &facts,
             &mut cell,
         )
-        .map_err(|error| {
-            format!("system {system} production Boundary-18 apply failed: {error}")
-        })?;
+        .map_err(|error| format!("system {system} production Boundary-18 apply failed: {error}"))?;
 
         let expected_b = parse_b_linker_alias(row.value("bAlias")?, &hydrated.predecessor)?;
         if expected_b != outer.target_b_linker {
@@ -9705,18 +9702,39 @@ fn validate_outer_b_linker_body(
         let checks: [(&str, bool); 16] = [
             ("vSide", row.value("vSide")? == side),
             ("entryGuardReplayed", row.bool("entryGuardReplayed")?),
-            ("linkedBefore", row.bool("linkedBefore")? == outer.linked_before),
-            ("writeExecuted", row.bool("writeExecuted")? == (outer.linked_write_count == 1)),
-            ("linkedAfter", row.bool("linkedAfter")? == outer.linked_after),
+            (
+                "linkedBefore",
+                row.bool("linkedBefore")? == outer.linked_before,
+            ),
+            (
+                "writeExecuted",
+                row.bool("writeExecuted")? == (outer.linked_write_count == 1),
+            ),
+            (
+                "linkedAfter",
+                row.bool("linkedAfter")? == outer.linked_after,
+            ),
             (
                 "valueChanged",
                 row.bool("valueChanged")? == (outer.linked_value_change_count > 0),
             ),
-            ("closedAfter", row.bool("closedAfter")? == outer.closed_after),
-            ("arenaOtherCellsUnchanged", row.bool("arenaOtherCellsUnchanged")?),
-            ("persistentStateUnchanged", row.bool("persistentStateUnchanged")?),
+            (
+                "closedAfter",
+                row.bool("closedAfter")? == outer.closed_after,
+            ),
+            (
+                "arenaOtherCellsUnchanged",
+                row.bool("arenaOtherCellsUnchanged")?,
+            ),
+            (
+                "persistentStateUnchanged",
+                row.bool("persistentStateUnchanged")?,
+            ),
             ("vMapSize", row.usize("vMapSize")? == outer.v_map_size),
-            ("currentVOrdinal", row.usize("currentVOrdinal")? == outer.current_v_ordinal),
+            (
+                "currentVOrdinal",
+                row.usize("currentVOrdinal")? == outer.current_v_ordinal,
+            ),
             (
                 "remainingWithTargets",
                 row.usize("remainingWithTargets")? == outer.remaining_with_targets,
@@ -9754,7 +9772,9 @@ fn validate_outer_b_linker_body(
             return Err(format!("system {system} Boundary-18 summary differs"));
         }
         if !cell.linked {
-            return Err(format!("system {system} Boundary-18 left the cell unlinked"));
+            return Err(format!(
+                "system {system} Boundary-18 left the cell unlinked"
+            ));
         }
     }
     Ok(())
