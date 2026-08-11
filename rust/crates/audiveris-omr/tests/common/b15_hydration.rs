@@ -1106,6 +1106,16 @@ fn parse_run_table(value: &str) -> Result<RunTable, String> {
         .map_err(|error| format!("run table reconstruction failed: {error}"))
 }
 
+/// The glyph-registry bootstrap's join key. The Java probe computes this exact
+/// digest for every glyph in the page registry, so content matches across the
+/// two sides without either trusting the other's identities.
+// Used by the Boundary-20 gate's self-driving path; the other gates that
+// include this file have no page registry to join.
+#[allow(dead_code)]
+pub(super) fn run_table_digest(table: &RunTable) -> String {
+    run_table_sha256(table)
+}
+
 fn run_table_sha256(table: &RunTable) -> String {
     let orientation = match table.orientation() {
         Orientation::Horizontal => "HORIZONTAL",

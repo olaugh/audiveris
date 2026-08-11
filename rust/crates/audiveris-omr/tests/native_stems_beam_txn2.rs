@@ -26,6 +26,9 @@ use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
     NativeStemsBeamOuterBLinkerCell, NativeStemsBeamOuterVLinkerFact,
     apply_native_stems_beam_vlink_outer_b_linker_transaction,
 };
+use audiveris_omr::native_stems_beam_vlink_transaction::{
+    NativeStemsBeamCreateStemDisposition, NativeStemsBeamGlyphRegistrationAction,
+};
 /// The beam corpus in its usual order. The gate grades every sheet whose
 /// fixtures are installed and tolerates a gap only at the end, so a sheet that
 /// is frozen but ungraded cannot hide between two graded ones.
@@ -421,21 +424,23 @@ fn second_transaction_replays_through_production_chain() {
 /// does not -- chula starts with 1,650 active glyphs -- so it needs a one-time
 /// page-level bootstrap of id and flags, keyed by content.
 ///
-/// So the remaining obstacle is not evidence but *authority*: the model has no
-/// way to say "this registry is complete, so absence is proof". Adding that,
-/// with the existing fail-closed guards kept for the non-authoritative case,
-/// is what would let the chain self-drive -- turning ~276 rows and 157KB per
-/// transaction into one page-level identity table plus the compact per-step
-/// oracle the census probe already emits. Claiming authority wrongly would
-/// silently mis-register a stem, so it belongs in its own boundary with its own
-/// evidence, not bolted on here.
+/// So the obstacle was never evidence but *authority*: the model had no way to
+/// say "this registry is complete, so absence is proof".
 ///
-/// Ignored by default: it reports a finding rather than guarding a contract.
-/// It is kept because the finding is the kind that gets re-litigated, and this
-/// re-runs in six seconds.
+/// **It now does, and the chain self-drives.** With the page glyph registry
+/// bootstrapped once (`AUDIVERIS_GLYPH_REGISTRY_OUT`, joined by content digest
+/// so neither side trusts the other's identities) and `systemStems` declared
+/// `CompleteSinceEmptyBaseline`, the second transaction runs on carried state
+/// alone and reaches **the same answer Java did**: plan 152, ReuseActive,
+/// CreatedChecked. That equivalence is asserted below, because a chain that
+/// runs without Java's evidence is only worth having if it agrees with it --
+/// otherwise self-drive is just a cheaper way of being wrong.
+///
+/// The txn2 fixtures are read solely to check the answer; nothing in them
+/// feeds the transaction. That is the difference between ~276 rows and 157KB
+/// per transaction and one page-level table for a ~30-transaction pass.
 #[test]
-#[ignore = "spike: reports whether the chain can self-drive, not a contract"]
-fn spike_second_transaction_from_carried_state() {
+fn second_transaction_from_carried_state_reproduces_java() {
     let image = "chula.png";
     let key = "chula";
     let system_id = 1;
@@ -531,29 +536,47 @@ fn spike_second_transaction_from_carried_state() {
                 .then_some(attempt.stored_theoretical_line_before),
         },
     );
-    // Supply only the page-level glyph identities -- canonical alias and Java
-    // GlyphIndex id -- for the plan's pre-existing glyphs, taking their content
-    // from the typed plan attempt. These identities are assigned before the
-    // transaction chain begins, so a self-driving chain would need them once
-    // per page rather than once per transaction. What fails after this is what
-    // is genuinely per-transaction.
-    let certificate = family_rows(&create_text, "stemsbeamcreatestemfrontier", system_id)
-        .first()
-        .copied()
-        .map(|row| row_field(row, "selectedGlyphRefs").to_owned())
-        .unwrap_or_default();
-    let identities = certificate
-        .trim_matches(|c| c == '[' || c == ']')
-        .split(',')
-        .filter_map(|token| {
-            let parts = token.split(':').collect::<Vec<_>>();
-            let alias = parts.get(1)?.parse::<usize>().ok()?;
-            let id = parts.get(3)?.strip_prefix("id=")?.parse::<i32>().ok()?;
-            Some((alias, id))
+    // Bootstrap the page's glyph registry, the way a self-driving chain would:
+    // once per page, from the Java dump, rather than once per transaction from
+    // a fixture. The join is by content -- both sides compute the same run
+    // digest -- so neither side has to trust the other's identities.
+    let registry_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-glyph-registry-chula.txt"),
+    )
+    .expect("page glyph registry");
+    let mut registry = std::collections::BTreeMap::new();
+    for line in registry_text.lines() {
+        if !line.starts_with("stemsbeamglyphregistryentry ") {
+            continue;
+        }
+        let id = row_field(line, "id").parse::<i32>().expect("registry id");
+        let active = row_field(line, "active") == "true";
+        registry.insert(row_field(line, "content").to_owned(), (id, active));
+    }
+    println!("page glyph registry: {} entries", registry.len());
+
+    let identities = attempt
+        .glyphs
+        .iter()
+        .map(|glyph| {
+            let key = format!(
+                "g:{}:{}:{}:{}:{}",
+                glyph.bounds.x,
+                glyph.bounds.y,
+                glyph.bounds.width,
+                glyph.bounds.height,
+                b15_hydration::run_table_digest(&glyph.structural_key.run_table),
+            );
+            let (id, active) = *registry
+                .get(&key)
+                .unwrap_or_else(|| panic!("plan glyph absent from the page registry: {key}"));
+            // The probe assigns the canonical alias as "glyph:" + id, so the
+            // alias is the id; nothing extra needs recording.
+            (usize::try_from(id).expect("positive glyph id"), id, active)
         })
         .collect::<Vec<_>>();
-    println!("page-level glyph identities supplied: {identities:?}");
-    for (glyph, (alias, id)) in attempt.glyphs.iter().zip(&identities) {
+    println!("plan glyphs resolved against the registry: {identities:?}");
+    for (glyph, (alias, id, _active)) in attempt.glyphs.iter().zip(&identities) {
         state.selected_glyph_bindings.push(
             audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamSelectedGlyphBinding {
                 reference: glyph.reference,
@@ -573,7 +596,7 @@ fn spike_second_transaction_from_carried_state() {
     // reuse by searching `known_canonical_glyphs` for matching content, and
     // only falls back to Java's exhaustive scan when nothing matches. Seeding
     // the page's glyphs here is what a bootstrapped chain would do once.
-    for (glyph, (alias, id)) in attempt.glyphs.iter().zip(&identities) {
+    for (glyph, (alias, id, active)) in attempt.glyphs.iter().zip(&identities) {
         state.glyph_index.known_canonical_glyphs.push(
             audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
                 canonical_alias: *alias,
@@ -584,11 +607,22 @@ fn spike_second_transaction_from_carried_state() {
                         weight: glyph.weight,
                         run_table: glyph.structural_key.run_table.clone(),
                     },
-                active_in_index: true,
-                strongly_retained: true,
+                active_in_index: *active,
+                // The active index holds a glyph strongly; an originals-only
+                // entry is weakly held, which is exactly the distinction the
+                // hit-path guard cares about.
+                strongly_retained: *active,
             },
         );
     }
+
+    // systemStems begins empty at STEMS -- the frozen create-stem baseline
+    // records `systemStems 0` -- and only these transactions insert into it, so
+    // a chain that has carried every insertion may treat its own misses as
+    // absence rather than asking Java again.
+    state.system_stems.authority =
+        audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamRegistryAuthority
+            ::CompleteSinceEmptyBaseline;
 
     let outcome = audiveris_omr::native_stems_beam_vlink_transaction
         ::apply_native_stems_beam_vlink_create_stem_transaction(
@@ -599,33 +633,53 @@ fn spike_second_transaction_from_carried_state() {
             &b15_hydration::checker_context_for_page(&page),
         );
 
-    match outcome {
-        Ok(transaction) => {
-            println!(
-                "SELF-DRIVE OK: plan {} registration {:?} disposition {:?}",
-                transaction.plan.plan_ordinal,
-                transaction.registration.action,
-                transaction.disposition
-            );
-            // What the frozen txn2 fixture says this must be.
-            let expected = family_rows(&create_text, "stemsbeamcreatestemresult", system_id);
-            if let Some(row) = expected.first() {
-                println!(
-                    "  fixture says: registration {} disposition {}",
-                    row_field(row, "registration"),
-                    row_field(row, "disposition")
-                );
-            }
-        }
-        Err(error) => {
-            println!("SELF-DRIVE BLOCKED: {error:?}");
-            println!(
-                "  (txn2 fixture inputs available but unused: base {} bytes, create {} bytes, \
-                 reuse {} bytes)",
-                base_text.len(),
-                create_text.len(),
-                reuse_text.len()
-            );
-        }
-    }
+    let transaction = outcome.unwrap_or_else(|error| {
+        panic!(
+            "self-drive blocked at {error:?} (txn2 fixture inputs deliberately unused: \
+             base {} bytes, create {} bytes, reuse {} bytes)",
+            base_text.len(),
+            create_text.len(),
+            reuse_text.len(),
+        )
+    });
+
+    // The whole point: the answer the chain reached on its own must be the
+    // answer Java gave. Anything less would make self-drive a cheaper way of
+    // being wrong.
+    let row = *family_rows(&create_text, "stemsbeamcreatestemresult", system_id)
+        .first()
+        .expect("txn2 create fixture has its result row");
+    let registration = match transaction.registration.action {
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false,
+        } => "ReuseActive",
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: true,
+        } => "ReinsertOriginal",
+        NativeStemsBeamGlyphRegistrationAction::Registered => "New",
+    };
+    let disposition = match transaction.disposition {
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { .. } => "CreatedChecked",
+        NativeStemsBeamCreateStemDisposition::CreatedArtificial { .. } => "CreatedArtificial",
+        NativeStemsBeamCreateStemDisposition::Reused { .. } => "Reused",
+        NativeStemsBeamCreateStemDisposition::Rejected => "Rejected",
+    };
+    assert_eq!(
+        transaction.plan.plan_ordinal, second.plan.plan_ordinal,
+        "self-driven transaction ran a different plan"
+    );
+    assert_eq!(
+        registration,
+        row_field(row, "registration"),
+        "self-driven registration differs from Java"
+    );
+    assert_eq!(
+        disposition,
+        row_field(row, "disposition"),
+        "self-driven disposition differs from Java"
+    );
+    println!(
+        "self-drive reproduced Java: plan {} registration {registration} disposition {disposition}",
+        transaction.plan.plan_ordinal
+    );
 }
