@@ -169,8 +169,18 @@ stream, then this trailer label order:
 
 The one-page Chula runner uses Epsilon GC. Full exploration starts every page in
 a fresh JVM with the JDK default collector because Bach's transient replay
-evidence exhausts a 48 GiB Epsilon heap. Collector choice is not represented as
-semantic evidence; both modes are byte-determinism checked.
+evidence exhausts a 48 GiB Epsilon heap.
+
+Collector choice is not represented as semantic evidence, but it is not inert
+either, and only the frozen one-page mode is byte-determinism checked. The
+GlyphIndex holds `WeakGlyph` in both `originals` and the active entity map, and
+a cleared entry fails `equals`, so it is re-registered under a fresh persistent
+id from a generator shared with `InterIndex`. Under Epsilon nothing is ever
+collected and the ids are reproducible; under a collecting JVM they are not.
+Measured on chula: `lastId` 3128 on two identical Epsilon runs, against
+3307/3305/3315 on three runs of one identical G1 command. So full mode's output
+may differ run to run, and any fixture promoted out of it must first be
+reproduced under Epsilon -- see the replay-on-frozen rule in `rust/PORTING.md`.
 
 `stemsbeamexpandcorpussummary schema ... mode ... pages ... pageRefs ...`
 `rowCounts ... probeSourceSha256 ... runnerSourceSha256 ...`

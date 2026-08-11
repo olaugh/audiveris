@@ -608,9 +608,19 @@ fn second_transaction_from_carried_state_reproduces_java() {
                         run_table: glyph.structural_key.run_table.clone(),
                     },
                 active_in_index: *active,
-                // The active index holds a glyph strongly; an originals-only
-                // entry is weakly held, which is exactly the distinction the
-                // hit-path guard cares about.
+                // Not because the active index retains strongly -- it does not.
+                // Both `GlyphIndex.originals` and the active `BasicIndex.entities`
+                // hold `WeakGlyph`, so in a collecting JVM either entry can be
+                // cleared, and a cleared entry fails equals() and is re-registered
+                // under a fresh persistent id. Measured: under G1 the same command
+                // yields lastId 3307/3305/3315 across three runs, all of which
+                // diverge from EpsilonGC's 3128.
+                //
+                // What makes this value correct is that the oracle runs under
+                // -XX:+UseEpsilonGC, where no collection can occur, so nothing is
+                // ever cleared and every registered glyph stays retained. The
+                // port's contract is therefore no-collection semantics, not a
+                // claim about reference strength.
                 strongly_retained: *active,
             },
         );
