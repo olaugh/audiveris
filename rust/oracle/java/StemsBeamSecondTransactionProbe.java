@@ -368,6 +368,70 @@ public final class StemsBeamSecondTransactionProbe
         System.exit(0);
     }
 
+    /**
+     * Write the page's glyph registry as the first transaction sees it.
+     *
+     * A chained SIDES pass can carry its own registries forward, but the glyph
+     * index does not start empty -- chula holds 1,650 active glyphs by the
+     * first transaction -- so a chain must be told once per page what is
+     * already there. Content is available natively from the typed products;
+     * only the Java GlyphIndex id and the active flag are not, and the alias is
+     * not extra data because it is assigned as "glyph:" + id.
+     *
+     * Taken at the first transaction's own baseline rather than straight after
+     * page load: the retriever and linker construction between those two points
+     * registers hundreds more glyphs, and a registry that is short by even one
+     * entry would let a chain claiming authority register a duplicate stem
+     * silently.
+     *
+     * Written to the file named by AUDIVERIS_GLYPH_REGISTRY_OUT, so stdout and
+     * every fixture derived from it are unchanged.
+     */
+    private static void dumpGlyphRegistryAtBaseline (GlyphRegistrySnapshot registry)
+        throws Exception
+    {
+        final String output = System.getenv("AUDIVERIS_GLYPH_REGISTRY_OUT");
+        if (output == null || GLYPH_REGISTRY_WRITTEN) return;
+        GLYPH_REGISTRY_WRITTEN = true;
+        final List<String> rows = new ArrayList<>();
+        final Set<Integer> seen = new HashSet<>();
+        for (Glyph glyph : registry.active.keySet()) {
+            if (!seen.add(glyph.getId())) {
+                throw new IllegalStateException("duplicate active glyph id in registry dump");
+            }
+            rows.add(String.format(
+                    "stemsbeamglyphregistryentry id %d active true content %s",
+                    glyph.getId(), glyphToken(glyph)));
+        }
+        for (Glyph glyph : registry.originals.keySet()) {
+            if (registry.active.containsKey(glyph)) continue;
+            if (!seen.add(glyph.getId())) {
+                throw new IllegalStateException("duplicate original glyph id in registry dump");
+            }
+            rows.add(String.format(
+                    "stemsbeamglyphregistryentry id %d active false content %s",
+                    glyph.getId(), glyphToken(glyph)));
+        }
+        rows.sort(Comparator.naturalOrder());
+        try (java.io.PrintStream out = new java.io.PrintStream(
+                new java.io.FileOutputStream(output), true, StandardCharsets.UTF_8)) {
+            out.println("# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) page glyph registry.");
+            out.println("# schema: stems-beam-glyph-registry-v1");
+            out.println("# The GlyphIndex at the first STEMS transaction's own baseline, not at");
+            out.println("# page load: linker construction in between registers hundreds more");
+            out.println("# glyphs. Keyed by the same content token the other families use, whose");
+            out.println("# run digest the Rust side computes identically. The canonical alias is");
+            out.println("# not recorded because the probe assigns it as glyph: + id.");
+            out.printf("stemsbeamglyphregistrypage active %d originals %d entries %d "
+                            + "activeHash %s originalsHash %s%n",
+                    registry.active.size(), registry.originals.size(), rows.size(),
+                    registry.activeHash, registry.originalsHash);
+            for (String row : rows) out.println(row);
+        }
+    }
+
+    private static boolean GLYPH_REGISTRY_WRITTEN;
+
     private static void assertLoadedFromProductionClasses ()
         throws Exception
     {
@@ -957,6 +1021,9 @@ public final class StemsBeamSecondTransactionProbe
                 assertCreateStemExpected(
                         ref, candidate, selected, candidateObjectIdBefore, existing, registration,
                         registered, disposition, stem, createImpacts, stemProfile, before, after);
+            }
+            if (!freshMode) {
+                dumpGlyphRegistryAtBaseline(before.glyphs);
             }
             final List<String> createRows = freshCreateRowLines(
                     beam, beamIndex, hSide, b, v, ref, stemProfile, linkProfile, lastIndex,

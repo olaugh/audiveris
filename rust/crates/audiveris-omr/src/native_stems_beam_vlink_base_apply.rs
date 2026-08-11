@@ -2597,8 +2597,8 @@ mod tests {
         native_stems_beam_vlink_transaction::{
             NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphAliasOrder,
             NativeStemsBeamGlyphIndexTransactionState, NativeStemsBeamPersistentIdState,
-            NativeStemsBeamStemGrade, NativeStemsBeamSystemStemTransactionState,
-            NativeStemsBeamVLinkTransactionScope,
+            NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
+            NativeStemsBeamSystemStemTransactionState, NativeStemsBeamVLinkTransactionScope,
         },
         stems_step::{NativeStemLine, NativeStemPoint},
     };
@@ -2837,6 +2837,8 @@ mod tests {
             system_stems: NativeStemsBeamSystemStemTransactionState {
                 system_id: SYSTEM_ID,
                 next_stem_identity: 1,
+                // Hydrated from Java rows: keep the scan requirement.
+                authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
                 known_stems: vec![stem],
                 exhaustive_lookup: None,
             },

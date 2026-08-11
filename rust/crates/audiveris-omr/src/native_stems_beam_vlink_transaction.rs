@@ -215,11 +215,40 @@ pub struct NativeStemsBeamExhaustiveSystemStemEqualsScan {
     pub lookup: NativeStemsBeamExhaustiveSystemStemLookup,
 }
 
+/// Whether a registry's absences are proofs.
+///
+/// Both the glyph and system-stem registries answer "does this already exist?"
+/// by searching carried entries for matching content, and fall back to a Java
+/// exhaustive scan when nothing matches -- because a miss in a partial registry
+/// says nothing. That fallback is what stops a chained SIDES pass from running
+/// on its own state: every transaction after the first would need its own scan
+/// evidence.
+///
+/// A registry that has carried every entry since an empty baseline is different
+/// in kind: a miss there *is* absence. `systemStems` qualifies, because STEMS
+/// begins with it empty -- the frozen create-stem baseline records
+/// `systemStems 0` -- and only these transactions insert into it.
+///
+/// The distinction is deliberately explicit rather than inferred from
+/// `known_stems.is_empty()` or a count, because claiming it wrongly does not
+/// fail: it silently registers a second stem for a glyph that already had one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeStemsBeamRegistryAuthority {
+    /// Every entry since an empty baseline is carried, so a content miss proves
+    /// absence and no exhaustive scan is required.
+    CompleteSinceEmptyBaseline,
+    /// The registry may be missing entries; only an exhaustive scan decides.
+    RequiresExhaustiveScan,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamSystemStemTransactionState {
     pub system_id: usize,
     pub next_stem_identity: usize,
     pub known_stems: Vec<NativeStemsBeamKnownSystemStem>,
+    /// Defaults to `RequiresExhaustiveScan` everywhere the state is built from
+    /// Java rows, so hydrated paths keep their existing evidence requirement.
+    pub authority: NativeStemsBeamRegistryAuthority,
     pub exhaustive_lookup: Option<NativeStemsBeamExhaustiveSystemStemEqualsScan>,
 }
 
@@ -1499,6 +1528,14 @@ fn prepare_system_stem_lookup(
             consume_certificate: false,
         });
     }
+    if state.authority == NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline {
+        // A miss in a registry that has carried everything since empty is
+        // absence, and Java's scan would only confirm it.
+        return Ok(PreparedSystemStemLookup {
+            stem: None,
+            consume_certificate: state.exhaustive_lookup.is_some(),
+        });
+    }
     let scan = state
         .exhaustive_lookup
         .as_ref()
@@ -1832,6 +1869,109 @@ mod tests {
         )
     }
 
+    fn stem_state(
+        authority: NativeStemsBeamRegistryAuthority,
+        known: Vec<NativeStemsBeamKnownSystemStem>,
+    ) -> NativeStemsBeamSystemStemTransactionState {
+        NativeStemsBeamSystemStemTransactionState {
+            system_id: 1,
+            next_stem_identity: known.len(),
+            known_stems: known,
+            authority,
+            exhaustive_lookup: None,
+        }
+    }
+
+    fn known_stem(
+        content: NativeStemsBeamFixedGlyphContent,
+        glyph_id: i32,
+    ) -> NativeStemsBeamKnownSystemStem {
+        let bounds = content.bounds;
+        NativeStemsBeamKnownSystemStem {
+            stem_identity: 0,
+            glyph_id,
+            glyph_content: content,
+            inter_id: None,
+            grade: NativeStemsBeamStemGrade::Artificial(0.5),
+            geometry: NativeStemsBeamCreatedStemGeometry {
+                median: NativeStemLine {
+                    start: NativeStemPoint { x: 0.0, y: 0.0 },
+                    stop: NativeStemPoint { x: 0.0, y: 6.0 },
+                },
+                mean_thickness: 1.0,
+                ribbon_bounds: JavaRectangle {
+                    x: i32::try_from(bounds.x).unwrap(),
+                    y: i32::try_from(bounds.y).unwrap(),
+                    width: i32::try_from(bounds.width).unwrap(),
+                    height: i32::try_from(bounds.height).unwrap(),
+                },
+            },
+            sig_attached: false,
+            abnormal: false,
+        }
+    }
+
+    /// Absence in a complete registry is a proof; absence in a partial one is
+    /// only a question, and the question still demands Java's answer.
+    #[test]
+    fn only_a_complete_registry_may_answer_a_miss_without_a_scan() {
+        let candidate = vertical_content();
+        let resolved = prepare_system_stem_lookup(
+            &candidate,
+            7,
+            &stem_state(
+                NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+                Vec::new(),
+            ),
+        )
+        .expect("a complete registry resolves its own miss");
+        assert!(
+            resolved.stem.is_none(),
+            "a miss in a complete registry is absence"
+        );
+        assert!(
+            matches!(
+                prepare_system_stem_lookup(
+                    &candidate,
+                    7,
+                    &stem_state(
+                        NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
+                        Vec::new(),
+                    ),
+                ),
+                Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteSystemStems)
+            ),
+            "a partial registry must not invent absence"
+        );
+    }
+
+    /// Authority changes what a *miss* means, never what a *hit* means: a
+    /// carried entry still decides, and still has to agree with the canonical
+    /// glyph it claims.
+    #[test]
+    fn authority_does_not_loosen_a_carried_hit() {
+        let candidate = vertical_content();
+        for authority in [
+            NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+            NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
+        ] {
+            let known = vec![known_stem(candidate.clone(), 7)];
+            let hit =
+                prepare_system_stem_lookup(&candidate, 7, &stem_state(authority, known.clone()))
+                    .expect("a carried entry decides under either authority");
+            assert!(hit.stem.is_some(), "carried hit lost under {authority:?}");
+            assert!(
+                matches!(
+                    prepare_system_stem_lookup(&candidate, 99, &stem_state(authority, known)),
+                    Err(NativeStemsBeamVLinkTransactionError::SystemStemInvariant {
+                        phase: "canonical glyph identity",
+                    })
+                ),
+                "identity check skipped under {authority:?}"
+            );
+        }
+    }
+
     fn absent_glyph_scan(
         candidate: NativeStemsBeamFixedGlyphContent,
     ) -> NativeStemsBeamExhaustiveGlyphEqualsScan {
@@ -1873,6 +2013,8 @@ mod tests {
             system_stems: NativeStemsBeamSystemStemTransactionState {
                 system_id: 1,
                 next_stem_identity: 0,
+                // Hydrated from Java rows: keep the scan requirement.
+                authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
                 known_stems: Vec::new(),
                 exhaustive_lookup: None,
             },

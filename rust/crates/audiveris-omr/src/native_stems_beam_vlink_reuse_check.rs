@@ -1834,8 +1834,8 @@ mod tests {
         native_stems_beam_vlink_transaction::{
             NativeStemsBeamCreatedStemGeometry, NativeStemsBeamFixedGlyphContent,
             NativeStemsBeamGlyphAliasOrder, NativeStemsBeamGlyphIndexTransactionState,
-            NativeStemsBeamPersistentIdState, NativeStemsBeamSystemStemTransactionState,
-            NativeStemsBeamVLinkTransactionScope,
+            NativeStemsBeamPersistentIdState, NativeStemsBeamRegistryAuthority,
+            NativeStemsBeamSystemStemTransactionState, NativeStemsBeamVLinkTransactionScope,
         },
         native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
         stem_seeds_step::{NativeStemCounts, NativeStemImpacts},
@@ -1943,6 +1943,8 @@ mod tests {
             system_stems: NativeStemsBeamSystemStemTransactionState {
                 system_id: 1,
                 next_stem_identity: 0,
+                // Hydrated from Java rows: keep the scan requirement.
+                authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
                 known_stems: Vec::new(),
                 exhaustive_lookup: None,
             },

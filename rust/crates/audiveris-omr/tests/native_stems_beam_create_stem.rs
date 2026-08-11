@@ -2252,6 +2252,8 @@ fn state_from_fixture(
         system_stems: NativeStemsBeamSystemStemTransactionState {
             system_id: scheduler.system_id,
             next_stem_identity: 0,
+            // Hydrated from Java rows: keep the scan requirement.
+            authority: audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
             known_stems: Vec::new(),
             exhaustive_lookup: Some(NativeStemsBeamExhaustiveSystemStemEqualsScan {
                 candidate,
