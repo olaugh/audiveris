@@ -263,6 +263,44 @@ Java source checked into this repository and may move.
 - **Rust parity policy:** retain the asymmetric rollback and grade the divergence
   explicitly; do not reconstruct the final line solely from returned Glyphs.
 
+### AV-JAVA-RISK-007: a missing leading barline costs the whole grand staff
+
+- **Locations:**
+  `app/src/main/java/org/audiveris/omr/sheet/grid/PeakGraph.java`,
+  `getSystemTops` around lines 1040-1053 and `areRightConnected` around lines
+  144-159; `app/src/main/java/org/audiveris/omr/sheet/SystemManager.java`,
+  `minIndentation`.
+- **Behavior:** the first connection that would assign a bottom staff to a
+  system is discarded when it starts more than `maxFirstConnectionXOffset`
+  (default 2 interlines) right of that staff's left abscissa, unless the *last*
+  peaks of both staves are themselves connected. `systemTops[bottom - 1]` stays
+  null on rejection, so later connections are re-tested by the same rule; since
+  connections are ordered by abscissa, once the leftmost fails the rest are
+  further right and fail identically.
+- **Impact:** a leading barline too faint to detect therefore costs the entire
+  grand staff, and each staff becomes its own system. Braces are then found only
+  for systems whose leading barline was detected -- elsewhere
+  `getStartPeakIndex()` returns -1 and the staff logs as a one-staff system --
+  so a piano page exports as three parts rather than one. Residual horizontal
+  foreshortening in the same photographed input independently trips
+  `minIndentation` (also 2 interlines), and `allocatePages` reports phantom
+  movements. Measured on a phone photo of a piano score: connections existed at
+  grades up to 0.76 for exactly the right staff pairs and were all discarded;
+  raising both constants took the page from 11 measures across 3 phantom
+  movements to 43 measures in one. A control PDF of the same music ruled out
+  resolution (interline 19 against the photo's 20).
+- **Status:** *not a defect.* `getSystemTops` carries an explicit
+  `TODO: What if very first connection is missing but we have more on right?`
+  and `areRightConnected` is the implemented second chance, so the case is
+  known. What is worth raising with the maintainer is that the escape requires
+  the last peaks of both staves to be connected, which fails on exactly the
+  inputs that lose the leading barline -- a faint or cropped final barline
+  defeats it -- and that the failure is silent: nothing in the output points at
+  a threshold, so a user sees only phantom movements and split parts.
+- **Rust parity policy:** none. Reproduce the Java thresholds and the
+  short-circuit exactly; this entry records why a photographed page behaves the
+  way it does, not a behaviour to diverge from.
+
 ## Reporting notes
 
 Findings in test probes, Rust-only code, or oracle normalization are not listed
