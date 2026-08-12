@@ -693,3 +693,177 @@ fn second_transaction_from_carried_state_reproduces_java() {
         transaction.plan.plan_ordinal
     );
 }
+
+/// The SIG bootstrap: one ordered snapshot per system determines every incident scan.
+///
+/// Three boundaries -- base apply, head links and sibling links -- refuse to run
+/// without a certificate whose `stem_incident_*` and `beam_incident_*` scans are
+/// `edgesOf`, `incomingEdgesOf` and `outgoingEdgesOf` in Java's order. Unlike
+/// `systemStems`, the SIG is not empty when STEMS begins, so a chain carrying its own
+/// state cannot become authoritative by tracking alone: it has to be told once what is
+/// already there. That is the largest of the eight self-drive blockers and is shared by
+/// all three.
+///
+/// What this proves is that being told once is *enough*. JGraphT iterates `vertexSet`
+/// and `edgeSet` in insertion order, and a per-vertex incident list is that same order
+/// filtered to the vertex -- incoming first, then outgoing, which is exactly what
+/// `NativeStemsBeamStemIncidentScanState::ExhaustiveIncomingThenOutgoing` names. So one
+/// global ordering determines every incident query, and the bootstrap does not need a
+/// per-vertex adjacency dump at all.
+///
+/// The check is against Java's own recorded scans rather than against a restatement of
+/// the rule. Synthetic rows are excluded: only `scope real` describes the actual graph.
+#[test]
+fn sig_snapshot_derives_the_incident_scans_java_recorded() {
+    let snapshot = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
+    )
+    .expect("frozen SIG snapshot");
+
+    let header = snapshot
+        .lines()
+        .find(|line| line.starts_with("stemsbeamsigsnapshotsystem "))
+        .expect("snapshot header");
+    let vertex_count: usize = row_field(header, "vertices").parse().expect("vertices");
+    let edge_count: usize = row_field(header, "edges").parse().expect("edges");
+
+    let mut vertex_rows = Vec::new();
+    let mut edge_rows = Vec::new();
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for line in snapshot.lines() {
+        if let Some(rest) = line.strip_prefix("stemsbeamsigsnapshotvertex ") {
+            let ordinal: usize = row_field(rest, "ordinal").parse().expect("vertex ordinal");
+            assert_eq!(ordinal, vertex_rows.len(), "vertex ordinals must be dense");
+            vertex_rows.push(row_after(rest, "row"));
+        } else if let Some(rest) = line.strip_prefix("stemsbeamsigsnapshotedge ") {
+            let ordinal: usize = row_field(rest, "ordinal").parse().expect("edge ordinal");
+            assert_eq!(ordinal, edges.len(), "edge ordinals must be dense");
+            edges.push((
+                row_field(rest, "source").parse().expect("source"),
+                row_field(rest, "target").parse().expect("target"),
+            ));
+            edge_rows.push(row_after(rest, "row"));
+        }
+    }
+    assert_eq!(vertex_rows.len(), vertex_count, "vertex count");
+    assert_eq!(edges.len(), edge_count, "edge count");
+
+    // Recompute the hashes Java wrote, over the same row strings in the same order.
+    // A snapshot that parsed cleanly but described a different graph -- reordered,
+    // truncated, or from another baseline -- fails here rather than silently
+    // producing plausible incident scans.
+    let rows_hash = |rows: &[&str]| {
+        let mut joined = String::new();
+        for row in rows {
+            joined.push_str(row);
+            joined.push('\n');
+        }
+        sha256_hex(joined.as_bytes())
+    };
+    assert_eq!(
+        rows_hash(&vertex_rows),
+        row_field(header, "vertexHash"),
+        "vertex rows do not rebuild Java's ordered vertex hash"
+    );
+    assert_eq!(
+        rows_hash(&edge_rows),
+        row_field(header, "edgeHash"),
+        "edge rows do not rebuild Java's ordered edge hash"
+    );
+
+    // Java's own incident scans, from the frozen base-apply fixture.
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
+    )
+    .expect("frozen base-apply");
+    let mut checked = 0;
+    for family in [
+        "stemsbeamvlinkbaseapplybeamincident ",
+        "stemsbeamvlinkbaseapplystemincident ",
+    ] {
+        let recorded: Vec<(&str, usize)> = fixture
+            .lines()
+            .filter_map(|line| line.strip_prefix(family))
+            .filter(|rest| {
+                row_field(rest, "system") == "1"
+                    && row_field(rest, "scope") == "real"
+                    && row_field(rest, "phase") == "Before"
+            })
+            .filter_map(|rest| {
+                row_field(rest, "globalRelationIdentity")
+                    .strip_prefix("sig-edge:")
+                    .map(|ordinal| {
+                        (
+                            row_field(rest, "direction"),
+                            ordinal.parse::<usize>().expect("edge ordinal"),
+                        )
+                    })
+            })
+            // An edge at or past the baseline count was added by this transaction, so
+            // it is tracked state rather than bootstrap state.
+            .filter(|(_, ordinal)| *ordinal < edge_count)
+            .collect();
+        if recorded.is_empty() {
+            // A freshly created stem has no baseline edges at all, so its scan is
+            // entirely tracked. That is a real case, not a gap in the snapshot.
+            continue;
+        }
+
+        // The one vertex every recorded edge touches is the vertex Java scanned.
+        let mut candidates: Option<std::collections::BTreeSet<usize>> = None;
+        for (_, ordinal) in &recorded {
+            let (source, target) = edges[*ordinal];
+            let pair = std::collections::BTreeSet::from([source, target]);
+            candidates = Some(match candidates {
+                None => pair,
+                Some(current) => current.intersection(&pair).copied().collect(),
+            });
+        }
+        let candidates = candidates.expect("recorded rows exist");
+        assert_eq!(
+            candidates.len(),
+            1,
+            "{family}: recorded edges share no single vertex: {candidates:?}"
+        );
+        let vertex = *candidates.iter().next().expect("one vertex");
+
+        let derived: Vec<(&str, usize)> = edges
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, target))| *target == vertex)
+            .map(|(ordinal, _)| ("Incoming", ordinal))
+            .chain(
+                edges
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (source, _))| *source == vertex)
+                    .map(|(ordinal, _)| ("Outgoing", ordinal)),
+            )
+            .collect();
+        assert_eq!(
+            derived, recorded,
+            "{family}: incoming-then-outgoing over the snapshot does not reproduce \
+             Java's scan of vertex {vertex}"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 0,
+        "no real-scope incident scan was compared; the fixture families moved"
+    );
+    println!(
+        "SIG bootstrap: {vertex_count} vertices, {edge_count} edges; \
+         {checked} incident scan(s) derived exactly from insertion order"
+    );
+}
+
+/// The remainder of a row after `name`, which for the snapshot rows is the exact string
+/// Java hashed and therefore must not be re-tokenised.
+fn row_after<'a>(row: &'a str, name: &str) -> &'a str {
+    let marker = format!(" {name} ");
+    let start = row
+        .find(&marker)
+        .unwrap_or_else(|| panic!("row lacks {name}: {row}"))
+        + marker.len();
+    &row[start..]
+}

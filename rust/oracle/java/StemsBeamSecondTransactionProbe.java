@@ -432,6 +432,96 @@ public final class StemsBeamSecondTransactionProbe
 
     private static boolean GLYPH_REGISTRY_WRITTEN;
 
+    /**
+     * Dump one system's SIG in JGraphT insertion order, at the first transaction's
+     * own baseline.
+     *
+     * A chain that carries its own state has to answer `edgesOf`, `incomingEdgesOf`
+     * and `outgoingEdgesOf` without asking Java, because three boundaries -- base
+     * apply, head links and sibling links -- gate on certificates whose scans are
+     * those queries in order. The SIG is not empty when STEMS starts (639 vertices
+     * and 538 edges on chula), so unlike `systemStems` it cannot become
+     * authoritative by tracking alone; it needs telling once what is already there.
+     *
+     * Order is the whole point. `vertexSet()` and `edgeSet()` iterate in insertion
+     * order, and a per-vertex incident list is that same order filtered to the
+     * vertex, so one global ordering determines every incident query. Sorting these
+     * rows -- as the b12/b13 lineage hashes deliberately do -- would destroy exactly
+     * the information the certificates encode.
+     *
+     * The vertex and edge rows are the same strings the ordered `GraphOrder` hashes
+     * are computed over, so a reader can recompute both hashes and prove it
+     * reconstructed the same graph rather than merely parsing a plausible file.
+     *
+     * Written to the file named by AUDIVERIS_SIG_SNAPSHOT_OUT, so stdout and every
+     * fixture derived from it are unchanged. The runner gives each system its own
+     * filename: a SIG belongs to one system, and the runner starts a fresh JVM per
+     * system, so there is no in-process state that could accumulate them.
+     */
+    private static void dumpSigSnapshotAtBaseline (SystemInfo system,
+                                                   SigSnapshot baseline)
+        throws Exception
+    {
+        final String output = System.getenv("AUDIVERIS_SIG_SNAPSHOT_OUT");
+        if (output == null || SIG_SNAPSHOT_WRITTEN) return;
+        SIG_SNAPSHOT_WRITTEN = true;
+        final SIGraph sig = system.getSig();
+        // `baseline` sorted its rows away, so the order has to be re-read here. That
+        // is only the same graph if nothing has been added since the baseline was
+        // captured, so check it rather than assume it: every vertex and edge now in
+        // the SIG must already be in the baseline snapshot. An addition in between
+        // would make the ordinals below describe a graph no reader could reproduce.
+        final GraphOrder graph = new GraphOrder(sig);
+        for (Inter inter : graph.vertices) {
+            if (!baseline.vertices.containsKey(inter)) {
+                throw new IllegalStateException(
+                        "SIG gained vertex " + inter.getId() + " before the snapshot");
+            }
+        }
+        for (Relation relation : graph.edges) {
+            if (!baseline.edges.containsKey(relation)) {
+                throw new IllegalStateException("SIG gained an edge before the snapshot");
+            }
+        }
+        try (java.io.PrintStream out = new java.io.PrintStream(
+                new java.io.FileOutputStream(output), true, StandardCharsets.UTF_8)) {
+            {
+                out.println("# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) baseline SIG order.");
+                out.println("# schema: stems-beam-sig-snapshot-v1");
+                out.println("# One system, at its first STEMS transaction baseline. Rows are in");
+                out.println("# JGraphT insertion order and MUST NOT be sorted: the incident scans");
+                out.println("# the apply certificates carry are this order filtered per vertex,");
+                out.println("# incoming before outgoing.");
+                out.println("# vertexHash/edgeHash are over these rows as written, so a reader");
+                out.println("# can prove it rebuilt the same graph.");
+            }
+            out.printf("stemsbeamsigsnapshotsystem system %d vertices %d edges %d "
+                            + "vertexHash %s edgeHash %s%n",
+                    system.getId(), graph.vertices.size(), graph.edges.size(),
+                    graph.vertexHash, graph.edgeHash);
+            for (int ordinal = 0; ordinal < graph.vertices.size(); ordinal++) {
+                final Inter inter = graph.vertices.get(ordinal);
+                out.printf("stemsbeamsigsnapshotvertex system %d ordinal %d id %d row %s%n",
+                        system.getId(), ordinal, inter.getId(),
+                        ordinal + ":" + interStructuralToken(inter));
+            }
+            for (int ordinal = 0; ordinal < graph.edges.size(); ordinal++) {
+                final Relation relation = graph.edges.get(ordinal);
+                final Inter source = sig.getEdgeSource(relation);
+                final Inter target = sig.getEdgeTarget(relation);
+                out.printf("stemsbeamsigsnapshotedge system %d ordinal %d source %d target %d "
+                                + "sourceId %d targetId %d class %s row %s%n",
+                        system.getId(), ordinal, graph.vertexOrdinals.get(source),
+                        graph.vertexOrdinals.get(target), source.getId(), target.getId(),
+                        relation.getClass().getSimpleName(),
+                        ordinal + ":source=" + graph.vertexOrdinals.get(source) + ":target="
+                                + graph.vertexOrdinals.get(target) + ":" + relationState(relation));
+            }
+        }
+    }
+
+    private static boolean SIG_SNAPSHOT_WRITTEN;
+
     private static void assertLoadedFromProductionClasses ()
         throws Exception
     {
@@ -1024,6 +1114,7 @@ public final class StemsBeamSecondTransactionProbe
             }
             if (!freshMode) {
                 dumpGlyphRegistryAtBaseline(before.glyphs);
+                dumpSigSnapshotAtBaseline(system, before.sig);
             }
             final List<String> createRows = freshCreateRowLines(
                     beam, beamIndex, hSide, b, v, ref, stemProfile, linkProfile, lastIndex,
