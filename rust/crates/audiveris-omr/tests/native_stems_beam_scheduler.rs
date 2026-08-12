@@ -4145,3 +4145,154 @@ fn resume_path_magnitudes() {
         }
     }
 }
+
+/// The full SIDES pass, and why a chain fed only its own writes runs too long.
+///
+/// `scheduler_resume_chain_composes_without_repeating_a_v_linker` drives the chain with a
+/// synthetic success that links nothing but the transaction's own B linker, and overruns:
+/// 53 transactions where Java runs 31. This reads Java's own full pass and shows exactly
+/// what the chain is not being told.
+///
+/// Java executes 32 transactions and skips 21 sides through `BLinker.link`'s
+/// `if (vLinkers.isEmpty() || isLinked()) return true`. Every one of those 21 is skipped
+/// because the B linker was already linked, and **every one was linked by an earlier
+/// transaction's `linkSiblings`**, which writes cells on sibling beams in the group.
+///
+/// Nothing is linked before the pass begins, so this is entirely tracked state: a chain
+/// that carries each transaction's Boundary-16 sibling result forward has everything it
+/// needs, with no bootstrap. That is worth stating precisely because it was not obvious --
+/// two intermediate measurements here reported a non-empty baseline, and both were
+/// artifacts of sampling it after the first transaction had already run.
+///
+/// The sibling-linked set never overlaps the executed one, which is what makes the
+/// arithmetic exact rather than approximate: 32 executed + 21 skipped = 53 sides, which is
+/// precisely what the synthetic chain runs when it skips nothing.
+#[test]
+fn the_sides_pass_accounts_for_every_skipped_side() {
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
+    )
+    .expect("frozen SIDES pass");
+
+    let aliases = |rest: &str| -> Vec<String> {
+        match rest.split(" aliases ").nth(1) {
+            None => Vec::new(),
+            Some(list) => list.trim().split(',').map(str::to_owned).collect(),
+        }
+    };
+
+    let mut baseline: Vec<String> = Vec::new();
+    let mut sibling_linked: BTreeSet<String> = BTreeSet::new();
+    let mut executed: Vec<String> = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
+    let mut census = None;
+    for line in fixture.lines() {
+        if let Some(rest) = line.strip_prefix("stemsbeamsidesloopbaseline ") {
+            baseline = aliases(rest);
+        } else if let Some(rest) = line.strip_prefix("stemsbeamsidesloopsibling ") {
+            sibling_linked.extend(aliases(rest));
+            let _ = row_field(rest, "transaction");
+        } else if let Some(rest) = line.strip_prefix("stemsbeamsidesloopskip ") {
+            skipped.push((
+                row_field(rest, "bAlias").to_owned(),
+                row_field(rest, "cause").to_owned(),
+            ));
+        } else if let Some(rest) = line.strip_prefix("stemsbeamsidesloopstep ") {
+            // Step 0 is emitted once per executed transaction. The numbered rows come
+            // from the probe's fresh-transaction counter, which does not count the
+            // first -- so counting those would miss a transaction.
+            if row_field(rest, "step") == "0" {
+                executed.push(row_field(rest, "bAlias").to_owned());
+            }
+        } else if let Some(rest) = line.strip_prefix("stemsbeamsidesloopcensus ") {
+            census = Some((
+                row_field(rest, "freshTransactions")
+                    .parse::<usize>()
+                    .expect("count"),
+                row_field(rest, "sidesExhausted").to_owned(),
+            ));
+        }
+    }
+    let (counted, exhausted) = census.expect("census row");
+    assert_eq!(
+        exhausted, "true",
+        "the pass must run to exhaustion, not stop at a frontier"
+    );
+    assert_eq!(
+        executed.len(),
+        32,
+        "chula system 1 executes 32 transactions"
+    );
+    assert_eq!(
+        counted + 1,
+        executed.len(),
+        "the fresh-transaction counter should trail the executed count by exactly the \
+         first transaction; if it does not, the counter's meaning has changed"
+    );
+    assert!(
+        baseline.is_empty(),
+        "nothing should be linked before the pass runs"
+    );
+
+    let executed_set: BTreeSet<&String> = executed.iter().collect();
+    assert_eq!(
+        executed_set.len(),
+        executed.len(),
+        "a B linker ran two transactions; the pass should consume each once"
+    );
+
+    // Nothing a transaction linked on a sibling beam is ever executed itself, and nothing
+    // linked before the pass is either. This is what lets the counts simply add up.
+    for alias in &sibling_linked {
+        assert!(
+            !executed_set.contains(alias),
+            "{alias} was linked by linkSiblings and also ran its own transaction"
+        );
+    }
+    for alias in &baseline {
+        assert!(
+            !executed_set.contains(alias),
+            "{alias} was linked before the pass and also ran its own transaction"
+        );
+    }
+
+    for (alias, cause) in &skipped {
+        assert_eq!(
+            cause, "AlreadyLinked",
+            "{alias}: unexpected skip cause {cause}"
+        );
+        assert!(
+            sibling_linked.contains(alias),
+            "{alias} was skipped as already linked, but no transaction's linkSiblings \
+             linked it -- the model is incomplete"
+        );
+    }
+    assert_eq!(skipped.len(), 21, "chula system 1 skips 21 sides");
+    assert_eq!(
+        executed.len() + skipped.len(),
+        53,
+        "executed plus skipped should equal the 53 sides the unfed chain runs"
+    );
+    println!(
+        "SIDES pass: {} transactions + {} skips = {} sides; {} B linkers linked by \
+         linkSiblings, {} linked before the pass",
+        executed.len(),
+        skipped.len(),
+        executed.len() + skipped.len(),
+        sibling_linked.len(),
+        baseline.len()
+    );
+}
+
+/// The value following `name` in a space-separated oracle row.
+fn row_field<'a>(row: &'a str, name: &str) -> &'a str {
+    let mut tokens = row.split(' ');
+    while let Some(token) = tokens.next() {
+        if token == name {
+            return tokens
+                .next()
+                .unwrap_or_else(|| panic!("field {name} lacks a value: {row}"));
+        }
+    }
+    panic!("row lacks {name}: {row}");
+}

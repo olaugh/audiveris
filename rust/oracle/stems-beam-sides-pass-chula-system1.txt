@@ -1,0 +1,133 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) full SIDES pass, chula system 1.
+# schema: stems-beam-sides-pass-v1
+# The pass run to exhaustion rather than stopped at a frontier. Families:
+#   census   the pass total and how it terminated
+#   baseline B linkers already linked before the pass ran -- zero here, see below
+#   step     step 0 is emitted once per executed transaction; the numbered rows are the
+#            probe's fresh-transaction counter, which does not count the first
+#   sibling   what each transaction's linkSiblings left linked on OTHER beams
+#   skip      a side BLinker.link returned early on, and why
+# The accounting closes exactly: 32 transactions execute, 21 sides are skipped as
+# AlreadyLinked, and every one of the 21 was linked by an earlier transaction's
+# linkSiblings. Nothing is linked before the pass begins, so this is entirely tracked
+# state with no bootstrap. Executed and sibling-linked B linkers never overlap, and
+# 32 + 21 = 53, which is exactly what a chain fed only its own writes runs.
+# Two fresh JVM passes are byte-identical.
+stemsbeamsidesloopbaseline chula.png#1 system 1 linked 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 12 bAlias beam:12:b:0 vSide TOP plan 143 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 1 bAlias beam:12:b:0 ownLinked true siblings 2 aliases beam:0:b:0,beam:1:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 12 bAlias beam:12:b:2 vSide TOP plan 152 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 2 bAlias beam:12:b:2 ownLinked true siblings 2 aliases beam:2:b:0,beam:3:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 1 beamSig 12 bAlias beam:12:b:2 vSide TOP plan 152 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 22 bAlias beam:22:b:0 vSide TOP plan 618 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 3 bAlias beam:22:b:0 ownLinked true siblings 1 aliases beam:41:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 2 beamSig 22 bAlias beam:22:b:0 vSide TOP plan 618 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 22 bAlias beam:22:b:2 vSide TOP plan 627 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 4 bAlias beam:22:b:2 ownLinked true siblings 2 aliases beam:17:b:0,beam:18:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 3 beamSig 22 bAlias beam:22:b:2 vSide TOP plan 627 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 16 bAlias beam:16:b:0 vSide TOP plan 400 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 5 bAlias beam:16:b:0 ownLinked true siblings 2 aliases beam:4:b:0,beam:5:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 4 beamSig 16 bAlias beam:16:b:0 vSide TOP plan 400 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 16 bAlias beam:16:b:2 vSide TOP plan 409 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 6 bAlias beam:16:b:2 ownLinked true siblings 2 aliases beam:8:b:0,beam:9:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 5 beamSig 16 bAlias beam:16:b:2 vSide TOP plan 409 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 28 bAlias beam:28:b:0 vSide TOP plan 504 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 7 bAlias beam:28:b:0 ownLinked true siblings 1 aliases beam:42:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 6 beamSig 28 bAlias beam:28:b:0 vSide TOP plan 504 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 28 bAlias beam:28:b:2 vSide TOP plan 513 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 8 bAlias beam:28:b:2 ownLinked true siblings 1 aliases beam:43:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 7 beamSig 28 bAlias beam:28:b:2 vSide TOP plan 513 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 29 bAlias beam:29:b:0 vSide TOP plan 24 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 9 bAlias beam:29:b:0 ownLinked true siblings 1 aliases beam:44:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 8 beamSig 29 bAlias beam:29:b:0 vSide TOP plan 24 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 29 bAlias beam:29:b:2 vSide TOP plan 33 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 10 bAlias beam:29:b:2 ownLinked true siblings 2 aliases beam:24:b:0,beam:25:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 9 beamSig 29 bAlias beam:29:b:2 vSide TOP plan 33 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 20 bAlias beam:20:b:0 vSide TOP plan 316 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 11 bAlias beam:20:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 10 beamSig 20 bAlias beam:20:b:0 vSide TOP plan 316 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 20 bAlias beam:20:b:1 vSide TOP plan 321 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 12 bAlias beam:20:b:1 ownLinked true siblings 2 aliases beam:10:b:0,beam:11:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 11 beamSig 20 bAlias beam:20:b:1 vSide TOP plan 321 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 32 bAlias beam:32:b:0 vSide TOP plan 326 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 13 bAlias beam:32:b:0 ownLinked true siblings 1 aliases beam:46:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 12 beamSig 32 bAlias beam:32:b:0 vSide TOP plan 326 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 32 bAlias beam:32:b:2 vSide TOP plan 335 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 14 bAlias beam:32:b:2 ownLinked true siblings 1 aliases beam:47:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 13 beamSig 32 bAlias beam:32:b:2 vSide TOP plan 335 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 15 bAlias beam:15:b:0 vSide TOP plan 38 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 15 bAlias beam:15:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 14 beamSig 15 bAlias beam:15:b:0 vSide TOP plan 38 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 15 bAlias beam:15:b:1 vSide TOP plan 43 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 16 bAlias beam:15:b:1 ownLinked true siblings 2 aliases beam:6:b:0,beam:7:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 15 beamSig 15 bAlias beam:15:b:1 vSide TOP plan 43 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 31 bAlias beam:31:b:0 vSide TOP plan 247 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 17 bAlias beam:31:b:0 ownLinked true siblings 1 aliases beam:45:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 16 beamSig 31 bAlias beam:31:b:0 vSide TOP plan 247 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 31 bAlias beam:31:b:2 vSide TOP plan 256 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 18 bAlias beam:31:b:2 ownLinked true siblings 2 aliases beam:26:b:0,beam:27:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 17 beamSig 31 bAlias beam:31:b:2 vSide TOP plan 256 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 21 bAlias beam:21:b:0 vSide TOP plan 578 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 19 bAlias beam:21:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 18 beamSig 21 bAlias beam:21:b:0 vSide TOP plan 578 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 21 bAlias beam:21:b:1 vSide TOP plan 583 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 20 bAlias beam:21:b:1 ownLinked true siblings 2 aliases beam:13:b:0,beam:14:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 19 beamSig 21 bAlias beam:21:b:1 vSide TOP plan 583 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 35 bAlias beam:35:b:0 vSide TOP plan 187 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 21 bAlias beam:35:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 20 beamSig 35 bAlias beam:35:b:0 vSide TOP plan 187 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 35 bAlias beam:35:b:1 vSide TOP plan 192 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 22 bAlias beam:35:b:1 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 21 beamSig 35 bAlias beam:35:b:1 vSide TOP plan 192 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 34 bAlias beam:34:b:0 vSide TOP plan 444 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 23 bAlias beam:34:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 22 beamSig 34 bAlias beam:34:b:0 vSide TOP plan 444 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 34 bAlias beam:34:b:1 vSide TOP plan 449 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 24 bAlias beam:34:b:1 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 23 beamSig 34 bAlias beam:34:b:1 vSide TOP plan 449 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 30 bAlias beam:30:b:0 vSide TOP plan 632 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 25 bAlias beam:30:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 24 beamSig 30 bAlias beam:30:b:0 vSide TOP plan 632 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 30 bAlias beam:30:b:1 vSide TOP plan 637 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 26 bAlias beam:30:b:1 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 25 beamSig 30 bAlias beam:30:b:1 vSide TOP plan 637 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 36 bAlias beam:36:b:0 vSide TOP plan 568 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 27 bAlias beam:36:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 26 beamSig 36 bAlias beam:36:b:0 vSide TOP plan 568 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 36 bAlias beam:36:b:1 vSide TOP plan 573 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 28 bAlias beam:36:b:1 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 27 beamSig 36 bAlias beam:36:b:1 vSide TOP plan 573 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 33 bAlias beam:33:b:0 vSide TOP plan 306 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 29 bAlias beam:33:b:0 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 28 beamSig 33 bAlias beam:33:b:0 vSide TOP plan 306 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 33 bAlias beam:33:b:1 vSide TOP plan 311 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 30 bAlias beam:33:b:1 ownLinked true siblings 0
+stemsbeamsidesloopstep chula.png#1 system 1 step 29 beamSig 33 bAlias beam:33:b:1 vSide TOP plan 311 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 19 bAlias beam:19:b:0 vSide TOP plan 558 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 31 bAlias beam:19:b:0 ownLinked true siblings 1 aliases beam:23:b:0
+stemsbeamsidesloopstep chula.png#1 system 1 step 30 beamSig 19 bAlias beam:19:b:0 vSide TOP plan 558 stemProfile 4 linked true
+stemsbeamsidesloopstep chula.png#1 system 1 step 0 beamSig 19 bAlias beam:19:b:1 vSide TOP plan 563 stemProfile 4 linked true
+stemsbeamsidesloopsibling chula.png#1 system 1 transaction 32 bAlias beam:19:b:1 ownLinked true siblings 1 aliases beam:23:b:1
+stemsbeamsidesloopstep chula.png#1 system 1 step 31 beamSig 19 bAlias beam:19:b:1 vSide TOP plan 563 stemProfile 4 linked true
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 23 bAlias beam:23:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 23 bAlias beam:23:b:1 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 2 bAlias beam:2:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 6 bAlias beam:6:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 0 bAlias beam:0:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 1 bAlias beam:1:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 8 bAlias beam:8:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 10 bAlias beam:10:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 13 bAlias beam:13:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 4 bAlias beam:4:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 5 bAlias beam:5:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 17 bAlias beam:17:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 24 bAlias beam:24:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 26 bAlias beam:26:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 44 bAlias beam:44:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 42 bAlias beam:42:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 43 bAlias beam:43:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 45 bAlias beam:45:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 46 bAlias beam:46:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 47 bAlias beam:47:b:0 hSide RIGHT cause AlreadyLinked
+stemsbeamsidesloopskip chula.png#1 system 1 beamSig 41 bAlias beam:41:b:0 hSide LEFT cause AlreadyLinked
+stemsbeamsidesloopcensus chula.png#1 system 1 freshTransactions 31 secondFrontier true sidesExhausted true
