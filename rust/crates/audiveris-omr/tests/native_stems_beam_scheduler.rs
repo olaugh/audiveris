@@ -3746,10 +3746,11 @@ fn native_stems_beam_scheduler_resume_matches_java_on_corpus() {
 /// 618, 627, ... 558, 563 -- and the extra 21 correspond one-for-one to the 21
 /// sides Java skips through `BLinker.link`'s `isLinked()` early return, whose B
 /// aliases have zero overlap with the executed ones because `linkSiblings`
-/// linked them. Closing that gap means feeding `sibling_linked_b_linkers` from
-/// each transaction's Boundary-16 result, which needs the full chain of typed
-/// applies this test deliberately does not run. Until then, read this as a test
-/// of composition mechanics, not of transaction-count parity.
+/// linked them. `the_chain_fed_javas_sibling_writes_stops_where_java_stops` now
+/// supplies exactly those writes from the frozen pass and the chain stops at 32,
+/// in Java's order -- so the sequencing is proven and what remains is computing
+/// the writes from the typed Boundary-16 applies rather than reading them.
+/// Read this test as composition mechanics, not transaction-count parity.
 #[test]
 fn scheduler_resume_chain_composes_without_repeating_a_v_linker() {
     let mut systems_driven = 0;
@@ -4295,4 +4296,158 @@ fn row_field<'a>(row: &'a str, name: &str) -> &'a str {
         }
     }
     panic!("row lacks {name}: {row}");
+}
+
+/// Feed the chain Java's own sibling writes, and it stops where Java stops.
+///
+/// `scheduler_resume_chain_composes_without_repeating_a_v_linker` runs 53 transactions
+/// against Java's 32 because it tells the resume that each transaction linked nothing but
+/// its own B linker. `the_sides_pass_accounts_for_every_skipped_side` established what is
+/// missing: 21 sides are skipped, and every one was linked by an earlier transaction's
+/// `linkSiblings`. This closes the loop by supplying exactly that, per transaction, from
+/// the frozen pass.
+///
+/// The evidence is joined by Java's own B-linker alias, `beam:<sigOrdinal>:b:<ordinal>`.
+/// Nothing here trusts an identity across the boundary: the beam is found by its SIG
+/// ordinal in the stump product, and the B ordinal is Java's zero-based index into
+/// `allBLinkers`, which the Rust ref stores one-based -- so the conversion is explicit and
+/// asserted rather than assumed.
+///
+/// This proves the resume's *sequencing* is right, given correct sibling writes. It does
+/// not prove the Rust applies can compute those writes themselves; that is the typed
+/// Boundary-16 chain, and it is the remaining work.
+#[test]
+fn the_chain_fed_javas_sibling_writes_stops_where_java_stops() {
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
+    )
+    .expect("frozen SIDES pass");
+
+    // executing B-linker alias -> what its linkSiblings left linked elsewhere
+    let mut writes: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for line in fixture.lines() {
+        let Some(rest) = line.strip_prefix("stemsbeamsidesloopsibling ") else {
+            continue;
+        };
+        let alias = row_field(rest, "bAlias").to_owned();
+        let siblings: Vec<String> = match rest.split(" aliases ").nth(1) {
+            None => Vec::new(),
+            Some(list) => list.trim().split(',').map(str::to_owned).collect(),
+        };
+        order.push(alias.clone());
+        assert!(
+            writes.insert(alias, siblings).is_none(),
+            "a B linker ran two transactions in the frozen pass"
+        );
+    }
+    assert_eq!(
+        order.len(),
+        32,
+        "the frozen pass should hold 32 transactions"
+    );
+
+    let inputs = native_scheduler_inputs("chula.png");
+    let index = 0;
+    let stumps = &inputs.beam_stumps.systems[index];
+    assert_eq!(stumps.system_id, 1, "expected chula system 1 first");
+
+    // Java names a beam by its SIG ordinal; the Rust products name it by source.
+    let mut sig_of: BTreeMap<NativeStemsBeamSource, usize> = BTreeMap::new();
+    let mut source_of: BTreeMap<usize, NativeStemsBeamSource> = BTreeMap::new();
+    for beam in &stumps.beams_by_abscissa {
+        sig_of.insert(beam.source, beam.sig_ordinal);
+        source_of.insert(beam.sig_ordinal, beam.source);
+    }
+
+    let alias_of = |reference: &NativeStemsBeamBLinkerRef| -> String {
+        let sig = sig_of
+            .get(&reference.beam)
+            .unwrap_or_else(|| panic!("no SIG ordinal for {:?}", reference.beam));
+        assert!(reference.id >= 1, "B-linker ids are one-based in the port");
+        format!("beam:{sig}:b:{}", reference.id - 1)
+    };
+    let reference_of = |alias: &str| -> NativeStemsBeamBLinkerRef {
+        let mut parts = alias.split(':');
+        assert_eq!(parts.next(), Some("beam"), "unexpected alias {alias}");
+        let sig: usize = parts.next().expect("sig").parse().expect("sig ordinal");
+        assert_eq!(parts.next(), Some("b"), "unexpected alias {alias}");
+        let ordinal: usize = parts.next().expect("b").parse().expect("b ordinal");
+        NativeStemsBeamBLinkerRef {
+            beam: *source_of
+                .get(&sig)
+                .unwrap_or_else(|| panic!("no beam with SIG ordinal {sig} for {alias}")),
+            id: ordinal + 1,
+        }
+    };
+
+    let recognition = materialize_native_stems_beam_scheduler_frontiers(
+        &inputs.beams,
+        &inputs.beam_stumps,
+        &inputs.beam_vlinkers,
+        &inputs.beam_builders,
+        &inputs.link_plans,
+    )
+    .expect("scheduler frontiers");
+    let mut system = recognition.systems[index].clone();
+    assert_eq!(system.system_id, 1);
+
+    let mut executed: Vec<NativeStemsBeamBLinkerRef> = Vec::new();
+    let mut fed_siblings = 0;
+    for step in 0..200 {
+        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &system.status
+        else {
+            break;
+        };
+        let alias = alias_of(&frontier.b_linker);
+        let siblings = writes.get(&alias).unwrap_or_else(|| {
+            panic!(
+                "step {step}: the chain ran {alias}, which Java's pass never did -- the \
+                 sequences have diverged"
+            )
+        });
+        fed_siblings += siblings.len();
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: true,
+            sibling_linked_b_linkers: siblings.iter().map(|a| reference_of(a)).collect(),
+        };
+        executed.push(frontier.b_linker);
+        let resume = resume_native_stems_beam_scheduler_after_transaction(
+            &system,
+            &inputs.beam_vlinkers.systems[index],
+            &inputs.beam_builders.systems[index],
+            &inputs.link_plans.systems[index],
+            &completed,
+        )
+        .unwrap_or_else(|error| panic!("step {step}: resume failed: {error}"));
+        system = *resume.advanced_system;
+    }
+
+    assert!(
+        !matches!(
+            system.status,
+            NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_)
+        ),
+        "the chain did not terminate"
+    );
+    assert_eq!(
+        executed.len(),
+        32,
+        "fed Java's sibling writes, the chain should run Java's 32 transactions, not 53"
+    );
+    assert_eq!(fed_siblings, 29, "29 B linkers are linked by linkSiblings");
+
+    // Same transactions, in the same order, not merely the same count.
+    let ran: Vec<String> = executed.iter().map(alias_of).collect();
+    assert_eq!(
+        ran, order,
+        "the chain ran Java's transactions in a different order"
+    );
+    println!(
+        "chain fed real sibling writes: {} transactions, matching Java exactly",
+        ran.len()
+    );
 }

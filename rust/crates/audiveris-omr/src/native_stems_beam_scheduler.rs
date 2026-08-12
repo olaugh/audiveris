@@ -1828,6 +1828,23 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
         return Err(NativeStemsBeamSchedulerError::SystemOrder);
     }
 
+    // Fold this transaction's writes in *before* walking forward, not after. Java's
+    // `linkSiblings` sets those cells during the transaction, so the very next side the
+    // caller loop reaches already sees them through `BLinker.link`'s `isLinked()` early
+    // return. Computing the updated set only for the returned system would let the walk
+    // re-run a side this transaction had just linked -- which is exactly one extra
+    // transaction at the end of chula system 1's pass, where the last transaction's
+    // sibling write is what retires the final side.
+    let mut linked_b_linkers = scheduler_system.linked_b_linkers.clone();
+    if completed.outer_b_linked_after && !linked_b_linkers.contains(&completed.b_linker) {
+        linked_b_linkers.push(completed.b_linker);
+    }
+    for sibling in &completed.sibling_linked_b_linkers {
+        if !linked_b_linkers.contains(sibling) {
+            linked_b_linkers.push(*sibling);
+        }
+    }
+
     let mut state = ReplayState {
         events: scheduler_system.prefix_events.clone(),
         deferred_line_deltas: scheduler_system.deferred_line_deltas.clone(),
@@ -1937,7 +1954,7 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
                     reference: b_reference,
                 },
             )?;
-            if !resumed_here && scheduler_system.linked_b_linkers.contains(&b_reference) {
+            if !resumed_here && linked_b_linkers.contains(&b_reference) {
                 // Java's `isLinked()` early return: the side succeeds without
                 // inspecting a single V linker.
                 let event_ordinal = state.events.len();
@@ -2106,15 +2123,6 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
     let resume_events = state.events[prefix_event_count..].to_vec();
     let mut consumed_v_linkers = scheduler_system.consumed_v_linkers.clone();
     consumed_v_linkers.push(completed.v_linker);
-    let mut linked_b_linkers = scheduler_system.linked_b_linkers.clone();
-    if completed.outer_b_linked_after && !linked_b_linkers.contains(&completed.b_linker) {
-        linked_b_linkers.push(completed.b_linker);
-    }
-    for sibling in &completed.sibling_linked_b_linkers {
-        if !linked_b_linkers.contains(sibling) {
-            linked_b_linkers.push(*sibling);
-        }
-    }
     let advanced_system = NativeStemsBeamSchedulerSystem {
         prefix_events: state.events.clone(),
         deferred_line_deltas: state.deferred_line_deltas.clone(),
