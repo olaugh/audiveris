@@ -10,13 +10,17 @@ production-source issue is confirmed.
 
 ## Repository state
 
-- Repository: `/Users/john/sources/jul10-charter/omr/tools/audiveris`
-- Branch: `codex/native-beam-e2e`; completed checkpoints are pushed to
-  `github.com/olaugh/audiveris` on `master`.
+- Repository: `/Users/john/sources/aug04-rubigo/audiveris`
+- Branch: `rust-port-continue`; completed checkpoints are pushed to
+  `github.com/olaugh/audiveris` on `master`, and only there -- pushing the same
+  commits to a second branch doubles CI for nothing.
 - Java baseline: Audiveris 5.11.0, source commit
   `9e1e55cd2746037d059345881c53e6a6754bffbd`
 - Rust workspace: `rust/`
-- JDK 25: `/Users/john/sources/jul10-charter/omr/tools/jdk25/Contents/Home`
+- JDK 25: a sibling of the checkout, `../jdk25/Contents/Home` -- currently
+  `/Users/john/sources/aug04-rubigo/jdk25/Contents/Home`. `xtask` resolves it that
+  way whenever `JAVA_HOME` is unset (`rust/xtask/src/main.rs:222`), so the relative
+  position is the contract and the absolute path is only today's instance.
 - Java test baseline: 39 suites, 212 executions, 0 failures, 0 errors, 1 skip
 
 The Java checkout has 991 production files and about 327,673 lines. Its unit suite
