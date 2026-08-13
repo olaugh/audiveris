@@ -4051,12 +4051,14 @@ order) and `edges: Vec<GridSigEdge>` in insertion order, with relations NoExclus
 BarConnectionSupport and BarGroup. `HeadlessGridSigState` carries it per system. So "the port
 owns no SIG" is true across stages but **not** of GRID -- GRID's is the seed to grow.
 
-**Slice 1 (in progress): surface GRID's SIG and prove it.** The executor builds
-`HeadlessGridSigState` inside `build_peak_graph` in recognize.rs, but `GridLinesRecognition`
-exposes only geometry, so nothing downstream can see it. Surface the per-system vertices and
-edges in order, then assert they reproduce snapshot ordinals 0-32 and the edges among them.
-Watch: `VerticalInterKind` is only `Bracket`/`Barline`, so the brace at ordinal 0 may come from
-`brace_sig.rs`/`BraceSigStore` rather than from `GridSig`.
+**Slice 1 (DONE 2026-08-12): GRID's SIG already agrees with Java, bar the brace.** No plumbing was needed after all: `PeakGraphReport` already
+carries `pub sig: HeadlessGridSigState`, so the SIG is reachable as
+`grid.peak_graph.sig` today. `grid_sig_matches_javas_opening_vertices` shows chula system 1
+holds **32 of Java's 33 opening vertices in the same order** -- 22 verticals then 10
+connectors, matching Java's counts and its all-verticals-before-any-connector ordering.
+The single gap is the **brace at ordinal 0**, which the port keeps in `brace_sig.rs` rather
+than in `GridSig`, exactly as the caveat predicted. The test asserts the gap
+(`nodes.len() == opening.len() - 1`) so it fails the moment the merge lands.
 
 **Slices 2-5:** HEADERS, BEAMS, LEDGERS, HEADS append in the same way, each verified against its
 ordinal range. HEADS is the one that needs new identity assignment, since it deliberately emits
