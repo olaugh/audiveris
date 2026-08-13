@@ -4279,7 +4279,7 @@ approximation off the ends, where Java simply extrapolates along the endpoint ch
 Switching it to `y_at_x_ext` shifts the measured pitch into agreement and takes the headers
 to **6/10**: staff 2 is now entirely bit-exact, alters and key together.
 
-**Four grades out of 221 now differ**, all on chula system 1: staff 1's two key alters
+**At that checkpoint four grades out of 221 differed**, all on chula system 1: staff 1's two key alters
 (header[2], header[3]), its key (header[4], which is just their mean and cannot be exact
 until they are), and one of the two times (header[9]).
 
@@ -4332,16 +4332,26 @@ does to a 1-ulp input perturbation -- usually it rounds away, occasionally it do
 also explains why clefs and staff 2 look clean: they are not evidence of correct features,
 only of perturbations that happened to vanish.
 
-This reframes the fix. Correcting the ART moments should make all four grades exact at once,
-and it may move staff 2's currently-exact grades through an intermediate state -- that is
-expected, not a regression, provided the endpoint is Java's features exactly. ART moments are
-built from angular and radial basis terms, so the likely divergence is transcendental
-(`cos`/`sin`) or accumulation order in the moment sum; compare
-`audiveris-image`'s ART implementation against `moments/ARTMoments.java` op by op, the same
-way `LineInfo.yAt` was compared, before reaching for any libm hypothesis.
+**CLOSED -- 221/221 SIG grades are now bit-exact (2026-08-13).** The op-by-op comparison
+continued through `BasicARTExtractor`, its 101x101 LUT, and the running Temurin 25 math
+paths. The ART loops, interpolation, normalization, and accumulation order already matched.
+The divergence was entirely in the LUT's transcendental inputs: platform `hypot`, `atan2`,
+`cos`, and `sin` do not reproduce the Java runtime's bits. The narrow ART math adapter now
+uses OpenJDK fdlibm's `hypot`/`atan2` paths and HotSpot AArch64's fused `Math.cos`/`Math.sin`
+instruction schedule, including its medium-range pi/2 reduction. One source detail is
+load-bearing: the cosine kernel retains the **original argument's high word** after
+reduction when choosing its `qx` rounding branch; recomputing that word from the reduced
+argument changes the final ulp.
 
-**Where to look, and one trap to avoid** (kept because it still applies if the ART moments
-turn out exact and the arithmetic is implicated after all): `NeuralNetwork.forward` (`math/NeuralNetwork.java:287`)
+This was measured at each operation, not inferred from a generic libm resemblance. Hashes
+over all 7,825 in-unit-circle LUT cells now match Java for radius, angle, radial basis,
+angular cosine, and angular sine. The frozen end-to-end diagnostic then reports **all 110
+features bit-exact for all 12 key alters**, including the four chula system-1 alters that
+first exposed the drift. `grade_sources_bit_match_java` moves the header ledger from 6/10
+to **10/10**, closing staff 1's two alters, their mean `KeyInter`, and the remaining
+`TimeWholeInter`; the complete measured SIG grade ledger is now **221/221**.
+
+**The fallback trap remains worth keeping:** `NeuralNetwork.forward` (`math/NeuralNetwork.java:287`)
 ends each unit in `sigmoid`, which is `1.0d / (1.0d + Math.exp(-val))`
 (`NeuralNetwork.java:558`). `audiveris-classifier`'s `forward` mirrors it exactly, including
 the reverse-index accumulation Java uses, and ends in `1.0 / (1.0 + (-sum).exp())`. So the

@@ -15,6 +15,11 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 use zip::ZipArchive;
 
+mod art_math;
+
+use art_math::{java_atan2, java_cos, java_sin};
+use audiveris_core::basic_line::java_hypot;
+
 /// Number of raw features accepted by Audiveris' shipped basic classifier.
 pub const INPUT_SIZE: usize = 110;
 /// Number of hidden cells in Audiveris' shipped basic classifier.
@@ -252,7 +257,7 @@ fn art_modules(pixels: &[(i32, i32)]) -> [f64; ART_FEATURE_COUNT] {
                 dy.max((f64::from(y) - center_y).abs()),
             )
         });
-    let radius = dx_max.hypot(dy_max);
+    let radius = java_hypot(dx_max, dy_max);
     let tables = art_luts();
     let mut real = [[0.0; ART_RADIAL]; ART_ANGULAR];
     let mut imaginary = [[0.0; ART_RADIAL]; ART_ANGULAR];
@@ -278,7 +283,7 @@ fn art_modules(pixels: &[(i32, i32)]) -> [f64; ART_FEATURE_COUNT] {
     for p in 0..ART_ANGULAR {
         for r in 0..ART_RADIAL {
             if p != 0 || r != 0 {
-                result[output] = (imaginary[p][r] / mass).hypot(real[p][r] / mass);
+                result[output] = java_hypot(imaginary[p][r] / mass, real[p][r] / mass);
                 output += 1;
             }
         }
@@ -351,16 +356,16 @@ fn art_luts() -> &'static ArtLuts {
             let tx = (x as f64 - LUT_RADIUS as f64) / LUT_RADIUS as f64;
             for y in 0..LUT_SIZE {
                 let ty = (y as f64 - LUT_RADIUS as f64) / LUT_RADIUS as f64;
-                let radial = tx.hypot(ty);
+                let radial = java_hypot(tx, ty);
                 if radial < 1.0 {
-                    let angle = ty.atan2(tx);
+                    let angle = java_atan2(ty, tx);
                     for p in 0..ART_ANGULAR {
                         for r in 0..ART_RADIAL {
                             let index = p * ART_RADIAL + r;
-                            let basis = (radial * std::f64::consts::PI * r as f64).cos();
+                            let basis = java_cos(radial * std::f64::consts::PI * r as f64);
                             let cell = x * LUT_SIZE + y;
-                            real[index][cell] = basis * (angle * p as f64).cos();
-                            imaginary[index][cell] = basis * (angle * p as f64).sin();
+                            real[index][cell] = basis * java_cos(angle * p as f64);
+                            imaginary[index][cell] = basis * java_sin(angle * p as f64);
                         }
                     }
                 }
