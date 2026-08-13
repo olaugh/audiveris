@@ -45,7 +45,10 @@ pub struct KeyAlterClassifierProposal {
     pub start: i32,
     pub width: i32,
     pub bounds: HeaderBounds,
-    pub classifier_grade: f64,
+    /// The alter inter's grade, i.e. Java's `alter.getGrade()`: the classifier
+    /// evaluation with `Grades.intrinsicRatio` applied. Not the raw evaluation
+    /// -- `computePitchedGrades` scales this, so the ratio must already be in.
+    pub inter_grade: f64,
     pub measured_pitch: f64,
 }
 
@@ -212,14 +215,19 @@ fn lifecycle_key_candidate(
         bounds.width = right - bounds.x + 1;
         bounds.height = bottom - bounds.y + 1;
     }
+    // `best_pitched` is parallel to `proposal.alters`: `pitched_key_grades`
+    // walks the same already-sorted sequence, so index i is alter i's grade
+    // under the selected clef.
     let slices = proposal
         .alters
         .iter()
-        .map(|alter| NeutralKeySlice {
+        .enumerate()
+        .map(|(index, alter)| NeutralKeySlice {
             start: alter.start,
             width: alter.width,
             alter_id: Some(alter.id),
             alter_bounds: Some(alter.bounds),
+            alter_grade: best_pitched.get(index).copied(),
         })
         .collect::<Vec<_>>();
     let intrinsic = best_pitched.iter().sum::<f64>() / best_pitched.len() as f64;
@@ -262,7 +270,7 @@ fn pitched_key_grades(
         if delta > maximum {
             return None;
         }
-        grades.push(alter.classifier_grade * (1.0 - (delta / maximum)));
+        grades.push(alter.inter_grade * (1.0 - (delta / maximum)));
     }
     Some(grades)
 }
@@ -317,12 +325,20 @@ fn key_pitches(kind: NeutralClefKind, shape: NeutralKeyAlterShape) -> Option<&'s
 const EM_EPSILON: f64 = 1e-10;
 const EM_MAX_ITERATIONS: usize = 10;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+// No `Eq`: the retained alter grade is an f64, exactly as `NeutralKeyCandidate`
+// already forgoes it for the key grade.
+#[derive(Clone, Debug, PartialEq)]
 pub struct NeutralKeySlice {
     pub start: i32,
     pub width: i32,
     pub alter_id: Option<usize>,
     pub alter_bounds: Option<HeaderBounds>,
+    /// The alter's own grade under the selected clef, i.e. Java's
+    /// `pitchedGrades[i]` as `KeyBuilder.applyPitchImpact` assigns it with
+    /// `alter.setGrade`. The key's `grade` is the mean of these; retaining them
+    /// per slice is what lets a `KeyAlterInter` carry its own SIG grade instead
+    /// of only contributing to the key's.
+    pub alter_grade: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -983,6 +999,11 @@ pub struct NativeKeyParameters {
     pub maximum_alters: usize,
     pub maximum_rank: usize,
     pub minimum_classifier_grade: f64,
+    /// Java `Grades.intrinsicRatio`, applied when a classifier evaluation
+    /// becomes an inter grade. `KeyBuilder.computePitchedGrades` then reads
+    /// `alter.getGrade()`, so every key grade downstream carries it; the header
+    /// time builder already applies the same ratio at the same point.
+    pub intrinsic_ratio: f64,
     /// The projection-peak constants driving signature inference and slice allocation.
     pub pipeline: KeyPipelineParameters,
 }
@@ -2134,7 +2155,13 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     start: slice.start,
                     width: slice.stop - slice.start + 1,
                     bounds: glyph.bounds,
-                    classifier_grade: grade,
+                    // Java's alter is an inter by now, so its grade carries
+                    // intrinsicRatio; `computePitchedGrades` multiplies
+                    // `alter.getGrade()`, not the raw evaluation. The
+                    // min-grade filter above compares raw evaluations, as
+                    // Java's does, so applying the ratio here and not at
+                    // selection keeps both halves faithful.
+                    inter_grade: grade * parameters.intrinsic_ratio,
                     measured_pitch: slice.pitch.expect("assigned with its glyph"),
                 });
             }
@@ -2611,6 +2638,7 @@ mod tests {
                     maximum_rank: 3,
                     pipeline: KeyPipelineParameters::new(8, 8),
                     minimum_classifier_grade: 0.5,
+                    intrinsic_ratio: 0.8,
                 },
             )]),
             100,
@@ -2710,6 +2738,7 @@ mod tests {
                     width: 5,
                     alter_id: Some(id + index + 1),
                     alter_bounds: Some(bounds(x, 5)),
+                    alter_grade: Some(grade),
                 }
             })
             .collect::<Vec<_>>();
@@ -2933,7 +2962,7 @@ mod tests {
                     start: 15 + index as i32 * 8,
                     width: 5,
                     bounds: bounds(15 + index as i32 * 8, 5),
-                    classifier_grade: 0.8,
+                    inter_grade: 0.8,
                     measured_pitch: *pitch,
                 })
                 .collect(),

@@ -615,7 +615,17 @@ struct GridPitch<'a>(&'a [StaffLineGeometry]);
 impl StaffPitchGeometry for GridPitch<'_> {
     fn line_span_at(&self, staff_id: usize, x: f64) -> Option<(f64, f64)> {
         let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
-        Some((staff.first_line.y_at_x(x)?, staff.last_line.y_at_x(x)?))
+        // `Staff.pitchPositionOf` reads `getFirstLine().yAt(x)` --
+        // `LineInfo.yAt`, which evaluates the spline by `GeoPath.yAtX` and
+        // extrapolates along the endpoint chord outside it. Not the true-curve
+        // bisection, which differs by a few ulp and shifts the measured pitch,
+        // and not an abscissa-bounded `Option`: Java answers for every x, so a
+        // glyph left or right of its own staff extrapolates rather than falling
+        // back to the nominal-interline approximation.
+        Some((
+            staff.first_line.y_at_x_ext(x),
+            staff.last_line.y_at_x_ext(x),
+        ))
     }
 }
 
@@ -811,6 +821,7 @@ pub fn recognize_native_headers(
                     maximum_alters: 7,
                     maximum_rank: max_eval_rank(),
                     minimum_classifier_grade: MINIMUM_KEY_GRADE,
+                    intrinsic_ratio: INTRINSIC_RATIO,
                     pipeline: KeyPipelineParameters::new(
                         sheet_interline,
                         staff_input.specific_interline,

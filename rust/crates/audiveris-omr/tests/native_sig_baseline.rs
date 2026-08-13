@@ -938,18 +938,26 @@ fn grade_sources_bit_match_java() {
         let candidate = staff.key_candidates.iter().find(|c| c.id == key).unwrap();
         for slice in &candidate.slices {
             if slice.alter_id.is_some() {
-                header_bits.push(0); // alter grades: source unknown yet
+                // Java `KeyBuilder.applyPitchImpact` does
+                // `alter.setGrade(pitchedGrades[i])`, so the alter's SIG grade
+                // is exactly its pitched grade under the selected clef. The
+                // intrinsicRatio is already inside it, applied when the
+                // evaluation became an inter grade.
+                header_bits.push(slice.alter_grade.unwrap_or(0.0).to_bits());
             }
         }
-        // Java's KeyInter grade is `EnsembleHelper.computeMeanContextualGrade`
-        // over its KeyAlterInter members (`KeyInter.invalidateCache`), and the
-        // port's `grade` is the mean of the same alters' pitched grades before
-        // any ratio. Applying intrinsicRatio here lands the value to ten
-        // decimals but NOT to the bit, so the association still differs -- Java
-        // means over per-member grades, the port scales a mean. Closing that
-        // needs the per-alter grades, which are also the four unwired rows
-        // above; both come from the same missing source.
-        header_bits.push((candidate.grade * 0.8).to_bits());
+        // The key's grade is the plain arithmetic mean of its members' grades,
+        // summed in slice order -- measured, not assumed: Java's two alters per
+        // staff mean to Java's key grade exactly on both staves. Summing the
+        // members here rather than scaling the port's precomputed mean is what
+        // makes it bit-exact, since the two associate differently.
+        let alters = candidate
+            .slices
+            .iter()
+            .filter_map(|slice| slice.alter_grade)
+            .collect::<Vec<_>>();
+        let key_grade = alters.iter().sum::<f64>() / alters.len() as f64;
+        header_bits.push(key_grade.to_bits());
     }
     for staff in &hs.staffs {
         let time = staff.selected_time_id.unwrap();

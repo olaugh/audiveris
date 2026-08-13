@@ -2007,6 +2007,7 @@ pub(crate) mod tests {
                     width: 5,
                     alter_id: Some(111),
                     alter_bounds: Some(bounds),
+                    alter_grade: Some(0.6),
                 }],
                 in_sig: true,
                 staff_id: Some(3),

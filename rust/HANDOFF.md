@@ -4246,6 +4246,47 @@ true-curve inversion, and the endpoint chord -- and the port has all three. A do
 naming the Java method is not evidence the body implements it; only a bit-exact
 comparison is.
 
+**The header grades: alters wired, and `LineInfo.yAt` bites a second time (2026-08-13).**
+Picking up the token-gate convergence after the ledger fix, the remaining gap was entirely
+the 10 header vertices (2 clefs, 4 key alters, 2 keys, 2 times). Three things closed most
+of it, each measured rather than assumed:
+
+1. **The alter grades were never missing, only discarded.** `pitched_key_grades` computes
+   them (Java `computePitchedGrades`) and `lifecycle_key_candidate` kept only their mean as
+   the key's `grade`. `NeutralKeySlice` now retains `alter_grade` per slice, which is
+   exactly what Java's `KeyBuilder.applyPitchImpact` assigns with `alter.setGrade(
+   pitchedGrades[i])`.
+2. **The alter's base grade must carry `intrinsicRatio`.** Java's `computePitchedGrades`
+   scales `alter.getGrade()` -- the *inter's* grade -- not the raw classifier evaluation,
+   and an inter's grade has the 0.8 in it. The port stored the raw evaluation, so every key
+   grade was exactly 0.8x off. `KeyAlterClassifierProposal.classifier_grade` is renamed
+   `inter_grade` and gets `* parameters.intrinsic_ratio` at creation, precisely where
+   `header_time_builder` already applies the same ratio -- which is why the times were
+   already right. The min-grade filter still compares raw evaluations, as Java's does
+   (`MINIMUM_KEY_GRADE` is pre-divided by the ratio for that reason), and `slice.grade` is a
+   max-selection, so scaling cannot reorder it.
+3. **`KeyInter`'s grade is the plain mean of its members' grades**, summed in slice order.
+   Measured, not assumed: Java's two alters mean exactly to Java's key grade on both staves.
+   Scaling the port's precomputed mean by 0.8 instead lands the value to ten decimals but
+   not to the bit, because the two associate differently.
+
+That took the headers 3/10 -> 4/10 bit-exact with all ten finally agreeing to ten decimals.
+The last structural gap was **the same `LineInfo.yAt` confusion as the ledgers, in a second
+place**: `GridPitch::line_span_at` fed `Staff.pitchPositionOf` from
+`first_line.y_at_x(x)` -- the true-curve bisection -- where Java reads
+`getFirstLine().yAt(x)`. It also returned `Option`, falling back to a nominal-interline
+approximation off the ends, where Java simply extrapolates along the endpoint chord.
+Switching it to `y_at_x_ext` shifts the measured pitch into agreement and takes the headers
+to **6/10**: staff 2 is now entirely bit-exact, alters and key together.
+
+**Four grades out of 221 now differ**, all on chula system 1: staff 1's two key alters
+(header[2], header[3]), its key (header[4], which is just their mean and cannot be exact
+until they are), and one of the two times (header[9]). Staff 2's alters run the identical
+arithmetic and are exact, so what remains is data-dependent and upstream of the key code --
+either `measured_pitch` still differing for those two glyphs or their classifier evaluation
+doing so. The next step is to print `measured_pitch` and the raw evaluation for staff 1's
+two alters against Java, exactly as the ledger chase printed check values.
+
 **Master's CI was red for six commits, and the cause was a shared vector (2026-08-13).**
 The "Rust port" workflow failed on `native_black_head_sizing_matches_java_on_every_beam_sheet`,
 shard 0, on both ubuntu and macos, from `501df761a` through `6ca009d2b`. It was never a
@@ -4302,7 +4343,11 @@ bisection) carries a comment claiming `Staff.distanceTo` calls `LineInfo.yAt(x)`
 walks the spline". That is the same conflation -- `distanceTo` reaches `GeoPath.yAtX`
 too, so the bisection is likely wrong there as well. It was left alone here because its
 remaining callers (`recognize.rs:2716/2724/5432`, `native_stems_beam_stumps.rs:1510`)
-have their own gates and deserve their own graded slice. Note that most `y_at_x_ext`
+have their own gates and deserve their own graded slice. **This prediction has since paid
+out once**: `GridPitch::line_span_at` was another such caller, and switching it to
+`y_at_x_ext` moved two header alters and a key into bit-exactness (see the header-grade
+entry above). Treat every remaining `y_at_x` call as a suspect until its Java counterpart
+is read: the question is always which of Java's three ordinate routes it stands for. Note that most `y_at_x_ext`
 consumers immediately `round_ties_even() as i32`, which is why this ulp bug could hide
 in barline and stem-seed geometry for so long while showing up in a ledger grade.
 
