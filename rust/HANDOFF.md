@@ -4309,6 +4309,33 @@ evidence about this path. The next step is a probe on the evaluation itself -- p
 Java's raw `Evaluation.grade` for those two glyphs and compare against the port's
 classifier -- rather than any further work in the key code, which is now exhausted.
 
+Java's side of that comparison is already frozen: **`oracle/key-alter-pitch.txt`** holds all
+12 alters' grade, measured pitch, ordinates and reference points, *and* each one's full
+110-input `MixGlyphDescriptor` feature vector, as raw bits. So the next slice needs no
+Gradle run -- it needs the port's key glyph rasters reachable from a test, which today they
+are not: `NeutralKeySlice` carries bounds but no raster, and the alter proposals stay inside
+`key_column`'s recognizer. Exposing that evidence is the work; the comparison itself is then
+a pure-Rust diff against the frozen file.
+
+**Where to look, and one trap to avoid.** `NeuralNetwork.forward` (`math/NeuralNetwork.java:287`)
+ends each unit in `sigmoid`, which is `1.0d / (1.0d + Math.exp(-val))`
+(`NeuralNetwork.java:558`). `audiveris-classifier`'s `forward` mirrors it exactly, including
+the reverse-index accumulation Java uses, and ends in `1.0 / (1.0 + (-sum).exp())`. So the
+two candidate sources are the **feature vector** and **`exp`** -- and clefs go through this
+same classifier and *are* bit-exact, as are staff 2's flats, so whatever it is, it is
+operand-specific rather than a broken layer. Discriminate by comparing the feature vectors
+first: if they are bit-identical, the residue is the network arithmetic.
+
+If it does turn out to be `exp`, **do not reach for fdlibm by analogy with `java_pow`.**
+`Math.exp` is not `StrictMath.exp`: HotSpot intrinsifies it (`_dexp`, derived from Intel's
+LIBM) on both x86-64 and AArch64, and `Math` is only specified to 1 ulp, so the intrinsic is
+free to differ from fdlibm and does. Porting `e_exp.c` would therefore reproduce the wrong
+oracle -- exactly the "know what your oracle actually is" failure this file already records
+for libjpeg. Establish what the running JDK's `Math.exp` actually returns for the operands
+in question before writing any replacement, and note that `java_pow` was itself refuted as
+a drift source once, so an ulp-level libm hypothesis deserves a measurement and not an
+assumption.
+
 An aside worth keeping: `/private/tmp/audiveris-probe.classpath`, which every
 `oracle/java/run-*.sh` depends on, was cleaned out of `/private/tmp` mid-session. It is a
 cache, not a checked-in artifact, and nothing documents how to rebuild it. Going through

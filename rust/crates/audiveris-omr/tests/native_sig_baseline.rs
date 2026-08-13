@@ -1081,7 +1081,8 @@ fn ledger_grades_match_java_bit_for_bit() {
 /// Exploratory: are the staff-line ordinates behind the key alters' measured
 /// pitch bit-identical to Java's?
 ///
-/// Java rows come from `oracle/java/KeyAlterPitchBits.java` (`:app:keyAlterPitchProbe`),
+/// Java rows are frozen in `oracle/key-alter-pitch.txt`, from
+/// `oracle/java/KeyAlterPitchBits.java` (`:app:keyAlterPitchProbe`),
 /// which prints `staff.getFirstLine().yAt(x)` and `getLastLine().yAt(x)` at each
 /// alter's centroid abscissa. Chula system 1 staff 2's alters are already
 /// bit-exact and staff 1's are not, so this asks whether the residue is in the
@@ -1122,7 +1123,10 @@ fn key_alter_line_ordinates_against_java() {
 /// The line ordinates are already bit-identical (see
 /// `key_alter_line_ordinates_against_java`), so this asks which of the next
 /// terms diverges: the pitch formula, the measured pitch, or the grade.
-/// Java rows from `:app:keyAlterPitchProbe` on chula.
+/// Java rows are frozen in `oracle/key-alter-pitch.txt`, from
+/// `:app:keyAlterPitchProbe` on chula. That file also carries each alter's
+/// 110-input `MixGlyphDescriptor` feature vector, which is what the next slice
+/// compares to decide between the features and the network arithmetic.
 #[test]
 #[ignore = "exploratory print"]
 fn key_alter_pitch_chain_against_java() {

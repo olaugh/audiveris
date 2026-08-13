@@ -76,6 +76,26 @@ public final class KeyAlterPitchBits {
                     line.append(" glyph -");
                 }
                 System.out.println(line);
+
+                // The feature vector and the raw evaluation behind the grade.
+                // The pitch chain is already bit-exact on both staves, so the
+                // remaining ulp difference is either these features or the
+                // network arithmetic; printing both says which.
+                if (glyph != null) {
+                    final int interline = staff.getSpecificInterline();
+                    final double[] features =
+                            new org.audiveris.omr.classifier.MixGlyphDescriptor()
+                                    .getFeatures(glyph, interline);
+                    final StringBuilder f = new StringBuilder("keyalterfeatures staff ")
+                            .append(staff.getId())
+                            .append(" bounds ").append(box.x).append(':').append(box.y)
+                            .append(" interline ").append(interline)
+                            .append(" features");
+                    for (double value : features) {
+                        f.append(' ').append(bits(value));
+                    }
+                    System.out.println(f);
+                }
             }
         }
         System.exit(0);
