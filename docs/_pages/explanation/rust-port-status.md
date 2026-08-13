@@ -735,8 +735,12 @@ graph-carriage layer now adds typed stable IDs, dense checked appends,
 insertion-order tombstones, abnormal updates, BeamStem portion payloads, and
 typed beam-source bindings. Its first stem/BeamStem append lands at vertex 221
 and edge 202 and yields Java's exact post-edge incident order. The next step is
-to project those owned queries into B14/B16/B17 certificates in the native
-identity domain rather than feeding per-transaction Java rows.
+now underway: B14's production projector derives all directed-pair and pre/post
+callback scans from the owned graph before the gate reads Java. After
+canonicalizing only Java's unrelated persistent IDs, the real first query is
+exact through edge order, direction, class, lazy reads, relevance, endpoint
+ordinals, and BeamStem portion. Next, wire that projector into public B14 apply,
+then project B16/B17 in the same native identity domain.
 
 Last updated 2026-08-13.
 
@@ -806,7 +810,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Project the owned SIG queries into B14/B16/B17 incident and pair certificates while carrying every transaction's appended state.
+1. Make public B14 consume its new owned-SIG certificate projector, then project B16/B17 in the same native identity domain.
 2. Drive chula system 1's full 32-transaction SIDES pass from native products only, then continue the carried state through STUMPS and competing-hook removal.
 3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.

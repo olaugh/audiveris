@@ -459,6 +459,9 @@ pub enum NativeSigError {
         system_id: usize,
         stem_identity: usize,
     },
+    InvalidBeamSourceBinding {
+        system_id: usize,
+    },
     InvalidVertexOrdinal {
         system_id: usize,
         expected: usize,
@@ -527,6 +530,12 @@ impl fmt::Display for NativeSigError {
                 formatter,
                 "system {system_id} has duplicate stem binding {stem_identity}"
             ),
+            Self::InvalidBeamSourceBinding { system_id } => {
+                write!(
+                    formatter,
+                    "system {system_id} has ambiguous beam source binding"
+                )
+            }
             Self::InvalidVertexOrdinal {
                 system_id,
                 expected,
@@ -1103,21 +1112,33 @@ fn append_beams(
     bindings: &mut NativeSigSystemBindings,
 ) -> Result<(), NativeSigError> {
     let first = graph.vertices.len();
-    let created = beams
-        .beams_after_multiple_rests
-        .iter()
-        .filter(|(id, _)| *id == system_id)
-        .enumerate()
-        .map(|(index, (_, beam))| (NativeStemsBeamSource::RawBeam(index), beam))
-        .chain(
-            beams
-                .hooks
-                .iter()
-                .filter(|(id, _)| *id == system_id)
-                .enumerate()
-                .map(|(index, (_, beam))| (NativeStemsBeamSource::Hook(index), beam)),
-        )
-        .collect::<Vec<_>>();
+    let mut created = Vec::new();
+    for (owner, beam) in &beams.beams_after_multiple_rests {
+        if *owner != system_id {
+            continue;
+        }
+        let matches = beams
+            .raw_beams
+            .iter()
+            .enumerate()
+            .filter(|(_, (candidate_owner, candidate))| {
+                candidate_owner == owner && candidate == beam
+            })
+            .map(|(ordinal, _)| ordinal)
+            .collect::<Vec<_>>();
+        let [ordinal] = matches.as_slice() else {
+            return Err(NativeSigError::InvalidBeamSourceBinding { system_id });
+        };
+        created.push((NativeStemsBeamSource::RawBeam(*ordinal), beam));
+    }
+    created.extend(
+        beams
+            .hooks
+            .iter()
+            .enumerate()
+            .filter(|(_, (owner, _))| *owner == system_id)
+            .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::Hook(ordinal), beam)),
+    );
     for &(source, beam) in &created {
         let vertex = NativeSigVertexId(push_beam_vertex(graph, beam));
         if bindings.beam_vertices.insert(source, vertex).is_some() {

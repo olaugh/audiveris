@@ -4463,8 +4463,15 @@ sidecar; the first carried stem/BeamStem append produces vertex 221 / edge 202 a
 exact `[54,55,56,57,58,202]` beam incident order.
 
 The next blocker is no longer discovering, reconstructing, or querying the baseline
-ordering or carrying graph mutations. STEMS must now project these owned query rows into
-the B14/B16/B17 certificate types in the native identity domain.
+ordering or carrying graph mutations. B14 now has the first production-owned certificate
+projector: given only the native SIG, typed beam binding, B13 relation draft, and plan, it
+derives the complete directed-pair and pre/post stem/beam incident scans without Java
+rows. `owned_sig_projects_the_first_b14_queries_without_java_rows` projects first, then
+reads Java and compares the full post-callback query after canonicalizing away Java's
+sheet-global Inter IDs; ordinals 54-58 plus fresh 202, direction, class, lazy-read state,
+relevance, endpoint vertex, and LEFT portion are exact. The remaining work is to make the
+public B14 apply consume this native-identity certificate directly, then repeat for
+B16/B17.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.

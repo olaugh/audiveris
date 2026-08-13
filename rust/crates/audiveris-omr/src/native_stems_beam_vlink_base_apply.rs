@@ -13,6 +13,10 @@
 use std::{error::Error, fmt};
 
 use crate::{
+    native_sig::{
+        NativeSigEdge, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
+        NativeSigSystemBindings, NativeSigVertexId,
+    },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_scheduler::{NativeStemsBeamPlanRef, NativeStemsBeamSchedulerSystem},
     native_stems_beam_stumps::{NativeStemsBeamSource, NativeStemsBeamStumpSystem},
@@ -28,6 +32,177 @@ use crate::{
     native_stems_beam_vlinkers::NativeStemsBeamVLinkerSystem,
     stems_step::NativeBeamPortion,
 };
+
+/// Derive every graph query B14 will read from the production-owned SIG.
+///
+/// Persistent Java EntityIndex IDs are deliberately not inputs. Certificate endpoint
+/// IDs use the native one-based insertion identity, while graph and relation identities
+/// remain zero-based insertion ordinals.
+pub fn project_native_stems_beam_vlink_base_apply_certificate(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    beam: NativeStemsBeamSource,
+    stem_vertex: Option<NativeSigVertexId>,
+    draft: &NativeStemsBeamRelationDraft,
+    plan: NativeStemsBeamPlanRef,
+) -> Result<NativeStemsBeamVLinkBaseApplyCertificate, NativeStemsBeamVLinkBaseApplyError> {
+    if bindings.system_id != sig.system_id || draft.beam != beam {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG projection identity join",
+        });
+    }
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG projection integrity",
+        })?;
+    let beam_vertex = *bindings.beam_vertices.get(&beam).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG beam binding",
+        },
+    )?;
+    let beam_payload =
+        sig.vertex(beam_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG live beam vertex",
+            })?;
+    let hook = match beam_payload.kind {
+        NativeSigInterKind::BeamHook => true,
+        NativeSigInterKind::Beam | NativeSigInterKind::SmallBeam => false,
+        _ => {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG beam binding kind",
+            });
+        }
+    };
+    if let Some(stem) = stem_vertex {
+        if sig
+            .vertex(stem.0)
+            .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Stem)
+        {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG live stem vertex",
+            });
+        }
+    }
+
+    let fresh = NativeStemsBeamRelationObjectIdentity::FreshDraft(plan.plan_ordinal);
+    let beam_before = project_native_beam_incident(sig, beam_vertex, hook, None, draft)?;
+    let stem_before = match stem_vertex {
+        None => NativeStemsBeamStemIncidentScan {
+            state: NativeStemsBeamStemIncidentScanState::MissingVertex,
+            query_relation_count: 0,
+            query_provenance_sha256: query_rows_sha256(std::iter::empty()),
+            relations: Vec::new(),
+        },
+        Some(stem) => project_native_stem_incident(sig, stem, None, beam_vertex, fresh)?,
+    };
+
+    let outgoing = sig.outgoing_edges(beam_vertex.0).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG beam outgoing query",
+        }
+    })?;
+    let directed = match stem_vertex {
+        None => Vec::new(),
+        Some(stem) => outgoing
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| edge.target == stem.0)
+            .map(|(source_outgoing_ordinal, edge)| (source_outgoing_ordinal, *edge))
+            .collect(),
+    };
+    let mut matched = false;
+    let pair_rows = directed
+        .iter()
+        .enumerate()
+        .map(|(pair_ordinal, (source_outgoing_ordinal, edge))| {
+            let kind = native_query_kind(edge.kind);
+            let class_read = if matched {
+                NativeStemsBeamPairClassRead::UnreadAfterBreak
+            } else if kind == NativeStemsBeamQueryRelationKind::BeamStem {
+                matched = true;
+                NativeStemsBeamPairClassRead::ExaminedMatchBreak
+            } else {
+                NativeStemsBeamPairClassRead::ExaminedContinue
+            };
+            NativeStemsBeamDirectedPairRelation {
+                pair_ordinal,
+                source_outgoing_ordinal: *source_outgoing_ordinal,
+                graph_relation_identity: edge.ordinal,
+                relation_object_identity: NativeStemsBeamRelationObjectIdentity::GraphObject(
+                    edge.ordinal,
+                ),
+                relation_class: native_relation_class(edge.kind).to_owned(),
+                kind,
+                class_read,
+            }
+        })
+        .collect::<Vec<_>>();
+    let outgoing_hash = query_rows_sha256(outgoing.iter().map(|edge| {
+        format!(
+            "{}:{}",
+            graph_relation_alias(edge.ordinal),
+            native_relation_class(edge.kind)
+        )
+    }));
+    let pair_hash = query_rows_sha256(pair_rows.iter().map(|row| {
+        format!(
+            "{}:{}:{}:{}",
+            row.pair_ordinal,
+            row.source_outgoing_ordinal,
+            graph_relation_alias(row.graph_relation_identity),
+            row.relation_class
+        )
+    }));
+    let inserts = !pair_rows
+        .iter()
+        .any(|row| row.kind == NativeStemsBeamQueryRelationKind::BeamStem);
+    let new_edge = inserts.then_some(sig.edges.len());
+    let effective_stem = stem_vertex.unwrap_or(NativeSigVertexId(sig.vertices.len()));
+    let stem_after = if let Some(edge) = new_edge {
+        project_native_stem_incident(sig, effective_stem, Some(edge), beam_vertex, fresh)?
+    } else {
+        stem_before.clone()
+    };
+    let beam_after = if let Some(edge) = new_edge {
+        project_native_beam_incident(
+            sig,
+            beam_vertex,
+            hook,
+            Some((edge, effective_stem, fresh)),
+            draft,
+        )?
+    } else {
+        beam_before.clone()
+    };
+    let chord_stem_matches = stem_after
+        .relations
+        .iter()
+        .filter(|row| row.kind == NativeStemsBeamQueryRelationKind::ChordStem)
+        .count();
+
+    Ok(NativeStemsBeamVLinkBaseApplyCertificate {
+        system_id: sig.system_id,
+        headless: true,
+        listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+        directed_pair_scan: NativeStemsBeamDirectedPairScan {
+            source_outgoing_scanned: outgoing.len(),
+            source_outgoing_provenance: NativeStemsBeamQueryProvenance::ExhaustiveSha256(
+                outgoing_hash,
+            ),
+            query_relation_count: pair_rows.len(),
+            pair_provenance: NativeStemsBeamQueryProvenance::ExhaustiveSha256(pair_hash),
+            relations: pair_rows,
+        },
+        stem_incident_before: stem_before,
+        stem_incident_after: stem_after,
+        beam_incident_before: beam_before,
+        beam_incident_after: beam_after,
+        chord_stem_matches,
+        fresh_relation_object_identity: fresh,
+        fresh_relation_graph_matches: 0,
+    })
+}
 
 /// One Java object participating in the base relation seam.
 #[derive(Clone, Debug, PartialEq)]
@@ -2421,6 +2596,264 @@ fn valid_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn native_relation_class(kind: NativeSigRelationKind) -> &'static str {
+    match kind {
+        NativeSigRelationKind::NoExclusion => "org.audiveris.omr.sig.relation.NoExclusion",
+        NativeSigRelationKind::BarConnection => {
+            "org.audiveris.omr.sig.relation.BarConnectionRelation"
+        }
+        NativeSigRelationKind::BarGroup => "org.audiveris.omr.sig.relation.BarGroupRelation",
+        NativeSigRelationKind::KeyAlters => "org.audiveris.omr.sig.relation.KeyAltersRelation",
+        NativeSigRelationKind::Containment => "org.audiveris.omr.sig.relation.Containment",
+        NativeSigRelationKind::ClefKey => "org.audiveris.omr.sig.relation.ClefKeyRelation",
+        NativeSigRelationKind::Exclusion => "org.audiveris.omr.sig.relation.Exclusion",
+        NativeSigRelationKind::BeamBeam => "org.audiveris.omr.sig.relation.BeamBeamRelation",
+        NativeSigRelationKind::BeamStem => "org.audiveris.omr.sig.relation.BeamStemRelation",
+        NativeSigRelationKind::BeamRest => "org.audiveris.omr.sig.relation.BeamRestRelation",
+        NativeSigRelationKind::HeadStem => "org.audiveris.omr.sig.relation.HeadStemRelation",
+        NativeSigRelationKind::ChordStem => "org.audiveris.omr.sig.relation.ChordStemRelation",
+    }
+}
+
+fn native_query_kind(kind: NativeSigRelationKind) -> NativeStemsBeamQueryRelationKind {
+    match kind {
+        NativeSigRelationKind::BeamStem => NativeStemsBeamQueryRelationKind::BeamStem,
+        NativeSigRelationKind::BeamRest => NativeStemsBeamQueryRelationKind::BeamRest,
+        NativeSigRelationKind::ChordStem => NativeStemsBeamQueryRelationKind::ChordStem,
+        _ => NativeStemsBeamQueryRelationKind::Other,
+    }
+}
+
+fn native_incident_opposite(kind: NativeSigInterKind) -> NativeStemsBeamIncidentOpposite {
+    match kind {
+        NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam => {
+            NativeStemsBeamIncidentOpposite::Beam
+        }
+        NativeSigInterKind::Stem => NativeStemsBeamIncidentOpposite::Stem,
+        _ => NativeStemsBeamIncidentOpposite::OtherInter,
+    }
+}
+
+fn native_inter_id(vertex: NativeSigVertexId) -> Result<i32, NativeStemsBeamVLinkBaseApplyError> {
+    i32::try_from(vertex.0.checked_add(1).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+            phase: "native SIG Inter identity overflow",
+        },
+    )?)
+    .map_err(|_| NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+        phase: "native SIG Inter identity overflow",
+    })
+}
+
+fn native_edge_direction(
+    edge: &NativeSigEdge,
+    queried: NativeSigVertexId,
+) -> (NativeStemsBeamIncidentDirection, NativeSigVertexId) {
+    if edge.target == queried.0 {
+        (
+            NativeStemsBeamIncidentDirection::Incoming,
+            NativeSigVertexId(edge.source),
+        )
+    } else {
+        (
+            NativeStemsBeamIncidentDirection::Outgoing,
+            NativeSigVertexId(edge.target),
+        )
+    }
+}
+
+fn project_native_stem_incident(
+    sig: &NativeSigSystem,
+    stem: NativeSigVertexId,
+    new_edge: Option<usize>,
+    beam: NativeSigVertexId,
+    fresh: NativeStemsBeamRelationObjectIdentity,
+) -> Result<NativeStemsBeamStemIncidentScan, NativeStemsBeamVLinkBaseApplyError> {
+    let mut relations = Vec::new();
+    let mut incoming = 0;
+    let mut outgoing = 0;
+    if stem.0 < sig.vertices.len() {
+        for edge in sig.incident_edges(stem.0).map_err(|_| {
+            NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG stem incident query",
+            }
+        })? {
+            let (direction, opposite_vertex) = native_edge_direction(edge, stem);
+            let direction_ordinal = match direction {
+                NativeStemsBeamIncidentDirection::Incoming => {
+                    let ordinal = incoming;
+                    incoming += 1;
+                    ordinal
+                }
+                NativeStemsBeamIncidentDirection::Outgoing => {
+                    let ordinal = outgoing;
+                    outgoing += 1;
+                    ordinal
+                }
+            };
+            let opposite = sig.vertex(opposite_vertex.0).ok_or(
+                NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native SIG stem opposite vertex",
+                },
+            )?;
+            let kind = native_query_kind(edge.kind);
+            relations.push(NativeStemsBeamStemIncidentRelation {
+                incident_ordinal: relations.len(),
+                direction,
+                direction_ordinal,
+                graph_relation_identity: edge.ordinal,
+                relation_object_identity: NativeStemsBeamRelationObjectIdentity::GraphObject(
+                    edge.ordinal,
+                ),
+                relation_class: native_relation_class(edge.kind).to_owned(),
+                kind,
+                opposite_vertex_ordinal: opposite_vertex.0,
+                opposite: native_incident_opposite(opposite.kind),
+                opposite_inter_id: native_inter_id(opposite_vertex)?,
+                chord_stem_match: kind == NativeStemsBeamQueryRelationKind::ChordStem,
+            });
+        }
+    } else if new_edge.is_none() || stem.0 != sig.vertices.len() {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG virtual stem identity",
+        });
+    }
+    if let Some(edge) = new_edge {
+        relations.push(NativeStemsBeamStemIncidentRelation {
+            incident_ordinal: relations.len(),
+            direction: NativeStemsBeamIncidentDirection::Incoming,
+            direction_ordinal: incoming,
+            graph_relation_identity: edge,
+            relation_object_identity: fresh,
+            relation_class: native_relation_class(NativeSigRelationKind::BeamStem).to_owned(),
+            kind: NativeStemsBeamQueryRelationKind::BeamStem,
+            opposite_vertex_ordinal: beam.0,
+            opposite: NativeStemsBeamIncidentOpposite::Beam,
+            opposite_inter_id: native_inter_id(beam)?,
+            chord_stem_match: false,
+        });
+    }
+    Ok(NativeStemsBeamStemIncidentScan {
+        state: NativeStemsBeamStemIncidentScanState::ExhaustiveIncomingThenOutgoing,
+        query_relation_count: relations.len(),
+        query_provenance_sha256: stem_incident_query_sha256(&relations),
+        relations,
+    })
+}
+
+fn project_native_beam_incident(
+    sig: &NativeSigSystem,
+    beam: NativeSigVertexId,
+    hook: bool,
+    new_edge: Option<(
+        usize,
+        NativeSigVertexId,
+        NativeStemsBeamRelationObjectIdentity,
+    )>,
+    draft: &NativeStemsBeamRelationDraft,
+) -> Result<NativeStemsBeamBeamIncidentScan, NativeStemsBeamVLinkBaseApplyError> {
+    let mut source = sig
+        .incident_edges(beam.0)
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG beam incident query",
+        })?
+        .into_iter()
+        .map(|edge| (edge, None))
+        .collect::<Vec<_>>();
+    let virtual_edge = new_edge.map(|(ordinal, stem, identity)| {
+        (
+            NativeSigEdge {
+                ordinal,
+                active: true,
+                source: beam.0,
+                target: stem.0,
+                kind: NativeSigRelationKind::BeamStem,
+                support: None,
+                beam_portion: Some(draft.beam_portion),
+            },
+            identity,
+        )
+    });
+    if let Some((edge, _)) = virtual_edge.as_ref() {
+        source.push((edge, Some(edge.ordinal)));
+    }
+    let mut incoming = 0;
+    let mut outgoing = 0;
+    let mut hook_found = false;
+    let mut relations = Vec::new();
+    for (edge, virtual_ordinal) in source {
+        let (direction, opposite_vertex) = native_edge_direction(edge, beam);
+        let direction_ordinal = match direction {
+            NativeStemsBeamIncidentDirection::Incoming => {
+                let ordinal = incoming;
+                incoming += 1;
+                ordinal
+            }
+            NativeStemsBeamIncidentDirection::Outgoing => {
+                let ordinal = outgoing;
+                outgoing += 1;
+                ordinal
+            }
+        };
+        let opposite_kind = if opposite_vertex.0 == sig.vertices.len() {
+            NativeSigInterKind::Stem
+        } else {
+            sig.vertex(opposite_vertex.0)
+                .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native SIG beam opposite vertex",
+                })?
+                .kind
+        };
+        let kind = native_query_kind(edge.kind);
+        let examined = !hook || !hook_found;
+        let relevant = examined
+            && if hook {
+                kind == NativeStemsBeamQueryRelationKind::BeamStem
+            } else {
+                matches!(
+                    kind,
+                    NativeStemsBeamQueryRelationKind::BeamStem
+                        | NativeStemsBeamQueryRelationKind::BeamRest
+                ) && edge.beam_portion.is_some()
+            };
+        if hook && relevant {
+            hook_found = true;
+        }
+        relations.push(NativeStemsBeamBeamIncidentRelation {
+            incident_ordinal: relations.len(),
+            direction,
+            direction_ordinal,
+            graph_relation_identity: edge.ordinal,
+            relation_object_identity: virtual_ordinal.map_or(
+                NativeStemsBeamRelationObjectIdentity::GraphObject(edge.ordinal),
+                |_| virtual_edge.expect("virtual edge is retained").1,
+            ),
+            relation_class: native_relation_class(edge.kind).to_owned(),
+            kind,
+            opposite_vertex_ordinal: opposite_vertex.0,
+            opposite: native_incident_opposite(opposite_kind),
+            opposite_inter_id: native_inter_id(opposite_vertex)?,
+            read: if examined {
+                NativeStemsBeamBeamIncidentRead::Examined
+            } else {
+                NativeStemsBeamBeamIncidentRead::UnreadAfterBreak
+            },
+            relevant,
+            beam_portion: edge.beam_portion,
+        });
+    }
+    Ok(NativeStemsBeamBeamIncidentScan {
+        rule: if hook {
+            NativeStemsBeamBeamIncidentRule::HookHasAnyBeamStem
+        } else {
+            NativeStemsBeamBeamIncidentRule::RawBeamLeftAndRight
+        },
+        query_relation_count: relations.len(),
+        query_provenance_sha256: beam_incident_query_sha256(&relations, hook),
+        relations,
+    })
 }
 
 fn query_rows_sha256(rows: impl IntoIterator<Item = String>) -> String {

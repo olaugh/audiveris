@@ -15,6 +15,12 @@ use audiveris_omr::native_sig::{
     NativeSigEdge, NativeSigRelationKind, NativeSigVertex, assemble_native_sig,
 };
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
+use audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamPlanRef;
+use audiveris_omr::native_stems_beam_vlink_base_apply::{
+    NativeStemsBeamIncidentDirection, NativeStemsBeamQueryRelationKind,
+    project_native_stems_beam_vlink_base_apply_certificate,
+};
+use audiveris_omr::native_stems_beam_vlink_reuse_check::NativeStemsBeamRelationDraft;
 use audiveris_omr::recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds};
 
 fn repo_root() -> PathBuf {
@@ -1104,6 +1110,166 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
             .all(|edge| !edge.active)
     );
     assert!(!removed_vertex.edges[edge_ordinal].active);
+}
+
+#[test]
+fn owned_sig_projects_the_first_b14_queries_without_java_rows() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .expect("assembled native SIG");
+    let system = sig
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .unwrap();
+    let bindings = sig
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == 1)
+        .unwrap();
+    let (&source, _) = bindings
+        .beam_vertices
+        .iter()
+        .find(|(_, vertex)| vertex.0 == 55)
+        .expect("typed source for the first selected beam");
+    let plan = NativeStemsBeamPlanRef {
+        system_id: 1,
+        plan_ordinal: 143,
+        builder_ordinal: 0,
+        stem_profile: 0,
+    };
+    let draft = NativeStemsBeamRelationDraft {
+        beam: source,
+        partner_stem_identity: 0,
+        partner_inter_id: None,
+        beam_portion: audiveris_omr::stems_step::NativeBeamPortion::Left,
+        dx: 0.0,
+        dy: 0.0,
+        x_impact: 0.0,
+        y_impact: 0.0,
+        grade: 1.0,
+        extension_point: audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 },
+        outgoing: true,
+    };
+    let before = system.clone();
+    let certificate = project_native_stems_beam_vlink_base_apply_certificate(
+        system, bindings, source, None, &draft, plan,
+    )
+    .expect("owned B14 query projection");
+    assert_eq!(*system, before, "projection must not mutate the graph");
+    assert_eq!(certificate.directed_pair_scan.query_relation_count, 0);
+    assert_eq!(certificate.beam_incident_before.relations.len(), 5);
+    assert_eq!(certificate.beam_incident_after.relations.len(), 6);
+    assert_eq!(certificate.stem_incident_after.relations.len(), 1);
+    assert_eq!(
+        certificate
+            .beam_incident_after
+            .relations
+            .iter()
+            .map(|row| row.graph_relation_identity)
+            .collect::<Vec<_>>(),
+        vec![54, 55, 56, 57, 58, 202]
+    );
+    let appended = certificate.beam_incident_after.relations.last().unwrap();
+    assert_eq!(
+        appended.direction,
+        NativeStemsBeamIncidentDirection::Outgoing
+    );
+    assert_eq!(appended.opposite_vertex_ordinal, 221);
+    assert_eq!(appended.opposite_inter_id, 222, "native one-based identity");
+    assert_eq!(appended.kind, NativeStemsBeamQueryRelationKind::BeamStem);
+    assert_eq!(
+        appended.beam_portion,
+        Some(audiveris_omr::stems_step::NativeBeamPortion::Left)
+    );
+
+    // Oracle separation: Java is read only after the native projection has returned.
+    // Canonicalize away Java's sheet-global Inter IDs; graph ordinals, directions,
+    // relation classes, lazy reads, relevance, and portions must remain exact.
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
+    )
+    .expect("frozen B14 fixture");
+    let java_beam_after = fixture
+        .lines()
+        .filter_map(|line| line.strip_prefix("stemsbeamvlinkbaseapplybeamincident "))
+        .filter(|row| {
+            row_field(row, "system") == "1"
+                && row_field(row, "plan") == "143"
+                && row_field(row, "scope") == "real"
+                && row_field(row, "phase") == "AfterCallback"
+        })
+        .map(|row| {
+            (
+                row_field(row, "direction"),
+                row_field(row, "globalRelationIdentity")
+                    .strip_prefix("sig-edge:")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+                row_field(row, "relationClass"),
+                row_field(row, "oppositeVertexOrdinal")
+                    .parse::<usize>()
+                    .unwrap(),
+                row_field(row, "readState"),
+                row_field(row, "relevant"),
+                row_field(row, "portion"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let native_beam_after = certificate
+        .beam_incident_after
+        .relations
+        .iter()
+        .map(|row| {
+            (
+                match row.direction {
+                    NativeStemsBeamIncidentDirection::Incoming => "Incoming",
+                    NativeStemsBeamIncidentDirection::Outgoing => "Outgoing",
+                },
+                row.graph_relation_identity,
+                row.relation_class.as_str(),
+                row.opposite_vertex_ordinal,
+                if row.beam_portion.is_some() {
+                    "ExaminedClassAndPortion"
+                } else {
+                    "ExaminedClassOnly"
+                },
+                if row.relevant { "true" } else { "false" },
+                match row.beam_portion {
+                    None => "-",
+                    Some(audiveris_omr::stems_step::NativeBeamPortion::Left) => "LEFT",
+                    Some(audiveris_omr::stems_step::NativeBeamPortion::Center) => "CENTER",
+                    Some(audiveris_omr::stems_step::NativeBeamPortion::Right) => "RIGHT",
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(native_beam_after, java_beam_after);
+
+    let mut broken = bindings.clone();
+    broken.beam_vertices.remove(&source);
+    assert!(
+        project_native_stems_beam_vlink_base_apply_certificate(
+            system, &broken, source, None, &draft, plan
+        )
+        .is_err()
+    );
 }
 
 fn native_edge_token(edge: &NativeSigEdge) -> String {
