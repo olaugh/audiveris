@@ -4451,10 +4451,14 @@ had not appended `LinesRetriever.addShortSections`'s horizontal sections before
 changes the native brace glyph to x=173 / width=22; `BraceInter.getBounds`'s exact
 staff-line extrapolation then closes the last token. The assembled edge product retains
 support grades and the four BarConnection impacts, not merely endpoint/kind triples.
+`NativeSigSystem` now also owns fail-closed `incoming_edges`, `outgoing_edges`,
+`incident_edges`, and directed-pair queries. They preserve global insertion order, with
+incident reads in Java/JGraphT's incoming-then-outgoing order; a production-only gate
+rebuilds the real chula base-apply beam scan exactly and rejects missing vertices.
 
-The next blocker is no longer discovering or reconstructing the baseline ordering. STEMS
-must consume this owned graph, assign it completeness authority, and derive the B14/B16/B17
-incident and pair certificates from it while carrying each transaction's appends.
+The next blocker is no longer discovering, reconstructing, or querying the baseline
+ordering. STEMS must project these owned query rows into the B14/B16/B17 certificate
+types while carrying each transaction's appended vertices and edges.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.

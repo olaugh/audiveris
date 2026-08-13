@@ -728,9 +728,12 @@ concurrency 1 and no background Java process.
 Twenty-four focused production tests and all 13 full exact integration tests
 pass; the full gate finishes in 148.82 seconds, and the standalone manifest
 validator passes 1/1 in 129.11 seconds. The full library suite is 685 passed / 0
-failed / 2 ignored. The next production step is to derive STEMS incident
-certificates from the owned graph and carry it through the full SIDES pass
-rather than feeding per-transaction Java rows.
+failed / 2 ignored. The owned SIG now answers fail-closed incoming, outgoing,
+incident, and directed-pair queries in Java/JGraphT order; its real chula
+base-apply beam scan matches the frozen Java rows exactly. The next production
+step is to project those owned queries into the B14/B16/B17 certificates and
+carry appended graph state through the full SIDES pass rather than feeding
+per-transaction Java rows.
 
 Last updated 2026-08-13.
 
@@ -800,7 +803,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Derive B14/B16/B17 incident and pair certificates from the owned cross-stage SIG while carrying every transaction's appended state.
+1. Project the owned SIG queries into B14/B16/B17 incident and pair certificates while carrying every transaction's appended state.
 2. Drive chula system 1's full 32-transaction SIDES pass from native products only, then continue the carried state through STUMPS and competing-hook removal.
 3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.

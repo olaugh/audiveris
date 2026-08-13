@@ -21,6 +21,13 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
+fn row_field<'a>(row: &'a str, name: &str) -> &'a str {
+    row.split(&format!(" {name} "))
+        .nth(1)
+        .and_then(|tail| tail.split(' ').next())
+        .unwrap_or_else(|| panic!("row lacks {name}: {row}"))
+}
+
 /// Java's vertex rows, as (ordinal, simple class name, bounds).
 fn java_vertices() -> Vec<(usize, String, String)> {
     let text = std::fs::read_to_string(
@@ -731,14 +738,13 @@ fn heads_products_derive_javas_head_ordinals() {
     );
 }
 
-/// The capstone gate, being converged: rebuild Java's ordered vertex hash.
+/// The capstone gate: rebuild Java's ordered vertex and edge hashes.
 ///
 /// The five slices prove class, order, bounds and edge structure. This renders each
 /// vertex's full structural token -- `class:shape=..:grade=<javahex>/<bits>:bounds=..:
 /// removed=..:abnormal=..:manual=..:implicit=..:profile=..` plus `median`/`height` for
 /// beams -- and requires byte-identity with the snapshot rows, which is what makes the
-/// assembled SIG a *product* rather than five proofs. Ignored until every field source is
-/// confirmed; run with --ignored to see the first divergence.
+/// assembled SIG a *product* rather than five independent proofs.
 ///
 /// Field sources confirmed so far, from the snapshot inventory:
 ///   * flags: removed/manual/implicit always false at this baseline, profile always 0,
@@ -862,6 +868,97 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
     assert_eq!(
         sha256_hex(edge_rows.as_bytes()),
         "9d55bb9b9db317bbf70d45d25f8ea9aeca8f92b310c19258bc6043ee95630a50"
+    );
+}
+
+/// The production graph answers Java/JGraphT incident queries without a per-query oracle.
+#[test]
+fn assembled_sig_derives_javas_incident_scan() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .expect("assembled native SIG");
+    let system = sig
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("system 1");
+
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
+    )
+    .expect("frozen base-apply fixture");
+    let recorded = fixture
+        .lines()
+        .filter_map(|line| line.strip_prefix("stemsbeamvlinkbaseapplybeamincident "))
+        .filter(|row| {
+            row_field(row, "system") == "1"
+                && row_field(row, "scope") == "real"
+                && row_field(row, "phase") == "Before"
+        })
+        .filter_map(|row| {
+            row_field(row, "globalRelationIdentity")
+                .strip_prefix("sig-edge:")
+                .map(|ordinal| {
+                    (
+                        row_field(row, "direction"),
+                        ordinal.parse::<usize>().expect("edge ordinal"),
+                    )
+                })
+        })
+        .filter(|(_, ordinal)| *ordinal < system.edges.len())
+        .collect::<Vec<_>>();
+    assert!(!recorded.is_empty(), "real baseline scan must not be empty");
+
+    let mut candidates: Option<std::collections::BTreeSet<usize>> = None;
+    for (_, ordinal) in &recorded {
+        let edge = &system.edges[*ordinal];
+        let endpoints = std::collections::BTreeSet::from([edge.source, edge.target]);
+        candidates = Some(match candidates {
+            None => endpoints,
+            Some(current) => current.intersection(&endpoints).copied().collect(),
+        });
+    }
+    let candidates = candidates.expect("recorded rows");
+    assert_eq!(candidates.len(), 1, "scan rows must identify one vertex");
+    let vertex = *candidates.iter().next().expect("one vertex");
+
+    let derived = system
+        .incident_edges(vertex)
+        .expect("live vertex query")
+        .into_iter()
+        .map(|edge| {
+            (
+                if edge.target == vertex {
+                    "Incoming"
+                } else {
+                    "Outgoing"
+                },
+                edge.ordinal,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(derived, recorded);
+
+    assert!(system.incident_edges(system.vertices.len()).is_err());
+    assert!(
+        system
+            .directed_edges(vertex, system.vertices.len())
+            .is_err()
     );
 }
 

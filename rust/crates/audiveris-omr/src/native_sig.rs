@@ -162,6 +162,70 @@ pub struct NativeSigSystem {
     pub edges: Vec<NativeSigEdge>,
 }
 
+impl NativeSigSystem {
+    #[must_use]
+    pub fn vertex(&self, ordinal: usize) -> Option<&NativeSigVertex> {
+        self.vertices.get(ordinal)
+    }
+
+    /// Java/JGraphT `incomingEdgesOf`, retaining global edge insertion order.
+    pub fn incoming_edges(&self, vertex: usize) -> Result<Vec<&NativeSigEdge>, NativeSigError> {
+        self.require_vertex(vertex)?;
+        Ok(self
+            .edges
+            .iter()
+            .filter(|edge| edge.target == vertex)
+            .collect())
+    }
+
+    /// Java/JGraphT `outgoingEdgesOf`, retaining global edge insertion order.
+    pub fn outgoing_edges(&self, vertex: usize) -> Result<Vec<&NativeSigEdge>, NativeSigError> {
+        self.require_vertex(vertex)?;
+        Ok(self
+            .edges
+            .iter()
+            .filter(|edge| edge.source == vertex)
+            .collect())
+    }
+
+    /// Java/JGraphT `edgesOf`: incoming insertion order followed by outgoing order.
+    pub fn incident_edges(&self, vertex: usize) -> Result<Vec<&NativeSigEdge>, NativeSigError> {
+        self.require_vertex(vertex)?;
+        Ok(self
+            .edges
+            .iter()
+            .filter(|edge| edge.target == vertex)
+            .chain(self.edges.iter().filter(|edge| edge.source == vertex))
+            .collect())
+    }
+
+    /// Java/JGraphT directed pair query, in source-outgoing insertion order.
+    pub fn directed_edges(
+        &self,
+        source: usize,
+        target: usize,
+    ) -> Result<Vec<&NativeSigEdge>, NativeSigError> {
+        self.require_vertex(source)?;
+        self.require_vertex(target)?;
+        Ok(self
+            .edges
+            .iter()
+            .filter(|edge| edge.source == source && edge.target == target)
+            .collect())
+    }
+
+    fn require_vertex(&self, ordinal: usize) -> Result<(), NativeSigError> {
+        if self.vertices.get(ordinal).is_some() {
+            Ok(())
+        } else {
+            Err(NativeSigError::MissingVertex {
+                system_id: self.system_id,
+                ordinal,
+            })
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeSigRecognition {
     pub systems: Vec<NativeSigSystem>,
@@ -177,6 +241,7 @@ pub enum NativeSigError {
     MissingStaffLine(usize),
     MissingSelected(&'static str, usize),
     MissingBeamGroup(usize),
+    MissingVertex { system_id: usize, ordinal: usize },
     InvalidBeamMember { system_id: usize, index: usize },
     UnsupportedTime { numerator: i32, denominator: i32 },
 }
@@ -196,6 +261,9 @@ impl fmt::Display for NativeSigError {
                 write!(formatter, "missing selected {kind} for staff {staff}")
             }
             Self::MissingBeamGroup(id) => write!(formatter, "missing BEAMS groups for system {id}"),
+            Self::MissingVertex { system_id, ordinal } => {
+                write!(formatter, "system {system_id} has no SIG vertex {ordinal}")
+            }
             Self::InvalidBeamMember { system_id, index } => {
                 write!(
                     formatter,
