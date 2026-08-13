@@ -4060,26 +4060,51 @@ The single gap is the **brace at ordinal 0**, which the port keeps in `brace_sig
 than in `GridSig`, exactly as the caveat predicted. The test asserts the gap
 (`nodes.len() == opening.len() - 1`) so it fails the moment the merge lands.
 
-**Slice 1b (next): merge the brace at ordinal 0.** Scoped precisely; the first scoping of
-it here was wrong and is corrected. The brace path is **fully implemented and unit-tested,
-and simply never called in production**. `continue_raw_bars_through_lines_root`
-(`raw_projector_adapter.rs:1597`, `pub`) takes a `&mut BraceSigStore`, builds the compound
-through `build_brace_filament`, and promotes it with `promote_brace_filament`; the unit test
-at line 3392 asserts it yields one brace inter for system 1. That test is its **only caller
-in the crate**. So the earlier note here -- that the missing step was rebuilding a
-`CurvedFilamentCompound` from retained section ids -- was wrong: nothing needs rebuilding.
-What is missing is that the production GRID executor never runs this path, and
-`PeakGraphReport` consequently has nowhere to carry a `BraceSigStore` next to its `sig`.
+**Slice 1b (DONE 2026-08-13): the brace promotes in production, 33/33.** Java's
+`buildBraces` now runs in the production GRID path (`recognize.rs`, immediately after the
+live brace stage and before `ProductionProcessBars` consumes the systems -- which is Java's
+own position for it, after topology completion and before `purgeLeftOfBraces` applies).
+`build_and_promote_system_braces` went `pub` with a doc note that its fallback
+middle-promotion never mutates on this path because `complete_detached_brace_topology`
+already set every middle. `all_brace_sections` comes from `sections_by_width` at
+`maximum_section_width` (Java's cached `getSectionsByWidth(maxBraceThickness=1.0
+interline)`); the per-peak members come from the live stage's retained
+`DetachedBraceFilamentEvidence.members`, materialized from the lags by `(lag, id)`. The
+filament parameters are `interline`, `segment_length = rint(1.0*interline)`,
+`left_margin = rint(0.5*interline)` (Java `braceLeftMargin`). `PeakGraphReport` gains
+`brace_promotions: Vec<BracePromotion>` and `brace_sig: BraceSigStore`.
+`grid_sig_matches_javas_opening_vertices` now asserts **brace + GridSig == all 33 of
+Java's opening vertices** for chula system 1, brace first. The store's glyph/inter ids are
+its own (Java ids are not fabricated); the snapshot's structural token carries no id, so
+ordinal + content is the comparison, which is the point of the exercise.
 
-The work is therefore: call this path from the production executor, surface the store on
-`PeakGraphReport`, and put each system's brace at the head of its vertex list, because Java
-puts it at ordinal 0. Check first whether the function does more than braces -- its name
-suggests it continues the whole raw-bars flow -- so that wiring it does not duplicate work
-the production path already does by another route. `grid_sig_matches_javas_opening_vertices`
-asserts the gap (`nodes.len() == opening.len() - 1`) and will fail when this lands; update it
-to equality plus a brace-first ordering check.
+**Slice 2 (next): HEADERS, ordinals 33-42.** Measured from the snapshot, chula system 1:
+vertex order is both clefs (staff 1 then 2), then staff 1's two KeyAlters followed by its
+KeyInter, then staff 2's, then both TimeWholes -- i.e. Java's column order (clef column,
+key column, time column), not per-staff order. Eight edges: per staff,
+`KeyAltersRelation(alter1 -> alter2)`, `Containment(key -> alter1)`,
+`Containment(key -> alter2)`, `ClefKeyRelation(clef -> key)`. The TimeWholes have no
+header-internal edges. `recognize_native_headers` already emits the selected clef/key/time
+inters with lifecycle evidence; the slice is appending them to the per-system vertex list
+after GRID's 33 and materializing those four relations per staff, then extending
+`native_sig_baseline.rs` to assert ordinals 33-42 and the edge set.
 
-**Slices 2-5:** HEADERS, BEAMS, LEDGERS, HEADS append in the same way, each verified against its
+**Measured 2026-08-13, and it simplifies everything: the baseline SIG has ZERO cross-stage
+edges.** Every stage's subgraph is closed -- GRID 34 edges, HEADERS 8, BEAMS 102, LEDGERS 0,
+HEADS 58, total 202. So the merged SIG is pure concatenation of complete per-stage
+subgraphs: no stage needs another stage's identities to build its edges, and each slice can
+be verified in isolation. (STEMS is exactly the stage that introduces the first cross-stage
+edges -- beam-stem, head-stem -- which is also why it needs the whole graph.) GridSig's
+system-1 edge count is already 34, matching Java's GRID subgraph exactly.
+
+**Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
+order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
+Edges, all internal: 48 Containment (each group contains its members: 31 beams, 17 hooks),
+44 BeamBeamRelation (13 beam-beam, 12 hook-beam, 12 beam-hook, 7 hook-hook), 10 Exclusion
+(hook vs beam). `recognize_native_beams` already produces beams, hooks and groups.
+
+**Slices 4-5:** LEDGERS (8 vertices, no edges), HEADS (102 vertices, 58 internal edges)
+append in the same way, each verified against its
 ordinal range. HEADS is the one that needs new identity assignment, since it deliberately emits
 identity-free products today.
 

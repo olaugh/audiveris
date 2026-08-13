@@ -9,6 +9,8 @@
 use std::path::PathBuf;
 
 use audiveris_image::grid_sig::GridSigNode;
+use audiveris_omr::clef_column::NeutralClefKind;
+use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::recognize::recognize_grid_lines;
 
 fn repo_root() -> PathBuf {
@@ -130,19 +132,199 @@ fn grid_sig_matches_javas_opening_vertices() {
         "the connector run should start exactly where Java's does"
     );
 
-    // The gap, stated as an assertion so it fails the moment it is closed.
+    // The brace, now promoted in production. Java puts it at ordinal 0, before
+    // every vertical -- so the merged per-system vertex list is brace first,
+    // then GridSig's verticals, then its connectors.
+    let promotions: Vec<_> = grid
+        .peak_graph
+        .brace_promotions
+        .iter()
+        .filter(|promotion| promotion.system_id == 1)
+        .collect();
+    assert_eq!(promotions.len(), 1, "chula system 1 has exactly one brace");
+    let brace_nodes = grid
+        .peak_graph
+        .brace_sig
+        .system_nodes(1)
+        .expect("system 1 brace nodes");
+    assert_eq!(brace_nodes.len(), 1, "one BraceInter in the store");
+
     assert_eq!(
-        nodes.len(),
-        opening.len() - 1,
-        "GridSig should hold every GRID vertex except the brace"
+        1 + nodes.len(),
+        opening.len(),
+        "brace + GridSig should hold every one of Java's opening vertices"
     );
     println!(
-        "slice 1: GridSig holds {}/{} of Java's opening vertices in order ({} verticals \
-         then {} connectors); the brace at ordinal 0 lives in brace_sig and still needs \
-         merging",
-        nodes.len(),
+        "slice 1: brace + GridSig hold {}/{} of Java's opening vertices in order (brace, \
+         {} verticals, {} connectors)",
+        1 + nodes.len(),
         opening.len(),
         barlines,
         connectors
+    );
+}
+
+/// Java's edge rows among a vertex-ordinal range, as (source, target, class).
+fn java_edges_within(range: std::ops::RangeInclusive<usize>) -> Vec<(usize, usize, String)> {
+    let text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
+    )
+    .expect("frozen SIG snapshot");
+    let field = |rest: &str, name: &str| -> String {
+        rest.split(&format!(" {name} "))
+            .nth(1)
+            .and_then(|tail| tail.split(' ').next())
+            .unwrap_or_else(|| panic!("edge row lacks {name}"))
+            .to_owned()
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("stemsbeamsigsnapshotedge ") else {
+            continue;
+        };
+        let source: usize = field(rest, "source").parse().expect("source");
+        let target: usize = field(rest, "target").parse().expect("target");
+        if range.contains(&source) && range.contains(&target) {
+            out.push((source, target, field(rest, "class")));
+        }
+    }
+    out
+}
+
+/// Slice 2: HEADERS' contribution, against Java's ordinals 33-42.
+///
+/// Java inserts header inters in *column* order -- every staff's clef, then per staff the
+/// key's alters immediately followed by the key, then every staff's time -- and ties each
+/// staff's header together with exactly four relations: `KeyAltersRelation` between
+/// neighbouring alters, `Containment` from the key to each alter, and `ClefKeyRelation`
+/// from the clef to the key. The times participate in no header-internal relation.
+///
+/// The port's HEADERS products carry everything that sequence needs: per staff, a selected
+/// clef, a selected key whose slices hold the alters in x order, and a selected whole-sign
+/// time. This asserts Java's vertex order and edge shape are exactly what those products
+/// would derive, which is the rule the merged SIG will use to append its HEADERS slice.
+#[test]
+fn headers_products_derive_javas_header_ordinals() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+
+    // Java's slice, from the frozen snapshot.
+    let java = java_vertices();
+    let header_range: Vec<_> = java
+        .iter()
+        .skip_while(|(_, class, _)| {
+            matches!(
+                class.as_str(),
+                "BraceInter" | "BarlineInter" | "BarConnectorInter"
+            )
+        })
+        .take_while(|(_, class, _)| {
+            matches!(
+                class.as_str(),
+                "ClefInter" | "KeyAlterInter" | "KeyInter" | "TimeWholeInter"
+            )
+        })
+        .collect();
+    let first_ordinal = header_range.first().expect("headers exist").0;
+    let last_ordinal = header_range.last().expect("headers exist").0;
+    let java_classes: Vec<&str> = header_range
+        .iter()
+        .map(|(_, class, _)| class.as_str())
+        .collect();
+
+    // The port's system 1 products.
+    let system = headers
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("system 1");
+    let staffs: Vec<_> = system.staffs.iter().collect();
+    assert_eq!(staffs.len(), 2, "chula system 1 is a grand staff");
+
+    // Derive the insertion sequence from the products, in Java's column order.
+    let mut derived: Vec<String> = Vec::new();
+    for staff in &staffs {
+        let clef_id = staff.selected_clef_id.expect("selected clef");
+        let clef = staff
+            .clef_candidates
+            .iter()
+            .find(|candidate| candidate.id == clef_id)
+            .expect("selected clef exists");
+        assert!(
+            matches!(clef.kind, NeutralClefKind::Treble),
+            "chula's header clefs are G clefs"
+        );
+        derived.push("ClefInter".to_owned());
+    }
+    let mut alters_per_staff = Vec::new();
+    for staff in &staffs {
+        let key_id = staff.selected_key_id.expect("selected key");
+        let key = staff
+            .key_candidates
+            .iter()
+            .find(|candidate| candidate.id == key_id)
+            .expect("selected key exists");
+        let alters = key
+            .slices
+            .iter()
+            .filter(|slice| slice.alter_id.is_some())
+            .count();
+        alters_per_staff.push(alters);
+        for _ in 0..alters {
+            derived.push("KeyAlterInter".to_owned());
+        }
+        derived.push("KeyInter".to_owned());
+    }
+    for staff in &staffs {
+        let time_id = staff.selected_time_id.expect("selected time");
+        let time = staff
+            .time_candidates
+            .iter()
+            .find(|candidate| candidate.id == time_id)
+            .expect("selected time exists");
+        assert!(
+            time.member_ids.is_empty(),
+            "chula's 2/4 is a whole sign, not a pair"
+        );
+        derived.push("TimeWholeInter".to_owned());
+    }
+    assert_eq!(
+        derived, java_classes,
+        "the products' column-order derivation should reproduce Java's header ordinals"
+    );
+
+    // The edge shape, staff by staff. Ordinals within the range follow from the
+    // derivation above, so they can be computed rather than searched for.
+    let mut expected_edges: Vec<(usize, usize, String)> = Vec::new();
+    let mut cursor = first_ordinal + staffs.len(); // first alter, after the clefs
+    for (staff_index, alters) in alters_per_staff.iter().enumerate() {
+        let clef = first_ordinal + staff_index;
+        let first_alter = cursor;
+        let key = first_alter + alters;
+        for pair in 0..alters.saturating_sub(1) {
+            expected_edges.push((
+                first_alter + pair,
+                first_alter + pair + 1,
+                "KeyAltersRelation".to_owned(),
+            ));
+        }
+        for alter in 0..*alters {
+            expected_edges.push((key, first_alter + alter, "Containment".to_owned()));
+        }
+        expected_edges.push((clef, key, "ClefKeyRelation".to_owned()));
+        cursor = key + 1;
+    }
+    let mut java_edges = java_edges_within(first_ordinal..=last_ordinal);
+    java_edges.sort();
+    expected_edges.sort();
+    assert_eq!(
+        expected_edges, java_edges,
+        "per-staff KeyAlters/Containment/ClefKey should be exactly Java's header edges"
+    );
+    println!(
+        "slice 2: {} header vertices ({java_classes:?}) and {} edges derive exactly",
+        derived.len(),
+        java_edges.len()
     );
 }

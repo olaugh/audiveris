@@ -13,12 +13,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::brace_filament::BraceFilamentParameters;
 use crate::brace_portions::BracePortionParameters;
+use crate::brace_sig::{BracePromotion, BraceSigStore};
 use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::production_stages::TerminalRasterStages;
 use crate::raw_projector_adapter::{
     DetachedBraceFilamentEvidence, DetachedBraceProjector, DetachedBraceStageParameters,
-    advance_live_bars_through_braces,
+    RawBraceStageParameters, advance_live_bars_through_braces, build_and_promote_system_braces,
 };
 use audiveris_image::adaptive;
 use audiveris_image::bar_alignment::BarAlignment;
@@ -243,6 +245,12 @@ pub struct PeakGraphReport {
     /// order. Their member identities are retained for the later full brace
     /// glyph/SIG promotion boundary.
     pub brace_filaments: Vec<DetachedBraceFilamentEvidence>,
+    /// Java `buildBraces`: each multi-staff system's brace, as a registered
+    /// glyph plus a `BraceInter` -- the SIG's very first vertex per system.
+    pub brace_promotions: Vec<BracePromotion>,
+    /// The store those promotions live in: original glyphs and per-system
+    /// SIG insertion order.
+    pub brace_sig: BraceSigStore,
     /// Candidate peaks a `BarsRetriever` purge removed, each with the stage
     /// that removed it.
     ///
@@ -1883,6 +1891,101 @@ fn build_peak_graph(
     )
     .map_err(grid_stage("brace portions"))?;
 
+    // Java `buildBraces`, in Java's position: after brace-portion detection and
+    // topology completion, before `purgeLeftOfBraces` is applied through the
+    // prepared-bars flow below. The live stage above already set every
+    // BRACE_MIDDLE, so the promotion's fallback branch never mutates here.
+    let mut brace_sig =
+        BraceSigStore::new(0, 0, derived.systems.iter().map(BarsSystemState::system_id));
+    let mut brace_promotions = Vec::new();
+    {
+        // Java caches `allBraceSections = getSectionsByWidth(maxBraceThickness)`.
+        let located = audiveris_image::bars_logic::sections_by_width(
+            &lags.vertical,
+            &lags.horizontal,
+            brace_parameters.maximum_section_width,
+        );
+        let all_brace_sections = located
+            .iter()
+            .map(|id| {
+                let slice = match id.lag {
+                    audiveris_image::bars_logic::SectionLag::Vertical => &lags.vertical,
+                    audiveris_image::bars_logic::SectionLag::Horizontal => &lags.horizontal,
+                };
+                slice
+                    .iter()
+                    .find(|section| section.id() == id.id)
+                    .cloned()
+                    .ok_or_else(|| format!("brace section {} missing from its lag", id.id))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(grid_stage("brace sections"))?;
+        // The portion probes already ran; their member sections are retained in
+        // the stage evidence, keyed by peak. `buildBraceFilament` starts from
+        // exactly those members.
+        let mut members_by_peak = std::collections::HashMap::new();
+        for evidence in &brace_stage.filaments {
+            let members = evidence
+                .members
+                .iter()
+                .map(|id| {
+                    let slice = match id.lag {
+                        audiveris_image::bars_logic::SectionLag::Vertical => &lags.vertical,
+                        audiveris_image::bars_logic::SectionLag::Horizontal => &lags.horizontal,
+                    };
+                    slice
+                        .iter()
+                        .find(|section| section.id() == id.id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            format!("brace member section {} missing from its lag", id.id)
+                        })
+                })
+                .collect::<Result<Vec<_>, String>>()
+                .map_err(grid_stage("brace members"))?;
+            members_by_peak.insert(evidence.peak.key(), members);
+        }
+        for state in &mut derived.systems {
+            brace_promotions.extend(
+                build_and_promote_system_braces(
+                    state,
+                    &all_brace_sections,
+                    &skew,
+                    RawBraceStageParameters {
+                        portions: BracePortionParameters {
+                            neutral_gap: brace_parameters.neutral_gap,
+                            maximum_peak_width: brace_parameters.maximum_peak_width,
+                            maximum_bar_gap: brace_parameters.maximum_bar_gap,
+                            minimum_portion_height: f64::from(
+                                brace_parameters.minimum_portion_height,
+                            ),
+                            maximum_curvature: f64::from(brace_parameters.maximum_curvature),
+                            lookup_extension: f64::from(brace_parameters.lookup_extension),
+                        },
+                        filament: BraceFilamentParameters {
+                            interline: usize::try_from(interline).unwrap_or(1).max(1),
+                            // BarFilamentFactory.segmentLength = rint(1.0 * interline).
+                            segment_length: pixels(1.0, interline).max(1) as usize,
+                            // BarsRetriever.braceLeftMargin = 0.5 interlines.
+                            left_margin: pixels(0.5, interline),
+                        },
+                        maximum_alignment_dx: f64::from(brace_parameters.maximum_alignment_dx),
+                    },
+                    &mut brace_sig,
+                    &mut |key| {
+                        members_by_peak.get(&key).cloned().ok_or_else(|| {
+                            format!(
+                                "brace portion staff {} has no probed members",
+                                key.staff_id().value()
+                            )
+                        })
+                    },
+                )
+                .map_err(grid_stage("brace promotion"))?,
+            );
+        }
+    }
+
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
     let bars = ProductionProcessBars::new(
         RawProductionRetrieveLines::new(
@@ -2039,6 +2142,8 @@ fn build_peak_graph(
         stick_count,
         stickless_peak_count,
         brace_filaments: brace_stage.filaments,
+        brace_promotions,
+        brace_sig,
         retained_peaks,
         purged_peaks,
         rejections,

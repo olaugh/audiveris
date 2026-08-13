@@ -2248,7 +2248,16 @@ fn reconcile_brace_snapshot(
     Ok(())
 }
 
-fn build_and_promote_system_braces(
+/// Java `BarsRetriever.buildBraces` for one system: walk each BRACE_TOP down
+/// through compatible middles to a bottom, build the full brace filament, and
+/// promote it into `sig_store` as a registered glyph plus a `BraceInter`.
+///
+/// The fallback branch that promotes a first peak to BRACE_MIDDLE only fires
+/// when a staff has no brace peak; a caller that has already run
+/// `complete_detached_brace_topology` (the live production path does, inside
+/// `advance_live_bars_through_braces`) supplies every middle up front, so on
+/// that path this reads state without mutating it.
+pub fn build_and_promote_system_braces(
     state: &mut BarsSystemState,
     all_brace_sections: &[Section],
     skew: &HeadlessSkew,
