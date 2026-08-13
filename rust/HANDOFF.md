@@ -4142,8 +4142,24 @@ pairs (54-10=44). LEDGERS: the port's final glyph bounds are NOT the SIG bounds 
 parallelogram coincides (4 of chula's 8). The materialized inters carry median+thickness;
 applying `Rectangle2D.getBounds()` semantics (floor min, ceil max) reproduces Java's 8
 ledger vertices exactly, in creation order (per staff, per line index -- not abscissa).
-Remaining: slice 5, HEADS -- 102 vertices (55 NOTEHEAD_VOID, 47 NOTEHEAD_BLACK), 58
-head-head Exclusion edges, nothing else.
+**Slice 5 DONE (2026-08-13): all five slices now derive.** HEADS needed zero new
+recording, the fifth time in a row: `heads_in_sig_order` is Java's creation/SIG order,
+`beam_removed_heads` are the vertices the beam purge takes back out, and each staff's
+`purge.overlap.decisions` carry the (purged, kept) pairs Java joins with an OVERLAP
+exclusion when `doRemove` is false. One trap cost a round: decision indices are *creation*
+indices -- the purge resolves `ordered_indices[position]` back before recording -- not
+input ordinals, and mapping them through `input_ordinal` scatters the pairs. 102 heads and
+58 exclusions match exactly on chula system 1.
+
+**The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
+baseline derive from production products, per stage, in insertion order.** What remains to
+make it a *product* rather than five proofs: an assembled per-system SIG type that
+concatenates the five slices with sheet-global ordinals, and the structural-token gate that
+rebuilds Java's ordered vertexHash/edgeHash from the assembled graph (needs each inter's
+grade bit-pattern in the token format; the grades are all present on the products). Then
+the STEMS certificates -- incident scans in insertion order -- can be *computed* from the
+assembled SIG plus tracking, which closes the self-drive gap and opens
+`recognize_native_stems`.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.

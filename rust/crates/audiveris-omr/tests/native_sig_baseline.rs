@@ -561,3 +561,169 @@ fn ledgers_products_derive_javas_ledger_ordinals() {
         derived.len()
     );
 }
+
+/// Slice 5: HEADS' contribution, against Java's ordinals 119-220.
+///
+/// The last and largest slice: 102 heads and 58 head-head OVERLAP exclusions, nothing
+/// else. The epilog already records everything -- `heads_in_sig_order` is Java's
+/// creation/SIG order, `beam_removed_heads` are the vertices the beam purge later takes
+/// back out of the SIG, and each staff's `purge.overlap.decisions` are exactly the pairs
+/// Java joined with `sig.insertExclusion(purged, kept, OVERLAP)` when `doRemove` was
+/// false (NoteHeadsBuilder.java:975).
+#[test]
+fn heads_products_derive_javas_head_ordinals() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+
+    // Java's slice.
+    let java: Vec<(usize, String, String)> = java_vertices()
+        .into_iter()
+        .filter(|(_, class, _)| class == "HeadInter")
+        .map(|(ordinal, _, bounds)| (ordinal, String::new(), bounds))
+        .collect();
+    let java_shapes: Vec<String> = {
+        let text = std::fs::read_to_string(
+            repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
+        )
+        .expect("frozen SIG snapshot");
+        text.lines()
+            .filter(|line| {
+                line.starts_with("stemsbeamsigsnapshotvertex ") && line.contains("HeadInter")
+            })
+            .map(|line| {
+                line.split(":shape=")
+                    .nth(1)
+                    .and_then(|tail| tail.split(':').next())
+                    .expect("shape")
+                    .to_owned()
+            })
+            .collect()
+    };
+    let first_ordinal = java.first().expect("heads exist").0;
+
+    // The port's SIG order: creation order, minus the heads the beam purge removed.
+    let epilog_system = heads
+        .epilog
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("system 1 epilog");
+    let staff_system = heads
+        .epilog
+        .staff_epilog
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("system 1 staff epilog");
+    let removed: std::collections::BTreeSet<(usize, usize)> = epilog_system
+        .beam_removed_heads
+        .iter()
+        .map(|reference| (reference.staff_index, reference.head_index))
+        .collect();
+    let survivors: Vec<(usize, usize)> = epilog_system
+        .heads_in_sig_order
+        .iter()
+        .map(|reference| (reference.staff_index, reference.head_index))
+        .filter(|key| !removed.contains(key))
+        .collect();
+
+    let resolve = |key: &(usize, usize)| &staff_system.staffs[key.0].heads[key.1];
+    let derived: Vec<(String, String)> = survivors
+        .iter()
+        .map(|key| {
+            let head = resolve(key);
+            let shape = match head.shape {
+                audiveris_omr::head_template::HeadTemplateShape::NoteheadBlack => "NOTEHEAD_BLACK",
+                audiveris_omr::head_template::HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
+                audiveris_omr::head_template::HeadTemplateShape::WholeNote => "WHOLE_NOTE",
+                audiveris_omr::head_template::HeadTemplateShape::Breve => "BREVE",
+            };
+            (
+                shape.to_owned(),
+                format!(
+                    "{}:{}:{}:{}",
+                    head.bounds.x, head.bounds.y, head.bounds.width, head.bounds.height
+                ),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, String)> = java_shapes
+        .into_iter()
+        .zip(java.iter().map(|(_, _, bounds)| bounds.clone()))
+        .collect();
+    if derived != expected {
+        println!("derived {} heads, java {}", derived.len(), expected.len());
+        for (index, (have, want)) in derived.iter().zip(&expected).enumerate() {
+            if have != want {
+                println!("  first divergence at {index}: port {have:?} java {want:?}");
+                break;
+            }
+        }
+        panic!("SIG-order survivors should be Java's head vertices");
+    }
+
+    // The exclusions: overlap decisions, mapped from input ordinals to SIG ordinals.
+    let ordinal_of: std::collections::BTreeMap<(usize, usize), usize> = survivors
+        .iter()
+        .enumerate()
+        .map(|(index, key)| (*key, first_ordinal + index))
+        .collect();
+    let mut derived_exclusions = std::collections::BTreeSet::new();
+    for (staff_index, staff) in staff_system.staffs.iter().enumerate() {
+        for decision in &staff.purge.overlap.decisions {
+            // Decision indices are creation indices: the purge walks
+            // ordered_indices and resolves each position back before recording.
+            let purged = (staff_index, decision.purged_index);
+            let kept = (staff_index, decision.kept_index);
+            let (Some(one), Some(two)) = (ordinal_of.get(&purged), ordinal_of.get(&kept)) else {
+                continue; // an excluded head later beam-removed leaves no SIG edge
+            };
+            derived_exclusions.insert((*one.min(two), *one.max(two)));
+        }
+    }
+    let java_exclusions: std::collections::BTreeSet<(usize, usize)> =
+        java_edges_within(first_ordinal..=java.last().expect("heads").0)
+            .into_iter()
+            .filter(|(_, _, class)| class == "Exclusion")
+            .map(|(source, target, _)| (source.min(target), source.max(target)))
+            .collect();
+    if derived_exclusions != java_exclusions {
+        println!(
+            "derived {} exclusions, java {}",
+            derived_exclusions.len(),
+            java_exclusions.len()
+        );
+        println!(
+            "port-only: {:?}",
+            derived_exclusions
+                .difference(&java_exclusions)
+                .collect::<Vec<_>>()
+        );
+        println!(
+            "java-only: {:?}",
+            java_exclusions
+                .difference(&derived_exclusions)
+                .collect::<Vec<_>>()
+        );
+        panic!("overlap decisions should be exactly Java's head exclusions");
+    }
+    println!(
+        "slice 5: {} heads and {} exclusions derive exactly",
+        derived.len(),
+        derived_exclusions.len()
+    );
+}
