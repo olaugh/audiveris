@@ -4167,6 +4167,19 @@ clef/key/alter/time (candidate `grade` fields -- verify bit-equality), beams (Ra
 native_sig_baseline.rs is the #[ignore]d skeleton to converge; vertexHash = sha256 over
 `ordinal:token` rows newline-terminated, per GraphOrder.
 
+**Token-gate convergence, measured (2026-08-13, `grade_sources_bit_match_java`,
+#[ignore]d diagnostic in native_sig_baseline.rs):** of the 221 grades, **182 are already
+bit-exact** -- all 102 heads (`grade_bits`), all 48 beams/hooks (`RawBeam.grade`), all 32
+barlines/connectors (GridSig `intrinsic_grade`). Clefs: both bit-exact
+(candidate `grade`). Times: one exact, one off by last-ulps. **Keys: SIG grade =
+candidate.grade x 0.8** (intrinsicRatio -- confirmed numerically, 0.5252/0.6565 = 0.8000).
+Alters: source not yet wired (per-alter grades live in key_column's pitched alters, not on
+the slice). **Ledgers: 5/8 bit-exact, 3 drift by 13-21 ulp** -- the port's grade formula
+associates differently from Java somewhere; find the exact op order in the ledger
+impacts-to-grade path. Brace = 0.8 constant, groups = 1.0 constant (verify bits when
+wiring). So the remaining convergence work is: 3 ledger ulp-chases, 1 time ulp-chase, the
+x0.8 key rule, 4 alter grade sources, 2 constants -- then the token renderer and the hash.
+
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to
 make it a *product* rather than five proofs: an assembled per-system SIG type that

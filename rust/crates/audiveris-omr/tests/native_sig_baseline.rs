@@ -761,3 +761,224 @@ fn assembled_tokens_rebuild_javas_vertex_hash() {
     // vertexHash = sha256 over "ordinal:token\n" rows, matching GraphOrder.
     println!("gate skeleton: {} Java rows parsed", java_rows.len());
 }
+
+/// Exploratory: do the products' grades bit-match Java's tokens? Prints per class.
+#[test]
+#[ignore = "exploratory print"]
+fn grade_sources_bit_match_java() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+
+    let text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
+    )
+    .expect("frozen SIG snapshot");
+    let java_bits: Vec<(String, u64)> = text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamsigsnapshotvertex "))
+        .map(|line| {
+            let row = line.split(" row ").nth(1).expect("row");
+            let class = row
+                .split("org.audiveris.omr.sig.inter.")
+                .nth(1)
+                .and_then(|tail| tail.split(':').next())
+                .expect("class")
+                .to_owned();
+            let bits = row
+                .split(":grade=")
+                .nth(1)
+                .and_then(|tail| tail.split(':').next())
+                .and_then(|token| token.split('/').nth(1))
+                .map(|hex| u64::from_str_radix(hex, 16).expect("bits"))
+                .expect("grade bits");
+            (class, bits)
+        })
+        .collect();
+    let bits_for = |class: &str| -> Vec<u64> {
+        java_bits
+            .iter()
+            .filter(|(name, _)| name == class)
+            .map(|(_, bits)| *bits)
+            .collect()
+    };
+
+    // Ledgers, in creation order.
+    let derived: Vec<u64> = ledgers
+        .materializer
+        .inters()
+        .iter()
+        .filter(|inter| inter.system_id == 1 && !inter.removed)
+        .map(|inter| inter.grade.to_bits())
+        .collect();
+    println!(
+        "LedgerInter grades bit-match: {}",
+        derived == bits_for("LedgerInter")
+    );
+    for (have, want) in derived.iter().zip(bits_for("LedgerInter")) {
+        println!(
+            "   ledger port {:.10} java {:.10} ratio {:.10}",
+            f64::from_bits(*have),
+            f64::from_bits(want),
+            f64::from_bits(want) / f64::from_bits(*have)
+        );
+        println!(
+            "     bits port {have:016x} java {want:016x} ulp {}",
+            (*have as i64 - want as i64).abs()
+        );
+    }
+
+    // Heads, SIG-order survivors.
+    let epilog_system = heads
+        .epilog
+        .systems
+        .iter()
+        .find(|s| s.system_id == 1)
+        .unwrap();
+    let staff_system = heads
+        .epilog
+        .staff_epilog
+        .systems
+        .iter()
+        .find(|s| s.system_id == 1)
+        .unwrap();
+    let removed: std::collections::BTreeSet<(usize, usize)> = epilog_system
+        .beam_removed_heads
+        .iter()
+        .map(|r| (r.staff_index, r.head_index))
+        .collect();
+    let head_bits: Vec<u64> = epilog_system
+        .heads_in_sig_order
+        .iter()
+        .map(|r| (r.staff_index, r.head_index))
+        .filter(|key| !removed.contains(key))
+        .map(|(staff, head)| staff_system.staffs[staff].heads[head].grade_bits)
+        .collect();
+    println!(
+        "HeadInter grades bit-match: {}",
+        head_bits == bits_for("HeadInter")
+    );
+
+    // Beams+hooks, browse order then probe pass.
+    let created: Vec<u64> = beams
+        .beams_after_multiple_rests
+        .iter()
+        .filter(|(id, _)| *id == 1)
+        .map(|(_, beam)| beam.grade.to_bits())
+        .chain(
+            beams
+                .hooks
+                .iter()
+                .filter(|(id, _)| *id == 1)
+                .map(|(_, beam)| beam.grade.to_bits()),
+        )
+        .collect();
+    let mut java_beams: Vec<u64> = Vec::new();
+    for (class, bits) in &java_bits {
+        if class == "BeamInter" || class == "BeamHookInter" {
+            java_beams.push(*bits);
+        }
+    }
+    println!("Beam/Hook grades bit-match: {}", created == java_beams);
+
+    // GRID verticals+connectors from GridSig intrinsic grades.
+    let system = grid
+        .peak_graph
+        .sig
+        .systems
+        .iter()
+        .find(|s| s.system_id == 1)
+        .unwrap();
+    let grid_bits: Vec<u64> = system
+        .sig
+        .nodes_in_order()
+        .map(|(_, node)| node.intrinsic_grade().to_bits())
+        .collect();
+    let mut java_grid: Vec<u64> = Vec::new();
+    for (class, bits) in &java_bits {
+        if class == "BarlineInter" || class == "BarConnectorInter" {
+            java_grid.push(*bits);
+        }
+    }
+    println!(
+        "Barline/Connector grades bit-match: {}",
+        grid_bits == java_grid
+    );
+
+    // Headers: clefs, alters, keys, times from candidates.
+    let hs = headers.systems.iter().find(|s| s.system_id == 1).unwrap();
+    let mut header_bits = Vec::new();
+    for staff in &hs.staffs {
+        let clef = staff.selected_clef_id.unwrap();
+        header_bits.push(
+            staff
+                .clef_candidates
+                .iter()
+                .find(|c| c.id == clef)
+                .unwrap()
+                .grade
+                .to_bits(),
+        );
+    }
+    for staff in &hs.staffs {
+        let key = staff.selected_key_id.unwrap();
+        let candidate = staff.key_candidates.iter().find(|c| c.id == key).unwrap();
+        for slice in &candidate.slices {
+            if slice.alter_id.is_some() {
+                header_bits.push(0); // alter grades: source unknown yet
+            }
+        }
+        header_bits.push(candidate.grade.to_bits());
+    }
+    for staff in &hs.staffs {
+        let time = staff.selected_time_id.unwrap();
+        header_bits.push(
+            staff
+                .time_candidates
+                .iter()
+                .find(|c| c.id == time)
+                .unwrap()
+                .grade
+                .to_bits(),
+        );
+    }
+    let mut java_headers: Vec<u64> = Vec::new();
+    for (class, bits) in &java_bits {
+        if matches!(
+            class.as_str(),
+            "ClefInter" | "KeyAlterInter" | "KeyInter" | "TimeWholeInter"
+        ) {
+            java_headers.push(*bits);
+        }
+    }
+    let matches = header_bits
+        .iter()
+        .zip(&java_headers)
+        .filter(|(a, b)| a == b)
+        .count();
+    println!(
+        "Header grades bit-match: {matches}/{} (alters intentionally unwired)",
+        java_headers.len()
+    );
+    for (index, (have, want)) in header_bits.iter().zip(&java_headers).enumerate() {
+        println!(
+            "   header[{index}] port {:.10} java {:.10} match {}",
+            f64::from_bits(*have),
+            f64::from_bits(*want),
+            have == want
+        );
+    }
+}
