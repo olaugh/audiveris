@@ -77,6 +77,7 @@ pub mod native_heads_seed_lookup;
 pub mod native_heads_small_beams;
 pub mod native_heads_staff_epilog;
 pub mod native_ledgers;
+pub mod native_sig;
 pub mod native_stem_seeds;
 pub mod native_stems_beam_builders;
 pub mod native_stems_beam_link_plans;

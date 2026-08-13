@@ -46,7 +46,7 @@ use crate::grid_executor::{
 use audiveris_image::ingest::{self, LoadError, fnv1a64_bytes};
 use audiveris_image::lag_rebuild::RegisteredHorizontalLag;
 use audiveris_image::line_completion::LineCompletionStage;
-use audiveris_image::line_short_sections::HorizontalSectionLag;
+use audiveris_image::line_short_sections::{HorizontalSectionLag, NoopVipSectionHook};
 use audiveris_image::lines_coordinator::{
     StaffCandidate, StaffCandidateKind, retrieve_staff_candidates,
 };
@@ -2366,9 +2366,10 @@ pub fn recognize_grid_lines_raster(
         seed_parameters.raster.minimum_horizontal_run_length,
     )
     .map_err(grid_stage("run partition"))?;
-    let lag = HorizontalSectionLag::from_long_runs(tables.long_horizontal.clone())
+    let mut lag = HorizontalSectionLag::from_long_runs(tables.long_horizontal.clone())
         .map_err(grid_stage("horizontal lag"))?;
-    let lags = build_initial_grid_lags(&tables, seed_parameters.raster.maximum_vertical_run_shift);
+    let mut lags =
+        build_initial_grid_lags(&tables, seed_parameters.raster.maximum_vertical_run_shift);
 
     let seed_pass = build_primary_cluster_pass(&lag, seed_parameters.raw_primary)
         .map_err(grid_stage("primary pass (slope seed)"))?;
@@ -2383,6 +2384,14 @@ pub fn recognize_grid_lines_raster(
     let mut primary = pass.into_state();
     let result = retrieve_staff_candidates(&mut primary, None, parameters.lines)
         .map_err(grid_stage("staff retrieval"))?;
+
+    // Java `GridBuilder.buildInfo` calls `LinesRetriever.addShortSections`
+    // after staff-line retrieval and before `BarsRetriever.process`. The bar,
+    // bracket, and brace filament builders therefore see the original long
+    // horizontal sections followed by the newly registered short sections.
+    lag.add_short_sections(&tables.short_horizontal, &mut NoopVipSectionHook)
+        .map_err(grid_stage("short horizontal sections"))?;
+    lags.horizontal = lag.sections().to_vec();
 
     // The adaptive filter already emits Java ByteProcessor semantics
     // (`FOREGROUND == 0`, `BACKGROUND == 255`), which is exactly what the

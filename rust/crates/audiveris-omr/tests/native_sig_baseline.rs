@@ -11,6 +11,9 @@ use std::path::PathBuf;
 use audiveris_image::grid_sig::GridSigNode;
 use audiveris_omr::clef_column::NeutralClefKind;
 use audiveris_omr::native_headers::recognize_native_headers;
+use audiveris_omr::native_sig::{
+    NativeSigEdge, NativeSigRelationKind, NativeSigVertex, assemble_native_sig,
+};
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds};
 
@@ -744,8 +747,30 @@ fn heads_products_derive_javas_head_ordinals() {
 ///   * BraceInter: grade = Grades.intrinsicRatio * 1 = 0.8;
 ///   * KeyInter: shape=null, bounds = union of its alters' bounds.
 #[test]
-#[ignore = "token gate under convergence -- grades for GRID/HEADERS classes not yet wired"]
-fn assembled_tokens_rebuild_javas_vertex_hash() {
+fn assembled_sig_rebuilds_javas_structural_hashes() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .expect("assembled native SIG");
+    let system = sig
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .unwrap();
     let text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
     )
@@ -753,13 +778,276 @@ fn assembled_tokens_rebuild_javas_vertex_hash() {
     let java_rows: Vec<&str> = text
         .lines()
         .filter(|line| line.starts_with("stemsbeamsigsnapshotvertex "))
-        .map(|line| line.split(" row ").nth(1).expect("row").trim())
+        .map(|line| {
+            line.split(" row ")
+                .nth(1)
+                .and_then(|row| row.split_once(':').map(|(_, token)| token))
+                .expect("row token")
+                .trim()
+        })
         .collect();
     assert_eq!(java_rows.len(), 221);
-    // Assembly rendering to be filled in as each class's grade source is confirmed;
-    // compare rendered[i] against java_rows[i] and panic with the first field diff.
-    // vertexHash = sha256 over "ordinal:token\n" rows, matching GraphOrder.
-    println!("gate skeleton: {} Java rows parsed", java_rows.len());
+    assert_eq!(system.vertices.len(), java_rows.len());
+    for (vertex, java) in system.vertices.iter().zip(&java_rows) {
+        assert_eq!(
+            native_vertex_token(vertex),
+            *java,
+            "vertex ordinal {}",
+            vertex.ordinal
+        );
+    }
+    let vertex_rows = system
+        .vertices
+        .iter()
+        .map(|vertex| format!("{}:{}\n", vertex.ordinal, native_vertex_token(vertex)))
+        .collect::<String>();
+    assert_eq!(
+        sha256_hex(vertex_rows.as_bytes()),
+        "c7a84a6eca6e49477f1bd26f9e93f066d7add49cc1e922b06f86cfd33e9646e6"
+    );
+
+    let java_edges = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("stemsbeamsigsnapshotedge "))
+        .map(|rest| {
+            let field = |name: &str| {
+                rest.split(&format!(" {name} "))
+                    .nth(1)
+                    .and_then(|tail| tail.split(' ').next())
+                    .expect("edge field")
+            };
+            (
+                field("source").parse::<usize>().unwrap(),
+                field("target").parse::<usize>().unwrap(),
+                field("class").to_owned(),
+                rest.split(" row ")
+                    .nth(1)
+                    .and_then(|row| row.split_once(':').map(|(_, token)| token))
+                    .expect("edge row token")
+                    .to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let native_edges = system
+        .edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.source,
+                edge.target,
+                match edge.kind {
+                    NativeSigRelationKind::NoExclusion => "NoExclusion",
+                    NativeSigRelationKind::BarConnection => "BarConnectionRelation",
+                    NativeSigRelationKind::BarGroup => "BarGroupRelation",
+                    NativeSigRelationKind::KeyAlters => "KeyAltersRelation",
+                    NativeSigRelationKind::Containment => "Containment",
+                    NativeSigRelationKind::ClefKey => "ClefKeyRelation",
+                    NativeSigRelationKind::Exclusion => "Exclusion",
+                    NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
+                }
+                .to_owned(),
+                native_edge_token(edge),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(native_edges.len(), java_edges.len());
+    for (ordinal, (native, java)) in native_edges.iter().zip(&java_edges).enumerate() {
+        assert_eq!(native, java, "edge ordinal {ordinal}");
+    }
+    let edge_rows = system
+        .edges
+        .iter()
+        .map(|edge| format!("{}:{}\n", edge.ordinal, native_edge_token(edge)))
+        .collect::<String>();
+    assert_eq!(
+        sha256_hex(edge_rows.as_bytes()),
+        "9d55bb9b9db317bbf70d45d25f8ea9aeca8f92b310c19258bc6043ee95630a50"
+    );
+}
+
+fn native_edge_token(edge: &NativeSigEdge) -> String {
+    let class = match edge.kind {
+        NativeSigRelationKind::NoExclusion => "NoExclusion",
+        NativeSigRelationKind::BarConnection => "BarConnectionRelation",
+        NativeSigRelationKind::BarGroup => "BarGroupRelation",
+        NativeSigRelationKind::KeyAlters => "KeyAltersRelation",
+        NativeSigRelationKind::Containment => "Containment",
+        NativeSigRelationKind::ClefKey => "ClefKeyRelation",
+        NativeSigRelationKind::Exclusion => "Exclusion",
+        NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
+    };
+    let mut token = format!(
+        "source={}:target={}:org.audiveris.omr.sig.relation.{class}:manual=false",
+        edge.source, edge.target,
+    );
+    if let Some(support) = edge.support {
+        token.push_str(&format!(
+            ":grade={}/{:016x}",
+            java_hex_float(support.grade),
+            support.grade.to_bits(),
+        ));
+        if let Some(impacts) = support.bar_connection_impacts {
+            token.push_str(&format!(
+                ":impacts=[align:{}/{:016x}:w=0x1.0p1/4000000000000000,\
+                 dWidth:{}/{:016x}:w=0x1.0p0/3ff0000000000000,\
+                 gap:{}/{:016x}:w=0x1.0p1/4000000000000000,\
+                 white:{}/{:016x}:w=0x1.0p1/4000000000000000]",
+                java_hex_float(impacts.align),
+                impacts.align.to_bits(),
+                java_hex_float(impacts.width),
+                impacts.width.to_bits(),
+                java_hex_float(impacts.gap),
+                impacts.gap.to_bits(),
+                java_hex_float(impacts.white),
+                impacts.white.to_bits(),
+            ));
+        } else {
+            token.push_str(":impacts=-");
+        }
+    }
+    token
+}
+
+fn native_vertex_token(vertex: &NativeSigVertex) -> String {
+    let bounds = vertex.bounds;
+    let mut token = format!(
+        "org.audiveris.omr.sig.inter.{}:shape={}:grade={}/{:016x}:bounds={}:{}:{}:{}:\
+         removed=false:abnormal={}:manual=false:implicit=false:profile=0",
+        vertex.kind.java_class(),
+        vertex.shape.as_deref().unwrap_or("null"),
+        java_hex_float(vertex.grade),
+        vertex.grade.to_bits(),
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        vertex.abnormal,
+    );
+    if let Some(beam) = vertex.beam_geometry {
+        token.push_str(&format!(
+            ":median={}/{:016x}:{}/{:016x}:{}/{:016x}:{}/{:016x}:height={}/{:016x}",
+            java_hex_float(beam.x1),
+            beam.x1.to_bits(),
+            java_hex_float(beam.y1),
+            beam.y1.to_bits(),
+            java_hex_float(beam.x2),
+            beam.x2.to_bits(),
+            java_hex_float(beam.y2),
+            beam.y2.to_bits(),
+            java_hex_float(beam.height),
+            beam.height.to_bits(),
+        ));
+    }
+    token
+}
+
+fn java_hex_float(value: f64) -> String {
+    let bits = value.to_bits();
+    let negative = bits >> 63 != 0;
+    let magnitude = bits & 0x7fff_ffff_ffff_ffff;
+    let prefix = if negative { "-" } else { "" };
+    let exponent_bits = ((magnitude >> 52) & 0x7ff) as i32;
+    let fraction = magnitude & 0x000f_ffff_ffff_ffff;
+    if exponent_bits == 0x7ff {
+        return if fraction == 0 {
+            format!("{prefix}Infinity")
+        } else {
+            "NaN".to_owned()
+        };
+    }
+    if exponent_bits == 0 && fraction == 0 {
+        return format!("{prefix}0x0.0p0");
+    }
+    let mut digits = format!("{fraction:013x}");
+    while digits.len() > 1 && digits.ends_with('0') {
+        digits.pop();
+    }
+    if exponent_bits == 0 {
+        format!("{prefix}0x0.{digits}p-1022")
+    } else {
+        format!("{prefix}0x1.{digits}p{}", exponent_bits - 1023)
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut padded = bytes.to_vec();
+    let bit_len = u64::try_from(bytes.len()).expect("input length fits u64") * 8;
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+    let mut state = [
+        0x6a09e667_u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    for chunk in padded.chunks_exact(64) {
+        let mut words = [0_u32; 64];
+        for (index, word) in words[..16].iter_mut().enumerate() {
+            let offset = index * 4;
+            *word = u32::from_be_bytes([
+                chunk[offset],
+                chunk[offset + 1],
+                chunk[offset + 2],
+                chunk[offset + 3],
+            ]);
+        }
+        for index in 16..64 {
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(words[index - 7])
+                .wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        for index in 0..64 {
+            let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ ((!e) & g);
+            let temporary1 = h
+                .wrapping_add(sigma1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(words[index]);
+            let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let temporary2 = sigma0.wrapping_add(majority);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temporary1);
+            d = c;
+            c = b;
+            b = a;
+            a = temporary1.wrapping_add(temporary2);
+        }
+        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *slot = slot.wrapping_add(value);
+        }
+    }
+    state.iter().map(|word| format!("{word:08x}")).collect()
 }
 
 /// Diagnostic: do the products' grades bit-match Java's tokens?

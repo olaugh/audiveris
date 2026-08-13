@@ -4078,7 +4078,7 @@ Java's opening vertices** for chula system 1, brace first. The store's glyph/int
 its own (Java ids are not fabricated); the snapshot's structural token carries no id, so
 ordinal + content is the comparison, which is the point of the exercise.
 
-**Slice 2 (next): HEADERS, ordinals 33-42.** Measured from the snapshot, chula system 1:
+**Slice 2 (subsequently completed): HEADERS, ordinals 33-42.** Measured from the snapshot, chula system 1:
 vertex order is both clefs (staff 1 then 2), then staff 1's two KeyAlters followed by its
 KeyInter, then staff 2's, then both TimeWholes -- i.e. Java's column order (clef column,
 key column, time column), not per-staff order. Eight edges: per staff,
@@ -4159,13 +4159,12 @@ bits` and the port already has `java_hex_double` (private copies in several file
 one). Confirmed from the snapshot inventory: flags removed/manual/implicit always false at
 this baseline, profile always 0, **abnormal=true exactly for beams, hooks and heads** (no
 stem yet); BeamGroupInter shape=null grade=1.0 bounds=union of members; BraceInter
-grade=0.8 (intrinsicRatio); KeyInter shape=null bounds=union of its alters. Still to wire:
-bit-exact grades for barlines/connectors (GridSig `intrinsic_grade`), brace (constant),
-clef/key/alter/time (candidate `grade` fields -- verify bit-equality), beams (RawBeam
-`grade` + median/height hexfloats), ledgers (MaterializedLedgerInter `grade`), heads
-(`grade_bits`, already bit-exact). `assembled_tokens_rebuild_javas_vertex_hash` in
-native_sig_baseline.rs is the #[ignore]d skeleton to converge; vertexHash = sha256 over
-`ordinal:token` rows newline-terminated, per GraphOrder.
+grade=0.8 (intrinsicRatio); KeyInter shape=null bounds=union of its alters. At that
+checkpoint the remaining work was to wire and bit-match the per-class grades. That work
+is now complete: `assembled_sig_rebuilds_javas_structural_hashes` is an active test in
+`native_sig_baseline.rs`, and it rebuilds Java's vertex and edge hashes from the
+production-owned SIG. `vertexHash` is SHA-256 over newline-terminated `ordinal:token`
+rows, per GraphOrder.
 
 **Token-gate convergence, measured (2026-08-13, `grade_sources_bit_match_java`,
 #[ignore]d diagnostic in native_sig_baseline.rs):** of the 221 grades, **182 are already
@@ -4440,15 +4439,22 @@ is read: the question is always which of Java's three ordinate routes it stands 
 consumers immediately `round_ties_even() as i32`, which is why this ulp bug could hide
 in barline and stem-seed geometry for so long while showing up in a ledger grade.
 
-**The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
-baseline derive from production products, per stage, in insertion order.** What remains to
-make it a *product* rather than five proofs: an assembled per-system SIG type that
-concatenates the five slices with sheet-global ordinals, and the structural-token gate that
-rebuilds Java's ordered vertexHash/edgeHash from the assembled graph (needs each inter's
-grade bit-pattern in the token format; the grades are all present on the products). Then
-the STEMS certificates -- incident scans in insertion order -- can be *computed* from the
-assembled SIG plus tracking, which closes the self-drive gap and opens
-`recognize_native_stems`.
+**The port now owns the SIG through HEADS.** `assemble_native_sig` concatenates the live
+GRID, HEADERS, BEAMS, LEDGERS, and HEADS products into one typed graph per system with
+stable native vertex and edge insertion ordinals. The chula-system-1 gate renders all 221
+full vertex tokens and all 202 full relation tokens from that graph and reproduces Java's
+ordered SHA-256 values exactly: vertex `c7a84a6eca6e49477f1bd26f9e93f066d7add49cc1e922b06f86cfd33e9646e6`,
+edge `9d55bb9b9db317bbf70d45d25f8ea9aeca8f92b310c19258bc6043ee95630a50`.
+This work found a lifecycle omission rather than hiding it in the renderer: native GRID
+had not appended `LinesRetriever.addShortSections`'s horizontal sections before
+`BarsRetriever`, which left the brace glyph too narrow. Running that stage in Java order
+changes the native brace glyph to x=173 / width=22; `BraceInter.getBounds`'s exact
+staff-line extrapolation then closes the last token. The assembled edge product retains
+support grades and the four BarConnection impacts, not merely endpoint/kind triples.
+
+The next blocker is no longer discovering or reconstructing the baseline ordering. STEMS
+must consume this owned graph, assign it completeness authority, and derive the B14/B16/B17
+incident and pair certificates from it while carrying each transaction's appends.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4468,20 +4474,23 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Grade the caller's outer B-linker assignment and scheduling immediately after
-   the now-exact head-relation loop.
-2. Continue later beam-scheduler attempts, stump
-   linking, and competing-hook removal as separately graded boundaries.
-3. Extend `.omr` typing only through bounded read-only views that preserve every
+1. Replace the Java-fed B14/B16/B17 SIG scans with queries over the new owned graph,
+   preserving insertion order and every transaction's appended relation/state overlay.
+2. Drive the chula-system-1 SIDES pass from native products only: carry B12 through B18,
+   feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
+   32-transaction pass only after the driver returns.
+3. Extend the same carried graph/state through STUMPS, competing-hook removal, and the
+   remaining scheduler branches, then expose a real `recognize_native_stems` entry point.
+4. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
-4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
+5. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
    current vector ordering stable while its key-aware diagnostics catch schema drift.
-5. Add Tesseract data to the oracle manifest when its resolved runtime location is
+6. Add Tesseract data to the oracle manifest when its resolved runtime location is
    known; the bundled classifier, fonts, JDK metadata, and image fixtures are frozen.
-6. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
+7. Freeze or vendor the three parent-corpus SCALE pages before expecting `xtask vectors`
    to work in a standalone Audiveris clone; today those vectors deliberately resolve
    `../../data/synth/...` from this parent OMR checkout.
-7. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
+8. Port deeper semantic behavior in `OmrStep` order; stop comparison at the first
    differing stage so later agreement cannot hide an upstream mismatch.
 
 ## Differential fixture plan
