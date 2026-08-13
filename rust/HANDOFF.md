@@ -4180,6 +4180,23 @@ impacts-to-grade path. Brace = 0.8 constant, groups = 1.0 constant (verify bits 
 wiring). So the remaining convergence work is: 3 ledger ulp-chases, 1 time ulp-chase, the
 x0.8 key rule, 4 alter grade sources, 2 constants -- then the token renderer and the hash.
 
+**The ledger ulp-chase, resolved to a named root cause (2026-08-13).** The drift is NOT in
+the impact inputs and NOT in the aggregation order. `ledger_ulp_drift_isolation`
+(#[ignore]d) re-aggregates each ledger from its stored impacts with computeGrade's exact
+formula and reproduces the stored grade bit-for-bit -- so the port is self-consistent, and
+a perturbation search that seemed to finger impact[2] was a red herring: with weight 4 it
+is merely the finest dial (any ~2^-49 aggregate offset can be expressed through it).
+Java's interpolation (`Check.java:262`, `(v-low)/range` then `GradeUtil.clamp` to [0,1])
+and bounds match the port's. What remains is the **pow implementation itself**: the
+aggregate runs 8 pow calls (`grade^weight` x7, then `global^(1/totalWeight)`); HotSpot's
+`Math.pow` is the fdlibm-derived dpow stub while Rust's `powf` is Apple libm, they differ
+by ~1 ulp on specific operands, and three ledgers plus one time signature happen to hit
+such operands. The frozen ledgers fixture stores grades at 9 decimals, which is why the
+old exact gate never saw it. **Next step: port fdlibm's e_pow (StrictMath.pow source) to
+Rust as `java_pow`, use it in every grade aggregation, and re-run
+`grade_sources_bit_match_java`** -- if the hypothesis is right, ledgers go 8/8 and times
+2/2 with no other change. If it is wrong, the diagnostic prints will say so immediately.
+
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to
 make it a *product* rather than five proofs: an assembled per-system SIG type that
