@@ -983,10 +983,18 @@ fn grade_sources_bit_match_java() {
     }
 }
 
-/// Exploratory: is the ledger ulp-drift in the impact inputs or in the aggregation?
+/// Java's `LedgerInter` grades, bit for bit.
+///
+/// `oracle/ledgers-chula.txt` freezes ledger grades at nine decimals, which
+/// cannot distinguish a one-ulp `yRef`. That is precisely how a `LineInfo.yAt`
+/// divergence survived every earlier ledger gate: `StaffBoundary::y_at_x_ext`
+/// evaluated the staff-line spline by true-curve bisection instead of
+/// `GeoPath.yAtX`'s convenience parameter, and the near-cancellation in the
+/// two `|y - y_target|` dy checks amplified that into 13-21 ulp on three of
+/// these eight grades. So this gate compares raw f64 bit patterns and nothing
+/// softer.
 #[test]
-#[ignore = "exploratory print"]
-fn ledger_ulp_drift_isolation() {
+fn ledger_grades_match_java_bit_for_bit() {
     let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
         .expect("GRID recognition");
     let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
@@ -995,6 +1003,7 @@ fn ledger_ulp_drift_isolation() {
         .expect("BEAMS recognition");
     let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
         .expect("LEDGERS recognition");
+
     let java_bits: Vec<u64> = {
         let text = std::fs::read_to_string(
             repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
@@ -1015,93 +1024,34 @@ fn ledger_ulp_drift_isolation() {
             })
             .collect()
     };
-    for (inter, want) in ledgers
+    assert_eq!(
+        java_bits.len(),
+        8,
+        "chula system 1 LedgerInter count in the Java snapshot"
+    );
+
+    let port: Vec<_> = ledgers
         .materializer
         .inters()
         .iter()
         .filter(|inter| inter.system_id == 1 && !inter.removed)
-        .zip(&java_bits)
-    {
-        // Reaggregate from the stored impacts, exactly as computeGrade does.
-        let mut product = 1.0_f64;
-        let mut total_weight = 0.0_f64;
-        for impact in &inter.impacts {
-            total_weight += impact.weight;
-            if impact.grade == 0.0 {
-                product = 0.0;
-            } else if impact.weight != 0.0 {
-                product *= impact.grade.powf(impact.weight);
-            }
-        }
-        let re = 0.8_f64 * product.powf(1.0 / total_weight);
-        // The same aggregation through fdlibm pow, the hypothesis under test.
-        let mut jp = 1.0_f64;
-        let mut jw = 0.0_f64;
-        for impact in &inter.impacts {
-            jw += impact.weight;
-            if impact.grade == 0.0 {
-                jp = 0.0;
-            } else if impact.weight != 0.0 {
-                jp *= audiveris_omr::java_math::java_pow(impact.grade, impact.weight);
-            }
-        }
-        let rej = 0.8_f64 * audiveris_omr::java_math::java_pow(jp, 1.0 / jw);
-        let stored = inter.grade;
-        println!(
-            "ledger x={} stored={:016x} reagg={:016x} java={:016x}  stored==java {}  reagg==java {}",
+        .collect();
+    assert_eq!(
+        port.len(),
+        java_bits.len(),
+        "port ledger count for chula system 1"
+    );
+
+    for (inter, want) in port.iter().zip(&java_bits) {
+        assert_eq!(
+            inter.grade.to_bits(),
+            *want,
+            "ledger at x={} grade bits: port {:016x} ({:.17}) vs java {:016x} ({:.17})",
             inter.median.0.0,
-            stored.to_bits(),
-            re.to_bits(),
+            inter.grade.to_bits(),
+            inter.grade,
             want,
-            stored.to_bits() == *want,
-            re.to_bits() == *want,
+            f64::from_bits(*want),
         );
-        println!(
-            "   java_pow reagg {:016x}  == java {}",
-            rej.to_bits(),
-            rej.to_bits() == *want
-        );
-        {
-            let bits: Vec<String> = inter
-                .impacts
-                .iter()
-                .map(|impact| format!("{:x}", impact.grade.to_bits()))
-                .collect();
-            println!("   port impacts {}", bits.join(" "));
-        }
-        if re.to_bits() != *want {
-            // Which single impact, moved by how many ulps, lands on Java's bits?
-            for (index, impact) in inter.impacts.iter().enumerate() {
-                for offset in -64_i64..=64 {
-                    if offset == 0 || impact.grade == 0.0 {
-                        continue;
-                    }
-                    let moved = f64::from_bits((impact.grade.to_bits() as i64 + offset) as u64);
-                    let mut product = 1.0_f64;
-                    let mut total_weight = 0.0_f64;
-                    for (other_index, other) in inter.impacts.iter().enumerate() {
-                        total_weight += other.weight;
-                        let grade = if other_index == index {
-                            moved
-                        } else {
-                            other.grade
-                        };
-                        if grade == 0.0 {
-                            product = 0.0;
-                        } else if other.weight != 0.0 {
-                            product *= grade.powf(other.weight);
-                        }
-                    }
-                    let candidate = 0.8_f64 * product.powf(1.0 / total_weight);
-                    if candidate.to_bits() == *want {
-                        println!(
-                            "   impact[{index}] (value {:.6}, grade {:.12}) moved {offset} ulp \
-                             reproduces Java",
-                            impact.value, impact.grade
-                        );
-                    }
-                }
-            }
-        }
     }
 }

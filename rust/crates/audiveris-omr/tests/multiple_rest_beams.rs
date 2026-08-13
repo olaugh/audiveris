@@ -44,8 +44,18 @@ fn bach_system_six_produces_one_identity_free_multiple_rest_replacement() {
             height: 11,
         }
     );
+    // These two are port-pinned intermediates, not Java-verified values: Java's
+    // oracle publishes this rest's grade and bounds (both asserted above, both
+    // unchanged) but never its pitch. Both derive from `Staff.pitchPositionOf`,
+    // which reads `getFirstLine().yAt(x)` / `getLastLine().yAt(x)`, so they moved
+    // when `y_at_x_ext` was corrected to evaluate the spline as `LineInfo.yAt`
+    // does. `stop_pitch` shifted 3987 ulp -- a pitch this close to zero comes out
+    // of a near-cancellation that amplifies a one-ulp ordinate -- while
+    // `start_pitch` was unaffected. Pitch is only read through
+    // `abs() > MULTIPLE_REST_MAX_ABSOLUTE_PITCH`, so neither shift can change the
+    // decision, and the rest is still detected with identical grade and bounds.
     assert_eq!(rest.start_pitch.to_bits(), 0x3fb9_12cb_541e_8116);
-    assert_eq!(rest.stop_pitch.to_bits(), 0x3fac_76cd_f933_c1d3);
+    assert_eq!(rest.stop_pitch.to_bits(), 0x3fac_76cd_f933_b240);
     assert_eq!(rest.serif_search.added_chunk, 5);
     assert_eq!(
         (

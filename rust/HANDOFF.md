@@ -4216,6 +4216,70 @@ subtraction. Next: print the check VALUES (not grades) both sides for one drifte
 then compare the port's y_target/endpoint computation to LedgersBuilder's line 480 region
 op by op. This is minutes of work with the probe now in the tree.
 
+**The ledger ulp-chase is CLOSED: `y_at_x_ext` was not `LineInfo.yAt` (2026-08-13).**
+The op-by-op comparison the previous entry called for did not need the probe at all --
+reading the Java was enough. `y_target` is `yRef + signum(index)*interline`, and for
+every one of chula's eight system-1 ledgers `index` is -1, so `yRef` is
+`staffLine.yAt(stick.getCenter2D().getX())` and the previous-ledger branch of
+`getYReference` never runs. `StaffLine.yAt` (`sheet/StaffLine.java:345`) is two branches,
+and `StaffBoundary::y_at_x_ext` matched neither:
+
+- **In range**, Java calls `getSpline().yAtX(x)` -- `GeoPath.yAtX`, which takes the
+  *convenience* parameter `t = (x - p1.x) / (p2.x - p1.x)` and evaluates the Bezier in y
+  alone. The port instead called `y_at_x`, a 64-step **bisection that inverts x(t) on the
+  true curve**. Those agree mathematically and differ by a few ulp on a curved segment.
+  The port already had the faithful evaluation as `geopath_y_at_x` (written for
+  `Staff.buildAllLedgerLines`); `y_at_x_ext` simply was not calling it.
+- **Out of range**, Java forms `sl = dy/dx` first and multiplies second. The port had
+  folded it to `start.y + (dy * (x - start.x)) / dx` -- multiply first, divide second,
+  which moves the last ulp.
+
+Fixing both to follow `StaffLine.yAt` op for op takes chula system-1 ledgers from
+**5/8 to 8/8 bit-exact** against Java's stored `LedgerInter` grade bits, with no change
+to the impact formulas, the aggregation, or `java_pow`. This retroactively confirms the
+pow refutation: the drift was in the impact *inputs*, upstream of aggregation, exactly
+where the previous entry placed it.
+
+The lesson generalizes past ledgers: **"walks the spline" is not one operation.** Java has
+three ways to ask a staff line for an ordinate -- `GeoPath.yAtX`'s convenience parameter,
+true-curve inversion, and the endpoint chord -- and the port has all three. A doc comment
+naming the Java method is not evidence the body implements it; only a bit-exact
+comparison is.
+
+**What the fix moved elsewhere, and why it was re-pinned rather than reverted.** One
+other gate changed: `bach_system_six_produces_one_identity_free_multiple_rest_replacement`
+asserts the Bach system-6 multiple rest's `stop_pitch` bits, and they shifted by 3987 ulp
+(`0x3fac76cdf933c1d3` -> `0x3fac76cdf933b240`, ~0.0555939070417). `start_pitch` did not
+move. That constant is a **port self-snapshot, not a Java-verified value**: it appears
+nowhere but that test, and the Java oracle for this rest
+(`oracle/heads-scanner-slices.txt`) publishes its grade `0x3fe3dacf882d0517` and bounds
+`1183:2377:104:11` -- both asserted in the same test, both still passing -- but never its
+pitch. Java reaches pitch through `Staff.pitchPositionOf` (`Staff.java:1692`), which reads
+`getFirstLine().yAt(x)` and `getLastLine().yAt(x)`, i.e. exactly the method corrected
+here, so the new value is the more faithful one. A pitch this near zero is a
+near-cancellation, which is why a one-ulp ordinate becomes thousands of ulp; and pitch is
+consumed only as `abs() > MULTIPLE_REST_MAX_ABSOLUTE_PITCH`, so no shift of this size can
+change a decision. The rest is still produced with identical ordinal, staff, grade,
+median, bounds and serif evidence. The web status page claimed this rest matched Java on
+"pitch"; that word was removed, since the oracle never carried it.
+
+The one genuinely red gate on this branch, `native_black_head_sizing_matches_java_on_every_beam_sheet`,
+**predates this work**: it fails identically at 6ca009d2b with the change reverted, and
+`chula.png` and `oracle/black-head-sizer.txt` are byte-identical between this worktree and
+the parent checkout, so it is not a worktree artifact. Its chula candidate row 0 is a
+different component entirely (10x40 `width_low` vs the expected 137x13 `width_high`) at
+equal row counts, so it is an ordering or selection defect in the sizer, unrelated to
+ordinates. It needs its own slice.
+
+**Open, and deliberately not fixed in this slice:** `StaffBoundary::y_at_x` (the
+bisection) carries a comment claiming `Staff.distanceTo` calls `LineInfo.yAt(x)`, "which
+walks the spline". That is the same conflation -- `distanceTo` reaches `GeoPath.yAtX`
+too, so the bisection is likely wrong there as well. It was left alone here because its
+remaining callers (`recognize.rs:2716/2724/5432`, `native_stems_beam_stumps.rs:1510`)
+have their own gates and deserve their own graded slice. Note that most `y_at_x_ext`
+consumers immediately `round_ties_even() as i32`, which is why this ulp bug could hide
+in barline and stem-seed geometry for so long while showing up in a ledger grade.
+
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to
 make it a *product* rather than five proofs: an assembled per-system SIG type that

@@ -409,6 +409,14 @@ impl StaffBoundary {
 
     /// Java `LineInfo.yAt(double)`: evaluate within the spline and extrapolate
     /// outside it using the chord through the two endpoints.
+    ///
+    /// Both branches follow `StaffLine.yAt` op for op, because callers compare
+    /// the result against Java bit for bit. The in-range branch is
+    /// `getSpline().yAtX(x)`, i.e. `GeoPath.yAtX`'s convenience parameter --
+    /// *not* the true-curve bisection of [`Self::y_at_x`], which answers a few
+    /// ulp differently on a curved segment. The out-of-range branch forms the
+    /// slope first and multiplies second, as Java does; folding it into one
+    /// multiply-then-divide expression moves the last ulp.
     #[must_use]
     pub fn y_at_x_ext(&self, x: f64) -> f64 {
         let start = self.first_point();
@@ -418,10 +426,11 @@ impl StaffBoundary {
             if dx == 0.0 {
                 start.1
             } else {
-                start.1 + ((stop.1 - start.1) * (x - start.0) / dx)
+                let slope = (stop.1 - start.1) / dx;
+                start.1 + (slope * (x - start.0))
             }
         } else {
-            self.y_at_x(x).unwrap_or(start.1)
+            self.geopath_y_at_x(x).unwrap_or(start.1)
         }
     }
 
