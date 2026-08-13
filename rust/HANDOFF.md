@@ -4128,6 +4128,22 @@ are decided, surface them plus creation order on `NativeBeamRecognition`, then a
 ordinals 43-110 and the 102 edges. Group sizes on chula system 1, for the test:
 [1x9, 2, 3x5, 4x3, 5x2] summing 48.
 
+**Slice 3 edge rules PROVEN, order rule open (2026-08-13).** The two derivation rules
+verify against Java's graph exactly: `Exclusion` = same-item hook-then-beam adjacency
+(Java's OVERLAP exclusion for two readings of one item), and `BeamBeamRelation` = **all
+within-group pairs minus pairs holding an exclusion** -- measured 54 group pairs, 10
+excluded, exactly Java's 44 (BeamGroupInter.addMember supports the new member against
+every existing member; the SIG declines support where an exclusion exists). Containment is
+`group_memberships` verbatim. **What failed:** creation order.
+`beams_after_multiple_rests` + `hooks` gives 48 members with the right trailing
+probed-hook run, but the browse prefix is `BBBHBHBBBH...` where Java's SIG order is
+`HBHBHBHBHB...` -- Java registers hook-then-beam per item during browsing, the port's
+raw_beams order groups differently (extension reordering? per-line batching in
+beam_recognizer?). The WIP test `beams_products_derive_javas_beam_ordinals` is `#[ignore]`
+with both sequences printed on failure; fixing the order (or surfacing a
+registration-order record) un-ignores it and the edge assertions inside are already
+correct.
+
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
 Edges, all internal: 48 Containment (each group contains its members: 31 beams, 17 hooks),
