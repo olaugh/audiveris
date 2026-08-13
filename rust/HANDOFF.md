@@ -4097,6 +4097,20 @@ be verified in isolation. (STEMS is exactly the stage that introduces the first 
 edges -- beam-stem, head-stem -- which is also why it needs the whole graph.) GridSig's
 system-1 edge count is already 34, matching Java's GRID subgraph exactly.
 
+**Slice 3 scouting (2026-08-13):** the SIG-shaped record already exists inside
+`beams_step.rs`: `NeutralBeamSystem` carries `inters: Vec<NeutralBeamInter>` in SIG source
+order (ids + kinds Beam/SmallBeam/BeamHook/MultipleRest/VerticalSerif) **and**
+`relations: Vec<NeutralBeamRelation>` plus `beam_group_ids` -- i.e. exactly the
+creation-order interleave and the edge record the slice needs, maintained by deltas as the
+step runs (hooks probe TOP then BOTTOM per beam in SIG source order, beams_step.rs:933).
+`NativeBeamRecognition` does NOT surface it -- it exposes separate beams/hooks lists and
+group index sets. Before wiring anything, answer: is `beams_step` the production path of
+`recognize_native_beams`, or a differential harness around a `visual` (Java-fed) twin? The
+`self.visual.build_hooks(...)` shape suggests the latter. If it is a harness, slice 3 means
+surfacing the *native* half's final NeutralBeamSystem; if production already runs it, slice
+3 is another PeakGraphReport-style plumbing job. Same lesson as slices 1 and 1b either way:
+the machinery exists, only the surfacing is missing.
+
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
 Edges, all internal: 48 Containment (each group contains its members: 31 beams, 17 hooks),
