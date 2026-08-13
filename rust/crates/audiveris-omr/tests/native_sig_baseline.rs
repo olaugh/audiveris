@@ -45,9 +45,8 @@ fn java_vertices() -> Vec<(usize, String, String)> {
         let bounds = row
             .split(":bounds=")
             .nth(1)
-            .and_then(|tail| tail.split(':').next())
-            .unwrap_or("-")
-            .to_owned();
+            .map(|tail| tail.split(':').take(4).collect::<Vec<_>>().join(":"))
+            .unwrap_or_else(|| "-".to_owned());
         out.push((ordinal, class, bounds));
     }
     out
@@ -345,8 +344,6 @@ fn headers_products_derive_javas_header_ordinals() {
 ///     already holding an exclusion. Measured on chula system 1: 54 group pairs, 10 of
 ///     them excluded, exactly the 44 relations Java's SIG carries.
 #[test]
-#[ignore = "the edge rules verify, but raw_beams is not Java's registration order -- see \
-            HANDOFF slice 3: port browse starts BBBH where Java alternates HBHBHB"]
 fn beams_products_derive_javas_beam_ordinals() {
     let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
         .expect("GRID recognition");
@@ -508,5 +505,59 @@ fn beams_products_derive_javas_beam_ordinals() {
         group_count,
         exclusions.len(),
         beam_beam.len()
+    );
+}
+
+/// Slice 4: LEDGERS' contribution, against Java's ordinals 111-118.
+///
+/// Eight vertices, zero edges -- but the bounds are not glyph bounds. `LedgerInter`
+/// computes its bounds from `AreaUtil.horizontalParallelogram(median, thickness)`
+/// (`computeArea`, LedgerInter.java:235), so the SIG carries parallelogram geometry and
+/// only coincides with the glyph where the ink exactly fills it -- 4 of chula's 8 do,
+/// which is what exposed the difference. The port's materialized inters carry the same
+/// median and thickness, so Java's integer bounds follow from `Rectangle2D.getBounds()`
+/// semantics: floor the min corner, ceil the max.
+///
+/// The order is *not* by abscissa -- Java creates ledgers per staff, per line index --
+/// so this asserts the port's list order, not a sorted comparison.
+#[test]
+fn ledgers_products_derive_javas_ledger_ordinals() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+
+    let java: Vec<String> = java_vertices()
+        .into_iter()
+        .filter(|(_, class, _)| class == "LedgerInter")
+        .map(|(_, _, bounds)| bounds)
+        .collect();
+
+    let derived: Vec<String> = ledgers
+        .materializer
+        .inters()
+        .iter()
+        .filter(|inter| inter.system_id == 1 && !inter.removed)
+        .map(|inter| {
+            let ((x1, y1), (x2, y2)) = inter.median;
+            let half = inter.thickness / 2.0;
+            let min_x = x1.min(x2).floor() as i64;
+            let min_y = (y1.min(y2) - half).floor() as i64;
+            let max_x = x1.max(x2).ceil() as i64;
+            let max_y = (y1.max(y2) + half).ceil() as i64;
+            format!("{min_x}:{min_y}:{}:{}", max_x - min_x, max_y - min_y)
+        })
+        .collect();
+    assert_eq!(
+        derived, java,
+        "parallelogram bounds over the materialized medians should be Java's ledger vertices"
+    );
+    println!(
+        "slice 4: {} ledgers derive exactly, zero edges",
+        derived.len()
     );
 }

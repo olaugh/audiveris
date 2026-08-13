@@ -794,7 +794,12 @@ fn recognize_native_beams_impl(
     // same closed buffer more strictly for BEAMS.
     let head_spot_runs = spot_runs(&chain.closed, width, height, HEAD_BINARIZATION_THRESHOLD)?;
     let table = spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD)?;
-    let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+    let mut components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+    // Java browses each system's beam spots in `Glyphs.byFullOrdinate` order -- top,
+    // then left (BeamsBuilder.buildBeams sorts exactly this way despite its comment
+    // saying abscissa). The SIG's beam insertion order, which STEMS later relies on,
+    // is downstream of this sort; component-extraction order is not it.
+    components.sort_by_key(|component| (component.top, component.left));
 
     // In Java this happens inside `SpotsBuilder.buildSpots`, before the same
     // glyphs are dispatched to systems and interpreted as beams. The switches

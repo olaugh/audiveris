@@ -4128,21 +4128,22 @@ are decided, surface them plus creation order on `NativeBeamRecognition`, then a
 ordinals 43-110 and the 102 edges. Group sizes on chula system 1, for the test:
 [1x9, 2, 3x5, 4x3, 5x2] summing 48.
 
-**Slice 3 edge rules PROVEN, order rule open (2026-08-13).** The two derivation rules
-verify against Java's graph exactly: `Exclusion` = same-item hook-then-beam adjacency
-(Java's OVERLAP exclusion for two readings of one item), and `BeamBeamRelation` = **all
-within-group pairs minus pairs holding an exclusion** -- measured 54 group pairs, 10
-excluded, exactly Java's 44 (BeamGroupInter.addMember supports the new member against
-every existing member; the SIG declines support where an exclusion exists). Containment is
-`group_memberships` verbatim. **What failed:** creation order.
-`beams_after_multiple_rests` + `hooks` gives 48 members with the right trailing
-probed-hook run, but the browse prefix is `BBBHBHBBBH...` where Java's SIG order is
-`HBHBHBHBHB...` -- Java registers hook-then-beam per item during browsing, the port's
-raw_beams order groups differently (extension reordering? per-line batching in
-beam_recognizer?). The WIP test `beams_products_derive_javas_beam_ordinals` is `#[ignore]`
-with both sequences printed on failure; fixing the order (or surfacing a
-registration-order record) un-ignores it and the edge assertions inside are already
-correct.
+**Slices 3 and 4 DONE (2026-08-13).** BEAMS: the order divergence was component iteration
+-- Java sorts each system's beam spots by `Glyphs.byFullOrdinate` (top, then left; its
+comment says abscissa, the code wins) while the port browsed components in extraction
+order. One sort where `build_glyph_components` returns
+(`components.sort_by_key(|c| (c.top, c.left))`, recognize.rs) makes browse order Java's
+registration order; the full workspace suite passed on it unchanged. With that, all of
+BEAMS derives exactly: 48 members in insertion order, 20 groups, Exclusion = same-item
+hook-then-beam adjacency (10), BeamBeamRelation = all within-group pairs minus excluded
+pairs (54-10=44). LEDGERS: the port's final glyph bounds are NOT the SIG bounds --
+`LedgerInter.computeArea` (Java :235) sets bounds from
+`AreaUtil.horizontalParallelogram(median, thickness)`, so only ink that fills the
+parallelogram coincides (4 of chula's 8). The materialized inters carry median+thickness;
+applying `Rectangle2D.getBounds()` semantics (floor min, ceil max) reproduces Java's 8
+ledger vertices exactly, in creation order (per staff, per line index -- not abscissa).
+Remaining: slice 5, HEADS -- 102 vertices (55 NOTEHEAD_VOID, 47 NOTEHEAD_BLACK), 58
+head-head Exclusion edges, nothing else.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
