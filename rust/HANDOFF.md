@@ -4111,6 +4111,23 @@ surfacing the *native* half's final NeutralBeamSystem; if production already run
 3 is another PeakGraphReport-style plumbing job. Same lesson as slices 1 and 1b either way:
 the machinery exists, only the surfacing is missing.
 
+**Slice 3, measured to the rule level (2026-08-13).** `beams_step`'s `VisualBeams` seam has
+only a test `FakeVisual` implementor, so it is a lifecycle skeleton, not the production
+path; production is the direct path in `recognize.rs` (`recognize_native_beams`). Creation
+order is already surfaced there: per system, `raw_beams` (browse+extend order -- the
+`HBHB...` interleave, where each browse spot can yield a hook and a beam) followed by
+`hooks` (the per-beam TOP/BOTTOM probe pass -- the trailing `HHHHHHH` run at ordinals
+84-90). Groups are `group_memberships`. What is NOT surfaced, and not derivable from the
+surfaced products: **(a)** the 10 `Exclusion` edges pair adjacent ordinals ((43,44),
+(45,46)...) -- hook-vs-beam alternative readings of the same spot, decided at browse time;
+**(b)** the 44 `BeamBeamRelation` edges are all within-group but are neither all pairs
+(54) nor consecutive members (18) -- they are Java's geometric neighbour checks inside
+`BeamGroupInter` construction. Both decisions are made inside the port's browse and
+grouping code and discarded. Slice 3 is therefore: record those two pair sets where they
+are decided, surface them plus creation order on `NativeBeamRecognition`, then assert
+ordinals 43-110 and the 102 edges. Group sizes on chula system 1, for the test:
+[1x9, 2, 3x5, 4x3, 5x2] summing 48.
+
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
 Edges, all internal: 48 Containment (each group contains its members: 31 beams, 17 hooks),
