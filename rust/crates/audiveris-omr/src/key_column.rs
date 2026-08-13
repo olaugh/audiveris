@@ -39,7 +39,8 @@ pub enum NeutralKeyAlterShape {
     Sharp,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+// No `Copy`: the retained glyph raster owns its runs.
+#[derive(Clone, Debug, PartialEq)]
 pub struct KeyAlterClassifierProposal {
     pub id: usize,
     pub start: i32,
@@ -50,6 +51,12 @@ pub struct KeyAlterClassifierProposal {
     /// -- `computePitchedGrades` scales this, so the ratio must already be in.
     pub inter_grade: f64,
     pub measured_pitch: f64,
+    /// The glyph the classifier actually saw, positioned at `bounds`. Retained
+    /// for the same reason a final ledger keeps its raster: the classifier
+    /// evaluation is the one term behind a key alter's grade that cannot be
+    /// re-derived from the published products, and comparing it against Java
+    /// needs the exact input, not a reconstruction.
+    pub raster: RunTable,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,6 +235,7 @@ fn lifecycle_key_candidate(
             alter_id: Some(alter.id),
             alter_bounds: Some(alter.bounds),
             alter_grade: best_pitched.get(index).copied(),
+            alter_raster: Some(alter.raster.clone()),
         })
         .collect::<Vec<_>>();
     let intrinsic = best_pitched.iter().sum::<f64>() / best_pitched.len() as f64;
@@ -339,6 +347,9 @@ pub struct NeutralKeySlice {
     /// per slice is what lets a `KeyAlterInter` carry its own SIG grade instead
     /// of only contributing to the key's.
     pub alter_grade: Option<f64>,
+    /// The exact glyph the classifier evaluated, positioned at `alter_bounds`.
+    /// See [`KeyAlterClassifierProposal::raster`].
+    pub alter_raster: Option<RunTable>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2163,6 +2174,7 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                     // selection keeps both halves faithful.
                     inter_grade: grade * parameters.intrinsic_ratio,
                     measured_pitch: slice.pitch.expect("assigned with its glyph"),
+                    raster: glyph.raster.clone(),
                 });
             }
             if alters.is_empty() {
@@ -2739,6 +2751,7 @@ mod tests {
                     alter_id: Some(id + index + 1),
                     alter_bounds: Some(bounds(x, 5)),
                     alter_grade: Some(grade),
+                    alter_raster: None,
                 }
             })
             .collect::<Vec<_>>();
@@ -2964,6 +2977,7 @@ mod tests {
                     bounds: bounds(15 + index as i32 * 8, 5),
                     inter_grade: 0.8,
                     measured_pitch: *pitch,
+                    raster: RunTable::new(Orientation::Vertical, 5, 5).expect("5x5"),
                 })
                 .collect(),
         }

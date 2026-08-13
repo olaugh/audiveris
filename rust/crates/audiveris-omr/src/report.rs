@@ -2008,6 +2008,7 @@ pub(crate) mod tests {
                     alter_id: Some(111),
                     alter_bounds: Some(bounds),
                     alter_grade: Some(0.6),
+                    alter_raster: None,
                 }],
                 in_sig: true,
                 staff_id: Some(3),

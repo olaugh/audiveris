@@ -1244,3 +1244,108 @@ fn key_alter_measured_pitch_against_java() {
         );
     }
 }
+
+/// Exploratory: are the key alters' classifier *inputs* bit-identical to Java?
+///
+/// The pitch chain is exact on all four chula system-1 alters, and staff 2's
+/// grades are exact while staff 1's drift 2-3 ulp, so the residue is the
+/// classifier. It has exactly two candidate sources: the feature vector and the
+/// sigmoid's `exp`. This compares the features against Java's, frozen in
+/// `oracle/key-alter-pitch.txt` from `:app:keyAlterPitchProbe`. If they match,
+/// the arithmetic is implicated -- and see HANDOFF before assuming fdlibm for
+/// `Math.exp`, which HotSpot intrinsifies.
+#[test]
+#[ignore = "exploratory print"]
+fn key_alter_features_against_java() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+
+    let text = std::fs::read_to_string(repo_root().join("rust/oracle/key-alter-pitch.txt"))
+        .expect("key alter oracle");
+    let mut java: std::collections::BTreeMap<String, Vec<u64>> = std::collections::BTreeMap::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("keyalterfeatures ") else {
+            continue;
+        };
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        let staff = fields[1];
+        let bounds = fields[3];
+        let start = fields
+            .iter()
+            .position(|f| *f == "features")
+            .expect("features")
+            + 1;
+        let bits = fields[start..]
+            .iter()
+            .map(|hex| u64::from_str_radix(hex, 16).expect("hex"))
+            .collect();
+        java.insert(format!("{staff}:{bounds}"), bits);
+    }
+    assert_eq!(java.len(), 12, "chula has 12 key alters in the oracle");
+
+    let mut compared = 0;
+    for system in &headers.systems {
+        for staff in &system.staffs {
+            let Some(key) = staff.selected_key_id else {
+                continue;
+            };
+            let Some(candidate) = staff.key_candidates.iter().find(|c| c.id == key) else {
+                continue;
+            };
+            for slice in &candidate.slices {
+                let (Some(bounds), Some(raster)) =
+                    (slice.alter_bounds, slice.alter_raster.as_ref())
+                else {
+                    continue;
+                };
+                let name = format!("{}:{}:{}", staff.staff_id, bounds.x, bounds.y);
+                let Some(want) = java.get(&name) else {
+                    println!("   no Java row for {name}");
+                    continue;
+                };
+                let features = audiveris_classifier::mix_glyph_features_from_run_table(
+                    raster,
+                    (bounds.x, bounds.y),
+                    staff.specific_interline,
+                )
+                .expect("features");
+                let diffs: Vec<String> = features
+                    .iter()
+                    .zip(want)
+                    .enumerate()
+                    .filter(|(_, (have, want))| have.to_bits() != **want)
+                    .map(|(index, (have, want))| {
+                        format!(
+                            "[{index}] {:016x} vs {want:016x} ulp {:+}",
+                            have.to_bits(),
+                            (have.to_bits() as i64) - (*want as i64)
+                        )
+                    })
+                    .collect();
+                compared += 1;
+                if diffs.is_empty() {
+                    println!("alter {name}: all {} features bit-exact", features.len());
+                } else {
+                    println!(
+                        "alter {name}: {} of {} features differ",
+                        diffs.len(),
+                        features.len()
+                    );
+                    let indices: Vec<usize> = features
+                        .iter()
+                        .zip(want)
+                        .enumerate()
+                        .filter(|(_, (have, want))| have.to_bits() != **want)
+                        .map(|(index, _)| index)
+                        .collect();
+                    println!("      differing indices: {indices:?}");
+                    for diff in diffs.iter().take(3) {
+                        println!("      {diff}");
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared} alters against Java");
+}

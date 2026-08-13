@@ -4309,15 +4309,39 @@ evidence about this path. The next step is a probe on the evaluation itself -- p
 Java's raw `Evaluation.grade` for those two glyphs and compare against the port's
 classifier -- rather than any further work in the key code, which is now exhausted.
 
-Java's side of that comparison is already frozen: **`oracle/key-alter-pitch.txt`** holds all
-12 alters' grade, measured pitch, ordinates and reference points, *and* each one's full
-110-input `MixGlyphDescriptor` feature vector, as raw bits. So the next slice needs no
-Gradle run -- it needs the port's key glyph rasters reachable from a test, which today they
-are not: `NeutralKeySlice` carries bounds but no raster, and the alter proposals stay inside
-`key_column`'s recognizer. Exposing that evidence is the work; the comparison itself is then
-a pure-Rust diff against the frozen file.
+Java's side of that comparison is frozen in **`oracle/key-alter-pitch.txt`**: all 12 alters'
+grade, measured pitch, ordinates and reference points, *and* each one's full 110-input
+`MixGlyphDescriptor` feature vector, as raw bits. No Gradle run is needed to repeat it.
 
-**Where to look, and one trap to avoid.** `NeuralNetwork.forward` (`math/NeuralNetwork.java:287`)
+**MEASURED, and it is the ART moments -- not `exp` (2026-08-13).** That comparison has now
+been run, and it answers the question the paragraph below poses. `NeutralKeySlice` retains
+`alter_raster`, the exact glyph the classifier evaluated (the same reason a final ledger
+keeps its raster), and `key_alter_features_against_java` diffs the port's
+`mix_glyph_features_from_run_table` against the frozen Java vectors:
+
+- **77 to 90 of the 110 features differ, by 1 to 5 ulp, on all four chula system-1 alters
+  -- including staff 2's, whose final grades are bit-exact.**
+- Every differing index is **<= 98**. With `ARTMoments.ANGULAR = 20` and `RADIAL = 5`,
+  `artCount = 99`, so indices 0-98 are the ART moments, 99-108 the ten geometric moments,
+  and 109 the aspect. **The geometric moments and the aspect are bit-exact every time; only
+  the ART moments drift.**
+
+So the root cause is the **ART moment computation**, and the sigmoid is exonerated: features
+differ on all four alters while only two final grades do, which is exactly what a sigmoid
+does to a 1-ulp input perturbation -- usually it rounds away, occasionally it does not. That
+also explains why clefs and staff 2 look clean: they are not evidence of correct features,
+only of perturbations that happened to vanish.
+
+This reframes the fix. Correcting the ART moments should make all four grades exact at once,
+and it may move staff 2's currently-exact grades through an intermediate state -- that is
+expected, not a regression, provided the endpoint is Java's features exactly. ART moments are
+built from angular and radial basis terms, so the likely divergence is transcendental
+(`cos`/`sin`) or accumulation order in the moment sum; compare
+`audiveris-image`'s ART implementation against `moments/ARTMoments.java` op by op, the same
+way `LineInfo.yAt` was compared, before reaching for any libm hypothesis.
+
+**Where to look, and one trap to avoid** (kept because it still applies if the ART moments
+turn out exact and the arithmetic is implicated after all): `NeuralNetwork.forward` (`math/NeuralNetwork.java:287`)
 ends each unit in `sigmoid`, which is `1.0d / (1.0d + Math.exp(-val))`
 (`NeuralNetwork.java:558`). `audiveris-classifier`'s `forward` mirrors it exactly, including
 the reverse-index accumulation Java uses, and ends in `1.0 / (1.0 + (-sum).exp())`. So the
