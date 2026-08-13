@@ -4151,6 +4151,22 @@ indices -- the purge resolves `ordered_indices[position]` back before recording 
 input ordinals, and mapping them through `input_ordinal` scatters the pairs. 102 heads and
 58 exclusions match exactly on chula system 1.
 
+**The token gate (capstone) is scoped and skeletoned.** The full structural token is
+`class:shape=..:grade=hex(grade):bounds=x:y:w:h:removed=..:abnormal=..:manual=..:
+implicit=..:profile=..`, plus `:median=hex(x1):hex(y1):hex(x2):hex(y2):height=hex(h)` for
+beams/hooks (probe `interStructuralToken`); `hex` is Java `Double.toHexString + "/" +
+bits` and the port already has `java_hex_double` (private copies in several files -- reuse
+one). Confirmed from the snapshot inventory: flags removed/manual/implicit always false at
+this baseline, profile always 0, **abnormal=true exactly for beams, hooks and heads** (no
+stem yet); BeamGroupInter shape=null grade=1.0 bounds=union of members; BraceInter
+grade=0.8 (intrinsicRatio); KeyInter shape=null bounds=union of its alters. Still to wire:
+bit-exact grades for barlines/connectors (GridSig `intrinsic_grade`), brace (constant),
+clef/key/alter/time (candidate `grade` fields -- verify bit-equality), beams (RawBeam
+`grade` + median/height hexfloats), ledgers (MaterializedLedgerInter `grade`), heads
+(`grade_bits`, already bit-exact). `assembled_tokens_rebuild_javas_vertex_hash` in
+native_sig_baseline.rs is the #[ignore]d skeleton to converge; vertexHash = sha256 over
+`ordinal:token` rows newline-terminated, per GraphOrder.
+
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to
 make it a *product* rather than five proofs: an assembled per-system SIG type that

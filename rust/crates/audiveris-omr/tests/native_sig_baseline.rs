@@ -727,3 +727,37 @@ fn heads_products_derive_javas_head_ordinals() {
         derived_exclusions.len()
     );
 }
+
+/// The capstone gate, being converged: rebuild Java's ordered vertex hash.
+///
+/// The five slices prove class, order, bounds and edge structure. This renders each
+/// vertex's full structural token -- `class:shape=..:grade=<javahex>/<bits>:bounds=..:
+/// removed=..:abnormal=..:manual=..:implicit=..:profile=..` plus `median`/`height` for
+/// beams -- and requires byte-identity with the snapshot rows, which is what makes the
+/// assembled SIG a *product* rather than five proofs. Ignored until every field source is
+/// confirmed; run with --ignored to see the first divergence.
+///
+/// Field sources confirmed so far, from the snapshot inventory:
+///   * flags: removed/manual/implicit always false at this baseline, profile always 0,
+///     abnormal true exactly for beams, hooks and heads (no stem yet);
+///   * BeamGroupInter: shape=null, grade exactly 1.0, bounds = union of member bounds;
+///   * BraceInter: grade = Grades.intrinsicRatio * 1 = 0.8;
+///   * KeyInter: shape=null, bounds = union of its alters' bounds.
+#[test]
+#[ignore = "token gate under convergence -- grades for GRID/HEADERS classes not yet wired"]
+fn assembled_tokens_rebuild_javas_vertex_hash() {
+    let text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sig-snapshot-chula-system1.txt"),
+    )
+    .expect("frozen SIG snapshot");
+    let java_rows: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamsigsnapshotvertex "))
+        .map(|line| line.split(" row ").nth(1).expect("row").trim())
+        .collect();
+    assert_eq!(java_rows.len(), 221);
+    // Assembly rendering to be filled in as each class's grade source is confirmed;
+    // compare rendered[i] against java_rows[i] and panic with the first field diff.
+    // vertexHash = sha256 over "ordinal:token\n" rows, matching GraphOrder.
+    println!("gate skeleton: {} Java rows parsed", java_rows.len());
+}
