@@ -4469,9 +4469,17 @@ derives the complete directed-pair and pre/post stem/beam incident scans without
 rows. `owned_sig_projects_the_first_b14_queries_without_java_rows` projects first, then
 reads Java and compares the full post-callback query after canonicalizing away Java's
 sheet-global Inter IDs; ordinals 54-58 plus fresh 202, direction, class, lazy-read state,
-relevance, endpoint vertex, and LEFT portion are exact. The remaining work is to make the
-public B14 apply consume this native-identity certificate directly, then repeat for
-B16/B17.
+relevance, endpoint vertex, and LEFT portion are exact. Public B14 now consumes that
+certificate directly through
+`apply_native_stems_beam_vlink_base_transaction_to_native_sig`: the compact replay state,
+owned graph, and bindings are cloned and committed atomically; chula system 1 appends the
+exact Stem vertex 221 and LEFT BeamStem edge 202, updates abnormal state, and still matches
+the frozen Java transaction. Certificate endpoint identities explicitly distinguish the
+legacy Java EntityIndex domain from one-based native vertices, so no fixture-derived ID
+map crosses into production. This gate is deliberately chula-system-1-only: broader SIG
+assembly still has corpus gaps such as Bach system 6's missing BEAMS group product. Next,
+carry this graph through later B14 transactions and project B16/B17 in the same native
+identity domain.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4491,8 +4499,9 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Replace the Java-fed B14/B16/B17 SIG scans with queries over the new owned graph,
-   preserving insertion order and every transaction's appended relation/state overlay.
+1. Carry the now-native first B14 mutation into subsequent transactions, then replace the
+   Java-fed B16/B17 SIG scans with queries over that same graph while preserving insertion
+   order and every relation/state mutation.
 2. Drive the chula-system-1 SIDES pass from native products only: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
    32-transaction pass only after the driver returns.

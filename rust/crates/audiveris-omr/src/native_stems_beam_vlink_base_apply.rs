@@ -14,8 +14,9 @@ use std::{error::Error, fmt};
 
 use crate::{
     native_sig::{
-        NativeSigEdge, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
-        NativeSigSystemBindings, NativeSigVertexId,
+        NativeSigBounds, NativeSigEdge, NativeSigInterKind, NativeSigRelationKind,
+        NativeSigSupport, NativeSigSystem, NativeSigSystemBindings, NativeSigVertex,
+        NativeSigVertexId,
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_scheduler::{NativeStemsBeamPlanRef, NativeStemsBeamSchedulerSystem},
@@ -86,7 +87,8 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
     }
 
     let fresh = NativeStemsBeamRelationObjectIdentity::FreshDraft(plan.plan_ordinal);
-    let beam_before = project_native_beam_incident(sig, beam_vertex, hook, None, draft)?;
+    let beam_before =
+        project_native_beam_incident(sig, beam_vertex, stem_vertex, hook, None, draft)?;
     let stem_before = match stem_vertex {
         None => NativeStemsBeamStemIncidentScan {
             state: NativeStemsBeamStemIncidentScanState::MissingVertex,
@@ -168,6 +170,7 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
         project_native_beam_incident(
             sig,
             beam_vertex,
+            Some(effective_stem),
             hook,
             Some((edge, effective_stem, fresh)),
             draft,
@@ -185,6 +188,7 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
         system_id: sig.system_id,
         headless: true,
         listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+        endpoint_identity: NativeStemsBeamCertificateEndpointIdentity::NativeVertexOneBased,
         directed_pair_scan: NativeStemsBeamDirectedPairScan {
             source_outgoing_scanned: outgoing.len(),
             source_outgoing_provenance: NativeStemsBeamQueryProvenance::ExhaustiveSha256(
@@ -497,6 +501,19 @@ pub enum NativeStemsBeamSigListenerTopology {
     SoleStandardSigListener,
 }
 
+/// Identity domain used for opposite endpoints in the exhaustive SIG query
+/// rows carried by a base-apply certificate.
+///
+/// Frozen Java oracle rows use persistent `Inter` IDs. Certificates projected
+/// from the port-owned SIG instead use the stable, one-based native vertex ID;
+/// this keeps production projection independent of a fixture-derived
+/// Java-ID map while preserving the existing oracle corpus verbatim.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeStemsBeamCertificateEndpointIdentity {
+    JavaPersistentInterId,
+    NativeVertexOneBased,
+}
+
 /// One-shot evidence for every live read made by `SIGraph.addVertex`,
 /// `Link.applyTo`, and the synchronous `BeamStemRelation.added` callback.
 #[derive(Clone, Debug, PartialEq)]
@@ -504,6 +521,7 @@ pub struct NativeStemsBeamVLinkBaseApplyCertificate {
     pub system_id: usize,
     pub headless: bool,
     pub listener_topology: NativeStemsBeamSigListenerTopology,
+    pub endpoint_identity: NativeStemsBeamCertificateEndpointIdentity,
     /// Directed `beam -> stem` `getAllEdges` order used by duplicate lookup.
     pub directed_pair_scan: NativeStemsBeamDirectedPairScan,
     /// Post-edge `edgesOf(stem)` callback order, or explicit not-read state.
@@ -766,6 +784,185 @@ pub fn apply_native_stems_beam_vlink_base_transaction(
     Ok(commit(prepared, state))
 }
 
+/// Project and apply B14 against the mutable port-owned SIG.
+///
+/// The graph and compact boundary state are cloned and committed together, so
+/// any projection, predecessor, validation, or graph-mutation failure leaves
+/// all caller-owned state unchanged. Java persistent IDs remain part of the
+/// compact replay state, but are never imported into the native graph query
+/// certificate.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    stump_system: &NativeStemsBeamStumpSystem,
+    vlinker_system: &NativeStemsBeamVLinkerSystem,
+    create_transaction: &NativeStemsBeamVLinkTransaction,
+    reuse_live_state: &NativeStemsBeamVLinkReuseLiveState,
+    relation_parameters: NativeStemsBeamRelationParameters,
+    reuse_check: &NativeStemsBeamVLinkReuseCheck,
+    state: &mut NativeStemsBeamVLinkBaseApplyState,
+    sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+) -> Result<NativeStemsBeamVLinkBaseApplyTransaction, NativeStemsBeamVLinkBaseApplyError> {
+    let NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { relation } =
+        &reuse_check.outcome
+    else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady);
+    };
+    let stem = reuse_check
+        .final_stem
+        .as_ref()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady)?;
+    if sig.system_id != state.sig.system_id
+        || bindings.system_id != sig.system_id
+        || sig.vertices.len() != state.sig.baseline_vertex_count
+        || sig.edges.len() != state.sig.baseline_relation_count
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG base-apply baseline join",
+        });
+    }
+    let stem_vertex = bindings.stem_vertices.get(&stem.stem_identity).copied();
+    if stem_vertex.map(|vertex| vertex.0) != state.sig.stem.sig_vertex_identity {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG stem binding join",
+        });
+    }
+
+    let certificate = project_native_stems_beam_vlink_base_apply_certificate(
+        sig,
+        bindings,
+        relation.beam,
+        stem_vertex,
+        relation,
+        reuse_check.plan,
+    )?;
+    let mut next_state = state.clone();
+    next_state.certificate = Some(certificate);
+    let mut next_sig = sig.clone();
+    let mut next_bindings = bindings.clone();
+    let transaction = apply_native_stems_beam_vlink_base_transaction(
+        scheduler_system,
+        plan_system,
+        stump_system,
+        vlinker_system,
+        create_transaction,
+        reuse_live_state,
+        relation_parameters,
+        reuse_check,
+        &mut next_state,
+    )?;
+
+    let effective_stem_vertex = match transaction.vertex_action {
+        NativeStemsBeamVLinkVertexAction::RegisteredAndAdded {
+            sig_vertex_identity,
+            ..
+        } => {
+            let bounds = &transaction.stem_after.geometry.ribbon_bounds;
+            let grade = match &transaction.stem_after.grade {
+                crate::native_stems_beam_vlink_transaction::NativeStemsBeamStemGrade::Checked(
+                    check,
+                ) => check.grade,
+                crate::native_stems_beam_vlink_transaction::NativeStemsBeamStemGrade::Artificial(
+                    grade,
+                ) => *grade,
+            };
+            let vertex = NativeSigVertexId(sig_vertex_identity);
+            next_sig
+                .append_vertex(NativeSigVertex {
+                    ordinal: vertex.0,
+                    active: true,
+                    removed: false,
+                    kind: NativeSigInterKind::Stem,
+                    shape: Some("STEM".to_owned()),
+                    grade,
+                    bounds: NativeSigBounds {
+                        x: bounds.x,
+                        y: bounds.y,
+                        width: bounds.width,
+                        height: bounds.height,
+                    },
+                    abnormal: transaction.stem_after.abnormal,
+                    beam_geometry: None,
+                })
+                .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native SIG stem append",
+                })?;
+            next_bindings
+                .bind_stem(transaction.stem_after.stem_identity, vertex)
+                .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native SIG stem binding append",
+                })?;
+            vertex
+        }
+        NativeStemsBeamVLinkVertexAction::SkippedPositiveInterId => {
+            stem_vertex.ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG existing stem binding",
+            })?
+        }
+    };
+
+    if let NativeStemsBeamVLinkBaseApplyDisposition::Added {
+        graph_relation_identity,
+    } = transaction.apply_disposition
+    {
+        let beam_vertex = *next_bindings.beam_vertices.get(&relation.beam).ok_or(
+            NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG committed beam binding",
+            },
+        )?;
+        next_sig
+            .append_edge(NativeSigEdge {
+                ordinal: graph_relation_identity,
+                active: true,
+                source: beam_vertex.0,
+                target: effective_stem_vertex.0,
+                kind: NativeSigRelationKind::BeamStem,
+                support: Some(NativeSigSupport {
+                    grade: transaction.fresh_relation.grade,
+                    bar_connection_impacts: None,
+                }),
+                beam_portion: Some(transaction.fresh_relation.beam_portion),
+            })
+            .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG BeamStem append",
+            })?;
+    }
+    let beam_vertex = *next_bindings.beam_vertices.get(&relation.beam).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG committed beam binding",
+        },
+    )?;
+    let beam_abnormal_after = match transaction.callback.beam_abnormal {
+        NativeStemsBeamVLinkBeamAbnormalTrace::NotReadSuppressed => None,
+        NativeStemsBeamVLinkBeamAbnormalTrace::HookAnyBeamStem { after, .. }
+        | NativeStemsBeamVLinkBeamAbnormalTrace::RawBeamSides { after, .. } => Some(after),
+    };
+    if let Some(abnormal) = beam_abnormal_after {
+        next_sig.set_abnormal(beam_vertex, abnormal).map_err(|_| {
+            NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native SIG beam abnormal update",
+            }
+        })?;
+    }
+    next_sig
+        .set_abnormal(effective_stem_vertex, transaction.stem_after.abnormal)
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG stem abnormal update",
+        })?;
+    next_sig.validate_integrity().map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG committed integrity",
+        }
+    })?;
+
+    *state = next_state;
+    *sig = next_sig;
+    *bindings = next_bindings;
+    Ok(transaction)
+}
+
 #[derive(Clone)]
 struct PreparedCommit {
     key: NativeStemsBeamVLinkBaseApplyKey,
@@ -924,19 +1121,28 @@ fn prepare_commit(
         }
     };
 
+    let certificate_beam_inter_id = certificate_endpoint_id(
+        certificate,
+        state.sig.beam.sig_vertex_identity,
+        state.sig.beam.inter_id,
+        "beam certificate endpoint identity",
+    )?;
+    let certificate_stem_inter_id = certificate_endpoint_id(
+        certificate,
+        state.sig.stem.sig_vertex_identity.or(vertex_identity),
+        stem.inter_id
+            .or(vertex_inter_id)
+            .expect("stem ID was resolved"),
+        "stem certificate endpoint identity",
+    )?;
+
     let pair = &certificate.directed_pair_scan.relations;
     if stem.inter_id.is_none() && !pair.is_empty() {
         return Err(NativeStemsBeamVLinkBaseApplyError::InvalidEvidence {
             phase: "ID-zero pre-edge relation evidence",
         });
     }
-    validate_directed_pair_query(
-        state,
-        certificate,
-        stem.inter_id
-            .or(vertex_inter_id)
-            .expect("stem ID was resolved"),
-    )?;
+    validate_directed_pair_query(state, certificate, certificate_stem_inter_id)?;
 
     let first_beam_stem = pair
         .iter()
@@ -989,10 +1195,8 @@ fn prepare_commit(
         certificate,
         relation,
         graph_relation_identity,
-        state.sig.beam.inter_id,
-        stem.inter_id
-            .or(vertex_inter_id)
-            .expect("stem ID was resolved"),
+        certificate_beam_inter_id,
+        certificate_stem_inter_id,
     )?;
     validate_zero_chord_envelope(certificate)?;
 
@@ -1453,6 +1657,24 @@ fn validate_directed_pair_query(
     Ok(())
 }
 
+fn certificate_endpoint_id(
+    certificate: &NativeStemsBeamVLinkBaseApplyCertificate,
+    vertex_ordinal: Option<usize>,
+    java_inter_id: i32,
+    phase: &'static str,
+) -> Result<i32, NativeStemsBeamVLinkBaseApplyError> {
+    match certificate.endpoint_identity {
+        NativeStemsBeamCertificateEndpointIdentity::JavaPersistentInterId => (java_inter_id > 0)
+            .then_some(java_inter_id)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState { phase }),
+        NativeStemsBeamCertificateEndpointIdentity::NativeVertexOneBased => vertex_ordinal
+            .and_then(|ordinal| ordinal.checked_add(1))
+            .and_then(|identity| i32::try_from(identity).ok())
+            .filter(|identity| *identity > 0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState { phase }),
+    }
+}
+
 fn validate_callback_queries(
     state: &NativeStemsBeamVLinkBaseApplyState,
     certificate: &NativeStemsBeamVLinkBaseApplyCertificate,
@@ -1548,7 +1770,15 @@ fn validate_callback_queries(
                 phase: "pre-edge beam query rule",
             });
         }
-        validate_beam_incident_rows(state, certificate, stem_inter_id, draft, None, false)?;
+        validate_beam_incident_rows(
+            state,
+            certificate,
+            beam_inter_id,
+            stem_inter_id,
+            draft,
+            None,
+            false,
+        )?;
     }
     validate_pre_callback_snapshot_consistency(state, certificate, beam_inter_id, stem_inter_id)?;
 
@@ -1585,6 +1815,7 @@ fn validate_callback_queries(
     validate_beam_incident_rows(
         state,
         certificate,
+        beam_inter_id,
         stem_inter_id,
         draft,
         Some(new_graph_identity),
@@ -1687,6 +1918,7 @@ fn validate_stem_incident_rows(
 fn validate_beam_incident_rows(
     state: &NativeStemsBeamVLinkBaseApplyState,
     certificate: &NativeStemsBeamVLinkBaseApplyCertificate,
+    beam_inter_id: i32,
     stem_inter_id: i32,
     draft: &NativeStemsBeamRelationDraft,
     new_graph_identity: Option<usize>,
@@ -1741,7 +1973,7 @@ fn validate_beam_incident_rows(
                 row.opposite_vertex_ordinal,
                 row.opposite_inter_id,
                 state.sig.beam.sig_vertex_identity,
-                state.sig.beam.inter_id,
+                beam_inter_id,
                 effective_stem_vertex,
                 stem_inter_id,
             )
@@ -2626,16 +2858,6 @@ fn native_query_kind(kind: NativeSigRelationKind) -> NativeStemsBeamQueryRelatio
     }
 }
 
-fn native_incident_opposite(kind: NativeSigInterKind) -> NativeStemsBeamIncidentOpposite {
-    match kind {
-        NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam => {
-            NativeStemsBeamIncidentOpposite::Beam
-        }
-        NativeSigInterKind::Stem => NativeStemsBeamIncidentOpposite::Stem,
-        _ => NativeStemsBeamIncidentOpposite::OtherInter,
-    }
-}
-
 fn native_inter_id(vertex: NativeSigVertexId) -> Result<i32, NativeStemsBeamVLinkBaseApplyError> {
     i32::try_from(vertex.0.checked_add(1).ok_or(
         NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
@@ -2693,7 +2915,7 @@ fn project_native_stem_incident(
                     ordinal
                 }
             };
-            let opposite = sig.vertex(opposite_vertex.0).ok_or(
+            sig.vertex(opposite_vertex.0).ok_or(
                 NativeStemsBeamVLinkBaseApplyError::InvalidState {
                     phase: "native SIG stem opposite vertex",
                 },
@@ -2710,7 +2932,11 @@ fn project_native_stem_incident(
                 relation_class: native_relation_class(edge.kind).to_owned(),
                 kind,
                 opposite_vertex_ordinal: opposite_vertex.0,
-                opposite: native_incident_opposite(opposite.kind),
+                opposite: if opposite_vertex == beam {
+                    NativeStemsBeamIncidentOpposite::Beam
+                } else {
+                    NativeStemsBeamIncidentOpposite::OtherInter
+                },
                 opposite_inter_id: native_inter_id(opposite_vertex)?,
                 chord_stem_match: kind == NativeStemsBeamQueryRelationKind::ChordStem,
             });
@@ -2746,6 +2972,7 @@ fn project_native_stem_incident(
 fn project_native_beam_incident(
     sig: &NativeSigSystem,
     beam: NativeSigVertexId,
+    stem: Option<NativeSigVertexId>,
     hook: bool,
     new_edge: Option<(
         usize,
@@ -2797,15 +3024,13 @@ fn project_native_beam_incident(
                 ordinal
             }
         };
-        let opposite_kind = if opposite_vertex.0 == sig.vertices.len() {
-            NativeSigInterKind::Stem
-        } else {
-            sig.vertex(opposite_vertex.0)
-                .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+        if opposite_vertex.0 != sig.vertices.len() {
+            sig.vertex(opposite_vertex.0).ok_or(
+                NativeStemsBeamVLinkBaseApplyError::InvalidState {
                     phase: "native SIG beam opposite vertex",
-                })?
-                .kind
-        };
+                },
+            )?;
+        }
         let kind = native_query_kind(edge.kind);
         let examined = !hook || !hook_found;
         let relevant = examined
@@ -2833,7 +3058,11 @@ fn project_native_beam_incident(
             relation_class: native_relation_class(edge.kind).to_owned(),
             kind,
             opposite_vertex_ordinal: opposite_vertex.0,
-            opposite: native_incident_opposite(opposite_kind),
+            opposite: if Some(opposite_vertex) == stem {
+                NativeStemsBeamIncidentOpposite::Stem
+            } else {
+                NativeStemsBeamIncidentOpposite::OtherInter
+            },
             opposite_inter_id: native_inter_id(opposite_vertex)?,
             read: if examined {
                 NativeStemsBeamBeamIncidentRead::Examined
@@ -3182,6 +3411,7 @@ mod tests {
             system_id: SYSTEM_ID,
             headless: true,
             listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+            endpoint_identity: NativeStemsBeamCertificateEndpointIdentity::JavaPersistentInterId,
             directed_pair_scan: NativeStemsBeamDirectedPairScan {
                 source_outgoing_scanned: 0,
                 source_outgoing_provenance: NativeStemsBeamQueryProvenance::ExhaustiveSha256(hash()),

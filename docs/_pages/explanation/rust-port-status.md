@@ -733,14 +733,15 @@ incident, and directed-pair queries in Java/JGraphT order; its real chula
 base-apply beam scan matches the frozen Java rows exactly. The next production
 graph-carriage layer now adds typed stable IDs, dense checked appends,
 insertion-order tombstones, abnormal updates, BeamStem portion payloads, and
-typed beam-source bindings. Its first stem/BeamStem append lands at vertex 221
-and edge 202 and yields Java's exact post-edge incident order. The next step is
-now underway: B14's production projector derives all directed-pair and pre/post
-callback scans from the owned graph before the gate reads Java. After
-canonicalizing only Java's unrelated persistent IDs, the real first query is
-exact through edge order, direction, class, lazy reads, relevance, endpoint
-ordinals, and BeamStem portion. Next, wire that projector into public B14 apply,
-then project B16/B17 in the same native identity domain.
+typed beam-source bindings. Public B14 now consumes its production projector
+directly for chula system 1: the compact state, owned SIG, and typed bindings
+commit atomically, appending Stem vertex 221 and LEFT BeamStem edge 202 with
+the exact support grade and abnormal updates. Endpoint certificates use
+explicit one-based native vertex identities rather than a fixture-derived
+Java-ID map, while the frozen Java corpus remains unchanged. Next, carry this
+graph into later transactions and project B16/B17 in the same native identity
+domain; broader pre-STEMS SIG assembly remains bounded where later corpus
+systems still lack complete BEAMS group products.
 
 Last updated 2026-08-13.
 
@@ -810,7 +811,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Make public B14 consume its new owned-SIG certificate projector, then project B16/B17 in the same native identity domain.
+1. Carry the native first B14 mutation through later transactions, then project B16/B17 from the same owned graph and native identity domain.
 2. Drive chula system 1's full 32-transaction SIDES pass from native products only, then continue the carried state through STUMPS and competing-hook removal.
 3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.

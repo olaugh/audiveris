@@ -28,6 +28,7 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
+    native_sig::{NativeSigRecognition, assemble_native_sig},
     native_stem_seeds::{NativeStemSeedRecognition, recognize_native_stem_seeds},
     native_stems_beam_builders::{
         NativeStemsBeamBuilderRecognition, materialize_native_stems_beam_builders,
@@ -47,23 +48,26 @@ use audiveris_omr::{
     native_stems_beam_vlink_base_apply::{
         NativeStemsBeamBeamIncidentRead, NativeStemsBeamBeamIncidentRelation,
         NativeStemsBeamBeamIncidentRule, NativeStemsBeamBeamIncidentScan,
-        NativeStemsBeamDirectedPairRelation, NativeStemsBeamDirectedPairScan,
-        NativeStemsBeamGroupRuntimeState, NativeStemsBeamIncidentDirection,
-        NativeStemsBeamIncidentOpposite, NativeStemsBeamInterIndexAppend,
-        NativeStemsBeamInterIndexApplyState, NativeStemsBeamInterIndexLookup,
-        NativeStemsBeamNextPersistentIdLookup, NativeStemsBeamPairClassRead,
-        NativeStemsBeamQueryProvenance, NativeStemsBeamQueryRelationKind,
-        NativeStemsBeamRelationObjectIdentity, NativeStemsBeamSheetEditState,
-        NativeStemsBeamSigApplyState, NativeStemsBeamSigListenerTopology,
-        NativeStemsBeamSigRelationKind, NativeStemsBeamSigRelationState,
-        NativeStemsBeamSigVertexAppend, NativeStemsBeamSigVertexLookup,
-        NativeStemsBeamStemIncidentRelation, NativeStemsBeamStemIncidentScan,
-        NativeStemsBeamStemIncidentScanState, NativeStemsBeamVLinkBaseApplyCertificate,
-        NativeStemsBeamVLinkBaseApplyDisposition, NativeStemsBeamVLinkBaseApplyKey,
-        NativeStemsBeamVLinkBaseApplyOperation, NativeStemsBeamVLinkBaseApplyOutcome,
-        NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBeamAbnormalTrace,
-        NativeStemsBeamVLinkBeamRuntimeState, NativeStemsBeamVLinkStemRuntimeState,
-        NativeStemsBeamVLinkVertexAction, apply_native_stems_beam_vlink_base_transaction,
+        NativeStemsBeamCertificateEndpointIdentity, NativeStemsBeamDirectedPairRelation,
+        NativeStemsBeamDirectedPairScan, NativeStemsBeamGroupRuntimeState,
+        NativeStemsBeamIncidentDirection, NativeStemsBeamIncidentOpposite,
+        NativeStemsBeamInterIndexAppend, NativeStemsBeamInterIndexApplyState,
+        NativeStemsBeamInterIndexLookup, NativeStemsBeamNextPersistentIdLookup,
+        NativeStemsBeamPairClassRead, NativeStemsBeamQueryProvenance,
+        NativeStemsBeamQueryRelationKind, NativeStemsBeamRelationObjectIdentity,
+        NativeStemsBeamSheetEditState, NativeStemsBeamSigApplyState,
+        NativeStemsBeamSigListenerTopology, NativeStemsBeamSigRelationKind,
+        NativeStemsBeamSigRelationState, NativeStemsBeamSigVertexAppend,
+        NativeStemsBeamSigVertexLookup, NativeStemsBeamStemIncidentRelation,
+        NativeStemsBeamStemIncidentScan, NativeStemsBeamStemIncidentScanState,
+        NativeStemsBeamVLinkBaseApplyCertificate, NativeStemsBeamVLinkBaseApplyDisposition,
+        NativeStemsBeamVLinkBaseApplyKey, NativeStemsBeamVLinkBaseApplyOperation,
+        NativeStemsBeamVLinkBaseApplyOutcome, NativeStemsBeamVLinkBaseApplyState,
+        NativeStemsBeamVLinkBeamAbnormalTrace, NativeStemsBeamVLinkBeamRuntimeState,
+        NativeStemsBeamVLinkStemRuntimeState, NativeStemsBeamVLinkVertexAction,
+        apply_native_stems_beam_vlink_base_transaction,
+        apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        project_native_stems_beam_vlink_base_apply_certificate,
     },
     native_stems_beam_vlink_reuse_check::{
         NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamRelationParameters,
@@ -3686,6 +3690,8 @@ fn project_compact_queries(
         system_id: baseline.system_id()?,
         headless: parse_bool(page, "headless")?,
         listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+        endpoint_identity:
+            audiveris_omr::native_stems_beam_vlink_base_apply::NativeStemsBeamCertificateEndpointIdentity::JavaPersistentInterId,
         directed_pair_scan,
         stem_incident_before,
         stem_incident_after,
@@ -4045,6 +4051,7 @@ impl PredecessorFixture {
 
 struct NativePredecessorPage {
     grid: GridLinesRecognition,
+    sig: Option<NativeSigRecognition>,
     stem_seeds: NativeStemSeedRecognition,
     beam_stumps: NativeStemsBeamStumpRecognition,
     beam_vlinkers: NativeStemsBeamVLinkerRecognition,
@@ -4067,6 +4074,10 @@ fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         .unwrap_or_else(|error| panic!("{image}: LEDGERS failed: {error}"));
     let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
         .unwrap_or_else(|error| panic!("{image}: HEADS failed: {error}"));
+    let sig = (image == "chula.png").then(|| {
+        assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+            .unwrap_or_else(|error| panic!("{image}: native SIG assembly failed: {error}"))
+    });
     let corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
         .unwrap_or_else(|error| panic!("{image}: STEMS corners failed: {error}"));
     let head_seeds = materialize_native_stems_head_seeds(&grid, &stem_seeds, &corners)
@@ -4143,6 +4154,7 @@ fn native_predecessor_page(image: &str) -> NativePredecessorPage {
     .unwrap_or_else(|error| panic!("{image}: STEMS beam scheduler failed: {error}"));
     NativePredecessorPage {
         grid,
+        sig,
         stem_seeds,
         beam_stumps,
         beam_vlinkers,
@@ -7210,6 +7222,7 @@ fn assert_production_matches_java(
 }
 
 fn project_real_base_system(
+    page_key: &str,
     page: &NativePredecessorPage,
     oracle_page: &StrictRow,
     rows: &[StrictRow],
@@ -7251,7 +7264,6 @@ fn project_real_base_system(
     assert_independent_matches_java(rows, &independent, &independent_state)?;
 
     let mut production_state = build_real_base_state(page, oracle_page, rows, &predecessor)?;
-    let production_state_before = production_state.clone();
     let expected_key = NativeStemsBeamVLinkBaseApplyKey {
         system_id: predecessor.reuse_check.system_id,
         invocation_ordinal: predecessor.reuse_check.invocation_ordinal,
@@ -7263,17 +7275,77 @@ fn project_real_base_system(
     else {
         return Err(format!("system {system_id} predecessor is not ready"));
     };
-    let transaction = apply_native_stems_beam_vlink_base_transaction(
-        scheduler,
-        plans,
-        stumps,
-        vlinkers,
-        &predecessor.create_transaction,
-        &predecessor.live_state,
-        predecessor.relation_parameters,
-        &predecessor.reuse_check,
-        &mut production_state,
-    )
+    let use_native_sig = page_key == "chula" && system_id == 1;
+    let mut native_commit = None;
+    if use_native_sig {
+        let native_sig = page
+            .sig
+            .as_ref()
+            .ok_or_else(|| format!("missing native SIG recognition for {page_key}"))?
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| format!("missing native SIG system {system_id}"))?
+            .clone();
+        let native_bindings = page
+            .sig
+            .as_ref()
+            .ok_or_else(|| format!("missing native SIG recognition for {page_key}"))?
+            .bindings
+            .iter()
+            .find(|bindings| bindings.system_id == system_id)
+            .ok_or_else(|| format!("missing native SIG bindings {system_id}"))?
+            .clone();
+        let stem_identity = predecessor
+            .reuse_check
+            .final_stem
+            .as_ref()
+            .ok_or_else(|| format!("system {system_id} predecessor lacks final stem"))?
+            .stem_identity;
+        let stem_vertex = native_bindings.stem_vertices.get(&stem_identity).copied();
+        production_state.certificate = Some(
+            project_native_stems_beam_vlink_base_apply_certificate(
+                &native_sig,
+                &native_bindings,
+                expected_relation.beam,
+                stem_vertex,
+                expected_relation,
+                predecessor.reuse_check.plan,
+            )
+            .map_err(|error| format!("system {system_id} native query projection: {error}"))?,
+        );
+        let vertex_count = native_sig.vertices.len();
+        let edge_count = native_sig.edges.len();
+        native_commit = Some((native_sig, native_bindings, vertex_count, edge_count));
+    }
+    let production_state_before = production_state.clone();
+    let transaction = if let Some((native_sig, native_bindings, _, _)) = &mut native_commit {
+        apply_native_stems_beam_vlink_base_transaction_to_native_sig(
+            scheduler,
+            plans,
+            stumps,
+            vlinkers,
+            &predecessor.create_transaction,
+            &predecessor.live_state,
+            predecessor.relation_parameters,
+            &predecessor.reuse_check,
+            &mut production_state,
+            native_sig,
+            native_bindings,
+        )
+    } else {
+        apply_native_stems_beam_vlink_base_transaction(
+            scheduler,
+            plans,
+            stumps,
+            vlinkers,
+            &predecessor.create_transaction,
+            &predecessor.live_state,
+            predecessor.relation_parameters,
+            &predecessor.reuse_check,
+            &mut production_state,
+        )
+    }
     .map_err(|error| format!("system {system_id} production base apply: {error}"))?;
     assert_production_matches_java(
         rows,
@@ -7283,6 +7355,35 @@ fn project_real_base_system(
         &production_state_before,
         &production_state,
     )?;
+    if let Some((native_sig, native_bindings, vertex_count, edge_count)) = native_commit {
+        let committed_edge = transaction
+            .graph_relation_identity
+            .and_then(|ordinal| native_sig.edges.get(ordinal));
+        if native_sig.vertices.len() != vertex_count + transaction.sig_vertex_mutation_count
+            || native_sig.edges.len() != edge_count + transaction.sig_relation_mutation_count
+            || transaction.consumed_certificate.endpoint_identity
+                != NativeStemsBeamCertificateEndpointIdentity::NativeVertexOneBased
+            || native_bindings
+                .stem_vertices
+                .get(&transaction.stem_after.stem_identity)
+                .is_none_or(|vertex| {
+                    native_sig.vertex(vertex.0).is_none_or(|stem| {
+                        stem.kind != audiveris_omr::native_sig::NativeSigInterKind::Stem
+                    })
+                })
+            || committed_edge.is_none_or(|edge| {
+                edge.kind != audiveris_omr::native_sig::NativeSigRelationKind::BeamStem
+                    || edge.beam_portion != Some(expected_relation.beam_portion)
+                    || edge.support.is_none_or(|support| {
+                        support.grade.to_bits() != expected_relation.grade.to_bits()
+                    })
+            })
+        {
+            return Err(format!(
+                "system {system_id} native SIG commit differs from B14 transaction"
+            ));
+        }
+    }
 
     let production_disposition = match transaction.apply_disposition {
         NativeStemsBeamVLinkBaseApplyDisposition::Added { .. } => IndependentDisposition::Added,
@@ -8596,7 +8697,14 @@ fn project_frozen_base_apply_page(page_key: &str, bytes: &[u8]) -> Result<usize,
             match baseline.value("scope")? {
                 "real" => {
                     project_compact_queries(&parsed.page, block)?;
-                    project_real_base_system(&native, &parsed.page, block, &create, &reuse)?;
+                    project_real_base_system(
+                        page_key,
+                        &native,
+                        &parsed.page,
+                        block,
+                        &create,
+                        &reuse,
+                    )?;
                     real_systems += 1;
                 }
                 "synthetic" => {

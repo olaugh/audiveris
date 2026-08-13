@@ -380,6 +380,8 @@ fn project_compact_queries(
         system_id: baseline.system_id()?,
         headless: parse_bool(page, "headless")?,
         listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+        endpoint_identity:
+            audiveris_omr::native_stems_beam_vlink_base_apply::NativeStemsBeamCertificateEndpointIdentity::JavaPersistentInterId,
         directed_pair_scan,
         stem_incident_before,
         stem_incident_after,
