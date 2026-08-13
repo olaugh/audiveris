@@ -5569,3 +5569,89 @@ fn compact_model_fails_closed_on_live_chords_and_malformed_state() {
     );
     assert_eq!(missing_cell, missing_cell_before);
 }
+
+/// Boundary 16 computes the sibling writes the SIDES pass recorded.
+///
+/// The resume chain needs, per transaction, which *other* B linkers `linkSiblings` left
+/// linked -- that is what retires the 21 sides Java skips, and feeding it from the oracle
+/// makes the chain stop exactly where Java stops. This checks the port can produce those
+/// writes itself, by running the production Boundary-16 apply and comparing its
+/// `sibling_b_linker_cells` against the aliases the full-pass probe recorded for the same
+/// transaction.
+///
+/// Replay-on-frozen, per rust/PORTING.md: the derivation is proven on the transaction that
+/// already has frozen evidence before it is trusted on the 31 that do not.
+#[test]
+fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
+    let text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-sibling-links-chula.txt"),
+    )
+    .expect("frozen sibling-links fixture");
+    let rows = parse_scaffold_fixture(&text).expect("fixture parses");
+    let transactions = validate_core_rows(&rows).expect("core rows");
+    let transaction = transactions
+        .iter()
+        .find(|candidate| candidate.key.system == 1)
+        .expect("chula system 1 transaction");
+    let hydrated =
+        hydrate_real_boundary_sixteen(&rows[0], transaction).expect("boundary 16 applies");
+
+    let sig_of: std::collections::BTreeMap<_, _> = hydrated
+        .predecessor
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| (beam.source, beam.sig_ordinal))
+        .collect();
+    let alias =
+        |reference: &audiveris_omr::native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef| {
+            format!(
+                "beam:{}:b:{}",
+                sig_of.get(&reference.beam).expect("sig ordinal"),
+                reference.id - 1
+            )
+        };
+
+    let mut derived: Vec<String> = hydrated
+        .state_after
+        .sibling_b_linker_cells
+        .iter()
+        .filter(|cell| cell.linked)
+        .map(|cell| alias(&cell.reference))
+        .collect();
+    derived.sort();
+    derived.dedup();
+
+    // What Java's full pass recorded for the same transaction.
+    let pass = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
+    )
+    .expect("frozen SIDES pass");
+    let first = pass
+        .lines()
+        .find(|line| {
+            line.starts_with("stemsbeamsidesloopsibling ") && line.contains(" transaction 1 ")
+        })
+        .expect("the pass records a first transaction");
+    let mut recorded: Vec<String> = first
+        .split(" aliases ")
+        .nth(1)
+        .map(|list| list.trim().split(',').map(str::to_owned).collect())
+        .unwrap_or_default();
+    recorded.sort();
+
+    assert!(
+        !recorded.is_empty(),
+        "the first transaction should write sibling cells; if it stopped doing so the \
+         comparison below would prove nothing"
+    );
+    assert_eq!(
+        derived, recorded,
+        "Boundary 16's sibling cells differ from what Java's pass recorded for the same \
+         transaction"
+    );
+    println!(
+        "boundary 16 derived {} sibling writes, matching Java's pass: {derived:?}",
+        derived.len()
+    );
+}
