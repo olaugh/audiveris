@@ -4203,6 +4203,19 @@ regenerate chula, and diff impact-by-impact. `java_math.rs` stays -- it cost lit
 vectors document host libm agreement, and the token gate may yet need it for another
 class's operands.
 
+**The ledger drift is PINNED to the dy checks (2026-08-13).** `LedgerImpactBits.java`
+(now in rust/oracle/java; needs the CLI-reflection preamble, EpsilonGC, probe classpath)
+runs the pipeline to LEDGERS and prints every final ledger's grade and per-impact grades
+as raw f64 bits. Diffed against the port: **for the three drifted ledgers (x=2132, 1718,
+2228) impacts i0-i4 are bit-identical and i5+i6 -- the two dy checks,
+`|start/stop.y - y_target|/interline` -- each differ by ~140 ulp**; the five clean
+ledgers are bit-identical on all seven. Both endpoints shift together, so the culprit is
+the shared term: `y_target` (Java: `yRef + signum(index)*interline`) or the filament
+endpoint y, differing by an ulp or two and amplified by the near-cancellation in the
+subtraction. Next: print the check VALUES (not grades) both sides for one drifted ledger,
+then compare the port's y_target/endpoint computation to LedgersBuilder's line 480 region
+op by op. This is minutes of work with the probe now in the tree.
+
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to
 make it a *product* rather than five proofs: an assembled per-system SIG type that

@@ -1061,6 +1061,14 @@ fn ledger_ulp_drift_isolation() {
             rej.to_bits(),
             rej.to_bits() == *want
         );
+        {
+            let bits: Vec<String> = inter
+                .impacts
+                .iter()
+                .map(|impact| format!("{:x}", impact.grade.to_bits()))
+                .collect();
+            println!("   port impacts {}", bits.join(" "));
+        }
         if re.to_bits() != *want {
             // Which single impact, moved by how many ulps, lands on Java's bits?
             for (index, impact) in inter.impacts.iter().enumerate() {
