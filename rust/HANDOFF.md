@@ -4022,6 +4022,49 @@ it does not duplicate production Java implementations in the harness.
 - Parity reproduces Java behavior, including Java errors. Accuracy improvement is a
   separate held-out gate and requires an explicit divergence waiver.
 
+## Port-owned SIG: the slice map (started 2026-08-12)
+
+The blocker for a headless STEMS is that the port owns no SIG. This is the plan, written
+down before starting so an interrupted session resumes rather than re-derives.
+
+**The verification target already exists.** `rust/oracle/stems-beam-sig-snapshot-chula-system1.txt`
+holds Java's 221 vertices and 202 edges for chula system 1 in JGraphT insertion order, frozen
+under two byte-identical passes. Measured, the insertion order **is stage order**:
+
+| ordinals | stage | contents |
+| --- | --- | --- |
+| 0-32 | GRID | BraceInter 1, BarlineInter 22, BarConnectorInter 10 |
+| 33-42 | HEADERS | ClefInter 2, KeyAlterInter 4, KeyInter 2, TimeWholeInter 2 |
+| 43-110 | BEAMS | BeamHookInter 17 and BeamInter 31 interleaved, then BeamGroupInter 20 |
+| 111-118 | LEDGERS | LedgerInter 8 |
+| 119-220 | HEADS | HeadInter 102 |
+
+Edges, 202 total: Exclusion 68, Containment 52, BeamBeamRelation 44, NoExclusion 20,
+BarConnectionRelation 10, BarGroupRelation 4, KeyAltersRelation 2, ClefKeyRelation 2.
+
+So the SIG can be built one stage at a time, each slice checked against its own ordinal range
+rather than needing the whole graph at once.
+
+**What already exists.** `GridSig` (`audiveris-image/src/grid_sig.rs`) is a real SIG: it assigns
+sequential inter ids, holds `nodes: BTreeMap<GridInterId, GridSigNode>` (id order == insertion
+order) and `edges: Vec<GridSigEdge>` in insertion order, with relations NoExclusion,
+BarConnectionSupport and BarGroup. `HeadlessGridSigState` carries it per system. So "the port
+owns no SIG" is true across stages but **not** of GRID -- GRID's is the seed to grow.
+
+**Slice 1 (in progress): surface GRID's SIG and prove it.** The executor builds
+`HeadlessGridSigState` inside `build_peak_graph` in recognize.rs, but `GridLinesRecognition`
+exposes only geometry, so nothing downstream can see it. Surface the per-system vertices and
+edges in order, then assert they reproduce snapshot ordinals 0-32 and the edges among them.
+Watch: `VerticalInterKind` is only `Bracket`/`Barline`, so the brace at ordinal 0 may come from
+`brace_sig.rs`/`BraceSigStore` rather than from `GridSig`.
+
+**Slices 2-5:** HEADERS, BEAMS, LEDGERS, HEADS append in the same way, each verified against its
+ordinal range. HEADS is the one that needs new identity assignment, since it deliberately emits
+identity-free products today.
+
+**Then** the STEMS certificates can be computed rather than read, which unblocks self-drive, and
+`recognize_native_stems` becomes writable.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
