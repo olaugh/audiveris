@@ -772,6 +772,20 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
     .expect("HEADS recognition");
     let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
         .expect("assembled native SIG");
+    let bindings = sig
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == 1)
+        .expect("system 1 bindings");
+    assert_eq!(bindings.beam_vertices.len(), 48);
+    assert_eq!(
+        bindings
+            .beam_vertices
+            .values()
+            .map(|id| id.0)
+            .collect::<std::collections::BTreeSet<_>>(),
+        (43..91).collect()
+    );
     let system = sig
         .systems
         .iter()
@@ -850,6 +864,10 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
                     NativeSigRelationKind::ClefKey => "ClefKeyRelation",
                     NativeSigRelationKind::Exclusion => "Exclusion",
                     NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
+                    NativeSigRelationKind::BeamStem => "BeamStemRelation",
+                    NativeSigRelationKind::BeamRest => "BeamRestRelation",
+                    NativeSigRelationKind::HeadStem => "HeadStemRelation",
+                    NativeSigRelationKind::ChordStem => "ChordStemRelation",
                 }
                 .to_owned(),
                 native_edge_token(edge),
@@ -962,6 +980,132 @@ fn assembled_sig_derives_javas_incident_scan() {
     );
 }
 
+#[test]
+fn native_sig_carries_the_first_stem_and_relation_append() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS recognition");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+    )
+    .expect("HEADS recognition");
+    let mut sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .expect("assembled native SIG");
+    let system = sig
+        .systems
+        .iter_mut()
+        .find(|system| system.system_id == 1)
+        .expect("system 1");
+
+    let stem_ordinal = system.vertices.len();
+    system
+        .append_vertex(NativeSigVertex {
+            ordinal: stem_ordinal,
+            active: true,
+            removed: false,
+            kind: audiveris_omr::native_sig::NativeSigInterKind::Stem,
+            shape: Some("STEM".to_owned()),
+            grade: 1.0,
+            bounds: audiveris_omr::native_sig::NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        })
+        .expect("dense stem append");
+    let edge_ordinal = system.edges.len();
+    system
+        .append_edge(NativeSigEdge {
+            ordinal: edge_ordinal,
+            active: true,
+            source: 55,
+            target: stem_ordinal,
+            kind: NativeSigRelationKind::BeamStem,
+            support: Some(audiveris_omr::native_sig::NativeSigSupport {
+                grade: 1.0,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: Some(audiveris_omr::stems_step::NativeBeamPortion::Left),
+        })
+        .expect("dense BeamStem append");
+
+    assert_eq!(
+        system
+            .incident_edges(stem_ordinal)
+            .expect("stem incident query")
+            .iter()
+            .map(|edge| edge.ordinal)
+            .collect::<Vec<_>>(),
+        vec![202]
+    );
+    let beam_incident = system.incident_edges(55).expect("beam incident query");
+    assert_eq!(
+        beam_incident
+            .iter()
+            .map(|edge| edge.ordinal)
+            .collect::<Vec<_>>(),
+        vec![54, 55, 56, 57, 58, 202]
+    );
+    assert_eq!(
+        system
+            .directed_edges(55, stem_ordinal)
+            .expect("directed pair")
+            .iter()
+            .map(|edge| edge.ordinal)
+            .collect::<Vec<_>>(),
+        vec![202]
+    );
+
+    let mut wrong_vertex = system.vertices[stem_ordinal].clone();
+    wrong_vertex.ordinal = system.vertices.len() + 1;
+    assert!(system.append_vertex(wrong_vertex).is_err());
+    let mut wrong_edge = system.edges[edge_ordinal];
+    wrong_edge.ordinal = system.edges.len() + 1;
+    assert!(system.append_edge(wrong_edge).is_err());
+
+    let mut removed_edge = system.clone();
+    removed_edge
+        .remove_edge(audiveris_omr::native_sig::NativeSigEdgeId(edge_ordinal))
+        .expect("edge tombstone");
+    assert!(
+        removed_edge
+            .incident_edges(stem_ordinal)
+            .expect("stem remains live")
+            .is_empty()
+    );
+    assert_eq!(removed_edge.edges.len(), 203, "removal does not renumber");
+
+    let mut removed_vertex = system.clone();
+    removed_vertex
+        .remove_vertex(audiveris_omr::native_sig::NativeSigVertexId(55))
+        .expect("beam tombstone");
+    assert!(removed_vertex.vertex(55).is_none());
+    assert_eq!(
+        removed_vertex.vertices.len(),
+        222,
+        "removal does not renumber"
+    );
+    assert!(removed_vertex.incident_edges(55).is_err());
+    assert!(
+        removed_vertex.edges[54..=58]
+            .iter()
+            .all(|edge| !edge.active)
+    );
+    assert!(!removed_vertex.edges[edge_ordinal].active);
+}
+
 fn native_edge_token(edge: &NativeSigEdge) -> String {
     let class = match edge.kind {
         NativeSigRelationKind::NoExclusion => "NoExclusion",
@@ -972,6 +1116,10 @@ fn native_edge_token(edge: &NativeSigEdge) -> String {
         NativeSigRelationKind::ClefKey => "ClefKeyRelation",
         NativeSigRelationKind::Exclusion => "Exclusion",
         NativeSigRelationKind::BeamBeam => "BeamBeamRelation",
+        NativeSigRelationKind::BeamStem => "BeamStemRelation",
+        NativeSigRelationKind::BeamRest => "BeamRestRelation",
+        NativeSigRelationKind::HeadStem => "HeadStemRelation",
+        NativeSigRelationKind::ChordStem => "ChordStemRelation",
     };
     let mut token = format!(
         "source={}:target={}:org.audiveris.omr.sig.relation.{class}:manual=false",
@@ -1009,7 +1157,7 @@ fn native_vertex_token(vertex: &NativeSigVertex) -> String {
     let bounds = vertex.bounds;
     let mut token = format!(
         "org.audiveris.omr.sig.inter.{}:shape={}:grade={}/{:016x}:bounds={}:{}:{}:{}:\
-         removed=false:abnormal={}:manual=false:implicit=false:profile=0",
+         removed={}:abnormal={}:manual=false:implicit=false:profile=0",
         vertex.kind.java_class(),
         vertex.shape.as_deref().unwrap_or("null"),
         java_hex_float(vertex.grade),
@@ -1018,6 +1166,7 @@ fn native_vertex_token(vertex: &NativeSigVertex) -> String {
         bounds.y,
         bounds.width,
         bounds.height,
+        vertex.removed,
         vertex.abnormal,
     );
     if let Some(beam) = vertex.beam_geometry {

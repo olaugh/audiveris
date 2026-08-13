@@ -4455,10 +4455,16 @@ support grades and the four BarConnection impacts, not merely endpoint/kind trip
 `incident_edges`, and directed-pair queries. They preserve global insertion order, with
 incident reads in Java/JGraphT's incoming-then-outgoing order; a production-only gate
 rebuilds the real chula base-apply beam scan exactly and rejects missing vertices.
+The graph is now a carrier rather than a read-only snapshot: typed vertex/edge IDs,
+dense checked appends, tombstoned vertex/edge removal, abnormal-state updates, and an
+integrity validator preserve identities across later removals. Dynamic BeamStem edges
+retain their beam portion, and assembly publishes a typed beam-source-to-vertex binding
+sidecar; the first carried stem/BeamStem append produces vertex 221 / edge 202 and the
+exact `[54,55,56,57,58,202]` beam incident order.
 
 The next blocker is no longer discovering, reconstructing, or querying the baseline
-ordering. STEMS must project these owned query rows into the B14/B16/B17 certificate
-types while carrying each transaction's appended vertices and edges.
+ordering or carrying graph mutations. STEMS must now project these owned query rows into
+the B14/B16/B17 certificate types in the native identity domain.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.

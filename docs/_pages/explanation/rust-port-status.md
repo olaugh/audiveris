@@ -731,9 +731,12 @@ validator passes 1/1 in 129.11 seconds. The full library suite is 685 passed / 0
 failed / 2 ignored. The owned SIG now answers fail-closed incoming, outgoing,
 incident, and directed-pair queries in Java/JGraphT order; its real chula
 base-apply beam scan matches the frozen Java rows exactly. The next production
-step is to project those owned queries into the B14/B16/B17 certificates and
-carry appended graph state through the full SIDES pass rather than feeding
-per-transaction Java rows.
+graph-carriage layer now adds typed stable IDs, dense checked appends,
+insertion-order tombstones, abnormal updates, BeamStem portion payloads, and
+typed beam-source bindings. Its first stem/BeamStem append lands at vertex 221
+and edge 202 and yields Java's exact post-edge incident order. The next step is
+to project those owned queries into B14/B16/B17 certificates in the native
+identity domain rather than feeding per-transaction Java rows.
 
 Last updated 2026-08-13.
 
