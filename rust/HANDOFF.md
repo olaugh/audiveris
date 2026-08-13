@@ -4281,11 +4281,39 @@ to **6/10**: staff 2 is now entirely bit-exact, alters and key together.
 
 **Four grades out of 221 now differ**, all on chula system 1: staff 1's two key alters
 (header[2], header[3]), its key (header[4], which is just their mean and cannot be exact
-until they are), and one of the two times (header[9]). Staff 2's alters run the identical
-arithmetic and are exact, so what remains is data-dependent and upstream of the key code --
-either `measured_pitch` still differing for those two glyphs or their classifier evaluation
-doing so. The next step is to print `measured_pitch` and the raw evaluation for staff 1's
-two alters against Java, exactly as the ledger chase printed check values.
+until they are), and one of the two times (header[9]).
+
+**And that residue is now isolated to the glyph classifier, by elimination (2026-08-13).**
+`KeyAlterPitchBits.java` (`:app:keyAlterPitchProbe` in `staff-impacts.init.gradle`) prints
+every `KeyAlterInter`'s grade and measured pitch as raw bits, together with the staff-line
+ordinates and reference points behind them. Three `#[ignore]`d diagnostics in
+`native_sig_baseline.rs` walk the chain against it, and every term matches **bit for bit**:
+
+- `key_alter_line_ordinates_against_java` -- `first_line`/`last_line` ordinates at each
+  alter's centroid abscissa, all four rows ulp +0. So `y_at_x_ext` is right.
+- `key_alter_pitch_chain_against_java` -- `massPitch` and `geoPitch` through
+  `Staff.pitchPositionOf`, all ulp +0.
+- `key_alter_measured_pitch_against_java` -- the full flat mix
+  `0.5 * ((mass + flatMassPitchOffset) + (geo + areaPitchOffset))`, all ulp +0.
+
+The pitched grade is `inter_grade * (1 - delta/maxDeltaPitch)`. `delta` follows from a
+measured pitch that is now exact; `maxDeltaPitch` depends only on the alter count, and both
+staves' keys have two alters, so it is the same number for all four -- and staff 2's two
+alters come out exactly right. Every input to that multiply is therefore verified except
+one, so **the divergence is the classifier evaluation for staff 1's two flat glyphs**.
+
+That is a different class of problem from everything else in this chase, and worth saying
+plainly: it is the shape classifier's own numerics, not geometry. Note the heads are
+bit-exact, but heads go through template matching rather than the MLP, so they are no
+evidence about this path. The next step is a probe on the evaluation itself -- print
+Java's raw `Evaluation.grade` for those two glyphs and compare against the port's
+classifier -- rather than any further work in the key code, which is now exhausted.
+
+An aside worth keeping: `/private/tmp/audiveris-probe.classpath`, which every
+`oracle/java/run-*.sh` depends on, was cleaned out of `/private/tmp` mid-session. It is a
+cache, not a checked-in artifact, and nothing documents how to rebuild it. Going through
+`staff-impacts.init.gradle` instead sidesteps it entirely, since Gradle resolves the
+runtime classpath itself; prefer that route for new probes.
 
 **Master's CI was red for six commits, and the cause was a shared vector (2026-08-13).**
 The "Rust port" workflow failed on `native_black_head_sizing_matches_java_on_every_beam_sheet`,

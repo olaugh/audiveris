@@ -236,6 +236,28 @@ gradle.projectsEvaluated {
                 }
     }
 
+    // Prints every KeyAlterInter's grade and measured pitch as raw bits, with
+    // the staff-line ordinates and reference points behind them. The port's
+    // header grades differ from Java by 2-3 ulp on two alters, and by different
+    // ulp counts, so the divergence is per-glyph input rather than a shared
+    // scale; this is what lets it be located instead of reasoned about.
+    app.tasks.register('keyAlterPitchProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'KeyAlterPitchBits'
+        workingDir = app.projectDir
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        // -PkeyAlterTargets="data/examples/chula.png"
+        args = (app.findProperty('keyAlterTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def file = new File(target)
+                    (file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, target)).absolutePath
+                }
+    }
+
     app.tasks.register('stemSeedsProbe', JavaExec) {
         dependsOn 'compileStaffImpactsProbe'
         classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath

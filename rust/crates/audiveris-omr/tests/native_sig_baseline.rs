@@ -990,11 +990,17 @@ fn grade_sources_bit_match_java() {
         java_headers.len()
     );
     for (index, (have, want)) in header_bits.iter().zip(&java_headers).enumerate() {
+        let port = f64::from_bits(*have);
+        let java = f64::from_bits(*want);
+        // Signed ulp distance, and the exact ratio. A shared ratio across two
+        // alters points at their common scale factor; per-glyph ratios point at
+        // per-glyph input, i.e. the measured pitch.
+        let ulp = (*have as i64) - (*want as i64);
         println!(
-            "   header[{index}] port {:.10} java {:.10} match {}",
-            f64::from_bits(*have),
-            f64::from_bits(*want),
-            have == want
+            "   header[{index}] port {port:.17} java {java:.17} match {} ulp {ulp:+} \
+             ratio {:.17}",
+            have == want,
+            port / java,
         );
     }
 }
@@ -1068,6 +1074,169 @@ fn ledger_grades_match_java_bit_for_bit() {
             inter.grade,
             want,
             f64::from_bits(*want),
+        );
+    }
+}
+
+/// Exploratory: are the staff-line ordinates behind the key alters' measured
+/// pitch bit-identical to Java's?
+///
+/// Java rows come from `oracle/java/KeyAlterPitchBits.java` (`:app:keyAlterPitchProbe`),
+/// which prints `staff.getFirstLine().yAt(x)` and `getLastLine().yAt(x)` at each
+/// alter's centroid abscissa. Chula system 1 staff 2's alters are already
+/// bit-exact and staff 1's are not, so this asks whether the residue is in the
+/// ordinate itself or downstream of it.
+#[test]
+#[ignore = "exploratory print"]
+fn key_alter_line_ordinates_against_java() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    // staff, x, java top bits, java bottom bits
+    let rows: [(usize, f64, u64, u64); 4] = [
+        (1, 284.0, 0x4075_f7da_4e87_1146, 0x407b_4e53_480e_7bd6),
+        (1, 310.0, 0x4075_fa67_a80c_907d, 0x407b_50ff_6581_c007),
+        (2, 284.0, 0x4082_8a22_ff35_a8b4, 0x4085_348e_726e_4f03),
+        (2, 309.0, 0x4082_8b94_f209_4f20, 0x4085_35fa_f630_c7b4),
+    ];
+    for (staff_id, x, java_top, java_bottom) in rows {
+        let staff = grid
+            .staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == staff_id)
+            .expect("staff geometry");
+        let top = staff.first_line.y_at_x_ext(x);
+        let bottom = staff.last_line.y_at_x_ext(x);
+        println!(
+            "staff {staff_id} x {x}: top {:016x} java {java_top:016x} ulp {:+} | \
+             bottom {:016x} java {java_bottom:016x} ulp {:+}",
+            top.to_bits(),
+            (top.to_bits() as i64) - (java_top as i64),
+            bottom.to_bits(),
+            (bottom.to_bits() as i64) - (java_bottom as i64),
+        );
+    }
+}
+
+/// Exploratory: walk the key alter's pitch chain against Java, term by term.
+///
+/// The line ordinates are already bit-identical (see
+/// `key_alter_line_ordinates_against_java`), so this asks which of the next
+/// terms diverges: the pitch formula, the measured pitch, or the grade.
+/// Java rows from `:app:keyAlterPitchProbe` on chula.
+#[test]
+#[ignore = "exploratory print"]
+fn key_alter_pitch_chain_against_java() {
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    // staff, centroid x/y, center x/y, java massPitch, java geoPitch, java measuredPitch
+    /// staff, centroid x/y, area-centre x/y, then Java's massPitch, geoPitch
+    /// and measuredPitch as raw bits.
+    type PitchRow = (usize, f64, f64, f64, f64, u64, u64, u64);
+    let rows: [PitchRow; 4] = [
+        (
+            1,
+            284.0,
+            389.0,
+            286.0,
+            384.5,
+            0xbfdf_21e5_d407_bf6b,
+            0xbfed_17a7_855f_d990,
+            0x3fc3_dcdf_9c19_d523,
+        ),
+        (
+            1,
+            310.0,
+            358.0,
+            310.5,
+            353.5,
+            0xc00b_3dfb_7f4a_62e2,
+            0xc00e_9dc6_731c_4e4e,
+            0xc006_1aff_b185_441e,
+        ),
+        (
+            2,
+            284.0,
+            630.0,
+            285.0,
+            624.5,
+            0xbfe1_c2ea_5cea_d0e2,
+            0xbff1_24fb_90f9_a89a,
+            0x3fa4_5145_f494_0e08,
+        ),
+        (
+            2,
+            309.0,
+            600.0,
+            310.0,
+            594.5,
+            0xc00b_1578_215d_563f,
+            0xc00f_3745_9789_752a,
+            0xc006_537d_94c5_513a,
+        ),
+    ];
+    // Java `Staff.pitchPositionOf` for a point inside the staff.
+    let pitch_at = |staff: &audiveris_omr::recognize::StaffLineGeometry, x: f64, y: f64| -> f64 {
+        let top = staff.first_line.y_at_x_ext(x);
+        let bottom = staff.last_line.y_at_x_ext(x);
+        4.0 * ((2.0 * y) - bottom - top) / (bottom - top)
+    };
+    for (staff_id, cx, cy, gx, gy, java_mass, java_geo, java_measured) in rows {
+        let staff = grid
+            .staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == staff_id)
+            .expect("staff geometry");
+        let mass = pitch_at(staff, cx, cy);
+        let geo = pitch_at(staff, gx, gy);
+        println!(
+            "staff {staff_id} centroid {cx}: mass {:016x} java {java_mass:016x} ulp {:+} | \
+             geo {:016x} java {java_geo:016x} ulp {:+} (java measured {java_measured:016x})",
+            mass.to_bits(),
+            (mass.to_bits() as i64) - (java_mass as i64),
+            geo.to_bits(),
+            (geo.to_bits() as i64) - (java_geo as i64),
+        );
+    }
+}
+
+/// Exploratory: is the alters' residual drift in the measured pitch or the grade?
+#[test]
+#[ignore = "exploratory print"]
+fn key_alter_measured_pitch_against_java() {
+    use audiveris_music_font::{FLAT_MASS_PITCH_OFFSET, MusicFamily, area_pitch_offset};
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let flat_area_offset = area_pitch_offset(MusicFamily::Bravura, "FLAT").unwrap_or(0.0);
+    println!(
+        "FLAT_MASS_PITCH_OFFSET {:016x} flat_area_offset {:016x} ({flat_area_offset})",
+        FLAT_MASS_PITCH_OFFSET.to_bits(),
+        flat_area_offset.to_bits(),
+    );
+    // staff, centroid x/y, center x/y, java measuredPitch
+    let rows: [(usize, f64, f64, f64, f64, u64); 4] = [
+        (1, 284.0, 389.0, 286.0, 384.5, 0x3fc3_dcdf_9c19_d523),
+        (1, 310.0, 358.0, 310.5, 353.5, 0xc006_1aff_b185_441e),
+        (2, 284.0, 630.0, 285.0, 624.5, 0x3fa4_5145_f494_0e08),
+        (2, 309.0, 600.0, 310.0, 594.5, 0xc006_537d_94c5_513a),
+    ];
+    let pitch_at = |staff: &audiveris_omr::recognize::StaffLineGeometry, x: f64, y: f64| -> f64 {
+        let top = staff.first_line.y_at_x_ext(x);
+        let bottom = staff.last_line.y_at_x_ext(x);
+        4.0 * ((2.0 * y) - bottom - top) / (bottom - top)
+    };
+    for (staff_id, cx, cy, gx, gy, java_measured) in rows {
+        let staff = grid
+            .staff_lines
+            .iter()
+            .find(|staff| staff.staff_id == staff_id)
+            .expect("staff geometry");
+        let mass = pitch_at(staff, cx, cy);
+        let geo = pitch_at(staff, gx, gy) + flat_area_offset;
+        let measured = 0.5 * ((mass + FLAT_MASS_PITCH_OFFSET) + geo);
+        println!(
+            "staff {staff_id} centroid {cx}: measured {:016x} java {java_measured:016x} ulp {:+}",
+            measured.to_bits(),
+            (measured.to_bits() as i64) - (java_measured as i64),
         );
     }
 }
