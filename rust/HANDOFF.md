@@ -4192,10 +4192,16 @@ aggregate runs 8 pow calls (`grade^weight` x7, then `global^(1/totalWeight)`); H
 `Math.pow` is the fdlibm-derived dpow stub while Rust's `powf` is Apple libm, they differ
 by ~1 ulp on specific operands, and three ledgers plus one time signature happen to hit
 such operands. The frozen ledgers fixture stores grades at 9 decimals, which is why the
-old exact gate never saw it. **Next step: port fdlibm's e_pow (StrictMath.pow source) to
-Rust as `java_pow`, use it in every grade aggregation, and re-run
-`grade_sources_bit_match_java`** -- if the hypothesis is right, ledgers go 8/8 and times
-2/2 with no other change. If it is wrong, the diagnostic prints will say so immediately.
+old exact gate never saw it. **The pow hypothesis was tested and REFUTED (same day):** `java_pow` (fdlibm e_pow, now
+at `src/java_math.rs` with sanity vectors) produces bit-identical results to Apple libm's
+`powf` on every operand these grades hit, so pow is not the drift source. The reaggregation
+check was also circular -- port impacts reproduce the port total by construction. **The
+drift therefore lives in the impact GRADES the port computes**, upstream of aggregation,
+and the decisive next step is Java-side per-impact bits: extend the ledgers probe to emit
+each impact grade as hex (the frozen fixture's 9 decimals cannot distinguish an ulp),
+regenerate chula, and diff impact-by-impact. `java_math.rs` stays -- it cost little, its
+vectors document host libm agreement, and the token gate may yet need it for another
+class's operands.
 
 **The SIG slice map is complete: 221/221 vertices and 202/202 edges of Java's STEMS
 baseline derive from production products, per stage, in insertion order.** What remains to

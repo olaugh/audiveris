@@ -1034,6 +1034,18 @@ fn ledger_ulp_drift_isolation() {
             }
         }
         let re = 0.8_f64 * product.powf(1.0 / total_weight);
+        // The same aggregation through fdlibm pow, the hypothesis under test.
+        let mut jp = 1.0_f64;
+        let mut jw = 0.0_f64;
+        for impact in &inter.impacts {
+            jw += impact.weight;
+            if impact.grade == 0.0 {
+                jp = 0.0;
+            } else if impact.weight != 0.0 {
+                jp *= audiveris_omr::java_math::java_pow(impact.grade, impact.weight);
+            }
+        }
+        let rej = 0.8_f64 * audiveris_omr::java_math::java_pow(jp, 1.0 / jw);
         let stored = inter.grade;
         println!(
             "ledger x={} stored={:016x} reagg={:016x} java={:016x}  stored==java {}  reagg==java {}",
@@ -1043,6 +1055,11 @@ fn ledger_ulp_drift_isolation() {
             want,
             stored.to_bits() == *want,
             re.to_bits() == *want,
+        );
+        println!(
+            "   java_pow reagg {:016x}  == java {}",
+            rej.to_bits(),
+            rej.to_bits() == *want
         );
         if re.to_bits() != *want {
             // Which single impact, moved by how many ulps, lands on Java's bits?

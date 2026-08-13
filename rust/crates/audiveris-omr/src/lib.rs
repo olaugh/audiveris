@@ -53,6 +53,7 @@ pub mod header_time_column;
 pub mod headers_step;
 pub mod heads_post_range_corpus;
 pub mod heads_step;
+pub mod java_math;
 pub mod key_classifier;
 pub mod key_column;
 pub mod key_parameters;
