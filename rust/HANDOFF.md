@@ -4060,19 +4060,24 @@ The single gap is the **brace at ordinal 0**, which the port keeps in `brace_sig
 than in `GridSig`, exactly as the caveat predicted. The test asserts the gap
 (`nodes.len() == opening.len() - 1`) so it fails the moment the merge lands.
 
-**Slice 1b (next): merge the brace at ordinal 0.** Scoped, not started. The promotion
-boundary already exists -- `promote_brace_filament(filament, system_id, source_staff_id,
-store)` in `brace_sig.rs` -- but its only construction site is a unit test, so it is not
-wired into GRID execution. What GRID *does* retain is
-`PeakGraphReport.brace_filaments: Vec<DetachedBraceFilamentEvidence>`, carrying
-`members: Vec<LocatedSectionId>`, `bounds`, `points`, `mean_curvature` and the two
-extensions. The promotion wants a `CurvedFilamentCompound`, so the missing step is
-rebuilding that compound from the retained member section ids against
-`PeakGraphReport.vertical_sections` / `horizontal_sections`, which are already exposed.
-Then feed each brace into the system's vertex list *before* the verticals, because Java
-puts it at ordinal 0. `grid_sig_matches_javas_opening_vertices` currently asserts the gap
-(`nodes.len() == opening.len() - 1`) and will fail when this lands -- update it to
-`assert_eq!(nodes.len(), opening.len())` and add the brace-first ordering check.
+**Slice 1b (next): merge the brace at ordinal 0.** Scoped precisely; the first scoping of
+it here was wrong and is corrected. The brace path is **fully implemented and unit-tested,
+and simply never called in production**. `continue_raw_bars_through_lines_root`
+(`raw_projector_adapter.rs:1597`, `pub`) takes a `&mut BraceSigStore`, builds the compound
+through `build_brace_filament`, and promotes it with `promote_brace_filament`; the unit test
+at line 3392 asserts it yields one brace inter for system 1. That test is its **only caller
+in the crate**. So the earlier note here -- that the missing step was rebuilding a
+`CurvedFilamentCompound` from retained section ids -- was wrong: nothing needs rebuilding.
+What is missing is that the production GRID executor never runs this path, and
+`PeakGraphReport` consequently has nowhere to carry a `BraceSigStore` next to its `sig`.
+
+The work is therefore: call this path from the production executor, surface the store on
+`PeakGraphReport`, and put each system's brace at the head of its vertex list, because Java
+puts it at ordinal 0. Check first whether the function does more than braces -- its name
+suggests it continues the whole raw-bars flow -- so that wiring it does not duplicate work
+the production path already does by another route. `grid_sig_matches_javas_opening_vertices`
+asserts the gap (`nodes.len() == opening.len() - 1`) and will fail when this lands; update it
+to equality plus a brace-first ordering check.
 
 **Slices 2-5:** HEADERS, BEAMS, LEDGERS, HEADS append in the same way, each verified against its
 ordinal range. HEADS is the one that needs new identity assignment, since it deliberately emits
