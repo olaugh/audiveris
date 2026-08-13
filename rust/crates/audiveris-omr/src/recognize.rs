@@ -794,12 +794,11 @@ fn recognize_native_beams_impl(
     // same closed buffer more strictly for BEAMS.
     let head_spot_runs = spot_runs(&chain.closed, width, height, HEAD_BINARIZATION_THRESHOLD)?;
     let table = spot_runs(&chain.closed, width, height, BEAM_BINARIZATION_THRESHOLD)?;
-    let mut components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
-    // Java browses each system's beam spots in `Glyphs.byFullOrdinate` order -- top,
-    // then left (BeamsBuilder.buildBeams sorts exactly this way despite its comment
-    // saying abscissa). The SIG's beam insertion order, which STEMS later relies on,
-    // is downstream of this sort; component-extraction order is not it.
-    components.sort_by_key(|component| (component.top, component.left));
+    // Extraction order, and it must stay that way here: Java's `SpotsBuilder`
+    // hands `BlackHeadSizer` the glyph list as built, and only the later
+    // per-system beam browse re-sorts. Sorting in place ahead of the sizer
+    // silently changes which spot it sees first.
+    let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
 
     // In Java this happens inside `SpotsBuilder.buildSpots`, before the same
     // glyphs are dispatched to systems and interpreted as beams. The switches
@@ -878,7 +877,17 @@ fn recognize_native_beams_impl(
 
     let mut initial = Vec::new();
     let mut leftover = Vec::new();
-    for component in &components {
+    // Java browses each system's beam spots in `Glyphs.byFullOrdinate` order --
+    // top, then left (`BeamsBuilder.buildBeams` sorts exactly this way despite
+    // its comment saying abscissa). The SIG's beam insertion order, which STEMS
+    // later relies on, is downstream of this sort; component-extraction order is
+    // not it. The sort is stable, so equal (top, left) keeps extraction order.
+    let browse_order = {
+        let mut ordered = components.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|component| (component.top, component.left));
+        ordered
+    };
+    for component in browse_order {
         let systems = systems_for(component);
         if systems.is_empty() {
             continue;

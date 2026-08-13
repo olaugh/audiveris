@@ -4246,6 +4246,32 @@ true-curve inversion, and the endpoint chord -- and the port has all three. A do
 naming the Java method is not evidence the body implements it; only a bit-exact
 comparison is.
 
+**Master's CI was red for six commits, and the cause was a shared vector (2026-08-13).**
+The "Rust port" workflow failed on `native_black_head_sizing_matches_java_on_every_beam_sheet`,
+shard 0, on both ubuntu and macos, from `501df761a` through `6ca009d2b`. It was never a
+platform or fixture problem: `c64c15873` added
+`components.sort_by_key(|c| (c.top, c.left))` in `recognize_native_beams_impl` to put beam
+creation into Java's `Glyphs.byFullOrdinate` browse order -- correct in itself -- but it
+sorted **in place, ahead of `measure_black_heads(spots: &components)`**. Java's
+`SpotsBuilder.buildSpots` hands `BlackHeadSizer` the glyph list *as built*, and only the
+later per-system `BeamsBuilder.buildBeams` re-sorts, so the port's sizer started seeing the
+topmost spot first (chula ordinal 0 became the y=123 `width_low` sliver instead of Java's
+y=1845 `width_high` component). Row counts still matched, which is why it read as an
+ordering defect rather than a selection one.
+
+The fix keeps `components` in extraction order and sorts a borrowed view for the beam
+browse only. Both gates now hold at once: the sizer matches Java again, and
+`beams_products_derive_javas_beam_ordinals` -- the gate the sort was introduced for --
+still passes. `sort_by_key` is stable, so equal `(top, left)` keeps extraction order.
+
+Two process points worth keeping. `c64c15873`'s message asserts "the full workspace suite
+passes on it unchanged"; it did not, and the claim went unchecked because every CI run
+between the last green (`78bf90d40`) and `501df761a` was **cancelled** by the next push.
+Superseding pushes hide the run that would have caught this, so a red master can persist
+for hours while each individual commit looks fine. And **an in-place sort of a vector that
+more than one consumer reads is a silent behavioural change to all of them** -- prefer
+sorting a view at the point of use.
+
 **What the fix moved elsewhere, and why it was re-pinned rather than reverted.** One
 other gate changed: `bach_system_six_produces_one_identity_free_multiple_rest_replacement`
 asserts the Bach system-6 multiple rest's `stop_pitch` bits, and they shifted by 3987 ulp

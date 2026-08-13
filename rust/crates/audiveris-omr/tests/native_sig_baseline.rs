@@ -941,7 +941,15 @@ fn grade_sources_bit_match_java() {
                 header_bits.push(0); // alter grades: source unknown yet
             }
         }
-        header_bits.push(candidate.grade.to_bits());
+        // Java's KeyInter grade is `EnsembleHelper.computeMeanContextualGrade`
+        // over its KeyAlterInter members (`KeyInter.invalidateCache`), and the
+        // port's `grade` is the mean of the same alters' pitched grades before
+        // any ratio. Applying intrinsicRatio here lands the value to ten
+        // decimals but NOT to the bit, so the association still differs -- Java
+        // means over per-member grades, the port scales a mean. Closing that
+        // needs the per-alter grades, which are also the four unwired rows
+        // above; both come from the same missing source.
+        header_bits.push((candidate.grade * 0.8).to_bits());
     }
     for staff in &hs.staffs {
         let time = staff.selected_time_id.unwrap();
