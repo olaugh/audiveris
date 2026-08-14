@@ -751,6 +751,14 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         sig_vertex_ordinal: group_vertex.0,
         state_sha256: sha256_hex(group_state.as_bytes()),
     });
+    let certificate = project_native_stems_beam_vlink_base_apply_certificate(
+        sig,
+        bindings,
+        relation.beam,
+        None,
+        relation,
+        reuse_check.plan,
+    )?;
     Ok(NativeStemsBeamVLinkBaseApplyState {
         transaction_state: transaction_state.clone(),
         inter_index: NativeStemsBeamInterIndexApplyState {
@@ -798,7 +806,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
             },
         },
         sheet_edit: prior.sheet_edit,
-        certificate: None,
+        certificate: Some(certificate),
         committed: None,
     })
 }

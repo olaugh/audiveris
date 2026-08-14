@@ -26,6 +26,10 @@ use audiveris_omr::{
     },
     native_stems_beam_scheduler::NativeStemsBeamSchedulerResumeStatus,
     native_stems_beam_stumps::NativeStemsBeamSource,
+    native_stems_beam_vlink_b_linker_flag::{
+        NativeStemsBeamVLinkBLinkerFlagState,
+        apply_native_stems_beam_vlink_b_linker_flag_transaction,
+    },
     native_stems_beam_vlink_base_apply::{
         NativeStemsBeamBeamIncidentRead, NativeStemsBeamBeamIncidentRule,
         NativeStemsBeamGroupRuntimeState, NativeStemsBeamIncidentDirection,
@@ -6099,6 +6103,158 @@ fn native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read() {
         second_base.fresh_relation.extension_point.y.to_bits(),
         0x407c_b1ed_e751_1cca
     );
+
+    let second_base_state_before = roll_native_stems_beam_vlink_base_apply_state(
+        &native_base.state_after,
+        &second_transaction_state,
+        &second_reuse,
+        &sig,
+        &bindings,
+        &[],
+    )
+    .expect("repeatable transaction-2 B14 rollover input");
+    let second_target = second.b_linker;
+    let second_target_linked = cells
+        .iter()
+        .find(|cell| cell.reference == second_target)
+        .expect("transaction-2 target B cell")
+        .linked;
+    assert!(!second_target_linked);
+    let mut second_flag_state = NativeStemsBeamVLinkBLinkerFlagState {
+        system_id: 1,
+        base_apply_state_before: second_base_state_before,
+        target_b_linker: second_target,
+        linked: second_target_linked,
+        committed: None,
+    };
+    let second_flag = apply_native_stems_beam_vlink_b_linker_flag_transaction(
+        second_scheduler,
+        &hydrated.plans,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &second_create,
+        &second_live,
+        hydrated.relation_parameters,
+        &second_reuse,
+        &second_base,
+        &mut second_flag_state,
+    )
+    .expect("native transaction-2 B15");
+    let mut second_cells = cells.clone();
+    let second_siblings = apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
+        &mut second_sig,
+        &second_bindings,
+        second_scheduler,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &hydrated.reachability,
+        &hydrated.builder,
+        &second_base,
+        &second_flag,
+        &mut second_cells,
+    )
+    .expect("native transaction-2 B16");
+    assert_eq!(
+        second_siblings
+            .graph
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![208, 209]
+    );
+    let mut second_s_cells = s_cells.clone();
+    let second_heads = apply_native_stems_beam_vlink_head_transaction_to_native_sig(
+        &mut second_sig,
+        &second_bindings,
+        second_scheduler,
+        &hydrated.plans,
+        &hydrated.builder,
+        &hydrated.head_corners,
+        &hydrated.reachability,
+        &second_flag,
+        &second_siblings,
+        &second_cells,
+        &mut second_s_cells,
+    )
+    .expect("native transaction-2 B17");
+    assert_eq!(
+        (second_sig.vertices.len(), second_sig.edges.len()),
+        (223, 212)
+    );
+    assert_eq!(
+        second_heads
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![210, 211]
+    );
+    assert_eq!(
+        second_heads
+            .steps
+            .iter()
+            .map(|step| (step.head_vertex.0, step.stem_vertex.0))
+            .collect::<Vec<_>>(),
+        vec![(130, 222), (131, 222)]
+    );
+    assert_eq!(second_heads.s_linker_write_count, 2);
+    assert_eq!(second_heads.s_linker_value_change_count, 2);
+    assert_eq!((second_heads.last_index, second_heads.max_index), (4, 4));
+    assert!(second_heads.returned_true);
+    let second_sig_ordinals = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| (beam.source, beam.sig_ordinal))
+        .collect::<BTreeMap<_, _>>();
+    let second_b_alias = |reference: NativeStemsBeamBLinkerRef| {
+        format!(
+            "beam:{}:b:{}",
+            second_sig_ordinals[&reference.beam],
+            reference.id - 1
+        )
+    };
+    assert_eq!(second_b_alias(second_siblings.base_b_linker), "beam:12:b:2");
+    assert_eq!(
+        second_siblings
+            .assigned_b_linkers
+            .iter()
+            .copied()
+            .map(second_b_alias)
+            .collect::<Vec<_>>(),
+        vec!["beam:2:b:0", "beam:3:b:0"]
+    );
+
+    let txn2_sibling_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-txn2-sibling-links-chula.txt"),
+    )
+    .expect("expected-only transaction-2 B16 fixture");
+    let txn2_sibling_result = txn2_sibling_text
+        .lines()
+        .find(|line| {
+            line.starts_with("stemsbeamvlinksiblinglinksresult ")
+                && line.contains(" system 1 plan 152 scope real case - ")
+        })
+        .expect("transaction-2 B16 result");
+    assert!(txn2_sibling_result.contains(
+        "siblings 2 committedEdges 2 committedEdgeAliases [sig-edge:208,sig-edge:209] committedFlags 2 committedBCells [beam:2:b:0,beam:3:b:0] eventCount 6"
+    ));
+    let txn2_head_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-txn2-head-links-chula.txt"),
+    )
+    .expect("expected-only transaction-2 B17 fixture");
+    let txn2_head_result = txn2_head_text
+        .lines()
+        .find(|line| {
+            line.starts_with("stemsbeamvlinkheadlinksresult ")
+                && line.contains(" system 1 plan 152 scope real case - ")
+        })
+        .expect("transaction-2 B17 result");
+    assert!(txn2_head_result.contains(
+        "headEntries 2 duplicateEntries 0 relationsInserted 2 sWriteCount 2 sValueChangeCount 2 consistencyWriteCount 2 headAbnormalChangeCount 2 stemAbnormalChangeCount 1 dirtyCascadeCount 3"
+    ));
+
     let txn2_base_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-txn2-base-apply-chula.txt"),
     )

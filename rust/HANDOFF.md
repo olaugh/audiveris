@@ -4542,8 +4542,13 @@ txn2 oracle is opened. `roll_native_stems_beam_vlink_base_apply_state` then fold
 prior InterIndex append into a 640-entry native lineage, recomputes the 222/207 baseline
 from the owned graph, and creates a fresh one-shot B14 state without txn2 rows. Native
 B14 appends Stem vertex 222 and RIGHT BeamStem edge 207, assigns persistent ID 2341, and
-matches the frozen grade/extension/result only after returning. The bounded rollover
-requires the same base beam and a non-VIP next ID; linked-S scans and B16/B17 remain.
+matches the frozen grade/extension/result only after returning. The same persistent B/S
+arenas then carry B15-B17 without txn2 rows: B16 appends sibling edges 208/209 and links
+`beam:2:b:0` plus `beam:3:b:0`; B17 appends HeadStem edges 210/211 from native heads
+130/131, links `head:21:LEFT` plus `head:22:LEFT`, and leaves the owned graph at 223/212.
+Only then are the frozen B14/B16/B17 results opened. The bounded rollover requires the
+same base beam and a non-VIP next ID; linked-S scans for later frontiers and txn2 B18/B19
+remain.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4563,9 +4568,9 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Carry transaction 2 B15-B17 from the owned post-B14 223/208 graph to the measured
-   223/212 endpoint without txn2 Java rows; extend B13 to linked-S HeadStem scans for
-   later frontiers.
+1. Join transaction 2 B18/B19 to the same B/S/SIG authorities and prove scheduler resume
+   reaches transaction 3; then make the B12-B19 carrier iterative. Extend B13 to linked-S
+   HeadStem scans before a later frontier needs them.
 2. Drive the chula-system-1 SIDES pass from owned state: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
    32-transaction pass only after the driver returns. Do not claim native-products-only
