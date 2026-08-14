@@ -26,6 +26,10 @@ use audiveris_omr::{
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::NativeStemsBeamSchedulerResumeStatus,
+    native_stems_beam_sides::{
+        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
+        NativeStemsBeamSidesGlyphEvidence, advance_native_stems_beam_sides_transaction,
+    },
     native_stems_beam_stumps::NativeStemsBeamSource,
     native_stems_beam_vlink_b_linker_flag::{
         NativeStemsBeamVLinkBLinkerFlagState,
@@ -76,8 +80,9 @@ use audiveris_omr::{
         initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamExhaustiveGlyphLookup,
-        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphAliasOrder,
+        NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphEqualsScan,
+        NativeStemsBeamExhaustiveGlyphLookup, NativeStemsBeamFixedGlyphContent,
+        NativeStemsBeamGlyphAliasOrder, NativeStemsBeamGlyphRegistrationAction,
         NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamSystemStemAuthorityProof,
         apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
@@ -6414,8 +6419,141 @@ fn native_b15_through_b19_carrier_reaches_fourth_frontier_before_oracle_read() {
         &third_transaction_state,
     )
     .expect("native transaction-3 compound candidate");
-    third_transaction_state.glyph_index.exhaustive_lookup =
-        Some(exhaustive_glyph_scan(third_candidate, &registry_text));
+    let third_glyph_scan = exhaustive_glyph_scan(third_candidate, &registry_text);
+
+    // The production carrier owns the same transaction as one clone-and-swap
+    // operation.  Seed it only with the post-transaction-2 authorities and
+    // candidate-specific page evidence; all plan-specific work is internal.
+    let checker_page = b15_hydration::native_predecessor_page("chula.png");
+    let checker = b15_hydration::checker_context_for_page(&checker_page);
+    let carrier_before = NativeStemsBeamSidesCarrier {
+        scheduler: (**third_scheduler).clone(),
+        latest_base_apply: (*second_base.state_after).clone(),
+        sig: second_sig.clone(),
+        bindings: second_bindings.clone(),
+        b_cells: second_cells.clone(),
+        s_cells: second_s_cells.clone(),
+        beam_inter_index: beam_bootstrap.clone(),
+        configured_inter_vip_ids: Vec::new(),
+    };
+    let context = NativeStemsBeamSidesContext {
+        plans: &hydrated.plans,
+        builders: &hydrated.builder,
+        stumps: &hydrated.stumps,
+        vlinkers: &hydrated.vlinkers,
+        reachability: &hydrated.reachability,
+        head_corners: &hydrated.head_corners,
+        checker: &checker,
+        relation_parameters: hydrated.relation_parameters,
+    };
+    let evidence = NativeStemsBeamSidesGlyphEvidence {
+        selected: &third_bootstrap,
+        exhaustive_candidate: Some(&third_glyph_scan),
+    };
+    let mut carrier = carrier_before.clone();
+    let carried_third =
+        advance_native_stems_beam_sides_transaction(&mut carrier, context, evidence)
+            .expect("atomic native transaction-3 carrier");
+    assert_eq!(
+        (carrier.sig.vertices.len(), carrier.sig.edges.len()),
+        (224, 216)
+    );
+    assert_eq!(carrier.bindings.stem_vertices[&2].0, 223);
+    assert_eq!(carried_third.base.graph_relation_identity, Some(212));
+    assert_eq!(
+        carried_third
+            .siblings
+            .graph
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![213]
+    );
+    assert_eq!(
+        carried_third
+            .heads
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![214, 215]
+    );
+    assert_eq!(
+        carrier
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        3
+    );
+    assert_eq!(carried_third.create.registration.glyph_id, 298);
+    assert_eq!(
+        carried_third.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false
+        }
+    );
+    assert_eq!(
+        carried_third.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 2 }
+    );
+    assert_eq!(
+        carrier
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .union_size,
+        1650
+    );
+    assert_eq!(
+        carrier.latest_base_apply.inter_index.baseline_entry_count,
+        641
+    );
+    assert_eq!(
+        carrier.latest_base_apply.inter_index.appended_entries.len(),
+        1
+    );
+    assert_eq!(carrier.b_cells.iter().filter(|cell| cell.linked).count(), 8);
+    assert_eq!(carrier.s_cells.iter().filter(|cell| cell.linked).count(), 6);
+    assert!(
+        carrier
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .all(|stem| stem.sig_attached
+                && stem.abnormal
+                    == carrier.sig.vertices[carrier.bindings.stem_vertices[&stem.stem_identity].0]
+                        .abnormal)
+    );
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(carried_fourth) =
+        &carried_third.outer_resume.resume.status
+    else {
+        panic!("atomic transaction 3 did not reach the fourth frontier");
+    };
+    assert_eq!(carried_fourth.plan.plan_ordinal, 627);
+
+    // A B16 failure occurs after provisional B12-B15 work, but no part of the
+    // caller's complete carrier can escape the shadow.
+    let assigned = carried_third
+        .siblings
+        .assigned_b_linkers
+        .first()
+        .copied()
+        .expect("transaction-3 sibling cell");
+    let mut late_failure = carrier_before.clone();
+    late_failure
+        .b_cells
+        .retain(|cell| cell.reference != assigned);
+    let late_failure_before = late_failure.clone();
+    advance_native_stems_beam_sides_transaction(&mut late_failure, context, evidence)
+        .expect_err("missing sibling B cell must reject the carrier transaction");
+    assert_eq!(late_failure, late_failure_before);
+
+    third_transaction_state.glyph_index.exhaustive_lookup = Some(third_glyph_scan);
     let third_create = apply_native_stems_beam_vlink_create_stem_transaction(
         third_scheduler,
         &hydrated.builder,
@@ -6616,6 +6754,12 @@ fn native_b15_through_b19_carrier_reaches_fourth_frontier_before_oracle_read() {
     assert_eq!(fourth.plan.plan_ordinal, 627);
     assert_eq!(second_b_alias(fourth.b_linker), "beam:22:b:2");
     assert_eq!(fourth.vertical_side, NativeStemVerticalSide::Top);
+    assert_eq!(carried_third.create, third_create);
+    assert_eq!(carried_third.reuse_live_state, third_live);
+    assert_eq!(carried_third.reuse, third_reuse);
+    assert_eq!(carried_third.siblings, third_siblings);
+    assert_eq!(carried_third.heads, third_heads);
+    assert_eq!(carried_third.outer_resume, third_outer_resume);
 
     let txn2_sibling_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-txn2-sibling-links-chula.txt"),
