@@ -580,6 +580,8 @@ public final class StemsBeamSidesLoopProbe
         int stumpsEvent;
         int stumpsBeamOrdinal;
         int stumpsStumpOrdinal;
+        final int stumpsTransactionLimit = Integer.getInteger(
+                "audiveris.rustport.stumpsTransactionLimit", 1);
         static final int FRESH_TRANSACTION_CAP = 400;
         List<String> freshBaseRows;
         List<String> freshFlagRows;
@@ -747,6 +749,10 @@ public final class StemsBeamSidesLoopProbe
         void runStumpsPrefix ()
             throws Exception
         {
+            if (stumpsTransactionLimit < 1 || stumpsTransactionLimit > 2) {
+                throw new IllegalStateException(
+                        "unsupported STUMPS transaction limit " + stumpsTransactionLimit);
+            }
             final List<String> retained = new ArrayList<>();
             for (Inter inter : work) retained.add(beamAlias((AbstractBeamInter) inter));
             final List<String> linked = new ArrayList<>();
@@ -997,7 +1003,7 @@ public final class StemsBeamSidesLoopProbe
                                 page, system.getId(), stumpsEvent, stumpsBeamOrdinal,
                                 beamSigOrdinals.get(beam), stumpsStumpOrdinal, bAliases.get(b),
                                 V_V_SIDE.get(v), ref.plan);
-                    } else {
+                    } else if (stumpsTransactions >= stumpsTransactionLimit) {
                         before.assertOnlyLineChanged(snapshot(
                                 sheet, retriever, inspectionBeams, heads, allLinkers));
                         System.out.printf(
