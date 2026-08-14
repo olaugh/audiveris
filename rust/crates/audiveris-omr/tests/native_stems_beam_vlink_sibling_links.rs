@@ -16,6 +16,11 @@ use std::{
 
 use audiveris_image::beam_structure::Segment;
 use audiveris_omr::{
+    native_headers::recognize_native_headers,
+    native_heads::recognize_native_heads,
+    native_ledgers::recognize_native_ledgers,
+    native_sig::assemble_native_sig,
+    native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
@@ -26,6 +31,7 @@ use audiveris_omr::{
         NativeStemsBeamIncidentOpposite, NativeStemsBeamQueryRelationKind,
         NativeStemsBeamSheetEditState, NativeStemsBeamSigListenerTopology,
         NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBeamRuntimeState,
+        apply_native_stems_beam_vlink_base_transaction_to_native_sig,
     },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
@@ -48,8 +54,11 @@ use audiveris_omr::{
         NativeStemsBeamVLinkSiblingLinksOperation, NativeStemsBeamVLinkSiblingLinksOutcome,
         NativeStemsBeamVLinkSiblingLinksState, NativeStemsBeamVLinkSiblingLinksTransaction,
         apply_native_stems_beam_vlink_sibling_links_transaction,
+        apply_native_stems_beam_vlink_sibling_transaction_to_native_sig,
+        initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
+    recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
     stems_step::{NativeBeamPortion, NativeStemPoint, NativeStemVerticalSide},
 };
 
@@ -5654,4 +5663,241 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
         "boundary 16 derived {} sibling writes, matching Java's pass: {derived:?}",
         derived.len()
     );
+}
+
+/// The first measured transaction now derives B16 from the owned SIG and
+/// typed products.  Java rows are opened only after the complete native
+/// graph/cell result exists.
+#[test]
+fn native_b15_b16_carrier_commits_first_transaction_before_oracle_read() {
+    let base_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
+    )
+    .expect("frozen B14 predecessor");
+    let create_text =
+        std::fs::read_to_string(repo_root().join("rust/oracle/stems-beam-create-stem-chula.txt"))
+            .expect("frozen B12 predecessor");
+    let reuse_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-reuse-check-chula.txt"),
+    )
+    .expect("frozen B13 predecessor");
+    let hydrated =
+        b15_hydration::run_real("chula.png", 1, &base_text, &create_text, &reuse_text, false)
+            .expect("native predecessors through B15");
+
+    let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
+        .expect("GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("HEADS recognition");
+    let assembled = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .expect("native SIG assembly");
+    let mut sig = assembled
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("system 1 SIG")
+        .clone();
+    let mut bindings = assembled
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == 1)
+        .expect("system 1 bindings")
+        .clone();
+    let mut base_state = hydrated.state_before.base_apply_state_before.clone();
+    let native_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
+        &hydrated.scheduler,
+        &hydrated.plans,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &hydrated.create_transaction,
+        &hydrated.reuse_live_state,
+        hydrated.relation_parameters,
+        &hydrated.reuse_check,
+        &mut base_state,
+        &mut sig,
+        &mut bindings,
+    )
+    .expect("native B14 commit");
+    // The native graph deliberately uses one-based native vertex identities
+    // where the legacy replay certificate retains Java EntityIndex IDs.  Join
+    // the complete mutation result in the shared semantic domain instead of
+    // pretending those identity domains are interchangeable.
+    assert_eq!(native_base.key, hydrated.base_apply.key);
+    assert_eq!(native_base.stem_before, hydrated.base_apply.stem_before);
+    assert_eq!(native_base.stem_after, hydrated.base_apply.stem_after);
+    assert_eq!(
+        native_base.fresh_relation,
+        hydrated.base_apply.fresh_relation
+    );
+    assert_eq!(
+        native_base.graph_relation_identity,
+        hydrated.base_apply.graph_relation_identity
+    );
+    assert_eq!(
+        native_base.apply_disposition,
+        hydrated.base_apply.apply_disposition
+    );
+    assert_eq!(native_base.callback, hydrated.base_apply.callback);
+    assert_eq!(native_base.operations, hydrated.base_apply.operations);
+    assert_eq!(native_base.outcome, hydrated.base_apply.outcome);
+    assert_eq!((sig.vertices.len(), sig.edges.len()), (222, 203));
+
+    let mut cells = initialize_native_stems_beam_b_linker_cells(&hydrated.reachability)
+        .expect("complete native B-cell arena");
+    let post_b14_sig = sig.clone();
+    let pre_b15_cells = cells.clone();
+    let actual = apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
+        &mut sig,
+        &bindings,
+        &hydrated.scheduler,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &hydrated.reachability,
+        &hydrated.builder,
+        &native_base,
+        &hydrated.transaction,
+        &mut cells,
+    )
+    .expect("native B15+B16 carrier commit");
+
+    assert_eq!((sig.vertices.len(), sig.edges.len()), (222, 205));
+    assert!(!actual.base_linked_before);
+    assert!(actual.base_linked_after);
+    assert_eq!(
+        actual.graph.appended_edges,
+        vec![
+            audiveris_omr::native_sig::NativeSigEdgeId(203),
+            audiveris_omr::native_sig::NativeSigEdgeId(204)
+        ]
+    );
+    assert_eq!(actual.siblings.len(), 2);
+    assert!(
+        actual
+            .siblings
+            .iter()
+            .all(|step| step.branch == NativeStemsBeamSiblingBranch::Linked)
+    );
+    assert_eq!(actual.b_linker_write_count, 3);
+    assert_eq!(actual.b_linker_value_change_count, 3);
+    assert_eq!(
+        sig.incident_edges(221)
+            .expect("native stem incidents")
+            .iter()
+            .map(|edge| edge.ordinal)
+            .collect::<Vec<_>>(),
+        vec![202, 203, 204]
+    );
+
+    // From this point onward the frozen B16 fixture is expected-only.
+    let text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-sibling-links-chula.txt"),
+    )
+    .expect("frozen B16 fixture");
+    let rows = parse_scaffold_fixture(&text).expect("B16 fixture parses");
+    let transactions = validate_core_rows(&rows).expect("B16 core rows");
+    let expected = transactions
+        .iter()
+        .find(|transaction| transaction.key.system == 1)
+        .expect("system 1 B16 rows");
+    let expected_members = expected
+        .rows
+        .iter()
+        .filter(|row| row.kind == RowKind::GroupMember)
+        .collect::<Vec<_>>();
+    assert_eq!(expected_members.len(), actual.group_members.len());
+    for (native, java) in actual.group_members.iter().zip(expected_members) {
+        assert_eq!(native.member_ordinal, java.usize("memberOrdinal").unwrap());
+        assert_eq!(
+            native.cross,
+            parse_point(java.value("verticalCross").unwrap()).unwrap()
+        );
+        assert_eq!(
+            native.left_limit.to_bits(),
+            parse_f64(java.value("leftLimit").unwrap())
+                .unwrap()
+                .to_bits()
+        );
+        assert_eq!(
+            native.right_limit.to_bits(),
+            parse_f64(java.value("rightLimit").unwrap())
+                .unwrap()
+                .to_bits()
+        );
+        assert_eq!(native.selected, java.bool("selected").unwrap());
+        assert_eq!(
+            native.sorted_ordinal,
+            parse_optional_usize(java.value("sortedOrdinal").unwrap()).unwrap()
+        );
+        assert_eq!(native.removed_as_base, java.bool("baseIdentity").unwrap());
+    }
+    for native in &actual.siblings {
+        let geometry =
+            sibling_transaction_rows(expected, RowKind::Geometry, native.sibling_ordinal)
+                .expect("one geometry row");
+        let [geometry] = geometry.as_slice() else {
+            panic!("expected one geometry row");
+        };
+        assert_eq!(
+            native.geometry.as_ref().expect("linked geometry"),
+            &expected_geometry_from_row(geometry).expect("expected geometry")
+        );
+    }
+    assert!(actual.group_state_before[0].abnormal);
+    assert!(!actual.group_state_after[0].abnormal);
+    assert!(actual.group_state_before[1].abnormal);
+    assert!(actual.group_state_after[1].abnormal);
+
+    let sig_ordinal = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| (beam.source, beam.sig_ordinal))
+        .collect::<BTreeMap<_, _>>();
+    let alias = |reference: NativeStemsBeamBLinkerRef| {
+        format!(
+            "beam:{}:b:{}",
+            sig_ordinal[&reference.beam],
+            reference.id - 1
+        )
+    };
+    assert_eq!(alias(actual.base_b_linker), "beam:12:b:0");
+    assert_eq!(
+        actual
+            .assigned_b_linkers
+            .iter()
+            .copied()
+            .map(alias)
+            .collect::<Vec<_>>(),
+        vec!["beam:0:b:0", "beam:1:b:0"]
+    );
+
+    // Even malformed persistent-cell authority leaves both carrier products
+    // byte-for-byte at the supplied pre-call state.
+    let mut rollback_sig = post_b14_sig.clone();
+    let mut rollback_cells = pre_b15_cells.clone();
+    let missing = actual.assigned_b_linkers[1];
+    rollback_cells.retain(|cell| cell.reference != missing);
+    let invalid_before = rollback_cells.clone();
+    assert!(
+        apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
+            &mut rollback_sig,
+            &bindings,
+            &hydrated.scheduler,
+            &hydrated.stumps,
+            &hydrated.vlinkers,
+            &hydrated.reachability,
+            &hydrated.builder,
+            &native_base,
+            &hydrated.transaction,
+            &mut rollback_cells,
+        )
+        .is_err()
+    );
+    assert_eq!(rollback_sig, post_b14_sig);
+    assert_eq!(rollback_cells, invalid_before);
 }

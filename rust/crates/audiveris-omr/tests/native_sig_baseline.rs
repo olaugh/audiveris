@@ -1093,14 +1093,21 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
         .support
         .expect("base support")
         .grade;
-    let drafts = sibling_sources.map(|source| NativeStemsBeamSiblingGraphDraft {
-        source,
-        grade,
-        beam_portion: audiveris_omr::stems_step::NativeBeamPortion::Left,
-        // Query chronology does not depend on geometry; the full B16 layer
-        // supplies this already-proven typed value when it consumes the projection.
-        extension_point: audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 },
-    });
+    let drafts = sibling_sources
+        .into_iter()
+        .enumerate()
+        .map(
+            |(sibling_ordinal, source)| NativeStemsBeamSiblingGraphDraft {
+                sibling_ordinal,
+                source,
+                grade,
+                beam_portion: audiveris_omr::stems_step::NativeBeamPortion::Left,
+                // Query chronology does not depend on geometry; the full B16 layer
+                // supplies this already-proven typed value when it consumes the projection.
+                extension_point: audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 },
+            },
+        )
+        .collect::<Vec<_>>();
     let post_b14 = system.clone();
     let projection = project_native_stems_beam_vlink_sibling_graph(
         system,

@@ -4488,9 +4488,22 @@ before appending 204. Source-outgoing, directed-pair, post-stem, and post-beam e
 chronology matches the frozen Java rows only after the native result has returned. The atomic graph wrapper
 ends at 222 vertices / 205 edges with `BeamVSiblingDraft {143,0/1}` provenance and exact
 grade/LEFT plus typed extension payloads; missing group bindings, a removed base edge, and duplicate
-drafts fail closed, with rollback proven. This is intentionally graph-only: full B16
-still needs native group/member digest, builder, and B-cell state before the first
-transaction is self-driving.
+drafts fail closed, with rollback proven. That graph-only projector remains the narrow
+query/mutation primitive used by the carrier below.
+
+The first measured B15+B16 transaction is now carried beyond that graph-only layer in
+owned typed state. The carrier initializes the complete B-linker cell catalogue exposed
+by native reachability, applies B15's `beam:12:b:0` false-to-true assignment, derives
+BeamGroup membership and geometry from the owned SIG/stump/V-linker products, selects
+each immutable builder item natively, and preserves Java's edge/callback -> builder
+lookup -> shared-cell write order. It commits edges 203/204 together with
+`beam:0:b:0` and `beam:1:b:0` false-to-true, replacing opaque Java group digests with
+typed member vertex/abnormal snapshots. SIG and B cells use one clone-and-swap commit;
+invalid carrier input leaves both unchanged. The 12/12 B16 gate opens the frozen B16
+rows only after the native result exists and compares group order, all geometry bits,
+abnormal changes, edge chronology, and cell aliases. This is bounded to chula system 1
+transaction 1. B17 HeadStem/S-cell carriage is still required before transaction 2 can
+start from the honest 222-vertex / 207-edge graph.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4510,12 +4523,13 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Join the native B16 graph projection to typed group/builder/B-cell state, commit its
-   two sibling B-cell writes, then project and commit B17's HeadStem/S-cell mutations.
-   Only then can transaction 2 start from the honest 222-vertex / 207-edge graph.
-2. Drive the chula-system-1 SIDES pass from native products only: carry B12 through B18,
+1. Project and commit B17's HeadStem edges and persistent S-cell mutations from the
+   same owned SIG/B-cell carrier. Only then can transaction 2 start from the honest
+   222-vertex / 207-edge graph.
+2. Drive the chula-system-1 SIDES pass from owned state: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
-   32-transaction pass only after the driver returns.
+   32-transaction pass only after the driver returns. Do not claim native-products-only
+   until the current Java-fixture glyph-registry bootstrap is replaced.
 3. Extend the same carried graph/state through STUMPS, competing-hook removal, and the
    remaining scheduler branches, then expose a real `recognize_native_stems` entry point.
 4. Extend `.omr` typing only through bounded read-only views that preserve every

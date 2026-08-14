@@ -97,6 +97,9 @@ pub struct NativeStemsBeamSiblingGraphRelation {
 /// Java `linkSiblings` order; every graph query and mutation is derived here.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeStemsBeamSiblingGraphDraft {
+    /// Ordinal in Java's complete selected-sibling loop, including siblings
+    /// which take an earlier no-mutation branch.
+    pub sibling_ordinal: usize,
     pub source: NativeStemsBeamSource,
     pub grade: f64,
     pub beam_portion: NativeBeamPortion,
@@ -272,7 +275,6 @@ fn project_native_sibling_graph(
                     .iter()
                     .any(|prior| prior.source == draft.source)
         })
-        || drafts.is_empty()
     {
         return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
             phase: "native sibling ordered member partition",
@@ -282,7 +284,17 @@ fn project_native_sibling_graph(
     let mut shadow = sig.clone();
     let mut steps = Vec::with_capacity(drafts.len());
     let mut appended_edges = Vec::new();
-    for (sibling_ordinal, draft) in drafts.iter().enumerate() {
+    for (draft_ordinal, draft) in drafts.iter().enumerate() {
+        let sibling_ordinal = draft.sibling_ordinal;
+        if sibling_ordinal < draft_ordinal
+            || drafts[..draft_ordinal]
+                .iter()
+                .any(|prior| prior.sibling_ordinal >= sibling_ordinal)
+        {
+            return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling draft ordinal order",
+            });
+        }
         let sibling_vertex = bindings.beam_vertices.get(&draft.source).copied().ok_or(
             NativeStemsBeamVLinkSiblingLinksError::InvalidState {
                 phase: "native sibling beam binding",
@@ -439,6 +451,545 @@ pub fn apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
     )?;
     *sig = shadow;
     Ok(projection)
+}
+
+/// Persistent native shared cell for one beam B-linker.  This is the field
+/// observed by every V child of the B-linker; it deliberately carries no Java
+/// object identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamNativeBLinkerCell {
+    pub reference: NativeStemsBeamBLinkerRef,
+    pub linked: bool,
+    pub closed: bool,
+}
+
+/// Typed member state used instead of Java's opaque BeamGroup token hash.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamNativeGroupMemberState {
+    pub source: NativeStemsBeamSource,
+    pub vertex: NativeSigVertexId,
+    pub abnormal: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamNativeSiblingTrace {
+    pub sibling_ordinal: usize,
+    pub source: NativeStemsBeamSource,
+    pub branch: NativeStemsBeamSiblingBranch,
+    pub geometry: Option<NativeStemsBeamSiblingGeometryTrace>,
+    pub selected_b_linker: Option<NativeStemsBeamBLinkerRef>,
+    pub linked_before: Option<bool>,
+    pub linked_after: Option<bool>,
+}
+
+/// Native B15+B16 carrier delta.  The SIG and shared-cell catalogue are the
+/// authoritative post-state; this value is a deterministic trace of the
+/// serial work which produced them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamNativeSiblingTransaction {
+    pub system_id: usize,
+    pub plan_ordinal: usize,
+    pub stem_identity: usize,
+    pub group_ordinal: usize,
+    pub group_members: Vec<NativeStemsBeamSiblingGroupMemberTrace>,
+    pub group_state_before: Vec<NativeStemsBeamNativeGroupMemberState>,
+    pub group_state_after: Vec<NativeStemsBeamNativeGroupMemberState>,
+    pub siblings: Vec<NativeStemsBeamNativeSiblingTrace>,
+    pub graph: NativeStemsBeamSiblingGraphProjection,
+    pub base_b_linker: NativeStemsBeamBLinkerRef,
+    pub base_linked_before: bool,
+    pub base_linked_after: bool,
+    pub assigned_b_linkers: Vec<NativeStemsBeamBLinkerRef>,
+    pub b_linker_write_count: usize,
+    pub b_linker_value_change_count: usize,
+}
+
+/// Construct the complete shared B-cell arena before the first SIDES
+/// transaction.  Reachability owns the exhaustive arena topology; all cells
+/// are initially false/open in this still-pre-link state.
+pub fn initialize_native_stems_beam_b_linker_cells(
+    reachability: &NativeStemsBeamReachabilitySystem,
+) -> Result<Vec<NativeStemsBeamNativeBLinkerCell>, NativeStemsBeamVLinkSiblingLinksError> {
+    let mut cells = Vec::new();
+    let mut seen = Vec::new();
+    for arena in &reachability.final_beam_arenas {
+        for entry in &arena.all_b_linkers {
+            if entry.reference.beam != arena.beam
+                || entry.reference.id == 0
+                || seen.contains(&entry.reference)
+            {
+                return Err(NativeStemsBeamVLinkSiblingLinksError::Predecessor {
+                    phase: "native shared B-cell arena",
+                });
+            }
+            seen.push(entry.reference);
+            cells.push(NativeStemsBeamNativeBLinkerCell {
+                reference: entry.reference,
+                linked: false,
+                closed: false,
+            });
+        }
+    }
+    Ok(cells)
+}
+
+/// Resume from the verified B15 result, derive every real B16 input from
+/// native products, and atomically commit both the SIG and shared B cells.
+/// No Java alias, persistent Inter ID, fixture row, or opaque group hash is an
+/// input to this path.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
+    sig: &mut NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    stump_system: &NativeStemsBeamStumpSystem,
+    vlinker_system: &NativeStemsBeamVLinkerSystem,
+    reachability_system: &NativeStemsBeamReachabilitySystem,
+    builder_system: &NativeStemsBeamBuilderSystem,
+    base_apply_transaction: &NativeStemsBeamVLinkBaseApplyTransaction,
+    b_linker_flag_transaction: &NativeStemsBeamVLinkBLinkerFlagTransaction,
+    cells: &mut Vec<NativeStemsBeamNativeBLinkerCell>,
+) -> Result<NativeStemsBeamNativeSiblingTransaction, NativeStemsBeamVLinkSiblingLinksError> {
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorNotReady),
+    };
+    let system_id = scheduler_system.system_id;
+    if system_id != sig.system_id
+        || system_id != bindings.system_id
+        || system_id != stump_system.system_id
+        || system_id != vlinker_system.system_id
+        || system_id != reachability_system.system_id
+        || system_id != builder_system.system_id
+        || stump_system.interline != vlinker_system.interline
+        || stump_system.interline != reachability_system.interline
+        || stump_system.max_beam_side_dx != vlinker_system.max_beam_side_dx
+        || stump_system.max_beam_side_dx != reachability_system.max_beam_side_dx
+        || frontier.plan != b_linker_flag_transaction.key.plan
+        || frontier.b_linker != b_linker_flag_transaction.target_b_linker
+        || frontier.v_linker != b_linker_flag_transaction.triggering_v_linker
+        || base_apply_transaction.key != b_linker_flag_transaction.key
+        || !b_linker_flag_transaction.linked_after
+        || b_linker_flag_transaction.stem_after.stem_identity
+            != base_apply_transaction.stem_after.stem_identity
+        || b_linker_flag_transaction
+            .continuation_support_grade
+            .to_bits()
+            != base_apply_transaction.fresh_relation.grade.to_bits()
+    {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
+    }
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 bindings",
+        }
+    })?;
+    validate_native_cell_catalogue(reachability_system, cells)?;
+
+    let mut shadow_sig = sig.clone();
+    let mut shadow_cells = cells.clone();
+    let base_cell = native_cell_mut(&mut shadow_cells, b_linker_flag_transaction.target_b_linker)?;
+    if base_cell.linked != b_linker_flag_transaction.linked_before {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B15 shared-cell before join",
+        });
+    }
+    let base_linked_before = base_cell.linked;
+    base_cell.linked = b_linker_flag_transaction.linked_after;
+
+    let (base_b, v_linker) = resolve_base_vlinker(vlinker_system, frontier.v_linker)?;
+    let builder = builder_system
+        .builders
+        .get(frontier.plan.builder_ordinal)
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::Predecessor {
+            phase: "native B16 builder ordinal",
+        })?;
+    if builder.start != frontier.v_linker || builder.y_direction != v_linker.y_direction {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
+    }
+    let base_beam = find_stump_beam(stump_system, frontier.beam)?;
+    let stem = &b_linker_flag_transaction.stem_after;
+    let stem_identity = stem.stem_identity;
+    let stem_vertex = bindings.stem_vertices.get(&stem_identity).copied().ok_or(
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 stem binding",
+        },
+    )?;
+    let group_vertex = bindings
+        .beam_group_vertices
+        .get(&base_beam.group_ordinal)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 group binding",
+        })?;
+    let group_sources = shadow_sig
+        .outgoing_edges(group_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 group query",
+        })?
+        .into_iter()
+        .filter(|edge| edge.kind == NativeSigRelationKind::Containment)
+        .map(|edge| {
+            source_for_vertex(bindings, NativeSigVertexId(edge.target)).ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                    phase: "native B16 group member binding",
+                },
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if reachability_system
+        .groups_in_source_order
+        .get(base_beam.group_ordinal)
+        != Some(&group_sources)
+    {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
+    }
+
+    let vertical = Segment {
+        x1: base_b.reference_point.x,
+        y1: base_b.reference_point.y,
+        x2: base_b.reference_point.x - (1_000.0 * reachability_system.global_slope),
+        y2: base_b.reference_point.y + 1_000.0,
+    };
+    let mut group_members = Vec::with_capacity(group_sources.len());
+    for (member_ordinal, source) in group_sources.iter().copied().enumerate() {
+        let beam = find_stump_beam(stump_system, source)?;
+        let cross = generic_intersection(vertical, beam.median);
+        let left_limit = beam.median.x1 - f64::from(vlinker_system.max_beam_side_dx);
+        let right_limit = beam.median.x2 + f64::from(vlinker_system.max_beam_side_dx);
+        group_members.push(NativeStemsBeamSiblingGroupMemberTrace {
+            member_ordinal,
+            source,
+            cross,
+            left_limit,
+            right_limit,
+            selected: left_limit <= cross.x && cross.x <= right_limit,
+            sorted_ordinal: None,
+            removed_as_base: false,
+        });
+    }
+    let mut selected = group_members
+        .iter()
+        .enumerate()
+        .filter_map(|(index, member)| member.selected.then_some(index))
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        group_members[*left]
+            .cross
+            .y
+            .total_cmp(&group_members[*right].cross.y)
+    });
+    for (ordinal, index) in selected.iter().copied().enumerate() {
+        group_members[index].sorted_ordinal = Some(ordinal);
+    }
+    let base_index = selected
+        .iter()
+        .position(|index| group_members[*index].source == frontier.beam)
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native B16 selected base member",
+        })?;
+    group_members[selected[base_index]].removed_as_base = true;
+    selected.remove(base_index);
+    let sibling_sources = selected
+        .iter()
+        .map(|index| group_members[*index].source)
+        .collect::<Vec<_>>();
+    validate_native_reachability_siblings(reachability_system, frontier.v_linker, &group_members)?;
+
+    let group_state_before = native_group_state(&shadow_sig, bindings, &group_sources)?;
+    let stem_median = stem_segment(stem);
+    let base_cross = generic_intersection(stem_median, base_beam.median);
+    let portion_maximum_dx = java_rint_i32(f64::from(stump_system.interline) * 0.5);
+    let mut traces = Vec::with_capacity(sibling_sources.len());
+    let mut linked_work = Vec::new();
+    let mut linked_cells = Vec::new();
+    for (sibling_ordinal, source) in sibling_sources.iter().copied().enumerate() {
+        let sibling_beam = find_stump_beam(stump_system, source)?;
+        let sibling_vertex = bindings.beam_vertices.get(&source).copied().ok_or(
+            NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native B16 sibling binding",
+            },
+        )?;
+        if sibling_beam.beam_glyph == base_beam.beam_glyph {
+            traces.push(NativeStemsBeamNativeSiblingTrace {
+                sibling_ordinal,
+                source,
+                branch: NativeStemsBeamSiblingBranch::SameGlyph,
+                geometry: None,
+                selected_b_linker: None,
+                linked_before: None,
+                linked_after: None,
+            });
+            continue;
+        }
+        let existing = shadow_sig
+            .directed_edges(sibling_vertex.0, stem_vertex.0)
+            .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native B16 directed pair",
+            })?
+            .into_iter()
+            .any(|edge| edge.kind == NativeSigRelationKind::BeamStem);
+        if existing {
+            traces.push(NativeStemsBeamNativeSiblingTrace {
+                sibling_ordinal,
+                source,
+                branch: NativeStemsBeamSiblingBranch::ExistingBeamStem,
+                geometry: None,
+                selected_b_linker: None,
+                linked_before: None,
+                linked_after: None,
+            });
+            continue;
+        }
+        let geometry = sibling_geometry_values(
+            stem_median,
+            base_beam.median,
+            sibling_beam.median,
+            sibling_beam.height,
+            base_cross,
+            v_linker.y_direction,
+            portion_maximum_dx,
+            MAX_SHORTER_RATIO,
+            b_linker_flag_transaction.continuation_support_grade,
+        );
+        if geometry.wrong_side == Some(true) {
+            traces.push(NativeStemsBeamNativeSiblingTrace {
+                sibling_ordinal,
+                source,
+                branch: NativeStemsBeamSiblingBranch::ShorterWrongSide,
+                geometry: Some(geometry),
+                selected_b_linker: None,
+                linked_before: None,
+                linked_after: None,
+            });
+            continue;
+        }
+        let draft = NativeStemsBeamSiblingGraphDraft {
+            sibling_ordinal,
+            source,
+            grade: b_linker_flag_transaction.continuation_support_grade,
+            beam_portion: geometry.beam_portion.ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::DefensiveCommitInvariant {
+                    phase: "native B16 linked portion",
+                },
+            )?,
+            extension_point: geometry.extension_point.ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::DefensiveCommitInvariant {
+                    phase: "native B16 linked extension",
+                },
+            )?,
+        };
+        linked_work.push((traces.len(), draft));
+        traces.push(NativeStemsBeamNativeSiblingTrace {
+            sibling_ordinal,
+            source,
+            branch: NativeStemsBeamSiblingBranch::Linked,
+            geometry: Some(geometry),
+            selected_b_linker: None,
+            linked_before: None,
+            linked_after: None,
+        });
+    }
+
+    // Start with the read-only group projection, then commit each Linked
+    // sibling separately.  This preserves Java's edge/callback -> immutable
+    // builder lookup -> shared-cell write order before the next sibling.
+    let mut graph = apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
+        &mut shadow_sig,
+        bindings,
+        base_beam.group_ordinal,
+        frontier.beam,
+        stem_identity,
+        frontier.plan.plan_ordinal,
+        &[],
+    )?;
+    for (trace_index, draft) in linked_work {
+        let projected = apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
+            &mut shadow_sig,
+            bindings,
+            base_beam.group_ordinal,
+            frontier.beam,
+            stem_identity,
+            frontier.plan.plan_ordinal,
+            std::slice::from_ref(&draft),
+        )?;
+        if projected.group_vertex != graph.group_vertex
+            || projected.base_vertex != graph.base_vertex
+            || projected.stem_vertex != graph.stem_vertex
+            || projected.group_outgoing != graph.group_outgoing
+            || projected.group_members != graph.group_members
+            || projected.steps.len() != 1
+            || projected.appended_edges.len() != 1
+            || projected.steps[0].sibling_ordinal != draft.sibling_ordinal
+            || projected.steps[0].source != draft.source
+        {
+            return Err(
+                NativeStemsBeamVLinkSiblingLinksError::DefensiveCommitInvariant {
+                    phase: "native B16 graph/branch join",
+                },
+            );
+        }
+        graph.steps.extend(projected.steps);
+        graph.appended_edges.extend(projected.appended_edges);
+
+        let selected_b_linker = native_builder_b_linker(builder, draft.source);
+        if let Some(reference) = selected_b_linker {
+            let cell = native_cell_mut(&mut shadow_cells, reference)?;
+            let before = cell.linked;
+            cell.linked = true;
+            linked_cells.push((reference, before));
+            traces[trace_index].linked_before = Some(before);
+            traces[trace_index].linked_after = Some(true);
+        }
+        traces[trace_index].selected_b_linker = selected_b_linker;
+    }
+    let group_state_after = native_group_state(&shadow_sig, bindings, &group_sources)?;
+    let assigned_b_linkers = linked_cells
+        .iter()
+        .map(|(reference, _)| *reference)
+        .collect::<Vec<_>>();
+    let b_linker_value_change_count = usize::from(!base_linked_before)
+        + linked_cells.iter().filter(|(_, before)| !*before).count();
+    let transaction = NativeStemsBeamNativeSiblingTransaction {
+        system_id,
+        plan_ordinal: frontier.plan.plan_ordinal,
+        stem_identity,
+        group_ordinal: base_beam.group_ordinal,
+        group_members,
+        group_state_before,
+        group_state_after,
+        siblings: traces,
+        graph,
+        base_b_linker: b_linker_flag_transaction.target_b_linker,
+        base_linked_before,
+        base_linked_after: true,
+        assigned_b_linkers,
+        b_linker_write_count: 1 + linked_cells.len(),
+        b_linker_value_change_count,
+    };
+    *sig = shadow_sig;
+    *cells = shadow_cells;
+    Ok(transaction)
+}
+
+fn validate_native_cell_catalogue(
+    reachability: &NativeStemsBeamReachabilitySystem,
+    cells: &[NativeStemsBeamNativeBLinkerCell],
+) -> Result<(), NativeStemsBeamVLinkSiblingLinksError> {
+    let expected = reachability
+        .final_beam_arenas
+        .iter()
+        .flat_map(|arena| arena.all_b_linkers.iter().map(|entry| entry.reference))
+        .collect::<Vec<_>>();
+    let actual = cells.iter().map(|cell| cell.reference).collect::<Vec<_>>();
+    if actual != expected
+        || actual
+            .iter()
+            .enumerate()
+            .any(|(index, reference)| actual[..index].contains(reference))
+    {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native shared B-cell catalogue",
+        });
+    }
+    Ok(())
+}
+
+fn native_cell_mut(
+    cells: &mut [NativeStemsBeamNativeBLinkerCell],
+    reference: NativeStemsBeamBLinkerRef,
+) -> Result<&mut NativeStemsBeamNativeBLinkerCell, NativeStemsBeamVLinkSiblingLinksError> {
+    let mut matches = cells.iter_mut().filter(|cell| cell.reference == reference);
+    let cell = matches
+        .next()
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native selected B-cell",
+        })?;
+    if matches.next().is_some() {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native duplicate selected B-cell",
+        });
+    }
+    Ok(cell)
+}
+
+fn native_group_state(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    sources: &[NativeStemsBeamSource],
+) -> Result<Vec<NativeStemsBeamNativeGroupMemberState>, NativeStemsBeamVLinkSiblingLinksError> {
+    sources
+        .iter()
+        .map(|source| {
+            let vertex = bindings.beam_vertices.get(source).copied().ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                    phase: "native group-state beam binding",
+                },
+            )?;
+            let abnormal = sig.vertex(vertex.0).map(|beam| beam.abnormal).ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                    phase: "native group-state live beam",
+                },
+            )?;
+            Ok(NativeStemsBeamNativeGroupMemberState {
+                source: *source,
+                vertex,
+                abnormal,
+            })
+        })
+        .collect()
+}
+
+fn validate_native_reachability_siblings(
+    reachability: &NativeStemsBeamReachabilitySystem,
+    reference: crate::native_stems_beam_vlinkers::NativeStemsBeamVLinkerRef,
+    members: &[NativeStemsBeamSiblingGroupMemberTrace],
+) -> Result<(), NativeStemsBeamVLinkSiblingLinksError> {
+    let inspection = reachability
+        .beam_inspections
+        .iter()
+        .flat_map(|beam| &beam.b_visits)
+        .flat_map(|visit| &visit.v_inspections)
+        .find(|inspection| inspection.reference == reference)
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::Predecessor {
+            phase: "native B16 reachability inspection",
+        })?;
+    let mut selected = members
+        .iter()
+        .filter(|member| member.selected)
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|member| member.sorted_ordinal);
+    if inspection.siblings.len() != selected.len()
+        || inspection
+            .siblings
+            .iter()
+            .zip(selected)
+            .any(|(prior, now)| {
+                prior.beam != now.source || !point_bits_equal(prior.cross, now.cross)
+            })
+    {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::PredecessorMismatch);
+    }
+    Ok(())
+}
+
+fn native_builder_b_linker(
+    builder: &crate::native_stems_beam_builders::NativeStemsBeamBuilder,
+    source: NativeStemsBeamSource,
+) -> Option<NativeStemsBeamBLinkerRef> {
+    builder.items.iter().find_map(|item| match item.target {
+        Some(NativeStemsBeamBuilderTargetRef::Beam(reference))
+            if item.kind == NativeStemsBeamBuilderItemKind::BeamLinker
+                && reference.beam == source =>
+        {
+            Some(reference)
+        }
+        _ => None,
+    })
 }
 
 /// Stable Java glyph-object evidence. `None` means Java `null`; equal values
