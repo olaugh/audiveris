@@ -10,6 +10,7 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
+    native_sig::{NativeSigRecognition, assemble_native_sig},
     native_stem_seeds::{NativeStemSeedRecognition, recognize_native_stem_seeds},
     native_stems_beam_builders::{
         NativeStemsBeamBuilderRecognition, NativeStemsBeamBuilderSystem,
@@ -752,6 +753,10 @@ pub(super) struct NativePredecessorPage {
     pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
     pub(super) plans: NativeStemsBeamLinkPlanRecognition,
     pub(super) scheduler: NativeStemsBeamSchedulerRecognition,
+    // Only later-carriage gates query this product; the same shared hydrator
+    // is compiled into older boundary gates that intentionally stop earlier.
+    #[allow(dead_code)]
+    pub(super) sig: NativeSigRecognition,
 }
 
 pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
@@ -768,6 +773,8 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         .unwrap_or_else(|error| panic!("{image}: LEDGERS failed: {error}"));
     let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
         .unwrap_or_else(|error| panic!("{image}: HEADS failed: {error}"));
+    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
+        .unwrap_or_else(|error| panic!("{image}: SIG assembly failed: {error}"));
     let corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
         .unwrap_or_else(|error| panic!("{image}: STEMS corners failed: {error}"));
     let head_seeds = materialize_native_stems_head_seeds(&grid, &stem_seeds, &corners)
@@ -852,6 +859,7 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         beam_builders,
         plans,
         scheduler,
+        sig,
     }
 }
 

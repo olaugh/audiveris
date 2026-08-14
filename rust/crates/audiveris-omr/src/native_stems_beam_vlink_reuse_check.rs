@@ -15,6 +15,7 @@ use audiveris_core::java_math::java_positive_pow;
 use audiveris_image::beam_structure::Segment;
 
 use crate::{
+    native_sig::{NativeSigInterKind, NativeSigSystem, NativeSigSystemBindings},
     native_stems_beam_link_plans::{
         NativeStemsBeamHeadRelation, NativeStemsBeamLinkPlanAttempt,
         NativeStemsBeamLinkPlanOutcome, NativeStemsBeamLinkPlanSystem,
@@ -25,6 +26,10 @@ use crate::{
     },
     native_stems_beam_stumps::{
         NativeStemsBeamSource, NativeStemsBeamStumpBeam, NativeStemsBeamStumpSystem,
+    },
+    native_stems_beam_vlink_head_links::{
+        NativeStemsBeamHeadLinkHeadRef, NativeStemsBeamHeadSLinkerRef,
+        NativeStemsBeamNativeSLinkerCell,
     },
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamAppliedLineDeltaSource, NativeStemsBeamCreateStemDisposition,
@@ -289,6 +294,130 @@ impl fmt::Display for NativeStemsBeamVLinkReuseCheckError {
 }
 
 impl Error for NativeStemsBeamVLinkReuseCheckError {}
+
+/// Project B13's lazy live reads from the owned graph and persistent S cells.
+///
+/// The current native carrier supports the all-unlinked path without any
+/// relation scan: Java reads the shared S flag first and skips `getSideStems`
+/// when it is false. Linked S cells fail closed until the native provenance
+/// serializer and live-stem synchronization are carried by the same runtime.
+pub fn project_native_stems_beam_vlink_reuse_live_state(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    s_cells: &[NativeStemsBeamNativeSLinkerCell],
+) -> Result<NativeStemsBeamVLinkReuseLiveState, NativeStemsBeamVLinkReuseCheckError> {
+    let system_id = scheduler_system.system_id;
+    if sig.system_id != system_id
+        || bindings.system_id != system_id
+        || plan_system.system_id != system_id
+        || bindings.validate_against(sig).is_err()
+    {
+        return Err(NativeStemsBeamVLinkReuseCheckError::SystemOrder);
+    }
+    for (index, cell) in s_cells.iter().enumerate() {
+        if cell.closed
+            || s_cells[..index]
+                .iter()
+                .any(|prior| prior.reference == cell.reference)
+            || cell.ordered_observer_corners.len() != 2
+            || cell.ordered_observer_corners[0].head != cell.reference.head.reference
+            || cell.ordered_observer_corners[1].head != cell.reference.head.reference
+            || cell.ordered_observer_corners[0].horizontal != cell.reference.horizontal
+            || cell.ordered_observer_corners[1].horizontal != cell.reference.horizontal
+            || cell.ordered_observer_corners[0].vertical
+                != crate::stems_step::NativeStemVerticalSide::Top
+            || cell.ordered_observer_corners[1].vertical
+                != crate::stems_step::NativeStemVerticalSide::Bottom
+        {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                map_ordinal: 0,
+                phase: "native S-cell catalogue",
+            });
+        }
+    }
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidProduct {
+                system_id,
+                phase: "native reuse scheduler frontier",
+            });
+        }
+    };
+    let (attempt, builder_start) = resolve_attempt(plan_system, frontier.plan)?;
+    if builder_start != frontier.v_linker {
+        return Err(NativeStemsBeamVLinkReuseCheckError::InvalidProduct {
+            system_id,
+            phase: "native reuse plan/V join",
+        });
+    }
+    let mut entries = Vec::with_capacity(attempt.relations.len());
+    for (map_ordinal, relation) in attempt.relations.iter().enumerate() {
+        if relation.map_ordinal != map_ordinal {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidProduct {
+                system_id,
+                phase: "native reuse relation order",
+            });
+        }
+        let head = NativeStemsBeamHeadLinkHeadRef {
+            reference: relation.corner.head,
+            sig_ordinal: relation.corner.sig_ordinal,
+            x_ordinal: relation.corner.x_ordinal,
+        };
+        let head_vertex = bindings
+            .head_vertices
+            .get(&relation.corner.head)
+            .copied()
+            .ok_or(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                map_ordinal,
+                phase: "native head binding",
+            })?;
+        if sig
+            .vertex(head_vertex.0)
+            .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Head)
+        {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                map_ordinal,
+                phase: "native live head vertex",
+            });
+        }
+        let reference = NativeStemsBeamHeadSLinkerRef {
+            head,
+            horizontal: relation.corner.horizontal,
+        };
+        let matches = s_cells
+            .iter()
+            .filter(|cell| cell.reference == reference)
+            .collect::<Vec<_>>();
+        let [cell] = matches.as_slice() else {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                map_ordinal,
+                phase: "native S-cell cardinality",
+            });
+        };
+        if cell.linked {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                map_ordinal,
+                phase: "linked native S-cell projection not yet supported",
+            });
+        }
+        entries.push(NativeStemsBeamReuseEntryEvidence {
+            map_ordinal,
+            corner: relation.corner,
+            observation: NativeStemsBeamReuseEntryObservation::Examined {
+                s_linker_linked: false,
+                head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::NotRead,
+            },
+        });
+    }
+    Ok(NativeStemsBeamVLinkReuseLiveState {
+        system_id,
+        live_sig_stems: Vec::new(),
+        evaluation: NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries),
+    })
+}
 
 /// Evaluate the read-only continuation after one committed create-stem
 /// transaction.

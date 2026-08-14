@@ -4534,8 +4534,11 @@ selected glyph to the disclosed page-level GlyphIndex bootstrap by full native c
 and promotes `systemStems` only with a completeness token tied to the dense history from
 the empty STEMS-entry baseline. The clone-and-swap preparation rejects ambiguous glyph
 evidence without mutation; B12 then independently reaches ReuseActive / CreatedChecked
-before the txn2 family fixtures are opened. This slice does not yet project B13 or mutate
-the 222/207 SIG for transaction 2.
+before the txn2 family fixtures are opened. B13 now also has a bounded native live-state
+projector: it validates the plan heads through owned bindings and reads the persistent
+S cells first. Plan 152's two cells are false, so it emits two exact `NotRead` graph
+lookups and independently reaches `AllUnlinked` / `ReadyBeforeSigMutation` before the
+txn2 oracle is opened. Linked-S relation scans and B14 mutation of the 222/207 SIG remain.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4555,8 +4558,8 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Project transaction 2's B13 live state from the carried S cells and owned SIG, roll a
-   fresh graph-derived B14 state, then carry B14-B17 from 222/207 to the measured 223/212
+1. Extend the native B13 projector to linked-S HeadStem scans, roll a fresh graph-derived
+   B14 state, then carry transaction 2 B14-B17 from 222/207 to the measured 223/212
    endpoint without txn2 Java rows.
 2. Drive the chula-system-1 SIDES pass from owned state: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's

@@ -22,9 +22,15 @@ use audiveris_omr::native_stems_beam_scheduler::{
     NativeStemsBeamCompletedVLinkEvidence, NativeStemsBeamSchedulerResumeStatus,
     NativeStemsBeamSchedulerStatus, resume_native_stems_beam_scheduler_after_transaction,
 };
+use audiveris_omr::native_stems_beam_vlink_head_links::initialize_native_stems_beam_s_linker_cells;
 use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
     NativeStemsBeamOuterBLinkerCell, NativeStemsBeamOuterVLinkerFact,
     apply_native_stems_beam_vlink_outer_b_linker_transaction,
+};
+use audiveris_omr::native_stems_beam_vlink_reuse_check::{
+    NativeStemsBeamReuseDisposition, NativeStemsBeamReuseEntryObservation,
+    NativeStemsBeamVLinkReuseCheckOutcome, NativeStemsBeamVLinkReuseLiveEvaluation,
+    evaluate_native_stems_beam_vlink_reuse_check, project_native_stems_beam_vlink_reuse_live_state,
 };
 use audiveris_omr::native_stems_beam_vlink_transaction::{
     NativeStemsBeamCreateStemDisposition, NativeStemsBeamFixedGlyphContent,
@@ -628,8 +634,66 @@ fn second_transaction_from_carried_state_reproduces_java() {
         panic!("self-drive blocked at {error:?} (txn2 fixture inputs deliberately unopened)",)
     });
 
+    // Project B13's actual lazy reads from native head bindings and the
+    // persistent S-cell topology. Both plan-152 parents are still unlinked, so
+    // Java does not query HeadStem relations and no graph certificate is
+    // needed. The page SIG is used only for live head binding validation here;
+    // the carried 222/207 mutation state becomes load-bearing in B14.
+    let sig = page
+        .sig
+        .systems
+        .iter()
+        .find(|sig| sig.system_id == system_id)
+        .expect("native system SIG");
+    let bindings = page
+        .sig
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == system_id)
+        .expect("native system bindings");
+    let s_cells = initialize_native_stems_beam_s_linker_cells(&page.head_corners.systems[index])
+        .expect("native S-cell topology");
+    let live = project_native_stems_beam_vlink_reuse_live_state(
+        sig,
+        bindings,
+        &scheduler,
+        &page.plans.systems[index],
+        &s_cells,
+    )
+    .expect("native B13 live-state projection");
+    let NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries) = &live.evaluation else {
+        panic!("accepted txn2 must inspect relation entries");
+    };
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|entry| matches!(
+        entry.observation,
+        NativeStemsBeamReuseEntryObservation::Examined {
+            s_linker_linked: false,
+            ..
+        }
+    )));
+    let reuse = evaluate_native_stems_beam_vlink_reuse_check(
+        &scheduler,
+        &page.plans.systems[index],
+        &page.beam_stumps.systems[index],
+        &page.beam_vlinkers.systems[index],
+        &transaction,
+        &state,
+        &live,
+        first.relation_parameters,
+    )
+    .expect("native transaction-2 B13");
+    assert_eq!(
+        reuse.reuse_disposition,
+        NativeStemsBeamReuseDisposition::AllUnlinked
+    );
+    assert!(matches!(
+        reuse.outcome,
+        NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { .. }
+    ));
+
     // The transaction-2 oracle is expected-only: no family file is opened
-    // until the production preparation and B12 call have both returned.
+    // until production B12 and the graph/S-cell-derived B13 have returned.
     let base_text = txn2_text("base-apply", key);
     let create_text = txn2_text("create-stem", key);
     let reuse_text = txn2_text("reuse-check", key);
