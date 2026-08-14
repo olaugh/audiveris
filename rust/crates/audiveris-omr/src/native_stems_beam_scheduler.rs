@@ -229,6 +229,25 @@ pub enum NativeStemsBeamSchedulerEvent {
     },
 }
 
+const fn scheduler_event_ordinal(event: &NativeStemsBeamSchedulerEvent) -> usize {
+    match event {
+        NativeStemsBeamSchedulerEvent::BeamPassStart { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::MissingSideBLinker { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::EmptyVLinkerSideSuccess { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::SideVSkippedEmptyTargets { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::InvokedKnownFalsePlan { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::SideBLinkerResult { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::BeamRetainedForStumps { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::BeamRemovedFromLocalWorklist { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::StumpSkippedStructuralSideGlyph {
+            event_ordinal, ..
+        }
+        | NativeStemsBeamSchedulerEvent::StumpSkippedAlreadyLinkedB { event_ordinal, .. } => {
+            *event_ordinal
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamDeferredLineDelta {
     pub delta_ordinal: usize,
@@ -243,6 +262,12 @@ pub struct NativeStemsBeamDeferredLineDelta {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum NativeStemsBeamSchedulerStatus {
+    /// SIDES has ended, but Java's STUMPS worklist has not begun.
+    SidesExhausted {
+        retained_for_stumps: Vec<NativeStemsBeamSource>,
+        final_local_worklist: Vec<NativeStemsBeamSource>,
+    },
+    /// Both SIDES and STUMPS have ended.
     Completed {
         retained_for_stumps: Vec<NativeStemsBeamSource>,
         final_local_worklist: Vec<NativeStemsBeamSource>,
@@ -318,6 +343,10 @@ pub enum NativeStemsBeamSchedulerError {
     InvalidStump {
         system_id: usize,
         reference: NativeStemsBeamBLinkerRef,
+    },
+    InvalidTerminal {
+        system_id: usize,
+        phase: &'static str,
     },
 }
 
@@ -402,6 +431,7 @@ pub fn materialize_native_stems_beam_scheduler_frontiers(
             .count();
         totals.line_deltas += system.deferred_line_deltas.len();
         match system.status {
+            NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => {}
             NativeStemsBeamSchedulerStatus::Completed { .. } => totals.completed += 1,
             NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => {
                 totals.awaiting_v += 1;
@@ -473,6 +503,26 @@ enum KnownSideDisposition {
     Retain,
     RemoveLocal,
     AwaitHookRemoval,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StumpSkipReason {
+    StructuralSideGlyph,
+    AlreadyLinkedB,
+}
+
+fn stump_skip_reason(
+    side_aliases: &[usize],
+    stump_alias: usize,
+    b_linked: bool,
+) -> Option<StumpSkipReason> {
+    if side_aliases.contains(&stump_alias) {
+        Some(StumpSkipReason::StructuralSideGlyph)
+    } else if b_linked {
+        Some(StumpSkipReason::AlreadyLinkedB)
+    } else {
+        None
+    }
 }
 
 fn raw_exclusion_pairs(
@@ -1721,6 +1771,26 @@ pub struct NativeStemsBeamSchedulerResume {
     pub advanced_system: Box<NativeStemsBeamSchedulerSystem>,
 }
 
+/// Result of entering Java's STUMPS pass from an exhausted SIDES carrier.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamSchedulerStumpsContinuation {
+    pub system_id: usize,
+    /// Events produced after the SIDES terminal, with global event ordinals.
+    pub stump_events: Vec<NativeStemsBeamSchedulerEvent>,
+    pub status: NativeStemsBeamSchedulerStumpsStatus,
+    /// Atomic successor. The input system is borrowed and remains unchanged.
+    pub advanced_system: Box<NativeStemsBeamSchedulerSystem>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeStemsBeamSchedulerStumpsStatus {
+    AwaitingVLinkTransaction(Box<NativeStemsBeamAwaitingVLinkTransaction>),
+    Completed {
+        retained_for_stumps: Vec<NativeStemsBeamSource>,
+        final_local_worklist: Vec<NativeStemsBeamSource>,
+    },
+}
+
 /// Gate/plan handling for one V attempt during the resume, shared by the
 /// completed-B continuation and fresh sides/beams.  Returns the second
 /// frontier when the plan is ready, `None` after a skip or known-false event.
@@ -2138,7 +2208,7 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
             NativeStemsBeamSchedulerResumeStatus::SidesExhaustedBeforeSecondFrontier {
                 retained_for_stumps,
                 final_local_worklist,
-            } => NativeStemsBeamSchedulerStatus::Completed {
+            } => NativeStemsBeamSchedulerStatus::SidesExhausted {
                 retained_for_stumps: retained_for_stumps.clone(),
                 final_local_worklist: final_local_worklist.clone(),
             },
@@ -2148,6 +2218,311 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
     Ok(NativeStemsBeamSchedulerResume {
         system_id,
         resume_events,
+        status,
+        advanced_system: Box::new(advanced_system),
+    })
+}
+
+/// Enter Java's STUMPS pass from the actual terminal produced by the native
+/// SIDES carrier, stopping at its first persistent V-link transaction.
+///
+/// Java tests structural equality with a side stump before consulting the
+/// enclosing B-linker's shared `linked` flag. That ordering is observable when
+/// both predicates are true and is retained in the emitted skip event.
+pub fn continue_native_stems_beam_scheduler_into_stumps(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    stump_system: &NativeStemsBeamStumpSystem,
+    v_system: &NativeStemsBeamVLinkerSystem,
+    builder_system: &NativeStemsBeamBuilderSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerError> {
+    let system_id = scheduler_system.system_id;
+    if stump_system.system_id != system_id
+        || v_system.system_id != system_id
+        || builder_system.system_id != system_id
+        || plan_system.system_id != system_id
+        || scheduler_system.link_profile != plan_system.link_profile
+        || stump_system.profile != v_system.profile
+        || stump_system.interline != v_system.interline
+        || stump_system.interline != builder_system.interline
+        || stump_system.interline != plan_system.interline
+    {
+        return Err(NativeStemsBeamSchedulerError::SystemOrder);
+    }
+    validate_builder_plan_matrix(system_id, builder_system, plan_system)?;
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &scheduler_system.status
+    else {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "scheduler is not a SidesExhausted terminal",
+        });
+    };
+    if retained_for_stumps != final_local_worklist
+        || retained_for_stumps.iter().enumerate().any(|(index, source)| {
+            retained_for_stumps[..index].contains(source)
+                || !scheduler_system
+                    .beams_by_reverse_width
+                    .iter()
+                    .any(|beam| beam.source == *source)
+        })
+        || scheduler_system
+            .prefix_events
+            .iter()
+            .any(|event| matches!(event, NativeStemsBeamSchedulerEvent::BeamPassStart { snapshot, .. } if snapshot.pass == NativeStemsBeamSchedulerPass::Stumps))
+        || scheduler_system
+            .prefix_events
+            .iter()
+            .enumerate()
+            .any(|(ordinal, event)| scheduler_event_ordinal(event) != ordinal)
+        || scheduler_system
+            .deferred_line_deltas
+            .iter()
+            .enumerate()
+            .any(|(ordinal, delta)| delta.delta_ordinal != ordinal)
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "completed SIDES worklist",
+        });
+    }
+    if scheduler_system
+        .consumed_v_linkers
+        .iter()
+        .enumerate()
+        .any(|(index, reference)| scheduler_system.consumed_v_linkers[..index].contains(reference))
+        || scheduler_system
+            .linked_b_linkers
+            .iter()
+            .enumerate()
+            .any(|(index, reference)| {
+                scheduler_system.linked_b_linkers[..index].contains(reference)
+                    || !v_system
+                        .constructors
+                        .iter()
+                        .any(|constructor| find_b_linker(constructor, *reference).is_some())
+            })
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "carried linker identity catalogue",
+        });
+    }
+    let known_false_count = scheduler_system
+        .prefix_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                NativeStemsBeamSchedulerEvent::InvokedKnownFalsePlan { .. }
+            )
+        })
+        .count();
+    let invocation_ordinal = known_false_count
+        .checked_add(scheduler_system.consumed_v_linkers.len())
+        .ok_or(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "STUMPS invocation ordinal",
+        })?;
+    let known_false_ordinals = scheduler_system
+        .prefix_events
+        .iter()
+        .filter_map(|event| match event {
+            NativeStemsBeamSchedulerEvent::InvokedKnownFalsePlan {
+                invocation_ordinal, ..
+            } => Some(*invocation_ordinal),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if known_false_ordinals
+        .iter()
+        .enumerate()
+        .any(|(index, ordinal)| {
+            *ordinal >= invocation_ordinal || known_false_ordinals[..index].contains(ordinal)
+        })
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "carried invocation chronology",
+        });
+    }
+    let mut state = ReplayState {
+        events: scheduler_system.prefix_events.clone(),
+        deferred_line_deltas: scheduler_system.deferred_line_deltas.clone(),
+        shifted_v_linkers: scheduler_system
+            .deferred_line_deltas
+            .iter()
+            .map(|delta| delta.v_linker)
+            .chain(scheduler_system.consumed_v_linkers.iter().copied())
+            .collect(),
+        invocation_ordinal,
+    };
+    let first_event = state.events.len();
+    let mut processed = Vec::new();
+    let mut frontier = None;
+
+    'beams: for (stump_index, &source) in final_local_worklist.iter().enumerate() {
+        let snapshot = worklist_snapshot(
+            NativeStemsBeamSchedulerPass::Stumps,
+            stump_index,
+            final_local_worklist,
+        );
+        let scheduled_beam = scheduler_system
+            .beams_by_reverse_width
+            .iter()
+            .find(|beam| beam.source == source)
+            .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource { system_id, source })?;
+        let beam = find_stump_beam(stump_system, source)
+            .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource { system_id, source })?;
+        let constructor = v_system
+            .constructors
+            .iter()
+            .find(|constructor| {
+                constructor.source == source && constructor.survives_constructor_loop
+            })
+            .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource { system_id, source })?;
+        let event_ordinal = state.events.len();
+        state
+            .events
+            .push(NativeStemsBeamSchedulerEvent::BeamPassStart {
+                event_ordinal,
+                snapshot: snapshot.clone(),
+                kind: scheduled_beam.kind,
+                competing_hook: scheduled_beam.competing_hook,
+                selected_stem_profile: BEAM_SEED_PROFILE,
+            });
+        let side_aliases = beam
+            .sides
+            .iter()
+            .filter_map(|side| side.final_stump.as_ref().map(stump_canonical_alias))
+            .collect::<Vec<_>>();
+        for &v_reference in &constructor.stump_v_linkers {
+            let b_linker = find_b_linker(constructor, v_reference.b_linker).ok_or(
+                NativeStemsBeamSchedulerError::MissingBLinker {
+                    system_id,
+                    reference: v_reference.b_linker,
+                },
+            )?;
+            let stump =
+                b_linker
+                    .stump
+                    .as_ref()
+                    .ok_or(NativeStemsBeamSchedulerError::InvalidStump {
+                        system_id,
+                        reference: b_linker.reference,
+                    })?;
+            validate_inline_built_stump(system_id, beam, b_linker.reference, stump)?;
+            let alias = stump_canonical_alias(stump);
+            match stump_skip_reason(
+                &side_aliases,
+                alias,
+                scheduler_system
+                    .linked_b_linkers
+                    .contains(&b_linker.reference),
+            ) {
+                Some(StumpSkipReason::StructuralSideGlyph) => {
+                    let event_ordinal = state.events.len();
+                    state.events.push(
+                        NativeStemsBeamSchedulerEvent::StumpSkippedStructuralSideGlyph {
+                            event_ordinal,
+                            beam: source,
+                            b_linker: b_linker.reference,
+                            v_linker: v_reference,
+                            canonical_stump_alias: alias,
+                        },
+                    );
+                    continue;
+                }
+                Some(StumpSkipReason::AlreadyLinkedB) => {
+                    let event_ordinal = state.events.len();
+                    state
+                        .events
+                        .push(NativeStemsBeamSchedulerEvent::StumpSkippedAlreadyLinkedB {
+                            event_ordinal,
+                            beam: source,
+                            b_linker: b_linker.reference,
+                            v_linker: v_reference,
+                        });
+                    continue;
+                }
+                None => {}
+            }
+            let lookup = find_plan(
+                system_id,
+                builder_system,
+                plan_system,
+                v_reference,
+                BEAM_SEED_PROFILE,
+            )?;
+            if lookup.attempt.outcome == NativeStemsBeamLinkPlanOutcome::ReadyForCreateStem {
+                reject_repeated_v(system_id, &state, v_reference)?;
+                frontier = Some(NativeStemsBeamAwaitingVLinkTransaction {
+                    invocation_ordinal: state.invocation_ordinal,
+                    snapshot,
+                    beam: source,
+                    horizontal_side: None,
+                    b_linker: b_linker.reference,
+                    v_linker: v_reference,
+                    vertical_side: v_reference.side,
+                    plan: lookup.reference,
+                    outcome: lookup.attempt.outcome,
+                    linked_sides_before: Vec::new(),
+                    retained_beams_before: processed.clone(),
+                    would_apply_stored_line_delta: pending_line_delta(
+                        &state,
+                        lookup.reference,
+                        v_reference,
+                        lookup.attempt,
+                    ),
+                });
+                break 'beams;
+            }
+            record_known_false(
+                system_id,
+                &mut state,
+                NativeStemsBeamSchedulerPass::Stumps,
+                source,
+                None,
+                b_linker.reference,
+                v_reference,
+                lookup,
+            )?;
+        }
+        processed.push(source);
+    }
+
+    let status = frontier.map_or_else(
+        || NativeStemsBeamSchedulerStumpsStatus::Completed {
+            retained_for_stumps: retained_for_stumps.clone(),
+            final_local_worklist: final_local_worklist.clone(),
+        },
+        |frontier| {
+            NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(Box::new(frontier))
+        },
+    );
+    let advanced_status = match &status {
+        NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(frontier) => {
+            NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier.clone())
+        }
+        NativeStemsBeamSchedulerStumpsStatus::Completed {
+            retained_for_stumps,
+            final_local_worklist,
+        } => NativeStemsBeamSchedulerStatus::Completed {
+            retained_for_stumps: retained_for_stumps.clone(),
+            final_local_worklist: final_local_worklist.clone(),
+        },
+    };
+    let advanced_system = NativeStemsBeamSchedulerSystem {
+        prefix_events: state.events.clone(),
+        deferred_line_deltas: state.deferred_line_deltas,
+        status: advanced_status,
+        ..scheduler_system.clone()
+    };
+    Ok(NativeStemsBeamSchedulerStumpsContinuation {
+        system_id,
+        stump_events: state.events[first_event..].to_vec(),
         status,
         advanced_system: Box::new(advanced_system),
     })
@@ -2234,6 +2609,19 @@ mod tests {
         };
         assert_ne!(seed, built);
         assert_eq!(stump_canonical_alias(&seed), stump_canonical_alias(&built));
+    }
+
+    #[test]
+    fn stump_structural_skip_precedes_the_carried_linked_b_guard() {
+        assert_eq!(
+            stump_skip_reason(&[7], 7, true),
+            Some(StumpSkipReason::StructuralSideGlyph)
+        );
+        assert_eq!(
+            stump_skip_reason(&[7], 8, true),
+            Some(StumpSkipReason::AlreadyLinkedB)
+        );
+        assert_eq!(stump_skip_reason(&[7], 8, false), None);
     }
 
     #[test]

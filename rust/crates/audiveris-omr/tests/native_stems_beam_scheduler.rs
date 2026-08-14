@@ -3227,6 +3227,9 @@ impl<'a> SystemProjector<'a> {
             NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(transaction) => {
                 self.emit_hook_frontier(transaction);
             }
+            NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => {
+                panic!("isolated prefix projector stopped between SIDES and STUMPS")
+            }
             NativeStemsBeamSchedulerStatus::Completed {
                 final_local_worklist,
                 ..
@@ -3852,6 +3855,7 @@ fn scheduler_resume_chain_composes_without_repeating_a_v_linker() {
                 executed.len(),
                 match &system.status {
                     NativeStemsBeamSchedulerStatus::Completed { .. } => "Completed",
+                    NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => "SidesExhausted",
                     NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) =>
                         "AwaitingHookRemoval",
                     NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => "Awaiting",
@@ -3931,6 +3935,7 @@ fn chain_one_system(
         transactions,
         terminal: match &system.status {
             NativeStemsBeamSchedulerStatus::Completed { .. } => "Completed",
+            NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => "SidesExhausted",
             NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => "HookRemoval",
             NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => "Awaiting",
         },
@@ -3947,7 +3952,7 @@ fn chain_one_system(
 /// to satisfy the code under test.
 ///
 /// Exhaustion and hook-removal are plentiful -- chaining the eight-sheet corpus
-/// reaches Completed on most systems and AwaitingHookRemoval on allegretto 1
+/// reaches SidesExhausted on most systems and AwaitingHookRemoval on allegretto 1
 /// and 3. The multi-V continuation is not: across all 24 chained systems it
 /// happens **three times in two systems**, batuque 1 (once) and BachInvention5
 /// 6 (twice). Multi-V B linkers themselves are common -- 35 on chula system 1
@@ -3959,7 +3964,7 @@ fn chain_one_system(
 /// the resume.
 #[test]
 fn resume_reaches_exhaustion_hook_removal_and_multi_v_continuation_on_the_corpus() {
-    let mut completed = 0;
+    let mut sides_exhausted = 0;
     let mut hook_removal = 0;
     let mut multi_v = 0;
     for page in PAGES {
@@ -3981,14 +3986,17 @@ fn resume_reaches_exhaustion_hook_removal_and_multi_v_continuation_on_the_corpus
             }
             let outcome = chain_one_system(&inputs, system, index, &[], true, 200);
             match outcome.terminal {
-                "Completed" => completed += 1,
+                "SidesExhausted" => sides_exhausted += 1,
                 "HookRemoval" => hook_removal += 1,
                 other => panic!("{}: chain did not terminate: {other}", page.image),
             }
             multi_v += outcome.multi_v_continuations;
         }
     }
-    assert!(completed > 0, "no system exhausted its SIDES worklist");
+    assert!(
+        sides_exhausted > 0,
+        "no system exhausted its SIDES worklist"
+    );
     assert!(
         hook_removal > 0,
         "no system stopped at a competing-hook removal"
@@ -4028,7 +4036,7 @@ fn a_failed_link_leaves_the_side_unlinked_and_shortens_the_pass() {
         succeeded.transactions
     );
     assert_eq!(
-        failed.terminal, "Completed",
+        failed.terminal, "SidesExhausted",
         "a pass whose links all fail still exhausts its worklist"
     );
 }

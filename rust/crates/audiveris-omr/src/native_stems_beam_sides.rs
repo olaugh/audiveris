@@ -7,7 +7,10 @@ use crate::{
     native_stems_beam_builders::NativeStemsBeamBuilderSystem,
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
-    native_stems_beam_scheduler::{NativeStemsBeamSchedulerStatus, NativeStemsBeamSchedulerSystem},
+    native_stems_beam_scheduler::{
+        NativeStemsBeamSchedulerStatus, NativeStemsBeamSchedulerStumpsContinuation,
+        NativeStemsBeamSchedulerSystem, continue_native_stems_beam_scheduler_into_stumps,
+    },
     native_stems_beam_stumps::NativeStemsBeamStumpSystem,
     native_stems_beam_vlink_b_linker_flag::{
         NativeStemsBeamVLinkBLinkerFlagState, NativeStemsBeamVLinkBLinkerFlagTransaction,
@@ -189,6 +192,130 @@ pub fn advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
         context,
         GlyphAuthority::FirstStems(bridge),
     )
+}
+
+/// Atomically leave an exhausted SIDES carrier and enter its STUMPS worklist.
+///
+/// The scheduler's carried linked-B set is accepted only when it is a bijective
+/// view of the persistent true B cells. No graph, binding, registry, or shared
+/// linker cell is changed by this read-only scheduler continuation.
+pub fn continue_native_stems_beam_sides_carrier_into_stumps(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+) -> Result<NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSidesError> {
+    let mut shadow = carrier.clone();
+    if !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells) {
+        return Err(stage(
+            "STUMPS-linked-B-authority",
+            "scheduler linked-B set differs from persistent true cells",
+        ));
+    }
+    let unchanged = (
+        shadow.latest_base_apply.clone(),
+        shadow.sig.clone(),
+        shadow.bindings.clone(),
+        shadow.b_cells.clone(),
+        shadow.s_cells.clone(),
+        shadow.beam_inter_index.clone(),
+        shadow.configured_inter_vip_ids.clone(),
+    );
+    let continuation = continue_native_stems_beam_scheduler_into_stumps(
+        &shadow.scheduler,
+        context.stumps,
+        context.vlinkers,
+        context.builders,
+        context.plans,
+    )
+    .map_err(|error| stage("STUMPS-scheduler", error))?;
+    shadow.scheduler = (*continuation.advanced_system).clone();
+    if unchanged
+        != (
+            shadow.latest_base_apply.clone(),
+            shadow.sig.clone(),
+            shadow.bindings.clone(),
+            shadow.b_cells.clone(),
+            shadow.s_cells.clone(),
+            shadow.beam_inter_index.clone(),
+            shadow.configured_inter_vip_ids.clone(),
+        )
+    {
+        return Err(stage(
+            "STUMPS-atomicity",
+            "scheduler continuation changed persistent carrier state",
+        ));
+    }
+    *carrier = shadow;
+    Ok(continuation)
+}
+
+fn linked_b_cells_match(
+    linked: &[crate::native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef],
+    cells: &[NativeStemsBeamNativeBLinkerCell],
+) -> bool {
+    if cells.iter().enumerate().any(|(index, cell)| {
+        cells[..index]
+            .iter()
+            .any(|prior| prior.reference == cell.reference)
+    }) || linked
+        .iter()
+        .enumerate()
+        .any(|(index, reference)| linked[..index].contains(reference))
+    {
+        return false;
+    }
+    let true_cells = cells
+        .iter()
+        .filter(|cell| cell.linked)
+        .map(|cell| cell.reference)
+        .collect::<Vec<_>>();
+    true_cells.len() == linked.len()
+        && true_cells
+            .iter()
+            .all(|reference| linked.contains(reference))
+        && linked
+            .iter()
+            .all(|reference| true_cells.contains(reference))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        native_stems_beam_stumps::NativeStemsBeamSource,
+        native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
+    };
+
+    #[test]
+    fn linked_b_authority_is_an_exact_true_cell_bijection() {
+        let one = NativeStemsBeamBLinkerRef {
+            beam: NativeStemsBeamSource::RawBeam(1),
+            id: 1,
+        };
+        let two = NativeStemsBeamBLinkerRef {
+            beam: NativeStemsBeamSource::RawBeam(2),
+            id: 1,
+        };
+        let cells = [
+            NativeStemsBeamNativeBLinkerCell {
+                reference: one,
+                linked: true,
+                closed: false,
+            },
+            NativeStemsBeamNativeBLinkerCell {
+                reference: two,
+                linked: false,
+                closed: false,
+            },
+        ];
+        assert!(linked_b_cells_match(&[one], &cells));
+        assert!(!linked_b_cells_match(&[one, two], &cells));
+        assert!(!linked_b_cells_match(&[], &cells));
+        let mut closed = cells;
+        closed[1].closed = true;
+        assert!(linked_b_cells_match(&[one], &closed));
+        closed[0].closed = true;
+        assert!(linked_b_cells_match(&[one], &closed));
+    }
 }
 
 #[derive(Clone, Copy)]

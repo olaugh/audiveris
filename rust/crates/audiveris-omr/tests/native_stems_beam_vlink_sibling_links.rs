@@ -33,12 +33,14 @@ use audiveris_omr::{
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::{
         NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamPlanRef,
-        NativeStemsBeamSchedulerPass, NativeStemsBeamSchedulerResumeStatus,
-        NativeStemsBeamSchedulerStatus, NativeStemsBeamWorklistSnapshot,
+        NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
+        NativeStemsBeamSchedulerResumeStatus, NativeStemsBeamSchedulerStatus,
+        NativeStemsBeamSchedulerStumpsStatus, NativeStemsBeamWorklistSnapshot,
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
+        continue_native_stems_beam_sides_carrier_into_stumps,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
     native_stems_beam_vlink_b_linker_flag::{
@@ -6177,7 +6179,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "68ef2f2156d1af1e54e6345c9fb198cb44a74f1ffcc93b52a5ab88873dee4540"
+        "650c90f48d9b331dc4aa972a42fbb226347356fd95fc831cb7495f6807ad22ad"
     );
     let data = fixture
         .lines()
@@ -7197,7 +7199,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         repeated.push(transaction);
     }
     assert_eq!(repeated.len(), 30);
-    let audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::Completed {
+    let audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::SidesExhausted {
         retained_for_stumps,
         final_local_worklist,
     } = &carrier.scheduler.status
@@ -7220,6 +7222,232 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert!(carrier.b_cells.iter().all(|cell| !cell.closed));
     assert!(carrier.s_cells.iter().all(|cell| !cell.closed));
+
+    // Leave the authenticated SIDES terminal through the production STUMPS
+    // continuation before opening the expected prefix. The scheduler's linked
+    // set must be a bijective view of the 61 persistent true B cells.
+    let sides_terminal_carrier = carrier.clone();
+    let mut corrupt_linked_b = sides_terminal_carrier.clone();
+    corrupt_linked_b
+        .b_cells
+        .iter_mut()
+        .find(|cell| cell.linked)
+        .expect("linked B cell at SIDES terminal")
+        .linked = false;
+    let corrupt_before = corrupt_linked_b.clone();
+    continue_native_stems_beam_sides_carrier_into_stumps(&mut corrupt_linked_b, context)
+        .expect_err("linked-B scheduler/cell disagreement must reject atomically");
+    assert_eq!(corrupt_linked_b, corrupt_before);
+
+    let stumps_actual = continue_native_stems_beam_sides_carrier_into_stumps(&mut carrier, context)
+        .expect("native post-SIDES STUMPS prefix");
+    assert_eq!(stumps_actual.stump_events.len(), 2);
+    let NativeStemsBeamSchedulerEvent::BeamPassStart {
+        snapshot,
+        selected_stem_profile,
+        ..
+    } = &stumps_actual.stump_events[0]
+    else {
+        panic!("STUMPS prefix must begin with the retained beam");
+    };
+    assert_eq!(snapshot.pass, NativeStemsBeamSchedulerPass::Stumps);
+    assert_eq!(snapshot.current_index, 0);
+    assert_eq!(*selected_stem_profile, 3);
+    let NativeStemsBeamSchedulerEvent::StumpSkippedStructuralSideGlyph {
+        beam,
+        b_linker,
+        v_linker,
+        ..
+    } = stumps_actual.stump_events[1]
+    else {
+        panic!("first stump must take structural-side precedence");
+    };
+    assert_eq!(beam, snapshot.current);
+    assert_eq!(second_b_alias(b_linker), "beam:12:b:0");
+    assert_eq!(v_linker.side, NativeStemVerticalSide::Top);
+    assert!(
+        sides_terminal_carrier
+            .scheduler
+            .linked_b_linkers
+            .contains(&b_linker),
+        "the structural-side branch must win while the same B cell is linked"
+    );
+    assert!(
+        sides_terminal_carrier
+            .b_cells
+            .iter()
+            .any(|cell| cell.reference == b_linker && cell.linked),
+        "the persistent B-cell authority must agree that the structural stump is linked"
+    );
+    let NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(stump_frontier) =
+        &stumps_actual.status
+    else {
+        panic!("measured STUMPS prefix must stop at a V-link transaction");
+    };
+    assert_eq!(
+        stump_frontier.snapshot.pass,
+        NativeStemsBeamSchedulerPass::Stumps
+    );
+    assert_eq!(stump_frontier.snapshot.current_index, 0);
+    assert_eq!(stump_frontier.beam, snapshot.current);
+    assert_eq!(second_b_alias(stump_frontier.b_linker), "beam:12:b:1");
+    assert_eq!(stump_frontier.horizontal_side, None);
+    assert_eq!(stump_frontier.vertical_side, NativeStemVerticalSide::Top);
+    assert_eq!(stump_frontier.plan.plan_ordinal, 147);
+    assert_eq!(stump_frontier.plan.stem_profile, 3);
+    let stump_attempt = hydrated
+        .plans
+        .builders
+        .iter()
+        .flat_map(|builder| builder.attempts.iter())
+        .nth(stump_frontier.plan.plan_ordinal)
+        .expect("native STUMPS plan 147");
+    assert_eq!(stump_attempt.stem_profile, 3);
+    assert_eq!(stump_attempt.link_profile, 1);
+    assert_eq!(stump_attempt.head_target_count, 2);
+    assert_eq!(stump_attempt.expand_last_index, Some(2));
+    assert_eq!(stump_attempt.relations.len(), 2);
+    assert_eq!(stump_attempt.glyphs.len(), 1);
+    assert!(!stump_attempt.stored_theoretical_line_would_mutate);
+    assert_eq!(carrier.scheduler, *stumps_actual.advanced_system);
+    assert_eq!(
+        carrier.latest_base_apply,
+        sides_terminal_carrier.latest_base_apply
+    );
+    assert_eq!(carrier.sig, sides_terminal_carrier.sig);
+    assert_eq!(carrier.bindings, sides_terminal_carrier.bindings);
+    assert_eq!(carrier.b_cells, sides_terminal_carrier.b_cells);
+    assert_eq!(carrier.s_cells, sides_terminal_carrier.s_cells);
+    assert_eq!(
+        carrier.beam_inter_index,
+        sides_terminal_carrier.beam_inter_index
+    );
+
+    // Expected-only STUMPS rows are opened after the production continuation
+    // and its atomic/coherence guards have returned.
+    let stumps_prefix_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-stumps-prefix-chula-system1.txt"),
+    )
+    .expect("expected-only STUMPS prefix");
+    assert_eq!(
+        sha256_hex(stumps_prefix_text.as_bytes()),
+        "643782fd7051100ffb66c07ebe736b4ff857f7f63240de61cd3bf47f2ac80179"
+    );
+    let stumps_rows = stumps_prefix_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(stumps_rows.len(), 6);
+    assert!(stumps_rows[0].starts_with(
+        "stemsbeamstumpsprefixbaseline chula.png#1 system 1 retained 34 work [beam:12,"
+    ));
+    assert!(stumps_rows[0].contains(" linkedB 61 "));
+    let between = |row: &str, start: &str, end: &str| {
+        row.split_once(start)
+            .and_then(|(_, suffix)| suffix.split_once(end).map(|(value, _)| value))
+            .expect("strict STUMPS baseline field")
+            .to_owned()
+    };
+    let expected_work_field = between(stumps_rows[0], " work [", "] linkedB ");
+    let expected_work = expected_work_field
+        .split(',')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let actual_work = snapshot
+        .sources
+        .iter()
+        .map(|source| {
+            let ordinal = hydrated
+                .stumps
+                .beams_by_abscissa
+                .iter()
+                .find(|beam| beam.source == *source)
+                .expect("retained STUMPS beam in native stump catalogue")
+                .sig_ordinal;
+            format!("beam:{ordinal}")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_work, expected_work);
+    let expected_linked_field = between(stumps_rows[0], " linkedAliases [", "] sigVertices ");
+    let expected_linked = expected_linked_field
+        .split(',')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut actual_linked = sides_terminal_carrier
+        .scheduler
+        .linked_b_linkers
+        .iter()
+        .copied()
+        .map(second_b_alias)
+        .collect::<Vec<_>>();
+    actual_linked.sort();
+    assert_eq!(actual_linked, expected_linked);
+    assert_eq!(
+        stumps_rows[1],
+        "stemsbeamstumpsprefixbeam chula.png#1 system 1 event 0 beamOrdinal 0 beamSig 12 stumpLinkers 3 sideStumps 2"
+    );
+    assert!(
+        stumps_rows[2].contains(
+            "event 1 beamOrdinal 0 beamSig 12 stumpOrdinal 0 bAlias beam:12:b:0 vSide TOP"
+        )
+    );
+    assert!(stumps_rows[2].ends_with("sideStump true linkedBefore true action SkipSideStump"));
+    assert!(
+        stumps_rows[3].contains(
+            "event 2 beamOrdinal 0 beamSig 12 stumpOrdinal 1 bAlias beam:12:b:1 vSide TOP"
+        )
+    );
+    assert!(stumps_rows[3].ends_with(
+        "plan 147 stemProfile 3 linkProfile 1 headTargets 2 lastIndex 2 relations 2 glyphs 1 lineChanged false action AwaitingVLinkTransaction"
+    ));
+    assert_eq!(
+        stumps_rows[4],
+        "stemsbeamstumpsprefixterminal chula.png#1 system 1 events 3 beamOrdinal 0 beamSig 12 stumpOrdinal 1 bAlias beam:12:b:1 vSide TOP plan 147 terminal AwaitingVLinkTransaction stopBeforeCreateStem true"
+    );
+    assert!(
+        stumps_rows[5]
+            .contains("schema stems-beam-stumps-prefix-v1 page chula.png#1 system 1 rows 5")
+    );
+    assert!(stumps_rows[5].contains(" sidesRowsByteIdentical true "));
+    assert!(
+        stumps_rows[5]
+            .ends_with("freshRuns 2 freshRunsByteIdentical true stopBeforeCreateStem true")
+    );
+    let summary_tokens = stumps_rows[5].split_ascii_whitespace().collect::<Vec<_>>();
+    let summary_value = |name: &str| {
+        summary_tokens
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| summary_tokens.get(index + 1))
+            .copied()
+            .expect("strict STUMPS summary field")
+    };
+    assert_eq!(
+        summary_value("probeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active STUMPS probe source")
+        )
+    );
+    assert_eq!(
+        summary_value("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/run-stems-beam-stumps-prefix.sh"))
+                .expect("active STUMPS runner source")
+        )
+    );
+    assert_eq!(
+        summary_value("sidesFixtureSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"))
+                .expect("frozen predecessor SIDES fixture")
+        )
+    );
+    let emitted_body = format!("{}\n", stumps_rows[..5].join("\n"));
+    assert_eq!(
+        summary_value("emittedBodySha256"),
+        sha256_hex(emitted_body.as_bytes())
+    );
 
     let all_siblings = std::iter::once(&actual)
         .chain(std::iter::once(&second_siblings))
