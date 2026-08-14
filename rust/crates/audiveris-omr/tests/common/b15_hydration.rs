@@ -81,7 +81,10 @@ use audiveris_omr::{
     },
     native_stems_head_builders::materialize_native_stems_head_builders,
     native_stems_head_corner_reachability::materialize_native_stems_head_corner_reachability,
-    native_stems_head_corners::materialize_native_stems_head_corners,
+    native_stems_head_corners::{
+        NativeStemsHeadCornerRecognition, NativeStemsHeadCornerSystem,
+        materialize_native_stems_head_corners,
+    },
     native_stems_head_seeds::materialize_native_stems_head_seeds,
     native_stems_head_stumps::materialize_native_stems_head_stumps,
     recognize::{
@@ -744,6 +747,7 @@ pub(super) struct NativePredecessorPage {
     pub(super) stem_seeds: NativeStemSeedRecognition,
     pub(super) beam_stumps: NativeStemsBeamStumpRecognition,
     pub(super) beam_vlinkers: NativeStemsBeamVLinkerRecognition,
+    pub(super) head_corners: NativeStemsHeadCornerRecognition,
     pub(super) beam_reachability: NativeStemsBeamReachabilityRecognition,
     pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
     pub(super) plans: NativeStemsBeamLinkPlanRecognition,
@@ -843,6 +847,7 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         stem_seeds,
         beam_stumps,
         beam_vlinkers,
+        head_corners: corners,
         beam_reachability,
         beam_builders,
         plans,
@@ -2372,6 +2377,7 @@ pub(super) struct HydratedBoundaryFifteen {
     pub plans: NativeStemsBeamLinkPlanSystem,
     pub stumps: NativeStemsBeamStumpSystem,
     pub vlinkers: NativeStemsBeamVLinkerSystem,
+    pub head_corners: NativeStemsHeadCornerSystem,
     pub reachability: NativeStemsBeamReachabilitySystem,
     pub builder: NativeStemsBeamBuilderSystem,
     pub create_transaction: NativeStemsBeamVLinkTransaction,
@@ -2545,6 +2551,13 @@ pub(super) fn run_real_on_page(
         plans: plans.clone(),
         stumps: stumps.clone(),
         vlinkers: vlinkers.clone(),
+        head_corners: page
+            .head_corners
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or_else(|| format!("system {system_id} head corners missing"))?
+            .clone(),
         reachability: reachability.clone(),
         builder: builder.clone(),
         create_transaction: predecessor.create_transaction,

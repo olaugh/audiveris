@@ -1067,6 +1067,7 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
             }),
             beam_portion: Some(audiveris_omr::stems_step::NativeBeamPortion::Left),
             stem_extension: Some(audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 }),
+            head_stem: None,
         })
         .expect("dense BeamStem append");
     assert_eq!(

@@ -936,6 +936,7 @@ pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
                 }),
                 beam_portion: Some(transaction.fresh_relation.beam_portion),
                 stem_extension: Some(transaction.fresh_relation.extension_point),
+                head_stem: None,
             })
             .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
                 phase: "native SIG BeamStem append",
@@ -3019,6 +3020,7 @@ fn project_native_beam_incident(
                 support: None,
                 beam_portion: Some(draft.beam_portion),
                 stem_extension: Some(draft.extension_point),
+                head_stem: None,
             },
             identity,
         )

@@ -338,6 +338,7 @@ fn project_native_sibling_graph(
                 }),
                 beam_portion: Some(draft.beam_portion),
                 stem_extension: Some(draft.extension_point),
+                head_stem: None,
             };
             let projected = graph_relation(&edge);
             shadow.append_edge(edge).map_err(|_| {

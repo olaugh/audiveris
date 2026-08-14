@@ -33,6 +33,11 @@ use audiveris_omr::{
         NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBeamRuntimeState,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
     },
+    native_stems_beam_vlink_head_links::{
+        NativeStemsBeamHeadLinkBranch,
+        apply_native_stems_beam_vlink_head_transaction_to_native_sig,
+        initialize_native_stems_beam_s_linker_cells,
+    },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
         NativeStemsBeamSiblingBeamAbnormalTrace, NativeStemsBeamSiblingBeamIncidentRelation,
@@ -5669,7 +5674,7 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
 /// typed products.  Java rows are opened only after the complete native
 /// graph/cell result exists.
 #[test]
-fn native_b15_b16_carrier_commits_first_transaction_before_oracle_read() {
+fn native_b15_b16_b17_carrier_commits_first_transaction_before_oracle_read() {
     let base_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
     )
@@ -5792,6 +5797,162 @@ fn native_b15_b16_carrier_commits_first_transaction_before_oracle_read() {
             .collect::<Vec<_>>(),
         vec![202, 203, 204]
     );
+
+    // Carry the same owned SIG and B-cell authority through B17 before any
+    // Boundary-16 or Boundary-17 oracle row is opened.
+    let mut s_cells = initialize_native_stems_beam_s_linker_cells(&hydrated.head_corners)
+        .expect("complete native S-cell arena");
+    let post_b16_sig = sig.clone();
+    let pre_b17_s_cells = s_cells.clone();
+    let head_actual = apply_native_stems_beam_vlink_head_transaction_to_native_sig(
+        &mut sig,
+        &bindings,
+        &hydrated.scheduler,
+        &hydrated.plans,
+        &hydrated.builder,
+        &hydrated.head_corners,
+        &hydrated.reachability,
+        &hydrated.transaction,
+        &actual,
+        &cells,
+        &mut s_cells,
+    )
+    .expect("native B17 graph/S-cell carrier commit");
+    assert_eq!((sig.vertices.len(), sig.edges.len()), (222, 207));
+    assert_eq!(head_actual.plan_ordinal, 143);
+    assert_eq!(head_actual.steps.len(), 2);
+    assert!(
+        head_actual
+            .steps
+            .iter()
+            .all(|step| step.branch == NativeStemsBeamHeadLinkBranch::Linked)
+    );
+    assert_eq!(
+        head_actual
+            .steps
+            .iter()
+            .map(|step| (step.head_vertex.0, step.stem_vertex.0))
+            .collect::<Vec<_>>(),
+        vec![(119, 221), (120, 221)]
+    );
+    assert_eq!(
+        head_actual
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![205, 206]
+    );
+    assert_eq!(head_actual.s_linker_write_count, 2);
+    assert_eq!(head_actual.s_linker_value_change_count, 2);
+    assert_eq!(head_actual.head_abnormal_value_change_count, 2);
+    assert_eq!(head_actual.stem_abnormal_value_change_count, 1);
+    assert_eq!(head_actual.dirty_cascade_assignment_count, 3);
+    assert_eq!((head_actual.last_index, head_actual.max_index), (5, 5));
+    assert!(!head_actual.remainder_less_than);
+    assert!(head_actual.returned_true);
+    assert_eq!(
+        head_actual
+            .steps
+            .iter()
+            .map(|step| step.consistency.expect("linked consistency").to_bits())
+            .collect::<Vec<_>>(),
+        vec![0x3ffc_9249_2492_4925; 2]
+    );
+    assert_eq!(
+        head_actual.steps[0]
+            .stem_incident_after
+            .as_ref()
+            .expect("first stem callback")
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![202, 203, 204, 205]
+    );
+    assert_eq!(
+        head_actual.steps[1]
+            .stem_incident_after
+            .as_ref()
+            .expect("second stem callback")
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![202, 203, 204, 205, 206]
+    );
+    assert!(!sig.vertices[119].abnormal);
+    assert!(!sig.vertices[120].abnormal);
+    assert!(!sig.vertices[221].abnormal);
+
+    // A late second-entry binding failure proves the first provisional S write,
+    // edge, and abnormal callbacks cannot escape the clone-and-swap carrier.
+    let mut rollback_sig = post_b16_sig.clone();
+    let mut rollback_s_cells = pre_b17_s_cells.clone();
+    let mut invalid_bindings = bindings.clone();
+    let second_head = head_actual.steps[1].corner.head;
+    invalid_bindings.head_vertices.remove(&second_head);
+    assert!(
+        apply_native_stems_beam_vlink_head_transaction_to_native_sig(
+            &mut rollback_sig,
+            &invalid_bindings,
+            &hydrated.scheduler,
+            &hydrated.plans,
+            &hydrated.builder,
+            &hydrated.head_corners,
+            &hydrated.reachability,
+            &hydrated.transaction,
+            &actual,
+            &cells,
+            &mut rollback_s_cells,
+        )
+        .is_err()
+    );
+    assert_eq!(rollback_sig, post_b16_sig);
+    assert_eq!(rollback_s_cells, pre_b17_s_cells);
+
+    // Boundary-17 is expected-only from here onward. Compare the frozen
+    // native-domain facts without importing Java aliases or persistent IDs.
+    let head_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-head-links-chula.txt"),
+    )
+    .expect("frozen B17 fixture");
+    let real = |prefix: &str| {
+        head_text
+            .lines()
+            .filter(|line| {
+                line.starts_with(prefix) && line.contains(" system 1 plan 143 scope real case - ")
+            })
+            .collect::<Vec<_>>()
+    };
+    let entries = real("stemsbeamvlinkheadlinksheadentry ");
+    let edges = real("stemsbeamvlinkheadlinksedge ");
+    let callbacks = real("stemsbeamvlinkheadlinkscallback ");
+    assert_eq!((entries.len(), edges.len(), callbacks.len()), (2, 2, 2));
+    for (ordinal, (native, java)) in head_actual.steps.iter().zip(entries).enumerate() {
+        assert!(java.contains(&format!(" mapOrdinal {ordinal} ")));
+        assert!(java.contains(&format!(" headVertexOrdinal {} ", native.head_vertex.0)));
+        assert!(java.contains(" sLinkedBefore false sClosedBefore false "));
+        assert!(java.contains(" draftHeadSide LEFT "));
+    }
+    for (ordinal, (native, java)) in head_actual.steps.iter().zip(edges).enumerate() {
+        assert!(java.contains(&format!(" mapOrdinal {ordinal} ")));
+        assert!(java.contains(&format!(
+            " graphInsertionOrdinal {} ",
+            native.appended_edge.expect("linked edge").0
+        )));
+        assert!(java.contains(&format!(" sourceVertexOrdinal {} ", native.head_vertex.0)));
+        assert!(java.contains(" targetVertexOrdinal 221 "));
+    }
+    assert!(callbacks[0].contains(
+        " headAbnormalBefore true headAbnormalAfter false stemAbnormalBefore true stemAbnormalAfter false "
+    ));
+    assert!(callbacks[1].contains(
+        " headAbnormalBefore true headAbnormalAfter false stemAbnormalBefore false stemAbnormalAfter false "
+    ));
+    let result = real("stemsbeamvlinkheadlinksresult ");
+    assert_eq!(result.len(), 1);
+    assert!(result[0].contains(
+        " headEntries 2 duplicateEntries 0 relationsInserted 2 sWriteCount 2 sValueChangeCount 2 consistencyWriteCount 2 headAbnormalChangeCount 2 stemAbnormalChangeCount 1 dirtyCascadeCount 3 "
+    ));
 
     // From this point onward the frozen B16 fixture is expected-only.
     let text = std::fs::read_to_string(

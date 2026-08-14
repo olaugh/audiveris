@@ -19,6 +19,11 @@ use std::{
 use crate::{
     head_template::HeadTemplateShape,
     native_heads_staff_epilog::NativeHeadStaffEpilogRef,
+    native_sig::{
+        NativeSigEdge, NativeSigEdgeId, NativeSigHeadStemPayload, NativeSigInterKind,
+        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigSystem,
+        NativeSigSystemBindings, NativeSigVertexId,
+    },
     native_stems_beam_builders::NativeStemsBeamBuilderSystem,
     native_stems_beam_link_plans::{
         NativeStemsBeamHeadRelation, NativeStemsBeamLinkPlanAttempt, NativeStemsBeamLinkPlanSystem,
@@ -43,12 +48,15 @@ use crate::{
         NativeStemsBeamVLinkReuseLiveState,
     },
     native_stems_beam_vlink_sibling_links::{
+        NativeStemsBeamNativeBLinkerCell, NativeStemsBeamNativeSiblingTransaction,
         NativeStemsBeamSiblingRelationObjectIdentity, NativeStemsBeamVLinkSiblingLinksState,
         NativeStemsBeamVLinkSiblingLinksTransaction,
         apply_native_stems_beam_vlink_sibling_links_transaction,
+        initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::NativeStemsBeamVLinkTransaction,
     native_stems_beam_vlinkers::NativeStemsBeamVLinkerSystem,
+    native_stems_head_corners::{NativeStemsHeadCornerHead, NativeStemsHeadCornerSystem},
     stems_step::{NativeStemHeadSide, NativeStemPoint, NativeStemVerticalSide},
 };
 
@@ -113,6 +121,575 @@ pub struct NativeStemsBeamHeadSLinkerCell {
     pub closed: bool,
     /// Java `EnumMap<VerticalSide,CLinker>` order: TOP, then BOTTOM.
     pub ordered_observer_corners: Vec<NativeStemsBeamHeadCornerRef>,
+}
+
+/// Persistent native S-linker cell. The topology comes from the complete
+/// head-corner constructor product, never from a B17 fixture row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamNativeSLinkerCell {
+    pub reference: NativeStemsBeamHeadSLinkerRef,
+    pub linked: bool,
+    pub closed: bool,
+    /// Exact `EnumMap<VerticalSide,CLinker>` order: TOP then BOTTOM.
+    pub ordered_observer_corners: Vec<NativeStemsBeamHeadCornerRef>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamNativeHeadStep {
+    pub map_ordinal: usize,
+    pub corner: NativeStemsBeamHeadCornerRef,
+    pub head_vertex: NativeSigVertexId,
+    pub stem_vertex: NativeSigVertexId,
+    pub s_linker: NativeStemsBeamHeadSLinkerRef,
+    pub linked_before: bool,
+    pub linked_after: bool,
+    pub closed_before: bool,
+    pub closed_after: bool,
+    pub directed_pair_before: Vec<NativeSigEdgeId>,
+    pub consistency: Option<f64>,
+    pub appended_edge: Option<NativeSigEdgeId>,
+    pub head_incident_after: Option<Vec<NativeSigEdgeId>>,
+    pub stem_incident_after: Option<Vec<NativeSigEdgeId>>,
+    pub head_abnormal_before: bool,
+    pub head_abnormal_after: bool,
+    pub stem_abnormal_before: bool,
+    pub stem_abnormal_after: bool,
+    pub branch: NativeStemsBeamHeadLinkBranch,
+}
+
+/// Native graph/S-cell delta for the first carried B17 transaction. Sheet and
+/// Book dirty assignments are counted, but their external state is not owned
+/// by this bounded carrier yet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamNativeHeadTransaction {
+    pub system_id: usize,
+    pub plan_ordinal: usize,
+    pub stem_identity: usize,
+    pub steps: Vec<NativeStemsBeamNativeHeadStep>,
+    pub assigned_s_linkers: Vec<NativeStemsBeamHeadSLinkerRef>,
+    pub appended_edges: Vec<NativeSigEdgeId>,
+    pub s_linker_write_count: usize,
+    pub s_linker_value_change_count: usize,
+    pub head_abnormal_value_change_count: usize,
+    pub stem_abnormal_value_change_count: usize,
+    pub dirty_cascade_assignment_count: usize,
+    pub last_index: i32,
+    pub max_index: i32,
+    pub remainder_less_than: bool,
+    pub returned_true: bool,
+}
+
+/// Build the exhaustive native S-cell catalogue: two cells per live head,
+/// each observing its TOP then BOTTOM C child.
+pub fn initialize_native_stems_beam_s_linker_cells(
+    corners: &NativeStemsHeadCornerSystem,
+) -> Result<Vec<NativeStemsBeamNativeSLinkerCell>, NativeStemsBeamVLinkHeadLinksError> {
+    let mut x_ordinals = vec![None; corners.heads_in_sig_order.len()];
+    for (x_ordinal, &sig_ordinal) in corners.heads_by_abscissa.iter().enumerate() {
+        let slot = x_ordinals.get_mut(sig_ordinal).ok_or(
+            NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                phase: "native S-cell x order",
+            },
+        )?;
+        if slot.replace(x_ordinal).is_some() {
+            return Err(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                phase: "duplicate native S-cell x order",
+            });
+        }
+    }
+    let mut result = Vec::with_capacity(corners.heads_in_sig_order.len() * 2);
+    for (sig_ordinal, head) in corners.heads_in_sig_order.iter().enumerate() {
+        let x_ordinal =
+            x_ordinals[sig_ordinal].ok_or(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                phase: "missing native S-cell x order",
+            })?;
+        if head.corners_in_constructor_order.len() != 4 {
+            return Err(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                phase: "native S-cell corner count",
+            });
+        }
+        for (side, start) in [
+            (NativeStemHeadSide::Left, 0),
+            (NativeStemHeadSide::Right, 2),
+        ] {
+            let observer = |offset: usize| NativeStemsBeamHeadCornerRef {
+                head: head.reference,
+                sig_ordinal,
+                x_ordinal,
+                horizontal: side,
+                vertical: head.corners_in_constructor_order[start + offset].vertical,
+            };
+            let top = observer(0);
+            let bottom = observer(1);
+            if top.vertical != NativeStemVerticalSide::Top
+                || bottom.vertical != NativeStemVerticalSide::Bottom
+                || head.corners_in_constructor_order[start].horizontal != side
+                || head.corners_in_constructor_order[start + 1].horizontal != side
+            {
+                return Err(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                    phase: "native S-cell constructor order",
+                });
+            }
+            result.push(NativeStemsBeamNativeSLinkerCell {
+                reference: NativeStemsBeamHeadSLinkerRef {
+                    head: NativeStemsBeamHeadLinkHeadRef {
+                        reference: head.reference,
+                        sig_ordinal,
+                        x_ordinal,
+                    },
+                    horizontal: side,
+                },
+                linked: false,
+                closed: false,
+                ordered_observer_corners: vec![top, bottom],
+            });
+        }
+    }
+    Ok(result)
+}
+
+/// Resume from the owned post-B16 graph and atomically commit Java's ordered
+/// B17 head loop to that graph and the persistent native S-cell catalogue.
+/// Legacy Java object IDs, aliases, hashes, and certificate rows are not part
+/// of this API.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_native_stems_beam_vlink_head_transaction_to_native_sig(
+    sig: &mut NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    builders: &NativeStemsBeamBuilderSystem,
+    corners: &NativeStemsHeadCornerSystem,
+    reachability: &NativeStemsBeamReachabilitySystem,
+    b15: &NativeStemsBeamVLinkBLinkerFlagTransaction,
+    b16: &NativeStemsBeamNativeSiblingTransaction,
+    b_cells: &[NativeStemsBeamNativeBLinkerCell],
+    s_cells: &mut Vec<NativeStemsBeamNativeSLinkerCell>,
+) -> Result<NativeStemsBeamNativeHeadTransaction, NativeStemsBeamVLinkHeadLinksError> {
+    let frontier = match &scheduler.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => return Err(NativeStemsBeamVLinkHeadLinksError::PredecessorNotReady),
+    };
+    let system_id = scheduler.system_id;
+    if system_id != sig.system_id
+        || system_id != bindings.system_id
+        || system_id != plans.system_id
+        || system_id != builders.system_id
+        || system_id != corners.system_id
+        || system_id != reachability.system_id
+        || plans.interline != reachability.interline
+        || plans.interline != corners.interline
+        || frontier.plan != b15.key.plan
+        || b16.system_id != system_id
+        || b16.plan_ordinal != frontier.plan.plan_ordinal
+        || b16.stem_identity != b15.stem_after.stem_identity
+        || !b15.linked_after
+    {
+        return Err(NativeStemsBeamVLinkHeadLinksError::PredecessorMismatch);
+    }
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 bindings",
+        }
+    })?;
+    let expected_b_cells =
+        initialize_native_stems_beam_b_linker_cells(reachability).map_err(|_| {
+            NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 B-cell topology",
+            }
+        })?;
+    if expected_b_cells.len() != b_cells.len()
+        || expected_b_cells
+            .iter()
+            .map(|cell| cell.reference)
+            .ne(b_cells.iter().map(|cell| cell.reference))
+        || !b_cells
+            .iter()
+            .any(|cell| cell.reference == b15.target_b_linker && cell.linked)
+        || b16.assigned_b_linkers.iter().any(|reference| {
+            !b_cells
+                .iter()
+                .any(|cell| cell.reference == *reference && cell.linked)
+        })
+    {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 B-cell continuity",
+        });
+    }
+    let expected_s_cells = initialize_native_stems_beam_s_linker_cells(corners)?;
+    if expected_s_cells.len() != s_cells.len()
+        || expected_s_cells
+            .iter()
+            .zip(s_cells.iter())
+            .any(|(expected, actual)| {
+                expected.reference != actual.reference
+                    || expected.ordered_observer_corners != actual.ordered_observer_corners
+            })
+    {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 S-cell topology",
+        });
+    }
+    let plan = resolve_plan(plans, frontier.plan)?;
+    let builder = builders.builders.get(frontier.plan.builder_ordinal).ok_or(
+        NativeStemsBeamVLinkHeadLinksError::Predecessor {
+            phase: "native B17 builder",
+        },
+    )?;
+    let inspection = resolve_reachability_inspection(
+        reachability,
+        b15.triggering_v_linker,
+        system_id,
+        plans.interline,
+    )?;
+    if plan.relations.is_empty()
+        || plan.relations.len() != plan.head_target_count
+        || plan
+            .relations
+            .iter()
+            .enumerate()
+            .any(|(ordinal, relation)| {
+                relation.map_ordinal != ordinal
+                    || !relation.check.accepted
+                    || relation.check.extension_point.is_none()
+                    || !inspection.head_targets.contains(&relation.corner)
+            })
+    {
+        return Err(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+            phase: "native B17 relation map",
+        });
+    }
+    let stem_vertex = bindings
+        .stem_vertices
+        .get(&b16.stem_identity)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 stem binding",
+        })?;
+    let base_edges = sig
+        .directed_edges(b16.graph.base_vertex.0, stem_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 base edge query",
+        })?;
+    if !base_edges.iter().any(|edge| {
+        edge.kind == NativeSigRelationKind::BeamStem
+            && edge.origin
+                == (NativeSigRelationOrigin::BeamVBaseDraft {
+                    plan_ordinal: frontier.plan.plan_ordinal,
+                })
+    }) || b16.graph.appended_edges.iter().any(|id| {
+        sig.edges.get(id.0).is_none_or(|edge| {
+            !edge.active
+                || edge.kind != NativeSigRelationKind::BeamStem
+                || edge.target != stem_vertex.0
+                || !matches!(
+                    edge.origin,
+                    NativeSigRelationOrigin::BeamVSiblingDraft { plan_ordinal, .. }
+                        if plan_ordinal == frontier.plan.plan_ordinal
+                )
+        })
+    }) {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 post-B16 graph continuity",
+        });
+    }
+    let stem =
+        sig.vertex(stem_vertex.0)
+            .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 stem vertex",
+            })?;
+    if stem.kind != NativeSigInterKind::Stem || !stem.abnormal {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 post-B16 stem",
+        });
+    }
+
+    let mut shadow_sig = sig.clone();
+    let mut shadow_cells = s_cells.clone();
+    let mut steps = Vec::with_capacity(plan.relations.len());
+    let mut assigned_s_linkers = Vec::with_capacity(plan.relations.len());
+    let mut appended_edges = Vec::new();
+    let mut s_linker_value_change_count = 0;
+    let mut head_abnormal_value_change_count = 0;
+    let mut stem_abnormal_value_change_count = 0;
+    let mut dirty_cascade_assignment_count = 0;
+    for relation in &plan.relations {
+        let head_vertex = bindings
+            .head_vertices
+            .get(&relation.corner.head)
+            .copied()
+            .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 head binding",
+            })?;
+        let head = native_corner_head(corners, relation.corner)?;
+        let graph_head = shadow_sig.vertex(head_vertex.0).ok_or(
+            NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 head vertex",
+            },
+        )?;
+        if graph_head.kind != NativeSigInterKind::Head
+            || graph_head.shape.as_deref() != Some(native_head_shape(head.shape))
+        {
+            return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 head shape",
+            });
+        }
+        let s_ref = NativeStemsBeamHeadSLinkerRef {
+            head: NativeStemsBeamHeadLinkHeadRef::from_corner(relation.corner),
+            horizontal: relation.check.derived_horizontal,
+        };
+        let cell = unique_native_s_cell_mut(&mut shadow_cells, s_ref)?;
+        let linked_before = cell.linked;
+        let closed_before = cell.closed;
+        cell.linked = true;
+        s_linker_value_change_count += usize::from(!linked_before);
+        assigned_s_linkers.push(s_ref);
+
+        let directed_pair_before = shadow_sig
+            .directed_edges(head_vertex.0, stem_vertex.0)
+            .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                phase: "native B17 pair query",
+            })?
+            .iter()
+            .map(|edge| NativeSigEdgeId(edge.ordinal))
+            .collect::<Vec<_>>();
+        let existing = directed_pair_before
+            .iter()
+            .any(|id| shadow_sig.edges[id.0].kind == NativeSigRelationKind::HeadStem);
+        let head_abnormal_before = shadow_sig.vertices[head_vertex.0].abnormal;
+        let stem_abnormal_before = shadow_sig.vertices[stem_vertex.0].abnormal;
+        let mut consistency = None;
+        let mut appended_edge = None;
+        let mut head_incident_after = None;
+        let mut stem_incident_after = None;
+        let branch = if existing {
+            NativeStemsBeamHeadLinkBranch::ExistingHeadStem
+        } else {
+            let value = head_stem_consistency(
+                false,
+                b15.stem_after.geometry.median.start.y,
+                b15.stem_after.geometry.median.stop.y,
+                plans.interline,
+            )?;
+            let extension = relation.check.extension_point.ok_or(
+                NativeStemsBeamVLinkHeadLinksError::Predecessor {
+                    phase: "native B17 extension",
+                },
+            )?;
+            let edge_id = NativeSigEdgeId(shadow_sig.edges.len());
+            shadow_sig
+                .append_edge(NativeSigEdge {
+                    ordinal: edge_id.0,
+                    active: true,
+                    source: head_vertex.0,
+                    target: stem_vertex.0,
+                    kind: NativeSigRelationKind::HeadStem,
+                    origin: NativeSigRelationOrigin::BeamVHeadDraft {
+                        plan_ordinal: frontier.plan.plan_ordinal,
+                        map_ordinal: relation.map_ordinal,
+                    },
+                    support: Some(NativeSigSupport {
+                        grade: relation.check.grade,
+                        bar_connection_impacts: None,
+                    }),
+                    beam_portion: None,
+                    stem_extension: None,
+                    head_stem: Some(NativeSigHeadStemPayload {
+                        dx: relation.check.dx,
+                        dy: relation.check.dy,
+                        head_side: relation.check.derived_horizontal,
+                        extension_point: extension,
+                        consistency: value,
+                        manual: false,
+                    }),
+                })
+                .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                    phase: "native B17 edge append",
+                })?;
+            let head_scan = shadow_sig
+                .incident_edges(head_vertex.0)
+                .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                    phase: "native B17 head incident query",
+                })?
+                .iter()
+                .map(|edge| NativeSigEdgeId(edge.ordinal))
+                .collect::<Vec<_>>();
+            let stem_scan = shadow_sig
+                .incident_edges(stem_vertex.0)
+                .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                    phase: "native B17 stem incident query",
+                })?
+                .iter()
+                .map(|edge| NativeSigEdgeId(edge.ordinal))
+                .collect::<Vec<_>>();
+            let head_after = if native_head_reads_head_stem(head.shape) {
+                !head_scan
+                    .iter()
+                    .any(|id| shadow_sig.edges[id.0].kind == NativeSigRelationKind::HeadStem)
+            } else {
+                head_abnormal_before
+            };
+            let stem_after = !stem_scan
+                .iter()
+                .any(|id| shadow_sig.edges[id.0].kind == NativeSigRelationKind::HeadStem);
+            shadow_sig
+                .set_abnormal(head_vertex, head_after)
+                .and_then(|()| shadow_sig.set_abnormal(stem_vertex, stem_after))
+                .map_err(|_| NativeStemsBeamVLinkHeadLinksError::InvalidState {
+                    phase: "native B17 abnormal callback",
+                })?;
+            if head_after != head_abnormal_before {
+                head_abnormal_value_change_count += 1;
+                dirty_cascade_assignment_count += 1;
+            }
+            if stem_after != stem_abnormal_before {
+                stem_abnormal_value_change_count += 1;
+                dirty_cascade_assignment_count += 1;
+            }
+            consistency = Some(value);
+            appended_edge = Some(edge_id);
+            appended_edges.push(edge_id);
+            head_incident_after = Some(head_scan);
+            stem_incident_after = Some(stem_scan);
+            NativeStemsBeamHeadLinkBranch::Linked
+        };
+        let cell_after = unique_native_s_cell(&shadow_cells, s_ref)?;
+        steps.push(NativeStemsBeamNativeHeadStep {
+            map_ordinal: relation.map_ordinal,
+            corner: relation.corner,
+            head_vertex,
+            stem_vertex,
+            s_linker: s_ref,
+            linked_before,
+            linked_after: cell_after.linked,
+            closed_before,
+            closed_after: cell_after.closed,
+            directed_pair_before,
+            consistency,
+            appended_edge,
+            head_incident_after,
+            stem_incident_after,
+            head_abnormal_before,
+            head_abnormal_after: shadow_sig.vertices[head_vertex.0].abnormal,
+            stem_abnormal_before,
+            stem_abnormal_after: shadow_sig.vertices[stem_vertex.0].abnormal,
+            branch,
+        });
+    }
+    shadow_sig.validate_integrity().map_err(|_| {
+        NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "native B17 committed SIG",
+        }
+    })?;
+    let last_index = plan.expand_last_index.unwrap_or(-1);
+    let max_index = i32::try_from(builder.items.len())
+        .ok()
+        .and_then(|count| count.checked_sub(1))
+        .ok_or(NativeStemsBeamVLinkHeadLinksError::UnsupportedV1 {
+            phase: "native B17 builder max index",
+        })?;
+    let result = NativeStemsBeamNativeHeadTransaction {
+        system_id,
+        plan_ordinal: frontier.plan.plan_ordinal,
+        stem_identity: b16.stem_identity,
+        steps,
+        assigned_s_linkers,
+        appended_edges,
+        s_linker_write_count: plan.relations.len(),
+        s_linker_value_change_count,
+        head_abnormal_value_change_count,
+        stem_abnormal_value_change_count,
+        dirty_cascade_assignment_count,
+        last_index,
+        max_index,
+        remainder_less_than: last_index < max_index,
+        returned_true: true,
+    };
+    *sig = shadow_sig;
+    *s_cells = shadow_cells;
+    Ok(result)
+}
+
+fn native_corner_head(
+    corners: &NativeStemsHeadCornerSystem,
+    corner: NativeStemsBeamHeadCornerRef,
+) -> Result<&NativeStemsHeadCornerHead, NativeStemsBeamVLinkHeadLinksError> {
+    let head = corners.heads_in_sig_order.get(corner.sig_ordinal).ok_or(
+        NativeStemsBeamVLinkHeadLinksError::Predecessor {
+            phase: "native B17 corner SIG ordinal",
+        },
+    )?;
+    let x_ordinal = corners
+        .heads_by_abscissa
+        .iter()
+        .position(|&ordinal| ordinal == corner.sig_ordinal);
+    if head.reference != corner.head
+        || x_ordinal != Some(corner.x_ordinal)
+        || !head.corners_in_constructor_order.iter().any(|candidate| {
+            candidate.horizontal == corner.horizontal && candidate.vertical == corner.vertical
+        })
+    {
+        return Err(NativeStemsBeamVLinkHeadLinksError::Predecessor {
+            phase: "native B17 corner topology",
+        });
+    }
+    Ok(head)
+}
+
+fn native_head_shape(shape: HeadTemplateShape) -> &'static str {
+    match shape {
+        HeadTemplateShape::NoteheadBlack => "NOTEHEAD_BLACK",
+        HeadTemplateShape::NoteheadVoid => "NOTEHEAD_VOID",
+        HeadTemplateShape::WholeNote => "WHOLE_NOTE",
+        HeadTemplateShape::Breve => "BREVE",
+    }
+}
+
+fn native_head_reads_head_stem(shape: HeadTemplateShape) -> bool {
+    matches!(
+        shape,
+        HeadTemplateShape::NoteheadBlack | HeadTemplateShape::NoteheadVoid
+    )
+}
+
+fn unique_native_s_cell_mut(
+    cells: &mut [NativeStemsBeamNativeSLinkerCell],
+    reference: NativeStemsBeamHeadSLinkerRef,
+) -> Result<&mut NativeStemsBeamNativeSLinkerCell, NativeStemsBeamVLinkHeadLinksError> {
+    let mut matches = cells.iter_mut().filter(|cell| cell.reference == reference);
+    let cell = matches
+        .next()
+        .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "missing native B17 S cell",
+        })?;
+    if matches.next().is_some() {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "duplicate native B17 S cell",
+        });
+    }
+    Ok(cell)
+}
+
+fn unique_native_s_cell(
+    cells: &[NativeStemsBeamNativeSLinkerCell],
+    reference: NativeStemsBeamHeadSLinkerRef,
+) -> Result<&NativeStemsBeamNativeSLinkerCell, NativeStemsBeamVLinkHeadLinksError> {
+    let mut matches = cells.iter().filter(|cell| cell.reference == reference);
+    let cell = matches
+        .next()
+        .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "missing committed native B17 S cell",
+        })?;
+    if matches.next().is_some() {
+        return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
+            phase: "duplicate committed native B17 S cell",
+        });
+    }
+    Ok(cell)
 }
 
 /// Java relation-object identity. Dense graph identity is a separate domain.

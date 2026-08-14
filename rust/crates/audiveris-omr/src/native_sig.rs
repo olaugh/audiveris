@@ -25,10 +25,11 @@ use crate::{
     header_time_column::{NeutralSpecificTimeShape, NeutralTimeCandidate},
     native_headers::{NativeHeaderRecognition, NativeHeaderStaffRecognition},
     native_heads::NativeHeadsRecognition,
+    native_heads_staff_epilog::NativeHeadStaffEpilogRef,
     native_ledgers::NativeLedgerRecognition,
     native_stems_beam_stumps::NativeStemsBeamSource,
     recognize::{GridLinesRecognition, NativeBeamRecognition},
-    stems_step::{NativeBeamPortion, NativeStemPoint},
+    stems_step::{NativeBeamPortion, NativeStemHeadSide, NativeStemPoint},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +190,16 @@ pub struct NativeSigSupport {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeSigHeadStemPayload {
+    pub dx: f64,
+    pub dy: f64,
+    pub head_side: NativeStemHeadSide,
+    pub extension_point: NativeStemPoint,
+    pub consistency: f64,
+    pub manual: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeSigEdge {
     pub ordinal: usize,
     /// Live graph membership. Removal leaves an insertion-order tombstone.
@@ -202,6 +213,8 @@ pub struct NativeSigEdge {
     pub beam_portion: Option<NativeBeamPortion>,
     /// BeamStem extension retained for later callback and reuse projections.
     pub stem_extension: Option<NativeStemPoint>,
+    /// HeadStem fields retained for later reuse and callback projections.
+    pub head_stem: Option<NativeSigHeadStemPayload>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -420,10 +433,29 @@ fn valid_edge_payload(edge: &NativeSigEdge) -> bool {
     }
     match edge.kind {
         NativeSigRelationKind::BeamStem => {
-            edge.support.is_some() && edge.beam_portion.is_some() && edge.stem_extension.is_some()
+            edge.support.is_some()
+                && edge.beam_portion.is_some()
+                && edge.stem_extension.is_some()
+                && edge.head_stem.is_none()
         }
-        NativeSigRelationKind::BeamRest => edge.support.is_some() && edge.stem_extension.is_none(),
-        _ => edge.beam_portion.is_none() && edge.stem_extension.is_none(),
+        NativeSigRelationKind::BeamRest => {
+            edge.support.is_some() && edge.stem_extension.is_none() && edge.head_stem.is_none()
+        }
+        NativeSigRelationKind::HeadStem => {
+            edge.support.is_some()
+                && edge.beam_portion.is_none()
+                && edge.stem_extension.is_none()
+                && edge.head_stem.is_some_and(|head| {
+                    head.dx.is_finite()
+                        && head.dy.is_finite()
+                        && head.extension_point.x.is_finite()
+                        && head.extension_point.y.is_finite()
+                        && head.consistency.is_finite()
+                })
+        }
+        _ => {
+            edge.beam_portion.is_none() && edge.stem_extension.is_none() && edge.head_stem.is_none()
+        }
     }
 }
 
@@ -439,6 +471,7 @@ pub struct NativeSigSystemBindings {
     pub beam_vertices: BTreeMap<NativeStemsBeamSource, NativeSigVertexId>,
     pub beam_group_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub stem_vertices: BTreeMap<usize, NativeSigVertexId>,
+    pub head_vertices: BTreeMap<NativeHeadStaffEpilogRef, NativeSigVertexId>,
 }
 
 impl NativeSigSystemBindings {
@@ -493,6 +526,17 @@ impl NativeSigSystemBindings {
                 });
             }
         }
+        for (&head, vertex) in &self.head_vertices {
+            if sig
+                .vertex(vertex.0)
+                .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Head)
+            {
+                return Err(NativeSigError::DuplicateHeadBinding {
+                    system_id: self.system_id,
+                    head,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -523,6 +567,20 @@ impl NativeSigSystemBindings {
             return Err(NativeSigError::DuplicateStemBinding {
                 system_id: self.system_id,
                 stem_identity,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn bind_head(
+        &mut self,
+        head: NativeHeadStaffEpilogRef,
+        vertex: NativeSigVertexId,
+    ) -> Result<(), NativeSigError> {
+        if self.head_vertices.insert(head, vertex).is_some() {
+            return Err(NativeSigError::DuplicateHeadBinding {
+                system_id: self.system_id,
+                head,
             });
         }
         Ok(())
@@ -574,6 +632,10 @@ pub enum NativeSigError {
     DuplicateBeamGroupBinding {
         system_id: usize,
         group_ordinal: usize,
+    },
+    DuplicateHeadBinding {
+        system_id: usize,
+        head: NativeHeadStaffEpilogRef,
     },
     InvalidBeamSourceBinding {
         system_id: usize,
@@ -652,6 +714,10 @@ impl fmt::Display for NativeSigError {
             } => write!(
                 formatter,
                 "system {system_id} has duplicate beam-group binding {group_ordinal}"
+            ),
+            Self::DuplicateHeadBinding { system_id, head } => write!(
+                formatter,
+                "system {system_id} has duplicate head binding {head:?}"
             ),
             Self::InvalidBeamSourceBinding { system_id } => {
                 write!(
@@ -737,6 +803,7 @@ pub fn assemble_native_sig(
             beam_vertices: BTreeMap::new(),
             beam_group_vertices: BTreeMap::new(),
             stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
         };
         append_grid(grid, grid_system, &mut graph)?;
         append_headers(header_system.staffs.as_slice(), &mut graph)?;
@@ -748,7 +815,12 @@ pub fn assemble_native_sig(
             &mut system_bindings,
         )?;
         append_ledgers(ledgers, system_id, &mut graph)?;
-        append_heads(head_system, staff_head_system, &mut graph);
+        append_heads(
+            head_system,
+            staff_head_system,
+            &mut graph,
+            &mut system_bindings,
+        )?;
         graph.validate_integrity()?;
         system_bindings.validate_against(&graph)?;
         systems.push(graph);
@@ -805,6 +877,7 @@ fn push_edge(
         support,
         beam_portion: None,
         stem_extension: None,
+        head_stem: None,
     });
 }
 
@@ -829,6 +902,7 @@ fn push_bar_connection_edge(
         }),
         beam_portion: None,
         stem_extension: None,
+        head_stem: None,
     });
 }
 
@@ -1515,7 +1589,8 @@ fn append_heads(
     system: &crate::native_heads_epilog::NativeHeadsEpilogSystem,
     staff_system: &crate::native_heads_staff_epilog::NativeHeadsStaffEpilogSystem,
     graph: &mut NativeSigSystem,
-) {
+    bindings: &mut NativeSigSystemBindings,
+) -> Result<(), NativeSigError> {
     let first = graph.vertices.len();
     let removed = system
         .beam_removed_heads
@@ -1528,9 +1603,9 @@ fn append_heads(
         .map(|reference| (reference.staff_index, reference.head_index))
         .filter(|key| !removed.contains(key))
         .collect::<Vec<_>>();
-    for &(staff, head) in &survivors {
-        let head = &staff_system.staffs[staff].heads[head];
-        push_vertex(
+    for &(staff, head_index) in &survivors {
+        let head = &staff_system.staffs[staff].heads[head_index];
+        let vertex = push_vertex(
             graph,
             NativeSigVertex {
                 ordinal: 0,
@@ -1557,6 +1632,13 @@ fn append_heads(
                 beam_geometry: None,
             },
         );
+        bindings.bind_head(
+            NativeHeadStaffEpilogRef {
+                staff_index: staff,
+                head_index,
+            },
+            NativeSigVertexId(vertex),
+        )?;
     }
     let ordinal_of = survivors
         .iter()
@@ -1573,4 +1655,5 @@ fn append_heads(
             }
         }
     }
+    Ok(())
 }
