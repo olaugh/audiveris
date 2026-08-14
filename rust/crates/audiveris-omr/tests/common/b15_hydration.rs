@@ -751,6 +751,9 @@ pub(super) struct NativePredecessorPage {
     pub(super) head_corners: NativeStemsHeadCornerRecognition,
     pub(super) beam_reachability: NativeStemsBeamReachabilityRecognition,
     pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
+    #[allow(dead_code)] // Consumed by the native SIDES carrier gate only.
+    pub(super) modeled_canonical_glyphs:
+        Vec<audiveris_omr::native_stems_beam_builders::NativeStemsModeledCanonicalGlyph>,
     pub(super) plans: NativeStemsBeamLinkPlanRecognition,
     pub(super) scheduler: NativeStemsBeamSchedulerRecognition,
     // The historical all-page B15/B17 replay does not require an assembled
@@ -857,6 +860,7 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         head_corners: corners,
         beam_reachability,
         beam_builders,
+        modeled_canonical_glyphs: head_builders.modeled_canonical_glyphs,
         plans,
         scheduler,
         sig,

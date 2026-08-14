@@ -1119,6 +1119,7 @@ struct NativePage {
     beam_reachability: NativeStemsBeamReachabilityRecognition,
     head_stumps: NativeStemsHeadStumpRecognition,
     beam_builders: NativeStemsBeamBuilderRecognition,
+    head_builders: audiveris_omr::native_stems_head_builders::NativeStemsHeadBuilderRecognition,
     plans: NativeStemsBeamLinkPlanRecognition,
 }
 
@@ -1128,6 +1129,7 @@ struct GateGlyph {
     bounds: Bounds,
     weight: usize,
     run_table: RunTable,
+    modeled_canonical_ordinal: usize,
 }
 
 impl GateGlyph {
@@ -1142,6 +1144,7 @@ impl GateGlyph {
                 run_table: self.run_table.clone(),
             },
             structural_digest: structural_digest(self.bounds, &self.run_table),
+            modeled_canonical_ordinal: self.modeled_canonical_ordinal,
         }
     }
 
@@ -1330,6 +1333,8 @@ struct GateSystem<'a> {
     corner_system: &'a audiveris_omr::native_stems_head_corners::NativeStemsHeadCornerSystem,
     head_stump_system: &'a audiveris_omr::native_stems_head_stumps::NativeStemsHeadStumpSystem,
     builder_system: &'a audiveris_omr::native_stems_beam_builders::NativeStemsBeamBuilderSystem,
+    modeled_registry:
+        &'a [audiveris_omr::native_stems_beam_builders::NativeStemsModeledCanonicalGlyph],
 }
 
 impl<'a> GateSystem<'a> {
@@ -1344,6 +1349,7 @@ impl<'a> GateSystem<'a> {
             corner_system: &page.corners.systems[index],
             head_stump_system: &page.head_stumps.systems[index],
             builder_system: &page.beam_builders.systems[index],
+            modeled_registry: &page.head_builders.modeled_canonical_glyphs,
         };
         assert_eq!(result.seed_system.raw.system_id, system_id);
         assert_eq!(result.stump_system.system_id, system_id);
@@ -1476,11 +1482,37 @@ impl<'a> GateSystem<'a> {
         build: &NativeStemsHeadStumpBuild,
     ) -> GateGlyph {
         let glyph = build.candidate.as_ref().expect("built head stump glyph");
+        self.gate_glyph(
+            reference,
+            glyph.bounds,
+            glyph.weight,
+            glyph.run_table.clone(),
+        )
+    }
+
+    fn gate_glyph(
+        &self,
+        reference: NativeStemsBeamBuilderGlyphRef,
+        bounds: Bounds,
+        weight: usize,
+        run_table: RunTable,
+    ) -> GateGlyph {
+        let matches = self
+            .modeled_registry
+            .iter()
+            .filter(|entry| {
+                entry.bounds == bounds && entry.weight == weight && entry.run_table == run_table
+            })
+            .collect::<Vec<_>>();
+        let [modeled] = matches.as_slice() else {
+            panic!("modeled canonical glyph cardinality: {}", matches.len());
+        };
         GateGlyph {
             reference,
-            bounds: glyph.bounds,
-            weight: glyph.weight,
-            run_table: glyph.run_table.clone(),
+            bounds,
+            weight,
+            run_table,
+            modeled_canonical_ordinal: modeled.modeled_canonical_ordinal,
         }
     }
 
@@ -1492,23 +1524,18 @@ impl<'a> GateSystem<'a> {
         match reference {
             NativeStemsBeamBuilderGlyphRef::StemSeed { free_glyph_ordinal } => {
                 let glyph = &self.seed_system.free_glyphs[free_glyph_ordinal];
-                GateGlyph {
+                self.gate_glyph(
                     reference,
-                    bounds: glyph.bounds,
-                    weight: glyph.weight,
-                    run_table: glyph.run_table.clone(),
-                }
+                    glyph.bounds,
+                    glyph.weight,
+                    glyph.run_table.clone(),
+                )
             }
             NativeStemsBeamBuilderGlyphRef::BeamStump { b_linker } => {
                 let linker = self.b_linker(b_linker);
                 let stump = linker.stump.as_ref().expect("beam stump");
                 let glyph = self.beam_stump_glyph(self.beam(b_linker.beam), stump);
-                GateGlyph {
-                    reference,
-                    bounds: glyph.bounds,
-                    weight: glyph.weight,
-                    run_table: glyph.run_table,
-                }
+                self.gate_glyph(reference, glyph.bounds, glyph.weight, glyph.run_table)
             }
             NativeStemsBeamBuilderGlyphRef::HeadStump { corner } => {
                 let head = self
@@ -1535,12 +1562,12 @@ impl<'a> GateSystem<'a> {
                 match stump.outcome {
                     NativeStemsHeadStumpOutcome::Seed { free_glyph_ordinal } => {
                         let glyph = &self.seed_system.free_glyphs[free_glyph_ordinal];
-                        GateGlyph {
+                        self.gate_glyph(
                             reference,
-                            bounds: glyph.bounds,
-                            weight: glyph.weight,
-                            run_table: glyph.run_table.clone(),
-                        }
+                            glyph.bounds,
+                            glyph.weight,
+                            glyph.run_table.clone(),
+                        )
                     }
                     NativeStemsHeadStumpOutcome::Built { .. } => self.head_build_glyph(
                         reference,
@@ -1555,12 +1582,12 @@ impl<'a> GateSystem<'a> {
                     .iter()
                     .find(|registration| registration.glyph == reference)
                     .expect("chunk registration");
-                GateGlyph {
+                self.gate_glyph(
                     reference,
-                    bounds: registration.bounds,
-                    weight: registration.weight,
-                    run_table: registration.run_table.clone(),
-                }
+                    registration.bounds,
+                    registration.weight,
+                    registration.run_table.clone(),
+                )
             }
         }
     }
@@ -3414,6 +3441,7 @@ fn native_page(image: &str) -> NativePage {
         beam_reachability,
         head_stumps,
         beam_builders,
+        head_builders,
         plans,
     }
 }

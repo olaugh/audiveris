@@ -25,6 +25,7 @@ use crate::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderGlyphRef, NativeStemsBeamBuilderItem,
         NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderRecognition,
         NativeStemsBeamBuilderSystem, NativeStemsBeamBuilderTargetRef,
+        NativeStemsModeledCanonicalGlyph,
     },
     native_stems_beam_reachability::{
         NativeStemsBeamHeadCornerRef, NativeStemsBeamReachabilityRecognition,
@@ -300,6 +301,8 @@ pub struct NativeStemsBeamSelectedGlyph {
     pub weight: usize,
     pub structural_key: NativeStemsBeamLinkGlyphKey,
     pub structural_digest: u64,
+    /// Identity in the final native page-registry replay.
+    pub modeled_canonical_ordinal: usize,
 }
 
 /// Collision-free Java `Glyph.equals` key: top-left plus exact `RunTable`.
@@ -376,6 +379,7 @@ struct ResolvedGlyph {
     weight: usize,
     run_table: RunTable,
     structural_digest: u64,
+    modeled_canonical_ordinal: usize,
 }
 
 impl ResolvedGlyph {
@@ -390,6 +394,7 @@ impl ResolvedGlyph {
                 run_table: self.run_table.clone(),
             },
             structural_digest: self.structural_digest,
+            modeled_canonical_ordinal: self.modeled_canonical_ordinal,
         }
     }
 
@@ -410,6 +415,7 @@ struct SystemContext<'a> {
     builder_system: &'a NativeStemsBeamBuilderSystem,
     reach_system: &'a crate::native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
     head_builder_system: &'a NativeStemsHeadBuilderSystem,
+    modeled_canonical_glyphs: &'a [NativeStemsModeledCanonicalGlyph],
     link_profile: i32,
     min_linker_length: i32,
 }
@@ -539,6 +545,7 @@ pub fn materialize_native_stems_beam_link_plans(
             builder_system,
             reach_system,
             head_builder_system,
+            modeled_canonical_glyphs: &head_builders.modeled_canonical_glyphs,
             link_profile,
             min_linker_length,
         };
@@ -825,7 +832,7 @@ fn resolve_glyph(
     builder: &NativeStemsBeamBuilder,
     reference: NativeStemsBeamBuilderGlyphRef,
 ) -> Result<ResolvedGlyph, NativeStemsBeamLinkPlanError> {
-    match reference {
+    let mut resolved = match reference {
         NativeStemsBeamBuilderGlyphRef::StemSeed { free_glyph_ordinal } => {
             let glyph = context
                 .seed_system
@@ -950,7 +957,24 @@ fn resolve_glyph(
                 registration.run_table.clone(),
             )
         }
-    }
+    }?;
+    let matches = context
+        .modeled_canonical_glyphs
+        .iter()
+        .filter(|glyph| {
+            glyph.bounds == resolved.bounds
+                && glyph.weight == resolved.weight
+                && glyph.run_table == resolved.run_table
+        })
+        .collect::<Vec<_>>();
+    let [modeled] = matches.as_slice() else {
+        return Err(NativeStemsBeamLinkPlanError::MissingGlyph {
+            system_id: context.system_id,
+            reference,
+        });
+    };
+    resolved.modeled_canonical_ordinal = modeled.modeled_canonical_ordinal;
+    Ok(resolved)
 }
 
 fn resolved_glyph(
@@ -974,6 +998,8 @@ fn resolved_glyph(
         weight,
         run_table,
         structural_digest,
+        // Filled by `resolve_glyph` after joining to the final registry.
+        modeled_canonical_ordinal: usize::MAX,
     })
 }
 

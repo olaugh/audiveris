@@ -2641,6 +2641,18 @@ struct RegisteredGlyph {
     modeled_canonical_ordinal: usize,
 }
 
+/// One exact canonical glyph in the final native registry replay.
+///
+/// The ordinal is native registry identity, not a Java persistent ID.  It is
+/// stable because the replay uses Java's registration order and equality.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsModeledCanonicalGlyph {
+    pub modeled_canonical_ordinal: usize,
+    pub bounds: Bounds,
+    pub weight: usize,
+    pub run_table: RunTable,
+}
+
 pub(crate) struct RegistryRegistration {
     pub(crate) modeled_canonical_ordinal: usize,
     pub(crate) action: NativeStemsBeamBuilderRegistrationAction,
@@ -2652,6 +2664,17 @@ pub(crate) struct GlyphRegistry {
     pub(crate) baseline: NativeStemsBeamBuilderRegistryBaseline,
 }
 impl GlyphRegistry {
+    pub(crate) fn modeled_canonical_glyphs(&self) -> Vec<NativeStemsModeledCanonicalGlyph> {
+        self.entries
+            .iter()
+            .map(|entry| NativeStemsModeledCanonicalGlyph {
+                modeled_canonical_ordinal: entry.modeled_canonical_ordinal,
+                bounds: entry.key.bounds,
+                weight: entry.key.run_table.weight(),
+                run_table: entry.key.run_table.clone(),
+            })
+            .collect()
+    }
     pub(crate) fn seeded(
         grid: &GridLinesRecognition,
         beams: &NativeBeamRecognition,

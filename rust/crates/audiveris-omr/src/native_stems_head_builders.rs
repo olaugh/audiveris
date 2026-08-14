@@ -32,7 +32,7 @@ use crate::{
         GlyphKey, GlyphRegistry, NativeStemsBeamBuilderError,
         NativeStemsBeamBuilderPreBuilderGlyphSource, NativeStemsBeamBuilderRecognition,
         NativeStemsBeamBuilderRegistrationAction, NativeStemsBeamBuilderRegistryBaseline,
-        java_double_compare,
+        NativeStemsModeledCanonicalGlyph, java_double_compare,
     },
     native_stems_beam_stumps::{
         NativeStemsBeamSource, NativeStemsBeamStumpBeam, NativeStemsBeamStumpRecognition,
@@ -74,6 +74,8 @@ pub struct NativeStemsHeadBuilderRecognition {
     /// standalone beam-builder baseline, this excludes raw beams already
     /// replaced by `MultipleRestsBuilder`.
     pub registry_baseline: NativeStemsBeamBuilderRegistryBaseline,
+    /// Complete modeled page registry after the final head-builder replay.
+    pub modeled_canonical_glyphs: Vec<NativeStemsModeledCanonicalGlyph>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -802,6 +804,7 @@ pub fn materialize_native_stems_head_builders(
             c.head_parts_action == NativeStemsHeadBuilderHeadPartsAction::KeepNonVipJavaBehavior
         })
         .count();
+    let modeled_canonical_glyphs = registry.modeled_canonical_glyphs();
     Ok(NativeStemsHeadBuilderRecognition {
         inspect_profile,
         systems,
@@ -814,6 +817,7 @@ pub fn materialize_native_stems_head_builders(
         low_remain_non_vip_keep_count,
         vip_head_count,
         registry_baseline: baseline,
+        modeled_canonical_glyphs,
     })
 }
 
