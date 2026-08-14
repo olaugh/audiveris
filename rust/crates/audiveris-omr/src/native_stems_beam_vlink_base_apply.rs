@@ -87,8 +87,15 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
     }
 
     let fresh = NativeStemsBeamRelationObjectIdentity::FreshDraft(plan.plan_ordinal);
-    let beam_before =
-        project_native_beam_incident(sig, beam_vertex, stem_vertex, hook, None, draft)?;
+    let beam_before = project_native_beam_incident(
+        sig,
+        beam_vertex,
+        stem_vertex,
+        hook,
+        None,
+        draft,
+        plan.plan_ordinal,
+    )?;
     let stem_before = match stem_vertex {
         None => NativeStemsBeamStemIncidentScan {
             state: NativeStemsBeamStemIncidentScanState::MissingVertex,
@@ -174,6 +181,7 @@ pub fn project_native_stems_beam_vlink_base_apply_certificate(
             hook,
             Some((edge, effective_stem, fresh)),
             draft,
+            plan.plan_ordinal,
         )?
     } else {
         beam_before.clone()
@@ -919,11 +927,15 @@ pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
                 source: beam_vertex.0,
                 target: effective_stem_vertex.0,
                 kind: NativeSigRelationKind::BeamStem,
+                origin: crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                    plan_ordinal: reuse_check.plan.plan_ordinal,
+                },
                 support: Some(NativeSigSupport {
                     grade: transaction.fresh_relation.grade,
                     bar_connection_impacts: None,
                 }),
                 beam_portion: Some(transaction.fresh_relation.beam_portion),
+                stem_extension: Some(transaction.fresh_relation.extension_point),
             })
             .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
                 phase: "native SIG BeamStem append",
@@ -954,6 +966,11 @@ pub fn apply_native_stems_beam_vlink_base_transaction_to_native_sig(
     next_sig.validate_integrity().map_err(|_| {
         NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native SIG committed integrity",
+        }
+    })?;
+    next_bindings.validate_against(&next_sig).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native SIG committed binding integrity",
         }
     })?;
 
@@ -2980,6 +2997,7 @@ fn project_native_beam_incident(
         NativeStemsBeamRelationObjectIdentity,
     )>,
     draft: &NativeStemsBeamRelationDraft,
+    plan_ordinal: usize,
 ) -> Result<NativeStemsBeamBeamIncidentScan, NativeStemsBeamVLinkBaseApplyError> {
     let mut source = sig
         .incident_edges(beam.0)
@@ -2997,8 +3015,10 @@ fn project_native_beam_incident(
                 source: beam.0,
                 target: stem.0,
                 kind: NativeSigRelationKind::BeamStem,
+                origin: crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft { plan_ordinal },
                 support: None,
                 beam_portion: Some(draft.beam_portion),
+                stem_extension: Some(draft.extension_point),
             },
             identity,
         )

@@ -21,6 +21,10 @@ use audiveris_omr::native_stems_beam_vlink_base_apply::{
     project_native_stems_beam_vlink_base_apply_certificate,
 };
 use audiveris_omr::native_stems_beam_vlink_reuse_check::NativeStemsBeamRelationDraft;
+use audiveris_omr::native_stems_beam_vlink_sibling_links::{
+    NativeStemsBeamSiblingGraphDraft, apply_native_stems_beam_vlink_sibling_graph_to_native_sig,
+    project_native_stems_beam_vlink_sibling_graph,
+};
 use audiveris_omr::recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds};
 
 fn repo_root() -> PathBuf {
@@ -792,6 +796,15 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
             .collect::<std::collections::BTreeSet<_>>(),
         (43..91).collect()
     );
+    assert_eq!(bindings.beam_group_vertices.len(), 20);
+    assert_eq!(
+        bindings
+            .beam_group_vertices
+            .iter()
+            .map(|(&group, vertex)| (group, vertex.0))
+            .collect::<Vec<_>>(),
+        (0..20).zip(91..111).collect::<Vec<_>>()
+    );
     let system = sig
         .systems
         .iter()
@@ -1006,6 +1019,12 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
     .expect("HEADS recognition");
     let mut sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
         .expect("assembled native SIG");
+    let mut bindings = sig
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == 1)
+        .expect("system 1 bindings")
+        .clone();
     let system = sig
         .systems
         .iter_mut()
@@ -1039,13 +1058,246 @@ fn native_sig_carries_the_first_stem_and_relation_append() {
             source: 55,
             target: stem_ordinal,
             kind: NativeSigRelationKind::BeamStem,
+            origin: audiveris_omr::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                plan_ordinal: 143,
+            },
             support: Some(audiveris_omr::native_sig::NativeSigSupport {
                 grade: 1.0,
                 bar_connection_impacts: None,
             }),
             beam_portion: Some(audiveris_omr::stems_step::NativeBeamPortion::Left),
+            stem_extension: Some(audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 }),
         })
         .expect("dense BeamStem append");
+    assert_eq!(
+        system.edges[edge_ordinal].origin,
+        audiveris_omr::native_sig::NativeSigRelationOrigin::BeamVBaseDraft { plan_ordinal: 143 }
+    );
+    bindings
+        .bind_stem(
+            143,
+            audiveris_omr::native_sig::NativeSigVertexId(stem_ordinal),
+        )
+        .expect("first stem binding");
+
+    let source_at = |vertex: usize| {
+        bindings
+            .beam_vertices
+            .iter()
+            .find_map(|(&source, id)| (id.0 == vertex).then_some(source))
+            .unwrap_or_else(|| panic!("missing beam source for vertex {vertex}"))
+    };
+    let base_source = source_at(55);
+    let sibling_sources = [source_at(43), source_at(44)];
+    let grade = system.edges[edge_ordinal]
+        .support
+        .expect("base support")
+        .grade;
+    let drafts = sibling_sources.map(|source| NativeStemsBeamSiblingGraphDraft {
+        source,
+        grade,
+        beam_portion: audiveris_omr::stems_step::NativeBeamPortion::Left,
+        // Query chronology does not depend on geometry; the full B16 layer
+        // supplies this already-proven typed value when it consumes the projection.
+        extension_point: audiveris_omr::stems_step::NativeStemPoint { x: 0.0, y: 0.0 },
+    });
+    let post_b14 = system.clone();
+    let projection = project_native_stems_beam_vlink_sibling_graph(
+        system,
+        &bindings,
+        0,
+        base_source,
+        143,
+        143,
+        &drafts,
+    )
+    .expect("owned B16 graph projection");
+    assert_eq!(*system, post_b14, "B16 projection must be read-only");
+    assert_eq!(
+        projection
+            .group_outgoing
+            .iter()
+            .map(|row| row.edge.0)
+            .collect::<Vec<_>>(),
+        vec![52, 53, 54, 116, 119]
+    );
+    assert_eq!(projection.steps.len(), 2);
+    assert_eq!(
+        projection.steps[0]
+            .source_outgoing_before
+            .iter()
+            .map(|row| row.edge.0)
+            .collect::<Vec<_>>(),
+        vec![42, 55, 117, 120]
+    );
+    assert!(projection.steps[0].directed_pair_before.is_empty());
+    assert_eq!(projection.steps[0].appended.unwrap().edge.0, 203);
+    assert_eq!(
+        projection.steps[0]
+            .stem_incident_after
+            .iter()
+            .map(|row| row.edge.0)
+            .collect::<Vec<_>>(),
+        vec![202, 203]
+    );
+    assert_eq!(
+        projection.steps[1]
+            .source_outgoing_before
+            .iter()
+            .map(|row| row.edge.0)
+            .collect::<Vec<_>>(),
+        vec![56, 118, 121]
+    );
+    assert!(projection.steps[1].directed_pair_before.is_empty());
+    assert_eq!(projection.steps[1].appended.unwrap().edge.0, 204);
+    assert_eq!(
+        projection.steps[1]
+            .stem_incident_after
+            .iter()
+            .map(|row| row.edge.0)
+            .collect::<Vec<_>>(),
+        vec![202, 203, 204]
+    );
+
+    // Read Java only after the native result is complete, and compare only
+    // native graph identities/order rather than Java aliases or EntityIndex IDs.
+    let fixture = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-sibling-links-chula.txt"),
+    )
+    .expect("frozen B16 fixture");
+    let java_appends = fixture
+        .lines()
+        .filter(|line| {
+            line.starts_with("stemsbeamvlinksiblinglinksedge ")
+                && line.contains(" system 1 plan 143 scope real ")
+        })
+        .map(|line| {
+            row_field(line, "graphInsertionOrdinal")
+                .parse::<usize>()
+                .expect("B16 edge ordinal")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        projection
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        java_appends
+    );
+    let fixture_edges = |prefix: &str, sibling: usize| {
+        fixture
+            .lines()
+            .filter(|line| {
+                line.starts_with(prefix)
+                    && line.contains(" system 1 plan 143 scope real ")
+                    && row_field(line, "siblingOrdinal") == sibling.to_string()
+            })
+            .map(|line| {
+                row_field(line, "graphRelationIdentity")
+                    .strip_prefix("sig-edge:")
+                    .expect("SIG edge alias")
+                    .parse::<usize>()
+                    .expect("SIG edge ordinal")
+            })
+            .collect::<Vec<_>>()
+    };
+    for (ordinal, step) in projection.steps.iter().enumerate() {
+        assert_eq!(
+            step.source_outgoing_before
+                .iter()
+                .map(|row| row.edge.0)
+                .collect::<Vec<_>>(),
+            fixture_edges("stemsbeamvlinksiblinglinkssourceoutgoing ", ordinal)
+        );
+        assert_eq!(
+            step.stem_incident_after
+                .iter()
+                .map(|row| row.edge.0)
+                .collect::<Vec<_>>(),
+            fixture_edges("stemsbeamvlinksiblinglinksstemincident ", ordinal)
+        );
+        assert_eq!(
+            step.beam_incident_after
+                .iter()
+                .map(|row| row.edge.0)
+                .collect::<Vec<_>>(),
+            fixture_edges("stemsbeamvlinksiblinglinksbeamincident ", ordinal)
+        );
+    }
+
+    let mut committed = post_b14.clone();
+    let committed_projection = apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
+        &mut committed,
+        &bindings,
+        0,
+        base_source,
+        143,
+        143,
+        &drafts,
+    )
+    .expect("atomic native B16 graph commit");
+    assert_eq!(committed_projection, projection);
+    assert_eq!(committed.edges.len(), 205);
+    assert_eq!(
+        committed.edges[203].origin,
+        audiveris_omr::native_sig::NativeSigRelationOrigin::BeamVSiblingDraft {
+            plan_ordinal: 143,
+            sibling_ordinal: 0,
+        }
+    );
+    assert_eq!(
+        committed.edges[204].origin,
+        audiveris_omr::native_sig::NativeSigRelationOrigin::BeamVSiblingDraft {
+            plan_ordinal: 143,
+            sibling_ordinal: 1,
+        }
+    );
+
+    let mut missing_group = bindings.clone();
+    missing_group.beam_group_vertices.remove(&0);
+    assert!(
+        project_native_stems_beam_vlink_sibling_graph(
+            &post_b14,
+            &missing_group,
+            0,
+            base_source,
+            143,
+            143,
+            &drafts,
+        )
+        .is_err()
+    );
+    let mut missing_base_edge = post_b14.clone();
+    missing_base_edge
+        .remove_edge(audiveris_omr::native_sig::NativeSigEdgeId(202))
+        .expect("remove B14 edge in negative clone");
+    let missing_projection = project_native_stems_beam_vlink_sibling_graph(
+        &missing_base_edge,
+        &bindings,
+        0,
+        base_source,
+        143,
+        143,
+        &drafts,
+    )
+    .expect("negative graph remains internally valid");
+    assert_ne!(missing_projection, projection);
+    let mut rollback = post_b14.clone();
+    let duplicate_drafts = [drafts[0], drafts[0]];
+    assert!(
+        apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
+            &mut rollback,
+            &bindings,
+            0,
+            base_source,
+            143,
+            143,
+            &duplicate_drafts,
+        )
+        .is_err()
+    );
+    assert_eq!(rollback, post_b14, "failed B16 graph apply rolls back");
 
     assert_eq!(
         system

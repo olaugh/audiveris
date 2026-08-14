@@ -222,7 +222,7 @@ const BASE_APPLY_MANIFEST: &str = "rust/oracle/stems-beam-vlink-base-apply-manif
 const BASE_APPLY_GATE_SOURCE: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_base_apply.rs";
 const BASE_APPLY_GATE_SOURCE_SHA256: &str =
-    "dca619c5609fc20c271d8fc9476194f9bccdfd1c6d4d283a28c2ada341427a8a";
+    "9969c862f83dec954e15d37429d07d99a720dec4a7b72f8e6162467796d3e6b3";
 const JGRAPHT_CORE_VERSION: &str = "1.5.2";
 const JGRAPHT_CORE_JAR: &str = "jgrapht-core-1.5.2.jar";
 const JGRAPHT_CORE_JAR_SHA256: &str =

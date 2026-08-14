@@ -19,6 +19,11 @@ use audiveris_image::{beam_structure::Segment, run_table::Orientation};
 
 use crate::{
     beam_inters::BeamKind,
+    native_sig::{
+        NativeSigEdge, NativeSigEdgeId, NativeSigInterKind, NativeSigRelationKind,
+        NativeSigRelationOrigin, NativeSigSupport, NativeSigSystem, NativeSigSystemBindings,
+        NativeSigVertexId,
+    },
     native_stems_beam_builders::{
         NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderSystem,
         NativeStemsBeamBuilderTargetRef,
@@ -74,6 +79,367 @@ const STEM_HALF_LINKER_ITEM_CLASS: &str = "org.audiveris.omr.sheet.stem.StemItem
 const BEAM_B_LINKER_CLASS: &str = "org.audiveris.omr.sheet.stem.BeamLinker$BLinker";
 const BEAM_V_LINKER_CLASS: &str = "org.audiveris.omr.sheet.stem.BeamLinker$BLinker$VLinker";
 const HEAD_C_LINKER_CLASS: &str = "org.audiveris.omr.sheet.stem.HeadLinker$SLinker$CLinker";
+
+/// One relation as observed through the port-owned insertion-ordered SIG.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemsBeamSiblingGraphRelation {
+    pub edge: NativeSigEdgeId,
+    pub origin: NativeSigRelationOrigin,
+    pub source: NativeSigVertexId,
+    pub target: NativeSigVertexId,
+    pub kind: NativeSigRelationKind,
+    pub grade: Option<f64>,
+    pub beam_portion: Option<NativeBeamPortion>,
+    pub extension_point: Option<NativeStemPoint>,
+}
+
+/// Native inputs for one sibling BeamStem draft. Order is the already-proven
+/// Java `linkSiblings` order; every graph query and mutation is derived here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeStemsBeamSiblingGraphDraft {
+    pub source: NativeStemsBeamSource,
+    pub grade: f64,
+    pub beam_portion: NativeBeamPortion,
+    pub extension_point: NativeStemPoint,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamSiblingGraphStep {
+    pub sibling_ordinal: usize,
+    pub source: NativeStemsBeamSource,
+    pub sibling_vertex: NativeSigVertexId,
+    pub source_outgoing_before: Vec<NativeStemsBeamSiblingGraphRelation>,
+    pub directed_pair_before: Vec<NativeStemsBeamSiblingGraphRelation>,
+    pub appended: Option<NativeStemsBeamSiblingGraphRelation>,
+    pub stem_incident_after: Vec<NativeStemsBeamSiblingGraphRelation>,
+    pub beam_incident_after: Vec<NativeStemsBeamSiblingGraphRelation>,
+    pub beam_abnormal_before: bool,
+    pub beam_abnormal_after: bool,
+}
+
+/// Graph-only B16 evidence. Java object aliases, persistent Inter IDs, and
+/// opaque member hashes are intentionally absent from this production type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamSiblingGraphProjection {
+    pub system_id: usize,
+    pub group_ordinal: usize,
+    pub group_vertex: NativeSigVertexId,
+    pub base_source: NativeStemsBeamSource,
+    pub base_vertex: NativeSigVertexId,
+    pub stem_identity: usize,
+    pub stem_vertex: NativeSigVertexId,
+    pub group_outgoing: Vec<NativeStemsBeamSiblingGraphRelation>,
+    pub group_members: Vec<NativeStemsBeamSource>,
+    pub steps: Vec<NativeStemsBeamSiblingGraphStep>,
+    pub appended_edges: Vec<NativeSigEdgeId>,
+}
+
+fn graph_relation(edge: &NativeSigEdge) -> NativeStemsBeamSiblingGraphRelation {
+    NativeStemsBeamSiblingGraphRelation {
+        edge: NativeSigEdgeId(edge.ordinal),
+        origin: edge.origin,
+        source: NativeSigVertexId(edge.source),
+        target: NativeSigVertexId(edge.target),
+        kind: edge.kind,
+        grade: edge.support.map(|support| support.grade),
+        beam_portion: edge.beam_portion,
+        extension_point: edge.stem_extension,
+    }
+}
+
+fn source_for_vertex(
+    bindings: &NativeSigSystemBindings,
+    vertex: NativeSigVertexId,
+) -> Option<NativeStemsBeamSource> {
+    bindings
+        .beam_vertices
+        .iter()
+        .find_map(|(&source, &bound)| (bound == vertex).then_some(source))
+}
+
+fn native_sibling_source_outgoing(
+    sig: &NativeSigSystem,
+    source: NativeSigVertexId,
+) -> Result<Vec<&NativeSigEdge>, NativeStemsBeamVLinkSiblingLinksError> {
+    if sig.vertex(source.0).is_none() {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling source vertex",
+        });
+    }
+    sig.outgoing_edges(source.0)
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling source outgoing query",
+        })
+}
+
+fn native_beam_abnormal(
+    sig: &NativeSigSystem,
+    beam: NativeSigVertexId,
+) -> Result<bool, NativeStemsBeamVLinkSiblingLinksError> {
+    let vertex = sig
+        .vertex(beam.0)
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling beam vertex",
+        })?;
+    let portions = sig
+        .incident_edges(beam.0)
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling beam incident query",
+        })?
+        .into_iter()
+        .filter(|edge| edge.kind == NativeSigRelationKind::BeamStem)
+        .filter_map(|edge| edge.beam_portion)
+        .collect::<Vec<_>>();
+    Ok(match vertex.kind {
+        NativeSigInterKind::BeamHook => portions.is_empty(),
+        NativeSigInterKind::Beam | NativeSigInterKind::SmallBeam => {
+            !portions.contains(&NativeBeamPortion::Left)
+                || !portions.contains(&NativeBeamPortion::Right)
+        }
+        _ => {
+            return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling beam kind",
+            });
+        }
+    })
+}
+
+fn project_native_sibling_graph(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    group_ordinal: usize,
+    base_source: NativeStemsBeamSource,
+    stem_identity: usize,
+    plan_ordinal: usize,
+    drafts: &[NativeStemsBeamSiblingGraphDraft],
+) -> Result<
+    (NativeStemsBeamSiblingGraphProjection, NativeSigSystem),
+    NativeStemsBeamVLinkSiblingLinksError,
+> {
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling binding integrity",
+        }
+    })?;
+    let group_vertex = bindings
+        .beam_group_vertices
+        .get(&group_ordinal)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling beam-group binding",
+        })?;
+    let base_vertex = bindings.beam_vertices.get(&base_source).copied().ok_or(
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling base-beam binding",
+        },
+    )?;
+    let stem_vertex = bindings.stem_vertices.get(&stem_identity).copied().ok_or(
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling stem binding",
+        },
+    )?;
+    let group_outgoing = sig
+        .outgoing_edges(group_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling group outgoing query",
+        })?
+        .into_iter()
+        .map(graph_relation)
+        .collect::<Vec<_>>();
+    let group_members = group_outgoing
+        .iter()
+        .filter(|edge| edge.kind == NativeSigRelationKind::Containment)
+        .map(|edge| {
+            source_for_vertex(bindings, edge.target).ok_or(
+                NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                    phase: "native sibling group member binding",
+                },
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if !group_members.contains(&base_source)
+        || drafts.iter().any(|draft| draft.source == base_source)
+        || drafts.iter().enumerate().any(|(index, draft)| {
+            !draft.grade.is_finite()
+                || !draft.extension_point.x.is_finite()
+                || !draft.extension_point.y.is_finite()
+                || !group_members.contains(&draft.source)
+                || drafts[..index]
+                    .iter()
+                    .any(|prior| prior.source == draft.source)
+        })
+        || drafts.is_empty()
+    {
+        return Err(NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling ordered member partition",
+        });
+    }
+
+    let mut shadow = sig.clone();
+    let mut steps = Vec::with_capacity(drafts.len());
+    let mut appended_edges = Vec::new();
+    for (sibling_ordinal, draft) in drafts.iter().enumerate() {
+        let sibling_vertex = bindings.beam_vertices.get(&draft.source).copied().ok_or(
+            NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling beam binding",
+            },
+        )?;
+        let source_outgoing_before = native_sibling_source_outgoing(&shadow, sibling_vertex)?
+            .into_iter()
+            .map(graph_relation)
+            .collect::<Vec<_>>();
+        let directed_pair_before = shadow
+            .directed_edges(sibling_vertex.0, stem_vertex.0)
+            .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling directed-pair query",
+            })?
+            .into_iter()
+            .map(graph_relation)
+            .collect::<Vec<_>>();
+        let beam_abnormal_before = shadow
+            .vertex(sibling_vertex.0)
+            .expect("validated live sibling")
+            .abnormal;
+        let appended = if directed_pair_before
+            .iter()
+            .any(|edge| edge.kind == NativeSigRelationKind::BeamStem)
+        {
+            None
+        } else {
+            let edge = NativeSigEdge {
+                ordinal: shadow.edges.len(),
+                active: true,
+                source: sibling_vertex.0,
+                target: stem_vertex.0,
+                kind: NativeSigRelationKind::BeamStem,
+                origin: NativeSigRelationOrigin::BeamVSiblingDraft {
+                    plan_ordinal,
+                    sibling_ordinal,
+                },
+                support: Some(NativeSigSupport {
+                    grade: draft.grade,
+                    bar_connection_impacts: None,
+                }),
+                beam_portion: Some(draft.beam_portion),
+                stem_extension: Some(draft.extension_point),
+            };
+            let projected = graph_relation(&edge);
+            shadow.append_edge(edge).map_err(|_| {
+                NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                    phase: "native sibling shadow append",
+                }
+            })?;
+            appended_edges.push(projected.edge);
+            Some(projected)
+        };
+        let beam_abnormal_after = native_beam_abnormal(&shadow, sibling_vertex)?;
+        shadow
+            .set_abnormal(sibling_vertex, beam_abnormal_after)
+            .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling shadow abnormal update",
+            })?;
+        let stem_incident_after = shadow
+            .incident_edges(stem_vertex.0)
+            .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling stem incident query",
+            })?
+            .into_iter()
+            .map(graph_relation)
+            .collect();
+        let beam_incident_after = shadow
+            .incident_edges(sibling_vertex.0)
+            .map_err(|_| NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+                phase: "native sibling beam incident query",
+            })?
+            .into_iter()
+            .map(graph_relation)
+            .collect();
+        steps.push(NativeStemsBeamSiblingGraphStep {
+            sibling_ordinal,
+            source: draft.source,
+            sibling_vertex,
+            source_outgoing_before,
+            directed_pair_before,
+            appended,
+            stem_incident_after,
+            beam_incident_after,
+            beam_abnormal_before,
+            beam_abnormal_after,
+        });
+    }
+    shadow.validate_integrity().map_err(|_| {
+        NativeStemsBeamVLinkSiblingLinksError::InvalidState {
+            phase: "native sibling projected SIG integrity",
+        }
+    })?;
+    Ok((
+        NativeStemsBeamSiblingGraphProjection {
+            system_id: sig.system_id,
+            group_ordinal,
+            group_vertex,
+            base_source,
+            base_vertex,
+            stem_identity,
+            stem_vertex,
+            group_outgoing,
+            group_members,
+            steps,
+            appended_edges,
+        },
+        shadow,
+    ))
+}
+
+/// Read-only graph projection for B16. All serial mutations occur on a clone.
+#[allow(clippy::too_many_arguments)]
+pub fn project_native_stems_beam_vlink_sibling_graph(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    group_ordinal: usize,
+    base_source: NativeStemsBeamSource,
+    stem_identity: usize,
+    plan_ordinal: usize,
+    drafts: &[NativeStemsBeamSiblingGraphDraft],
+) -> Result<NativeStemsBeamSiblingGraphProjection, NativeStemsBeamVLinkSiblingLinksError> {
+    project_native_sibling_graph(
+        sig,
+        bindings,
+        group_ordinal,
+        base_source,
+        stem_identity,
+        plan_ordinal,
+        drafts,
+    )
+    .map(|(projection, _)| projection)
+}
+
+/// Atomically commit the graph portion of B16 after deriving it natively.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_native_stems_beam_vlink_sibling_graph_to_native_sig(
+    sig: &mut NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    group_ordinal: usize,
+    base_source: NativeStemsBeamSource,
+    stem_identity: usize,
+    plan_ordinal: usize,
+    drafts: &[NativeStemsBeamSiblingGraphDraft],
+) -> Result<NativeStemsBeamSiblingGraphProjection, NativeStemsBeamVLinkSiblingLinksError> {
+    let (projection, shadow) = project_native_sibling_graph(
+        sig,
+        bindings,
+        group_ordinal,
+        base_source,
+        stem_identity,
+        plan_ordinal,
+        drafts,
+    )?;
+    *sig = shadow;
+    Ok(projection)
+}
 
 /// Stable Java glyph-object evidence. `None` means Java `null`; equal values
 /// mean the exact same object, which is stronger than equal fixed content.

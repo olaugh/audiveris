@@ -7373,6 +7373,10 @@ fn project_real_base_system(
                 })
             || committed_edge.is_none_or(|edge| {
                 edge.kind != audiveris_omr::native_sig::NativeSigRelationKind::BeamStem
+                    || edge.origin
+                        != audiveris_omr::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                            plan_ordinal: predecessor.reuse_check.plan.plan_ordinal,
+                        }
                     || edge.beam_portion != Some(expected_relation.beam_portion)
                     || edge.support.is_none_or(|support| {
                         support.grade.to_bits() != expected_relation.grade.to_bits()

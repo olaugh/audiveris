@@ -4458,8 +4458,9 @@ rebuilds the real chula base-apply beam scan exactly and rejects missing vertice
 The graph is now a carrier rather than a read-only snapshot: typed vertex/edge IDs,
 dense checked appends, tombstoned vertex/edge removal, abnormal-state updates, and an
 integrity validator preserve identities across later removals. Dynamic BeamStem edges
-retain their beam portion, and assembly publishes a typed beam-source-to-vertex binding
-sidecar; the first carried stem/BeamStem append produces vertex 221 / edge 202 and the
+retain beam portion, extension point, and native draft lineage; assembly publishes typed
+beam-source and surviving-beam-group vertex bindings. The first carried stem/BeamStem
+append produces vertex 221 / edge 202 and the
 exact `[54,55,56,57,58,202]` beam incident order.
 
 The next blocker is no longer discovering, reconstructing, or querying the baseline
@@ -4477,9 +4478,19 @@ exact Stem vertex 221 and LEFT BeamStem edge 202, updates abnormal state, and st
 the frozen Java transaction. Certificate endpoint identities explicitly distinguish the
 legacy Java EntityIndex domain from one-based native vertices, so no fixture-derived ID
 map crosses into production. This gate is deliberately chula-system-1-only: broader SIG
-assembly still has corpus gaps such as Bach system 6's missing BEAMS group product. Next,
-carry this graph through later B14 transactions and project B16/B17 in the same native
-identity domain.
+assembly still has corpus gaps such as Bach system 6's missing BEAMS group product.
+
+The graph portion of B16 now also derives and commits natively for that first transaction.
+`project_native_stems_beam_vlink_sibling_graph` resolves BeamGroup 0 and Stem 143 from
+typed bindings, reads group edges `[52,53,54,116,119]`, and simulates the two sibling
+links serially on a clone. Sibling 0 appends edge 203; sibling 1's stem scan then sees 203
+before appending 204. Source-outgoing, directed-pair, post-stem, and post-beam edge
+chronology matches the frozen Java rows only after the native result has returned. The atomic graph wrapper
+ends at 222 vertices / 205 edges with `BeamVSiblingDraft {143,0/1}` provenance and exact
+grade/LEFT plus typed extension payloads; missing group bindings, a removed base edge, and duplicate
+drafts fail closed, with rollback proven. This is intentionally graph-only: full B16
+still needs native group/member digest, builder, and B-cell state before the first
+transaction is self-driving.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4499,9 +4510,9 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Carry the now-native first B14 mutation into subsequent transactions, then replace the
-   Java-fed B16/B17 SIG scans with queries over that same graph while preserving insertion
-   order and every relation/state mutation.
+1. Join the native B16 graph projection to typed group/builder/B-cell state, commit its
+   two sibling B-cell writes, then project and commit B17's HeadStem/S-cell mutations.
+   Only then can transaction 2 start from the honest 222-vertex / 207-edge graph.
 2. Drive the chula-system-1 SIDES pass from native products only: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
    32-transaction pass only after the driver returns.

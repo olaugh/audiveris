@@ -738,9 +738,14 @@ directly for chula system 1: the compact state, owned SIG, and typed bindings
 commit atomically, appending Stem vertex 221 and LEFT BeamStem edge 202 with
 the exact support grade and abnormal updates. Endpoint certificates use
 explicit one-based native vertex identities rather than a fixture-derived
-Java-ID map, while the frozen Java corpus remains unchanged. Next, carry this
-graph into later transactions and project B16/B17 in the same native identity
-domain; broader pre-STEMS SIG assembly remains bounded where later corpus
+Java-ID map, while the frozen Java corpus remains unchanged. The graph-only B16
+projector now resolves the native BeamGroup and Stem, derives their exact graph-edge
+chronology for group, source, pair, stem, and beam scans, and serially commits sibling BeamStem edges
+203 and 204 with native draft origins. Sibling 1 observes edge 203 before its
+own append; the graph ends at 222 vertices / 205 edges, and negative projection
+or apply cases leave it unchanged. Full B16 still needs native group-digest,
+builder, and B-cell joins, followed by B17's edges 205-206, before transaction 2
+is honestly self-driving. Broader pre-STEMS SIG assembly remains bounded where later corpus
 systems still lack complete BEAMS group products.
 
 Last updated 2026-08-13.
@@ -780,7 +785,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Twenty exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state. The first nine own constructor, stump, reachability, and builder preparation; boundaries 10-20 grade scheduler planning through the second carried transaction, including exact base/sibling/head SIG mutation and B/S shared-cell effects. The port now also owns the complete pre-STEMS graph: chula system 1 reproduces Java's 221 vertex tokens, 202 relation tokens, insertion order, and both structural hashes. | Derive transaction certificates from that owned graph, drive the full SIDES pass without Java-fed transaction rows, continue through STUMPS, then expose `recognize_native_stems`. |
+| 10 | `STEMS` | **Components graded** | Twenty exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state. The first nine own constructor, stump, reachability, and builder preparation; boundaries 10-20 grade scheduler planning through the second carried transaction, including exact base/sibling/head SIG mutation and B/S shared-cell effects. The port now owns the complete pre-STEMS graph and its first B14 plus graph-only B16 mutations: chula system 1 grows from Java's exact 221/202 baseline through vertex 221 / edge 202 and sibling edges 203-204 in native insertion order. | Join native B16 group/builder/B-cell state, commit B17 edges 205-206, then drive SIDES without Java-fed rows and continue through STUMPS. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -811,7 +816,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Carry the native first B14 mutation through later transactions, then project B16/B17 from the same owned graph and native identity domain.
+1. Join the native B16 graph projection to typed group/builder/B-cell state, then project and commit B17 from the same owned graph and native identity domain.
 2. Drive chula system 1's full 32-transaction SIDES pass from native products only, then continue the carried state through STUMPS and competing-hook removal.
 3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.

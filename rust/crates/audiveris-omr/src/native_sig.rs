@@ -28,7 +28,7 @@ use crate::{
     native_ledgers::NativeLedgerRecognition,
     native_stems_beam_stumps::NativeStemsBeamSource,
     recognize::{GridLinesRecognition, NativeBeamRecognition},
-    stems_step::NativeBeamPortion,
+    stems_step::{NativeBeamPortion, NativeStemPoint},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +153,27 @@ pub enum NativeSigRelationKind {
     ChordStem,
 }
 
+/// Native origin of a relation object in the insertion-ordered SIG.
+///
+/// This is deliberately independent of Java object identity. Later STEMS
+/// boundaries nevertheless distinguish a relation that was already in the
+/// graph from the still-live draft object inserted by B14/B16/B17.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSigRelationOrigin {
+    BaselineGraph,
+    BeamVBaseDraft {
+        plan_ordinal: usize,
+    },
+    BeamVSiblingDraft {
+        plan_ordinal: usize,
+        sibling_ordinal: usize,
+    },
+    BeamVHeadDraft {
+        plan_ordinal: usize,
+        map_ordinal: usize,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeSigBarConnectionImpacts {
     pub align: f64,
@@ -175,9 +196,12 @@ pub struct NativeSigEdge {
     pub source: usize,
     pub target: usize,
     pub kind: NativeSigRelationKind,
+    pub origin: NativeSigRelationOrigin,
     pub support: Option<NativeSigSupport>,
     /// Payload retained by BeamStem/BeamRest relations for later abnormal scans.
     pub beam_portion: Option<NativeBeamPortion>,
+    /// BeamStem extension retained for later callback and reuse projections.
+    pub stem_extension: Option<NativeStemPoint>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -381,10 +405,25 @@ impl NativeSigSystem {
 }
 
 fn valid_edge_payload(edge: &NativeSigEdge) -> bool {
+    let valid_origin = match edge.origin {
+        NativeSigRelationOrigin::BaselineGraph => true,
+        NativeSigRelationOrigin::BeamVBaseDraft { .. }
+        | NativeSigRelationOrigin::BeamVSiblingDraft { .. } => {
+            edge.kind == NativeSigRelationKind::BeamStem
+        }
+        NativeSigRelationOrigin::BeamVHeadDraft { .. } => {
+            edge.kind == NativeSigRelationKind::HeadStem
+        }
+    };
+    if !valid_origin {
+        return false;
+    }
     match edge.kind {
-        NativeSigRelationKind::BeamStem => edge.support.is_some() && edge.beam_portion.is_some(),
-        NativeSigRelationKind::BeamRest => edge.support.is_some(),
-        _ => edge.beam_portion.is_none(),
+        NativeSigRelationKind::BeamStem => {
+            edge.support.is_some() && edge.beam_portion.is_some() && edge.stem_extension.is_some()
+        }
+        NativeSigRelationKind::BeamRest => edge.support.is_some() && edge.stem_extension.is_none(),
+        _ => edge.beam_portion.is_none() && edge.stem_extension.is_none(),
     }
 }
 
@@ -398,10 +437,83 @@ pub struct NativeSigRecognition {
 pub struct NativeSigSystemBindings {
     pub system_id: usize,
     pub beam_vertices: BTreeMap<NativeStemsBeamSource, NativeSigVertexId>,
+    pub beam_group_vertices: BTreeMap<usize, NativeSigVertexId>,
     pub stem_vertices: BTreeMap<usize, NativeSigVertexId>,
 }
 
 impl NativeSigSystemBindings {
+    pub fn validate_against(&self, sig: &NativeSigSystem) -> Result<(), NativeSigError> {
+        if self.system_id != sig.system_id {
+            return Err(NativeSigError::InvalidBeamSourceBinding {
+                system_id: self.system_id,
+            });
+        }
+        let bound_beams = self
+            .beam_vertices
+            .values()
+            .map(|vertex| vertex.0)
+            .collect::<BTreeSet<_>>();
+        for vertex in self.beam_vertices.values() {
+            if sig.vertex(vertex.0).is_none_or(|vertex| {
+                !matches!(
+                    vertex.kind,
+                    NativeSigInterKind::Beam
+                        | NativeSigInterKind::BeamHook
+                        | NativeSigInterKind::SmallBeam
+                )
+            }) {
+                return Err(NativeSigError::InvalidBeamSourceBinding {
+                    system_id: self.system_id,
+                });
+            }
+        }
+        for (&group_ordinal, vertex) in &self.beam_group_vertices {
+            if sig
+                .vertex(vertex.0)
+                .is_none_or(|vertex| vertex.kind != NativeSigInterKind::BeamGroup)
+                || sig.outgoing_edges(vertex.0)?.iter().any(|edge| {
+                    edge.kind != NativeSigRelationKind::Containment
+                        || !bound_beams.contains(&edge.target)
+                })
+            {
+                return Err(NativeSigError::DuplicateBeamGroupBinding {
+                    system_id: self.system_id,
+                    group_ordinal,
+                });
+            }
+        }
+        for (&stem_identity, vertex) in &self.stem_vertices {
+            if sig
+                .vertex(vertex.0)
+                .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Stem)
+            {
+                return Err(NativeSigError::DuplicateStemBinding {
+                    system_id: self.system_id,
+                    stem_identity,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn bind_beam_group(
+        &mut self,
+        group_ordinal: usize,
+        vertex: NativeSigVertexId,
+    ) -> Result<(), NativeSigError> {
+        if self
+            .beam_group_vertices
+            .insert(group_ordinal, vertex)
+            .is_some()
+        {
+            return Err(NativeSigError::DuplicateBeamGroupBinding {
+                system_id: self.system_id,
+                group_ordinal,
+            });
+        }
+        Ok(())
+    }
+
     pub fn bind_stem(
         &mut self,
         stem_identity: usize,
@@ -458,6 +570,10 @@ pub enum NativeSigError {
     DuplicateStemBinding {
         system_id: usize,
         stem_identity: usize,
+    },
+    DuplicateBeamGroupBinding {
+        system_id: usize,
+        group_ordinal: usize,
     },
     InvalidBeamSourceBinding {
         system_id: usize,
@@ -529,6 +645,13 @@ impl fmt::Display for NativeSigError {
             } => write!(
                 formatter,
                 "system {system_id} has duplicate stem binding {stem_identity}"
+            ),
+            Self::DuplicateBeamGroupBinding {
+                system_id,
+                group_ordinal,
+            } => write!(
+                formatter,
+                "system {system_id} has duplicate beam-group binding {group_ordinal}"
             ),
             Self::InvalidBeamSourceBinding { system_id } => {
                 write!(
@@ -612,6 +735,7 @@ pub fn assemble_native_sig(
         let mut system_bindings = NativeSigSystemBindings {
             system_id,
             beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
             stem_vertices: BTreeMap::new(),
         };
         append_grid(grid, grid_system, &mut graph)?;
@@ -626,6 +750,7 @@ pub fn assemble_native_sig(
         append_ledgers(ledgers, system_id, &mut graph)?;
         append_heads(head_system, staff_head_system, &mut graph);
         graph.validate_integrity()?;
+        system_bindings.validate_against(&graph)?;
         systems.push(graph);
         bindings.push(system_bindings);
     }
@@ -676,8 +801,10 @@ fn push_edge(
         source,
         target,
         kind,
+        origin: NativeSigRelationOrigin::BaselineGraph,
         support,
         beam_portion: None,
+        stem_extension: None,
     });
 }
 
@@ -695,11 +822,13 @@ fn push_bar_connection_edge(
         source,
         target,
         kind: NativeSigRelationKind::BarConnection,
+        origin: NativeSigRelationOrigin::BaselineGraph,
         support: Some(NativeSigSupport {
             grade,
             bar_connection_impacts: Some(impacts),
         }),
         beam_portion: None,
+        stem_extension: None,
     });
 }
 
@@ -1187,12 +1316,12 @@ fn append_beams(
         }
     }
     let mut group_ordinals = vec![None; active.len()];
-    let mut final_groups = groups.groups.iter();
+    let mut final_groups = groups.groups.iter().enumerate();
     for (provisional, is_active) in active.iter().copied().enumerate() {
         if !is_active {
             continue;
         }
-        let group = final_groups
+        let (group_ordinal, group) = final_groups
             .next()
             .expect("one final group per active identity");
         let mut bounds = None;
@@ -1210,7 +1339,7 @@ fn append_beams(
             };
             bounds = Some(bounds.map_or(item, |current: NativeSigBounds| current.union(item)));
         }
-        group_ordinals[provisional] = Some(push_vertex(
+        let vertex = NativeSigVertexId(push_vertex(
             graph,
             NativeSigVertex {
                 ordinal: 0,
@@ -1229,6 +1358,8 @@ fn append_beams(
                 beam_geometry: None,
             },
         ));
+        group_ordinals[provisional] = Some(vertex.0);
+        bindings.bind_beam_group(group_ordinal, vertex)?;
     }
 
     #[derive(Clone, Copy)]
