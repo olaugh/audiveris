@@ -10,8 +10,8 @@ use crate::{
     native_stems_beam_scheduler::{
         BEAM_SEED_PROFILE, NativeStemsBeamCompletedStumpVLinkEvidence,
         NativeStemsBeamSchedulerPass, NativeStemsBeamSchedulerStatus,
-        NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerSystem,
-        continue_native_stems_beam_scheduler_into_stumps,
+        NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerStumpsStatus,
+        NativeStemsBeamSchedulerSystem, continue_native_stems_beam_scheduler_into_stumps,
         resume_native_stems_beam_scheduler_after_stumps_transaction,
     },
     native_stems_beam_stumps::NativeStemsBeamStumpSystem,
@@ -120,6 +120,17 @@ pub struct NativeStemsBeamStumpsTransaction {
     pub siblings: NativeStemsBeamNativeSiblingTransaction,
     pub heads: NativeStemsBeamNativeHeadTransaction,
     pub resume: NativeStemsBeamSchedulerStumpsContinuation,
+}
+
+/// Atomic result of driving up to a bounded number of STUMPS V frontiers.
+///
+/// `status` is the carrier's exact scheduler status after the returned
+/// transactions. An awaiting status means the caller-provided limit was
+/// reached; completion is Java's true post-STUMPS terminal.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamStumpsDrive {
+    pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
+    pub status: NativeStemsBeamSchedulerStumpsStatus,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -235,6 +246,60 @@ pub fn advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
     .and_then(NativeStemsBeamCarrierTransaction::into_stumps)
 }
 
+/// Atomically drive a bounded sequence of already-awaited STUMPS frontiers.
+///
+/// Every transaction is the same B12-B17 plus scheduler-resume operation as
+/// [`advance_native_stems_beam_stumps_transaction_from_first_stems_bridge`].
+/// The complete carrier is committed only after the batch reaches true
+/// post-STUMPS completion or consumes `transaction_limit`; any later failure
+/// rolls back the earlier transactions in this call as well.
+pub fn drive_native_stems_beam_stumps_from_first_stems_bridge(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+    transaction_limit: usize,
+) -> Result<NativeStemsBeamStumpsDrive, NativeStemsBeamSidesError> {
+    if transaction_limit == 0 {
+        return Err(stage(
+            "STUMPS-drive-limit",
+            "transaction limit must be positive",
+        ));
+    }
+
+    let mut shadow = carrier.clone();
+    let mut transactions = Vec::new();
+    loop {
+        let status = current_stumps_status(&shadow.scheduler)?;
+        if matches!(
+            status,
+            NativeStemsBeamSchedulerStumpsStatus::Completed { .. }
+        ) || transactions.len() == transaction_limit
+        {
+            *carrier = shadow;
+            return Ok(NativeStemsBeamStumpsDrive {
+                transactions,
+                status,
+            });
+        }
+
+        match advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+            &mut shadow,
+            context,
+            bridge,
+        ) {
+            Ok(transaction) => transactions.push(transaction),
+            Err(mut error) => {
+                error.detail = format!(
+                    "after {} successful shadow transactions: {}",
+                    transactions.len(),
+                    error.detail
+                );
+                return Err(error);
+            }
+        }
+    }
+}
+
 /// Atomically leave an exhausted SIDES carrier and enter its STUMPS worklist.
 ///
 /// The scheduler's carried linked-B set is accepted only when it is a bijective
@@ -318,6 +383,29 @@ fn linked_b_cells_match(
             .all(|reference| true_cells.contains(reference))
 }
 
+fn current_stumps_status(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+) -> Result<NativeStemsBeamSchedulerStumpsStatus, NativeStemsBeamSidesError> {
+    match &scheduler.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier)
+            if frontier_matches_carrier_pass(frontier, CarrierPass::Stumps) =>
+        {
+            Ok(NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(frontier.clone()))
+        }
+        NativeStemsBeamSchedulerStatus::Completed {
+            retained_for_stumps,
+            final_local_worklist,
+        } => Ok(NativeStemsBeamSchedulerStumpsStatus::Completed {
+            retained_for_stumps: retained_for_stumps.clone(),
+            final_local_worklist: final_local_worklist.clone(),
+        }),
+        _ => Err(stage(
+            "STUMPS-drive-status",
+            "scheduler is neither awaiting a typed STUMPS frontier nor complete",
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,6 +444,45 @@ mod tests {
         assert!(linked_b_cells_match(&[one], &closed));
         closed[0].closed = true;
         assert!(linked_b_cells_match(&[one], &closed));
+    }
+
+    #[test]
+    fn stumps_drive_accepts_only_awaiting_stumps_or_true_completion() {
+        let retained = vec![NativeStemsBeamSource::RawBeam(1)];
+        let worklist = vec![NativeStemsBeamSource::RawBeam(2)];
+        let mut scheduler = NativeStemsBeamSchedulerSystem {
+            system_id: 1,
+            link_profile: 1,
+            glyphs_in_sig_order: Vec::new(),
+            live_exclusions: Vec::new(),
+            beams_by_reverse_width: Vec::new(),
+            prefix_events: Vec::new(),
+            deferred_line_deltas: Vec::new(),
+            consumed_v_linkers: Vec::new(),
+            linked_b_linkers: Vec::new(),
+            status: NativeStemsBeamSchedulerStatus::Completed {
+                retained_for_stumps: retained.clone(),
+                final_local_worklist: worklist.clone(),
+            },
+        };
+        assert_eq!(
+            current_stumps_status(&scheduler).expect("true completion"),
+            NativeStemsBeamSchedulerStumpsStatus::Completed {
+                retained_for_stumps: retained.clone(),
+                final_local_worklist: worklist.clone(),
+            }
+        );
+
+        scheduler.status = NativeStemsBeamSchedulerStatus::SidesExhausted {
+            retained_for_stumps: retained,
+            final_local_worklist: worklist,
+        };
+        assert_eq!(
+            current_stumps_status(&scheduler)
+                .expect_err("pre-STUMPS terminal must not masquerade as completion")
+                .stage,
+            "STUMPS-drive-status"
+        );
     }
 
     #[test]

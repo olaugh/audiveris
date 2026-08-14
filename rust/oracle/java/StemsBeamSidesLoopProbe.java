@@ -749,7 +749,7 @@ public final class StemsBeamSidesLoopProbe
         void runStumpsPrefix ()
             throws Exception
         {
-            if (stumpsTransactionLimit < 1 || stumpsTransactionLimit > 3) {
+            if (stumpsTransactionLimit < 1 || stumpsTransactionLimit > 7) {
                 throw new IllegalStateException(
                         "unsupported STUMPS transaction limit " + stumpsTransactionLimit);
             }
