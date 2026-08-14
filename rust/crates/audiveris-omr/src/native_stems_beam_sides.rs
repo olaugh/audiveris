@@ -8,8 +8,11 @@ use crate::{
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
     native_stems_beam_scheduler::{
-        NativeStemsBeamSchedulerStatus, NativeStemsBeamSchedulerStumpsContinuation,
-        NativeStemsBeamSchedulerSystem, continue_native_stems_beam_scheduler_into_stumps,
+        BEAM_SEED_PROFILE, NativeStemsBeamCompletedStumpVLinkEvidence,
+        NativeStemsBeamSchedulerPass, NativeStemsBeamSchedulerStatus,
+        NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerSystem,
+        continue_native_stems_beam_scheduler_into_stumps,
+        resume_native_stems_beam_scheduler_after_stumps_transaction,
     },
     native_stems_beam_stumps::NativeStemsBeamStumpSystem,
     native_stems_beam_vlink_b_linker_flag::{
@@ -101,6 +104,24 @@ pub struct NativeStemsBeamSidesTransaction {
     pub outer_resume: NativeStemsBeamNativeOuterResumeTransaction,
 }
 
+/// Exact B12-B17 mutation plus B19 continuation for one STUMPS V frontier.
+///
+/// Java's `linkStumps` invokes `VLinker.link` directly, so this trace has no
+/// B18 outer assignment. B15 and B16 are the persistent B-cell authorities
+/// visible to the resumed stump loop.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamStumpsTransaction {
+    pub preparation: NativeStemsBeamFrontierPreparation,
+    pub create: NativeStemsBeamVLinkTransaction,
+    pub reuse_live_state: NativeStemsBeamVLinkReuseLiveState,
+    pub reuse: NativeStemsBeamVLinkReuseCheck,
+    pub base: NativeStemsBeamVLinkBaseApplyTransaction,
+    pub flag: NativeStemsBeamVLinkBLinkerFlagTransaction,
+    pub siblings: NativeStemsBeamNativeSiblingTransaction,
+    pub heads: NativeStemsBeamNativeHeadTransaction,
+    pub resume: NativeStemsBeamSchedulerStumpsContinuation,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsBeamSidesError {
     pub stage: &'static str,
@@ -177,7 +198,9 @@ pub fn advance_native_stems_beam_sides_transaction(
         carrier,
         context,
         GlyphAuthority::Legacy(glyphs),
+        CarrierPass::Sides,
     )
+    .and_then(NativeStemsBeamCarrierTransaction::into_sides)
 }
 
 /// Execute one frontier from the validated one-time first-STEMS bridge.
@@ -191,7 +214,25 @@ pub fn advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
         carrier,
         context,
         GlyphAuthority::FirstStems(bridge),
+        CarrierPass::Sides,
     )
+    .and_then(NativeStemsBeamCarrierTransaction::into_sides)
+}
+
+/// Execute one typed STUMPS frontier through B12-B17 and resume its stump
+/// worklist. The first-STEMS bridge remains the glyph identity authority.
+pub fn advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsBeamStumpsTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_beam_sides_transaction_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::FirstStems(bridge),
+        CarrierPass::Stumps,
+    )
+    .and_then(NativeStemsBeamCarrierTransaction::into_stumps)
 }
 
 /// Atomically leave an exhausted SIDES carrier and enter its STUMPS worklist.
@@ -316,6 +357,65 @@ mod tests {
         closed[0].closed = true;
         assert!(linked_b_cells_match(&[one], &closed));
     }
+
+    #[test]
+    fn stump_carrier_requires_stumps_profile_and_no_horizontal_side() {
+        use crate::{
+            native_stems_beam_link_plans::NativeStemsBeamLinkPlanOutcome,
+            native_stems_beam_scheduler::{
+                NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamPlanRef,
+                NativeStemsBeamWorklistSnapshot,
+            },
+            native_stems_beam_vlinkers::NativeStemsBeamVLinkerRef,
+            stems_step::NativeStemVerticalSide,
+        };
+
+        let beam = NativeStemsBeamSource::RawBeam(12);
+        let b_linker = NativeStemsBeamBLinkerRef { beam, id: 2 };
+        let v_linker = NativeStemsBeamVLinkerRef {
+            b_linker,
+            side: NativeStemVerticalSide::Top,
+        };
+        let mut frontier = NativeStemsBeamAwaitingVLinkTransaction {
+            invocation_ordinal: 32,
+            snapshot: NativeStemsBeamWorklistSnapshot {
+                pass: NativeStemsBeamSchedulerPass::Stumps,
+                current_index: 0,
+                sources: vec![beam],
+                current: beam,
+                remaining: Vec::new(),
+            },
+            beam,
+            horizontal_side: None,
+            b_linker,
+            v_linker,
+            vertical_side: NativeStemVerticalSide::Top,
+            plan: NativeStemsBeamPlanRef {
+                system_id: 1,
+                plan_ordinal: 147,
+                builder_ordinal: 0,
+                stem_profile: BEAM_SEED_PROFILE,
+            },
+            outcome: NativeStemsBeamLinkPlanOutcome::ReadyForCreateStem,
+            linked_sides_before: Vec::new(),
+            retained_beams_before: Vec::new(),
+            would_apply_stored_line_delta: None,
+        };
+        assert!(frontier_matches_carrier_pass(
+            &frontier,
+            CarrierPass::Stumps
+        ));
+        assert!(!frontier_matches_carrier_pass(
+            &frontier,
+            CarrierPass::Sides
+        ));
+
+        frontier.plan.stem_profile -= 1;
+        assert!(!frontier_matches_carrier_pass(
+            &frontier,
+            CarrierPass::Stumps
+        ));
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -324,12 +424,117 @@ enum GlyphAuthority<'a> {
     FirstStems(&'a NativeStemsFirstGlyphIndexBridge),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CarrierPass {
+    Sides,
+    Stumps,
+}
+
+fn frontier_matches_carrier_pass(
+    frontier: &crate::native_stems_beam_scheduler::NativeStemsBeamAwaitingVLinkTransaction,
+    pass: CarrierPass,
+) -> bool {
+    match pass {
+        CarrierPass::Sides => {
+            frontier.snapshot.pass == NativeStemsBeamSchedulerPass::Sides
+                && frontier.horizontal_side.is_some()
+        }
+        CarrierPass::Stumps => {
+            frontier.snapshot.pass == NativeStemsBeamSchedulerPass::Stumps
+                && frontier.horizontal_side.is_none()
+                && frontier.plan.stem_profile == BEAM_SEED_PROFILE
+                && frontier.linked_sides_before.is_empty()
+        }
+    }
+}
+
+enum CarrierTerminal {
+    Sides(NativeStemsBeamNativeOuterResumeTransaction),
+    Stumps(NativeStemsBeamSchedulerStumpsContinuation),
+}
+
+struct NativeStemsBeamCarrierTransaction {
+    preparation: NativeStemsBeamFrontierPreparation,
+    create: NativeStemsBeamVLinkTransaction,
+    reuse_live_state: NativeStemsBeamVLinkReuseLiveState,
+    reuse: NativeStemsBeamVLinkReuseCheck,
+    base: NativeStemsBeamVLinkBaseApplyTransaction,
+    flag: NativeStemsBeamVLinkBLinkerFlagTransaction,
+    siblings: NativeStemsBeamNativeSiblingTransaction,
+    heads: NativeStemsBeamNativeHeadTransaction,
+    terminal: CarrierTerminal,
+}
+
+impl NativeStemsBeamCarrierTransaction {
+    fn into_sides(self) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
+        let CarrierTerminal::Sides(outer_resume) = self.terminal else {
+            return Err(stage("carrier-pass", "STUMPS terminal returned for SIDES"));
+        };
+        Ok(NativeStemsBeamSidesTransaction {
+            preparation: self.preparation,
+            create: self.create,
+            reuse_live_state: self.reuse_live_state,
+            reuse: self.reuse,
+            base: self.base,
+            flag: self.flag,
+            siblings: self.siblings,
+            heads: self.heads,
+            outer_resume,
+        })
+    }
+
+    fn into_stumps(self) -> Result<NativeStemsBeamStumpsTransaction, NativeStemsBeamSidesError> {
+        let CarrierTerminal::Stumps(resume) = self.terminal else {
+            return Err(stage("carrier-pass", "SIDES terminal returned for STUMPS"));
+        };
+        Ok(NativeStemsBeamStumpsTransaction {
+            preparation: self.preparation,
+            create: self.create,
+            reuse_live_state: self.reuse_live_state,
+            reuse: self.reuse,
+            base: self.base,
+            flag: self.flag,
+            siblings: self.siblings,
+            heads: self.heads,
+            resume,
+        })
+    }
+}
+
 fn advance_native_stems_beam_sides_transaction_with_authority(
     carrier: &mut NativeStemsBeamSidesCarrier,
     context: NativeStemsBeamSidesContext<'_>,
     glyphs: GlyphAuthority<'_>,
-) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
+    pass: CarrierPass,
+) -> Result<NativeStemsBeamCarrierTransaction, NativeStemsBeamSidesError> {
     let mut shadow = carrier.clone();
+    let frontier = match &shadow.scheduler.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(stage(
+                "carrier-pass",
+                "scheduler is not awaiting a V frontier",
+            ));
+        }
+    };
+    if !frontier_matches_carrier_pass(frontier, pass) {
+        return Err(stage(
+            "carrier-pass",
+            "frontier pass/profile/horizontal-side semantics differ",
+        ));
+    }
+    if pass == CarrierPass::Stumps
+        && !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells)
+    {
+        return Err(stage(
+            "STUMPS-linked-B-authority",
+            "scheduler linked-B set differs from persistent true cells",
+        ));
+    }
+    let relation_parameters = NativeStemsBeamRelationParameters {
+        profile: frontier.plan.stem_profile,
+        ..context.relation_parameters
+    };
     reconcile_known_stems(&mut shadow.latest_base_apply, &shadow.sig, &shadow.bindings)?;
     let mut transaction_state = shadow.latest_base_apply.transaction_state.clone();
     let proof = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
@@ -413,7 +618,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         &create,
         &transaction_state,
         &reuse_live_state,
-        context.relation_parameters,
+        relation_parameters,
     )
     .map_err(|error| stage("B13", error))?;
     let mut base_state = roll_native_stems_beam_vlink_base_apply_state(
@@ -437,7 +642,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         context.vlinkers,
         &create,
         &reuse_live_state,
-        context.relation_parameters,
+        relation_parameters,
         &reuse,
         &mut base_state,
         &mut shadow.sig,
@@ -471,7 +676,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         context.vlinkers,
         &create,
         &reuse_live_state,
-        context.relation_parameters,
+        relation_parameters,
         &reuse,
         &base,
         &mut flag_state,
@@ -504,22 +709,70 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         &mut shadow.s_cells,
     )
     .map_err(|error| stage("B17", error))?;
-    let outer_resume = apply_native_stems_beam_outer_and_resume_transaction(
-        &shadow.scheduler,
-        context.vlinkers,
-        context.builders,
-        context.plans,
-        context.reachability,
-        &flag,
-        &siblings,
-        &heads,
-        &mut shadow.b_cells,
-    )
-    .map_err(|error| stage("B18/B19", error))?;
+    let terminal = match pass {
+        CarrierPass::Sides => CarrierTerminal::Sides(
+            apply_native_stems_beam_outer_and_resume_transaction(
+                &shadow.scheduler,
+                context.vlinkers,
+                context.builders,
+                context.plans,
+                context.reachability,
+                &flag,
+                &siblings,
+                &heads,
+                &mut shadow.b_cells,
+            )
+            .map_err(|error| stage("B18/B19", error))?,
+        ),
+        CarrierPass::Stumps => {
+            if !flag.linked_after
+                || siblings.system_id != shadow.scheduler.system_id
+                || heads.system_id != shadow.scheduler.system_id
+                || siblings.plan_ordinal != flag.key.plan.plan_ordinal
+                || heads.plan_ordinal != flag.key.plan.plan_ordinal
+                || siblings.stem_identity != heads.stem_identity
+                || !heads.returned_true
+            {
+                return Err(stage(
+                    "B19-STUMPS-predecessor",
+                    "B15-B17 terminal join differs",
+                ));
+            }
+            let completed = NativeStemsBeamCompletedStumpVLinkEvidence {
+                plan: flag.key.plan,
+                b_linker: flag.target_b_linker,
+                v_linker: flag.triggering_v_linker,
+                b15_linked_after: flag.linked_after,
+                sibling_linked_b_linkers: siblings.assigned_b_linkers.clone(),
+            };
+            CarrierTerminal::Stumps(
+                resume_native_stems_beam_scheduler_after_stumps_transaction(
+                    &shadow.scheduler,
+                    context.stumps,
+                    context.vlinkers,
+                    context.builders,
+                    context.plans,
+                    &completed,
+                )
+                .map_err(|error| stage("B19-STUMPS", error))?,
+            )
+        }
+    };
     let mut carried_base = (*base.state_after).clone();
     reconcile_known_stems(&mut carried_base, &shadow.sig, &shadow.bindings)?;
     shadow.latest_base_apply = carried_base;
-    shadow.scheduler = (*outer_resume.resume.advanced_system).clone();
+    shadow.scheduler = match &terminal {
+        CarrierTerminal::Sides(outer_resume) => (*outer_resume.resume.advanced_system).clone(),
+        CarrierTerminal::Stumps(resume) => (*resume.advanced_system).clone(),
+    };
+    if pass == CarrierPass::Stumps
+        && !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells)
+    {
+        return Err(stage(
+            "STUMPS-linked-B-commit",
+            "resumed scheduler differs from committed B15/B16 cells",
+        ));
+    }
     shadow
         .sig
         .validate_integrity()
@@ -529,7 +782,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         .validate_against(&shadow.sig)
         .map_err(|error| stage("post-transaction-bindings", error))?;
 
-    let transaction = NativeStemsBeamSidesTransaction {
+    let transaction = NativeStemsBeamCarrierTransaction {
         preparation,
         create,
         reuse_live_state,
@@ -538,7 +791,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         flag,
         siblings,
         heads,
-        outer_resume,
+        terminal,
     };
     *carrier = shadow;
     Ok(transaction)

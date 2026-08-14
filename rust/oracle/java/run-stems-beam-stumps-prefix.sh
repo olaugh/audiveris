@@ -31,9 +31,10 @@ pass_two=$(mktemp /private/tmp/stems-stumps-prefix-pass2.XXXXXX)
 semantic_one=$(mktemp /private/tmp/stems-stumps-prefix-semantic1.XXXXXX)
 semantic_two=$(mktemp /private/tmp/stems-stumps-prefix-semantic2.XXXXXX)
 rows=$(mktemp /private/tmp/stems-stumps-prefix-rows.XXXXXX)
+txn_rows=$(mktemp /private/tmp/stems-stumps-transaction-rows.XXXXXX)
 sides=$(mktemp /private/tmp/stems-stumps-prefix-sides.XXXXXX)
 frozen_sides_rows=$(mktemp /private/tmp/stems-stumps-prefix-sides-frozen.XXXXXX)
-trap 'rm -f "$warmup" "$pass_one" "$pass_two" "$semantic_one" "$semantic_two" "$rows" "$sides" "$frozen_sides_rows"' EXIT
+trap 'rm -f "$warmup" "$pass_one" "$pass_two" "$semantic_one" "$semantic_two" "$rows" "$txn_rows" "$sides" "$frozen_sides_rows"' EXIT
 
 run_pass()
 {
@@ -74,6 +75,14 @@ if [ "$(grep -c '^stemsbeamstumpsprefixbaseline ' "$rows")" -ne 1 ] || \
     echo "bounded chula STUMPS prefix contract differs" >&2
     exit 1
 fi
+grep '^stemsbeamstumpstxn' "$pass_one" > "$txn_rows"
+if [ "$(grep -c '^stemsbeamstumpstxnresult ' "$txn_rows")" -ne 1 ] || \
+        [ "$(grep -c '^stemsbeamstumpstxnresumeterminal ' "$txn_rows")" -ne 1 ] || \
+        ! grep -q ' transaction 1 plan 147 ' "$txn_rows" || \
+        ! grep -q ' terminal AwaitingVLinkTransaction stopBeforeCreateStem true$' "$txn_rows"; then
+    echo "bounded first STUMPS transaction/resume contract differs" >&2
+    exit 1
+fi
 
 probe_sha=$(shasum -a 256 "$script_dir/StemsBeamSidesLoopProbe.java" | awk '{print $1}')
 runner_sha=$(shasum -a 256 "$0" | awk '{print $1}')
@@ -92,3 +101,17 @@ out="$repo_root/rust/oracle/stems-beam-stumps-prefix-chula-system1.txt"
         "stemsbeamstumpsprefixsummary schema stems-beam-stumps-prefix-v1 page chula.png#1 system 1 rows $row_count probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha sidesFixtureSha256 $sides_sha sidesRowsByteIdentical true emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha freshRuns 2 freshRunsByteIdentical true stopBeforeCreateStem true"
 } > "$out"
 echo "wrote $out ($row_count rows)"
+
+txn_body_sha=$(shasum -a 256 "$txn_rows" | awk '{print $1}')
+txn_row_count=$(wc -l < "$txn_rows" | tr -d ' ')
+txn_out="$repo_root/rust/oracle/stems-beam-stumps-transaction-chula-system1.txt"
+{
+    echo '# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) first STUMPS transaction.'
+    echo '# schema: stems-beam-stumps-transaction-v1'
+    echo '# Executes chula system-1 plan 147 through B12-B19 and resumes STUMPS.'
+    echo '# Stops at the next ready stump VLinker before its createStem.'
+    cat "$txn_rows"
+    printf '%s\n' \
+        "stemsbeamstumpstxnsummary schema stems-beam-stumps-transaction-v1 page chula.png#1 system 1 rows $txn_row_count probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha prefixFixtureSha256 $(shasum -a 256 "$out" | awk '{print $1}') sidesFixtureSha256 $sides_sha sidesRowsByteIdentical true emittedBodySha256 $txn_body_sha semanticPassSha256 $semantic_sha freshRuns 2 freshRunsByteIdentical true stopBeforeSecondCreateStem true"
+} > "$txn_out"
+echo "wrote $txn_out ($txn_row_count rows)"

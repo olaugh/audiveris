@@ -40,6 +40,7 @@ use audiveris_omr::{
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
+        advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
         continue_native_stems_beam_sides_carrier_into_stumps,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
@@ -64,8 +65,9 @@ use audiveris_omr::{
     },
     native_stems_beam_vlink_outer_b_linker::apply_native_stems_beam_outer_and_resume_transaction,
     native_stems_beam_vlink_reuse_check::{
-        NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamReuseEntryObservation,
-        NativeStemsBeamVLinkReuseLiveEvaluation, evaluate_native_stems_beam_vlink_reuse_check,
+        NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamReuseDisposition,
+        NativeStemsBeamReuseEntryObservation, NativeStemsBeamVLinkReuseLiveEvaluation,
+        evaluate_native_stems_beam_vlink_reuse_check,
         project_native_stems_beam_vlink_reuse_live_state,
     },
     native_stems_beam_vlink_sibling_links::{
@@ -6179,7 +6181,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "650c90f48d9b331dc4aa972a42fbb226347356fd95fc831cb7495f6807ad22ad"
+        "a928814f05ec705c150cdc3733adfe88f570916f8ba990ef6ede7e8930c7556b"
     );
     let data = fixture
         .lines()
@@ -7323,6 +7325,81 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         sides_terminal_carrier.beam_inter_index
     );
 
+    // Execute the first STUMPS frontier and resume the same retained worklist
+    // before either the prefix or transaction expected rows are opened.
+    let awaiting_stump = carrier.clone();
+    let mut missing_stump_b = awaiting_stump.clone();
+    missing_stump_b
+        .b_cells
+        .retain(|cell| cell.reference != stump_frontier.b_linker);
+    let missing_stump_b_before = missing_stump_b.clone();
+    let bridge_before = bridge.clone();
+    advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+        &mut missing_stump_b,
+        context,
+        &bridge,
+    )
+    .expect_err("missing first-STUMPS B cell must reject atomically");
+    assert_eq!(missing_stump_b, missing_stump_b_before);
+    assert_eq!(bridge, bridge_before);
+
+    let first_stump = advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+        &mut carrier,
+        context,
+        &bridge,
+    )
+    .expect("native first STUMPS transaction and resume");
+    assert_eq!(first_stump.flag.key.plan.plan_ordinal, 147);
+    assert_eq!(first_stump.create.registration.glyph_id, 310);
+    assert_eq!(
+        first_stump.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false
+        }
+    );
+    assert_eq!(
+        first_stump.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 32 }
+    );
+    assert_eq!(
+        first_stump.reuse.reuse_disposition,
+        NativeStemsBeamReuseDisposition::AllUnlinked
+    );
+    assert_eq!(first_stump.reuse.reuse_trace.len(), 2);
+    assert_eq!(first_stump.base.graph_relation_identity, Some(331));
+    assert!(first_stump.base.apply_returned);
+    assert!(first_stump.flag.linked_after);
+    assert!(first_stump.siblings.assigned_b_linkers.is_empty());
+    assert_eq!(first_stump.heads.appended_edges.len(), 2);
+    assert_eq!(
+        (carrier.sig.vertices.len(), carrier.sig.edges.len()),
+        (254, 334)
+    );
+    assert_eq!(carrier.bindings.stem_vertices.len(), 33);
+    assert_eq!(
+        carrier.b_cells.iter().filter(|cell| cell.linked).count(),
+        62
+    );
+    assert_eq!(
+        carrier.s_cells.iter().filter(|cell| cell.linked).count(),
+        70
+    );
+    let NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(next_stump) =
+        &first_stump.resume.status
+    else {
+        panic!("first STUMPS transaction must resume at a second frontier");
+    };
+    assert_eq!(
+        next_stump.snapshot.pass,
+        NativeStemsBeamSchedulerPass::Stumps
+    );
+    assert_eq!(next_stump.snapshot.current_index, 1);
+    assert_eq!(second_b_alias(next_stump.b_linker), "beam:22:b:1");
+    assert_eq!(next_stump.vertical_side, NativeStemVerticalSide::Top);
+    assert_eq!(next_stump.plan.plan_ordinal, 622);
+    assert_eq!(carrier.scheduler, *first_stump.resume.advanced_system);
+    assert_eq!(bridge, bridge_before);
+
     // Expected-only STUMPS rows are opened after the production continuation
     // and its atomic/coherence guards have returned.
     let stumps_prefix_text = std::fs::read_to_string(
@@ -7331,7 +7408,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "643782fd7051100ffb66c07ebe736b4ff857f7f63240de61cd3bf47f2ac80179"
+        "014a36a67d42adcdc08918038b9eb432220905f4594ca6e05a7aa5f5ef8b3e7a"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -7447,6 +7524,93 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         summary_value("emittedBodySha256"),
         sha256_hex(emitted_body.as_bytes())
+    );
+
+    let stumps_transaction_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-stumps-transaction-chula-system1.txt"),
+    )
+    .expect("expected-only first-STUMPS transaction");
+    assert_eq!(
+        sha256_hex(stumps_transaction_text.as_bytes()),
+        "d193be4a995abb80fd61493a726f068a595a8c7a67b4870b28d7b2b0942c2587"
+    );
+    let transaction_rows = stumps_transaction_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(transaction_rows.len(), 7);
+    assert_eq!(
+        transaction_rows[0],
+        "stemsbeamstumpstxnresult chula.png#1 system 1 transaction 1 plan 147 beamSig 12 bAlias beam:12:b:1 vSide TOP registration ReuseActive disposition CreatedChecked registeredGlyphId 310 reuseOutcome AllUnlinked reuseEntriesRead 2 finalStemInterId 2372 baseNewVertex true baseGraphRelation sig-edge:331 bLinkedAfter true siblings 0 siblingAliases - heads 2 sigVertices 672 sigEdges 670 systemStems 33 outerAssignment false"
+    );
+    assert!(
+        transaction_rows[1].contains(
+            "event 3 beamOrdinal 0 beamSig 12 stumpOrdinal 2 bAlias beam:12:b:2 vSide TOP"
+        )
+    );
+    assert!(transaction_rows[1].ends_with("sideStump true linkedBefore true action SkipSideStump"));
+    assert_eq!(
+        transaction_rows[2],
+        "stemsbeamstumpstxnresumebeam chula.png#1 system 1 event 4 beamOrdinal 1 beamSig 22 stumpLinkers 3 sideStumps 2"
+    );
+    assert!(
+        transaction_rows[3].contains(
+            "event 5 beamOrdinal 1 beamSig 22 stumpOrdinal 0 bAlias beam:22:b:0 vSide TOP"
+        )
+    );
+    assert!(transaction_rows[3].ends_with("sideStump true linkedBefore true action SkipSideStump"));
+    assert!(
+        transaction_rows[4].contains(
+            "event 6 beamOrdinal 1 beamSig 22 stumpOrdinal 1 bAlias beam:22:b:1 vSide TOP"
+        )
+    );
+    assert!(transaction_rows[4].ends_with(
+        "plan 622 stemProfile 3 linkProfile 1 headTargets 2 lastIndex 2 relations 2 glyphs 1 lineChanged false action AwaitingVLinkTransaction"
+    ));
+    assert_eq!(
+        transaction_rows[5],
+        "stemsbeamstumpstxnresumeterminal chula.png#1 system 1 events 7 transactions 1 beamOrdinal 1 beamSig 22 stumpOrdinal 1 bAlias beam:22:b:1 vSide TOP plan 622 terminal AwaitingVLinkTransaction stopBeforeCreateStem true"
+    );
+    assert!(
+        transaction_rows[6]
+            .contains("schema stems-beam-stumps-transaction-v1 page chula.png#1 system 1 rows 6")
+    );
+    assert!(transaction_rows[6].contains(" sidesRowsByteIdentical true "));
+    assert!(
+        transaction_rows[6]
+            .ends_with("freshRuns 2 freshRunsByteIdentical true stopBeforeSecondCreateStem true")
+    );
+    let transaction_summary_tokens = transaction_rows[6]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let transaction_summary_value = |name: &str| {
+        transaction_summary_tokens
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| transaction_summary_tokens.get(index + 1))
+            .copied()
+            .expect("strict first-STUMPS transaction summary field")
+    };
+    assert_eq!(
+        transaction_summary_value("probeSourceSha256"),
+        summary_value("probeSourceSha256")
+    );
+    assert_eq!(
+        transaction_summary_value("runnerSourceSha256"),
+        summary_value("runnerSourceSha256")
+    );
+    assert_eq!(
+        transaction_summary_value("prefixFixtureSha256"),
+        sha256_hex(stumps_prefix_text.as_bytes())
+    );
+    assert_eq!(
+        transaction_summary_value("sidesFixtureSha256"),
+        summary_value("sidesFixtureSha256")
+    );
+    let transaction_body = format!("{}\n", transaction_rows[..6].join("\n"));
+    assert_eq!(
+        transaction_summary_value("emittedBodySha256"),
+        sha256_hex(transaction_body.as_bytes())
     );
 
     let all_siblings = std::iter::once(&actual)

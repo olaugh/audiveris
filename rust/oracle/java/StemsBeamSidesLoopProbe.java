@@ -575,6 +575,11 @@ public final class StemsBeamSidesLoopProbe
         // this probe itself emits.
         boolean freshMode;
         int freshTransactions;
+        boolean stumpsPhase;
+        int stumpsTransactions;
+        int stumpsEvent;
+        int stumpsBeamOrdinal;
+        int stumpsStumpOrdinal;
         static final int FRESH_TRANSACTION_CAP = 400;
         List<String> freshBaseRows;
         List<String> freshFlagRows;
@@ -762,18 +767,23 @@ public final class StemsBeamSidesLoopProbe
                     terminal.systemStems.entries.size(), terminal.sig.relationStateHash,
                     terminal.linkers.hash);
 
-            int event = 0;
+            stumpsPhase = true;
+            stumpsEvent = 0;
             for (int beamOrdinal = 0; beamOrdinal < work.size(); beamOrdinal++) {
+                stumpsBeamOrdinal = beamOrdinal;
                 final AbstractBeamInter beam = (AbstractBeamInter) work.get(beamOrdinal);
                 final List<Object> stumpLinkers = (List<Object>) LINKER_STUMP_V.get(beam.getLinker());
                 final Map<HorizontalSide, Glyph> sideStumps =
                         (Map<HorizontalSide, Glyph>) LINKER_SIDE_STUMPS.get(beam.getLinker());
+                final String beamFamily = stumpsTransactions == 0
+                        ? "stemsbeamstumpsprefixbeam" : "stemsbeamstumpstxnresumebeam";
                 System.out.printf(
-                        "stemsbeamstumpsprefixbeam %s system %d event %d beamOrdinal %d "
+                        "%s %s system %d event %d beamOrdinal %d "
                                 + "beamSig %d stumpLinkers %d sideStumps %d%n",
-                        page, system.getId(), event++, beamOrdinal,
+                        beamFamily, page, system.getId(), stumpsEvent++, beamOrdinal,
                         beamSigOrdinals.get(beam), stumpLinkers.size(), sideStumps.size());
                 for (int stumpOrdinal = 0; stumpOrdinal < stumpLinkers.size(); stumpOrdinal++) {
+                    stumpsStumpOrdinal = stumpOrdinal;
                     final Object v = stumpLinkers.get(stumpOrdinal);
                     final StemLinker linker = (StemLinker) v;
                     final Glyph stump = linker.getStump();
@@ -781,12 +791,15 @@ public final class StemsBeamSidesLoopProbe
                     final boolean sideStump = sideStumps.values().contains(stump);
                     final boolean linkedBefore = linker.isLinked();
                     if (sideStump || linkedBefore) {
+                        final String stepFamily = stumpsTransactions == 0
+                                ? "stemsbeamstumpsprefixstep"
+                                : "stemsbeamstumpstxnresumestep";
                         System.out.printf(
-                                "stemsbeamstumpsprefixstep %s system %d event %d "
+                                "%s %s system %d event %d "
                                         + "beamOrdinal %d beamSig %d stumpOrdinal %d bAlias %s "
                                         + "vSide %s stump %s sideStump %s linkedBefore %s "
                                         + "action %s%n",
-                                page, system.getId(), event++, beamOrdinal,
+                                stepFamily, page, system.getId(), stumpsEvent++, beamOrdinal,
                                 beamSigOrdinals.get(beam), stumpOrdinal, bAliases.get(b),
                                 V_V_SIDE.get(v), glyphToken(stump), sideStump, linkedBefore,
                                 sideStump ? "SkipSideStump" : "SkipAlreadyLinkedB");
@@ -797,65 +810,32 @@ public final class StemsBeamSidesLoopProbe
                     final StemBuilder builder = (StemBuilder) V_STEM_BUILDER.get(v);
                     final int headTargets = builder.getCLinkers(null).size();
                     if (headTargets == 0) {
+                        final String stepFamily = stumpsTransactions == 0
+                                ? "stemsbeamstumpsprefixstep"
+                                : "stemsbeamstumpstxnresumestep";
                         System.out.printf(
-                                "stemsbeamstumpsprefixstep %s system %d event %d "
+                                "%s %s system %d event %d "
                                         + "beamOrdinal %d beamSig %d stumpOrdinal %d bAlias %s "
                                         + "vSide %s stump %s sideStump false linkedBefore false "
                                         + "plan %d stemProfile %d linkProfile %d headTargets 0 "
                                         + "lastIndex - relations 0 glyphs 0 lineChanged false "
                                         + "action SkipNoHeadTargets%n",
-                                page, system.getId(), event++, beamOrdinal,
+                                stepFamily, page, system.getId(), stumpsEvent++, beamOrdinal,
                                 beamSigOrdinals.get(beam), stumpOrdinal, bAliases.get(b),
                                 V_V_SIDE.get(v), glyphToken(stump), ref.plan,
                                 Profiles.BEAM_SEED, system.getProfile());
                         continue;
                     }
-
-                    final Line2D stored = (Line2D) V_THEO_LINE.get(v);
-                    final Line2D lineBefore = copy(stored);
-                    final PersistentSnapshot before = snapshot(
-                            sheet, retriever, inspectionBeams, heads, allLinkers);
-                    final LinkedHashMap<StemLinker, Relation> relations = new LinkedHashMap<>();
-                    final LinkedHashSet<Glyph> glyphs = new LinkedHashSet<>();
-                    final int lastIndex = (Integer) V_EXPAND.invoke(
-                            v, Profiles.BEAM_SEED, system.getProfile(), relations, glyphs);
-                    final boolean lineChanged = !sameLine(lineBefore, stored);
-                    before.assertOnlyLineChanged(snapshot(
-                            sheet, retriever, inspectionBeams, heads, allLinkers));
-                    final String action;
-                    if (lastIndex == -1) action = "ExpandFailed";
-                    else if (relations.isEmpty()) action = "NoRelations";
-                    else if (glyphs.isEmpty()) action = "NoGlyphs";
-                    else action = "AwaitingVLinkTransaction";
-                    System.out.printf(
-                            "stemsbeamstumpsprefixstep %s system %d event %d "
-                                    + "beamOrdinal %d beamSig %d stumpOrdinal %d bAlias %s "
-                                    + "vSide %s stump %s sideStump false linkedBefore false "
-                                    + "plan %d stemProfile %d linkProfile %d headTargets %d "
-                                    + "lastIndex %d relations %d glyphs %d lineChanged %s "
-                                    + "action %s%n",
-                            page, system.getId(), event++, beamOrdinal,
-                            beamSigOrdinals.get(beam), stumpOrdinal, bAliases.get(b),
-                            V_V_SIDE.get(v), glyphToken(stump), ref.plan,
-                            Profiles.BEAM_SEED, system.getProfile(), headTargets, lastIndex,
-                            relations.size(), glyphs.size(), lineChanged, action);
-                    if (action.equals("AwaitingVLinkTransaction")) {
-                        System.out.printf(
-                                "stemsbeamstumpsprefixterminal %s system %d events %d "
-                                        + "beamOrdinal %d beamSig %d stumpOrdinal %d bAlias %s "
-                                        + "vSide %s plan %d terminal AwaitingVLinkTransaction "
-                                        + "stopBeforeCreateStem true%n",
-                                page, system.getId(), event, beamOrdinal,
-                                beamSigOrdinals.get(beam), stumpOrdinal, bAliases.get(b),
-                                V_V_SIDE.get(v), ref.plan);
-                        return;
-                    }
+                    runV(
+                            beam, beamOrdinal, null, b, v,
+                            Profiles.BEAM_SEED, system.getProfile());
+                    if (stopped) return;
                 }
             }
             System.out.printf(
-                    "stemsbeamstumpsprefixterminal %s system %d events %d terminal Completed "
-                            + "stopBeforeCreateStem true%n",
-                    page, system.getId(), event);
+                    "stemsbeamstumpstxnresumeterminal %s system %d events %d "
+                            + "transactions %d terminal Completed stopBeforeCreateStem true%n",
+                    page, system.getId(), stumpsEvent, stumpsTransactions);
         }
 
         String beamAlias (AbstractBeamInter beam)
@@ -991,6 +971,49 @@ public final class StemsBeamSidesLoopProbe
             else if (relations.isEmpty()) outcome = "NoRelations";
             else if (glyphs.isEmpty()) outcome = "NoGlyphs";
             else outcome = "ReadyForCreateStem";
+            if (stumpsPhase) {
+                final String family = stumpsTransactions == 0
+                        ? "stemsbeamstumpsprefixstep" : "stemsbeamstumpstxnresumestep";
+                System.out.printf(
+                        "%s %s system %d event %d beamOrdinal %d beamSig %d "
+                                + "stumpOrdinal %d bAlias %s vSide %s stump %s "
+                                + "sideStump false linkedBefore false plan %d stemProfile %d "
+                                + "linkProfile %d headTargets %d lastIndex %d relations %d "
+                                + "glyphs %d lineChanged %s action %s%n",
+                        family, page, system.getId(), stumpsEvent++, stumpsBeamOrdinal,
+                        beamSigOrdinals.get(beam), stumpsStumpOrdinal, bAliases.get(b),
+                        V_V_SIDE.get(v), glyphToken(((StemLinker) v).getStump()), ref.plan,
+                        stemProfile, linkProfile, headTargets, lastIndex, relations.size(),
+                        glyphs.size(), !sameLine(lineBefore, lineAfterExpand),
+                        outcome.equals("ReadyForCreateStem")
+                                ? "AwaitingVLinkTransaction" : outcome);
+                if (outcome.equals("ReadyForCreateStem")) {
+                    if (stumpsTransactions == 0) {
+                        System.out.printf(
+                                "stemsbeamstumpsprefixterminal %s system %d events %d "
+                                        + "beamOrdinal %d beamSig %d stumpOrdinal %d bAlias %s "
+                                        + "vSide %s plan %d terminal AwaitingVLinkTransaction "
+                                        + "stopBeforeCreateStem true%n",
+                                page, system.getId(), stumpsEvent, stumpsBeamOrdinal,
+                                beamSigOrdinals.get(beam), stumpsStumpOrdinal, bAliases.get(b),
+                                V_V_SIDE.get(v), ref.plan);
+                    } else {
+                        before.assertOnlyLineChanged(snapshot(
+                                sheet, retriever, inspectionBeams, heads, allLinkers));
+                        System.out.printf(
+                                "stemsbeamstumpstxnresumeterminal %s system %d events %d "
+                                        + "transactions %d beamOrdinal %d beamSig %d "
+                                        + "stumpOrdinal %d bAlias %s vSide %s plan %d "
+                                        + "terminal AwaitingVLinkTransaction "
+                                        + "stopBeforeCreateStem true%n",
+                                page, system.getId(), stumpsEvent, stumpsTransactions,
+                                stumpsBeamOrdinal, beamSigOrdinals.get(beam),
+                                stumpsStumpOrdinal, bAliases.get(b), V_V_SIDE.get(v), ref.plan);
+                        stopped = true;
+                        return false;
+                    }
+                }
+            }
             if (!outcome.equals("ReadyForCreateStem")) {
                 if (resumePhase) {
                     emitResumeAttempt(beam, hSide, b, v, stemProfile, linkProfile,
@@ -1153,6 +1176,10 @@ public final class StemsBeamSidesLoopProbe
                     beam, beamIndex, hSide, b, v, ref, stemProfile, linkProfile, lastIndex,
                     relations, glyphs, selected, candidateObjectIdBefore, registered,
                     registration, disposition, stem, after, noStaff);
+            if (stumpsPhase) {
+                stumpsTransactions++;
+                return true;
+            }
             System.out.printf(
                     "stemsbeamsidesloopstep %s system %d step 0 beamSig %d bAlias %s "
                             + "vSide %s plan %d stemProfile %d linked %s%n",
@@ -1694,7 +1721,29 @@ public final class StemsBeamSidesLoopProbe
                     siblingRun, lastIndex, relations);
             emitHeadLinksRows(headRun);
             if (system.getId() == 1 && !freshMode) emitIsolatedHeadLinksCoverage(headRun);
-            executeOuterBLinker(flagRun, headRun, b, v);
+            if (!stumpsPhase) executeOuterBLinker(flagRun, headRun, b, v);
+            if (stumpsPhase) {
+                final List<String> siblingAliases = new ArrayList<>();
+                for (AcceptedSibling accepted : siblingRun.accepted) {
+                    siblingAliases.add(accepted.plan().beamAlias);
+                }
+                System.out.printf(
+                        "stemsbeamstumpstxnresult %s system %d transaction %d plan %d "
+                                + "beamSig %d bAlias %s vSide %s registration %s "
+                                + "disposition %s registeredGlyphId %d reuseOutcome %s "
+                                + "reuseEntriesRead %d finalStemInterId %d "
+                                + "baseNewVertex %s baseGraphRelation %s bLinkedAfter %s "
+                                + "siblings %d siblingAliases %s heads %d sigVertices %d "
+                                + "sigEdges %d systemStems %d outerAssignment false%n",
+                        page, system.getId(), stumpsTransactions + 1, ref.plan,
+                        beamSigOrdinals.get(beam), bAliases.get(b), vSide, registration,
+                        disposition, registered.getId(), reuse.outcome(), reuse.entriesRead(),
+                        finalStem.getId(), run.newVertex,
+                        run.after.graph.edgeAlias((Relation) run.link.relation),
+                        flagRun.linkedAfter, siblingRun.accepted.size(), list(siblingAliases),
+                        headRun.inserted.size(), headRun.after.sig.vertices.size(),
+                        headRun.after.sig.edges.size(), headRun.after.systemStems.entries.size());
+            }
 
             totals.transactions++;
             totals.newVertexBranches += run.newVertex ? 1 : 0;
