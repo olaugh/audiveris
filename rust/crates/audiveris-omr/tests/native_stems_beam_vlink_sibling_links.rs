@@ -24,6 +24,7 @@ use audiveris_omr::{
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
+    native_stems_beam_scheduler::NativeStemsBeamSchedulerResumeStatus,
     native_stems_beam_stumps::NativeStemsBeamSource,
     native_stems_beam_vlink_base_apply::{
         NativeStemsBeamBeamIncidentRead, NativeStemsBeamBeamIncidentRule,
@@ -38,6 +39,7 @@ use audiveris_omr::{
         apply_native_stems_beam_vlink_head_transaction_to_native_sig,
         initialize_native_stems_beam_s_linker_cells,
     },
+    native_stems_beam_vlink_outer_b_linker::apply_native_stems_beam_outer_and_resume_transaction,
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
         NativeStemsBeamSiblingBeamAbnormalTrace, NativeStemsBeamSiblingBeamIncidentRelation,
@@ -5674,7 +5676,7 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
 /// typed products.  Java rows are opened only after the complete native
 /// graph/cell result exists.
 #[test]
-fn native_b15_b16_b17_carrier_commits_first_transaction_before_oracle_read() {
+fn native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read() {
     let base_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
     )
@@ -5882,6 +5884,68 @@ fn native_b15_b16_b17_carrier_commits_first_transaction_before_oracle_read() {
     assert!(!sig.vertices[119].abnormal);
     assert!(!sig.vertices[120].abnormal);
     assert!(!sig.vertices[221].abnormal);
+
+    let outer_resume = apply_native_stems_beam_outer_and_resume_transaction(
+        &hydrated.scheduler,
+        &hydrated.vlinkers,
+        &hydrated.builder,
+        &hydrated.plans,
+        &hydrated.reachability,
+        &hydrated.transaction,
+        &actual,
+        &head_actual,
+        &mut cells,
+    )
+    .expect("native B18/B19 carrier resume");
+    assert!(outer_resume.outer.linked_before);
+    assert!(outer_resume.outer.linked_after);
+    assert_eq!(outer_resume.outer.linked_value_change_count, 0);
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(second) =
+        &outer_resume.resume.status
+    else {
+        panic!("native B19 did not reach the second frontier");
+    };
+    assert_eq!(second.plan.plan_ordinal, 152);
+    assert_eq!(
+        second.horizontal_side,
+        Some(audiveris_omr::stems_step::NativeStemHeadSide::Right)
+    );
+    assert!(
+        outer_resume
+            .resume
+            .advanced_system
+            .linked_b_linkers
+            .contains(&actual.base_b_linker)
+    );
+    assert!(actual.assigned_b_linkers.iter().all(|reference| {
+        outer_resume
+            .resume
+            .advanced_system
+            .linked_b_linkers
+            .contains(reference)
+    }));
+    let mut invalid_scheduler = hydrated.scheduler.clone();
+    invalid_scheduler.status =
+        audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::Completed {
+            retained_for_stumps: Vec::new(),
+            final_local_worklist: Vec::new(),
+        };
+    let before_failed_resume = cells.clone();
+    assert!(
+        apply_native_stems_beam_outer_and_resume_transaction(
+            &invalid_scheduler,
+            &hydrated.vlinkers,
+            &hydrated.builder,
+            &hydrated.plans,
+            &hydrated.reachability,
+            &hydrated.transaction,
+            &actual,
+            &head_actual,
+            &mut cells,
+        )
+        .is_err()
+    );
+    assert_eq!(cells, before_failed_resume);
 
     // A late second-entry binding failure proves the first provisional S write,
     // edge, and abnormal callbacks cannot escape the clone-and-swap carrier.

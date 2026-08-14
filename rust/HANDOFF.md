@@ -4512,10 +4512,20 @@ edges 205/206 from native vertices 119/120 to stem 221, retains full typed relat
 payload and exact `0x3ffc924924924925` consistency, and performs the serial head/stem
 abnormal callbacks. The owned graph ends at 222 vertices / 207 edges; a late missing
 second-head binding proves that the provisional first S write, edge, and abnormal changes
-all roll back together. `native_b15_b16_b17_carrier_commits_first_transaction_before_oracle_read`
+all roll back together. `native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read`
 opens B16/B17 rows only after the native result exists. This is still chula system 1,
-transaction 1, and graph/S-cell scope: sheet/book dirty state, B18/B19 resume, transaction
-2, and the Java-fixture glyph bootstrap remain outside the claim.
+transaction 1, and graph/S-cell scope: sheet/book dirty state, transaction 2 execution,
+and the Java-fixture glyph bootstrap remain outside the claim.
+
+The first transaction's owned authority now crosses B18 and B19 as well.
+`apply_native_stems_beam_outer_and_resume_transaction` derives the selected B's ordered
+V facts from native constructor/reachability products, performs the exact idempotent
+outer `setLinked(true)` against the same B cell B15/B16 mutated, folds B16's two sibling
+cells into the scheduler before walking, and reaches plan 152's RIGHT-side second
+frontier. A deliberately invalid post-outer scheduler state proves the cell shadow is
+not committed when resume fails. This establishes the honest transition into transaction
+2 from the 222/207 graph plus persistent B/S cells; it does not yet execute transaction
+2 from those authorities.
 
 **Slice 3 (BEAMS, ordinals 43-110), measured:** 48 hooks/beams interleaved in detection
 order (`HBHBHB...` -- the hook usually precedes its beam), then all 20 BeamGroupInters.
@@ -4535,8 +4545,8 @@ identity-free products today.
 
 Commit each slice separately after the full verification block above.
 
-1. Join the same owned SIG and persistent B/S-cell authorities through B18 and B19,
-   then prove transaction 2 is reached without rehydrating B16/B17 from Java rows.
+1. Execute transaction 2's B12-B17 chain from the carried 222/207 SIG and B/S cells,
+   deriving reuse and graph certificates from the owned graph rather than txn2 Java rows.
 2. Drive the chula-system-1 SIDES pass from owned state: carry B12 through B18,
    feed Boundary-16 sibling B-cell writes into Boundary-19 resume, and compare Java's
    32-transaction pass only after the driver returns. Do not claim native-products-only

@@ -21,6 +21,21 @@ use std::fmt;
 
 use crate::native_stems_beam_vlink_base_apply::NativeStemsBeamVLinkBaseApplyKey;
 use crate::native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef};
+use crate::{
+    native_stems_beam_builders::NativeStemsBeamBuilderSystem,
+    native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
+    native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
+    native_stems_beam_scheduler::{
+        NativeStemsBeamCompletedVLinkEvidence, NativeStemsBeamSchedulerResume,
+        NativeStemsBeamSchedulerSystem, resume_native_stems_beam_scheduler_after_transaction,
+    },
+    native_stems_beam_vlink_b_linker_flag::NativeStemsBeamVLinkBLinkerFlagTransaction,
+    native_stems_beam_vlink_head_links::NativeStemsBeamNativeHeadTransaction,
+    native_stems_beam_vlink_sibling_links::{
+        NativeStemsBeamNativeBLinkerCell, NativeStemsBeamNativeSiblingTransaction,
+    },
+    native_stems_beam_vlinkers::NativeStemsBeamVLinkerSystem,
+};
 
 /// The shared `BLinker.linked` cell as boundary 18 sees it: committed by
 /// boundary 15, target identity certified, `closed` never touched here.
@@ -71,6 +86,14 @@ pub struct NativeStemsBeamVLinkOuterBLinkerTransaction {
     pub outcome: NativeStemsBeamVLinkOuterBLinkerOutcome,
 }
 
+/// B18's idempotent write plus B19's scheduler result, derived from the same
+/// persistent cell authority which B15/B16 mutated.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamNativeOuterResumeTransaction {
+    pub outer: NativeStemsBeamVLinkOuterBLinkerTransaction,
+    pub resume: NativeStemsBeamSchedulerResume,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeStemsBeamVLinkOuterBLinkerError {
     Predecessor { phase: &'static str },
@@ -88,6 +111,115 @@ impl fmt::Display for NativeStemsBeamVLinkOuterBLinkerError {
 }
 
 impl Error for NativeStemsBeamVLinkOuterBLinkerError {}
+
+/// Join the owned B15-B17 carrier to B18 and B19. Every topology/query input
+/// is derived from native constructor/reachability products; the cell update
+/// is committed only if scheduler resume also succeeds.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_native_stems_beam_outer_and_resume_transaction(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
+    builders: &NativeStemsBeamBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    reachability: &NativeStemsBeamReachabilitySystem,
+    b15: &NativeStemsBeamVLinkBLinkerFlagTransaction,
+    b16: &NativeStemsBeamNativeSiblingTransaction,
+    b17: &NativeStemsBeamNativeHeadTransaction,
+    cells: &mut Vec<NativeStemsBeamNativeBLinkerCell>,
+) -> Result<NativeStemsBeamNativeOuterResumeTransaction, NativeStemsBeamVLinkOuterBLinkerError> {
+    if scheduler.system_id != vlinkers.system_id
+        || scheduler.system_id != builders.system_id
+        || scheduler.system_id != plans.system_id
+        || scheduler.system_id != reachability.system_id
+        || b15.key.system_id != scheduler.system_id
+        || b16.system_id != scheduler.system_id
+        || b17.system_id != scheduler.system_id
+        || b16.plan_ordinal != b15.key.plan.plan_ordinal
+        || b17.plan_ordinal != b15.key.plan.plan_ordinal
+        || b16.stem_identity != b17.stem_identity
+        || !b17.returned_true
+    {
+        return Err(NativeStemsBeamVLinkOuterBLinkerError::Predecessor {
+            phase: "native B18/B19 predecessor join",
+        });
+    }
+    let constructors = vlinkers
+        .constructors
+        .iter()
+        .flat_map(|constructor| &constructor.b_linkers)
+        .filter(|linker| linker.reference == b15.target_b_linker)
+        .collect::<Vec<_>>();
+    let [outer_b] = constructors.as_slice() else {
+        return Err(NativeStemsBeamVLinkOuterBLinkerError::InvalidTopology {
+            phase: "native B18 outer B cardinality",
+        });
+    };
+    let ordered_facts = outer_b
+        .v_linkers
+        .iter()
+        .map(|v| {
+            let inspections = reachability
+                .beam_inspections
+                .iter()
+                .flat_map(|beam| &beam.b_visits)
+                .flat_map(|visit| &visit.v_inspections)
+                .filter(|inspection| inspection.reference == v.reference)
+                .collect::<Vec<_>>();
+            let [inspection] = inspections.as_slice() else {
+                return Err(NativeStemsBeamVLinkOuterBLinkerError::InvalidTopology {
+                    phase: "native B18 V inspection cardinality",
+                });
+            };
+            Ok(NativeStemsBeamOuterVLinkerFact {
+                v_linker: v.reference,
+                has_target_linkers: !inspection.ordered_targets.is_empty(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut shadow_cells = cells.clone();
+    let matches = shadow_cells
+        .iter()
+        .enumerate()
+        .filter(|(_, cell)| cell.reference == b15.target_b_linker)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [cell_index] = matches.as_slice() else {
+        return Err(NativeStemsBeamVLinkOuterBLinkerError::InvalidTopology {
+            phase: "native B18 shared cell cardinality",
+        });
+    };
+    let native_cell = &mut shadow_cells[*cell_index];
+    let mut outer_cell = NativeStemsBeamOuterBLinkerCell {
+        target_b_linker: native_cell.reference,
+        linked: native_cell.linked,
+        closed: native_cell.closed,
+        committed_by_flag_boundary: Some(b15.key),
+    };
+    let outer = apply_native_stems_beam_vlink_outer_b_linker_transaction(
+        b15.key,
+        b17.returned_true,
+        b15.triggering_v_linker,
+        &ordered_facts,
+        &mut outer_cell,
+    )?;
+    native_cell.linked = outer_cell.linked;
+    native_cell.closed = outer_cell.closed;
+    let completed = NativeStemsBeamCompletedVLinkEvidence {
+        plan: b15.key.plan,
+        b_linker: b15.target_b_linker,
+        v_linker: b15.triggering_v_linker,
+        outer_b_linked_after: outer.linked_after,
+        sibling_linked_b_linkers: b16.assigned_b_linkers.clone(),
+    };
+    let resume = resume_native_stems_beam_scheduler_after_transaction(
+        scheduler, vlinkers, builders, plans, &completed,
+    )
+    .map_err(|_| NativeStemsBeamVLinkOuterBLinkerError::Predecessor {
+        phase: "native B19 scheduler resume",
+    })?;
+    *cells = shadow_cells;
+    Ok(NativeStemsBeamNativeOuterResumeTransaction { outer, resume })
+}
 
 /// Execute the outer `setLinked(true)` and record the loop-resumption facts.
 ///
