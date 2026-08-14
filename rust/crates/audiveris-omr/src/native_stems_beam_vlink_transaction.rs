@@ -54,6 +54,12 @@ pub enum NativeStemsBeamVLinkTransactionScope {
     SharedSheetFirstFrontier {
         system_id: usize,
     },
+    /// A later frontier in the same sheet/system chronology. The allocator,
+    /// glyph registry, line states, and `systemStems` entries are carried from
+    /// the preceding committed transaction rather than reconstructed.
+    SharedSheetSerial {
+        system_id: usize,
+    },
     IsolatedFreshSheetFrontier {
         system_id: usize,
     },
@@ -99,6 +105,63 @@ pub struct NativeStemsBeamSelectedGlyphBinding {
     pub canonical_alias: usize,
     pub glyph_id: i32,
     pub content: NativeStemsBeamFixedGlyphContent,
+}
+
+/// One page-bootstrap identity joined to exact native glyph content.
+///
+/// The bootstrap is deliberately separate from a transaction fixture. The
+/// port still does not own the page-wide `GlyphIndex` construction, so callers
+/// must disclose this input; once supplied, later frontiers select it by full
+/// bounds/weight/RunTable equality rather than by an oracle alias or hash.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamGlyphRegistryBootstrapEntry {
+    pub canonical_alias: usize,
+    pub glyph_id: i32,
+    pub content: NativeStemsBeamFixedGlyphContent,
+    pub active_in_index: bool,
+    pub strongly_retained: bool,
+}
+
+/// Explicit authority for promoting `systemStems` to a complete carried map.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamSystemStemAuthorityProof {
+    system_id: usize,
+    carried_stem_count: usize,
+}
+
+impl NativeStemsBeamSystemStemAuthorityProof {
+    /// Establish authority from the disclosed STEMS-entry fact that the map
+    /// was empty, joined to a dense native insertion history in `state`.
+    pub fn from_empty_stems_entry(
+        state: &NativeStemsBeamSystemStemTransactionState,
+        baseline_entry_count: usize,
+    ) -> Result<Self, NativeStemsBeamVLinkTransactionError> {
+        if baseline_entry_count != 0
+            || state
+                .known_stems
+                .iter()
+                .enumerate()
+                .any(|(identity, stem)| stem.stem_identity != identity)
+            || state.next_stem_identity != state.known_stems.len()
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::SystemStemInvariant {
+                phase: "complete-since-empty authority proof",
+            });
+        }
+        Ok(Self {
+            system_id: state.system_id,
+            carried_stem_count: state.known_stems.len(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamFrontierPreparation {
+    pub plan: NativeStemsBeamPlanRef,
+    pub v_linker: NativeStemsBeamVLinkerRef,
+    pub selected_glyphs: Vec<NativeStemsBeamBuilderGlyphRef>,
+    pub known_glyphs_added: usize,
+    pub line_state_added: bool,
 }
 
 /// Result of exhaustively comparing one exact candidate against every live
@@ -392,6 +455,168 @@ impl From<RunTableError> for NativeStemsBeamVLinkTransactionError {
     }
 }
 
+/// Prepare one later shared-sheet frontier from carried transaction state.
+///
+/// This is the production form of the state transition previously assembled
+/// by the transaction-2 integration test. It derives the V line state and
+/// selected glyph references from the scheduler/plan products, joins selected
+/// glyphs to a disclosed page bootstrap by exact content, and promotes the
+/// `systemStems` map only with an explicit completeness proof. The update is
+/// clone-and-swap: any missing/ambiguous bootstrap entry or invariant failure
+/// leaves `state` byte-for-byte unchanged.
+pub fn prepare_native_stems_beam_vlink_frontier_state(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    state: &mut NativeStemsBeamVLinkTransactionState,
+    glyph_bootstrap: &[NativeStemsBeamGlyphRegistryBootstrapEntry],
+    system_stems_proof: NativeStemsBeamSystemStemAuthorityProof,
+) -> Result<NativeStemsBeamFrontierPreparation, NativeStemsBeamVLinkTransactionError> {
+    if scheduler_system.system_id != plan_system.system_id
+        || state.system_stems.system_id != scheduler_system.system_id
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
+    }
+    validate_transaction_state(state)?;
+    if system_stems_proof.system_id != state.system_stems.system_id
+        || system_stems_proof.carried_stem_count != state.system_stems.known_stems.len()
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::SystemStemInvariant {
+            phase: "stale complete-since-empty authority proof",
+        });
+    }
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(
+                NativeStemsBeamVLinkTransactionError::NoAwaitingVLinkTransaction {
+                    system_id: scheduler_system.system_id,
+                },
+            );
+        }
+    };
+    let (attempt, start_v) = resolve_plan(plan_system, frontier.plan)?;
+    if frontier.v_linker != start_v
+        || frontier.outcome != NativeStemsBeamLinkPlanOutcome::ReadyForCreateStem
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::InvalidProduct {
+            system_id: scheduler_system.system_id,
+            phase: "serial frontier plan/V join",
+        });
+    }
+    let mut shadow = state.clone();
+    shadow.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetSerial {
+        system_id: scheduler_system.system_id,
+    };
+    if shadow
+        .line_states
+        .iter()
+        .any(|line| line.v_linker == frontier.v_linker)
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+            phase: "serial frontier duplicate V line state",
+        });
+    }
+    shadow.line_states.push(NativeStemsBeamVLinkLineState {
+        v_linker: frontier.v_linker,
+        stored_theoretical_line: attempt.stored_theoretical_line_before,
+        builder_line: attempt.initial_stem_line,
+        current_attachment_line: attempt
+            .attachment_aliases_stored_theoretical_line
+            .then_some(attempt.stored_theoretical_line_before),
+    });
+
+    let mut selected_glyphs = Vec::with_capacity(attempt.glyphs.len());
+    let mut known_glyphs_added = 0_usize;
+    for glyph in &attempt.glyphs {
+        let content = NativeStemsBeamFixedGlyphContent {
+            bounds: glyph.bounds,
+            weight: glyph.weight,
+            run_table: glyph.structural_key.run_table.clone(),
+        };
+        let matches = glyph_bootstrap
+            .iter()
+            .filter(|entry| entry.content == content)
+            .collect::<Vec<_>>();
+        let [entry] = matches.as_slice() else {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "serial frontier glyph bootstrap cardinality",
+            });
+        };
+        validate_content(&entry.content)?;
+        if entry.glyph_id <= 0
+            || entry.canonical_alias != entry.glyph_id as usize
+            || entry.glyph_id > shadow.glyph_index.persistent_ids.sheet_last_id
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "serial frontier glyph bootstrap identity",
+            });
+        }
+        let selected = NativeStemsBeamSelectedGlyphBinding {
+            reference: glyph.reference,
+            canonical_alias: entry.canonical_alias,
+            glyph_id: entry.glyph_id,
+            content: content.clone(),
+        };
+        let existing_selected = shadow
+            .selected_glyph_bindings
+            .iter()
+            .filter(|binding| binding.reference == glyph.reference)
+            .collect::<Vec<_>>();
+        match existing_selected.as_slice() {
+            [] => shadow.selected_glyph_bindings.push(selected),
+            [existing] if **existing == selected => {}
+            _ => {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "serial frontier selected glyph binding join",
+                });
+            }
+        }
+        let known = shadow
+            .glyph_index
+            .known_canonical_glyphs
+            .iter()
+            .filter(|known| known.content == content)
+            .collect::<Vec<_>>();
+        match known.as_slice() {
+            [] => {
+                shadow.glyph_index.known_canonical_glyphs.push(
+                    NativeStemsBeamKnownCanonicalGlyph {
+                        canonical_alias: entry.canonical_alias,
+                        glyph_id: entry.glyph_id,
+                        content,
+                        active_in_index: entry.active_in_index,
+                        strongly_retained: entry.strongly_retained,
+                    },
+                );
+                known_glyphs_added += 1;
+            }
+            [known]
+                if known.canonical_alias == entry.canonical_alias
+                    && known.glyph_id == entry.glyph_id
+                    && known.active_in_index == entry.active_in_index
+                    && known.strongly_retained == entry.strongly_retained => {}
+            _ => {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "serial frontier known glyph bootstrap join",
+                });
+            }
+        }
+        selected_glyphs.push(glyph.reference);
+    }
+    shadow.glyph_index.exhaustive_lookup = None;
+    shadow.system_stems.exhaustive_lookup = None;
+    shadow.system_stems.authority = NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline;
+    validate_transaction_state(&shadow)?;
+    *state = shadow;
+    Ok(NativeStemsBeamFrontierPreparation {
+        plan: frontier.plan,
+        v_linker: frontier.v_linker,
+        selected_glyphs,
+        known_glyphs_added,
+        line_state_added: true,
+    })
+}
+
 impl From<NativeStemGeometryError> for NativeStemsBeamVLinkTransactionError {
     fn from(source: NativeStemGeometryError) -> Self {
         Self::StemChecker(source)
@@ -424,6 +649,8 @@ pub fn apply_native_stems_beam_vlink_create_stem_transaction(
     match state.scope {
         NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: first }
             if first == system_id && first == 1 => {}
+        NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: serial }
+            if serial == system_id => {}
         NativeStemsBeamVLinkTransactionScope::IsolatedFreshSheetFrontier {
             system_id: isolated,
         } if isolated == system_id => {}

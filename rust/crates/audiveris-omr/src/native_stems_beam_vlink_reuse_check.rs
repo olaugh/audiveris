@@ -964,6 +964,9 @@ fn validate_committed_transaction_state(
         crate::native_stems_beam_vlink_transaction::NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier {
             system_id,
         } => system_id == transaction.system_id && system_id == 1,
+        crate::native_stems_beam_vlink_transaction::NativeStemsBeamVLinkTransactionScope::SharedSheetSerial {
+            system_id,
+        } => system_id == transaction.system_id,
         crate::native_stems_beam_vlink_transaction::NativeStemsBeamVLinkTransactionScope::IsolatedFreshSheetFrontier {
             system_id,
         } => system_id == transaction.system_id,

@@ -27,7 +27,10 @@ use audiveris_omr::native_stems_beam_vlink_outer_b_linker::{
     apply_native_stems_beam_vlink_outer_b_linker_transaction,
 };
 use audiveris_omr::native_stems_beam_vlink_transaction::{
-    NativeStemsBeamCreateStemDisposition, NativeStemsBeamGlyphRegistrationAction,
+    NativeStemsBeamCreateStemDisposition, NativeStemsBeamFixedGlyphContent,
+    NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamGlyphRegistryBootstrapEntry,
+    NativeStemsBeamSystemStemAuthorityProof, apply_native_stems_beam_vlink_create_stem_transaction,
+    prepare_native_stems_beam_vlink_frontier_state,
 };
 /// The beam corpus in its usual order. The gate grades every sheet whose
 /// fixtures are installed and tolerates a gap only at the end, so a sheet that
@@ -446,10 +449,6 @@ fn second_transaction_from_carried_state_reproduces_java() {
     let system_id = 1;
     let index = 0;
 
-    let base_text = txn2_text("base-apply", key);
-    let create_text = txn2_text("create-stem", key);
-    let reuse_text = txn2_text("reuse-check", key);
-
     let page = b15_hydration::native_predecessor_page(image);
 
     // Transaction 1, hydrated the ordinary way from its frozen fixtures.
@@ -509,11 +508,9 @@ fn second_transaction_from_carried_state_reproduces_java() {
     };
     println!("second frontier plan {}", second.plan.plan_ordinal);
 
-    // Seed the second V linker's line state from the plan matrix. The
-    // hydration builds this purely from the plan attempt --
-    // stored_theoretical_line_before, initial_stem_line and the attachment
-    // alias flag -- with no Java row involved, so a chained transaction can
-    // derive it from the typed product rather than a fixture.
+    // Resolve the page-level glyph bootstrap by exact native content. This is
+    // the one disclosed input the port still needs because it does not yet own
+    // construction of the page-wide GlyphIndex.
     let mut state = carried;
     let attempt = page.plans.systems[index]
         .builders
@@ -526,16 +523,6 @@ fn second_transaction_from_carried_state_reproduces_java() {
                 .find(|attempt| attempt.stem_profile == second.plan.stem_profile)
         })
         .expect("second frontier has a plan attempt");
-    state.line_states.push(
-        audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamVLinkLineState {
-            v_linker: second.v_linker,
-            stored_theoretical_line: attempt.stored_theoretical_line_before,
-            builder_line: attempt.initial_stem_line,
-            current_attachment_line: attempt
-                .attachment_aliases_stored_theoretical_line
-                .then_some(attempt.stored_theoretical_line_before),
-        },
-    );
     // Bootstrap the page's glyph registry, the way a self-driving chain would:
     // once per page, from the Java dump, rather than once per transaction from
     // a fixture. The join is by content -- both sides compute the same run
@@ -576,82 +563,77 @@ fn second_transaction_from_carried_state_reproduces_java() {
         })
         .collect::<Vec<_>>();
     println!("plan glyphs resolved against the registry: {identities:?}");
-    for (glyph, (alias, id, _active)) in attempt.glyphs.iter().zip(&identities) {
-        state.selected_glyph_bindings.push(
-            audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamSelectedGlyphBinding {
-                reference: glyph.reference,
+    let bootstrap = attempt
+        .glyphs
+        .iter()
+        .zip(&identities)
+        .map(
+            |(glyph, (alias, id, active))| NativeStemsBeamGlyphRegistryBootstrapEntry {
                 canonical_alias: *alias,
                 glyph_id: *id,
-                content:
-                    audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-                        bounds: glyph.bounds,
-                        weight: glyph.weight,
-                        run_table: glyph.structural_key.run_table.clone(),
-                    },
-            },
-        );
-    }
-
-    // The registry itself, not just the binding. `prepare_registration` decides
-    // reuse by searching `known_canonical_glyphs` for matching content, and
-    // only falls back to Java's exhaustive scan when nothing matches. Seeding
-    // the page's glyphs here is what a bootstrapped chain would do once.
-    for (glyph, (alias, id, active)) in attempt.glyphs.iter().zip(&identities) {
-        state.glyph_index.known_canonical_glyphs.push(
-            audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
-                canonical_alias: *alias,
-                glyph_id: *id,
-                content:
-                    audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-                        bounds: glyph.bounds,
-                        weight: glyph.weight,
-                        run_table: glyph.structural_key.run_table.clone(),
-                    },
+                content: NativeStemsBeamFixedGlyphContent {
+                    bounds: glyph.bounds,
+                    weight: glyph.weight,
+                    run_table: glyph.structural_key.run_table.clone(),
+                },
                 active_in_index: *active,
-                // Not because the active index retains strongly -- it does not.
-                // Both `GlyphIndex.originals` and the active `BasicIndex.entities`
-                // hold `WeakGlyph`, so in a collecting JVM either entry can be
-                // cleared, and a cleared entry fails equals() and is re-registered
-                // under a fresh persistent id. Measured: under G1 the same command
-                // yields lastId 3307/3305/3315 across three runs, all of which
-                // diverge from EpsilonGC's 3128.
-                //
-                // What makes this value correct is that the oracle runs under
-                // -XX:+UseEpsilonGC, where no collection can occur, so nothing is
-                // ever cleared and every registered glyph stays retained. The
-                // port's contract is therefore no-collection semantics, not a
-                // claim about reference strength.
+                // The frozen probe uses EpsilonGC, so registered weak entries are
+                // not collected during this chronology.
                 strongly_retained: *active,
             },
-        );
-    }
+        )
+        .collect::<Vec<_>>();
+    let before_prepare = state.clone();
+    let authority =
+        NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(&state.system_stems, 0)
+            .expect("carried systemStems completeness proof");
+    let preparation = prepare_native_stems_beam_vlink_frontier_state(
+        &scheduler,
+        &page.plans.systems[index],
+        &mut state,
+        &bootstrap,
+        authority,
+    )
+    .expect("prepare carried transaction 2");
+    assert_eq!(preparation.plan, second.plan);
+    assert_eq!(preparation.v_linker, second.v_linker);
+    assert_eq!(preparation.selected_glyphs.len(), 1);
+    assert!(preparation.line_state_added);
 
-    // systemStems begins empty at STEMS -- the frozen create-stem baseline
-    // records `systemStems 0` -- and only these transactions insert into it, so
-    // a chain that has carried every insertion may treat its own misses as
-    // absence rather than asking Java again.
-    state.system_stems.authority =
-        audiveris_omr::native_stems_beam_vlink_transaction::NativeStemsBeamRegistryAuthority
-            ::CompleteSinceEmptyBaseline;
-
-    let outcome = audiveris_omr::native_stems_beam_vlink_transaction
-        ::apply_native_stems_beam_vlink_create_stem_transaction(
+    // Ambiguous bootstrap evidence is rejected atomically.
+    let mut invalid_state = before_prepare.clone();
+    let mut ambiguous = bootstrap.clone();
+    ambiguous.push(bootstrap[0].clone());
+    assert!(
+        prepare_native_stems_beam_vlink_frontier_state(
             &scheduler,
-            &page.beam_builders.systems[index],
             &page.plans.systems[index],
-            &mut state,
-            &b15_hydration::checker_context_for_page(&page),
-        );
+            &mut invalid_state,
+            &ambiguous,
+            authority,
+        )
+        .is_err()
+    );
+    assert_eq!(invalid_state, before_prepare);
+
+    let outcome = apply_native_stems_beam_vlink_create_stem_transaction(
+        &scheduler,
+        &page.beam_builders.systems[index],
+        &page.plans.systems[index],
+        &mut state,
+        &b15_hydration::checker_context_for_page(&page),
+    );
 
     let transaction = outcome.unwrap_or_else(|error| {
-        panic!(
-            "self-drive blocked at {error:?} (txn2 fixture inputs deliberately unused: \
-             base {} bytes, create {} bytes, reuse {} bytes)",
-            base_text.len(),
-            create_text.len(),
-            reuse_text.len(),
-        )
+        panic!("self-drive blocked at {error:?} (txn2 fixture inputs deliberately unopened)",)
     });
+
+    // The transaction-2 oracle is expected-only: no family file is opened
+    // until the production preparation and B12 call have both returned.
+    let base_text = txn2_text("base-apply", key);
+    let create_text = txn2_text("create-stem", key);
+    let reuse_text = txn2_text("reuse-check", key);
+    assert!(!base_text.is_empty() && !reuse_text.is_empty());
 
     // The whole point: the answer the chain reached on its own must be the
     // answer Java gave. Anything less would make self-drive a cheaper way of
