@@ -641,12 +641,16 @@ fn second_transaction_from_carried_state_reproduces_java() {
     // the carried 222/207 mutation state becomes load-bearing in B14.
     let sig = page
         .sig
+        .as_ref()
+        .expect("native page SIG")
         .systems
         .iter()
         .find(|sig| sig.system_id == system_id)
         .expect("native system SIG");
     let bindings = page
         .sig
+        .as_ref()
+        .expect("native page SIG")
         .bindings
         .iter()
         .find(|bindings| bindings.system_id == system_id)

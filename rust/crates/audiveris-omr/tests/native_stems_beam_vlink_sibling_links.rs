@@ -6225,6 +6225,27 @@ fn native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read() {
             .collect::<Vec<_>>(),
         vec!["beam:2:b:0", "beam:3:b:0"]
     );
+    let second_outer_resume = apply_native_stems_beam_outer_and_resume_transaction(
+        second_scheduler,
+        &hydrated.vlinkers,
+        &hydrated.builder,
+        &hydrated.plans,
+        &hydrated.reachability,
+        &second_flag,
+        &second_siblings,
+        &second_heads,
+        &mut second_cells,
+    )
+    .expect("native transaction-2 B18/B19");
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(third) =
+        &second_outer_resume.resume.status
+    else {
+        panic!("transaction 2 did not reach a third frontier");
+    };
+    assert_eq!(third.plan.plan_ordinal, 618);
+    let third_alias = second_b_alias(third.b_linker);
+    assert_eq!(third_alias, "beam:22:b:0");
+    assert_eq!(third.vertical_side, NativeStemVerticalSide::Top);
 
     let txn2_sibling_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-txn2-sibling-links-chula.txt"),
@@ -6254,6 +6275,16 @@ fn native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read() {
     assert!(txn2_head_result.contains(
         "headEntries 2 duplicateEntries 0 relationsInserted 2 sWriteCount 2 sValueChangeCount 2 consistencyWriteCount 2 headAbnormalChangeCount 2 stemAbnormalChangeCount 1 dirtyCascadeCount 3"
     ));
+    let sides_pass_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
+    )
+    .expect("expected-only SIDES pass");
+    assert!(sides_pass_text.lines().any(|line| {
+        line.starts_with("stemsbeamsidesloopstep ")
+            && line.contains(
+                " system 1 step 2 beamSig 22 bAlias beam:22:b:0 vSide TOP plan 618 stemProfile 4 linked true",
+            )
+    }));
 
     let txn2_base_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-txn2-base-apply-chula.txt"),

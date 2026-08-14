@@ -753,10 +753,11 @@ pub(super) struct NativePredecessorPage {
     pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
     pub(super) plans: NativeStemsBeamLinkPlanRecognition,
     pub(super) scheduler: NativeStemsBeamSchedulerRecognition,
-    // Only later-carriage gates query this product; the same shared hydrator
-    // is compiled into older boundary gates that intentionally stop earlier.
+    // The historical all-page B15/B17 replay does not require an assembled
+    // SIG, and some wider systems still lack complete native BEAMS groups.
+    // Later-carriage gates require this explicitly and fail if it is absent.
     #[allow(dead_code)]
-    pub(super) sig: NativeSigRecognition,
+    pub(super) sig: Option<NativeSigRecognition>,
 }
 
 pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
@@ -773,8 +774,7 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         .unwrap_or_else(|error| panic!("{image}: LEDGERS failed: {error}"));
     let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
         .unwrap_or_else(|error| panic!("{image}: HEADS failed: {error}"));
-    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads)
-        .unwrap_or_else(|error| panic!("{image}: SIG assembly failed: {error}"));
+    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads).ok();
     let corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
         .unwrap_or_else(|error| panic!("{image}: STEMS corners failed: {error}"));
     let head_seeds = materialize_native_stems_head_seeds(&grid, &stem_seeds, &corners)
