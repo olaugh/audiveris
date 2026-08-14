@@ -276,6 +276,26 @@ pub enum NativeStemsBeamInterIndexLookup {
     },
 }
 
+/// Disclosed page-wide identity facts that remain outside the native SIG.
+///
+/// The native graph and stump products remain authoritative for the beam's
+/// source, vertex, group, removal, and abnormal state. This bootstrap supplies
+/// only the sheet-global identity fields required by the legacy B14 verifier.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeStemsBeamBeamInterIndexBootstrapEntry {
+    pub source: NativeStemsBeamSource,
+    pub inter_id: i32,
+    pub index_ordinal: usize,
+    pub vip: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeStemsBeamVLinkBaseRolloverAuthority<'a> {
+    pub stump_system: &'a NativeStemsBeamStumpSystem,
+    pub beam_inter_index: &'a [NativeStemsBeamBeamInterIndexBootstrapEntry],
+    pub configured_inter_vip_ids: &'a [i32],
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeStemsBeamNextPersistentIdLookup {
     NotRead,
@@ -569,16 +589,19 @@ pub struct NativeStemsBeamVLinkBaseApplyState {
 ///
 /// The prior InterIndex lineage is folded into a fresh baseline, while SIG
 /// counts and provenance are recomputed from the owned graph. This bounded
-/// form intentionally requires the same base beam as the prior transaction;
-/// changing beams needs a page-wide native InterIndex identity bootstrap.
+/// Beam identity is resolved from an explicit page-wide InterIndex bootstrap;
+/// every graph, group, and runtime fact is still recomputed from native state.
 pub fn roll_native_stems_beam_vlink_base_apply_state(
     prior: &NativeStemsBeamVLinkBaseApplyState,
     transaction_state: &NativeStemsBeamVLinkTransactionState,
     reuse_check: &NativeStemsBeamVLinkReuseCheck,
     sig: &NativeSigSystem,
     bindings: &NativeSigSystemBindings,
-    configured_inter_vip_ids: &[i32],
+    authority: NativeStemsBeamVLinkBaseRolloverAuthority<'_>,
 ) -> Result<NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyError> {
+    let stump_system = authority.stump_system;
+    let beam_inter_index_bootstrap = authority.beam_inter_index;
+    let configured_inter_vip_ids = authority.configured_inter_vip_ids;
     sig.validate_integrity()
         .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover SIG integrity",
@@ -595,6 +618,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         || prior.inter_index.appended_entries.len() != 1
         || transaction_state.system_stems.system_id != sig.system_id
         || reuse_check.system_id != sig.system_id
+        || stump_system.system_id != sig.system_id
     {
         return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover predecessor",
@@ -605,11 +629,45 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
     else {
         return Err(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady);
     };
-    if relation.beam != prior.sig.beam.source {
-        return Err(NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
-            phase: "native rollover changed base beam",
+    for (index, entry) in beam_inter_index_bootstrap.iter().enumerate() {
+        if entry.inter_id <= 0
+            || entry.index_ordinal >= prior.inter_index.baseline_entry_count
+            || beam_inter_index_bootstrap[..index].iter().any(|other| {
+                other.source == entry.source
+                    || other.inter_id == entry.inter_id
+                    || other.index_ordinal == entry.index_ordinal
+            })
+        {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover beam InterIndex bootstrap",
+            });
+        }
+    }
+    if stump_system.beams_by_abscissa.iter().any(|beam| {
+        beam_inter_index_bootstrap
+            .iter()
+            .filter(|entry| entry.source == beam.source)
+            .count()
+            != 1
+    }) || beam_inter_index_bootstrap.len() != stump_system.beams_by_abscissa.len()
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam InterIndex bootstrap coverage",
         });
     }
+    let stump_beam = stump_system
+        .beams_by_abscissa
+        .iter()
+        .find(|beam| beam.source == relation.beam)
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover stump beam",
+        })?;
+    let beam_identity = beam_inter_index_bootstrap
+        .iter()
+        .find(|entry| entry.source == relation.beam)
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover selected beam InterIndex identity",
+        })?;
     let beam_vertex = bindings.beam_vertices.get(&relation.beam).copied().ok_or(
         NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover beam binding",
@@ -713,7 +771,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         .join("\n");
     let group_vertex = bindings
         .beam_group_vertices
-        .get(&prior.sig.beam.stump_group_ordinal)
+        .get(&stump_beam.group_ordinal)
         .copied()
         .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover beam group binding",
@@ -743,14 +801,21 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let mut beam_runtime = prior.sig.beam.clone();
-    beam_runtime.sig_vertex_identity = Some(beam_vertex.0);
-    beam_runtime.removed = beam.removed;
-    beam_runtime.abnormal = beam.abnormal;
-    beam_runtime.beam_group = Some(NativeStemsBeamGroupRuntimeState {
-        sig_vertex_ordinal: group_vertex.0,
-        state_sha256: sha256_hex(group_state.as_bytes()),
-    });
+    let beam_runtime = NativeStemsBeamVLinkBeamRuntimeState {
+        source: relation.beam,
+        sig_vertex_identity: Some(beam_vertex.0),
+        inter_id: beam_identity.inter_id,
+        inter_indexed: true,
+        sig_system_id: sig.system_id,
+        removed: beam.removed,
+        vip: beam_identity.vip,
+        abnormal: beam.abnormal,
+        stump_group_ordinal: stump_beam.group_ordinal,
+        beam_group: Some(NativeStemsBeamGroupRuntimeState {
+            sig_vertex_ordinal: group_vertex.0,
+            state_sha256: sha256_hex(group_state.as_bytes()),
+        }),
+    };
     let certificate = project_native_stems_beam_vlink_base_apply_certificate(
         sig,
         bindings,
@@ -764,7 +829,15 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         inter_index: NativeStemsBeamInterIndexApplyState {
             baseline_entry_count,
             baseline_provenance_sha256: sha256_hex(inter_lineage.as_bytes()),
-            beam_lookup: prior.inter_index.beam_lookup,
+            beam_lookup: NativeStemsBeamInterIndexLookup::PresentSameObject {
+                index_ordinal: beam_identity.index_ordinal,
+                inter_id: beam_identity.inter_id,
+                vip: beam_identity.vip,
+                object_matches: 1,
+                inter_id_matches: 1,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+            },
             stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
             next_id_lookup: NativeStemsBeamNextPersistentIdLookup::VacantAndNotVip {
                 persistent_id: next_id,

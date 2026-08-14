@@ -1,0 +1,52 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) beam InterIndex authority.
+# schema: stems-beam-inter-index-v1
+# InterIndex ordinals are the sorted-ID getEntities iteration order at HEADS.
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 0 vertex 43 interId 905 indexOrdinal 113 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 1 vertex 44 interId 907 indexOrdinal 114 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 2 vertex 45 interId 908 indexOrdinal 115 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 3 vertex 46 interId 910 indexOrdinal 116 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 4 vertex 47 interId 911 indexOrdinal 117 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 5 vertex 48 interId 913 indexOrdinal 118 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 6 vertex 49 interId 914 indexOrdinal 119 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 7 vertex 50 interId 916 indexOrdinal 120 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 8 vertex 51 interId 917 indexOrdinal 121 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 9 vertex 52 interId 919 indexOrdinal 122 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 10 vertex 53 interId 920 indexOrdinal 123 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 11 vertex 54 interId 922 indexOrdinal 124 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 12 vertex 55 interId 923 indexOrdinal 125 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 13 vertex 56 interId 925 indexOrdinal 126 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 14 vertex 57 interId 927 indexOrdinal 127 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 15 vertex 58 interId 928 indexOrdinal 128 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 16 vertex 59 interId 930 indexOrdinal 129 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 17 vertex 60 interId 932 indexOrdinal 130 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 18 vertex 61 interId 934 indexOrdinal 131 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 19 vertex 62 interId 935 indexOrdinal 132 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 20 vertex 63 interId 937 indexOrdinal 133 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 21 vertex 64 interId 939 indexOrdinal 134 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 22 vertex 65 interId 941 indexOrdinal 135 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 23 vertex 66 interId 943 indexOrdinal 136 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 24 vertex 67 interId 945 indexOrdinal 137 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 25 vertex 68 interId 947 indexOrdinal 138 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 26 vertex 69 interId 948 indexOrdinal 139 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 27 vertex 70 interId 950 indexOrdinal 140 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 28 vertex 71 interId 951 indexOrdinal 141 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 29 vertex 72 interId 953 indexOrdinal 142 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 30 vertex 73 interId 955 indexOrdinal 143 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 31 vertex 74 interId 957 indexOrdinal 144 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 32 vertex 75 interId 959 indexOrdinal 145 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 33 vertex 76 interId 961 indexOrdinal 146 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 34 vertex 77 interId 963 indexOrdinal 147 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 35 vertex 78 interId 965 indexOrdinal 148 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 36 vertex 79 interId 967 indexOrdinal 149 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 37 vertex 80 interId 969 indexOrdinal 150 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 38 vertex 81 interId 971 indexOrdinal 151 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 39 vertex 82 interId 973 indexOrdinal 152 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 40 vertex 83 interId 975 indexOrdinal 153 vip false class BeamInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 41 vertex 84 interId 977 indexOrdinal 154 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 42 vertex 85 interId 979 indexOrdinal 155 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 43 vertex 86 interId 981 indexOrdinal 156 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 44 vertex 87 interId 983 indexOrdinal 157 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 45 vertex 88 interId 985 indexOrdinal 158 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 46 vertex 89 interId 987 indexOrdinal 159 vip false class BeamHookInter
+stemsbeaminterindexentry chula.png#1 system 1 beamSig 47 vertex 90 interId 989 indexOrdinal 160 vip false class BeamHookInter
+stemsbeaminterindexsummary chula.png#1 system 1 interIndexEntries 639 beams 48 rowsSha256 1550d098eadde838a3b66ec0a3e12dfdbe121189829a1718a78e95295622038b

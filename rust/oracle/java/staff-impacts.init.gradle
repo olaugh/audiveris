@@ -194,6 +194,25 @@ gradle.projectsEvaluated {
                 }
     }
 
+    app.tasks.register('beamInterIndexProbe', JavaExec) {
+        dependsOn 'compileStaffImpactsProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.BeamInterIndexProbe'
+        workingDir = app.projectDir
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        // -PbeamInterIndexTargets="data/examples/chula.png:1:1"
+        args = (app.findProperty('beamInterIndexTargets') ?: '').toString().split(/\s+/)
+                .findAll { !it.isEmpty() }
+                .collect { target ->
+                    def bits = target.split(':')
+                    def file = new File(bits[0])
+                    def resolved = file.isAbsolute() ? file
+                            : new File(gradle.rootProject.projectDir, bits[0])
+                    ([resolved.absolutePath] + bits[1..-1]).join(':')
+                }
+    }
+
     // Live omrscope mode deliberately remains a separate task and property so
     // the long-standing `sigProbe` command keeps its exact stdout contract.
     // SigProbe receives the explicit leading switch and frames the same

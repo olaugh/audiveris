@@ -617,6 +617,45 @@ pub fn prepare_native_stems_beam_vlink_frontier_state(
     })
 }
 
+/// Materialize the current frontier's selected glyph candidate without
+/// mutating the registry.
+///
+/// A serial carrier uses this after selected component bindings are prepared
+/// and before installing the disclosed page-wide exhaustive equality result
+/// needed by a compound candidate.
+pub fn materialize_native_stems_beam_frontier_candidate(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    state: &NativeStemsBeamVLinkTransactionState,
+) -> Result<NativeStemsBeamFixedGlyphContent, NativeStemsBeamVLinkTransactionError> {
+    if scheduler_system.system_id != plan_system.system_id
+        || state.system_stems.system_id != scheduler_system.system_id
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
+    }
+    validate_transaction_state(state)?;
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(
+                NativeStemsBeamVLinkTransactionError::NoAwaitingVLinkTransaction {
+                    system_id: scheduler_system.system_id,
+                },
+            );
+        }
+    };
+    let (attempt, start_v) = resolve_plan(plan_system, frontier.plan)?;
+    if frontier.v_linker != start_v
+        || frontier.outcome != NativeStemsBeamLinkPlanOutcome::ReadyForCreateStem
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::InvalidProduct {
+            system_id: scheduler_system.system_id,
+            phase: "frontier candidate plan/V join",
+        });
+    }
+    Ok(materialize_candidate(attempt, state)?.content)
+}
+
 impl From<NativeStemGeometryError> for NativeStemsBeamVLinkTransactionError {
     fn from(source: NativeStemGeometryError) -> Self {
         Self::StemChecker(source)
