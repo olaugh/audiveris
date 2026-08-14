@@ -762,8 +762,10 @@ disclosed page GlyphIndex bootstrap, and a private dense-history token establish
 then B12 reaches ReuseActive / CreatedChecked before any txn2 family oracle is opened.
 The bounded B13 projector also validates native head bindings and reads the two plan-152
 S cells first; because both are false, it records exact `NotRead` graph lookups and reaches
-AllUnlinked / ReadyBeforeSigMutation without oracle rows. Linked-S scans and native B14-B17
-carriage from the 222/207 graph remain next.
+AllUnlinked / ReadyBeforeSigMutation without oracle rows. A native rollover then folds the
+prior InterIndex append, recomputes the 222/207 graph baseline, and commits transaction-2
+B14 as Stem vertex 222 plus RIGHT BeamStem edge 207 before comparing the frozen result.
+Linked-S scans and native B15-B17 carriage remain next.
 Broader pre-STEMS SIG assembly remains bounded where later corpus
 systems still lack complete BEAMS group products.
 
@@ -835,7 +837,7 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Graph-roll transaction 2 B14 and carry B14-B17 from the owned 222/207 graph and persistent B/S cells without txn2 Java rows; extend B13 to linked-S scans needed by later frontiers.
+1. Carry transaction 2 B15-B17 from the owned 223/208 graph and persistent B/S cells without txn2 Java rows; extend B13 to linked-S scans needed by later frontiers.
 2. Drive chula system 1's full 32-transaction SIDES pass from owned state, then replace the remaining fixture-backed glyph-registry bootstrap and continue through STUMPS and competing-hook removal.
 3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.

@@ -564,6 +564,245 @@ pub struct NativeStemsBeamVLinkBaseApplyState {
     pub committed: Option<NativeStemsBeamVLinkBaseApplyKey>,
 }
 
+/// Roll a committed one-shot B14 state onto the next native scheduler
+/// frontier without importing a transaction-2 B14 fixture.
+///
+/// The prior InterIndex lineage is folded into a fresh baseline, while SIG
+/// counts and provenance are recomputed from the owned graph. This bounded
+/// form intentionally requires the same base beam as the prior transaction;
+/// changing beams needs a page-wide native InterIndex identity bootstrap.
+pub fn roll_native_stems_beam_vlink_base_apply_state(
+    prior: &NativeStemsBeamVLinkBaseApplyState,
+    transaction_state: &NativeStemsBeamVLinkTransactionState,
+    reuse_check: &NativeStemsBeamVLinkReuseCheck,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    configured_inter_vip_ids: &[i32],
+) -> Result<NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyError> {
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover bindings",
+        }
+    })?;
+    if prior.committed.is_none()
+        || prior.certificate.is_some()
+        || prior.sig.appended_vertices.len() != 1
+        || prior.sig.appended_relations.len() != 1
+        || prior.inter_index.appended_entries.len() != 1
+        || transaction_state.system_stems.system_id != sig.system_id
+        || reuse_check.system_id != sig.system_id
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor",
+        });
+    }
+    let NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { relation } =
+        &reuse_check.outcome
+    else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady);
+    };
+    if relation.beam != prior.sig.beam.source {
+        return Err(NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+            phase: "native rollover changed base beam",
+        });
+    }
+    let beam_vertex = bindings.beam_vertices.get(&relation.beam).copied().ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam binding",
+        },
+    )?;
+    let beam =
+        sig.vertex(beam_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover live beam",
+            })?;
+    if !matches!(
+        beam.kind,
+        NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam
+    ) {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam kind",
+        });
+    }
+    let final_stem = reuse_check
+        .final_stem
+        .as_ref()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady)?;
+    if final_stem.inter_id.is_some()
+        || final_stem.sig_attached
+        || bindings
+            .stem_vertices
+            .contains_key(&final_stem.stem_identity)
+        || transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .filter(|stem| stem.stem_identity == final_stem.stem_identity)
+            .count()
+            != 1
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover fresh stem",
+        });
+    }
+    let ids = transaction_state.glyph_index.persistent_ids;
+    let next_id = ids.sheet_last_id.checked_add(1).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+            phase: "native rollover persistent ID overflow",
+        },
+    )?;
+    if configured_inter_vip_ids
+        .iter()
+        .enumerate()
+        .any(|(index, id)| *id <= 0 || configured_inter_vip_ids[..index].contains(id))
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover configured Inter VIP IDs",
+        });
+    }
+    if configured_inter_vip_ids.contains(&next_id) {
+        return Err(NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+            phase: "native rollover next ID configured VIP",
+        });
+    }
+    let inter_id_matches = transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .filter(|stem| stem.inter_id == Some(next_id))
+        .count();
+    let glyph_matches = transaction_state
+        .glyph_index
+        .known_canonical_glyphs
+        .iter()
+        .filter(|glyph| glyph.glyph_id == next_id)
+        .count();
+    if inter_id_matches != 0 || glyph_matches != 0 {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover next persistent ID collision",
+        });
+    }
+    let baseline_entry_count = prior
+        .inter_index
+        .baseline_entry_count
+        .checked_add(prior.inter_index.appended_entries.len())
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover InterIndex count overflow",
+        })?;
+    let inter_lineage = format!(
+        "native-inter-index-rollover-v1:{}:{}:{:?}",
+        prior.inter_index.baseline_provenance_sha256,
+        prior.inter_index.baseline_entry_count,
+        prior.inter_index.appended_entries
+    );
+    let vertex_lineage = sig
+        .vertices
+        .iter()
+        .map(|vertex| format!("{vertex:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let edge_lineage = sig
+        .edges
+        .iter()
+        .map(|edge| format!("{edge:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let group_vertex = bindings
+        .beam_group_vertices
+        .get(&prior.sig.beam.stump_group_ordinal)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam group binding",
+        })?;
+    let group =
+        sig.vertex(group_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover live beam group",
+            })?;
+    if group.kind != NativeSigInterKind::BeamGroup {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam group kind",
+        });
+    }
+    let group_state = sig
+        .outgoing_edges(group_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover beam group query",
+        })?
+        .iter()
+        .map(|edge| {
+            let member = sig.vertex(edge.target).expect("validated active endpoint");
+            format!(
+                "{}:{}:{}:{}",
+                edge.ordinal, edge.target, member.active, member.abnormal
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut beam_runtime = prior.sig.beam.clone();
+    beam_runtime.sig_vertex_identity = Some(beam_vertex.0);
+    beam_runtime.removed = beam.removed;
+    beam_runtime.abnormal = beam.abnormal;
+    beam_runtime.beam_group = Some(NativeStemsBeamGroupRuntimeState {
+        sig_vertex_ordinal: group_vertex.0,
+        state_sha256: sha256_hex(group_state.as_bytes()),
+    });
+    Ok(NativeStemsBeamVLinkBaseApplyState {
+        transaction_state: transaction_state.clone(),
+        inter_index: NativeStemsBeamInterIndexApplyState {
+            baseline_entry_count,
+            baseline_provenance_sha256: sha256_hex(inter_lineage.as_bytes()),
+            beam_lookup: prior.inter_index.beam_lookup,
+            stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
+            next_id_lookup: NativeStemsBeamNextPersistentIdLookup::VacantAndNotVip {
+                persistent_id: next_id,
+                inter_id_matches: 0,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+                configured_vip_matches: configured_inter_vip_ids
+                    .iter()
+                    .filter(|id| **id == next_id)
+                    .count(),
+            },
+            appended_entries: Vec::new(),
+        },
+        sig: NativeStemsBeamSigApplyState {
+            system_id: sig.system_id,
+            baseline_vertex_count: sig.vertices.len(),
+            baseline_vertex_provenance_sha256: sha256_hex(vertex_lineage.as_bytes()),
+            baseline_relation_count: sig.edges.len(),
+            baseline_relation_provenance_sha256: sha256_hex(edge_lineage.as_bytes()),
+            beam_vertex: NativeStemsBeamSigVertexLookup::PresentSameObject {
+                vertex_ordinal: beam_vertex.0,
+                sig_vertex_identity: beam_vertex.0,
+                inter_id: beam_runtime.inter_id,
+                object_matches: 1,
+            },
+            stem_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            appended_vertices: Vec::new(),
+            appended_relations: Vec::new(),
+            listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+            beam: beam_runtime,
+            stem: NativeStemsBeamVLinkStemRuntimeState {
+                stem_identity: final_stem.stem_identity,
+                sig_vertex_identity: None,
+                inter_indexed: false,
+                sig_system_id: None,
+                removed: false,
+                vip: false,
+                abnormal: false,
+            },
+        },
+        sheet_edit: prior.sheet_edit,
+        certificate: None,
+        committed: None,
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeStemsBeamVLinkVertexAction {
     SkippedPositiveInterId,

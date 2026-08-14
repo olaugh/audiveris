@@ -33,6 +33,7 @@ use audiveris_omr::{
         NativeStemsBeamSheetEditState, NativeStemsBeamSigListenerTopology,
         NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBeamRuntimeState,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        roll_native_stems_beam_vlink_base_apply_state,
     },
     native_stems_beam_vlink_head_links::{
         NativeStemsBeamHeadLinkBranch,
@@ -40,6 +41,10 @@ use audiveris_omr::{
         initialize_native_stems_beam_s_linker_cells,
     },
     native_stems_beam_vlink_outer_b_linker::apply_native_stems_beam_outer_and_resume_transaction,
+    native_stems_beam_vlink_reuse_check::{
+        evaluate_native_stems_beam_vlink_reuse_check,
+        project_native_stems_beam_vlink_reuse_live_state,
+    },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamSiblingAppendedRelation, NativeStemsBeamSiblingBLinkerCell,
         NativeStemsBeamSiblingBeamAbnormalTrace, NativeStemsBeamSiblingBeamIncidentRelation,
@@ -63,6 +68,12 @@ use audiveris_omr::{
         apply_native_stems_beam_vlink_sibling_links_transaction,
         apply_native_stems_beam_vlink_sibling_transaction_to_native_sig,
         initialize_native_stems_beam_b_linker_cells,
+    },
+    native_stems_beam_vlink_transaction::{
+        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistryBootstrapEntry,
+        NativeStemsBeamSystemStemAuthorityProof,
+        apply_native_stems_beam_vlink_create_stem_transaction,
+        prepare_native_stems_beam_vlink_frontier_state,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
@@ -5924,6 +5935,188 @@ fn native_b15_through_b19_carrier_reaches_second_frontier_before_oracle_read() {
             .linked_b_linkers
             .contains(reference)
     }));
+
+    // Carry transaction 2 through a graph-derived B14 rollover before any
+    // transaction-2 family fixture is opened. The page GlyphIndex bootstrap
+    // is the one disclosed authority still outside native recognition.
+    let second_scheduler = &outer_resume.resume.advanced_system;
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(second) =
+        &outer_resume.resume.status
+    else {
+        unreachable!()
+    };
+    let second_attempt = hydrated
+        .plans
+        .builders
+        .iter()
+        .flat_map(|builder| &builder.attempts)
+        .nth(second.plan.plan_ordinal)
+        .expect("second plan attempt");
+    let registry_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-glyph-registry-chula.txt"),
+    )
+    .expect("disclosed page GlyphIndex bootstrap");
+    let bootstrap = second_attempt
+        .glyphs
+        .iter()
+        .map(|glyph| {
+            let content_key = format!(
+                "g:{}:{}:{}:{}:{}",
+                glyph.bounds.x,
+                glyph.bounds.y,
+                glyph.bounds.width,
+                glyph.bounds.height,
+                b15_hydration::run_table_digest(&glyph.structural_key.run_table)
+            );
+            let matches = registry_text
+                .lines()
+                .filter(|line| line.starts_with("stemsbeamglyphregistryentry "))
+                .filter_map(|line| {
+                    let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+                    let value = |name: &str| {
+                        tokens
+                            .iter()
+                            .position(|token| *token == name)
+                            .and_then(|index| tokens.get(index + 1))
+                            .copied()
+                    };
+                    (value("content") == Some(content_key.as_str())).then(|| {
+                        (
+                            value("id").expect("registry id").parse::<i32>().unwrap(),
+                            value("active") == Some("true"),
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            let [(glyph_id, active_in_index)] = matches.as_slice() else {
+                panic!("selected glyph bootstrap cardinality: {}", matches.len());
+            };
+            NativeStemsBeamGlyphRegistryBootstrapEntry {
+                canonical_alias: usize::try_from(*glyph_id).expect("positive glyph ID"),
+                glyph_id: *glyph_id,
+                content: NativeStemsBeamFixedGlyphContent {
+                    bounds: glyph.bounds,
+                    weight: glyph.weight,
+                    run_table: glyph.structural_key.run_table.clone(),
+                },
+                active_in_index: *active_in_index,
+                strongly_retained: *active_in_index,
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut second_transaction_state = native_base.state_after.transaction_state.clone();
+    let authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
+        &second_transaction_state.system_stems,
+        0,
+    )
+    .expect("dense carried systemStems");
+    prepare_native_stems_beam_vlink_frontier_state(
+        second_scheduler,
+        &hydrated.plans,
+        &mut second_transaction_state,
+        &bootstrap,
+        authority,
+    )
+    .expect("native transaction-2 preparation");
+    let second_create = apply_native_stems_beam_vlink_create_stem_transaction(
+        second_scheduler,
+        &hydrated.builder,
+        &hydrated.plans,
+        &mut second_transaction_state,
+        &b15_hydration::checker_context_for_page(&b15_hydration::native_predecessor_page(
+            "chula.png",
+        )),
+    )
+    .expect("native transaction-2 B12");
+    let second_live = project_native_stems_beam_vlink_reuse_live_state(
+        &sig,
+        &bindings,
+        second_scheduler,
+        &hydrated.plans,
+        &s_cells,
+    )
+    .expect("native transaction-2 B13 live state");
+    let second_reuse = evaluate_native_stems_beam_vlink_reuse_check(
+        second_scheduler,
+        &hydrated.plans,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &second_create,
+        &second_transaction_state,
+        &second_live,
+        hydrated.relation_parameters,
+    )
+    .expect("native transaction-2 B13");
+    let mut second_sig = sig.clone();
+    let mut second_bindings = bindings.clone();
+    let mut second_base_state = roll_native_stems_beam_vlink_base_apply_state(
+        &native_base.state_after,
+        &second_transaction_state,
+        &second_reuse,
+        &second_sig,
+        &second_bindings,
+        &[],
+    )
+    .expect("native transaction-2 B14 rollover");
+    assert_eq!(
+        (
+            second_base_state.inter_index.baseline_entry_count,
+            second_base_state.sig.baseline_vertex_count,
+            second_base_state.sig.baseline_relation_count,
+        ),
+        (640, 222, 207)
+    );
+    let second_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
+        second_scheduler,
+        &hydrated.plans,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &second_create,
+        &second_live,
+        hydrated.relation_parameters,
+        &second_reuse,
+        &mut second_base_state,
+        &mut second_sig,
+        &mut second_bindings,
+    )
+    .expect("native transaction-2 B14 commit");
+    assert_eq!(second_base.key.plan.plan_ordinal, 152);
+    assert_eq!(
+        (second_sig.vertices.len(), second_sig.edges.len()),
+        (223, 208)
+    );
+    assert_eq!(second_bindings.stem_vertices[&1].0, 222);
+    assert_eq!(second_base.graph_relation_identity, Some(207));
+    assert_eq!(
+        second_base.fresh_relation.grade.to_bits(),
+        0x3fee_e2b2_e530_80f0
+    );
+    assert_eq!(
+        second_base.fresh_relation.extension_point.x.to_bits(),
+        0x4088_5975_1290_d133
+    );
+    assert_eq!(
+        second_base.fresh_relation.extension_point.y.to_bits(),
+        0x407c_b1ed_e751_1cca
+    );
+    let txn2_base_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-txn2-base-apply-chula.txt"),
+    )
+    .expect("expected-only transaction-2 B14 fixture");
+    let txn2_result = txn2_base_text
+        .lines()
+        .find(|line| {
+            line.starts_with("stemsbeamvlinkbaseapplyresult ")
+                && line.contains(" system 1 plan 152 scope real case - ")
+        })
+        .expect("transaction-2 B14 result");
+    assert!(txn2_result.contains(
+        "branch NewIdZero retainedDraftIdentity draft:152 retainedDraftGrade 0x1.ee2b2e53080fp-1/3feee2b2e53080f0 applyReturn true graphRelationIdentity sig-edge:207"
+    ));
+    assert!(txn2_result.contains(
+        "finalStemInterId 2341 finalStemSigAttached true finalStemVip false finalStemAbnormal true finalBeamAbnormal false"
+    ));
+
     let mut invalid_scheduler = hydrated.scheduler.clone();
     invalid_scheduler.status =
         audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::Completed {
