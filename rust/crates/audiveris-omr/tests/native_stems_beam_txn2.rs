@@ -663,6 +663,7 @@ fn second_transaction_from_carried_state_reproduces_java() {
         &scheduler,
         &page.plans.systems[index],
         &s_cells,
+        &state.system_stems,
     )
     .expect("native B13 live-state projection");
     let NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries) = &live.evaluation else {

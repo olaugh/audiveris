@@ -275,6 +275,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         &shadow.scheduler,
         context.plans,
         &shadow.s_cells,
+        &transaction_state.system_stems,
     )
     .map_err(|error| stage("B13-live-state", error))?;
     let reuse = evaluate_native_stems_beam_vlink_reuse_check(

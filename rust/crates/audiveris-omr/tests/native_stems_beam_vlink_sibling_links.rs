@@ -16,17 +16,26 @@ use std::{
 
 use audiveris_image::{beam_structure::Segment, section::Bounds};
 use audiveris_omr::{
+    head_scanner_slices::JavaRectangle,
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
-    native_sig::{NativeSigInterKind, assemble_native_sig},
+    native_sig::{
+        NativeSigBounds, NativeSigEdge, NativeSigHeadStemPayload, NativeSigInterKind,
+        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertex,
+        NativeSigVertexId, assemble_native_sig,
+    },
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
         NativeStemsModeledCanonicalGlyph,
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
-    native_stems_beam_scheduler::NativeStemsBeamSchedulerResumeStatus,
+    native_stems_beam_scheduler::{
+        NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamPlanRef,
+        NativeStemsBeamSchedulerPass, NativeStemsBeamSchedulerResumeStatus,
+        NativeStemsBeamSchedulerStatus, NativeStemsBeamWorklistSnapshot,
+    },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
@@ -53,7 +62,8 @@ use audiveris_omr::{
     },
     native_stems_beam_vlink_outer_b_linker::apply_native_stems_beam_outer_and_resume_transaction,
     native_stems_beam_vlink_reuse_check::{
-        evaluate_native_stems_beam_vlink_reuse_check,
+        NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamReuseEntryObservation,
+        NativeStemsBeamVLinkReuseLiveEvaluation, evaluate_native_stems_beam_vlink_reuse_check,
         project_native_stems_beam_vlink_reuse_live_state,
     },
     native_stems_beam_vlink_sibling_links::{
@@ -81,19 +91,24 @@ use audiveris_omr::{
         initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamCreateStemDisposition, NativeStemsBeamFixedGlyphContent,
-        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamGlyphRegistryBootstrapEntry,
-        NativeStemsBeamPersistentIdState, NativeStemsBeamSystemStemAuthorityProof,
-        NativeStemsFirstGlyphFingerprint, NativeStemsFirstGlyphIndexBridge,
-        NativeStemsFirstGlyphIndexSnapshot, NativeStemsFirstGlyphSnapshotEntry,
-        apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsBeamCreateStemDisposition, NativeStemsBeamCreatedStemGeometry,
+        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistrationAction,
+        NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamKnownSystemStem,
+        NativeStemsBeamPersistentIdState, NativeStemsBeamRegistryAuthority,
+        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
+        NativeStemsBeamSystemStemTransactionState, NativeStemsFirstGlyphFingerprint,
+        NativeStemsFirstGlyphIndexBridge, NativeStemsFirstGlyphIndexSnapshot,
+        NativeStemsFirstGlyphSnapshotEntry, apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
-    stems_step::{NativeBeamPortion, NativeStemPoint, NativeStemVerticalSide},
+    stems_step::{
+        NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint,
+        NativeStemVerticalSide,
+    },
 };
 
 #[path = "common/b15_hydration.rs"]
@@ -5932,6 +5947,298 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
     );
 }
 
+/// The first measured linked-S branch uses native Allegretto plan topology and
+/// the owned SIG/S-cell read path.  The compact Java result is not opened until
+/// that read has selected the persistent stem and proved the suffix unread.
+#[test]
+fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
+    let page = b15_hydration::native_predecessor_page("allegretto.png");
+    let plans = &page.plans.systems[0];
+    let mut plan_ordinal = 0_usize;
+    let mut selected = None;
+    for builder in &plans.builders {
+        for attempt in &builder.attempts {
+            if plan_ordinal == 25 {
+                selected = Some((builder, attempt));
+            }
+            plan_ordinal += 1;
+        }
+    }
+    let (builder, attempt) = selected.expect("native Allegretto plan 25");
+    assert_eq!(attempt.relations.len(), 2);
+    assert_eq!(attempt.stem_profile, 1);
+    assert_eq!(builder.start.side, NativeStemVerticalSide::Bottom);
+    assert_eq!(
+        attempt
+            .relations
+            .iter()
+            .map(|relation| (
+                relation.corner.x_ordinal,
+                relation.corner.horizontal,
+                relation.corner.vertical,
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (2, NativeStemHeadSide::Right, NativeStemVerticalSide::Top,),
+            (3, NativeStemHeadSide::Right, NativeStemVerticalSide::Top,),
+        ]
+    );
+
+    let mut scheduler = page.scheduler.systems[0].clone();
+    let beam = builder.start.b_linker.beam;
+    let beam_sig = page.beam_stumps.systems[0]
+        .beams_by_abscissa
+        .iter()
+        .find(|candidate| candidate.source == beam)
+        .expect("plan-25 beam in native stump catalogue")
+        .sig_ordinal;
+    assert_eq!(beam_sig, 25);
+    scheduler.status = NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(Box::new(
+        NativeStemsBeamAwaitingVLinkTransaction {
+            invocation_ordinal: 28,
+            snapshot: NativeStemsBeamWorklistSnapshot {
+                pass: NativeStemsBeamSchedulerPass::Sides,
+                current_index: 0,
+                sources: vec![beam],
+                current: beam,
+                remaining: Vec::new(),
+            },
+            beam,
+            horizontal_side: Some(NativeStemHeadSide::Right),
+            b_linker: builder.start.b_linker,
+            v_linker: builder.start,
+            vertical_side: builder.start.side,
+            plan: NativeStemsBeamPlanRef {
+                system_id: 1,
+                plan_ordinal: 25,
+                builder_ordinal: builder.builder_ordinal,
+                stem_profile: attempt.stem_profile,
+            },
+            outcome: attempt.outcome,
+            linked_sides_before: Vec::new(),
+            retained_beams_before: Vec::new(),
+            would_apply_stored_line_delta: None,
+        },
+    ));
+
+    let assembled = page.sig.as_ref().expect("native Allegretto SIG");
+    let mut sig = assembled.systems[0].clone();
+    let mut bindings = assembled.bindings[0].clone();
+    let stem_vertex = NativeSigVertexId(sig.vertices.len());
+    sig.append_vertex(NativeSigVertex {
+        ordinal: stem_vertex.0,
+        active: true,
+        removed: false,
+        kind: NativeSigInterKind::Stem,
+        shape: Some("STEM".to_owned()),
+        grade: 0.5,
+        bounds: NativeSigBounds {
+            x: 602,
+            y: 10,
+            width: 3,
+            height: 90,
+        },
+        abnormal: false,
+        beam_geometry: None,
+    })
+    .expect("modeled persistent stem vertex");
+    bindings
+        .bind_stem(0, stem_vertex)
+        .expect("modeled persistent stem binding");
+
+    // Java's selected relation has global identity 229. Preserve every native
+    // baseline edge, then represent unrelated predecessor insertions as
+    // tombstones so the one live measured HeadStem relation occupies that
+    // identity without entering this bounded gate's semantic scan.
+    assert!(sig.edges.len() <= 229);
+    let tombstone = sig.edges[0];
+    while sig.edges.len() < 229 {
+        let mut edge = tombstone;
+        edge.ordinal = sig.edges.len();
+        edge.active = false;
+        sig.edges.push(edge);
+    }
+    let first_corner = attempt.relations[0].corner;
+    let head_vertex = bindings.head_vertices[&first_corner.head];
+    sig.append_edge(NativeSigEdge {
+        ordinal: 229,
+        active: true,
+        source: head_vertex.0,
+        target: stem_vertex.0,
+        kind: NativeSigRelationKind::HeadStem,
+        origin: NativeSigRelationOrigin::BeamVHeadDraft {
+            plan_ordinal: 15,
+            map_ordinal: 0,
+        },
+        support: Some(NativeSigSupport {
+            grade: 0.5,
+            bar_connection_impacts: None,
+        }),
+        beam_portion: None,
+        stem_extension: None,
+        head_stem: Some(NativeSigHeadStemPayload {
+            dx: 0.0,
+            dy: 0.0,
+            head_side: NativeStemHeadSide::Right,
+            extension_point: NativeStemPoint { x: 603.0, y: 10.0 },
+            consistency: 1.0,
+            manual: false,
+        }),
+    })
+    .expect("measured predecessor HeadStem relation");
+
+    let glyph = &attempt.glyphs[0];
+    let system_stems = NativeStemsBeamSystemStemTransactionState {
+        system_id: 1,
+        next_stem_identity: 1,
+        known_stems: vec![NativeStemsBeamKnownSystemStem {
+            stem_identity: 0,
+            glyph_id: 266,
+            glyph_content: NativeStemsBeamFixedGlyphContent {
+                bounds: glyph.bounds,
+                weight: glyph.weight,
+                run_table: glyph.structural_key.run_table.clone(),
+            },
+            inter_id: Some(2227),
+            grade: NativeStemsBeamStemGrade::Artificial(0.5),
+            geometry: NativeStemsBeamCreatedStemGeometry {
+                median: NativeStemLine {
+                    start: NativeStemPoint { x: 603.0, y: 10.0 },
+                    stop: NativeStemPoint { x: 603.0, y: 100.0 },
+                },
+                mean_thickness: 3.0,
+                ribbon_bounds: JavaRectangle {
+                    x: 602,
+                    y: 10,
+                    width: 3,
+                    height: 90,
+                },
+            },
+            sig_attached: true,
+            abnormal: false,
+        }],
+        authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
+        exhaustive_lookup: None,
+    };
+    let mut s_cells = initialize_native_stems_beam_s_linker_cells(&page.head_corners.systems[0])
+        .expect("native Allegretto S-cell topology");
+    let selected_cell = s_cells
+        .iter_mut()
+        .find(|cell| {
+            cell.reference.head.reference == first_corner.head
+                && cell.reference.horizontal == first_corner.horizontal
+        })
+        .expect("plan-25 shared S cell");
+    selected_cell.linked = true;
+
+    let sig_before = sig.clone();
+    let bindings_before = bindings.clone();
+    let cells_before = s_cells.clone();
+    let stems_before = system_stems.clone();
+    let actual = project_native_stems_beam_vlink_reuse_live_state(
+        &sig,
+        &bindings,
+        &scheduler,
+        plans,
+        &s_cells,
+        &system_stems,
+    )
+    .expect("graph-derived Allegretto linked-S B13 read");
+    assert_eq!(sig, sig_before);
+    assert_eq!(bindings, bindings_before);
+    assert_eq!(s_cells, cells_before);
+    assert_eq!(system_stems, stems_before);
+    let NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries) = &actual.evaluation else {
+        panic!("accepted plan must inspect its relations");
+    };
+    let [first, second] = entries.as_slice() else {
+        panic!("plan 25 must retain two relation positions");
+    };
+    let NativeStemsBeamReuseEntryObservation::Examined {
+        s_linker_linked: true,
+        head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(scan),
+    } = &first.observation
+    else {
+        panic!("first relation must exhaustively scan the linked S cell");
+    };
+    assert_eq!((scan.scanned_relation_count, scan.edges.len()), (1, 1));
+    assert!(matches!(
+        second.observation,
+        NativeStemsBeamReuseEntryObservation::UnreadAfterSelection
+    ));
+    let snapshot_hash = scan.provenance_sha256.clone();
+    let projection_hash = scan
+        .java_projection_sha256(NativeStemHeadSide::Right, &actual.live_sig_stems)
+        .expect("Java projection hash");
+
+    // Expected-only rows and their source pins are opened after the native
+    // graph read and its read-only/termination properties are established.
+    let fixture_path = repo_root().join("rust/oracle/stems-beam-linked-s-allegretto-system1.txt");
+    let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
+    assert_eq!(
+        sha256_hex(fixture.as_bytes()),
+        "68ef2f2156d1af1e54e6345c9fb198cb44a74f1ffcc93b52a5ab88873dee4540"
+    );
+    let data = fixture
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(data.len(), 6);
+    let entry_rows = data
+        .iter()
+        .filter(|line| line.starts_with("stemsbeamlinkedsentry "))
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(entry_rows.len(), 2);
+    let field = |line: &str, name: &str| {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let position = tokens
+            .iter()
+            .position(|token| *token == name)
+            .unwrap_or_else(|| panic!("missing {name} in {line}"));
+        tokens[position + 1].to_owned()
+    };
+    assert_eq!(field(entry_rows[0], "mapOrdinal"), "0");
+    assert_eq!(field(entry_rows[0], "cAlias"), "h:2:RIGHT:TOP");
+    assert_eq!(field(entry_rows[0], "sLinked"), "true");
+    assert_eq!(field(entry_rows[0], "incidentEdges"), "1");
+    assert_eq!(field(entry_rows[0], "matchingEdges"), "1");
+    assert_eq!(field(entry_rows[0], "distinctSideStems"), "1");
+    assert_eq!(field(entry_rows[0], "headSnapshotHash"), snapshot_hash);
+    assert_eq!(field(entry_rows[0], "projectionHash"), projection_hash);
+    assert_eq!(field(entry_rows[0], "action"), "SelectBreak");
+    assert_eq!(field(entry_rows[1], "mapOrdinal"), "1");
+    assert_eq!(field(entry_rows[1], "conditionRead"), "false");
+    assert_eq!(field(entry_rows[1], "action"), "UnreadAfterBreak");
+    let result = data
+        .iter()
+        .find(|line| line.starts_with("stemsbeamlinkedsresult "))
+        .expect("linked-S result row");
+    assert_eq!(field(result, "outcome"), "Selected");
+    assert_eq!(field(result, "selectedMapOrdinal"), "0");
+    assert_eq!(field(result, "entriesRead"), "1");
+    assert_eq!(field(result, "unreadFrom"), "1");
+    assert_eq!(field(result, "finalStemInterId"), "2227");
+    let summary = data.last().expect("linked-S summary");
+    assert_eq!(
+        field(summary, "probeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("probe source")
+        )
+    );
+    assert_eq!(
+        field(summary, "runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/run-stems-beam-linked-s.sh"))
+                .expect("runner source")
+        )
+    );
+    assert_eq!(field(summary, "freshRuns"), "2");
+    assert_eq!(field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(field(summary, "stopBeforeSigAddVertex"), "true");
+}
+
 /// The first measured transaction now derives B16 from the owned SIG and
 /// typed products.  Java rows are opened only after the complete native
 /// graph/cell result exists.
@@ -6380,6 +6687,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         second_scheduler,
         &hydrated.plans,
         &s_cells,
+        &second_transaction_state.system_stems,
     )
     .expect("native transaction-2 B13 live state");
     let second_reuse = evaluate_native_stems_beam_vlink_reuse_check(
@@ -7083,6 +7391,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         third_scheduler,
         &hydrated.plans,
         &second_s_cells,
+        &third_transaction_state.system_stems,
     )
     .expect("native transaction-3 B13 live state");
     let third_reuse = evaluate_native_stems_beam_vlink_reuse_check(

@@ -15,7 +15,9 @@ use audiveris_core::java_math::java_positive_pow;
 use audiveris_image::beam_structure::Segment;
 
 use crate::{
-    native_sig::{NativeSigInterKind, NativeSigSystem, NativeSigSystemBindings},
+    native_sig::{
+        NativeSigInterKind, NativeSigRelationKind, NativeSigSystem, NativeSigSystemBindings,
+    },
     native_stems_beam_link_plans::{
         NativeStemsBeamHeadRelation, NativeStemsBeamLinkPlanAttempt,
         NativeStemsBeamLinkPlanOutcome, NativeStemsBeamLinkPlanSystem,
@@ -34,8 +36,9 @@ use crate::{
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamAppliedLineDeltaSource, NativeStemsBeamCreateStemDisposition,
         NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamKnownSystemStem,
-        NativeStemsBeamStemGrade, NativeStemsBeamVLinkMutation, NativeStemsBeamVLinkTransaction,
-        NativeStemsBeamVLinkTransactionState, build_compound, valid_stem_grade,
+        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemTransactionState,
+        NativeStemsBeamVLinkMutation, NativeStemsBeamVLinkTransaction,
+        NativeStemsBeamVLinkTransactionState, build_compound, sha256_hex, valid_stem_grade,
         validate_known_stem, validate_transaction_state as validate_create_stem_state,
     },
     native_stems_beam_vlinkers::{
@@ -104,6 +107,29 @@ pub struct NativeStemsBeamHeadStemScan {
     pub scanned_relation_count: usize,
     pub provenance_sha256: String,
     pub edges: Vec<NativeStemsBeamHeadStemEdge>,
+}
+
+impl NativeStemsBeamHeadStemScan {
+    /// Recompute the Java probe's `snapshotHash` for the first-reference
+    /// live-stem catalogue.
+    pub fn java_snapshot_sha256(
+        &self,
+        stem_catalogue: &[NativeStemsBeamKnownSystemStem],
+    ) -> Result<String, NativeStemsBeamVLinkReuseCheckError> {
+        head_stem_scan_hashes(self, NativeStemHeadSide::Left, stem_catalogue, 0)
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    /// Recompute the Java probe's `projectionHash` for an independently known
+    /// parent side and the first-reference live-stem catalogue.
+    pub fn java_projection_sha256(
+        &self,
+        parent_side: NativeStemHeadSide,
+        stem_catalogue: &[NativeStemsBeamKnownSystemStem],
+    ) -> Result<String, NativeStemsBeamVLinkReuseCheckError> {
+        head_stem_scan_hashes(self, parent_side, stem_catalogue, 0)
+            .map(|(_, projection)| projection)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,21 +323,24 @@ impl Error for NativeStemsBeamVLinkReuseCheckError {}
 
 /// Project B13's lazy live reads from the owned graph and persistent S cells.
 ///
-/// The current native carrier supports the all-unlinked path without any
-/// relation scan: Java reads the shared S flag first and skips `getSideStems`
-/// when it is false. Linked S cells fail closed until the native provenance
-/// serializer and live-stem synchronization are carried by the same runtime.
+/// Java reads the shared S flag first and skips `getSideStems` when it is
+/// false. For a linked cell, the native SIG supplies Java's incoming-then-
+/// outgoing relation order, while the carried `systemStems` map supplies the
+/// persistent StemInter payloads. Targets are interned into the returned live
+/// catalogue in first-reference order, exactly like the Java probe.
 pub fn project_native_stems_beam_vlink_reuse_live_state(
     sig: &NativeSigSystem,
     bindings: &NativeSigSystemBindings,
     scheduler_system: &NativeStemsBeamSchedulerSystem,
     plan_system: &NativeStemsBeamLinkPlanSystem,
     s_cells: &[NativeStemsBeamNativeSLinkerCell],
+    system_stems: &NativeStemsBeamSystemStemTransactionState,
 ) -> Result<NativeStemsBeamVLinkReuseLiveState, NativeStemsBeamVLinkReuseCheckError> {
     let system_id = scheduler_system.system_id;
     if sig.system_id != system_id
         || bindings.system_id != system_id
         || plan_system.system_id != system_id
+        || system_stems.system_id != system_id
         || bindings.validate_against(sig).is_err()
     {
         return Err(NativeStemsBeamVLinkReuseCheckError::SystemOrder);
@@ -354,12 +383,22 @@ pub fn project_native_stems_beam_vlink_reuse_live_state(
         });
     }
     let mut entries = Vec::with_capacity(attempt.relations.len());
+    let mut live_sig_stems = Vec::new();
+    let mut selected = false;
     for (map_ordinal, relation) in attempt.relations.iter().enumerate() {
         if relation.map_ordinal != map_ordinal {
             return Err(NativeStemsBeamVLinkReuseCheckError::InvalidProduct {
                 system_id,
                 phase: "native reuse relation order",
             });
+        }
+        if selected {
+            entries.push(NativeStemsBeamReuseEntryEvidence {
+                map_ordinal,
+                corner: relation.corner,
+                observation: NativeStemsBeamReuseEntryObservation::UnreadAfterSelection,
+            });
+            continue;
         }
         let head = NativeStemsBeamHeadLinkHeadRef {
             reference: relation.corner.head,
@@ -397,24 +436,111 @@ pub fn project_native_stems_beam_vlink_reuse_live_state(
                 phase: "native S-cell cardinality",
             });
         };
-        if cell.linked {
-            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+        let head_stem_lookup = if cell.linked {
+            let mut edges = Vec::new();
+            for edge in sig
+                .incident_edges(head_vertex.0)
+                .map_err(|_| NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                    map_ordinal,
+                    phase: "native HeadStem incident scan",
+                })?
+                .into_iter()
+                .filter(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+            {
+                if edge.source != head_vertex.0 {
+                    return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                        map_ordinal,
+                        phase: "native HeadStem direction",
+                    });
+                }
+                let stem_identity = bindings
+                    .stem_vertices
+                    .iter()
+                    .find_map(|(identity, vertex)| (vertex.0 == edge.target).then_some(*identity))
+                    .ok_or(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                        map_ordinal,
+                        phase: "native HeadStem target binding",
+                    })?;
+                let stem = system_stems
+                    .known_stems
+                    .iter()
+                    .find(|stem| stem.stem_identity == stem_identity)
+                    .ok_or(NativeStemsBeamVLinkReuseCheckError::MissingStem { stem_identity })?;
+                if !stem.sig_attached || stem.inter_id.is_none() {
+                    return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                        map_ordinal,
+                        phase: "native HeadStem target persistence",
+                    });
+                }
+                if !live_sig_stems
+                    .iter()
+                    .any(|known: &NativeStemsBeamKnownSystemStem| {
+                        known.stem_identity == stem_identity
+                    })
+                {
+                    live_sig_stems.push(stem.clone());
+                }
+                let payload = edge.head_stem.ok_or(
+                    NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                        map_ordinal,
+                        phase: "native HeadStem payload",
+                    },
+                )?;
+                edges.push(NativeStemsBeamHeadStemEdge {
+                    scan_ordinal: edges.len(),
+                    relation_identity: edge.ordinal,
+                    relation_head_side: payload.head_side,
+                    target_stem_identity: stem_identity,
+                });
+            }
+            let mut scan = NativeStemsBeamHeadStemScan {
+                corner: relation.corner,
+                baseline_relation_count: edges.len(),
+                scanned_relation_count: edges.len(),
+                provenance_sha256: String::new(),
+                edges,
+            };
+            let (snapshot, projection) = head_stem_scan_hashes(
+                &scan,
+                relation.corner.horizontal,
+                &live_sig_stems,
                 map_ordinal,
-                phase: "linked native S-cell projection not yet supported",
-            });
-        }
+            )?;
+            scan.provenance_sha256 = snapshot;
+            if !valid_sha256(&projection) {
+                return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                    map_ordinal,
+                    phase: "Java HeadStem projection hash",
+                });
+            }
+            let distinct = scan
+                .edges
+                .iter()
+                .filter(|edge| edge.relation_head_side == relation.corner.horizontal)
+                .map(|edge| edge.target_stem_identity)
+                .fold(Vec::new(), |mut values, identity| {
+                    if !values.contains(&identity) {
+                        values.push(identity);
+                    }
+                    values
+                });
+            selected = distinct.len() == 1;
+            NativeStemsBeamHeadStemLookupEvidence::Exhaustive(scan)
+        } else {
+            NativeStemsBeamHeadStemLookupEvidence::NotRead
+        };
         entries.push(NativeStemsBeamReuseEntryEvidence {
             map_ordinal,
             corner: relation.corner,
             observation: NativeStemsBeamReuseEntryObservation::Examined {
-                s_linker_linked: false,
-                head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::NotRead,
+                s_linker_linked: cell.linked,
+                head_stem_lookup,
             },
         });
     }
     Ok(NativeStemsBeamVLinkReuseLiveState {
         system_id,
-        live_sig_stems: Vec::new(),
+        live_sig_stems,
         evaluation: NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries),
     })
 }
@@ -1763,7 +1889,74 @@ fn validate_head_stem_scan(
             }
         }
     }
+    let (snapshot_sha256, _) = head_stem_scan_hashes(
+        scan,
+        relation.corner.horizontal,
+        stem_catalogue,
+        relation.map_ordinal,
+    )?;
+    if scan.provenance_sha256 != snapshot_sha256 {
+        return Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+            map_ordinal: relation.map_ordinal,
+            phase: "Java HeadStem snapshot hash",
+        });
+    }
     Ok((matching_side_edge_count, distinct))
+}
+
+fn head_stem_scan_hashes(
+    scan: &NativeStemsBeamHeadStemScan,
+    parent_side: NativeStemHeadSide,
+    stem_catalogue: &[NativeStemsBeamKnownSystemStem],
+    map_ordinal: usize,
+) -> Result<(String, String), NativeStemsBeamVLinkReuseCheckError> {
+    let side_token = |side| match side {
+        NativeStemHeadSide::Left => "LEFT",
+        NativeStemHeadSide::Right => "RIGHT",
+    };
+    let mut seen = Vec::new();
+    let mut snapshot_bytes = Vec::new();
+    let mut projection_bytes = Vec::new();
+    for edge in &scan.edges {
+        let stem_ordinal = stem_catalogue
+            .iter()
+            .position(|stem| stem.stem_identity == edge.target_stem_identity)
+            .ok_or(NativeStemsBeamVLinkReuseCheckError::MissingStem {
+                stem_identity: edge.target_stem_identity,
+            })?;
+        let stem = &stem_catalogue[stem_ordinal];
+        let inter_id =
+            stem.inter_id
+                .ok_or(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
+                    map_ordinal,
+                    phase: "Java HeadStem projection persistent ID",
+                })?;
+        let distinct = !seen.contains(&(edge.relation_head_side, edge.target_stem_identity));
+        if distinct {
+            seen.push((edge.relation_head_side, edge.target_stem_identity));
+        }
+        let matches = edge.relation_head_side == parent_side;
+        let snapshot = format!(
+            "{}:{}:live:{}:{}:sig=true:glyph={}:distinct={}",
+            edge.relation_identity,
+            side_token(edge.relation_head_side),
+            stem_ordinal,
+            inter_id,
+            stem.glyph_id,
+            distinct
+        );
+        snapshot_bytes.extend_from_slice(snapshot.as_bytes());
+        snapshot_bytes.push(b'\n');
+        projection_bytes.extend_from_slice(
+            format!(
+                "{snapshot}:parent={}:matches={}\n",
+                side_token(parent_side),
+                matches
+            )
+            .as_bytes(),
+        );
+    }
+    Ok((sha256_hex(&snapshot_bytes), sha256_hex(&projection_bytes)))
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -2147,14 +2340,19 @@ mod tests {
     fn scan(
         corner: NativeStemsBeamHeadCornerRef,
         edges: Vec<NativeStemsBeamHeadStemEdge>,
+        catalogue: &[NativeStemsBeamKnownSystemStem],
     ) -> NativeStemsBeamHeadStemScan {
-        NativeStemsBeamHeadStemScan {
+        let mut scan = NativeStemsBeamHeadStemScan {
             corner,
             baseline_relation_count: edges.len(),
             scanned_relation_count: edges.len(),
-            provenance_sha256: "a".repeat(64),
+            provenance_sha256: String::new(),
             edges,
-        }
+        };
+        scan.provenance_sha256 = head_stem_scan_hashes(&scan, corner.horizontal, catalogue, 0)
+            .expect("valid test HeadStem projection")
+            .0;
+        scan
     }
 
     fn edge(
@@ -2202,6 +2400,38 @@ mod tests {
             },
             grade: 0.5,
         }
+    }
+
+    #[test]
+    fn java_head_stem_projection_hash_matches_measured_allegretto_transaction_28() {
+        let corner = corner(2, 2, NativeStemHeadSide::Right);
+        let mut stem = known_stem(0, Some(2227), true, vertical_line(603.0), 3.0);
+        stem.glyph_id = 266;
+        let scan = NativeStemsBeamHeadStemScan {
+            corner,
+            baseline_relation_count: 1,
+            scanned_relation_count: 1,
+            provenance_sha256: String::new(),
+            edges: vec![edge(0, 229, NativeStemHeadSide::Right, 0)],
+        };
+        let (snapshot, _) = head_stem_scan_hashes(
+            &scan,
+            NativeStemHeadSide::Right,
+            std::slice::from_ref(&stem),
+            0,
+        )
+        .expect("measured graph row is projectable");
+        let projection = scan
+            .java_projection_sha256(NativeStemHeadSide::Right, &[stem])
+            .expect("measured Java projection is projectable");
+        assert_eq!(
+            snapshot,
+            "08b72a351a5ad443cbadb12f040dbb74e42ff6c031ef796f4dc563b502279a63"
+        );
+        assert_eq!(
+            projection,
+            "46502fb158aa90d31c7594ec55686d4a2d1e796eebf55b0c7dfdc63f223abff6"
+        );
     }
 
     #[test]
@@ -2401,6 +2631,12 @@ mod tests {
             edge(1, 11, NativeStemHeadSide::Left, 2),
             edge(2, 12, NativeStemHeadSide::Right, 1),
         ];
+        let initial = known_stem(0, None, false, vertical_line(20.0), 1.0);
+        let catalogue = vec![
+            initial.clone(),
+            known_stem(1, Some(101), true, vertical_line(30.0), 1.0),
+            known_stem(2, Some(102), true, vertical_line(40.0), 1.0),
+        ];
         let entries = vec![
             NativeStemsBeamReuseEntryEvidence {
                 map_ordinal: 0,
@@ -2410,6 +2646,7 @@ mod tests {
                     head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(scan(
                         left,
                         edges.clone(),
+                        &catalogue[1..],
                     )),
                 },
             },
@@ -2419,7 +2656,9 @@ mod tests {
                 observation: NativeStemsBeamReuseEntryObservation::Examined {
                     s_linker_linked: true,
                     head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(scan(
-                        right, edges,
+                        right,
+                        edges,
+                        &catalogue[1..],
                     )),
                 },
             },
@@ -2428,12 +2667,6 @@ mod tests {
                 corner: unread,
                 observation: NativeStemsBeamReuseEntryObservation::UnreadAfterSelection,
             },
-        ];
-        let initial = known_stem(0, None, false, vertical_line(20.0), 1.0);
-        let catalogue = vec![
-            initial.clone(),
-            known_stem(1, Some(101), true, vertical_line(30.0), 1.0),
-            known_stem(2, Some(102), true, vertical_line(40.0), 1.0),
         ];
         let before = catalogue.clone();
         let (selected, disposition, trace) =
@@ -2470,7 +2703,7 @@ mod tests {
                 catalogue[0].clone()
             ),
             Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
-                phase: "ordered live SIG stem catalogue",
+                phase: "Java HeadStem snapshot hash",
                 ..
             })
         ));
@@ -2510,6 +2743,7 @@ mod tests {
                         edge(0, 10, NativeStemHeadSide::Left, 1),
                         edge(1, 11, NativeStemHeadSide::Left, 2),
                     ],
+                    &catalogue[1..],
                 )),
             },
         }];
@@ -2529,7 +2763,11 @@ mod tests {
         let catalogue = vec![attached.clone(), invalid_target];
         let extra_catalogue = [attached.clone(), extra_attached];
 
-        let missing_side = scan(left, vec![edge(0, 10, NativeStemHeadSide::Right, 1)]);
+        let missing_side = scan(
+            left,
+            vec![edge(0, 10, NativeStemHeadSide::Right, 1)],
+            std::slice::from_ref(&attached),
+        );
         let entries = vec![NativeStemsBeamReuseEntryEvidence {
             map_ordinal: 0,
             corner: left,
@@ -2586,6 +2824,7 @@ mod tests {
                             second_attached.stem_identity,
                         ),
                     ],
+                    &[second_attached.clone(), attached.clone()],
                 )),
             },
         }];
@@ -2602,7 +2841,13 @@ mod tests {
             })
         ));
 
-        let invalid_sig = scan(left, vec![edge(0, 10, NativeStemHeadSide::Left, 2)]);
+        let invalid_sig = NativeStemsBeamHeadStemScan {
+            corner: left,
+            baseline_relation_count: 1,
+            scanned_relation_count: 1,
+            provenance_sha256: "a".repeat(64),
+            edges: vec![edge(0, 10, NativeStemHeadSide::Left, 2)],
+        };
         assert!(matches!(
             validate_head_stem_scan(&invalid_sig, &relation, &catalogue),
             Err(NativeStemsBeamVLinkReuseCheckError::InvalidLiveState {
@@ -2610,7 +2855,11 @@ mod tests {
                 ..
             })
         ));
-        let mut uppercase_provenance = scan(left, vec![edge(0, 10, NativeStemHeadSide::Left, 1)]);
+        let mut uppercase_provenance = scan(
+            left,
+            vec![edge(0, 10, NativeStemHeadSide::Left, 1)],
+            &catalogue,
+        );
         uppercase_provenance.provenance_sha256 = "A".repeat(64);
         assert!(validate_head_stem_scan(&uppercase_provenance, &relation, &catalogue).is_err());
     }
@@ -2637,6 +2886,7 @@ mod tests {
                             edge(0, 10, NativeStemHeadSide::Left, 1),
                             edge(1, 11, NativeStemHeadSide::Left, 2),
                         ],
+                        &catalogue[1..],
                     )),
                 },
             },
@@ -2648,6 +2898,7 @@ mod tests {
                     head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(scan(
                         right,
                         vec![edge(0, 10, NativeStemHeadSide::Right, 1)],
+                        &catalogue[1..],
                     )),
                 },
             },
@@ -2674,6 +2925,7 @@ mod tests {
                             edge(0, 10, NativeStemHeadSide::Left, 1),
                             edge(1, 11, NativeStemHeadSide::Left, 2),
                         ],
+                        &catalogue[1..],
                     )),
                 },
             },
@@ -2688,6 +2940,7 @@ mod tests {
                             edge(0, 10, NativeStemHeadSide::Left, 1),
                             edge(1, 12, NativeStemHeadSide::Left, 2),
                         ],
+                        &catalogue[1..],
                     )),
                 },
             },

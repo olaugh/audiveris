@@ -1470,6 +1470,11 @@ public final class StemsBeamSidesLoopProbe
                 verifyFreshRowsAgainstFrozen(
                         reuseRows, REUSE_CHECK_FIXTURE_PATH, "stemsbeamvlinkreusecheck");
             }
+            if (page.equals("allegretto.png#1") && system.getId() == 1 && ref.plan == 25) {
+                emitLinkedSMeasurement(
+                        ref, beam, b, vSide, boundaryBefore, relationInputHashBefore,
+                        reuse, finalAlias, finalStem);
+            }
 
             // Capture the predecessor certificate with the frozen boundary-13 algorithms before
             // either addVertex or Link.applyTo is allowed to mutate the shared sheet/SIG state.
@@ -5665,6 +5670,59 @@ public final class StemsBeamSidesLoopProbe
                     liveStems.hash(), liveStems.hash(),
                     relationInputHashBefore, relationInputHashBefore));
             return lines;
+        }
+
+        /** Bounded real linked-S lane, emitted only for Allegretto system 1 / plan 25. */
+        void emitLinkedSMeasurement (PlanRef ref,
+                                     AbstractBeamInter beam,
+                                     Object b,
+                                     VerticalSide vSide,
+                                     PersistentSnapshot before,
+                                     String relationInputHash,
+                                     ReuseRun reuse,
+                                     String finalAlias,
+                                     StemInter finalStem)
+        {
+            System.out.printf(
+                    "stemsbeamlinkedsbaseline %s system %d transaction %d plan %d "
+                            + "beamSig %d bAlias %s vSide %s stemProfile 1 "
+                            + "sigVertices %d sigEdges %d systemStems %d linkedEntries %d "
+                            + "scanCount %d relationInputHash %s%n",
+                    page, system.getId(), transactionOrdinal + 1, ref.plan,
+                    beamSigOrdinals.get(beam), bAliases.get(b), vSide,
+                    before.sig.vertices.size(), before.sig.edges.size(),
+                    before.systemStems.entries.size(), reuse.linkedEntries, reuse.scanCount,
+                    relationInputHash);
+            for (ReuseEntryTrace row : reuse.entries) {
+                System.out.printf(
+                        "stemsbeamlinkedsentry %s system %d transaction %d plan %d "
+                                + "mapOrdinal %d cAlias %s conditionRead %s sLinked %s "
+                                + "parentHSide %s relationHeadSide %s scanState %s "
+                                + "incidentEdges %s matchingEdges %s distinctSideStems %s "
+                                + "headSnapshotHash %s projectionHash %s "
+                                + "sideStemAliases %s selectedStemAlias %s action %s%n",
+                        page, system.getId(), transactionOrdinal + 1, ref.plan,
+                        row.mapOrdinal, row.cAlias, row.conditionRead, row.sLinked,
+                        row.parentHSide, row.relationHeadSide, row.scanState,
+                        row.incidentEdges, row.matchingEdges, row.distinctSideStems,
+                        row.headSnapshotHash, row.projectionHash,
+                        row.sideStemAliases, row.selectedStemAlias, row.action);
+            }
+            System.out.printf(
+                    "stemsbeamlinkedsresult %s system %d transaction %d plan %d "
+                            + "outcome %s selectedMapOrdinal %s selectedC %s breakIndex %s "
+                            + "entriesRead %d unreadFrom 1 finalStemAlias %s finalStemInterId %d "
+                            + "finalStemSigAttached %s%n",
+                    page, system.getId(), transactionOrdinal + 1, ref.plan, reuse.outcome,
+                    reuse.selectedMapOrdinal, reuse.selectedC, reuse.breakIndex,
+                    reuse.entriesRead, finalAlias, finalStem.getId(), finalStem.getSig() != null);
+            System.out.printf(
+                    "stemsbeamlinkedsguard %s system %d transaction %d plan %d "
+                            + "sigHash %s relationStateHash %s systemStemsHash %s "
+                            + "linkerStateHash %s readOnly true stopBeforeSigAddVertex true%n",
+                    page, system.getId(), transactionOrdinal + 1, ref.plan,
+                    before.sig.hash, before.sig.relationStateHash, before.systemStems.hash,
+                    before.linkers.hash);
         }
 
         void assertReuseCheckExpected (int plan,

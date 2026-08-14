@@ -4907,6 +4907,38 @@ const fn opposite_head(side: NativeStemHeadSide) -> NativeStemHeadSide {
 fn head_scan(
     relation: &audiveris_omr::native_stems_beam_link_plans::NativeStemsBeamHeadRelation,
     edges: Vec<(usize, NativeStemHeadSide, usize)>,
+    stem_catalogue: &[NativeStemsBeamKnownSystemStem],
+) -> NativeStemsBeamHeadStemScan {
+    let edges = edges
+        .into_iter()
+        .enumerate()
+        .map(
+            |(scan_ordinal, (relation_identity, relation_head_side, target_stem_identity))| {
+                NativeStemsBeamHeadStemEdge {
+                    scan_ordinal,
+                    relation_identity,
+                    relation_head_side,
+                    target_stem_identity,
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+    let mut scan = NativeStemsBeamHeadStemScan {
+        corner: relation.corner,
+        baseline_relation_count: edges.len(),
+        scanned_relation_count: edges.len(),
+        provenance_sha256: String::new(),
+        edges,
+    };
+    scan.provenance_sha256 = scan
+        .java_snapshot_sha256(stem_catalogue)
+        .expect("synthetic Java HeadStem snapshot hash");
+    scan
+}
+
+fn unchecked_head_scan(
+    relation: &audiveris_omr::native_stems_beam_link_plans::NativeStemsBeamHeadRelation,
+    edges: Vec<(usize, NativeStemHeadSide, usize)>,
 ) -> NativeStemsBeamHeadStemScan {
     let edges = edges
         .into_iter()
@@ -6464,6 +6496,7 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                             (10, first.corner.horizontal, far.stem_identity),
                             (11, first.corner.horizontal, near.stem_identity),
                         ],
+                        &[far.clone(), near.clone()],
                     )),
                 },
             },
@@ -6475,6 +6508,7 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                     head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(head_scan(
                         second,
                         vec![(12, second.corner.horizontal, far.stem_identity)],
+                        &[far.clone(), near.clone()],
                     )),
                 },
             },
@@ -6551,6 +6585,7 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                                 same_glyph_second_stem.stem_identity,
                             ),
                         ],
+                        &[far.clone(), same_glyph_second_stem.clone()],
                     )),
                 },
             },
@@ -6599,6 +6634,7 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                     head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(head_scan(
                         first,
                         vec![(20, first.corner.horizontal, near.stem_identity)],
+                        std::slice::from_ref(&near),
                     )),
                 },
             },
@@ -6642,6 +6678,7 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                             opposite_head(first.corner.horizontal),
                             far.stem_identity,
                         )],
+                        std::slice::from_ref(&far),
                     )),
                 },
             },
@@ -6702,10 +6739,12 @@ fn native_boundary_thirteen_synthetic_reuse_and_fail_closed() {
                 corner: first.corner,
                 observation: NativeStemsBeamReuseEntryObservation::Examined {
                     s_linker_linked: true,
-                    head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(head_scan(
-                        first,
-                        vec![(40, first.corner.horizontal, initial.stem_identity)],
-                    )),
+                    head_stem_lookup: NativeStemsBeamHeadStemLookupEvidence::Exhaustive(
+                        unchecked_head_scan(
+                            first,
+                            vec![(40, first.corner.horizontal, initial.stem_identity)],
+                        ),
+                    ),
                 },
             },
             NativeStemsBeamReuseEntryEvidence {
