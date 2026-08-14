@@ -42,7 +42,7 @@ use audiveris_omr::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
-        begin_native_stems_head_linking_phase1,
+        advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         drive_native_stems_beam_stumps_from_first_stems_bridge,
         remove_native_stems_beam_competing_hook_and_resume,
@@ -6185,7 +6185,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "1f259ce1e36213e6756ecf9dcccff943f9155cb4e27042c2741cb49fe1f5473d"
+        "62125b5b8c1e26a0cf935a0cf6e997066e6c255f3ce843f1a883be17ff06821a"
     );
     let data = fixture
         .lines()
@@ -6262,7 +6262,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
     assert_eq!(
         sha256_hex(predecessor_text.as_bytes()),
-        "d8babdb5d54354e5f8eefc3005bd0047b8a35969ac4ba68fe8f0efab438f8298"
+        "913d3b80c36bf821ae7c99560ba39f564bd54598d71376bfdaed4291f7c3e686"
     );
     let predecessor_rows = predecessor_text
         .lines()
@@ -6555,7 +6555,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
     .expect("expected-only hook removal fixture");
     assert_eq!(
         sha256_hex(expected_text.as_bytes()),
-        "27571ce5a947c95cd229f64d59633adc214dcb0c8b75af10061913b489d013be"
+        "78d3f16d96954dd5d4e3a0c6dea70f3c4ce3c6e2125ca54029fa1fbf58116799"
     );
     let expected = expected_text
         .lines()
@@ -8063,7 +8063,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     // Transfer the complete native-owned post-STUMPS state into the first
     // head-phase decision before opening any head-phase expected row.
     let post_stumps_before = carrier.clone();
-    let head_phase = begin_native_stems_head_linking_phase1(
+    let mut head_phase = begin_native_stems_head_linking_phase1(
         &carrier,
         &checker_page.head_corners.systems[0],
         &checker_page.head_builders.systems[0],
@@ -8114,6 +8114,171 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ]
     );
 
+    // Execute the selected C linker atomically before opening any head-phase
+    // expected row. A late glyph-authority corruption must reject without
+    // leaking any graph, registry, allocator, or shared-cell mutation.
+    let head_phase_entry = head_phase.clone();
+    let head_transaction = advance_native_stems_head_single_item_c_link(
+        &mut head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
+        &checker_page.stem_seeds.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+        &checker,
+        &bridge,
+    )
+    .expect("native first-head C-link transaction");
+    assert_eq!(head_transaction.corner.x_ordinal, 38);
+    assert_eq!(head_transaction.corner.sig_ordinal, 45);
+    assert_eq!(
+        head_transaction.corner.horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        head_transaction.corner.vertical,
+        NativeStemVerticalSide::Top
+    );
+    assert_eq!(
+        (head_transaction.last_index, head_transaction.max_index),
+        (0, 0)
+    );
+    assert!(head_transaction.relation.accepted);
+    assert_eq!(
+        head_transaction.relation.derived_horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        head_transaction.relation.grade.to_bits(),
+        0x3fee_3eb4_ae84_ca9d
+    );
+    assert_eq!(
+        head_transaction.relation.dx.to_bits(),
+        0xbfa5_d942_375d_430c
+    );
+    assert_eq!(head_transaction.relation.dy.to_bits(), 0);
+    assert_eq!(
+        head_transaction
+            .relation
+            .extension_point
+            .expect("accepted head relation extension")
+            .x
+            .to_bits(),
+        0x4091_d5d6_e666_8034
+    );
+    assert_eq!(head_transaction.create.registration.glyph_id, 307);
+    assert_eq!(
+        head_transaction.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false
+        }
+    );
+    let stem_identity = match head_transaction.create.disposition {
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } => stem_identity,
+        ref other => panic!("first head created unexpected stem: {other:?}"),
+    };
+    let created = head_transaction
+        .create
+        .stem
+        .as_ref()
+        .expect("checked first-head stem");
+    let NativeStemsBeamStemGrade::Checked(created_check) = &created.grade else {
+        panic!("first head stem is not classifier-checked");
+    };
+    assert_eq!(created_check.grade.to_bits(), 0x3fe9_3554_3bd3_1399);
+    assert_eq!(
+        created.geometry.ribbon_bounds,
+        JavaRectangle {
+            x: 1140,
+            y: 319,
+            width: 4,
+            height: 92,
+        }
+    );
+    assert!(!created.abnormal);
+    assert_eq!(head_transaction.stem_vertex.0, 260);
+    assert_eq!(head_transaction.head_stem_edge.0, 353);
+    assert_eq!(head_transaction.s_linker.head.x_ordinal, 38);
+    assert_eq!(
+        head_transaction.s_linker.horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert!(!head_transaction.s_linked_before);
+    assert!(head_transaction.s_linked_after);
+    assert_eq!(head_transaction.closed_cell_changes, 0);
+    assert_eq!(head_phase.current_index, 1);
+    assert!(head_phase.frontier_consumed);
+    assert_eq!(
+        (
+            head_phase.beam_state.sig.vertices.len(),
+            head_phase.beam_state.sig.edges.len()
+        ),
+        (261, 354)
+    );
+    assert_eq!(head_phase.beam_state.bindings.stem_vertices.len(), 40);
+    assert_eq!(
+        head_phase
+            .beam_state
+            .s_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        84
+    );
+    let queued_right = head_phase.heads[0]
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == NativeStemHeadSide::Right)
+        .expect("queued first-head RIGHT S cell");
+    assert!(queued_right.linked);
+    assert!(!queued_right.closed);
+    let final_stem = head_phase
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.stem_identity == stem_identity)
+        .expect("attached first-head stem in persistent systemStems");
+    assert_eq!(final_stem.inter_id, Some(2379));
+    assert!(final_stem.sig_attached);
+
+    let mut corrupted = head_phase_entry.clone();
+    let mut corrupt_canonical = head_phase
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .known_canonical_glyphs
+        .iter()
+        .find(|glyph| glyph.glyph_id == head_transaction.selected_glyph_id)
+        .expect("selected head seed was promoted into carried canonical state")
+        .clone();
+    corrupt_canonical.glyph_id += 1;
+    corrupted
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .known_canonical_glyphs
+        .push(corrupt_canonical);
+    let corrupted_before = corrupted.clone();
+    assert!(
+        advance_native_stems_head_single_item_c_link(
+            &mut corrupted,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_reachability.systems[0],
+            &checker_page.stem_seeds.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+            &checker,
+            &bridge,
+        )
+        .is_err()
+    );
+    assert_eq!(corrupted, corrupted_before);
+
     // Expected-only STUMPS rows are opened after the production continuation
     // and its atomic/coherence guards have returned.
     let stumps_prefix_text = std::fs::read_to_string(
@@ -8122,7 +8287,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "19fcb9ff4527fbeb499a5a98ac5340ec456629f9ec84751214ff8da3fb00e9a4"
+        "6b607407d196cd7e37f23a4ca94b8b22ae1c38d7a523af127e95e718295fa939"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -8246,7 +8411,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "a23dc34722d3cec118ae234b70968a2c79200a520bd958a144bd9b655f18d5e0"
+        "691bafc9d14cb28d87ed131643cec4a711a236105020d6e19f6229af172ebbbf"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -8333,7 +8498,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "26e32d628f96bd167fbb2e1a1f4809071ba7a054fa12cfc74d8abc9492d24523"
+        "e4bc50cbacc5d2f433dd41a50498faa5dd80d8e0c0e082a20e995bbff4e156f1"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8429,7 +8594,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "cab5be7bf74e3665d180483126211ec856659cc002b276d67cb107cfa090a597"
+        "71008264a21daa544712606059654c86dcb4338ded7b72edc96ea45f59ea1716"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8525,7 +8690,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "e20adf7ecd07a0d665c0b87a7b1edf28548c8a49b9684d192622958b07b72e13"
+        "de36ab56915ea93998c569feb72686390608da787ce14b3800674e9b18aefb77"
     );
     let complete_rows = complete_stumps_text
         .lines()
@@ -8638,13 +8803,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only post-STUMPS head-phase prefix");
     assert_eq!(
         sha256_hex(head_phase_text.as_bytes()),
-        "0e06761ef67d2847e7d89cdd640deefe54129e12ea7aa5ebd4122896c2c86888"
+        "740140bef0fd1f34cca338463cdb9057f45da7026a3d97227611f87bce94efbe"
     );
     let head_phase_rows = head_phase_text
         .lines()
         .filter(|line| !line.starts_with('#'))
         .collect::<Vec<_>>();
-    assert_eq!(head_phase_rows.len(), 4);
+    assert_eq!(head_phase_rows.len(), 7);
     let head_field = |line: &str, name: &str| {
         let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
         let index = tokens
@@ -8693,9 +8858,24 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(frontier, "terminal"),
         "AwaitingHeadCLinkTransaction"
     );
-    // This final row is Java-only next-boundary evidence. Native deliberately
-    // stopped at the frontier above and does not claim this mutation yet.
-    let java_result = head_phase_rows[2];
+    let expand = head_phase_rows[2];
+    assert_eq!(head_field(expand, "cAlias"), "h:38:RIGHT:TOP");
+    assert_eq!(
+        head_field(expand, "lastIndex"),
+        head_transaction.last_index.to_string()
+    );
+    assert_eq!(
+        head_field(expand, "maxIndex"),
+        head_transaction.max_index.to_string()
+    );
+    assert_eq!(head_field(expand, "relations"), "1");
+    assert_eq!(head_field(expand, "glyphs"), "1");
+    assert_eq!(head_field(expand, "candidateIdBefore"), "307");
+    assert_eq!(head_field(expand, "existingGlyph"), "glyph:307");
+    assert_eq!(head_field(expand, "existingActive"), "true");
+    assert_eq!(head_field(expand, "existingStem"), "-");
+    assert_eq!(head_field(expand, "terminal"), "ReadyForHeadCreateStem");
+    let java_result = head_phase_rows[3];
     assert_eq!(head_field(java_result, "relationsBefore"), "0");
     assert_eq!(head_field(java_result, "relationsAfter"), "1");
     assert_eq!(head_field(java_result, "linked"), "true");
@@ -8709,7 +8889,42 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(java_result, "terminal"),
         "ReturnedBeforeSecondHead"
     );
-    let head_summary = head_phase_rows[3];
+    assert_eq!(head_field(java_result, "dirtyBefore"), "true:true:true");
+    assert_eq!(head_field(java_result, "dirtyAfter"), "true:true:true");
+    assert_eq!(head_field(java_result, "nextHeadOrder"), "1");
+    assert_eq!(head_field(java_result, "nextHeadSig"), "23");
+    assert_eq!(head_field(java_result, "nextHeadInterId"), "1331");
+    assert_eq!(
+        head_field(java_result, "nextSides"),
+        "[LEFT:true:false,RIGHT:false:false]"
+    );
+    let create = head_phase_rows[4];
+    assert_eq!(head_field(create, "registeredAlias"), "glyph:307");
+    assert_eq!(head_field(create, "registeredId"), "307");
+    assert_eq!(head_field(create, "registration"), "ReuseActive");
+    assert_eq!(head_field(create, "disposition"), "CreatedChecked");
+    assert_eq!(head_field(create, "stemId"), "2379");
+    assert_eq!(head_field(create, "stemVertex"), "260");
+    assert_eq!(head_field(create, "allocatorBefore"), "2378");
+    assert_eq!(head_field(create, "allocatorAfter"), "2379");
+    assert_eq!(head_field(create, "systemStemsBefore"), "39");
+    assert_eq!(head_field(create, "systemStemsAfter"), "40");
+    assert_eq!(head_field(create, "interIndexBefore"), "678");
+    assert_eq!(head_field(create, "interIndexAfter"), "679");
+    let apply = head_phase_rows[5];
+    assert_eq!(head_field(apply, "linked"), "true");
+    assert_eq!(head_field(apply, "addedVertices"), "1");
+    assert_eq!(head_field(apply, "addedEdges"), "1");
+    assert_eq!(
+        head_field(apply, "terminal"),
+        "ReturnedHeadCLinkTransaction"
+    );
+    let head_summary = head_phase_rows[6];
+    assert_eq!(
+        head_field(head_summary, "schema"),
+        "stems-head-phase-prefix-v2"
+    );
+    assert_eq!(head_field(head_summary, "rows"), "6");
     assert_eq!(head_field(head_summary, "freshRuns"), "2");
     assert_eq!(head_field(head_summary, "freshRunsByteIdentical"), "true");
     assert_eq!(

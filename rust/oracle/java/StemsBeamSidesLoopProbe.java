@@ -184,6 +184,13 @@ public final class StemsBeamSidesLoopProbe
     private static final Class<?> V_LINKER_CLASS;
     private static final Class<?> C_LINKER_CLASS;
     private static final Field C_V_SIDE;
+    private static final Field C_Y_DIR;
+    private static final Field C_REF_PT;
+    private static final Field C_STEM_BUILDER;
+    private static final Method C_EXPAND;
+    private static final Method C_LINK;
+    private static final Field PARAMETERS_MIN_STEM_TAIL_LG;
+    private static final Field PARAMETERS_BEST_STEM_TAIL_LG;
 
     static {
         try {
@@ -242,6 +249,18 @@ public final class StemsBeamSidesLoopProbe
                     "expand", int.class, int.class, Map.class, Set.class);
             V_EXPAND.setAccessible(true);
             C_V_SIDE = field(C_LINKER_CLASS, "vSide");
+            C_Y_DIR = field(C_LINKER_CLASS, "yDir");
+            C_REF_PT = field(C_LINKER_CLASS, "refPt");
+            C_STEM_BUILDER = field(C_LINKER_CLASS, "sb");
+            C_EXPAND = C_LINKER_CLASS.getDeclaredMethod(
+                    "expand", double.class, double.class, int.class, int.class,
+                    Map.class, Set.class);
+            C_EXPAND.setAccessible(true);
+            C_LINK = C_LINKER_CLASS.getDeclaredMethod(
+                    "link", int.class, int.class, boolean.class);
+            C_LINK.setAccessible(true);
+            PARAMETERS_MIN_STEM_TAIL_LG = field(parameters, "minStemTailLg");
+            PARAMETERS_BEST_STEM_TAIL_LG = field(parameters, "bestStemTailLg");
             STEM_BUILDER_THEO_LINE = field(StemBuilder.class, "theoLine");
             STEM_BUILDER_ITEMS = field(StemBuilder.class, "items");
             LINKER_ITEM_LINKER = field(StemItem.LinkerItem.class, "linker");
@@ -1014,15 +1033,61 @@ public final class StemsBeamSidesLoopProbe
                     beforeCanLink.sig.relationStateHash, beforeCanLink.linkers.hash);
             final int relationsBefore = system.getSig()
                     .getRelations(head, HeadStemRelation.class).size();
+            final DirtyFlags dirtyBefore = DirtyFlags.capture(sheet);
             final PersistentSnapshot before = snapshot(
                     sheet, retriever, inspectionBeams, heads, allLinkers);
-            final boolean linked = linker.linkSides(
-                    Profiles.STRICT, system.getProfile(), undefs, false);
+            if (selectedCorner == null) {
+                throw new IllegalStateException("first head has no selected CLinker");
+            }
+            final Point2D refPt = (Point2D) C_REF_PT.get(selectedCorner);
+            final int yDir = C_Y_DIR.getInt(selectedCorner);
+            final int minTail = PARAMETERS_MIN_STEM_TAIL_LG.getInt(params);
+            final int bestTail = PARAMETERS_BEST_STEM_TAIL_LG.getInt(params);
+            final double yHard = refPt.getY() + (yDir * minTail);
+            final double ySoft = refPt.getY() + (yDir * bestTail);
+            final LinkedHashMap<StemLinker, Relation> planRelations = new LinkedHashMap<>();
+            final LinkedHashSet<Glyph> planGlyphs = new LinkedHashSet<>();
+            final int lastIndex = (Integer) C_EXPAND.invoke(
+                    selectedCorner, yHard, ySoft, Profiles.STRICT, system.getProfile(),
+                    planRelations, planGlyphs);
+            final PersistentSnapshot expanded = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            before.assertOnlyLineChanged(expanded);
+            final Glyph candidate = planGlyphs.size() == 1
+                    ? planGlyphs.iterator().next() : GlyphFactory.buildGlyph(planGlyphs);
+            final Glyph existing = before.glyphs.equalOriginal(candidate);
+            final boolean existingActive = existing != null
+                    && before.glyphs.active.containsKey(existing);
+            final StemInter existingStem = before.systemStems.equalStem(candidate);
+            final List<String> selectedGlyphs = selectedGlyphTokens(planGlyphs, before.glyphs);
+            final List<String> relationInputs = new ArrayList<>();
+            for (Map.Entry<StemLinker, Relation> entry : planRelations.entrySet()) {
+                relationInputs.add(linkerAlias(entry.getKey()) + ":" + relationState(entry.getValue()));
+            }
+            System.out.printf(
+                    "stemsheadclinkexpand %s system %d headSig %d cAlias %s "
+                            + "refPt %s yDir %d minTail %d bestTail %d yHard %s ySoft %s "
+                            + "lastIndex %d maxIndex %d relations %d relationRows %s "
+                            + "glyphs %d selected %s candidate %s candidateIdBefore %d "
+                            + "existingGlyph %s existingActive %s existingStem %s "
+                            + "lineChanged %s terminal ReadyForHeadCreateStem%n",
+                    page, system.getId(), headSigOrdinals.get(head), cAliases.get(selectedCorner),
+                    point(refPt), yDir, minTail, bestTail, hex(yHard), hex(ySoft), lastIndex,
+                    ((StemBuilder) C_STEM_BUILDER.get(selectedCorner)).maxIndex(),
+                    planRelations.size(), list(relationInputs), planGlyphs.size(),
+                    list(selectedGlyphs), glyphToken(candidate), candidate.getId(),
+                    existing != null ? before.glyphs.alias(existing) : "-", existingActive,
+                    existingStem != null ? Integer.toString(existingStem.getId()) : "-",
+                    !before.lines.same(expanded.lines));
+            final boolean linked = (Boolean) C_LINK.invoke(
+                    selectedCorner, Profiles.STRICT, system.getProfile(), false);
             final PersistentSnapshot after = snapshot(
                     sheet, retriever, inspectionBeams, heads, allLinkers);
+            final DirtyFlags dirtyAfter = DirtyFlags.capture(sheet);
             final int relationsAfter = system.getSig()
                     .getRelations(head, HeadStemRelation.class).size();
             final Set<HorizontalSide> undefined = undefs.get(head);
+            final HeadInter nextHead = (HeadInter) ordered.get(1);
             System.out.printf(
                     "stemsheadphaseprefixresult %s system %d headOrder 0 headSig %d "
                             + "headInterId %d grade %s sidesBefore %s decisions %s sidesAfter %s "
@@ -1032,6 +1097,8 @@ public final class StemsBeamSidesLoopProbe
                             + "systemStemsBefore %d systemStemsAfter %d "
                             + "relationStateHashBefore %s relationStateHashAfter %s "
                             + "linkerStateHashBefore %s linkerStateHashAfter %s "
+                            + "dirtyBefore %s dirtyAfter %s nextHeadOrder 1 nextHeadSig %d "
+                            + "nextHeadInterId %d nextSides %s "
                             + "terminal ReturnedBeforeSecondHead%n",
                     page, system.getId(), headSigOrdinals.get(head), head.getId(),
                     hex(head.getGrade()), beforeSides, list(decisions), headSideState(linker),
@@ -1041,7 +1108,94 @@ public final class StemsBeamSidesLoopProbe
                     before.sig.edges.size(), after.sig.edges.size(),
                     before.systemStems.entries.size(), after.systemStems.entries.size(),
                     before.sig.relationStateHash, after.sig.relationStateHash,
-                    before.linkers.hash, after.linkers.hash);
+                    before.linkers.hash, after.linkers.hash, dirtyBefore.token(),
+                    dirtyAfter.token(), headSigOrdinals.get(nextHead), nextHead.getId(),
+                    headSideState(nextHead.getLinker()));
+            emitHeadCLinkMutation(
+                    head, selectedCorner, candidate, existing, existingActive, existingStem,
+                    planRelations, planGlyphs, before, expanded, after, linked);
+        }
+
+        void emitHeadCLinkMutation (HeadInter head,
+                                    Object selectedCorner,
+                                    Glyph candidate,
+                                    Glyph existing,
+                                    boolean existingActive,
+                                    StemInter existingStem,
+                                    LinkedHashMap<StemLinker, Relation> planRelations,
+                                    LinkedHashSet<Glyph> planGlyphs,
+                                    PersistentSnapshot before,
+                                    PersistentSnapshot expanded,
+                                    PersistentSnapshot after,
+                                    boolean linked)
+            throws Exception
+        {
+            final Glyph registered = after.glyphs.uniqueEqualOriginal(candidate);
+            final String registration = existing == null ? "New"
+                    : existingActive ? "ReuseActive" : "ReinsertOriginal";
+            final List<Inter> addedVertices = new ArrayList<>();
+            for (Inter inter : after.sig.vertices.keySet()) {
+                if (!before.sig.vertices.containsKey(inter)) addedVertices.add(inter);
+            }
+            final List<Relation> addedEdges = new ArrayList<>();
+            for (Relation relation : after.sig.edges.keySet()) {
+                if (!before.sig.edges.containsKey(relation)) addedEdges.add(relation);
+            }
+            if (addedVertices.size() != 1 || !(addedVertices.get(0) instanceof StemInter stem)) {
+                throw new IllegalStateException("head CLinker did not add exactly one stem vertex");
+            }
+            final String disposition = existingStem == null
+                    ? stem.getImpacts() == null ? "CreatedArtificial" : "CreatedChecked"
+                    : "Reused";
+            final List<Inter> vertices = new ArrayList<>(system.getSig().vertexSet());
+            final List<String> edgeRows = new ArrayList<>();
+            for (Relation relation : addedEdges) {
+                edgeRows.add("source=" + vertices.indexOf(system.getSig().getEdgeSource(relation))
+                        + ":target=" + vertices.indexOf(system.getSig().getEdgeTarget(relation))
+                        + ":" + relationState(relation));
+            }
+            final List<String> linkerChanges = new ArrayList<>();
+            for (Map.Entry<StemLinker, String> entry : before.linkers.state.entrySet()) {
+                final String next = after.linkers.state.get(entry.getKey());
+                if (!entry.getValue().equals(next)) {
+                    linkerChanges.add(linkerAlias(entry.getKey()) + ":" + entry.getValue()
+                            + "->" + next);
+                }
+            }
+            System.out.printf(
+                    "stemsheadclinkcreate %s system %d headSig %d cAlias %s "
+                            + "candidate %s registeredAlias %s registeredId %d "
+                            + "registration %s disposition %s stemId %d stemVertex %d "
+                            + "stemState %s glyphActiveBefore %d glyphActiveAfter %d "
+                            + "glyphOriginalsBefore %d glyphOriginalsAfter %d "
+                            + "allocatorBefore %d allocatorAfter %d systemStemsBefore %d "
+                            + "systemStemsAfter %d interIndexBefore %d interIndexAfter %d "
+                            + "expandOnlyLineChanged %s%n",
+                    page, system.getId(), headSigOrdinals.get(head), cAliases.get(selectedCorner),
+                    glyphToken(candidate), after.glyphs.alias(registered), registered.getId(),
+                    registration, disposition, stem.getId(), vertices.indexOf(stem),
+                    interStructuralToken(stem), before.glyphs.active.size(),
+                    after.glyphs.active.size(), before.glyphs.originals.size(),
+                    after.glyphs.originals.size(), before.allocator, after.allocator,
+                    before.systemStems.entries.size(), after.systemStems.entries.size(),
+                    before.inters.ordered.size(), after.inters.ordered.size(),
+                    !before.lines.same(expanded.lines));
+            System.out.printf(
+                    "stemsheadclinkapply %s system %d headSig %d cAlias %s linked %s "
+                            + "planRelations %d planGlyphs %d addedVertices %d addedEdges %d "
+                            + "edgeRows %s linkerChanges %s sigHashBefore %s sigHashAfter %s "
+                            + "relationStateHashBefore %s relationStateHashAfter %s "
+                            + "linkerHashBefore %s linkerHashAfter %s systemStemsHashBefore %s "
+                            + "systemStemsHashAfter %s glyphActiveHashBefore %s "
+                            + "glyphActiveHashAfter %s glyphOriginalsHashBefore %s "
+                            + "glyphOriginalsHashAfter %s terminal ReturnedHeadCLinkTransaction%n",
+                    page, system.getId(), headSigOrdinals.get(head), cAliases.get(selectedCorner),
+                    linked, planRelations.size(), planGlyphs.size(), addedVertices.size(),
+                    addedEdges.size(), list(edgeRows), list(linkerChanges), before.sig.hash,
+                    after.sig.hash, before.sig.relationStateHash, after.sig.relationStateHash,
+                    before.linkers.hash, after.linkers.hash, before.systemStems.hash,
+                    after.systemStems.hash, before.glyphs.activeHash, after.glyphs.activeHash,
+                    before.glyphs.originalsHash, after.glyphs.originalsHash);
         }
 
         String headSideState (HeadLinker linker)

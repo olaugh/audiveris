@@ -1461,6 +1461,158 @@ fn check_head_relation(
     })
 }
 
+/// Project `HeadLinker.CLinker.checkStemRelation` for a head-origin stem line.
+///
+/// Beam expansion uses the same Java relation calculation through its private
+/// item resolver. Head expansion already owns its selected stump bounds, so
+/// this entry keeps glyph resolution out of the shared mathematical kernel.
+pub fn project_native_stems_head_c_link_relation(
+    corner_system: &NativeStemsHeadCornerSystem,
+    builder_system: &NativeStemsHeadBuilderSystem,
+    corner: NativeStemsHeadCornerRef,
+    stem_line: NativeStemLine,
+    stump_bounds: Option<Bounds>,
+    link_profile: i32,
+) -> Result<NativeStemsBeamHeadRelationCheck, NativeStemsBeamLinkPlanError> {
+    let beam_corner = NativeStemsBeamHeadCornerRef {
+        head: corner.head,
+        sig_ordinal: corner.sig_ordinal,
+        x_ordinal: corner.x_ordinal,
+        horizontal: corner.horizontal,
+        vertical: corner.vertical,
+    };
+    if corner_system.system_id != builder_system.system_id
+        || corner_system.interline != builder_system.interline
+        || corner.sig_ordinal >= corner_system.heads_in_sig_order.len()
+    {
+        return Err(NativeStemsBeamLinkPlanError::SystemOrder);
+    }
+    let head = &corner_system.heads_in_sig_order[corner.sig_ordinal];
+    if head.reference != corner.head {
+        return Err(NativeStemsBeamLinkPlanError::MissingHead {
+            system_id: corner_system.system_id,
+            corner: beam_corner,
+        });
+    }
+    let center = (
+        head.bounds.x.wrapping_add(head.bounds.width / 2),
+        head.bounds.y.wrapping_add(head.bounds.height / 2),
+    );
+    let x_direction = -relative_ccw(
+        stem_line.start.x,
+        stem_line.start.y,
+        stem_line.stop.x,
+        stem_line.stop.y,
+        f64::from(center.0),
+        f64::from(center.1),
+    );
+    let derived_horizontal = if x_direction < 0 {
+        NativeStemHeadSide::Left
+    } else {
+        NativeStemHeadSide::Right
+    };
+    let dynamic_corner = corner_system.heads_in_sig_order[corner.sig_ordinal]
+        .corners_in_constructor_order
+        .iter()
+        .find(|candidate| {
+            candidate.horizontal == derived_horizontal && candidate.vertical == corner.vertical
+        })
+        .ok_or(NativeStemsBeamLinkPlanError::MissingHead {
+            system_id: corner_system.system_id,
+            corner: beam_corner,
+        })?;
+    let reference_point = dynamic_corner.reference;
+    let x_stem = java_intersection_at_y(stem_line, reference_point.y).x;
+    let x_gap_pixels = relation_x_gap_pixels(x_direction, x_stem, reference_point.x);
+    let y_direction = vertical_direction(corner.vertical);
+    let y_gap_pixels = if let Some(bounds) = stump_bounds {
+        let stump_y =
+            i32::try_from(bounds.y).map_err(|_| NativeStemsBeamLinkPlanError::Geometry {
+                system_id: corner_system.system_id,
+            })?;
+        let stump_height =
+            i32::try_from(bounds.height).map_err(|_| NativeStemsBeamLinkPlanError::Geometry {
+                system_id: corner_system.system_id,
+            })?;
+        let overlap = if y_direction > 0 {
+            f64::from(stump_y.wrapping_add(stump_height)) - stem_line.start.y
+        } else {
+            stem_line.stop.y - f64::from(stump_y)
+        };
+        stump_y_gap_pixels(overlap)
+    } else if reference_point.y < stem_line.start.y {
+        stem_line.start.y - reference_point.y
+    } else if reference_point.y > stem_line.stop.y {
+        reference_point.y - stem_line.stop.y
+    } else {
+        0.0
+    };
+    let dx = x_gap_pixels / f64::from(builder_system.interline);
+    let dy = y_gap_pixels / f64::from(builder_system.interline);
+    let (horizontal_gap_kind, x_maximum, x_weight, raw_x_impact) = if dx >= 0.0 {
+        let maximum = head_x_out_max(link_profile);
+        (
+            NativeStemsBeamHorizontalGapKind::Out,
+            maximum,
+            2.0,
+            (maximum - dx) / maximum,
+        )
+    } else {
+        let maximum = head_x_in_max(link_profile);
+        (
+            NativeStemsBeamHorizontalGapKind::In,
+            maximum,
+            1.0,
+            (maximum + dx) / maximum,
+        )
+    };
+    let y_maximum = head_y_gap_max(link_profile);
+    let raw_y_impact = (y_maximum - dy) / y_maximum;
+    let x_impact = java_clamp(raw_x_impact);
+    let y_impact = java_clamp(raw_y_impact);
+    let grade = support_grade(x_impact, x_weight, y_impact, 1.0);
+    let accepted = grade >= HEAD_RELATION_MIN_GRADE;
+    Ok(NativeStemsBeamHeadRelationCheck {
+        encountered_corner: beam_corner,
+        encountered_horizontal: corner.horizontal,
+        derived_horizontal,
+        horizontal_side_diverges: corner.horizontal != derived_horizontal,
+        vertical: corner.vertical,
+        head_center: center,
+        reference_point,
+        stump_bounds,
+        x_stem,
+        x_gap_pixels,
+        y_gap_pixels,
+        dx,
+        dy,
+        horizontal_gap_kind,
+        x_maximum,
+        y_maximum,
+        x_weight,
+        y_weight: 1.0,
+        raw_x_impact,
+        raw_y_impact,
+        x_impact,
+        y_impact,
+        grade,
+        accepted,
+        extension_point: accepted.then_some(NativeStemPoint {
+            x: x_stem,
+            y: if y_direction > 0 {
+                f64::from(head.bounds.y)
+            } else {
+                f64::from(
+                    head.bounds
+                        .y
+                        .wrapping_add(head.bounds.height)
+                        .wrapping_sub(1),
+                )
+            },
+        }),
+    })
+}
+
 fn stem_portion(
     head: &NativeStemsHeadCornerHead,
     stem_line: NativeStemLine,

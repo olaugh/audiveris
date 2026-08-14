@@ -72,11 +72,14 @@ if ! cmp -s "$stumps_actual" "$stumps_frozen"; then
     exit 1
 fi
 
-grep '^stemsheadphaseprefix' "$pass_one" > "$rows"
-if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 3 ] || \
+grep '^stemshead' "$pass_one" > "$rows"
+if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 6 ] || \
         [ "$(grep -c '^stemsheadphaseprefixbaseline ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixfrontier ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixresult ' "$rows")" -ne 1 ] || \
+        [ "$(grep -c '^stemsheadclinkexpand ' "$rows")" -ne 1 ] || \
+        [ "$(grep -c '^stemsheadclinkcreate ' "$rows")" -ne 1 ] || \
+        [ "$(grep -c '^stemsheadclinkapply ' "$rows")" -ne 1 ] || \
         ! grep -q 'headOrder 0 headSig 45 headInterId 1375 ' "$rows" || \
         ! grep -q 'decisions \[LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly\] selectedC ' "$rows" || \
         ! grep -q 'terminal AwaitingHeadCLinkTransaction$' "$rows" || \
@@ -84,6 +87,14 @@ if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 3 ] || \
         ! grep -q 'sigVerticesBefore 678 sigVerticesAfter 679 sigEdgesBefore 689 sigEdgesAfter 690 ' "$rows" || \
         ! grep -q 'systemStemsBefore 39 systemStemsAfter 40 ' "$rows"; then
     echo "bounded first-head phase contract differs" >&2
+    exit 1
+fi
+if ! grep -q 'lastIndex 0 maxIndex 0 relations 1 .* glyphs 1 .*candidateIdBefore 307 existingGlyph glyph:307 existingActive true existingStem - ' "$rows" || \
+        ! grep -q 'registeredAlias glyph:307 registeredId 307 registration ReuseActive disposition CreatedChecked stemId 2379 stemVertex 260 ' "$rows" || \
+        ! grep -q 'allocatorBefore 2378 allocatorAfter 2379 systemStemsBefore 39 systemStemsAfter 40 interIndexBefore 678 interIndexAfter 679 ' "$rows" || \
+        ! grep -q 'addedVertices 1 addedEdges 1 .*linkerChanges \[linker:SLinker:head:38:false:false->true:false,h:38:RIGHT:BOTTOM:false:false->true:false,h:38:RIGHT:TOP:false:false->true:false\] ' "$rows" || \
+        ! grep -q 'dirtyBefore true:true:true dirtyAfter true:true:true nextHeadOrder 1 nextHeadSig 23 nextHeadInterId 1331 nextSides \[LEFT:true:false,RIGHT:false:false\] ' "$rows"; then
+    echo "complete first-head CLinker transaction contract differs" >&2
     exit 1
 fi
 
@@ -95,11 +106,11 @@ stumps_sha=$(shasum -a 256 "$complete_fixture" | awk '{print $1}')
 out="$repo_root/rust/oracle/stems-head-phase-prefix-chula-system1.txt"
 {
     echo '# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) post-STUMPS head phase.'
-    echo '# schema: stems-head-phase-prefix-v1'
-    echo '# First reverse-grade head decision plus scoped Java post-call evidence.'
-    echo '# Native consumption stops at AwaitingHeadCLinkTransaction.'
+    echo '# schema: stems-head-phase-prefix-v2'
+    echo '# First reverse-grade head decision and complete first CLinker transaction.'
+    echo '# Expected rows stay unread until the native transaction returns.'
     cat "$rows"
     printf '%s\n' \
-        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v1 page chula.png#1 system 1 rows 3 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope AwaitingHeadCLinkTransaction javaEvidence ReturnedBeforeSecondHead"
+        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v2 page chula.png#1 system 1 rows 6 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope ReturnedHeadCLinkTransaction javaEvidence ReturnedBeforeSecondHead"
 } > "$out"
 echo "wrote $out"

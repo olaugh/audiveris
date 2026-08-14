@@ -284,6 +284,40 @@ impl NativeStemsFirstGlyphIndexBridge {
         &self.snapshot
     }
 
+    /// Resolve one exact native RunTable against a positive first-STEMS
+    /// fingerprint. This does not make opaque entries absence authority: only
+    /// a unique digest-and-bounds hit can promote the supplied content.
+    pub fn resolve_native_content(
+        &self,
+        content: &NativeStemsBeamFixedGlyphContent,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
+    {
+        validate_content(content)?;
+        let digest = run_table_sha256(&content.run_table);
+        let matches = self
+            .snapshot
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.fingerprint.bounds == content.bounds
+                    && entry.fingerprint.run_table_sha256 == digest
+            })
+            .collect::<Vec<_>>();
+        let [entry] = matches.as_slice() else {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native-content first-STEMS fingerprint",
+            });
+        };
+        Ok(NativeStemsBeamGlyphRegistryBootstrapEntry {
+            canonical_alias: usize::try_from(entry.glyph_id)
+                .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentIdExhausted)?,
+            glyph_id: entry.glyph_id,
+            content: content.clone(),
+            active_in_index: entry.active_in_index,
+            strongly_retained: entry.live_original,
+        })
+    }
+
     fn selected_bootstrap(
         &self,
         selected: &NativeStemsBeamSelectedGlyph,
@@ -427,6 +461,16 @@ pub struct NativeStemsBeamAppliedLineDelta {
 pub enum NativeStemsBeamStemGrade {
     Checked(NativeStemCheckResult),
     Artificial(f64),
+}
+
+impl NativeStemsBeamStemGrade {
+    #[must_use]
+    pub fn grade(&self) -> f64 {
+        match self {
+            Self::Checked(check) => check.grade,
+            Self::Artificial(grade) => *grade,
+        }
+    }
 }
 
 /// State constructed immediately by either `StemInter` constructor, before
@@ -580,6 +624,115 @@ pub struct NativeStemsBeamVLinkTransaction {
     pub sig_vertex_mutation_count: usize,
     pub sig_relation_mutation_count: usize,
     pub linker_flag_mutation_count: usize,
+}
+
+/// Origin-neutral `StemBuilder.createStem` result for an already materialized
+/// glyph candidate. Beam and head linkers share this Java operation, while
+/// their expansion and graph-link phases remain deliberately separate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsCreateStemCandidateTransaction {
+    pub system_id: usize,
+    pub stem_profile: i32,
+    pub candidate: NativeStemsBeamFixedGlyphContent,
+    pub registration: NativeStemsBeamGlyphRegistration,
+    pub checker_result: Option<NativeStemCheckResult>,
+    pub disposition: NativeStemsBeamCreateStemDisposition,
+    pub stem: Option<NativeStemsBeamKnownSystemStem>,
+    pub mutation_order: Vec<NativeStemsBeamVLinkMutation>,
+}
+
+/// Apply Java's origin-neutral `StemBuilder.createStem` transaction.
+///
+/// The caller owns expansion and supplies the exact selected glyph content.
+/// Registration, complete-since-empty `systemStems` lookup, stem checking and
+/// insertion use the same kernels as the beam-origin transaction.
+pub fn apply_native_stems_create_stem_candidate_transaction(
+    system_id: usize,
+    stem_profile: i32,
+    candidate: NativeStemsBeamFixedGlyphContent,
+    selected_canonical_identity: Option<(i32, usize)>,
+    state: &mut NativeStemsBeamVLinkTransactionState,
+    checker: &NativeStemsBeamStemCheckerContext,
+) -> Result<NativeStemsCreateStemCandidateTransaction, NativeStemsBeamVLinkTransactionError> {
+    if state.system_stems.system_id != system_id || !(0..=4).contains(&stem_profile) {
+        return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
+    }
+    validate_checker_context(checker)?;
+    validate_transaction_state(state)?;
+    validate_content(&candidate)?;
+    let registration = prepare_registration(&candidate, selected_canonical_identity, state)?;
+    let stem_lookup =
+        prepare_system_stem_lookup(&candidate, registration.glyph_id, &state.system_stems)?;
+    let prepared = match stem_lookup.stem.as_ref() {
+        Some(stem) => PreparedCreateStemResult {
+            checker_result: None,
+            disposition: NativeStemsBeamCreateStemDisposition::Reused {
+                stem_identity: stem.stem_identity,
+            },
+            stem: Some(stem.clone()),
+            next_stem_identity: state.system_stems.next_stem_identity,
+        },
+        None => prepare_new_stem(
+            &candidate,
+            registration.glyph_id,
+            stem_profile,
+            state.system_stems.next_stem_identity,
+            checker,
+        )?,
+    };
+
+    let mut mutation_order = Vec::new();
+    commit_registration(
+        state,
+        &candidate,
+        &registration,
+        &prepared.disposition,
+        &mut mutation_order,
+    );
+    if stem_lookup.consume_certificate {
+        state.system_stems.exhaustive_lookup = None;
+    }
+    if let Some(stem) = stem_lookup.stem
+        && !state
+            .system_stems
+            .known_stems
+            .iter()
+            .any(|known| known.stem_identity == stem.stem_identity)
+    {
+        state.system_stems.known_stems.push(stem);
+    }
+    if matches!(
+        prepared.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { .. }
+            | NativeStemsBeamCreateStemDisposition::CreatedArtificial { .. }
+    ) {
+        let stem = prepared
+            .stem
+            .clone()
+            .expect("created disposition was prepared with a stem");
+        state.system_stems.next_stem_identity = prepared.next_stem_identity;
+        state.system_stems.known_stems.push(stem.clone());
+        mutation_order.push(NativeStemsBeamVLinkMutation::SystemStemInserted {
+            stem_identity: stem.stem_identity,
+        });
+    }
+
+    Ok(NativeStemsCreateStemCandidateTransaction {
+        system_id,
+        stem_profile,
+        candidate,
+        registration: NativeStemsBeamGlyphRegistration {
+            alias_order: state.glyph_index.alias_order,
+            canonical_alias: registration.canonical_alias,
+            glyph_id: registration.glyph_id,
+            action: registration.action,
+            post_union_size: registration.post_union_size,
+        },
+        checker_result: prepared.checker_result,
+        disposition: prepared.disposition,
+        stem: prepared.stem,
+        mutation_order,
+    })
 }
 
 #[derive(Debug)]
@@ -2822,6 +2975,28 @@ mod tests {
         let mut mismatched = selected;
         mismatched.bounds.x += 1;
         assert!(bridge.selected_bootstrap(&mismatched).is_err());
+    }
+
+    #[test]
+    fn first_stems_bridge_resolves_only_an_exact_opaque_native_content() {
+        let (mut snapshot, modeled) = first_stems_bridge_inputs();
+        let opaque_index = FIRST_STEMS_VISIBLE_MODELED_COUNT;
+        let mut native = vertical_content();
+        native.bounds.x = opaque_index + 1;
+        snapshot.entries[opaque_index].fingerprint.run_table_sha256 =
+            run_table_sha256(&native.run_table);
+        snapshot.active_sha256 = first_stems_snapshot_sha256(&snapshot.entries, false);
+        snapshot.live_original_sha256 = first_stems_snapshot_sha256(&snapshot.entries, true);
+        let expected_id = snapshot.entries[opaque_index].glyph_id;
+        let bridge = NativeStemsFirstGlyphIndexBridge::from_snapshot(snapshot, &modeled).unwrap();
+
+        let binding = bridge.resolve_native_content(&native).unwrap();
+        assert_eq!(binding.glyph_id, expected_id);
+        assert!(binding.active_in_index);
+        assert!(binding.strongly_retained);
+
+        native.bounds.x += 1;
+        assert!(bridge.resolve_native_content(&native).is_err());
     }
 
     #[test]
