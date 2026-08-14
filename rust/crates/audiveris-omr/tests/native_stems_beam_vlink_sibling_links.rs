@@ -19,7 +19,7 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
-    native_sig::assemble_native_sig,
+    native_sig::{NativeSigInterKind, assemble_native_sig},
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
@@ -123,6 +123,13 @@ const FIRST_STEMS_GLYPH_ACTIVE_SHA256: &str =
     "dae5de3eabc2fb8d19613abcc8b24f4d865bcd55ca1ec6533faae30792692642";
 const FIRST_STEMS_GLYPH_ORIGINALS_SHA256: &str =
     "38f4861501e8099dedcb36b0ff9cf615f156ec5b929dffe31c51906a15362af0";
+const BEAM_INTER_INDEX_SHA256: &str =
+    "fde4daebadc5c7158fa8e83dcbd4ac0ca6381c614876b6fe48408ec2e245064e";
+const BEAM_INTER_INDEX_LINES: usize = 52;
+const BEAM_INTER_INDEX_BYTES: usize = 6_259;
+const EXECUTED_BASE_BEAM_SIG_ORDINALS: [usize; 16] = [
+    12, 15, 16, 19, 20, 21, 22, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+];
 
 fn first_stems_glyph_bridge(
     registry_text: &str,
@@ -5944,44 +5951,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let hydrated =
         b15_hydration::run_real("chula.png", 1, &base_text, &create_text, &reuse_text, false)
             .expect("native predecessors through B15");
-    let beam_index_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-inter-index-chula-system1.txt"),
-    )
-    .expect("disclosed page beam InterIndex bootstrap");
-    let beam_bootstrap = beam_index_text
-        .lines()
-        .filter(|line| line.starts_with("stemsbeaminterindexentry "))
-        .map(|line| {
-            let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
-            let value = |name: &str| {
-                tokens
-                    .iter()
-                    .position(|token| *token == name)
-                    .and_then(|index| tokens.get(index + 1))
-                    .copied()
-                    .expect("beam bootstrap field")
-            };
-            assert_eq!(value("system"), "1");
-            let sig_ordinal = value("beamSig").parse::<usize>().unwrap();
-            let beam = hydrated
-                .stumps
-                .beams_by_abscissa
-                .iter()
-                .find(|beam| beam.sig_ordinal == sig_ordinal)
-                .expect("beam bootstrap native source");
-            NativeStemsBeamBeamInterIndexBootstrapEntry {
-                source: beam.source,
-                inter_id: value("interId").parse().unwrap(),
-                index_ordinal: value("indexOrdinal").parse().unwrap(),
-                vip: value("vip").parse().unwrap(),
-            }
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        beam_bootstrap.len(),
-        hydrated.stumps.beams_by_abscissa.len()
-    );
-
     let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
         .expect("GRID recognition");
     let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
@@ -6005,6 +5974,151 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .find(|bindings| bindings.system_id == 1)
         .expect("system 1 bindings")
         .clone();
+
+    // Freeze the complete native catalogue before opening the disclosed
+    // persistent-ID rows. Fixture topology can validate this catalogue, but
+    // cannot select a source, vertex, or runtime class for it.
+    let native_beam_catalogue = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| {
+            let vertex_id = bindings
+                .beam_vertices
+                .get(&beam.source)
+                .copied()
+                .expect("native beam binding");
+            let vertex = sig.vertex(vertex_id.0).expect("live native beam vertex");
+            assert!(matches!(
+                vertex.kind,
+                NativeSigInterKind::Beam
+                    | NativeSigInterKind::BeamHook
+                    | NativeSigInterKind::SmallBeam
+            ));
+            (
+                beam.sig_ordinal,
+                (beam.source, vertex_id.0, vertex.kind.java_class()),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(native_beam_catalogue.len(), 48);
+    assert_eq!(
+        native_beam_catalogue.keys().copied().collect::<Vec<_>>(),
+        (0..48).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        native_beam_catalogue
+            .values()
+            .filter(|(_, _, class)| *class == "BeamInter")
+            .count(),
+        31
+    );
+    assert_eq!(
+        native_beam_catalogue
+            .values()
+            .filter(|(_, _, class)| *class == "BeamHookInter")
+            .count(),
+        17
+    );
+
+    let beam_index_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-inter-index-chula-system1.txt"),
+    )
+    .expect("disclosed sparse beam InterIndex authority");
+    assert_eq!(beam_index_text.len(), BEAM_INTER_INDEX_BYTES);
+    assert_eq!(beam_index_text.lines().count(), BEAM_INTER_INDEX_LINES);
+    assert_eq!(
+        sha256_hex(beam_index_text.as_bytes()),
+        BEAM_INTER_INDEX_SHA256
+    );
+    assert!(
+        beam_index_text
+            .lines()
+            .any(|line| line == "# schema: stems-beam-inter-index-v1")
+    );
+    let mut seen_fixture_ordinals = BTreeSet::new();
+    let mut seen_inter_ids = BTreeSet::new();
+    let mut seen_index_ordinals = BTreeSet::new();
+    let mut beam_bootstrap = Vec::new();
+    for line in beam_index_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeaminterindexentry "))
+    {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let [
+            "stemsbeaminterindexentry",
+            "chula.png#1",
+            "system",
+            "1",
+            "beamSig",
+            beam_sig,
+            "vertex",
+            fixture_vertex,
+            "interId",
+            inter_id,
+            "indexOrdinal",
+            index_ordinal,
+            "vip",
+            "false",
+            "class",
+            fixture_class,
+        ] = tokens.as_slice()
+        else {
+            panic!("malformed beam InterIndex authority row: {line}");
+        };
+        let beam_sig = beam_sig.parse::<usize>().expect("beam SIG ordinal");
+        let fixture_vertex = fixture_vertex.parse::<usize>().expect("beam vertex");
+        let inter_id = inter_id.parse::<i32>().expect("beam Inter ID");
+        let index_ordinal = index_ordinal.parse::<usize>().expect("beam index ordinal");
+        assert!(seen_fixture_ordinals.insert(beam_sig));
+        assert!(seen_inter_ids.insert(inter_id));
+        assert!(seen_index_ordinals.insert(index_ordinal));
+        let &(source, native_vertex, native_class) = native_beam_catalogue
+            .get(&beam_sig)
+            .expect("fixture beam exists in prior native catalogue");
+        assert_eq!(fixture_vertex, native_vertex);
+        assert_eq!(*fixture_class, native_class);
+        assert_eq!(index_ordinal, 113 + beam_sig);
+        if EXECUTED_BASE_BEAM_SIG_ORDINALS.contains(&beam_sig) {
+            beam_bootstrap.push(NativeStemsBeamBeamInterIndexBootstrapEntry {
+                source,
+                inter_id,
+                index_ordinal,
+                vip: false,
+            });
+        }
+    }
+    assert_eq!(
+        seen_fixture_ordinals.into_iter().collect::<Vec<_>>(),
+        (0..48).collect::<Vec<_>>()
+    );
+    assert_eq!(seen_inter_ids.len(), 48);
+    assert_eq!(seen_inter_ids.first(), Some(&905));
+    assert_eq!(seen_inter_ids.last(), Some(&989));
+    assert_eq!(
+        seen_index_ordinals.into_iter().collect::<Vec<_>>(),
+        (113..161).collect::<Vec<_>>()
+    );
+    assert_eq!(beam_bootstrap.len(), EXECUTED_BASE_BEAM_SIG_ORDINALS.len());
+    assert_eq!(
+        beam_bootstrap
+            .iter()
+            .map(|entry| {
+                native_beam_catalogue
+                    .iter()
+                    .find_map(|(ordinal, (source, _, _))| {
+                        (*source == entry.source).then_some(*ordinal)
+                    })
+                    .expect("sparse beam source in native catalogue")
+            })
+            .collect::<Vec<_>>(),
+        EXECUTED_BASE_BEAM_SIG_ORDINALS
+    );
+    assert!(beam_index_text.lines().any(|line| {
+        line == "stemsbeaminterindexsummary chula.png#1 system 1 interIndexEntries 639 beams 48 rowsSha256 1550d098eadde838a3b66ec0a3e12dfdbe121189829a1718a78e95295622038b"
+    }));
+    drop(beam_index_text);
+
     let mut base_state = hydrated.state_before.base_apply_state_before.clone();
     let native_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         &hydrated.scheduler,
@@ -6578,6 +6692,43 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(corrupt_bridge_carrier, corrupt_bridge_before);
     assert_eq!(bridge, bridge_before);
 
+    // Beam 19 is not selected until transaction 31. A sparse authority can
+    // therefore carry the first 30 transactions, but the first missing-ID
+    // lookup must reject atomically rather than borrowing another beam's ID.
+    let late_source = native_beam_catalogue[&19].0;
+    let mut missing_late_carrier = carrier_before.clone();
+    missing_late_carrier
+        .beam_inter_index
+        .retain(|entry| entry.source != late_source);
+    assert_eq!(missing_late_carrier.beam_inter_index.len(), 15);
+    for transaction_ordinal in 3..31 {
+        advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+            &mut missing_late_carrier,
+            context,
+            &bridge,
+        )
+        .unwrap_or_else(|error| {
+            panic!("sparse authority stopped before transaction {transaction_ordinal}: {error}")
+        });
+    }
+    let audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(
+        late_frontier,
+    ) = &missing_late_carrier.scheduler.status
+    else {
+        panic!("sparse authority did not reach the late missing beam");
+    };
+    assert_eq!(late_frontier.b_linker.beam, late_source);
+    let missing_late_before = missing_late_carrier.clone();
+    let bridge_before = bridge.clone();
+    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        &mut missing_late_carrier,
+        context,
+        &bridge,
+    )
+    .expect_err("late selected beam without persistent identity must reject");
+    assert_eq!(missing_late_carrier, missing_late_before);
+    assert_eq!(bridge, bridge_before);
+
     let mut carrier = carrier_before.clone();
     let carried_third = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
         &mut carrier,
@@ -6767,6 +6918,23 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .chain(repeated.iter().map(|transaction| &transaction.siblings))
         .collect::<Vec<_>>();
     assert_eq!(all_siblings.len(), 32);
+    assert_eq!(
+        all_siblings
+            .iter()
+            .map(|transaction| {
+                hydrated
+                    .stumps
+                    .beams_by_abscissa
+                    .iter()
+                    .find(|beam| beam.source == transaction.base_b_linker.beam)
+                    .expect("executed base beam in native stump catalogue")
+                    .sig_ordinal
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        EXECUTED_BASE_BEAM_SIG_ORDINALS
+    );
     assert_eq!(
         all_siblings
             .iter()

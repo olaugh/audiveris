@@ -276,11 +276,12 @@ pub enum NativeStemsBeamInterIndexLookup {
     },
 }
 
-/// Disclosed page-wide identity facts that remain outside the native SIG.
+/// Disclosed identity facts for a beam selected by a B14 transaction.
 ///
 /// The native graph and stump products remain authoritative for the beam's
-/// source, vertex, group, removal, and abnormal state. This bootstrap supplies
-/// only the sheet-global identity fields required by the legacy B14 verifier.
+/// source, vertex, group, removal, and abnormal state. Sparse collections are
+/// supported: this bootstrap supplies only the sheet-global identity fields
+/// required by the legacy B14 verifier for beams that actually reach B14.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeStemsBeamBeamInterIndexBootstrapEntry {
     pub source: NativeStemsBeamSource,
@@ -584,13 +585,40 @@ pub struct NativeStemsBeamVLinkBaseApplyState {
     pub committed: Option<NativeStemsBeamVLinkBaseApplyKey>,
 }
 
+fn selected_beam_inter_index_identity(
+    entries: &[NativeStemsBeamBeamInterIndexBootstrapEntry],
+    selected: NativeStemsBeamSource,
+    baseline_entry_count: usize,
+) -> Result<&NativeStemsBeamBeamInterIndexBootstrapEntry, NativeStemsBeamVLinkBaseApplyError> {
+    for (index, entry) in entries.iter().enumerate() {
+        if entry.inter_id <= 0
+            || entry.index_ordinal >= baseline_entry_count
+            || entries[..index].iter().any(|other| {
+                other.source == entry.source
+                    || other.inter_id == entry.inter_id
+                    || other.index_ordinal == entry.index_ordinal
+            })
+        {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover beam InterIndex bootstrap",
+            });
+        }
+    }
+    entries.iter().find(|entry| entry.source == selected).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover selected beam InterIndex identity",
+        },
+    )
+}
+
 /// Roll a committed one-shot B14 state onto the next native scheduler
 /// frontier without importing a transaction-2 B14 fixture.
 ///
 /// The prior InterIndex lineage is folded into a fresh baseline, while SIG
 /// counts and provenance are recomputed from the owned graph. This bounded
-/// Beam identity is resolved from an explicit page-wide InterIndex bootstrap;
-/// every graph, group, and runtime fact is still recomputed from native state.
+/// Beam identity is resolved from explicit sparse InterIndex evidence for the
+/// selected beam; every graph, group, and runtime fact is still recomputed from
+/// native state.
 pub fn roll_native_stems_beam_vlink_base_apply_state(
     prior: &NativeStemsBeamVLinkBaseApplyState,
     transaction_state: &NativeStemsBeamVLinkTransactionState,
@@ -629,44 +657,17 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
     else {
         return Err(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady);
     };
-    for (index, entry) in beam_inter_index_bootstrap.iter().enumerate() {
-        if entry.inter_id <= 0
-            || entry.index_ordinal >= prior.inter_index.baseline_entry_count
-            || beam_inter_index_bootstrap[..index].iter().any(|other| {
-                other.source == entry.source
-                    || other.inter_id == entry.inter_id
-                    || other.index_ordinal == entry.index_ordinal
-            })
-        {
-            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-                phase: "native rollover beam InterIndex bootstrap",
-            });
-        }
-    }
-    if stump_system.beams_by_abscissa.iter().any(|beam| {
-        beam_inter_index_bootstrap
-            .iter()
-            .filter(|entry| entry.source == beam.source)
-            .count()
-            != 1
-    }) || beam_inter_index_bootstrap.len() != stump_system.beams_by_abscissa.len()
-    {
-        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover beam InterIndex bootstrap coverage",
-        });
-    }
+    let beam_identity = selected_beam_inter_index_identity(
+        beam_inter_index_bootstrap,
+        relation.beam,
+        prior.inter_index.baseline_entry_count,
+    )?;
     let stump_beam = stump_system
         .beams_by_abscissa
         .iter()
         .find(|beam| beam.source == relation.beam)
         .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
             phase: "native rollover stump beam",
-        })?;
-    let beam_identity = beam_inter_index_bootstrap
-        .iter()
-        .find(|entry| entry.source == relation.beam)
-        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover selected beam InterIndex identity",
         })?;
     let beam_vertex = bindings.beam_vertices.get(&relation.beam).copied().ok_or(
         NativeStemsBeamVLinkBaseApplyError::InvalidState {
@@ -4839,6 +4840,89 @@ mod tests {
                     GENERATED_STEM_INTER_ID,
                 )
                 .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn sparse_beam_inter_index_evidence_resolves_only_the_selected_beam() {
+        let selected = NativeStemsBeamBeamInterIndexBootstrapEntry {
+            source: NativeStemsBeamSource::RawBeam(7),
+            inter_id: 23,
+            index_ordinal: 3,
+            vip: false,
+        };
+        let entries = [
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                source: NativeStemsBeamSource::Hook(2),
+                inter_id: 19,
+                index_ordinal: 1,
+                vip: true,
+            },
+            selected,
+        ];
+
+        assert_eq!(
+            selected_beam_inter_index_identity(&entries, selected.source, 4),
+            Ok(&selected)
+        );
+        assert_eq!(
+            selected_beam_inter_index_identity(&entries, NativeStemsBeamSource::RawBeam(8), 4,),
+            Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover selected beam InterIndex identity",
+            })
+        );
+    }
+
+    #[test]
+    fn sparse_beam_inter_index_evidence_remains_globally_unique_and_in_range() {
+        let valid = NativeStemsBeamBeamInterIndexBootstrapEntry {
+            source: NativeStemsBeamSource::RawBeam(7),
+            inter_id: 23,
+            index_ordinal: 3,
+            vip: false,
+        };
+        let malformed = [
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                inter_id: 0,
+                ..valid
+            },
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                index_ordinal: 4,
+                ..valid
+            },
+        ];
+        for entry in malformed {
+            assert_eq!(
+                selected_beam_inter_index_identity(&[entry], entry.source, 4),
+                Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover beam InterIndex bootstrap",
+                })
+            );
+        }
+
+        for duplicate in [
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                inter_id: 24,
+                index_ordinal: 2,
+                ..valid
+            },
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                source: NativeStemsBeamSource::RawBeam(8),
+                index_ordinal: 2,
+                ..valid
+            },
+            NativeStemsBeamBeamInterIndexBootstrapEntry {
+                source: NativeStemsBeamSource::RawBeam(8),
+                inter_id: 24,
+                ..valid
+            },
+        ] {
+            assert_eq!(
+                selected_beam_inter_index_identity(&[valid, duplicate], valid.source, 4),
+                Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover beam InterIndex bootstrap",
+                })
             );
         }
     }
