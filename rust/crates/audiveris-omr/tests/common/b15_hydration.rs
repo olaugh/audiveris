@@ -754,6 +754,8 @@ pub(super) struct NativePredecessorPage {
     #[allow(dead_code)] // Consumed by the native SIDES carrier gate only.
     pub(super) modeled_canonical_glyphs:
         Vec<audiveris_omr::native_stems_beam_builders::NativeStemsModeledCanonicalGlyph>,
+    #[allow(dead_code)] // Consumed by the native SIDES persistent-bridge gate only.
+    pub(super) first_system_visible_modeled_count: usize,
     pub(super) plans: NativeStemsBeamLinkPlanRecognition,
     pub(super) scheduler: NativeStemsBeamSchedulerRecognition,
     // The historical all-page B15/B17 replay does not require an assembled
@@ -844,6 +846,12 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         &head_builders,
     )
     .unwrap_or_else(|error| panic!("{image}: STEMS beam link plans failed: {error}"));
+    let first_system_visible_modeled_count = head_builders
+        .systems
+        .first()
+        .and_then(|system| system.registry_events.last())
+        .map(|event| event.modeled_count_after)
+        .unwrap_or_else(|| panic!("{image}: first STEMS system has no registry boundary"));
     let scheduler = materialize_native_stems_beam_scheduler_frontiers(
         &beams,
         &beam_stumps,
@@ -861,6 +869,7 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         beam_reachability,
         beam_builders,
         modeled_canonical_glyphs: head_builders.modeled_canonical_glyphs,
+        first_system_visible_modeled_count,
         plans,
         scheduler,
         sig,

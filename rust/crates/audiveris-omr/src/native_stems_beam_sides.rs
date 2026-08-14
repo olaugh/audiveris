@@ -40,9 +40,10 @@ use crate::{
         NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamFrontierPreparation,
         NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamStemCheckerContext,
         NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamVLinkTransaction,
-        apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsFirstGlyphIndexBridge, apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
+        prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
     },
     native_stems_beam_vlinkers::NativeStemsBeamVLinkerSystem,
     native_stems_head_corners::NativeStemsHeadCornerSystem,
@@ -169,6 +170,38 @@ pub fn advance_native_stems_beam_sides_transaction(
     context: NativeStemsBeamSidesContext<'_>,
     glyphs: NativeStemsBeamSidesGlyphEvidence<'_>,
 ) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_beam_sides_transaction_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::Legacy(glyphs),
+    )
+}
+
+/// Execute one frontier from the validated one-time first-STEMS bridge.
+/// No candidate-specific Java registry row is accepted by this entry point.
+pub fn advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_beam_sides_transaction_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::FirstStems(bridge),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum GlyphAuthority<'a> {
+    Legacy(NativeStemsBeamSidesGlyphEvidence<'a>),
+    FirstStems(&'a NativeStemsFirstGlyphIndexBridge),
+}
+
+fn advance_native_stems_beam_sides_transaction_with_authority(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    glyphs: GlyphAuthority<'_>,
+) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
     let mut shadow = carrier.clone();
     reconcile_known_stems(&mut shadow.latest_base_apply, &shadow.sig, &shadow.bindings)?;
     let mut transaction_state = shadow.latest_base_apply.transaction_state.clone();
@@ -177,13 +210,24 @@ pub fn advance_native_stems_beam_sides_transaction(
         0,
     )
     .map_err(|error| stage("system-stem-authority", error))?;
-    let preparation = prepare_native_stems_beam_vlink_frontier_state(
-        &shadow.scheduler,
-        context.plans,
-        &mut transaction_state,
-        glyphs.selected,
-        proof,
-    )
+    let preparation = match glyphs {
+        GlyphAuthority::Legacy(glyphs) => prepare_native_stems_beam_vlink_frontier_state(
+            &shadow.scheduler,
+            context.plans,
+            &mut transaction_state,
+            glyphs.selected,
+            proof,
+        ),
+        GlyphAuthority::FirstStems(bridge) => {
+            prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge(
+                &shadow.scheduler,
+                context.plans,
+                &mut transaction_state,
+                bridge,
+                proof,
+            )
+        }
+    }
     .map_err(|error| stage("B12-preparation", error))?;
     let candidate = materialize_native_stems_beam_frontier_candidate(
         &shadow.scheduler,
@@ -191,11 +235,31 @@ pub fn advance_native_stems_beam_sides_transaction(
         &transaction_state,
     )
     .map_err(|error| stage("B12-candidate", error))?;
-    if let Some(scan) = glyphs.exhaustive_candidate {
-        if scan.candidate != candidate {
-            return Err(stage("B12-glyph-authority", "candidate differs"));
+    match glyphs {
+        GlyphAuthority::Legacy(glyphs) => {
+            if let Some(scan) = glyphs.exhaustive_candidate {
+                if scan.candidate != candidate {
+                    return Err(stage("B12-glyph-authority", "candidate differs"));
+                }
+                transaction_state.glyph_index.exhaustive_lookup = Some(scan.clone());
+            }
         }
-        transaction_state.glyph_index.exhaustive_lookup = Some(scan.clone());
+        GlyphAuthority::FirstStems(_) => {
+            if !transaction_state
+                .selected_glyph_bindings
+                .iter()
+                .any(|selected| {
+                    preparation.selected_glyphs.contains(&selected.reference)
+                        && selected.content == candidate
+                })
+            {
+                return Err(stage(
+                    "B12-glyph-authority",
+                    "candidate is not a current selected modeled canonical",
+                ));
+            }
+            transaction_state.glyph_index.exhaustive_lookup = None;
+        }
     }
     let create = apply_native_stems_beam_vlink_create_stem_transaction(
         &shadow.scheduler,

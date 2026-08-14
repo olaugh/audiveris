@@ -28,10 +28,13 @@ use audiveris_image::{
 use crate::{
     beam_recognizer::run_table_center_line,
     head_scanner_slices::{JavaRectangle, VerticalRibbonArea},
-    native_stems_beam_builders::{NativeStemsBeamBuilderGlyphRef, NativeStemsBeamBuilderSystem},
+    native_stems_beam_builders::{
+        NativeStemsBeamBuilderGlyphRef, NativeStemsBeamBuilderSystem,
+        NativeStemsModeledCanonicalGlyph,
+    },
     native_stems_beam_link_plans::{
         NativeStemsBeamLinkPlanAttempt, NativeStemsBeamLinkPlanOutcome,
-        NativeStemsBeamLinkPlanSystem,
+        NativeStemsBeamLinkPlanSystem, NativeStemsBeamSelectedGlyph,
     },
     native_stems_beam_scheduler::{
         NativeStemsBeamDeferredLineDelta, NativeStemsBeamPlanRef, NativeStemsBeamSchedulerStatus,
@@ -120,6 +123,194 @@ pub struct NativeStemsBeamGlyphRegistryBootstrapEntry {
     pub content: NativeStemsBeamFixedGlyphContent,
     pub active_in_index: bool,
     pub strongly_retained: bool,
+}
+
+pub const FIRST_STEMS_GLYPH_UNION_SIZE: usize = 1_650;
+pub const FIRST_STEMS_LAST_PERSISTENT_ID: i32 = 2_339;
+pub const FIRST_STEMS_VISIBLE_MODELED_COUNT: usize = 1_058;
+pub const FIRST_STEMS_OPAQUE_GLYPH_COUNT: usize = 592;
+
+/// Audit-only identity for a page glyph whose exact `RunTable` is not modeled.
+/// A fingerprint never answers `Glyph.equals`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsFirstGlyphFingerprint {
+    pub bounds: Bounds,
+    pub run_table_sha256: String,
+}
+
+/// One identity in the disclosed first-STEMS Java `GlyphIndex` snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsFirstGlyphSnapshotEntry {
+    pub glyph_id: i32,
+    pub active_in_index: bool,
+    pub live_original: bool,
+    pub fingerprint: NativeStemsFirstGlyphFingerprint,
+    /// Present only for the system-visible prefix of the native registry.
+    pub modeled_canonical_ordinal: Option<usize>,
+}
+
+/// One-time page snapshot at chula system 1's first STEMS frontier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsFirstGlyphIndexSnapshot {
+    pub system_id: usize,
+    pub persistent_ids: NativeStemsBeamPersistentIdState,
+    pub union_size: usize,
+    pub active_count: usize,
+    pub live_original_count: usize,
+    pub active_sha256: String,
+    pub live_original_sha256: String,
+    pub visible_modeled_count: usize,
+    pub entries: Vec<NativeStemsFirstGlyphSnapshotEntry>,
+}
+
+/// Validated candidate-local bridge from native modeled ordinals to Java IDs.
+///
+/// Opaque page-global entries remain represented in `snapshot`, but only the
+/// exact modeled prefix is eligible for structural lookup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsFirstGlyphIndexBridge {
+    snapshot: NativeStemsFirstGlyphIndexSnapshot,
+    modeled: Vec<NativeStemsBeamKnownCanonicalGlyph>,
+}
+
+impl NativeStemsFirstGlyphIndexBridge {
+    pub fn from_snapshot(
+        snapshot: NativeStemsFirstGlyphIndexSnapshot,
+        modeled_registry: &[NativeStemsModeledCanonicalGlyph],
+    ) -> Result<Self, NativeStemsBeamVLinkTransactionError> {
+        let ids = snapshot.persistent_ids;
+        let active_sha256 = first_stems_snapshot_sha256(&snapshot.entries, false);
+        let live_original_sha256 = first_stems_snapshot_sha256(&snapshot.entries, true);
+        if snapshot.system_id != 1
+            || snapshot.union_size != FIRST_STEMS_GLYPH_UNION_SIZE
+            || snapshot.entries.len() != snapshot.union_size
+            || snapshot.active_count != snapshot.union_size
+            || snapshot.live_original_count != snapshot.union_size
+            || ids.sheet_last_id != FIRST_STEMS_LAST_PERSISTENT_ID
+            || ids.glyph_index_last_id != ids.sheet_last_id
+            || ids.inter_index_last_id != ids.sheet_last_id
+            || snapshot.visible_modeled_count != FIRST_STEMS_VISIBLE_MODELED_COUNT
+            || snapshot.visible_modeled_count > modeled_registry.len()
+            || !valid_sha256(&snapshot.active_sha256)
+            || !valid_sha256(&snapshot.live_original_sha256)
+            || snapshot.active_sha256 != active_sha256
+            || snapshot.live_original_sha256 != live_original_sha256
+            || !snapshot
+                .entries
+                .iter()
+                .any(|entry| entry.glyph_id == FIRST_STEMS_LAST_PERSISTENT_ID)
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "first-STEMS glyph snapshot header",
+            });
+        }
+        let mut modeled: Vec<Option<NativeStemsBeamKnownCanonicalGlyph>> =
+            vec![None; snapshot.visible_modeled_count];
+        for (index, entry) in snapshot.entries.iter().enumerate() {
+            if entry.glyph_id <= 0
+                || entry.glyph_id > ids.sheet_last_id
+                || !valid_sha256(&entry.fingerprint.run_table_sha256)
+                || entry.fingerprint.bounds.width == 0
+                || entry.fingerprint.bounds.height == 0
+                || snapshot.entries[..index].iter().any(|prior| {
+                    prior.glyph_id == entry.glyph_id || prior.fingerprint == entry.fingerprint
+                })
+            {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "first-STEMS glyph snapshot entries",
+                });
+            }
+            if let Some(ordinal) = entry.modeled_canonical_ordinal {
+                let Some(native) = modeled_registry.get(ordinal) else {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "first-STEMS modeled cutoff",
+                    });
+                };
+                if ordinal >= snapshot.visible_modeled_count
+                    || native.modeled_canonical_ordinal != ordinal
+                    || native.bounds != entry.fingerprint.bounds
+                    || run_table_sha256(&native.run_table) != entry.fingerprint.run_table_sha256
+                    || modeled[ordinal].is_some()
+                {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "first-STEMS modeled mapping",
+                    });
+                }
+                modeled[ordinal] = Some(NativeStemsBeamKnownCanonicalGlyph {
+                    canonical_alias: entry.glyph_id as usize,
+                    glyph_id: entry.glyph_id,
+                    content: NativeStemsBeamFixedGlyphContent {
+                        bounds: native.bounds,
+                        weight: native.weight,
+                        run_table: native.run_table.clone(),
+                    },
+                    active_in_index: entry.active_in_index,
+                    strongly_retained: entry.active_in_index,
+                });
+            }
+        }
+        if snapshot
+            .entries
+            .iter()
+            .filter(|entry| entry.active_in_index)
+            .count()
+            != snapshot.active_count
+            || snapshot
+                .entries
+                .iter()
+                .filter(|entry| entry.live_original)
+                .count()
+                != snapshot.live_original_count
+            || modeled.iter().any(Option::is_none)
+            || snapshot
+                .entries
+                .iter()
+                .filter(|entry| entry.modeled_canonical_ordinal.is_none())
+                .count()
+                != FIRST_STEMS_OPAQUE_GLYPH_COUNT
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "first-STEMS glyph snapshot coverage",
+            });
+        }
+        Ok(Self {
+            snapshot,
+            modeled: modeled.into_iter().flatten().collect(),
+        })
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> &NativeStemsFirstGlyphIndexSnapshot {
+        &self.snapshot
+    }
+
+    fn selected_bootstrap(
+        &self,
+        selected: &NativeStemsBeamSelectedGlyph,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
+    {
+        let known = self
+            .modeled
+            .get(selected.modeled_canonical_ordinal)
+            .ok_or(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)?;
+        let content = NativeStemsBeamFixedGlyphContent {
+            bounds: selected.bounds,
+            weight: selected.weight,
+            run_table: selected.structural_key.run_table.clone(),
+        };
+        if known.content != content {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "first-STEMS selected modeled identity",
+            });
+        }
+        Ok(NativeStemsBeamGlyphRegistryBootstrapEntry {
+            canonical_alias: known.canonical_alias,
+            glyph_id: known.glyph_id,
+            content,
+            active_in_index: known.active_in_index,
+            strongly_retained: known.strongly_retained,
+        })
+    }
 }
 
 /// Explicit authority for promoting `systemStems` to a complete carried map.
@@ -615,6 +806,54 @@ pub fn prepare_native_stems_beam_vlink_frontier_state(
         known_glyphs_added,
         line_state_added: true,
     })
+}
+
+/// Prepare one frontier from a validated one-time first-STEMS bridge.
+///
+/// This supplies no absence authority for the opaque page-global suffix. Each
+/// selected glyph must resolve through the system-visible modeled prefix.
+pub fn prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    state: &mut NativeStemsBeamVLinkTransactionState,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+    system_stems_proof: NativeStemsBeamSystemStemAuthorityProof,
+) -> Result<NativeStemsBeamFrontierPreparation, NativeStemsBeamVLinkTransactionError> {
+    let snapshot = bridge.snapshot();
+    let ids = state.glyph_index.persistent_ids;
+    if scheduler_system.system_id != snapshot.system_id
+        || state.glyph_index.union_size != snapshot.union_size
+        || ids.sheet_last_id < snapshot.persistent_ids.sheet_last_id
+        || ids.sheet_last_id != ids.glyph_index_last_id
+        || ids.sheet_last_id != ids.inter_index_last_id
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+            phase: "first-STEMS carried glyph snapshot",
+        });
+    }
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(
+                NativeStemsBeamVLinkTransactionError::NoAwaitingVLinkTransaction {
+                    system_id: scheduler_system.system_id,
+                },
+            );
+        }
+    };
+    let (attempt, _) = resolve_plan(plan_system, frontier.plan)?;
+    let bootstrap = attempt
+        .glyphs
+        .iter()
+        .map(|selected| bridge.selected_bootstrap(selected))
+        .collect::<Result<Vec<_>, _>>()?;
+    prepare_native_stems_beam_vlink_frontier_state(
+        scheduler_system,
+        plan_system,
+        state,
+        &bootstrap,
+        system_stems_proof,
+    )
 }
 
 /// Materialize the current frontier's selected glyph candidate without
@@ -1133,6 +1372,146 @@ fn validate_content(
     Ok(())
 }
 
+fn run_table_sha256(table: &RunTable) -> String {
+    let orientation = match table.orientation() {
+        Orientation::Horizontal => "HORIZONTAL",
+        Orientation::Vertical => "VERTICAL",
+    };
+    let mut bytes = format!("{orientation} {} {}\n", table.width(), table.height()).into_bytes();
+    for sequence in 0..table.sequence_count() {
+        let mut row = sequence.to_string();
+        for run in table.sequence(sequence).unwrap_or_default() {
+            row.push_str(&format!(" {}:{}", run.start, run.length));
+        }
+        row.push('\n');
+        bytes.extend_from_slice(row.as_bytes());
+    }
+    sha256_hex(&bytes)
+}
+
+fn first_stems_snapshot_sha256(
+    entries: &[NativeStemsFirstGlyphSnapshotEntry],
+    originals: bool,
+) -> String {
+    let mut rows = entries
+        .iter()
+        .filter(|entry| {
+            if originals {
+                entry.live_original
+            } else {
+                entry.active_in_index
+            }
+        })
+        .map(|entry| {
+            let bounds = entry.fingerprint.bounds;
+            let token = format!(
+                "g:{}:{}:{}:{}:{}",
+                bounds.x, bounds.y, bounds.width, bounds.height, entry.fingerprint.run_table_sha256
+            );
+            if originals {
+                format!("{token}:active={}", entry.active_in_index)
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    let mut bytes = Vec::new();
+    for row in rows {
+        bytes.extend_from_slice(row.as_bytes());
+        bytes.push(b'\n');
+    }
+    sha256_hex(&bytes)
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut padded = input.to_vec();
+    let bit_len = u64::try_from(input.len()).expect("glyph fingerprint length fits u64") * 8;
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+    let mut digest = [
+        0x6a09e667_u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    for chunk in padded.chunks_exact(64) {
+        let mut words = [0_u32; 64];
+        for (index, word) in words[..16].iter_mut().enumerate() {
+            let offset = index * 4;
+            *word = u32::from_be_bytes([
+                chunk[offset],
+                chunk[offset + 1],
+                chunk[offset + 2],
+                chunk[offset + 3],
+            ]);
+        }
+        for index in 16..64 {
+            let low = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let high = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
+                .wrapping_add(low)
+                .wrapping_add(words[index - 7])
+                .wrapping_add(high);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = digest;
+        for index in 0..64 {
+            let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choice = (e & f) ^ ((!e) & g);
+            let first = h
+                .wrapping_add(sigma1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(words[index]);
+            let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let second = sigma0.wrapping_add(majority);
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(first);
+            d = c;
+            c = b;
+            b = a;
+            a = first.wrapping_add(second);
+        }
+        for (slot, value) in digest.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+            *slot = slot.wrapping_add(value);
+        }
+    }
+    digest.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 fn validate_glyph_scan(
     scan: &NativeStemsBeamExhaustiveGlyphEqualsScan,
     last_id: i32,
@@ -1184,13 +1563,6 @@ fn validate_glyph_scan(
         }
     }
     Ok(())
-}
-
-fn valid_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn validate_system_stems(
@@ -2331,6 +2703,125 @@ mod tests {
             system_stem_mutation_count: 0,
             link_flag_mutation_count: 0,
         }
+    }
+
+    fn first_stems_bridge_inputs() -> (
+        NativeStemsFirstGlyphIndexSnapshot,
+        Vec<NativeStemsModeledCanonicalGlyph>,
+    ) {
+        let template = vertical_content();
+        let digest = run_table_sha256(&template.run_table);
+        let modeled = (0..=FIRST_STEMS_VISIBLE_MODELED_COUNT)
+            .map(|ordinal| NativeStemsModeledCanonicalGlyph {
+                modeled_canonical_ordinal: ordinal,
+                bounds: Bounds {
+                    x: ordinal + 1,
+                    ..template.bounds
+                },
+                weight: template.weight,
+                run_table: template.run_table.clone(),
+            })
+            .collect::<Vec<_>>();
+        let entries = (0..FIRST_STEMS_GLYPH_UNION_SIZE)
+            .map(|index| NativeStemsFirstGlyphSnapshotEntry {
+                glyph_id: if index + 1 == FIRST_STEMS_GLYPH_UNION_SIZE {
+                    FIRST_STEMS_LAST_PERSISTENT_ID
+                } else {
+                    i32::try_from(index + 1).unwrap()
+                },
+                active_in_index: true,
+                live_original: true,
+                fingerprint: NativeStemsFirstGlyphFingerprint {
+                    bounds: Bounds {
+                        x: index + 1,
+                        ..template.bounds
+                    },
+                    run_table_sha256: if index < FIRST_STEMS_VISIBLE_MODELED_COUNT {
+                        digest.clone()
+                    } else {
+                        sha256_hex(format!("opaque:{index}").as_bytes())
+                    },
+                },
+                modeled_canonical_ordinal: (index < FIRST_STEMS_VISIBLE_MODELED_COUNT)
+                    .then_some(index),
+            })
+            .collect();
+        let mut snapshot = NativeStemsFirstGlyphIndexSnapshot {
+            system_id: 1,
+            persistent_ids: NativeStemsBeamPersistentIdState {
+                sheet_last_id: FIRST_STEMS_LAST_PERSISTENT_ID,
+                glyph_index_last_id: FIRST_STEMS_LAST_PERSISTENT_ID,
+                inter_index_last_id: FIRST_STEMS_LAST_PERSISTENT_ID,
+            },
+            union_size: FIRST_STEMS_GLYPH_UNION_SIZE,
+            active_count: FIRST_STEMS_GLYPH_UNION_SIZE,
+            live_original_count: FIRST_STEMS_GLYPH_UNION_SIZE,
+            active_sha256: String::new(),
+            live_original_sha256: String::new(),
+            visible_modeled_count: FIRST_STEMS_VISIBLE_MODELED_COUNT,
+            entries,
+        };
+        snapshot.active_sha256 = first_stems_snapshot_sha256(&snapshot.entries, false);
+        snapshot.live_original_sha256 = first_stems_snapshot_sha256(&snapshot.entries, true);
+        (snapshot, modeled)
+    }
+
+    #[test]
+    fn first_stems_bridge_rejects_counts_duplicates_and_future_cutoff() {
+        let (snapshot, modeled) = first_stems_bridge_inputs();
+        assert!(
+            NativeStemsFirstGlyphIndexBridge::from_snapshot(snapshot.clone(), &modeled).is_ok()
+        );
+
+        let mut wrong_count = snapshot.clone();
+        wrong_count.union_size -= 1;
+        assert!(NativeStemsFirstGlyphIndexBridge::from_snapshot(wrong_count, &modeled).is_err());
+
+        let mut duplicate = snapshot.clone();
+        duplicate.entries[1].glyph_id = duplicate.entries[0].glyph_id;
+        assert!(NativeStemsFirstGlyphIndexBridge::from_snapshot(duplicate, &modeled).is_err());
+
+        let mut corrupt_hash = snapshot.clone();
+        corrupt_hash.active_sha256 = "0".repeat(64);
+        assert!(NativeStemsFirstGlyphIndexBridge::from_snapshot(corrupt_hash, &modeled).is_err());
+
+        let mut future = snapshot;
+        future.entries[FIRST_STEMS_VISIBLE_MODELED_COUNT].modeled_canonical_ordinal =
+            Some(FIRST_STEMS_VISIBLE_MODELED_COUNT);
+        assert!(NativeStemsFirstGlyphIndexBridge::from_snapshot(future, &modeled).is_err());
+    }
+
+    #[test]
+    fn first_stems_bridge_selects_exact_modeled_identity() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let (snapshot, modeled) = first_stems_bridge_inputs();
+        let bridge = NativeStemsFirstGlyphIndexBridge::from_snapshot(snapshot, &modeled).unwrap();
+        let native = &modeled[7];
+        let selected = NativeStemsBeamSelectedGlyph {
+            reference: NativeStemsBeamBuilderGlyphRef::StemSeed {
+                free_glyph_ordinal: 7,
+            },
+            bounds: native.bounds,
+            weight: native.weight,
+            structural_key: crate::native_stems_beam_link_plans::NativeStemsBeamLinkGlyphKey {
+                left: native.bounds.x,
+                top: native.bounds.y,
+                run_table: native.run_table.clone(),
+            },
+            structural_digest: 0,
+            modeled_canonical_ordinal: 7,
+        };
+        let binding = bridge.selected_bootstrap(&selected).unwrap();
+        assert_eq!(binding.glyph_id, 8);
+        assert_eq!(binding.canonical_alias, 8);
+        assert_eq!(binding.content.bounds, native.bounds);
+
+        let mut mismatched = selected;
+        mismatched.bounds.x += 1;
+        assert!(bridge.selected_bootstrap(&mismatched).is_err());
     }
 
     #[test]

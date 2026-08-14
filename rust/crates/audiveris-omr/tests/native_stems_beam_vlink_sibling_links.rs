@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
 };
 
-use audiveris_image::beam_structure::Segment;
+use audiveris_image::{beam_structure::Segment, section::Bounds};
 use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
@@ -23,12 +23,13 @@ use audiveris_omr::{
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
+        NativeStemsModeledCanonicalGlyph,
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::NativeStemsBeamSchedulerResumeStatus,
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
-        NativeStemsBeamSidesGlyphEvidence, advance_native_stems_beam_sides_transaction,
+        advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
     native_stems_beam_vlink_b_linker_flag::{
@@ -80,13 +81,15 @@ use audiveris_omr::{
         initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphEqualsScan,
-        NativeStemsBeamExhaustiveGlyphLookup, NativeStemsBeamFixedGlyphContent,
-        NativeStemsBeamGlyphAliasOrder, NativeStemsBeamGlyphRegistrationAction,
-        NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamSystemStemAuthorityProof,
+        NativeStemsBeamCreateStemDisposition, NativeStemsBeamFixedGlyphContent,
+        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamGlyphRegistryBootstrapEntry,
+        NativeStemsBeamPersistentIdState, NativeStemsBeamSystemStemAuthorityProof,
+        NativeStemsFirstGlyphFingerprint, NativeStemsFirstGlyphIndexBridge,
+        NativeStemsFirstGlyphIndexSnapshot, NativeStemsFirstGlyphSnapshotEntry,
         apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
+        prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
@@ -112,6 +115,177 @@ const BOUNDARY_FIFTEEN_MANIFEST_PATH: &str =
     "rust/oracle/stems-beam-vlink-b-linker-flag-manifest.txt";
 const BOUNDARY_FIFTEEN_MANIFEST_SHA256: &str =
     "c7032ac4871188ef0cf48ac63d99996e78a0e163bf1470d3be84c5e9b10d1d92";
+const FIRST_STEMS_GLYPH_REGISTRY_SHA256: &str =
+    "7311235c38b0667b249749a0e7e6ade278ce92a05ca4200529eb67d73bf1de1c";
+const FIRST_STEMS_GLYPH_REGISTRY_LINES: usize = 1_658;
+const FIRST_STEMS_GLYPH_REGISTRY_BYTES: usize = 226_926;
+const FIRST_STEMS_GLYPH_ACTIVE_SHA256: &str =
+    "dae5de3eabc2fb8d19613abcc8b24f4d865bcd55ca1ec6533faae30792692642";
+const FIRST_STEMS_GLYPH_ORIGINALS_SHA256: &str =
+    "38f4861501e8099dedcb36b0ff9cf615f156ec5b929dffe31c51906a15362af0";
+
+fn first_stems_glyph_bridge(
+    registry_text: &str,
+    modeled_registry: &[NativeStemsModeledCanonicalGlyph],
+    visible_modeled_count: usize,
+) -> NativeStemsFirstGlyphIndexBridge {
+    assert_eq!(registry_text.len(), FIRST_STEMS_GLYPH_REGISTRY_BYTES);
+    assert_eq!(
+        registry_text.lines().count(),
+        FIRST_STEMS_GLYPH_REGISTRY_LINES
+    );
+    assert_eq!(
+        sha256_hex(registry_text.as_bytes()),
+        FIRST_STEMS_GLYPH_REGISTRY_SHA256
+    );
+    assert!(
+        registry_text
+            .lines()
+            .any(|line| line == "# schema: stems-beam-glyph-registry-v1")
+    );
+    assert_eq!(visible_modeled_count, 1_058);
+    assert!(modeled_registry.len() > visible_modeled_count);
+
+    let page_rows = registry_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamglyphregistrypage "))
+        .collect::<Vec<_>>();
+    let [page] = page_rows.as_slice() else {
+        panic!(
+            "first-STEMS registry page-row cardinality: {}",
+            page_rows.len()
+        );
+    };
+    let page_tokens = page.split_ascii_whitespace().collect::<Vec<_>>();
+    assert_eq!(
+        page_tokens,
+        [
+            "stemsbeamglyphregistrypage",
+            "active",
+            "1650",
+            "originals",
+            "1650",
+            "entries",
+            "1650",
+            "activeHash",
+            FIRST_STEMS_GLYPH_ACTIVE_SHA256,
+            "originalsHash",
+            FIRST_STEMS_GLYPH_ORIGINALS_SHA256,
+        ]
+    );
+
+    let mut visible_by_content = modeled_registry[..visible_modeled_count]
+        .iter()
+        .map(|glyph| {
+            assert!(glyph.modeled_canonical_ordinal < visible_modeled_count);
+            (
+                format!(
+                    "g:{}:{}:{}:{}:{}",
+                    glyph.bounds.x,
+                    glyph.bounds.y,
+                    glyph.bounds.width,
+                    glyph.bounds.height,
+                    b15_hydration::run_table_digest(&glyph.run_table)
+                ),
+                glyph.modeled_canonical_ordinal,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(visible_by_content.len(), visible_modeled_count);
+
+    let mut entries = Vec::new();
+    let mut ids = BTreeSet::new();
+    let mut fingerprints = BTreeSet::new();
+    for line in registry_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamglyphregistryentry "))
+    {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let [
+            "stemsbeamglyphregistryentry",
+            "id",
+            glyph_id,
+            "active",
+            "true",
+            "content",
+            content,
+        ] = tokens.as_slice()
+        else {
+            panic!("malformed first-STEMS registry entry: {line}");
+        };
+        let glyph_id = glyph_id.parse::<i32>().expect("positive registry glyph ID");
+        assert!((1..=2_339).contains(&glyph_id));
+        assert!(
+            ids.insert(glyph_id),
+            "duplicate registry glyph ID {glyph_id}"
+        );
+        let parts = content.split(':').collect::<Vec<_>>();
+        let ["g", x, y, width, height, run_table_sha256] = parts.as_slice() else {
+            panic!("malformed first-STEMS glyph fingerprint: {content}");
+        };
+        let fingerprint = NativeStemsFirstGlyphFingerprint {
+            bounds: Bounds {
+                x: x.parse().expect("registry glyph x"),
+                y: y.parse().expect("registry glyph y"),
+                width: width.parse().expect("registry glyph width"),
+                height: height.parse().expect("registry glyph height"),
+            },
+            run_table_sha256: (*run_table_sha256).to_owned(),
+        };
+        assert!(
+            fingerprints.insert((*content).to_owned()),
+            "duplicate registry glyph content {content}"
+        );
+        entries.push(NativeStemsFirstGlyphSnapshotEntry {
+            glyph_id,
+            active_in_index: true,
+            // The page row says all 1,650 entries are live originals, and all
+            // 1,650 individual entries are active at this exact baseline.
+            live_original: true,
+            fingerprint,
+            modeled_canonical_ordinal: visible_by_content.remove(*content),
+        });
+    }
+    assert_eq!(entries.len(), 1_650);
+    assert!(
+        visible_by_content.is_empty(),
+        "visible native glyph lacks persistent binding"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.modeled_canonical_ordinal.is_some())
+            .count(),
+        visible_modeled_count
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.modeled_canonical_ordinal.is_none())
+            .count(),
+        592
+    );
+
+    NativeStemsFirstGlyphIndexBridge::from_snapshot(
+        NativeStemsFirstGlyphIndexSnapshot {
+            system_id: 1,
+            persistent_ids: NativeStemsBeamPersistentIdState {
+                sheet_last_id: 2_339,
+                glyph_index_last_id: 2_339,
+                inter_index_last_id: 2_339,
+            },
+            union_size: 1_650,
+            active_count: 1_650,
+            live_original_count: 1_650,
+            active_sha256: FIRST_STEMS_GLYPH_ACTIVE_SHA256.to_owned(),
+            live_original_sha256: FIRST_STEMS_GLYPH_ORIGINALS_SHA256.to_owned(),
+            visible_modeled_count,
+            entries,
+        },
+        modeled_registry,
+    )
+    .expect("validated one-time first-STEMS GlyphIndex bridge")
+}
 
 fn glyph_bootstrap_for_attempt(
     attempt: &NativeStemsBeamLinkPlanAttempt,
@@ -167,84 +341,6 @@ fn glyph_bootstrap_for_attempt(
         .collect()
 }
 
-fn exhaustive_glyph_scan(
-    candidate: NativeStemsBeamFixedGlyphContent,
-    registry_text: &str,
-) -> NativeStemsBeamExhaustiveGlyphEqualsScan {
-    let page = registry_text
-        .lines()
-        .find(|line| line.starts_with("stemsbeamglyphregistrypage "))
-        .expect("glyph registry page row");
-    let page_tokens = page.split_ascii_whitespace().collect::<Vec<_>>();
-    let page_value = |name: &str| {
-        page_tokens
-            .iter()
-            .position(|token| *token == name)
-            .and_then(|index| page_tokens.get(index + 1))
-            .copied()
-            .expect("glyph registry page field")
-    };
-    let content_key = format!(
-        "g:{}:{}:{}:{}:{}",
-        candidate.bounds.x,
-        candidate.bounds.y,
-        candidate.bounds.width,
-        candidate.bounds.height,
-        b15_hydration::run_table_digest(&candidate.run_table)
-    );
-    let entries = registry_text
-        .lines()
-        .filter(|line| line.starts_with("stemsbeamglyphregistryentry "))
-        .collect::<Vec<_>>();
-    let matches = entries
-        .iter()
-        .filter_map(|line| {
-            let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
-            let value = |name: &str| {
-                tokens
-                    .iter()
-                    .position(|token| *token == name)
-                    .and_then(|index| tokens.get(index + 1))
-                    .copied()
-            };
-            (value("content") == Some(content_key.as_str())).then(|| {
-                (
-                    value("id")
-                        .expect("registry match id")
-                        .parse::<i32>()
-                        .unwrap(),
-                    value("active") == Some("true"),
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    let lookup = match matches.as_slice() {
-        [] => NativeStemsBeamExhaustiveGlyphLookup::Absent,
-        [(glyph_id, active_in_index)] => NativeStemsBeamExhaustiveGlyphLookup::Present {
-            canonical_alias: usize::try_from(*glyph_id).expect("positive glyph ID"),
-            glyph_id: *glyph_id,
-            active_in_index: *active_in_index,
-        },
-        _ => panic!("compound glyph bootstrap is ambiguous"),
-    };
-    let active = page_value("active").parse::<usize>().unwrap();
-    let originals = page_value("originals").parse::<usize>().unwrap();
-    assert_eq!(entries.len(), page_value("entries").parse().unwrap());
-    NativeStemsBeamExhaustiveGlyphEqualsScan {
-        candidate,
-        alias_order: NativeStemsBeamGlyphAliasOrder::JavaGlyphId,
-        baseline_union_size: entries.len(),
-        baseline_active_count: active,
-        baseline_live_original_count: originals,
-        baseline_active_sha256: page_value("activeHash").to_owned(),
-        baseline_live_original_sha256: page_value("originalsHash").to_owned(),
-        scanned_active_count: active,
-        scanned_live_original_count: originals,
-        equal_active_matches: matches.iter().filter(|(_, active)| *active).count(),
-        equal_original_matches: matches.len(),
-        lookup,
-    }
-}
 const BOUNDARY_FIFTEEN_GATE_PATH: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_b_linker_flag.rs";
 const BOUNDARY_FIFTEEN_GATE_SHA256: &str =
@@ -6388,43 +6484,62 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(third.vertical_side, NativeStemVerticalSide::Top);
 
     // Transaction 3 is the first changed-base-beam and compound-glyph case.
-    // The complete page registries are disclosed bootstrap authorities; no
-    // transaction-3 B12-B19 row is read before this native result exists.
+    // Consume the disclosed first-STEMS page snapshot once, join its persistent
+    // identities to the system-1-visible native registry prefix, and drop the
+    // raw rows before any carried transaction runs.
     let third_scheduler = &second_outer_resume.resume.advanced_system;
-    let third_attempt = hydrated
-        .plans
-        .builders
-        .iter()
-        .flat_map(|builder| &builder.attempts)
-        .nth(third.plan.plan_ordinal)
-        .expect("third plan attempt");
-    let third_bootstrap = glyph_bootstrap_for_attempt(third_attempt, &registry_text);
+    let checker_page = b15_hydration::native_predecessor_page("chula.png");
+    let visible_modeled_count = checker_page.first_system_visible_modeled_count;
+    let bridge = first_stems_glyph_bridge(
+        &registry_text,
+        &checker_page.modeled_canonical_glyphs,
+        visible_modeled_count,
+    );
+    assert!(hydrated.plans.builders.iter().all(|builder| {
+        builder
+            .attempts
+            .iter()
+            .flat_map(|attempt| &attempt.glyphs)
+            .all(|glyph| glyph.modeled_canonical_ordinal < visible_modeled_count)
+    }));
+    drop(registry_text);
+
+    // Retain an independently prepared transaction-3 state for the beam-index
+    // authority negative below. It uses the same bridge, not a frontier row.
     let mut third_transaction_state = second_base.state_after.transaction_state.clone();
     let third_authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
         &third_transaction_state.system_stems,
         0,
     )
     .expect("transaction-3 dense carried systemStems");
-    prepare_native_stems_beam_vlink_frontier_state(
+    prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge(
         third_scheduler,
         &hydrated.plans,
         &mut third_transaction_state,
-        &third_bootstrap,
+        &bridge,
         third_authority,
     )
-    .expect("native transaction-3 preparation");
+    .expect("native transaction-3 bridge preparation");
     let third_candidate = materialize_native_stems_beam_frontier_candidate(
         third_scheduler,
         &hydrated.plans,
         &third_transaction_state,
     )
     .expect("native transaction-3 compound candidate");
-    let third_glyph_scan = exhaustive_glyph_scan(third_candidate, &registry_text);
+    assert!(
+        third_transaction_state
+            .selected_glyph_bindings
+            .iter()
+            .any(|selected| {
+                selected.content == third_candidate
+                    && selected.glyph_id == 298
+                    && selected.canonical_alias == 298
+            })
+    );
+    third_transaction_state.glyph_index.exhaustive_lookup = None;
 
     // The production carrier owns the same transaction as one clone-and-swap
-    // operation.  Seed it only with the post-transaction-2 authorities and
-    // candidate-specific page evidence; all plan-specific work is internal.
-    let checker_page = b15_hydration::native_predecessor_page("chula.png");
+    // operation. All plan-specific glyph selection now comes from the bridge.
     let checker = b15_hydration::checker_context_for_page(&checker_page);
     let carrier_before = NativeStemsBeamSidesCarrier {
         scheduler: (**third_scheduler).clone(),
@@ -6446,14 +6561,30 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         checker: &checker,
         relation_parameters: hydrated.relation_parameters,
     };
-    let evidence = NativeStemsBeamSidesGlyphEvidence {
-        selected: &third_bootstrap,
-        exhaustive_candidate: Some(&third_glyph_scan),
-    };
+    let mut corrupt_bridge_carrier = carrier_before.clone();
+    corrupt_bridge_carrier
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .union_size -= 1;
+    let corrupt_bridge_before = corrupt_bridge_carrier.clone();
+    let bridge_before = bridge.clone();
+    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        &mut corrupt_bridge_carrier,
+        context,
+        &bridge,
+    )
+    .expect_err("carried GlyphIndex union mismatch must reject the bridge transaction");
+    assert_eq!(corrupt_bridge_carrier, corrupt_bridge_before);
+    assert_eq!(bridge, bridge_before);
+
     let mut carrier = carrier_before.clone();
-    let carried_third =
-        advance_native_stems_beam_sides_transaction(&mut carrier, context, evidence)
-            .expect("atomic native transaction-3 carrier");
+    let carried_third = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        &mut carrier,
+        context,
+        &bridge,
+    )
+    .expect("atomic native transaction-3 bridge carrier");
     assert_eq!(
         (carrier.sig.vertices.len(), carrier.sig.edges.len()),
         (224, 216)
@@ -6536,46 +6667,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     };
     assert_eq!(carried_fourth.plan.plan_ordinal, 627);
 
-    // Invoke the same production carrier again from its own committed state.
-    // The selected-glyph and exhaustive-equality evidence remain disclosed
-    // page authorities, but no transaction-4 or SIDES-pass row is opened
-    // until the complete native result exists.
-    let fourth_attempt = hydrated
-        .plans
-        .builders
-        .iter()
-        .flat_map(|builder| &builder.attempts)
-        .nth(carried_fourth.plan.plan_ordinal)
-        .expect("fourth plan attempt");
-    let fourth_bootstrap = glyph_bootstrap_for_attempt(fourth_attempt, &registry_text);
-    let mut fourth_candidate_state = carrier.latest_base_apply.transaction_state.clone();
-    let fourth_authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
-        &fourth_candidate_state.system_stems,
-        0,
+    // Invoke the same production bridge carrier again from committed state.
+    let carried_fourth = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        &mut carrier,
+        context,
+        &bridge,
     )
-    .expect("transaction-4 dense carried systemStems");
-    prepare_native_stems_beam_vlink_frontier_state(
-        &carrier.scheduler,
-        &hydrated.plans,
-        &mut fourth_candidate_state,
-        &fourth_bootstrap,
-        fourth_authority,
-    )
-    .expect("native transaction-4 evidence preparation");
-    let fourth_candidate = materialize_native_stems_beam_frontier_candidate(
-        &carrier.scheduler,
-        &hydrated.plans,
-        &fourth_candidate_state,
-    )
-    .expect("native transaction-4 candidate");
-    let fourth_glyph_scan = exhaustive_glyph_scan(fourth_candidate, &registry_text);
-    let fourth_evidence = NativeStemsBeamSidesGlyphEvidence {
-        selected: &fourth_bootstrap,
-        exhaustive_candidate: Some(&fourth_glyph_scan),
-    };
-    let carried_fourth =
-        advance_native_stems_beam_sides_transaction(&mut carrier, context, fourth_evidence)
-            .expect("second atomic carrier invocation for transaction 4");
+    .expect("second atomic bridge carrier invocation for transaction 4");
     assert_eq!(carried_fourth.flag.key.plan.plan_ordinal, 627);
     assert_eq!(
         (carrier.sig.vertices.len(), carrier.sig.edges.len()),
@@ -6626,47 +6724,17 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
                 "carrier stopped before transaction {transaction_ordinal}: {status:?}"
             ),
         };
-        let attempt = hydrated
-            .plans
-            .builders
-            .iter()
-            .flat_map(|builder| &builder.attempts)
-            .nth(frontier.plan.plan_ordinal)
-            .expect("repeated plan attempt");
-        let selected = glyph_bootstrap_for_attempt(attempt, &registry_text);
-        let mut candidate_state = carrier.latest_base_apply.transaction_state.clone();
-        let authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
-            &candidate_state.system_stems,
-            0,
+        let transaction = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+            &mut carrier,
+            context,
+            &bridge,
         )
-        .expect("repeated dense carried systemStems");
-        prepare_native_stems_beam_vlink_frontier_state(
-            &carrier.scheduler,
-            &hydrated.plans,
-            &mut candidate_state,
-            &selected,
-            authority,
-        )
-        .expect("repeated evidence preparation");
-        let candidate = materialize_native_stems_beam_frontier_candidate(
-            &carrier.scheduler,
-            &hydrated.plans,
-            &candidate_state,
-        )
-        .expect("repeated candidate");
-        let scan = exhaustive_glyph_scan(candidate, &registry_text);
-        let evidence = NativeStemsBeamSidesGlyphEvidence {
-            selected: &selected,
-            exhaustive_candidate: Some(&scan),
-        };
-        let transaction =
-            advance_native_stems_beam_sides_transaction(&mut carrier, context, evidence)
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "transaction {transaction_ordinal} plan {} failed: {error}",
-                        frontier.plan.plan_ordinal
-                    )
-                });
+        .unwrap_or_else(|error| {
+            panic!(
+                "transaction {transaction_ordinal} plan {} failed: {error}",
+                frontier.plan.plan_ordinal
+            )
+        });
         repeated.push(transaction);
     }
     assert_eq!(repeated.len(), 30);
@@ -6821,11 +6889,16 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .b_cells
         .retain(|cell| cell.reference != assigned);
     let late_failure_before = late_failure.clone();
-    advance_native_stems_beam_sides_transaction(&mut late_failure, context, evidence)
-        .expect_err("missing sibling B cell must reject the carrier transaction");
+    let bridge_before = bridge.clone();
+    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        &mut late_failure,
+        context,
+        &bridge,
+    )
+    .expect_err("missing sibling B cell must reject the bridge carrier transaction");
     assert_eq!(late_failure, late_failure_before);
+    assert_eq!(bridge, bridge_before);
 
-    third_transaction_state.glyph_index.exhaustive_lookup = Some(third_glyph_scan);
     let third_create = apply_native_stems_beam_vlink_create_stem_transaction(
         third_scheduler,
         &hydrated.builder,
