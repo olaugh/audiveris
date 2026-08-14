@@ -5833,7 +5833,7 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
 /// typed products.  Java rows are opened only after the complete native
 /// graph/cell result exists.
 #[test]
-fn native_b15_through_b19_carrier_reaches_fourth_frontier_before_oracle_read() {
+fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let base_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-vlink-base-apply-chula.txt"),
     )
@@ -6536,6 +6536,278 @@ fn native_b15_through_b19_carrier_reaches_fourth_frontier_before_oracle_read() {
     };
     assert_eq!(carried_fourth.plan.plan_ordinal, 627);
 
+    // Invoke the same production carrier again from its own committed state.
+    // The selected-glyph and exhaustive-equality evidence remain disclosed
+    // page authorities, but no transaction-4 or SIDES-pass row is opened
+    // until the complete native result exists.
+    let fourth_attempt = hydrated
+        .plans
+        .builders
+        .iter()
+        .flat_map(|builder| &builder.attempts)
+        .nth(carried_fourth.plan.plan_ordinal)
+        .expect("fourth plan attempt");
+    let fourth_bootstrap = glyph_bootstrap_for_attempt(fourth_attempt, &registry_text);
+    let mut fourth_candidate_state = carrier.latest_base_apply.transaction_state.clone();
+    let fourth_authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
+        &fourth_candidate_state.system_stems,
+        0,
+    )
+    .expect("transaction-4 dense carried systemStems");
+    prepare_native_stems_beam_vlink_frontier_state(
+        &carrier.scheduler,
+        &hydrated.plans,
+        &mut fourth_candidate_state,
+        &fourth_bootstrap,
+        fourth_authority,
+    )
+    .expect("native transaction-4 evidence preparation");
+    let fourth_candidate = materialize_native_stems_beam_frontier_candidate(
+        &carrier.scheduler,
+        &hydrated.plans,
+        &fourth_candidate_state,
+    )
+    .expect("native transaction-4 candidate");
+    let fourth_glyph_scan = exhaustive_glyph_scan(fourth_candidate, &registry_text);
+    let fourth_evidence = NativeStemsBeamSidesGlyphEvidence {
+        selected: &fourth_bootstrap,
+        exhaustive_candidate: Some(&fourth_glyph_scan),
+    };
+    let carried_fourth =
+        advance_native_stems_beam_sides_transaction(&mut carrier, context, fourth_evidence)
+            .expect("second atomic carrier invocation for transaction 4");
+    assert_eq!(carried_fourth.flag.key.plan.plan_ordinal, 627);
+    assert_eq!(
+        (carrier.sig.vertices.len(), carrier.sig.edges.len()),
+        (225, 221)
+    );
+    assert_eq!(carrier.bindings.stem_vertices[&3].0, 224);
+    assert_eq!(carried_fourth.base.graph_relation_identity, Some(216));
+    assert_eq!(
+        carried_fourth
+            .siblings
+            .graph
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![217, 218]
+    );
+    assert_eq!(
+        carried_fourth
+            .heads
+            .appended_edges
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        vec![219, 220]
+    );
+    assert_eq!(
+        carrier.b_cells.iter().filter(|cell| cell.linked).count(),
+        11
+    );
+    assert_eq!(carrier.s_cells.iter().filter(|cell| cell.linked).count(), 8);
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(carried_fifth) =
+        &carried_fourth.outer_resume.resume.status
+    else {
+        panic!("second atomic carrier invocation did not reach transaction 5");
+    };
+    assert_eq!(carried_fifth.plan.plan_ordinal, 400);
+    assert_eq!(second_b_alias(carried_fifth.b_linker), "beam:16:b:0");
+    assert_eq!(carried_fifth.vertical_side, NativeStemVerticalSide::Top);
+
+    let mut repeated = vec![carried_third.clone(), carried_fourth.clone()];
+    for transaction_ordinal in 5..=32 {
+        let frontier = match &carrier.scheduler.status {
+            audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(
+                frontier,
+            ) => frontier.clone(),
+            status => panic!(
+                "carrier stopped before transaction {transaction_ordinal}: {status:?}"
+            ),
+        };
+        let attempt = hydrated
+            .plans
+            .builders
+            .iter()
+            .flat_map(|builder| &builder.attempts)
+            .nth(frontier.plan.plan_ordinal)
+            .expect("repeated plan attempt");
+        let selected = glyph_bootstrap_for_attempt(attempt, &registry_text);
+        let mut candidate_state = carrier.latest_base_apply.transaction_state.clone();
+        let authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
+            &candidate_state.system_stems,
+            0,
+        )
+        .expect("repeated dense carried systemStems");
+        prepare_native_stems_beam_vlink_frontier_state(
+            &carrier.scheduler,
+            &hydrated.plans,
+            &mut candidate_state,
+            &selected,
+            authority,
+        )
+        .expect("repeated evidence preparation");
+        let candidate = materialize_native_stems_beam_frontier_candidate(
+            &carrier.scheduler,
+            &hydrated.plans,
+            &candidate_state,
+        )
+        .expect("repeated candidate");
+        let scan = exhaustive_glyph_scan(candidate, &registry_text);
+        let evidence = NativeStemsBeamSidesGlyphEvidence {
+            selected: &selected,
+            exhaustive_candidate: Some(&scan),
+        };
+        let transaction =
+            advance_native_stems_beam_sides_transaction(&mut carrier, context, evidence)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "transaction {transaction_ordinal} plan {} failed: {error}",
+                        frontier.plan.plan_ordinal
+                    )
+                });
+        repeated.push(transaction);
+    }
+    assert_eq!(repeated.len(), 30);
+    let audiveris_omr::native_stems_beam_scheduler::NativeStemsBeamSchedulerStatus::Completed {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &carrier.scheduler.status
+    else {
+        panic!("32 native carrier transactions did not exhaust SIDES");
+    };
+    assert_eq!(retained_for_stumps, final_local_worklist);
+    assert_eq!(
+        (carrier.sig.vertices.len(), carrier.sig.edges.len()),
+        (253, 331)
+    );
+    assert_eq!(carrier.bindings.stem_vertices.len(), 32);
+    assert_eq!(
+        carrier.b_cells.iter().filter(|cell| cell.linked).count(),
+        61
+    );
+    assert_eq!(
+        carrier.s_cells.iter().filter(|cell| cell.linked).count(),
+        68
+    );
+    assert!(carrier.b_cells.iter().all(|cell| !cell.closed));
+    assert!(carrier.s_cells.iter().all(|cell| !cell.closed));
+
+    let all_siblings = std::iter::once(&actual)
+        .chain(std::iter::once(&second_siblings))
+        .chain(repeated.iter().map(|transaction| &transaction.siblings))
+        .collect::<Vec<_>>();
+    assert_eq!(all_siblings.len(), 32);
+    assert_eq!(
+        all_siblings
+            .iter()
+            .map(|transaction| transaction.assigned_b_linkers.len())
+            .sum::<usize>(),
+        29
+    );
+    assert_eq!(
+        all_siblings
+            .iter()
+            .map(|transaction| transaction.b_linker_write_count)
+            .sum::<usize>(),
+        61
+    );
+    let all_heads = std::iter::once(&head_actual)
+        .chain(std::iter::once(&second_heads))
+        .chain(repeated.iter().map(|transaction| &transaction.heads))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        all_heads
+            .iter()
+            .map(|transaction| transaction.s_linker_write_count)
+            .sum::<usize>(),
+        68
+    );
+
+    // Expected sequencing is deliberately opened only after the native loop
+    // has returned and the owned graph/cell terminal has been authenticated.
+    let sides_pass_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
+    )
+    .expect("expected-only SIDES pass");
+    let expected_steps = sides_pass_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamsidesloopstep ") && line.contains(" step 0 "))
+        .map(|line| {
+            let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+            let value = |name: &str| {
+                tokens
+                    .iter()
+                    .position(|token| *token == name)
+                    .and_then(|index| tokens.get(index + 1))
+                    .copied()
+                    .expect("SIDES step field")
+            };
+            (
+                value("plan").parse::<usize>().unwrap(),
+                value("bAlias").to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let actual_steps = std::iter::once((
+        native_base.key.plan.plan_ordinal,
+        second_b_alias(actual.base_b_linker),
+    ))
+    .chain(std::iter::once((
+        second_flag.key.plan.plan_ordinal,
+        second_b_alias(second_siblings.base_b_linker),
+    )))
+    .chain(repeated.iter().map(|transaction| {
+        (
+            transaction.flag.key.plan.plan_ordinal,
+            second_b_alias(transaction.siblings.base_b_linker),
+        )
+    }))
+    .collect::<Vec<_>>();
+    assert_eq!(actual_steps, expected_steps);
+
+    let expected_siblings = sides_pass_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamsidesloopsibling "))
+        .map(|line| {
+            let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+            let value = |name: &str| {
+                tokens
+                    .iter()
+                    .position(|token| *token == name)
+                    .and_then(|index| tokens.get(index + 1))
+                    .copied()
+                    .expect("SIDES sibling field")
+            };
+            let count = value("siblings").parse::<usize>().unwrap();
+            let aliases = if count == 0 {
+                Vec::new()
+            } else {
+                value("aliases").split(',').map(str::to_owned).collect()
+            };
+            (value("bAlias").to_owned(), aliases)
+        })
+        .collect::<Vec<_>>();
+    let actual_sibling_rows = all_siblings
+        .iter()
+        .map(|transaction| {
+            (
+                second_b_alias(transaction.base_b_linker),
+                transaction
+                    .assigned_b_linkers
+                    .iter()
+                    .copied()
+                    .map(second_b_alias)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(actual_sibling_rows, expected_siblings);
+    assert!(sides_pass_text.lines().any(|line| {
+        line == "stemsbeamsidesloopcensus chula.png#1 system 1 freshTransactions 31 secondFrontier true sidesExhausted true"
+    }));
+
     // A B16 failure occurs after provisional B12-B15 work, but no part of the
     // caller's complete carrier can escape the shadow.
     let assigned = carried_third
@@ -6789,10 +7061,6 @@ fn native_b15_through_b19_carrier_reaches_fourth_frontier_before_oracle_read() {
     assert!(txn2_head_result.contains(
         "headEntries 2 duplicateEntries 0 relationsInserted 2 sWriteCount 2 sValueChangeCount 2 consistencyWriteCount 2 headAbnormalChangeCount 2 stemAbnormalChangeCount 1 dirtyCascadeCount 3"
     ));
-    let sides_pass_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-sides-pass-chula-system1.txt"),
-    )
-    .expect("expected-only SIDES pass");
     assert!(sides_pass_text.lines().any(|line| {
         line.starts_with("stemsbeamsidesloopstep ")
             && line.contains(

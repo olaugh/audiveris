@@ -778,10 +778,14 @@ Inter ID/InterIndex ordinal/VIP and all graph
 and group facts remain native-derived. B14 adds Stem vertex 223/edge 212, B16 adds edge
 213 and `beam:41:b:0`, B17 adds edges 214/215 plus two S cells, and B18/B19 reaches plan
 627 / `beam:22:b:2` / TOP with the graph at 224/216. The production
-`advance_native_stems_beam_sides_transaction` now owns that already-awaited frontier as
-one clone-and-swap across scheduler, latest B14/transaction state, SIG/bindings, and B/S
-cells; a late B16 failure leaves the complete carrier unchanged. Repeated driving and
-later linked-S scans remain.
+`advance_native_stems_beam_sides_transaction` owns each already-awaited frontier as one
+clone-and-swap across scheduler, latest B14/transaction state, SIG/bindings, and B/S
+cells. Repeated calls now execute all 32 chula-system-1 SIDES transactions and return the
+completed scheduler at 253 vertices / 331 edges, 32 Stem bindings, 61 linked/open B
+cells, and 68 linked/open S cells. Exact plan/B-linker order and all 29 sibling-write
+lists match Java only after that native terminal exists; all 21 skipped sides are thus
+explained by earlier native B16 writes. A late B16 failure leaves the complete carrier
+unchanged. The disclosed page registries, wider linked-S scans, and STUMPS remain.
 Broader pre-STEMS SIG assembly remains bounded where later corpus
 systems still lack complete BEAMS group products.
 
@@ -822,7 +826,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | Twenty exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state. The first nine own constructor, stump, reachability, and builder preparation; boundaries 10-20 grade scheduler planning and exact base/sibling/head SIG mutation plus B/S shared-cell effects. The owned chula-system-1 path now carries three B12-B19 transactions. The third uses an atomic one-frontier production carrier, crosses the first changed base beam and compound GlyphIndex registration, grows 223/212 to 224/216 through edges 212-215, links one B and two S cells, then resumes to plan 627 / `beam:22:b:2` / TOP. Disclosed page GlyphIndex and beam-identity bootstraps remain. | Repeatedly drive the atomic carrier, extend linked-S reuse, and continue through STUMPS. |
+| 10 | `STEMS` | **Components graded** | Twenty exact production boundaries consume live final HEADS, GRID, BEAMS, and STEM_SEEDS state. The first nine own constructor, stump, reachability, and builder preparation; boundaries 10-20 grade scheduler planning and exact base/sibling/head SIG mutation plus B/S shared-cell effects. Chula system 1 now runs all 32 SIDES transactions through the atomic B12-B19 carrier, reaches exact scheduler exhaustion at 253 vertices / 331 edges, and retains 61 linked B plus 68 linked S cells. The exact 32 plan/B-linker tuples and 29 sibling-write lists match Java after native return. Disclosed page GlyphIndex and beam-identity bootstraps remain. | Replace those authorities, widen linked-S reuse, and continue through STUMPS. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -853,9 +857,9 @@ is present but the musical interpretation is not.
 
 ## Next work queue
 
-1. Repeatedly drive the atomic one-frontier B12-B19 carrier from plan 627 through the remaining chula SIDES frontiers; extend B13 to linked-S scans before wider reuse needs them.
-2. Drive chula system 1's full 32-transaction SIDES pass from owned state, then replace the remaining fixture-backed glyph-registry bootstrap and continue through STUMPS and competing-hook removal.
-3. Expose `recognize_native_stems` once the scheduler exhausts without Java-fed transaction rows.
+1. Replace the disclosed page GlyphIndex and beam InterIndex bootstrap authorities; no per-transaction Java rows feed the completed chula SIDES execution.
+2. Extend graph-derived B13 to linked-S HeadStem reuse for wider systems, then carry the exhausted scheduler through STUMPS and competing-hook removal.
+3. Expose `recognize_native_stems` once the full scheduler path runs from native products.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.
 5. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.
 
