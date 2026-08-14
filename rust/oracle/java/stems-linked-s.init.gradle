@@ -21,6 +21,8 @@ gradle.projectsEvaluated {
         jvmArgs '-XX:+UnlockExperimentalVMOptions', '-XX:+UseEpsilonGC'
         systemProperty 'logback.configurationFile',
                 "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        systemProperty 'audiveris.rustport.hookRemovalProbe',
+                providers.gradleProperty('hookRemovalProbe').getOrElse('false')
 
         def fixture = { String stem ->
             new File(gradle.rootProject.projectDir,

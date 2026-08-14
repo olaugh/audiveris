@@ -3155,6 +3155,22 @@ impl<'a> SystemProjector<'a> {
                         self.current_linked_sides.push(*side);
                     }
                 }
+                NativeStemsBeamSchedulerEvent::CompetingHookRemoved {
+                    event_ordinal,
+                    beam,
+                    competing_hook,
+                } => {
+                    assert_eq!(*event_ordinal, self.java_event);
+                    self.emit(format!(
+                        "stemsbeamschedulerhookremoved {} system {} event {} beamSig {} hookSig {}",
+                        self.page,
+                        self.scheduler.system_id,
+                        self.java_event,
+                        pre_tremolo_sig(self.stumps, *beam),
+                        pre_tremolo_sig(self.stumps, *competing_hook),
+                    ));
+                    self.java_event += 1;
+                }
                 NativeStemsBeamSchedulerEvent::BeamRetainedForStumps {
                     beam, linked_sides, ..
                 } => {

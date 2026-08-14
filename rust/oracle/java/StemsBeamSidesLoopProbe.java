@@ -582,6 +582,8 @@ public final class StemsBeamSidesLoopProbe
         int stumpsStumpOrdinal;
         final int stumpsTransactionLimit = Integer.getInteger(
                 "audiveris.rustport.stumpsTransactionLimit", 1);
+        final boolean hookRemovalMode = Boolean.getBoolean(
+                "audiveris.rustport.hookRemovalProbe");
         static final int FRESH_TRANSACTION_CAP = 400;
         List<String> freshBaseRows;
         List<String> freshFlagRows;
@@ -720,10 +722,102 @@ public final class StemsBeamSidesLoopProbe
                         throw new IllegalStateException(
                                 "hook-removal frontier precedes createStem");
                     }
-                    // Post-frontier competing-hook removal mutates the SIG in ways this
-                    // boundary does not yet model; stop the line rather than guess.
-                    throw new IllegalStateException(
-                            "resume reached competing-hook removal; extend the boundary");
+                    if (!hookRemovalMode) {
+                        // Historical runners stop rather than widening their boundary.
+                        throw new IllegalStateException(
+                                "resume reached competing-hook removal; extend the boundary");
+                    }
+                    final SIGraph sig = beam.getSig();
+                    final GraphOrder graphBefore = new GraphOrder(sig);
+                    final PersistentSnapshot before = snapshot(
+                            sheet, retriever, inspectionBeams, heads, allLinkers);
+                    final DirtyFlags dirtyBefore = DirtyFlags.capture(sheet);
+                    final List<String> incident = new ArrayList<>();
+                    for (Relation relation : sig.edgesOf(competitor)) {
+                        incident.add(graphBefore.edgeAlias(relation) + ":"
+                                + relation.getClass().getSimpleName());
+                    }
+                    final List<String> workBefore = new ArrayList<>();
+                    for (Inter inter : work) {
+                        workBefore.add(beamAlias((AbstractBeamInter) inter));
+                    }
+                    final List<String> groupBefore = new ArrayList<>();
+                    for (Inter inter : beam.getGroup().getMembers()) {
+                        groupBefore.add(beamAlias((AbstractBeamInter) inter));
+                    }
+                    final List<String> linkedBefore = new ArrayList<>();
+                    for (Object candidate : bAliases.keySet()) {
+                        if (((StemLinker) candidate).isLinked()) {
+                            linkedBefore.add(bAliases.get(candidate));
+                        }
+                    }
+                    linkedBefore.sort(Comparator.naturalOrder());
+                    System.out.printf(
+                            "stemsbeamhookremovalfrontier %s system %d transactions %d "
+                                    + "event %d workIndex %d beamSig %d hookSig %d "
+                                    + "beamInterId %d hookInterId %d linkedSides %s "
+                                    + "hookRemoved %s hookSigAttached %s hookVertexOrdinal %s "
+                                    + "incident %s work %s group %s linkedB %s "
+                                    + "sigVertices %d sigEdges %d sigVertexHash %s "
+                                    + "sigEdgeHash %s relationStateHash %s linkerStateHash %s%n",
+                            page, system.getId(), transactionOrdinal, resumeEvent, index,
+                            beamSigOrdinals.get(beam), beamSigOrdinals.get(competitor),
+                            beam.getId(), competitor.getId(), linkedSides,
+                            competitor.isRemoved(), competitor.getSig() != null,
+                            graphBefore.vertexOrdinal(competitor), list(incident),
+                            list(workBefore), list(groupBefore), list(linkedBefore),
+                            graphBefore.vertices.size(), graphBefore.edges.size(),
+                            graphBefore.vertexHash, graphBefore.edgeHash,
+                            before.sig.relationStateHash, before.linkers.hash);
+
+                    competitor.remove();
+
+                    final GraphOrder graphAfter = new GraphOrder(sig);
+                    final PersistentSnapshot after = snapshot(
+                            sheet, retriever, inspectionBeams, heads, allLinkers);
+                    final DirtyFlags dirtyAfter = DirtyFlags.capture(sheet);
+                    final List<String> workAfter = new ArrayList<>();
+                    for (Inter inter : work) {
+                        workAfter.add(beamAlias((AbstractBeamInter) inter));
+                    }
+                    final List<String> groupAfter = new ArrayList<>();
+                    for (Inter inter : beam.getGroup().getMembers()) {
+                        groupAfter.add(beamAlias((AbstractBeamInter) inter));
+                    }
+                    final List<String> linkedAfter = new ArrayList<>();
+                    for (Object candidate : bAliases.keySet()) {
+                        if (((StemLinker) candidate).isLinked()) {
+                            linkedAfter.add(bAliases.get(candidate));
+                        }
+                    }
+                    linkedAfter.sort(Comparator.naturalOrder());
+                    System.out.printf(
+                            "stemsbeamhookremovalresult %s system %d transactions %d "
+                                    + "event %d workIndex %d beamSig %d hookSig %d "
+                                    + "hookRemoved %s hookSigAttached %s hookVertexMatches %d "
+                                    + "hookIncidentAfter %d work %s workUnchanged %s "
+                                    + "group %s linkedB %s linkedBUnchanged %s "
+                                    + "sigVertices %d sigEdges %d sigVertexHash %s "
+                                    + "sigEdgeHash %s relationStateHash %s linkerStateHash %s "
+                                    + "allocatorUnchanged %s glyphRegistryUnchanged %s "
+                                    + "interIndexUnchanged %s systemStemsUnchanged %s "
+                                    + "linesUnchanged %s dirtyBefore %s dirtyAfter %s "
+                                    + "terminal RemovedCompetingHook%n",
+                            page, system.getId(), transactionOrdinal, resumeEvent++, index,
+                            beamSigOrdinals.get(beam), beamSigOrdinals.get(competitor),
+                            competitor.isRemoved(), competitor.getSig() != null,
+                            graphAfter.vertexObjectMatches(competitor),
+                            sig.containsVertex(competitor) ? sig.edgesOf(competitor).size() : 0,
+                            list(workAfter),
+                            workBefore.equals(workAfter), list(groupAfter), list(linkedAfter),
+                            linkedBefore.equals(linkedAfter), graphAfter.vertices.size(),
+                            graphAfter.edges.size(), graphAfter.vertexHash, graphAfter.edgeHash,
+                            after.sig.relationStateHash, after.linkers.hash,
+                            before.allocator == after.allocator,
+                            before.glyphs.sameIdentityState(after.glyphs),
+                            before.inters.same(after.inters),
+                            before.systemStems.same(after.systemStems),
+                            before.lines.same(after.lines), dirtyBefore.token(), dirtyAfter.token());
                 }
                 if (resumePhase) {
                     emitResumeBeamDecision(beam, beamOk, linkedSides);
@@ -5996,7 +6090,7 @@ public final class StemsBeamSidesLoopProbe
                             glyphActiveAtId(before.glyphs, candidateId) != null,
                             glyphOriginalAtId(before.glyphs, candidateId) != null,
                             targetSheet.getInterIndex().isVipId(candidateId));
-                    throw new CompactEnvelopeStop();
+                    if (!hookRemovalMode) throw new CompactEnvelopeStop();
                 }
             }
             final String relationBefore = relationState(link.relation);
@@ -6137,8 +6231,10 @@ public final class StemsBeamSidesLoopProbe
                                        StemInter stem,
                                        Link link)
         {
-            if (after.allocator != before.allocator + 1
-                    || stem.getId() != after.allocator
+            final boolean reused = before.inters.identities.containsKey(stem);
+            if ((reused
+                    ? after.allocator != before.allocator
+                    : after.allocator != before.allocator + 1 || stem.getId() != after.allocator)
                     || stem.getSig() != system.getSig()) {
                 throw new IllegalStateException("real shared allocator/StemInter registration delta");
             }
@@ -6149,12 +6245,12 @@ public final class StemsBeamSidesLoopProbe
                 throw new IllegalStateException("base apply crossed non-SIG state boundary");
             }
             final IdentityHashMap<Inter, Boolean> expectedInters = copySet(before.inters.identities);
-            expectedInters.put(stem, true);
+            if (!reused) expectedInters.put(stem, true);
             if (!identitySetEquals(expectedInters, after.inters.identities)) {
                 throw new IllegalStateException("unexpected InterIndex identity delta");
             }
             final IdentityHashMap<Inter, Boolean> expectedVertices = copySet(before.sig.vertices);
-            expectedVertices.put(stem, true);
+            if (!reused) expectedVertices.put(stem, true);
             final IdentityHashMap<Relation, Boolean> expectedEdges = copySet(before.sig.edges);
             expectedEdges.put(link.relation, true);
             if (!identitySetEquals(expectedVertices, after.sig.vertices)

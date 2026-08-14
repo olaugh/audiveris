@@ -3,7 +3,10 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    native_sig::{NativeSigInterKind, NativeSigSystem, NativeSigSystemBindings},
+    native_sig::{
+        NativeSigEdgeId, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
+        NativeSigSystemBindings, NativeSigVertexId,
+    },
     native_stems_beam_builders::NativeStemsBeamBuilderSystem,
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
@@ -12,6 +15,7 @@ use crate::{
         NativeStemsBeamSchedulerPass, NativeStemsBeamSchedulerStatus,
         NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerStumpsStatus,
         NativeStemsBeamSchedulerSystem, continue_native_stems_beam_scheduler_into_stumps,
+        resume_native_stems_beam_scheduler_after_hook_removal,
         resume_native_stems_beam_scheduler_after_stumps_transaction,
     },
     native_stems_beam_stumps::NativeStemsBeamStumpSystem,
@@ -131,6 +135,24 @@ pub struct NativeStemsBeamStumpsTransaction {
 pub struct NativeStemsBeamStumpsDrive {
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
     pub status: NativeStemsBeamSchedulerStumpsStatus,
+}
+
+/// Atomic removal of one competing hook plus the following SIDES continuation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamHookRemovalTransaction {
+    pub system_id: usize,
+    pub beam: crate::native_stems_beam_stumps::NativeStemsBeamSource,
+    pub competing_hook: crate::native_stems_beam_stumps::NativeStemsBeamSource,
+    pub hook_vertex: NativeSigVertexId,
+    pub group_vertex: NativeSigVertexId,
+    pub removed_edges: Vec<NativeSigEdgeId>,
+    pub active_vertex_count_before: usize,
+    pub active_vertex_count_after: usize,
+    pub active_edge_count_before: usize,
+    pub active_edge_count_after: usize,
+    pub group_members_before: Vec<crate::native_stems_beam_stumps::NativeStemsBeamSource>,
+    pub group_members_after: Vec<crate::native_stems_beam_stumps::NativeStemsBeamSource>,
+    pub resume: crate::native_stems_beam_scheduler::NativeStemsBeamSchedulerResume,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -300,6 +322,230 @@ pub fn drive_native_stems_beam_stumps_from_first_stems_bridge(
     }
 }
 
+/// Atomically remove the competing hook named by the current SIDES frontier
+/// and continue until the next persistent frontier or SIDES exhaustion.
+///
+/// Java keeps the removed Inter in its persistent InterIndex but removes it
+/// from the SIG and its beam group. Native persistent-ID evidence is therefore
+/// retained while the live beam binding is removed.
+pub fn remove_native_stems_beam_competing_hook_and_resume(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+) -> Result<NativeStemsBeamHookRemovalTransaction, NativeStemsBeamSidesError> {
+    let mut shadow = carrier.clone();
+    if !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells) {
+        return Err(stage(
+            "hook-removal-linked-B-authority",
+            "scheduler linked-B set differs from persistent true cells",
+        ));
+    }
+    let NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(frontier) =
+        &shadow.scheduler.status
+    else {
+        return Err(stage(
+            "hook-removal-frontier",
+            "scheduler is not awaiting competing-hook removal",
+        ));
+    };
+    let frontier = frontier.as_ref().clone();
+    if frontier.linked_sides
+        != [
+            crate::stems_step::NativeStemHeadSide::Left,
+            crate::stems_step::NativeStemHeadSide::Right,
+        ]
+    {
+        return Err(stage(
+            "hook-removal-frontier",
+            "full beam does not have both sides linked",
+        ));
+    }
+    let scheduled = shadow
+        .scheduler
+        .beams_by_reverse_width
+        .iter()
+        .find(|scheduled| scheduled.source == frontier.beam)
+        .ok_or_else(|| stage("hook-removal-frontier", "missing scheduled full beam"))?;
+    if scheduled.kind == crate::beam_inters::BeamKind::Hook
+        || scheduled.competing_hook != Some(frontier.competing_hook)
+    {
+        return Err(stage(
+            "hook-removal-frontier",
+            "scheduled competing-hook identity differs",
+        ));
+    }
+
+    let beam_vertex = shadow
+        .bindings
+        .beam_vertices
+        .get(&frontier.beam)
+        .copied()
+        .ok_or_else(|| stage("hook-removal-binding", "missing full-beam binding"))?;
+    let hook_vertex = shadow
+        .bindings
+        .beam_vertices
+        .get(&frontier.competing_hook)
+        .copied()
+        .ok_or_else(|| stage("hook-removal-binding", "missing hook binding"))?;
+    if shadow.sig.vertex(beam_vertex.0).is_none_or(|vertex| {
+        !matches!(
+            vertex.kind,
+            NativeSigInterKind::Beam | NativeSigInterKind::SmallBeam
+        )
+    }) || shadow
+        .sig
+        .vertex(hook_vertex.0)
+        .is_none_or(|vertex| vertex.kind != NativeSigInterKind::BeamHook)
+    {
+        return Err(stage(
+            "hook-removal-binding",
+            "live full-beam/hook kinds differ",
+        ));
+    }
+    let incident = shadow
+        .sig
+        .incident_edges(hook_vertex.0)
+        .map_err(|error| stage("hook-removal-incident", error))?;
+    let active_vertex_count_before = shadow
+        .sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active)
+        .count();
+    let active_edge_count_before = shadow.sig.edges.iter().filter(|edge| edge.active).count();
+    let removed_edges = incident
+        .iter()
+        .map(|edge| NativeSigEdgeId(edge.ordinal))
+        .collect::<Vec<_>>();
+    let exclusion_count = incident
+        .iter()
+        .filter(|edge| {
+            edge.kind == NativeSigRelationKind::Exclusion
+                && ((edge.source == hook_vertex.0 && edge.target == beam_vertex.0)
+                    || (edge.target == hook_vertex.0 && edge.source == beam_vertex.0))
+        })
+        .count();
+    let containing_groups = incident
+        .iter()
+        .filter(|edge| {
+            edge.kind == NativeSigRelationKind::Containment && edge.target == hook_vertex.0
+        })
+        .map(|edge| NativeSigVertexId(edge.source))
+        .collect::<Vec<_>>();
+    let [group_vertex] = containing_groups.as_slice() else {
+        return Err(stage(
+            "hook-removal-group",
+            "hook must belong to exactly one live beam group",
+        ));
+    };
+    if exclusion_count != 1
+        || shadow
+            .sig
+            .vertex(group_vertex.0)
+            .is_none_or(|vertex| vertex.kind != NativeSigInterKind::BeamGroup)
+    {
+        return Err(stage(
+            "hook-removal-incident",
+            "hook/full exclusion or group identity differs",
+        ));
+    }
+    let group_members_before =
+        live_group_member_sources(&shadow.sig, &shadow.bindings, *group_vertex)?;
+    if group_members_before.len() < 2
+        || !group_members_before.contains(&frontier.competing_hook)
+        || !group_members_before.contains(&frontier.beam)
+    {
+        return Err(stage(
+            "hook-removal-group",
+            "bounded removal requires a surviving multi-member beam group",
+        ));
+    }
+
+    shadow
+        .sig
+        .remove_vertex(hook_vertex)
+        .map_err(|error| stage("hook-removal-SIG", error))?;
+    let removed_binding = shadow
+        .bindings
+        .beam_vertices
+        .remove(&frontier.competing_hook);
+    if removed_binding != Some(hook_vertex) {
+        return Err(stage(
+            "hook-removal-binding",
+            "removed hook binding differs",
+        ));
+    }
+    let group_members_after =
+        live_group_member_sources(&shadow.sig, &shadow.bindings, *group_vertex)?;
+    let active_vertex_count_after = shadow
+        .sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active)
+        .count();
+    let active_edge_count_after = shadow.sig.edges.iter().filter(|edge| edge.active).count();
+    if active_vertex_count_after.checked_add(1) != Some(active_vertex_count_before)
+        || active_edge_count_after.checked_add(removed_edges.len())
+            != Some(active_edge_count_before)
+    {
+        return Err(stage(
+            "hook-removal-SIG",
+            "active graph delta differs from one vertex and its incident edges",
+        ));
+    }
+    let expected_after = group_members_before
+        .iter()
+        .copied()
+        .filter(|source| *source != frontier.competing_hook)
+        .collect::<Vec<_>>();
+    if group_members_after != expected_after {
+        return Err(stage(
+            "hook-removal-group",
+            "group membership delta is not hook-only",
+        ));
+    }
+    shadow
+        .sig
+        .validate_integrity()
+        .map_err(|error| stage("hook-removal-SIG", error))?;
+    shadow
+        .bindings
+        .validate_against(&shadow.sig)
+        .map_err(|error| stage("hook-removal-bindings", error))?;
+    let resume = resume_native_stems_beam_scheduler_after_hook_removal(
+        &shadow.scheduler,
+        context.vlinkers,
+        context.builders,
+        context.plans,
+        frontier.competing_hook,
+    )
+    .map_err(|error| stage("hook-removal-resume", error))?;
+    shadow.scheduler = (*resume.advanced_system).clone();
+    if !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells) {
+        return Err(stage(
+            "hook-removal-linked-B-commit",
+            "continuation changed the persistent linked-B view",
+        ));
+    }
+
+    let transaction = NativeStemsBeamHookRemovalTransaction {
+        system_id: shadow.scheduler.system_id,
+        beam: frontier.beam,
+        competing_hook: frontier.competing_hook,
+        hook_vertex,
+        group_vertex: *group_vertex,
+        removed_edges,
+        active_vertex_count_before,
+        active_vertex_count_after,
+        active_edge_count_before,
+        active_edge_count_after,
+        group_members_before,
+        group_members_after,
+        resume,
+    };
+    *carrier = shadow;
+    Ok(transaction)
+}
+
 /// Atomically leave an exhausted SIDES carrier and enter its STUMPS worklist.
 ///
 /// The scheduler's carried linked-B set is accepted only when it is a bijective
@@ -381,6 +627,40 @@ fn linked_b_cells_match(
         && linked
             .iter()
             .all(|reference| true_cells.contains(reference))
+}
+
+fn live_group_member_sources(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    group: NativeSigVertexId,
+) -> Result<Vec<crate::native_stems_beam_stumps::NativeStemsBeamSource>, NativeStemsBeamSidesError>
+{
+    let mut members = Vec::new();
+    for edge in sig
+        .outgoing_edges(group.0)
+        .map_err(|error| stage("hook-removal-group", error))?
+    {
+        if edge.kind != NativeSigRelationKind::Containment {
+            return Err(stage(
+                "hook-removal-group",
+                "beam group has a non-containment outgoing relation",
+            ));
+        }
+        let sources = bindings
+            .beam_vertices
+            .iter()
+            .filter(|(_, vertex)| vertex.0 == edge.target)
+            .map(|(source, _)| *source)
+            .collect::<Vec<_>>();
+        let [source] = sources.as_slice() else {
+            return Err(stage(
+                "hook-removal-group",
+                "group member has no unique live beam binding",
+            ));
+        };
+        members.push(*source);
+    }
+    Ok(members)
 }
 
 fn current_stumps_status(
@@ -483,6 +763,72 @@ mod tests {
                 .stage,
             "STUMPS-drive-status"
         );
+    }
+
+    #[test]
+    fn hook_group_members_follow_live_containment_order_and_bindings() {
+        use std::collections::BTreeMap;
+
+        use crate::native_sig::{
+            NativeSigBounds, NativeSigEdge, NativeSigRelationOrigin, NativeSigVertex,
+        };
+
+        let hook = NativeStemsBeamSource::RawBeam(4);
+        let beam = NativeStemsBeamSource::RawBeam(5);
+        let vertex = |ordinal, kind| NativeSigVertex {
+            ordinal,
+            active: true,
+            removed: false,
+            kind,
+            shape: None,
+            grade: 1.0,
+            bounds: NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        };
+        let containment = |ordinal, target| NativeSigEdge {
+            ordinal,
+            active: true,
+            source: 0,
+            target,
+            kind: NativeSigRelationKind::Containment,
+            origin: NativeSigRelationOrigin::BaselineGraph,
+            support: None,
+            beam_portion: None,
+            stem_extension: None,
+            head_stem: None,
+        };
+        let sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::BeamGroup),
+                vertex(1, NativeSigInterKind::BeamHook),
+                vertex(2, NativeSigInterKind::Beam),
+            ],
+            edges: vec![containment(0, 1), containment(1, 2)],
+        };
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 1,
+            beam_vertices: BTreeMap::from([
+                (hook, NativeSigVertexId(1)),
+                (beam, NativeSigVertexId(2)),
+            ]),
+            beam_group_vertices: BTreeMap::from([(7, NativeSigVertexId(0))]),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+        };
+        assert_eq!(
+            live_group_member_sources(&sig, &bindings, NativeSigVertexId(0))
+                .expect("ordered live members"),
+            [hook, beam]
+        );
+        bindings.beam_vertices.remove(&hook);
+        assert!(live_group_member_sources(&sig, &bindings, NativeSigVertexId(0)).is_err());
     }
 
     #[test]

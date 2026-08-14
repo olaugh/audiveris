@@ -203,6 +203,11 @@ pub enum NativeStemsBeamSchedulerEvent {
         logical_success: bool,
         linked_flag_after: bool,
     },
+    CompetingHookRemoved {
+        event_ordinal: usize,
+        beam: NativeStemsBeamSource,
+        competing_hook: NativeStemsBeamSource,
+    },
     BeamRetainedForStumps {
         event_ordinal: usize,
         beam: NativeStemsBeamSource,
@@ -237,6 +242,7 @@ const fn scheduler_event_ordinal(event: &NativeStemsBeamSchedulerEvent) -> usize
         | NativeStemsBeamSchedulerEvent::SideVSkippedEmptyTargets { event_ordinal, .. }
         | NativeStemsBeamSchedulerEvent::InvokedKnownFalsePlan { event_ordinal, .. }
         | NativeStemsBeamSchedulerEvent::SideBLinkerResult { event_ordinal, .. }
+        | NativeStemsBeamSchedulerEvent::CompetingHookRemoved { event_ordinal, .. }
         | NativeStemsBeamSchedulerEvent::BeamRetainedForStumps { event_ordinal, .. }
         | NativeStemsBeamSchedulerEvent::BeamRemovedFromLocalWorklist { event_ordinal, .. }
         | NativeStemsBeamSchedulerEvent::StumpSkippedStructuralSideGlyph {
@@ -2227,6 +2233,323 @@ pub fn resume_native_stems_beam_scheduler_after_transaction(
         deferred_line_deltas: state.deferred_line_deltas.clone(),
         consumed_v_linkers,
         linked_b_linkers,
+        status: match &status {
+            NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(next) => {
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(next.clone())
+            }
+            NativeStemsBeamSchedulerResumeStatus::AwaitingHookRemovalTransaction(next) => {
+                NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(next.clone())
+            }
+            NativeStemsBeamSchedulerResumeStatus::SidesExhaustedBeforeSecondFrontier {
+                retained_for_stumps,
+                final_local_worklist,
+            } => NativeStemsBeamSchedulerStatus::SidesExhausted {
+                retained_for_stumps: retained_for_stumps.clone(),
+                final_local_worklist: final_local_worklist.clone(),
+            },
+        },
+        ..scheduler_system.clone()
+    };
+    Ok(NativeStemsBeamSchedulerResume {
+        system_id,
+        resume_events,
+        status,
+        advanced_system: Box::new(advanced_system),
+    })
+}
+
+/// Resume SIDES after the competing hook named by the typed scheduler
+/// frontier has been removed from the live SIG.
+///
+/// Hook removal itself belongs to the graph-owning carrier. This pure
+/// continuation records the already-successful full beam as retained, then
+/// walks the remaining SIDES worklist in Java order.
+pub fn resume_native_stems_beam_scheduler_after_hook_removal(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    v_system: &NativeStemsBeamVLinkerSystem,
+    builder_system: &NativeStemsBeamBuilderSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    removed_hook: NativeStemsBeamSource,
+) -> Result<NativeStemsBeamSchedulerResume, NativeStemsBeamSchedulerError> {
+    let system_id = scheduler_system.system_id;
+    if v_system.system_id != system_id
+        || builder_system.system_id != system_id
+        || plan_system.system_id != system_id
+        || scheduler_system.link_profile != plan_system.link_profile
+    {
+        return Err(NativeStemsBeamSchedulerError::SystemOrder);
+    }
+    validate_builder_plan_matrix(system_id, builder_system, plan_system)?;
+    let NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(awaiting) =
+        &scheduler_system.status
+    else {
+        return Err(NativeStemsBeamSchedulerError::SystemOrder);
+    };
+    if awaiting.snapshot.pass != NativeStemsBeamSchedulerPass::Sides
+        || awaiting.beam != awaiting.snapshot.current
+        || awaiting.competing_hook != removed_hook
+        || awaiting.linked_sides != [NativeStemHeadSide::Left, NativeStemHeadSide::Right]
+        || awaiting
+            .snapshot
+            .sources
+            .get(awaiting.snapshot.current_index)
+            .copied()
+            != Some(awaiting.beam)
+        || awaiting.snapshot.remaining
+            != awaiting.snapshot.sources[(awaiting.snapshot.current_index + 1)..]
+        || awaiting.retained_beams_before
+            != awaiting.snapshot.sources[..awaiting.snapshot.current_index]
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "awaited competing-hook removal",
+        });
+    }
+    let scheduled_current = scheduler_system
+        .beams_by_reverse_width
+        .iter()
+        .find(|beam| beam.source == awaiting.beam)
+        .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource {
+            system_id,
+            source: awaiting.beam,
+        })?;
+    if scheduled_current.kind == BeamKind::Hook
+        || scheduled_current.competing_hook != Some(removed_hook)
+        || !scheduler_system
+            .live_exclusions
+            .iter()
+            .any(|exclusion| exclusion.hook == removed_hook && exclusion.beam == awaiting.beam)
+    {
+        return Err(
+            NativeStemsBeamSchedulerError::UnsupportedExclusionTopology {
+                system_id,
+                source: awaiting.beam,
+            },
+        );
+    }
+
+    let known_false_invocations = scheduler_system
+        .prefix_events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                NativeStemsBeamSchedulerEvent::InvokedKnownFalsePlan { .. }
+            )
+        })
+        .count();
+    let invocation_ordinal = scheduler_system
+        .consumed_v_linkers
+        .len()
+        .checked_add(known_false_invocations)
+        .ok_or(NativeStemsBeamSchedulerError::SystemOrder)?;
+    let mut state = ReplayState {
+        events: scheduler_system.prefix_events.clone(),
+        deferred_line_deltas: scheduler_system.deferred_line_deltas.clone(),
+        shifted_v_linkers: scheduler_system
+            .deferred_line_deltas
+            .iter()
+            .map(|delta| delta.v_linker)
+            .chain(scheduler_system.consumed_v_linkers.iter().copied())
+            .collect(),
+        invocation_ordinal,
+    };
+    let first_event = state.events.len();
+    let mut side_worklist = awaiting.snapshot.sources.clone();
+    let mut retained = awaiting.retained_beams_before.clone();
+    state
+        .events
+        .push(NativeStemsBeamSchedulerEvent::CompetingHookRemoved {
+            event_ordinal: state.events.len(),
+            beam: awaiting.beam,
+            competing_hook: removed_hook,
+        });
+    retained.push(awaiting.beam);
+    state
+        .events
+        .push(NativeStemsBeamSchedulerEvent::BeamRetainedForStumps {
+            event_ordinal: state.events.len(),
+            beam: awaiting.beam,
+            linked_sides: awaiting.linked_sides.clone(),
+        });
+    let mut index = awaiting.snapshot.current_index + 1;
+
+    let status = 'sides: loop {
+        if index >= side_worklist.len() {
+            if retained != side_worklist {
+                return Err(NativeStemsBeamSchedulerError::InvalidLiveSigOrder { system_id });
+            }
+            break NativeStemsBeamSchedulerResumeStatus::SidesExhaustedBeforeSecondFrontier {
+                retained_for_stumps: retained,
+                final_local_worklist: side_worklist,
+            };
+        }
+        let source = side_worklist[index];
+        let snapshot =
+            worklist_snapshot(NativeStemsBeamSchedulerPass::Sides, index, &side_worklist);
+        let scheduled_beam = scheduler_system
+            .beams_by_reverse_width
+            .iter()
+            .find(|beam| beam.source == source)
+            .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource { system_id, source })?;
+        let constructor = v_system
+            .constructors
+            .iter()
+            .find(|constructor| constructor.source == source)
+            .ok_or(NativeStemsBeamSchedulerError::InvalidBeamSource { system_id, source })?;
+        state
+            .events
+            .push(NativeStemsBeamSchedulerEvent::BeamPassStart {
+                event_ordinal: state.events.len(),
+                snapshot: snapshot.clone(),
+                kind: scheduled_beam.kind,
+                competing_hook: scheduled_beam.competing_hook,
+                selected_stem_profile: scheduled_beam.selected_side_stem_profile,
+            });
+        let mut linked_sides = Vec::new();
+        let mut failed_side = None;
+        for side in [NativeStemHeadSide::Left, NativeStemHeadSide::Right] {
+            let side_entry = constructor
+                .side_b_linkers
+                .iter()
+                .find(|candidate| candidate.side == side)
+                .ok_or(NativeStemsBeamSchedulerError::MissingSystemProduct {
+                    system_id,
+                    product: "LEFT/RIGHT side BLinker map",
+                })?;
+            let Some(b_reference) = side_entry.b_linker else {
+                state
+                    .events
+                    .push(NativeStemsBeamSchedulerEvent::MissingSideBLinker {
+                        event_ordinal: state.events.len(),
+                        beam: source,
+                        side,
+                    });
+                continue;
+            };
+            let b_linker = find_b_linker(constructor, b_reference).ok_or(
+                NativeStemsBeamSchedulerError::MissingBLinker {
+                    system_id,
+                    reference: b_reference,
+                },
+            )?;
+            if scheduler_system.linked_b_linkers.contains(&b_reference) {
+                state
+                    .events
+                    .push(NativeStemsBeamSchedulerEvent::SideBLinkerResult {
+                        event_ordinal: state.events.len(),
+                        beam: source,
+                        side,
+                        b_linker: b_reference,
+                        logical_success: true,
+                        linked_flag_after: true,
+                    });
+                linked_sides.push(side);
+                continue;
+            }
+            let logical_success = if b_linker.v_linkers.is_empty() {
+                state
+                    .events
+                    .push(NativeStemsBeamSchedulerEvent::EmptyVLinkerSideSuccess {
+                        event_ordinal: state.events.len(),
+                        beam: source,
+                        side,
+                        b_linker: b_reference,
+                        linked_flag_after: false,
+                    });
+                true
+            } else {
+                for v_linker in &b_linker.v_linkers {
+                    if let Some(frontier) = resume_side_v_attempt(
+                        system_id,
+                        builder_system,
+                        plan_system,
+                        &mut state,
+                        source,
+                        side,
+                        b_reference,
+                        v_linker.reference,
+                        scheduled_beam.selected_side_stem_profile,
+                        &snapshot,
+                        &linked_sides,
+                        &retained,
+                    )? {
+                        break 'sides NativeStemsBeamSchedulerResumeStatus
+                            ::AwaitingVLinkTransaction(Box::new(frontier));
+                    }
+                }
+                false
+            };
+            state
+                .events
+                .push(NativeStemsBeamSchedulerEvent::SideBLinkerResult {
+                    event_ordinal: state.events.len(),
+                    beam: source,
+                    side,
+                    b_linker: b_reference,
+                    logical_success,
+                    linked_flag_after: false,
+                });
+            if logical_success {
+                linked_sides.push(side);
+            } else if scheduled_beam.kind != BeamKind::Hook {
+                failed_side = Some(side);
+                break;
+            }
+        }
+
+        match known_side_disposition(
+            scheduled_beam.kind,
+            failed_side,
+            &linked_sides,
+            scheduled_beam.competing_hook.is_some(),
+        ) {
+            KnownSideDisposition::RemoveLocal => {
+                side_worklist.remove(index);
+                state.events.push(
+                    NativeStemsBeamSchedulerEvent::BeamRemovedFromLocalWorklist {
+                        event_ordinal: state.events.len(),
+                        beam: source,
+                        failed_side,
+                        worklist_after: side_worklist.clone(),
+                    },
+                );
+                continue;
+            }
+            KnownSideDisposition::AwaitHookRemoval => {
+                let competing_hook = scheduled_beam.competing_hook.ok_or(
+                    NativeStemsBeamSchedulerError::UnsupportedExclusionTopology {
+                        system_id,
+                        source,
+                    },
+                )?;
+                break NativeStemsBeamSchedulerResumeStatus::AwaitingHookRemovalTransaction(
+                    Box::new(NativeStemsBeamAwaitingHookRemovalTransaction {
+                        snapshot,
+                        beam: source,
+                        competing_hook,
+                        linked_sides,
+                        retained_beams_before: retained,
+                    }),
+                );
+            }
+            KnownSideDisposition::Retain => {}
+        }
+        retained.push(source);
+        state
+            .events
+            .push(NativeStemsBeamSchedulerEvent::BeamRetainedForStumps {
+                event_ordinal: state.events.len(),
+                beam: source,
+                linked_sides,
+            });
+        index += 1;
+    };
+
+    let resume_events = state.events[first_event..].to_vec();
+    let advanced_system = NativeStemsBeamSchedulerSystem {
+        prefix_events: state.events,
+        deferred_line_deltas: state.deferred_line_deltas,
         status: match &status {
             NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(next) => {
                 NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(next.clone())

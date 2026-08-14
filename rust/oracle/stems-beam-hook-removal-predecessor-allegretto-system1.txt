@@ -1,0 +1,32 @@
+# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) hook-removal scheduler input.
+# schema: stems-beam-hook-removal-predecessor-v1
+# Actual per-transaction B-linker and sibling writes through Allegretto system-1 transaction 28.
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 1 bAlias beam:10:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 2 bAlias beam:10:b:2 ownLinked true siblings 1 aliases beam:9:b:1
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 3 bAlias beam:14:b:0 ownLinked true siblings 1 aliases beam:22:b:0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 4 bAlias beam:14:b:1 ownLinked true siblings 1 aliases beam:22:b:3
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 5 bAlias beam:20:b:0 ownLinked true siblings 1 aliases beam:23:b:0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 6 bAlias beam:20:b:3 ownLinked true siblings 1 aliases beam:23:b:3
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 7 bAlias beam:11:b:0 ownLinked true siblings 1 aliases beam:16:b:0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 8 bAlias beam:11:b:1 ownLinked true siblings 1 aliases beam:16:b:3
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 9 bAlias beam:12:b:0 ownLinked true siblings 1 aliases beam:17:b:0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 10 bAlias beam:12:b:2 ownLinked true siblings 1 aliases beam:17:b:3
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 11 bAlias beam:21:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 12 bAlias beam:21:b:2 ownLinked true siblings 2 aliases beam:24:b:1,beam:25:b:1
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 13 bAlias beam:26:b:0 ownLinked true siblings 1 aliases beam:27:b:0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 14 bAlias beam:26:b:2 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 15 bAlias beam:8:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 16 bAlias beam:8:b:1 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 17 bAlias beam:13:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 18 bAlias beam:13:b:1 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 19 bAlias beam:15:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 20 bAlias beam:15:b:1 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 21 bAlias beam:18:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 22 bAlias beam:18:b:1 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 23 bAlias beam:19:b:0 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 24 bAlias beam:19:b:1 ownLinked true siblings 0
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 25 bAlias beam:9:b:0 ownLinked true siblings 1 aliases beam:10:b:1
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 26 bAlias beam:27:b:1 ownLinked true siblings 1 aliases beam:26:b:1
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 27 bAlias beam:24:b:0 ownLinked true siblings 1 aliases beam:21:b:1
+stemsbeamsidesloopsibling allegretto.png#1 system 1 transaction 28 bAlias beam:25:b:0 ownLinked true siblings 0
+stemsbeamhookremovalpredecessor summary schema stems-beam-hook-removal-predecessor-v1 page allegretto.png#1 system 1 transactions 28 rows 28 probeSourceSha256 e5fa0904026bc4e099cbe60d6f90e2a739461a54e20d9a5f0444e5b396a179fc runnerSourceSha256 3b9e0e28c9c2de75266c676a880dfe636bef885591ce12ed832640b8c72dd845 emittedBodySha256 e79f23a2ef462063a5fa4c2193c93735be4acbe285817cb11ab957b1160c453a semanticPassSha256 2cc4ad8e0aadf29b8055ce34c32b703c033c45880bef24ff26a707b6b6f0d3c5 freshRuns 2 freshRunsByteIdentical true terminal AwaitingHookRemovalTransaction

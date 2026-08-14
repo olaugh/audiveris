@@ -32,10 +32,11 @@ use audiveris_omr::{
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::{
-        NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamPlanRef,
-        NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
+        NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamCompletedVLinkEvidence,
+        NativeStemsBeamPlanRef, NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
         NativeStemsBeamSchedulerResumeStatus, NativeStemsBeamSchedulerStatus,
         NativeStemsBeamSchedulerStumpsStatus, NativeStemsBeamWorklistSnapshot,
+        resume_native_stems_beam_scheduler_after_transaction,
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
@@ -43,6 +44,7 @@ use audiveris_omr::{
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
         continue_native_stems_beam_sides_carrier_into_stumps,
         drive_native_stems_beam_stumps_from_first_stems_bridge,
+        remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
     native_stems_beam_vlink_b_linker_flag::{
@@ -6182,7 +6184,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "04ed945b171e745a39d11acecb2aca42f05731200b571d21951260846ed36d72"
+        "3c313fb0355d96d68a841c656c5e09cfe6e358f4a6837637e6256687b8751946"
     );
     let data = fixture
         .lines()
@@ -6242,6 +6244,362 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     assert_eq!(field(summary, "freshRuns"), "2");
     assert_eq!(field(summary, "freshRunsByteIdentical"), "true");
     assert_eq!(field(summary, "stopBeforeSigAddVertex"), "true");
+}
+
+/// Direct atomic gate at the first real Java competing-hook checkpoint.
+///
+/// This deliberately reconstructs the measured transaction-28 boundary; it
+/// does not claim that native code executed Allegretto transactions 1..28.
+/// Java's per-transaction sibling writes are input authority for reaching the
+/// typed scheduler frontier. The mutation/result fixture stays unopened until
+/// the native graph mutation and continuation have returned.
+#[test]
+fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
+    let predecessor_path =
+        repo_root().join("rust/oracle/stems-beam-hook-removal-predecessor-allegretto-system1.txt");
+    let predecessor_text =
+        std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
+    assert_eq!(
+        sha256_hex(predecessor_text.as_bytes()),
+        "e561daf16ddd0107d21a1a5debbd54c0d0e42e3d9dd87cc7319cd2d147f9c35f"
+    );
+    let predecessor_rows = predecessor_text
+        .lines()
+        .filter(|line| line.starts_with("stemsbeamsidesloopsibling "))
+        .collect::<Vec<_>>();
+    assert_eq!(predecessor_rows.len(), 28);
+
+    let base_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-allegretto.txt"),
+    )
+    .expect("Allegretto B14 predecessor");
+    let create_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-create-stem-allegretto.txt"),
+    )
+    .expect("Allegretto B12 predecessor");
+    let reuse_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-reuse-check-allegretto.txt"),
+    )
+    .expect("Allegretto B13 predecessor");
+    let hydrated = b15_hydration::run_real(
+        "allegretto.png",
+        1,
+        &base_text,
+        &create_text,
+        &reuse_text,
+        false,
+    )
+    .expect("native Allegretto checkpoint products");
+    let sig_of = hydrated
+        .stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| (beam.source, beam.sig_ordinal))
+        .collect::<BTreeMap<_, _>>();
+    let source_of = sig_of
+        .iter()
+        .map(|(source, ordinal)| (*ordinal, *source))
+        .collect::<BTreeMap<_, _>>();
+    let alias_of = |reference: NativeStemsBeamBLinkerRef| {
+        format!("beam:{}:b:{}", sig_of[&reference.beam], reference.id - 1)
+    };
+    let reference_of = |alias: &str| {
+        let fields = alias.split(':').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4);
+        assert_eq!(fields[0], "beam");
+        assert_eq!(fields[2], "b");
+        NativeStemsBeamBLinkerRef {
+            beam: source_of[&fields[1].parse::<usize>().expect("beam ordinal")],
+            id: fields[3].parse::<usize>().expect("B ordinal") + 1,
+        }
+    };
+
+    // Reproduce only the scheduler input checkpoint from Java's recorded
+    // transaction results. No mutation-result row has been opened yet.
+    let mut scheduler = hydrated.scheduler.clone();
+    for (index, row) in predecessor_rows.iter().enumerate() {
+        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &scheduler.status
+        else {
+            panic!(
+                "scheduler stopped before predecessor transaction {}",
+                index + 1
+            );
+        };
+        let tokens = row.split_ascii_whitespace().collect::<Vec<_>>();
+        let field = |name: &str| {
+            let position = tokens
+                .iter()
+                .position(|token| *token == name)
+                .unwrap_or_else(|| panic!("missing {name}: {row}"));
+            tokens[position + 1]
+        };
+        assert_eq!(field("transaction").parse::<usize>().unwrap(), index + 1);
+        assert_eq!(field("bAlias"), alias_of(frontier.b_linker));
+        assert_eq!(field("ownLinked"), "true");
+        let sibling_count = field("siblings").parse::<usize>().unwrap();
+        let siblings = row
+            .split(" aliases ")
+            .nth(1)
+            .map(|aliases| aliases.split(',').map(reference_of).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert_eq!(siblings.len(), sibling_count);
+        let completed = NativeStemsBeamCompletedVLinkEvidence {
+            plan: frontier.plan,
+            b_linker: frontier.b_linker,
+            v_linker: frontier.v_linker,
+            outer_b_linked_after: true,
+            sibling_linked_b_linkers: siblings,
+        };
+        scheduler = *resume_native_stems_beam_scheduler_after_transaction(
+            &scheduler,
+            &hydrated.vlinkers,
+            &hydrated.builder,
+            &hydrated.plans,
+            &completed,
+        )
+        .expect("real scheduler predecessor write")
+        .advanced_system;
+    }
+    let awaiting = match &scheduler.status {
+        NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(awaiting) => {
+            awaiting.as_ref().clone()
+        }
+        _ => panic!("28 real Java transaction results did not reach hook removal"),
+    };
+    assert_eq!(sig_of[&awaiting.beam], 25);
+    assert_eq!(sig_of[&awaiting.competing_hook], 24);
+    assert_eq!(awaiting.snapshot.current_index, 19);
+    // Native keeps more internal prefix events than Java's probe-visible
+    // resume counter; both domains are pinned below at their boundary.
+    assert_eq!(scheduler.prefix_events.len(), 89);
+
+    // Reconstruct the checkpoint's live hook neighborhood from native initial
+    // topology plus the two measured BeamStem incidences created earlier in
+    // the carried pass. Unrelated intermediate insertions remain out of scope.
+    let assembled = b15_hydration::native_predecessor_page("allegretto.png")
+        .sig
+        .expect("native Allegretto SIG");
+    let mut sig = assembled.systems[0].clone();
+    let mut bindings = assembled.bindings[0].clone();
+    let hook_vertex = bindings.beam_vertices[&awaiting.competing_hook];
+    let initial_hook_incidents = sig
+        .incident_edges(hook_vertex.0)
+        .expect("initial hook incidents");
+    assert_eq!(initial_hook_incidents.len(), 3);
+    for kind in [
+        NativeSigRelationKind::Containment,
+        NativeSigRelationKind::BeamBeam,
+        NativeSigRelationKind::Exclusion,
+    ] {
+        assert_eq!(
+            initial_hook_incidents
+                .iter()
+                .filter(|edge| edge.kind == kind)
+                .count(),
+            1
+        );
+    }
+    for stem_identity in 0..2 {
+        let stem_vertex = NativeSigVertexId(sig.vertices.len());
+        sig.append_vertex(NativeSigVertex {
+            ordinal: stem_vertex.0,
+            active: true,
+            removed: false,
+            kind: NativeSigInterKind::Stem,
+            shape: Some("STEM".to_owned()),
+            grade: 0.5,
+            bounds: NativeSigBounds {
+                x: 603,
+                y: 653,
+                width: 3,
+                height: 96,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        })
+        .expect("checkpoint stem vertex");
+        bindings
+            .bind_stem(stem_identity, stem_vertex)
+            .expect("checkpoint stem binding");
+        sig.append_edge(NativeSigEdge {
+            ordinal: sig.edges.len(),
+            active: true,
+            source: hook_vertex.0,
+            target: stem_vertex.0,
+            kind: NativeSigRelationKind::BeamStem,
+            origin: NativeSigRelationOrigin::BeamVSiblingDraft {
+                plan_ordinal: 13 + (2 * stem_identity),
+                sibling_ordinal: 0,
+            },
+            support: Some(NativeSigSupport {
+                grade: 0.5,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: Some(if stem_identity == 0 {
+                NativeBeamPortion::Right
+            } else {
+                NativeBeamPortion::Left
+            }),
+            stem_extension: Some(NativeStemPoint { x: 603.0, y: 653.0 }),
+            head_stem: None,
+        })
+        .expect("checkpoint BeamStem incidence");
+    }
+    assert_eq!(sig.incident_edges(hook_vertex.0).unwrap().len(), 5);
+
+    let mut b_cells = initialize_native_stems_beam_b_linker_cells(&hydrated.reachability)
+        .expect("Allegretto B-cell arena");
+    for cell in &mut b_cells {
+        cell.linked = scheduler.linked_b_linkers.contains(&cell.reference);
+    }
+    let s_cells = initialize_native_stems_beam_s_linker_cells(&hydrated.head_corners)
+        .expect("Allegretto S-cell arena");
+    let context = NativeStemsBeamSidesContext {
+        plans: &hydrated.plans,
+        builders: &hydrated.builder,
+        stumps: &hydrated.stumps,
+        vlinkers: &hydrated.vlinkers,
+        reachability: &hydrated.reachability,
+        head_corners: &hydrated.head_corners,
+        checker: &b15_hydration::checker_context_for_page(&b15_hydration::native_predecessor_page(
+            "allegretto.png",
+        )),
+        relation_parameters: hydrated.relation_parameters,
+    };
+    let mut carrier = NativeStemsBeamSidesCarrier {
+        scheduler,
+        latest_base_apply: hydrated.state_before.base_apply_state_before.clone(),
+        sig,
+        bindings,
+        b_cells,
+        s_cells,
+        beam_inter_index: Vec::new(),
+        configured_inter_vip_ids: Vec::new(),
+    };
+    let carrier_before = carrier.clone();
+    let before_snapshot = awaiting.snapshot.clone();
+
+    let mut missing_exclusion = carrier.clone();
+    let exclusion = missing_exclusion
+        .sig
+        .incident_edges(hook_vertex.0)
+        .unwrap()
+        .into_iter()
+        .find(|edge| edge.kind == NativeSigRelationKind::Exclusion)
+        .expect("full/hook exclusion")
+        .ordinal;
+    missing_exclusion
+        .sig
+        .remove_edge(audiveris_omr::native_sig::NativeSigEdgeId(exclusion))
+        .unwrap();
+    let corrupt_before = missing_exclusion.clone();
+    let error = remove_native_stems_beam_competing_hook_and_resume(&mut missing_exclusion, context)
+        .expect_err("missing exclusion must reject atomically");
+    assert_eq!(error.stage, "hook-removal-incident");
+    assert_eq!(missing_exclusion, corrupt_before);
+
+    let actual = remove_native_stems_beam_competing_hook_and_resume(&mut carrier, context)
+        .expect("atomic native hook removal and continuation");
+    assert_eq!(actual.removed_edges.len(), 5);
+    assert_eq!(
+        actual.active_vertex_count_before - actual.active_vertex_count_after,
+        1
+    );
+    assert_eq!(
+        actual.active_edge_count_before - actual.active_edge_count_after,
+        5
+    );
+    assert_eq!(actual.group_members_before.len(), 3);
+    assert_eq!(actual.group_members_after.len(), 2);
+    assert_eq!(carrier.latest_base_apply, carrier_before.latest_base_apply);
+    assert_eq!(carrier.b_cells, carrier_before.b_cells);
+    assert_eq!(carrier.s_cells, carrier_before.s_cells);
+    assert_eq!(carrier.beam_inter_index, carrier_before.beam_inter_index);
+    assert_eq!(
+        carrier.bindings.beam_vertices.len() + 1,
+        carrier_before.bindings.beam_vertices.len()
+    );
+    assert!(
+        !carrier
+            .bindings
+            .beam_vertices
+            .contains_key(&awaiting.competing_hook)
+    );
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        final_local_worklist,
+        ..
+    } = &carrier.scheduler.status
+    else {
+        panic!("hook removal did not exhaust the remaining SIDES worklist");
+    };
+    assert_eq!(
+        final_local_worklist,
+        &before_snapshot.sources[..=before_snapshot.current_index]
+    );
+    assert_eq!(actual.resume.resume_events.len(), 54);
+    assert_eq!(carrier.scheduler.prefix_events.len(), 143);
+    assert!(matches!(
+        actual.resume.resume_events.first(),
+        Some(NativeStemsBeamSchedulerEvent::CompetingHookRemoved {
+            event_ordinal: 89,
+            ..
+        })
+    ));
+
+    // Only now read mutation expectations. The scheduler predecessor above is
+    // input authority; these rows cannot influence the native return.
+    let expected_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-hook-removal-allegretto-system1.txt"),
+    )
+    .expect("expected-only hook removal fixture");
+    assert_eq!(
+        sha256_hex(expected_text.as_bytes()),
+        "da2cbf1bf35bbafe2925e9e8fc10525f49fe54588b1c45cb2f63e53686544e33"
+    );
+    let expected = expected_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(expected.len(), 5);
+    let field = |line: &str, name: &str| {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let position = tokens
+            .iter()
+            .position(|token| *token == name)
+            .unwrap_or_else(|| panic!("missing {name}: {line}"));
+        tokens[position + 1].to_owned()
+    };
+    let frontier = expected[0];
+    let result = expected[1];
+    assert_eq!(
+        field(frontier, "beamSig").parse::<usize>().unwrap(),
+        sig_of[&actual.beam]
+    );
+    assert_eq!(
+        field(frontier, "hookSig").parse::<usize>().unwrap(),
+        sig_of[&actual.competing_hook]
+    );
+    assert_eq!(field(frontier, "workIndex"), "19");
+    assert_eq!(field(frontier, "sigVertices"), "202");
+    assert_eq!(field(frontier, "sigEdges"), "232");
+    assert_eq!(field(result, "sigVertices"), "201");
+    assert_eq!(field(result, "sigEdges"), "227");
+    assert_eq!(field(result, "hookVertexMatches"), "0");
+    assert_eq!(field(result, "hookIncidentAfter"), "0");
+    assert_eq!(field(result, "workUnchanged"), "true");
+    assert_eq!(field(result, "linkedBUnchanged"), "true");
+    assert_eq!(field(result, "terminal"), "RemovedCompetingHook");
+    assert_eq!(field(expected[2], "event"), "110");
+    assert_eq!(
+        field(expected[2], "terminal"),
+        "SidesWorklistExhaustedBeforeSecondFrontier"
+    );
+    assert_eq!(field(expected[3], "sidesExhausted"), "true");
+    assert_eq!(
+        field(expected[4], "schedulerPredecessorFixtureSha256"),
+        sha256_hex(predecessor_text.as_bytes())
+    );
+    assert_eq!(field(expected[4], "freshRunsByteIdentical"), "true");
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and
@@ -7709,7 +8067,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "b510ec2a13dfa9f0869beb8aa7f8662e33fa34f8caa29dc3464f66ee3b839f94"
+        "ea5e2380210d9935e007fab1e50c46bc2b95ed09504dcc592531c9a95d33f925"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -7833,7 +8191,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "b64f52fff13f9b2edb351e315229c4eb58a160eadf81e679f2631e74f0aad3c5"
+        "0fff3405575aed0993bd2e36faf0db3e1dd1912b606d0a662af7ff79babe722c"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -7920,7 +8278,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "9d41cde6b10afdaa5efc9faa120acd9f8dacadf9c58175f95c64298de0deb7c6"
+        "bb3f557109423e6349883a7af37957843adc2cfabde519eb3d27936ab1fbe3b5"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8016,7 +8374,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "c2df8cadffe32bc4ce63cbfd7a71c5c62e489e4d20edc62aa5d2d8196e14d37a"
+        "f1a90acecf679feebf85eb17748495d409d967487a6d216651f7d177e55d7154"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8112,7 +8470,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "c112499f7ec97cf1bef23a0b570188e7415f3969a66c25ca13c6456ee2c2bdd5"
+        "4f038b6faddd8ae67b039a2378fe1389382be882b01cf999284374d35fc82f42"
     );
     let complete_rows = complete_stumps_text
         .lines()
