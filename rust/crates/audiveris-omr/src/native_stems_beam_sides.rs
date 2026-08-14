@@ -1,13 +1,13 @@
 //! Atomic carriage of one already-awaited STEMS SIDES transaction.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
     native_sig::{
         NativeSigEdgeId, NativeSigInterKind, NativeSigRelationKind, NativeSigSystem,
         NativeSigSystemBindings, NativeSigVertexId,
     },
-    native_stems_beam_builders::NativeStemsBeamBuilderSystem,
+    native_stems_beam_builders::{NativeStemsBeamBuilderSystem, java_double_compare},
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanSystem,
     native_stems_beam_reachability::NativeStemsBeamReachabilitySystem,
     native_stems_beam_scheduler::{
@@ -30,8 +30,10 @@ use crate::{
         roll_native_stems_beam_vlink_base_apply_state,
     },
     native_stems_beam_vlink_head_links::{
+        NativeStemsBeamHeadLinkHeadRef, NativeStemsBeamHeadSLinkerRef,
         NativeStemsBeamNativeHeadTransaction, NativeStemsBeamNativeSLinkerCell,
         apply_native_stems_beam_vlink_head_transaction_to_native_sig,
+        initialize_native_stems_beam_s_linker_cells,
     },
     native_stems_beam_vlink_outer_b_linker::{
         NativeStemsBeamNativeOuterResumeTransaction,
@@ -56,6 +58,11 @@ use crate::{
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
     },
     native_stems_beam_vlinkers::NativeStemsBeamVLinkerSystem,
+    native_stems_head_builders::{
+        NativeStemsHeadBuilderItemKind, NativeStemsHeadBuilderSystem,
+        NativeStemsHeadBuilderTargetRef,
+    },
+    native_stems_head_corner_reachability::NativeStemsHeadCornerRef,
     native_stems_head_corners::NativeStemsHeadCornerSystem,
 };
 
@@ -135,6 +142,50 @@ pub struct NativeStemsBeamStumpsTransaction {
 pub struct NativeStemsBeamStumpsDrive {
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
     pub status: NativeStemsBeamSchedulerStumpsStatus,
+}
+
+/// Production-owned entry to Java's head-linking phase 1.
+///
+/// The embedded beam carrier is the complete post-STUMPS authority. `heads`
+/// follows stable `Inters.byReverseGrade` order, while every head entry reads
+/// the two persistent S-linker cells already mutated by beam-origin links.
+/// This boundary deliberately stops before `HeadLinker.linkSides` evaluates
+/// either C linker.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1Carrier {
+    pub beam_state: NativeStemsBeamSidesCarrier,
+    pub heads: Vec<NativeStemsHeadPhase1Head>,
+    pub current_index: usize,
+    pub unlinked_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
+    pub undefined_sides: Vec<NativeStemsBeamHeadSLinkerRef>,
+    pub frontier: NativeStemsHeadPhase1Frontier,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1Head {
+    pub reference: NativeStemsBeamHeadLinkHeadRef,
+    pub grade: f64,
+    /// Java `HorizontalSide.values()`: LEFT, then RIGHT.
+    pub sides: Vec<NativeStemsBeamNativeSLinkerCell>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1Frontier {
+    pub head: NativeStemsBeamHeadLinkHeadRef,
+    pub stem_profile: i32,
+    pub link_profile: i32,
+    pub append: bool,
+    pub side_decisions: Vec<NativeStemsHeadPhase1SideDecision>,
+    pub next_corner: NativeStemsHeadCornerRef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1SideDecision {
+    pub side: crate::stems_step::NativeStemHeadSide,
+    pub linked_before: bool,
+    pub closed_before: bool,
+    pub top_can_link: Option<bool>,
+    pub bottom_can_link: Option<bool>,
 }
 
 /// Atomic removal of one competing hook plus the following SIDES continuation.
@@ -320,6 +371,306 @@ pub fn drive_native_stems_beam_stumps_from_first_stems_bridge(
             }
         }
     }
+}
+
+/// Transfer an authenticated post-STUMPS carrier into head-linking phase 1.
+///
+/// This is an atomic ownership boundary rather than a head-link mutation: the
+/// returned carrier owns a clone of every mutable authority, and failure does
+/// not consume or alter the caller's completed beam carrier.
+pub fn begin_native_stems_head_linking_phase1(
+    carrier: &NativeStemsBeamSidesCarrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Carrier, NativeStemsBeamSidesError> {
+    let NativeStemsBeamSchedulerStatus::Completed { .. } = &carrier.scheduler.status else {
+        return Err(stage(
+            "HEADS-phase1-terminal",
+            "beam scheduler has not completed STUMPS",
+        ));
+    };
+    if carrier.scheduler.system_id != head_corners.system_id
+        || carrier.sig.system_id != head_corners.system_id
+        || carrier.bindings.system_id != head_corners.system_id
+        || head_builders.system_id != head_corners.system_id
+        || plans.system_id != head_corners.system_id
+    {
+        return Err(stage(
+            "HEADS-phase1-system",
+            "completed carrier and head product differ by system",
+        ));
+    }
+    carrier
+        .bindings
+        .validate_against(&carrier.sig)
+        .map_err(|error| stage("HEADS-phase1-bindings", error))?;
+
+    let mut expected_grade_order = (0..head_corners.heads_in_sig_order.len()).collect::<Vec<_>>();
+    expected_grade_order.sort_by(|&left, &right| {
+        java_double_compare(
+            f64::from_bits(head_corners.heads_in_sig_order[right].grade_bits),
+            f64::from_bits(head_corners.heads_in_sig_order[left].grade_bits),
+        )
+        .cmp(&0)
+    });
+    if expected_grade_order != head_corners.heads_by_reverse_grade {
+        return Err(stage(
+            "HEADS-phase1-order",
+            "head reverse-grade permutation is not Java's stable order",
+        ));
+    }
+
+    let expected_cells = initialize_native_stems_beam_s_linker_cells(head_corners)
+        .map_err(|error| stage("HEADS-phase1-S-topology", error))?;
+    if expected_cells.len() != carrier.s_cells.len() {
+        return Err(stage(
+            "HEADS-phase1-S-topology",
+            "persistent S-cell catalogue is not exhaustive",
+        ));
+    }
+    let mut live_refs = BTreeSet::new();
+    for cell in &carrier.s_cells {
+        if !live_refs.insert(cell.reference) {
+            return Err(stage(
+                "HEADS-phase1-S-topology",
+                "duplicate persistent S-cell reference",
+            ));
+        }
+        let expected = expected_cells
+            .iter()
+            .find(|expected| expected.reference == cell.reference)
+            .ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-S-topology",
+                    "persistent S cell is absent from constructor topology",
+                )
+            })?;
+        if cell.ordered_observer_corners != expected.ordered_observer_corners {
+            return Err(stage(
+                "HEADS-phase1-S-topology",
+                "persistent S-cell observer order differs",
+            ));
+        }
+    }
+
+    let mut heads = Vec::with_capacity(expected_grade_order.len());
+    for sig_ordinal in expected_grade_order {
+        let head = &head_corners.heads_in_sig_order[sig_ordinal];
+        let x_ordinal = head_corners
+            .heads_by_abscissa
+            .iter()
+            .position(|&candidate| candidate == sig_ordinal)
+            .ok_or_else(|| stage("HEADS-phase1-order", "head absent from abscissa order"))?;
+        let reference = NativeStemsBeamHeadLinkHeadRef {
+            reference: head.reference,
+            sig_ordinal,
+            x_ordinal,
+        };
+        let vertex_id = carrier
+            .bindings
+            .head_vertices
+            .get(&head.reference)
+            .ok_or_else(|| stage("HEADS-phase1-head", "head product lacks a live SIG binding"))?;
+        let vertex = carrier.sig.vertex(vertex_id.0).ok_or_else(|| {
+            stage(
+                "HEADS-phase1-head",
+                "head binding points outside the live SIG",
+            )
+        })?;
+        if !vertex.active
+            || vertex.removed
+            || vertex.kind != NativeSigInterKind::Head
+            || vertex.grade.to_bits() != head.grade_bits
+        {
+            return Err(stage(
+                "HEADS-phase1-head",
+                "head binding is not the exact live graded HeadInter",
+            ));
+        }
+        let sides = [
+            crate::stems_step::NativeStemHeadSide::Left,
+            crate::stems_step::NativeStemHeadSide::Right,
+        ]
+        .into_iter()
+        .map(|horizontal| {
+            let side_ref = NativeStemsBeamHeadSLinkerRef {
+                head: reference,
+                horizontal,
+            };
+            carrier
+                .s_cells
+                .iter()
+                .find(|cell| cell.reference == side_ref)
+                .cloned()
+                .ok_or_else(|| stage("HEADS-phase1-S-topology", "head side cell is missing"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+        heads.push(NativeStemsHeadPhase1Head {
+            reference,
+            grade: vertex.grade,
+            sides,
+        });
+    }
+
+    let first = heads
+        .first()
+        .cloned()
+        .ok_or_else(|| stage("HEADS-phase1-frontier", "system has no stem-capable head"))?;
+    let mut side_decisions = Vec::new();
+    let mut next_corner = None;
+    for side in &first.sides {
+        if side.linked {
+            side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                side: side.reference.horizontal,
+                linked_before: true,
+                closed_before: side.closed,
+                top_can_link: None,
+                bottom_can_link: None,
+            });
+            continue;
+        }
+        if side.closed {
+            side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                side: side.reference.horizontal,
+                linked_before: false,
+                closed_before: true,
+                top_can_link: None,
+                bottom_can_link: None,
+            });
+            continue;
+        }
+        let top = side.ordered_observer_corners[0];
+        let bottom = side.ordered_observer_corners[1];
+        let top = NativeStemsHeadCornerRef {
+            head: top.head,
+            sig_ordinal: top.sig_ordinal,
+            x_ordinal: top.x_ordinal,
+            horizontal: top.horizontal,
+            vertical: top.vertical,
+        };
+        let bottom = NativeStemsHeadCornerRef {
+            head: bottom.head,
+            sig_ordinal: bottom.sig_ordinal,
+            x_ordinal: bottom.x_ordinal,
+            horizontal: bottom.horizontal,
+            vertical: bottom.vertical,
+        };
+        let top_ok = bounded_head_can_link(
+            top,
+            0,
+            head_builders,
+            &carrier.s_cells,
+            plans.min_linker_length,
+        )?;
+        let bottom_ok = bounded_head_can_link(
+            bottom,
+            0,
+            head_builders,
+            &carrier.s_cells,
+            plans.min_linker_length,
+        )?;
+        side_decisions.push(NativeStemsHeadPhase1SideDecision {
+            side: side.reference.horizontal,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(top_ok),
+            bottom_can_link: Some(bottom_ok),
+        });
+        match (top_ok, bottom_ok) {
+            (true, false) => {
+                next_corner = Some(top);
+                break;
+            }
+            (false, true) => {
+                next_corner = Some(bottom);
+                break;
+            }
+            (true, true) => {
+                return Err(stage(
+                    "HEADS-phase1-frontier",
+                    "first head reaches the unported dual-corner selection branch",
+                ));
+            }
+            (false, false) => {}
+        }
+    }
+    let next_corner = next_corner.ok_or_else(|| {
+        stage(
+            "HEADS-phase1-frontier",
+            "first head has no bounded C-link transaction",
+        )
+    })?;
+
+    Ok(NativeStemsHeadPhase1Carrier {
+        beam_state: carrier.clone(),
+        heads,
+        current_index: 0,
+        unlinked_heads: Vec::new(),
+        undefined_sides: Vec::new(),
+        frontier: NativeStemsHeadPhase1Frontier {
+            head: first.reference,
+            stem_profile: 0,
+            link_profile: plans.link_profile,
+            append: false,
+            side_decisions,
+            next_corner,
+        },
+    })
+}
+
+fn bounded_head_can_link(
+    corner: NativeStemsHeadCornerRef,
+    stem_profile: i32,
+    builders: &NativeStemsHeadBuilderSystem,
+    s_cells: &[NativeStemsBeamNativeSLinkerCell],
+    min_linker_length: i32,
+) -> Result<bool, NativeStemsBeamSidesError> {
+    let builder = builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == corner)
+        .ok_or_else(|| stage("HEADS-phase1-canLink", "corner has no C-origin builder"))?;
+    let length = builder
+        .lengths
+        .get(&stem_profile)
+        .copied()
+        .ok_or_else(|| stage("HEADS-phase1-canLink", "builder lacks STRICT length"))?;
+    if length < min_linker_length {
+        return Ok(false);
+    }
+    let max_gap = builders
+        .gap_map
+        .get(&stem_profile)
+        .copied()
+        .ok_or_else(|| stage("HEADS-phase1-canLink", "builder lacks STRICT gap threshold"))?;
+    for item in builder.items.iter().skip(1) {
+        if item.kind == NativeStemsHeadBuilderItemKind::Gap && item.contribution > max_gap {
+            return Ok(true);
+        }
+        let Some(NativeStemsHeadBuilderTargetRef::Head(target)) = item.target else {
+            continue;
+        };
+        let target_ref = NativeStemsBeamHeadLinkHeadRef {
+            reference: target.head,
+            sig_ordinal: target.sig_ordinal,
+            x_ordinal: target.x_ordinal,
+        };
+        let target_side = s_cells
+            .iter()
+            .find(|cell| {
+                cell.reference.head == target_ref && cell.reference.horizontal == target.horizontal
+            })
+            .ok_or_else(|| stage("HEADS-phase1-canLink", "target C linker lacks S cell"))?;
+        if target_side.linked {
+            return Ok(false);
+        }
+        return Err(stage(
+            "HEADS-phase1-canLink",
+            "first head reaches the unported close-head/gap recursion",
+        ));
+    }
+    Ok(true)
 }
 
 /// Atomically remove the competing hook named by the current SIDES frontier

@@ -80,7 +80,9 @@ use audiveris_omr::{
         NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRecognition, NativeStemsBeamVLinkerRef,
         NativeStemsBeamVLinkerSystem, materialize_native_stems_beam_vlinkers,
     },
-    native_stems_head_builders::materialize_native_stems_head_builders,
+    native_stems_head_builders::{
+        NativeStemsHeadBuilderRecognition, materialize_native_stems_head_builders,
+    },
     native_stems_head_corner_reachability::materialize_native_stems_head_corner_reachability,
     native_stems_head_corners::{
         NativeStemsHeadCornerRecognition, NativeStemsHeadCornerSystem,
@@ -749,6 +751,8 @@ pub(super) struct NativePredecessorPage {
     pub(super) beam_stumps: NativeStemsBeamStumpRecognition,
     pub(super) beam_vlinkers: NativeStemsBeamVLinkerRecognition,
     pub(super) head_corners: NativeStemsHeadCornerRecognition,
+    #[allow(dead_code)] // Consumed only by the post-STUMPS head-phase gate.
+    pub(super) head_builders: NativeStemsHeadBuilderRecognition,
     pub(super) beam_reachability: NativeStemsBeamReachabilityRecognition,
     pub(super) beam_builders: NativeStemsBeamBuilderRecognition,
     #[allow(dead_code)] // Consumed by the native SIDES carrier gate only.
@@ -868,7 +872,8 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         head_corners: corners,
         beam_reachability,
         beam_builders,
-        modeled_canonical_glyphs: head_builders.modeled_canonical_glyphs,
+        modeled_canonical_glyphs: head_builders.modeled_canonical_glyphs.clone(),
+        head_builders,
         first_system_visible_modeled_count,
         plans,
         scheduler,

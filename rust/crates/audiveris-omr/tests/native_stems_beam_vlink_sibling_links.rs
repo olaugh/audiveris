@@ -42,6 +42,7 @@ use audiveris_omr::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
+        begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         drive_native_stems_beam_stumps_from_first_stems_bridge,
         remove_native_stems_beam_competing_hook_and_resume,
@@ -6184,7 +6185,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "3c313fb0355d96d68a841c656c5e09cfe6e358f4a6837637e6256687b8751946"
+        "1f259ce1e36213e6756ecf9dcccff943f9155cb4e27042c2741cb49fe1f5473d"
     );
     let data = fixture
         .lines()
@@ -6261,7 +6262,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
     assert_eq!(
         sha256_hex(predecessor_text.as_bytes()),
-        "e561daf16ddd0107d21a1a5debbd54c0d0e42e3d9dd87cc7319cd2d147f9c35f"
+        "d8babdb5d54354e5f8eefc3005bd0047b8a35969ac4ba68fe8f0efab438f8298"
     );
     let predecessor_rows = predecessor_text
         .lines()
@@ -6554,7 +6555,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
     .expect("expected-only hook removal fixture");
     assert_eq!(
         sha256_hex(expected_text.as_bytes()),
-        "da2cbf1bf35bbafe2925e9e8fc10525f49fe54588b1c45cb2f63e53686544e33"
+        "27571ce5a947c95cd229f64d59633adc214dcb0c8b75af10061913b489d013be"
     );
     let expected = expected_text
         .lines()
@@ -8059,6 +8060,60 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert_eq!(bridge, bridge_before);
 
+    // Transfer the complete native-owned post-STUMPS state into the first
+    // head-phase decision before opening any head-phase expected row.
+    let post_stumps_before = carrier.clone();
+    let head_phase = begin_native_stems_head_linking_phase1(
+        &carrier,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native post-STUMPS head-phase frontier");
+    assert_eq!(carrier, post_stumps_before);
+    assert_eq!(head_phase.beam_state, carrier);
+    assert_eq!(head_phase.heads.len(), 102);
+    assert_eq!(head_phase.current_index, 0);
+    assert!(head_phase.unlinked_heads.is_empty());
+    assert!(head_phase.undefined_sides.is_empty());
+    assert_eq!(head_phase.frontier.head, head_phase.heads[0].reference);
+    assert_eq!(head_phase.frontier.stem_profile, 0);
+    assert_eq!(head_phase.frontier.link_profile, 1);
+    assert!(!head_phase.frontier.append);
+    assert_eq!(head_phase.frontier.side_decisions.len(), 2);
+    assert_eq!(
+        head_phase
+            .frontier
+            .side_decisions
+            .iter()
+            .map(|decision| {
+                (
+                    decision.side,
+                    decision.linked_before,
+                    decision.closed_before,
+                    decision.top_can_link,
+                    decision.bottom_can_link,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                NativeStemHeadSide::Left,
+                false,
+                false,
+                Some(false),
+                Some(false)
+            ),
+            (
+                NativeStemHeadSide::Right,
+                false,
+                false,
+                Some(true),
+                Some(false)
+            ),
+        ]
+    );
+
     // Expected-only STUMPS rows are opened after the production continuation
     // and its atomic/coherence guards have returned.
     let stumps_prefix_text = std::fs::read_to_string(
@@ -8067,7 +8122,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "ea5e2380210d9935e007fab1e50c46bc2b95ed09504dcc592531c9a95d33f925"
+        "19fcb9ff4527fbeb499a5a98ac5340ec456629f9ec84751214ff8da3fb00e9a4"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -8191,7 +8246,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "0fff3405575aed0993bd2e36faf0db3e1dd1912b606d0a662af7ff79babe722c"
+        "a23dc34722d3cec118ae234b70968a2c79200a520bd958a144bd9b655f18d5e0"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -8278,7 +8333,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "bb3f557109423e6349883a7af37957843adc2cfabde519eb3d27936ab1fbe3b5"
+        "26e32d628f96bd167fbb2e1a1f4809071ba7a054fa12cfc74d8abc9492d24523"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8374,7 +8429,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "f1a90acecf679feebf85eb17748495d409d967487a6d216651f7d177e55d7154"
+        "cab5be7bf74e3665d180483126211ec856659cc002b276d67cb107cfa090a597"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8470,7 +8525,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "4f038b6faddd8ae67b039a2378fe1389382be882b01cf999284374d35fc82f42"
+        "e20adf7ecd07a0d665c0b87a7b1edf28548c8a49b9684d192622958b07b72e13"
     );
     let complete_rows = complete_stumps_text
         .lines()
@@ -8575,6 +8630,105 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         complete_summary_value("emittedBodySha256"),
         sha256_hex(complete_body.as_bytes())
+    );
+
+    let head_phase_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1.txt"),
+    )
+    .expect("expected-only post-STUMPS head-phase prefix");
+    assert_eq!(
+        sha256_hex(head_phase_text.as_bytes()),
+        "0e06761ef67d2847e7d89cdd640deefe54129e12ea7aa5ebd4122896c2c86888"
+    );
+    let head_phase_rows = head_phase_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(head_phase_rows.len(), 4);
+    let head_field = |line: &str, name: &str| {
+        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let index = tokens
+            .iter()
+            .position(|token| *token == name)
+            .unwrap_or_else(|| panic!("missing head-phase field {name}: {line}"));
+        tokens[index + 1].to_owned()
+    };
+    let frontier = head_phase_rows[1];
+    assert_eq!(head_field(frontier, "headOrder"), "0");
+    assert_eq!(
+        head_field(frontier, "headSig").parse::<usize>().unwrap(),
+        head_phase.frontier.head.sig_ordinal
+    );
+    assert_eq!(head_field(frontier, "headInterId"), "1375");
+    assert_eq!(
+        head_field(frontier, "stemProfile").parse::<i32>().unwrap(),
+        head_phase.frontier.stem_profile
+    );
+    assert_eq!(
+        head_field(frontier, "linkProfile").parse::<i32>().unwrap(),
+        head_phase.frontier.link_profile
+    );
+    assert_eq!(head_field(frontier, "append"), "false");
+    assert_eq!(
+        head_field(frontier, "sides"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(
+        head_field(frontier, "decisions"),
+        "[LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    );
+    assert_eq!(head_field(frontier, "selectedC"), "h:38:RIGHT:TOP");
+    assert_eq!(head_phase.frontier.next_corner.x_ordinal, 38);
+    assert_eq!(head_phase.frontier.next_corner.sig_ordinal, 45);
+    assert_eq!(
+        head_phase.frontier.next_corner.horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        head_phase.frontier.next_corner.vertical,
+        NativeStemVerticalSide::Top
+    );
+    assert_eq!(head_phase.heads[0].grade.to_bits(), 0x3fe9_17c3_b820_7578);
+    assert_eq!(
+        head_field(frontier, "terminal"),
+        "AwaitingHeadCLinkTransaction"
+    );
+    // This final row is Java-only next-boundary evidence. Native deliberately
+    // stopped at the frontier above and does not claim this mutation yet.
+    let java_result = head_phase_rows[2];
+    assert_eq!(head_field(java_result, "relationsBefore"), "0");
+    assert_eq!(head_field(java_result, "relationsAfter"), "1");
+    assert_eq!(head_field(java_result, "linked"), "true");
+    assert_eq!(head_field(java_result, "sigVerticesBefore"), "678");
+    assert_eq!(head_field(java_result, "sigVerticesAfter"), "679");
+    assert_eq!(head_field(java_result, "sigEdgesBefore"), "689");
+    assert_eq!(head_field(java_result, "sigEdgesAfter"), "690");
+    assert_eq!(head_field(java_result, "systemStemsBefore"), "39");
+    assert_eq!(head_field(java_result, "systemStemsAfter"), "40");
+    assert_eq!(
+        head_field(java_result, "terminal"),
+        "ReturnedBeforeSecondHead"
+    );
+    let head_summary = head_phase_rows[3];
+    assert_eq!(head_field(head_summary, "freshRuns"), "2");
+    assert_eq!(head_field(head_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(head_summary, "probeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active shared head-phase probe")
+        )
+    );
+    assert_eq!(
+        head_field(head_summary, "runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/run-stems-head-phase-prefix.sh"))
+                .expect("active head-phase runner")
+        )
+    );
+    assert_eq!(
+        head_field(head_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
     );
 
     let all_siblings = std::iter::once(&actual)

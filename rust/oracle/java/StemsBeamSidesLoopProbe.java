@@ -584,6 +584,8 @@ public final class StemsBeamSidesLoopProbe
                 "audiveris.rustport.stumpsTransactionLimit", 1);
         final boolean hookRemovalMode = Boolean.getBoolean(
                 "audiveris.rustport.hookRemovalProbe");
+        final boolean headPhasePrefixMode = Boolean.getBoolean(
+                "audiveris.rustport.headPhasePrefixProbe");
         static final int FRESH_TRANSACTION_CAP = 400;
         List<String> freshBaseRows;
         List<String> freshFlagRows;
@@ -936,6 +938,120 @@ public final class StemsBeamSidesLoopProbe
                     "stemsbeamstumpstxnresumeterminal %s system %d events %d "
                             + "transactions %d terminal Completed stopBeforeCreateStem true%n",
                     page, system.getId(), stumpsEvent, stumpsTransactions);
+            if (headPhasePrefixMode) runHeadsPhasePrefix();
+        }
+
+        /** First exact call in {@code StemsRetriever.linkStems}' head phase 1. */
+        void runHeadsPhasePrefix ()
+            throws Exception
+        {
+            final List<Inter> ordered = new ArrayList<>(heads);
+            Collections.sort(ordered, Inters.byReverseGrade);
+            final LinkedHashMap<Inter, Set<HorizontalSide>> undefs = new LinkedHashMap<>();
+            final PersistentSnapshot phaseBefore = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            System.out.printf(
+                    "stemsheadphaseprefixbaseline %s system %d heads %d sigVertices %d "
+                            + "sigEdges %d systemStems %d relationStateHash %s "
+                            + "linkerStateHash %s terminal ReadyBeforeFirstHead%n",
+                    page, system.getId(), ordered.size(), phaseBefore.sig.vertices.size(),
+                    phaseBefore.sig.edges.size(), phaseBefore.systemStems.entries.size(),
+                    phaseBefore.sig.relationStateHash, phaseBefore.linkers.hash);
+
+            final HeadInter head = (HeadInter) ordered.get(0);
+            final HeadLinker linker = head.getLinker();
+            final String beforeSides = headSideState(linker);
+            final List<String> decisions = new ArrayList<>();
+            Object selectedCorner = null;
+            final PersistentSnapshot beforeCanLink = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            for (HorizontalSide side : HorizontalSide.values()) {
+                final HeadLinker.SLinker s = linker.getSLinkers().get(side);
+                if (s.isLinked()) {
+                    decisions.add(side + ":SkipAlreadyLinked");
+                    continue;
+                }
+                if (s.isClosed()) {
+                    decisions.add(side + ":SkipClosed");
+                    continue;
+                }
+                final var top = s.getCornerLinker(VerticalSide.TOP);
+                final var bottom = s.getCornerLinker(VerticalSide.BOTTOM);
+                final boolean topOk = top.canLink(Profiles.STRICT, false);
+                final boolean bottomOk = bottom.canLink(Profiles.STRICT, false);
+                final String branch;
+                if (topOk && !bottomOk) {
+                    branch = "TopOnly";
+                    selectedCorner = top;
+                } else if (!topOk && bottomOk) {
+                    branch = "BottomOnly";
+                    selectedCorner = bottom;
+                }
+                else if (!topOk) branch = "Neither";
+                else if (top.getStump() != null && top.getStump() == bottom.getStump()) {
+                    branch = "BothSameStumpUndefinedReturn";
+                } else {
+                    branch = side == HorizontalSide.LEFT ? "BothChooseBottom" : "BothChooseTop";
+                    selectedCorner = side == HorizontalSide.LEFT ? bottom : top;
+                }
+                decisions.add(side + ":top=" + topOk + ":bottom=" + bottomOk
+                        + ":branch=" + branch);
+            }
+            beforeCanLink.assertSame(snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers));
+            System.out.printf(
+                    "stemsheadphaseprefixfrontier %s system %d headOrder 0 headSig %d "
+                            + "headInterId %d stemProfile %d linkProfile %d append false "
+                            + "sides %s decisions %s selectedC %s "
+                            + "sigVertices %d sigEdges %d systemStems %d "
+                            + "relationStateHash %s linkerStateHash %s "
+                            + "terminal AwaitingHeadCLinkTransaction%n",
+                    page, system.getId(), headSigOrdinals.get(head), head.getId(),
+                    Profiles.STRICT, system.getProfile(), beforeSides, list(decisions),
+                    selectedCorner == null ? "-" : cAliases.get(selectedCorner),
+                    beforeCanLink.sig.vertices.size(), beforeCanLink.sig.edges.size(),
+                    beforeCanLink.systemStems.entries.size(),
+                    beforeCanLink.sig.relationStateHash, beforeCanLink.linkers.hash);
+            final int relationsBefore = system.getSig()
+                    .getRelations(head, HeadStemRelation.class).size();
+            final PersistentSnapshot before = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            final boolean linked = linker.linkSides(
+                    Profiles.STRICT, system.getProfile(), undefs, false);
+            final PersistentSnapshot after = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            final int relationsAfter = system.getSig()
+                    .getRelations(head, HeadStemRelation.class).size();
+            final Set<HorizontalSide> undefined = undefs.get(head);
+            System.out.printf(
+                    "stemsheadphaseprefixresult %s system %d headOrder 0 headSig %d "
+                            + "headInterId %d grade %s sidesBefore %s decisions %s sidesAfter %s "
+                            + "relationsBefore %d relationsAfter %d linked %s undefs %s "
+                            + "sigVerticesBefore %d sigVerticesAfter %d "
+                            + "sigEdgesBefore %d sigEdgesAfter %d "
+                            + "systemStemsBefore %d systemStemsAfter %d "
+                            + "relationStateHashBefore %s relationStateHashAfter %s "
+                            + "linkerStateHashBefore %s linkerStateHashAfter %s "
+                            + "terminal ReturnedBeforeSecondHead%n",
+                    page, system.getId(), headSigOrdinals.get(head), head.getId(),
+                    hex(head.getGrade()), beforeSides, list(decisions), headSideState(linker),
+                    relationsBefore, relationsAfter, linked,
+                    undefined == null ? "[]" : undefined,
+                    before.sig.vertices.size(), after.sig.vertices.size(),
+                    before.sig.edges.size(), after.sig.edges.size(),
+                    before.systemStems.entries.size(), after.systemStems.entries.size(),
+                    before.sig.relationStateHash, after.sig.relationStateHash,
+                    before.linkers.hash, after.linkers.hash);
+        }
+
+        String headSideState (HeadLinker linker)
+        {
+            final List<String> states = new ArrayList<>();
+            for (HorizontalSide side : HorizontalSide.values()) {
+                final HeadLinker.SLinker s = linker.getSLinkers().get(side);
+                states.add(side + ":" + s.isLinked() + ":" + s.isClosed());
+            }
+            return list(states);
         }
 
         String beamAlias (AbstractBeamInter beam)
