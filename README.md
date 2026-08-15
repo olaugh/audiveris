@@ -67,9 +67,10 @@ cargo run --release -p audiveris-cli -- -batch -step GRID -json score.pdf
 Each promoted inter carries its grade, its contextual grade, and the impacts the grade
 is a weighted geometric mean of — plus the candidates that were rejected and the named
 purge that rejected each. Rejected peaks that reached a named purge retain the same six
-intrinsic impacts, so a missed bar can be separated from a location where no candidate
-was ever formed. A recogniser that emits only its answer cannot be judged on what it
-missed.
+intrinsic impacts. Projection-stage core/grade rejections and compact raw
+above-threshold ranges are also reported, so a missed bar can be separated into no
+projection ridge, failed peak construction, failed core/grade, or a later named purge.
+A recogniser that emits only its answer cannot be judged on what it missed.
 
 ### Experimental stem/barline disambiguation
 
@@ -99,7 +100,8 @@ Two additional opt-in research controls target projectively captured pages:
 AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE=0.16 \
 AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
 AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
-AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.72 \
+AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.74 \
+AUDIVERIS_STAFF_EDGE_BAR_PROJECTION=1 \
 AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY=1 \
 AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
@@ -122,7 +124,19 @@ remain experimental: the tested global approximation is not yet as precise as
 a per-system projective vertical field and lowered ordinary warped-page
 precision in the first global-shear prototype. The current two-pass local-field
 version preserves ordinary precision; `AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE`
-sets its inclusive intrinsic-grade threshold (0.72 by default).
+sets its inclusive intrinsic-grade threshold (0.74 by default).
+
+The staff-edge projection is piano-specific and avoids the circular failure in
+which too few slanted bars survive to estimate their own direction. It measures
+`dx/dy` from the left endpoints of each adjacent two-staff grand staff, takes a
+robust median, shears one supplemental projection along that direction, and
+admits only interior candidates with core ≥0.9, gap ≥0.8, and grade ≥0.74.
+Boundary recovery is excluded because the same transform straightens brace
+flanks. On the fresh 50-page warped audit it changes 2,462 TP / 9 FP / 326 FN
+to **2,539 / 9 / 249**; the older connected holdout reaches 2,797 / 2 / 59.
+Clean disconnected pages remain 700 / 0 / 0, low-DPI pages retain 1,074 TP / 46
+FN, and the independent disconnected warp is unchanged at 425 / 14 / 255. It
+is opt-in and should be enabled only for piano-like staff pairing.
 
 The boundary-reassignment control targets a different projective failure: a
 brace fragment can become the first connected vertical on both piano staves,
@@ -155,6 +169,14 @@ column control retains only isolated candidates at least 7 pixels wide with a
 core impact of at least 0.8788; recovered peaks remain subject to downstream
 purges and carry `partial_recovered` provenance in JSON. Both controls remain
 opt-in pending real-scan validation.
+
+Accepted vertical JSON evidence also includes staff-free and original-binary
+lateral-ink measurements. They quantify notehead/beam-like attachment around a
+candidate but do not change recognition. On the synthetic warped disconnected
+sets a combined lateral/grade rule catches several surviving stems, yet a plain
+lateral threshold overlaps damaged true bars. The intended next discriminator
+is post-HEADS same-staff notehead attachment; the current pinned Bravura head
+catalog must first cover the low point sizes where these residual errors occur.
 
 ## Layout
 

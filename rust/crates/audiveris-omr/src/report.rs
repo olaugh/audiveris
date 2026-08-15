@@ -35,6 +35,7 @@ use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
 use audiveris_image::beam_structure::BeamImpacts;
 use audiveris_image::grid_sig::{GridSigNode, GridSigRelation};
 use audiveris_image::lines_coordinator::StaffCandidateKind;
+use audiveris_image::projection::ProjectionPeakRejectionStage;
 use audiveris_image::staff_peak::StaffPeakAttribute;
 use audiveris_image::system_population::BoundarySegment;
 
@@ -396,6 +397,7 @@ fn recognition_json(
     }
     let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
+    projection_ranges(&mut json, recognition);
     brace_probes(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
     if let Some(stem_seeds) = stem_seeds {
@@ -654,6 +656,7 @@ fn inters(
     beams: Option<&NativeBeamRecognition>,
     ledgers: Option<&NativeLedgerRecognition>,
 ) -> PublicationIds {
+    let no_staff_pixels = recognition.no_staff.to_pixels();
     json.key("inters");
     json.open('[');
     let mut next_ids = BTreeMap::<usize, usize>::new();
@@ -727,6 +730,38 @@ fn inters(
                         source_peak
                             .is_some_and(|peak| peak.is_set(StaffPeakAttribute::SlopeRecovered)),
                     );
+                    let lateral = lateral_ink_evidence(
+                        &no_staff_pixels,
+                        recognition.scale.width,
+                        recognition.scale.height,
+                        plan.median.x,
+                        plan.median.top,
+                        plan.median.bottom,
+                        plan.width,
+                        recognition.scale.scale.interline.main,
+                    );
+                    json.field_number("lateral_ink_ratio", lateral.ratio);
+                    json.field_integer("lateral_ink_rows", lateral.wide_rows as i64);
+                    json.field_integer(
+                        "maximum_lateral_extension",
+                        lateral.maximum_extension as i64,
+                    );
+                    let binary_lateral = lateral_ink_evidence(
+                        &recognition.scale.binary,
+                        recognition.scale.width,
+                        recognition.scale.height,
+                        plan.median.x,
+                        plan.median.top,
+                        plan.median.bottom,
+                        plan.width,
+                        recognition.scale.scale.interline.main,
+                    );
+                    json.field_number("binary_lateral_ink_ratio", binary_lateral.ratio);
+                    json.field_integer("binary_lateral_ink_rows", binary_lateral.wide_rows as i64);
+                    json.field_integer(
+                        "binary_maximum_lateral_extension",
+                        binary_lateral.maximum_extension as i64,
+                    );
                     json.field_boolean(
                         "partial_recovered",
                         source_peak
@@ -790,6 +825,71 @@ fn inters(
     }
     json.close(']');
     publication
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct LateralInkEvidence {
+    ratio: f64,
+    wide_rows: usize,
+    maximum_extension: usize,
+}
+
+/// Measure ink horizontally attached to a vertical candidate after staff-line
+/// removal. Noteheads and beams create several rows of lateral attachment to a
+/// stem; an isolated barline normally does not. This is diagnostic evidence,
+/// not yet a recognition gate.
+#[allow(clippy::too_many_arguments)]
+fn lateral_ink_evidence(
+    pixels: &[u8],
+    raster_width: usize,
+    raster_height: usize,
+    x: f64,
+    top: f64,
+    bottom: f64,
+    candidate_width: f64,
+    interline: i32,
+) -> LateralInkEvidence {
+    if pixels.len() != raster_width.saturating_mul(raster_height)
+        || raster_width == 0
+        || raster_height == 0
+    {
+        return LateralInkEvidence::default();
+    }
+    let center = (x.round_ties_even() as i64).clamp(0, raster_width as i64 - 1) as usize;
+    let half_core = ((candidate_width / 2.0).ceil() as usize).max(1);
+    let x0 = center.saturating_sub(half_core);
+    let x1 = center.saturating_add(half_core).min(raster_width - 1);
+    let y0 = (top.floor() as i64).clamp(0, raster_height as i64 - 1) as usize;
+    let y1 = (bottom.ceil() as i64).clamp(0, raster_height as i64 - 1) as usize;
+    let reach = usize::try_from(interline.max(1)).unwrap_or(1);
+    let wide_threshold = ((reach as f64) * 0.25).ceil() as usize;
+    let mut lateral_pixels = 0usize;
+    let mut wide_rows = 0usize;
+    let mut maximum_extension = 0usize;
+    for y in y0..=y1 {
+        let row = &pixels[y * raster_width..(y + 1) * raster_width];
+        if !row[x0..=x1].contains(&0) {
+            continue;
+        }
+        let mut left = 0usize;
+        while left < reach && x0 > left && row[x0 - left - 1] == 0 {
+            left += 1;
+        }
+        let mut right = 0usize;
+        while right < reach && x1 + right + 1 < raster_width && row[x1 + right + 1] == 0 {
+            right += 1;
+        }
+        let extension = left + right;
+        lateral_pixels += extension;
+        maximum_extension = maximum_extension.max(left.max(right));
+        wide_rows += usize::from(extension >= wide_threshold);
+    }
+    let height = y1.saturating_sub(y0) + 1;
+    LateralInkEvidence {
+        ratio: lateral_pixels as f64 / (height * reach) as f64,
+        wide_rows,
+        maximum_extension,
+    }
 }
 
 fn header_inters(
@@ -1183,14 +1283,42 @@ fn ledger_inter(json: &mut Json, id: usize, ledger: &MaterializedLedgerInter) {
 /// it was dropped -- `Unaligned` and `CClef` are very different claims about
 /// the same missing barline.
 ///
-/// These are rejections from the `BarsRetriever` purges specifically. They are
-/// not a complete n-best list: a peak that never reached the purges, because it
-/// failed core validation or graded below `Grades.minInterGrade`, is not here.
-/// That is a real limit of this schema version, not an assertion that no other
-/// candidates existed.
+/// Includes both projection-stage rejections and later `BarsRetriever` purges,
+/// so a consumer can distinguish an absent scan peak from a rejected one.
 fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
     json.key("candidates");
     json.open('[');
+    for staff in &recognition.staves {
+        for rejection in &staff.projection_rejections {
+            json.open('{');
+            json.field_string("kind", "BARLINE");
+            json.field_string("status", "rejected");
+            json.field_integer("system", 0);
+            json.field_integer("staff", staff.id as i64);
+            json.key("span");
+            json.open('{');
+            json.field_integer("start", i64::from(rejection.start));
+            json.field_integer("stop", i64::from(rejection.stop));
+            json.close('}');
+            json.key("evidence");
+            json.open('{');
+            json.field_string(
+                "rejected_by",
+                match rejection.stage {
+                    ProjectionPeakRejectionStage::CoreGapTooLarge => "ProjectionCoreGapTooLarge",
+                    ProjectionPeakRejectionStage::CoreInsufficientWhiteBeyondSerif => {
+                        "ProjectionCoreInsufficientWhiteBeyondSerif"
+                    }
+                    ProjectionPeakRejectionStage::BelowMinimumGrade => {
+                        "ProjectionBelowMinimumGrade"
+                    }
+                },
+            );
+            json.field_integer("projection_maximum", i64::from(rejection.maximum_value));
+            json.close('}');
+            json.close('}');
+        }
+    }
     for rejection in &recognition.peak_graph.rejections {
         json.open('{');
         json.field_string("kind", "BARLINE");
@@ -1222,6 +1350,22 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
         }
         json.close('}');
         json.close('}');
+    }
+    json.close(']');
+}
+
+fn projection_ranges(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("projection_ranges");
+    json.open('[');
+    for staff in &recognition.staves {
+        for (start, stop, maximum) in &staff.raw_projection_ranges {
+            json.open('{');
+            json.field_integer("staff", staff.id as i64);
+            json.field_integer("start", i64::from(*start));
+            json.field_integer("stop", i64::from(*stop));
+            json.field_integer("maximum", i64::from(*maximum));
+            json.close('}');
+        }
     }
     json.close(']');
 }
@@ -2595,6 +2739,25 @@ pub(crate) mod tests {
         assert!(!structural_faults(r#"{"a":1}}"#).is_empty());
         // A comma inside a string is not a fault.
         assert!(structural_faults(r#"{"a":"x,:y"}"#).is_empty());
+    }
+
+    #[test]
+    fn lateral_ink_distinguishes_an_attached_head_from_a_bare_vertical() {
+        let mut bare = vec![255; 20 * 20];
+        for y in 2..=17 {
+            bare[y * 20 + 10] = 0;
+        }
+        let bare_evidence = lateral_ink_evidence(&bare, 20, 20, 10.0, 2.0, 17.0, 1.0, 8);
+        assert_eq!(bare_evidence, LateralInkEvidence::default());
+
+        let mut attached = bare;
+        for x in 4..=10 {
+            attached[8 * 20 + x] = 0;
+        }
+        let attached_evidence = lateral_ink_evidence(&attached, 20, 20, 10.0, 2.0, 17.0, 1.0, 8);
+        assert!(attached_evidence.ratio > 0.0);
+        assert_eq!(attached_evidence.wide_rows, 1);
+        assert_eq!(attached_evidence.maximum_extension, 5);
     }
 
     #[test]

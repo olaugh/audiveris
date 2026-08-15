@@ -158,7 +158,26 @@ pub struct NeutralStaffProjectorResult {
     pub all_blanks: Vec<ProjectionBlank>,
     pub peak_search_bounds: PeakSearchBounds,
     pub peaks: Vec<StaffPeak>,
+    /// Constructed projection peaks rejected before they could enter the
+    /// peak graph.  Keeping these decisions makes an absent barline
+    /// distinguishable from a peak that was never scanned at all.
+    pub peak_rejections: Vec<ProjectionPeakRejection>,
     pub brace_candidate: Option<ProjectionBraceCandidate>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionPeakRejectionStage {
+    CoreGapTooLarge,
+    CoreInsufficientWhiteBeyondSerif,
+    BelowMinimumGrade,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectionPeakRejection {
+    pub start: i32,
+    pub stop: i32,
+    pub maximum_value: i32,
+    pub stage: ProjectionPeakRejectionStage,
 }
 
 /// Mutation-free decision produced by Java `StaffProjector.checkLinesRoot`.
@@ -1830,6 +1849,7 @@ impl StaffProjectionAccumulation {
             minimum_derivative,
             0,
         );
+        let mut peak_rejections = Vec::new();
         let peaks =
             self.projection
                 .find_peaks_in_range(scan, request.peak_construction, |candidate| {
@@ -1842,7 +1862,23 @@ impl StaffProjectionAccumulation {
                         0,
                         request.peak_core,
                     )?;
-                    candidate.into_staff_peak(
+                    if let Some(rejection) = validation.rejection {
+                        peak_rejections.push(ProjectionPeakRejection {
+                            start: candidate.start,
+                            stop: candidate.stop,
+                            maximum_value: candidate.maximum_value,
+                            stage: match rejection {
+                                PeakCoreRejection::GapTooLarge => {
+                                    ProjectionPeakRejectionStage::CoreGapTooLarge
+                                }
+                                PeakCoreRejection::InsufficientWhiteBeyondSerif => {
+                                    ProjectionPeakRejectionStage::CoreInsufficientWhiteBeyondSerif
+                                }
+                            },
+                        });
+                        return Ok(None);
+                    }
+                    let peak = candidate.into_staff_peak(
                         validation,
                         request.staff_id,
                         PeakGradeParams::new(
@@ -1850,7 +1886,16 @@ impl StaffProjectionAccumulation {
                             request.total_height,
                             half_mode,
                         ),
-                    )
+                    )?;
+                    if peak.is_none() {
+                        peak_rejections.push(ProjectionPeakRejection {
+                            start: candidate.start,
+                            stop: candidate.stop,
+                            maximum_value: candidate.maximum_value,
+                            stage: ProjectionPeakRejectionStage::BelowMinimumGrade,
+                        });
+                    }
+                    Ok(peak)
                 })?;
         let brace_candidate = request
             .brace_search
@@ -1864,6 +1909,7 @@ impl StaffProjectionAccumulation {
             all_blanks,
             peak_search_bounds,
             peaks,
+            peak_rejections,
             brace_candidate,
         })
     }
@@ -2702,6 +2748,7 @@ mod tests {
             PeakSearchBounds { x_min: 4, x_max: 7 }
         );
         assert_eq!(result.peaks.len(), 1);
+        assert!(result.peak_rejections.is_empty());
         let peak = &result.peaks[0];
         assert_eq!(
             (peak.staff_id().value(), peak.start(), peak.stop()),
@@ -2786,6 +2833,7 @@ mod tests {
                 x_max: 30,
             },
             peaks: vec![first, last],
+            peak_rejections: Vec::new(),
             brace_candidate: None,
         };
 
@@ -2870,6 +2918,7 @@ mod tests {
                 x_max: 11,
             },
             peaks: Vec::new(),
+            peak_rejections: Vec::new(),
             brace_candidate: None,
         };
         let refinement = PeakRefinementParams::new(6, 2, 4, 2, 1).unwrap();
@@ -3143,6 +3192,7 @@ mod tests {
                     x_max: 30,
                 },
                 peaks,
+                peak_rejections: Vec::new(),
                 brace_candidate: None,
             },
             scale_parameters: staff_projector_scale_parameters(StaffProjectorScaleRequest {

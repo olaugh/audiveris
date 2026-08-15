@@ -59,10 +59,10 @@ use audiveris_image::production_grid_params::{
 use audiveris_image::projection::{
     BarlineHeightSpec, MultiRestSideRequest, NeutralStaffProjectorRequest,
     NeutralStaffProjectorResult, PeakConstructionParams, PeakCoreGeometry, PeakCoreParams,
-    PeakRefinementParams, ShortProjection, StaffProjectionRequest, StaffProjectorProcessRequest,
-    StaffProjectorProcessTuning, StaffProjectorScaleParameters, StaffProjectorScaleRatios,
-    StaffProjectorScaleRequest, has_blank_between, process_staff_projection,
-    staff_projector_scale_parameters,
+    PeakRefinementParams, ProjectionPeakRejection, ShortProjection, StaffProjectionRequest,
+    StaffProjectorProcessRequest, StaffProjectorProcessTuning, StaffProjectorScaleParameters,
+    StaffProjectorScaleRatios, StaffProjectorScaleRequest, has_blank_between,
+    process_staff_projection, staff_projector_scale_parameters,
 };
 use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
@@ -230,6 +230,32 @@ pub struct StaffCandidateReport {
     pub line_count: usize,
     /// Graded bar peaks from this staff's projector, as `(start, stop, grade)`.
     pub peaks: Vec<(i32, i32, f64)>,
+    /// Projection candidates rejected before peak-graph construction.
+    pub projection_rejections: Vec<ProjectionPeakRejection>,
+    /// Contiguous x ranges whose staff projection reaches the resolved bar
+    /// threshold, before derivative splitting and peak construction.
+    pub raw_projection_ranges: Vec<(i32, i32, i32)>,
+}
+
+fn raw_projection_ranges(
+    result: &NeutralStaffProjectorResult,
+    minimum_count: i32,
+) -> Vec<(i32, i32, i32)> {
+    let mut ranges = Vec::new();
+    let mut active: Option<(i32, i32)> = None;
+    for x in result.peak_search_bounds.x_min..=result.peak_search_bounds.x_max {
+        let value = result.projection.value(x);
+        if value >= minimum_count {
+            let (_, maximum) = active.get_or_insert((x, value));
+            *maximum = (*maximum).max(value);
+        } else if let Some((start, maximum)) = active.take() {
+            ranges.push((start, x - 1, maximum));
+        }
+    }
+    if let Some((start, maximum)) = active {
+        ranges.push((start, result.peak_search_bounds.x_max, maximum));
+    }
+    ranges
 }
 
 /// Cross-staff barline structure recovered by the peak graph.
@@ -1528,7 +1554,7 @@ fn project_staff_peaks(
     projector_pixels: &[u8],
     staff: &StaffCandidate,
     scale_parameters: &StaffProjectorScaleParameters,
-    recovery_model: Option<BarVerticalSlopeModel>,
+    recovery_models: &[BarVerticalSlopeModel],
 ) -> Result<LiveStaffProjector, GridRecognitionError> {
     // The cluster's own line filaments, not the factory's pre-merge ones: a
     // line seeded by a short fragment keeps that fragment's id after absorbing
@@ -1555,17 +1581,20 @@ fn project_staff_peaks(
     let first_geometry = geometry_of(first, "first")?;
     let last_geometry = geometry_of(last, "last")?;
     let middle_geometry = geometry_of(middle, "middle")?;
-    let sheared_pixels = recovery_model.map(|model| {
-        let center_x = (staff.left() + staff.right()) / 2.0;
-        let center_y = middle_geometry.position_at(center_x).unwrap_or(0.0);
-        shear_vertical_projection_raster(
-            projector_pixels,
-            recognition.width,
-            recognition.height,
-            model,
-            center_y,
-        )
-    });
+    let sheared_pixels = recovery_models
+        .iter()
+        .map(|&model| {
+            let center_x = (staff.left() + staff.right()) / 2.0;
+            let center_y = middle_geometry.position_at(center_x).unwrap_or(0.0);
+            shear_vertical_projection_raster(
+                projector_pixels,
+                recognition.width,
+                recognition.height,
+                model,
+                center_y,
+            )
+        })
+        .collect::<Vec<_>>();
     // `StaffFilament.yAt(int x)` is `(int) Math.rint(yAt((double) x))`, and
     // `rint` rounds a half to *even* where Rust's `round` rounds it away from
     // zero. The two differ only when the ordinate lands exactly on a half, and
@@ -1659,7 +1688,7 @@ fn project_staff_peaks(
         )
         .map_err(grid_stage("projector"))?;
 
-    if let Some(sheared) = sheared_pixels.as_deref() {
+    for sheared in &sheared_pixels {
         let recovery_accumulation = ShortProjection::from_staff_raster(
             recognition.width,
             recognition.height,
@@ -1690,6 +1719,15 @@ fn project_staff_peaks(
             .map_err(grid_stage("slope-aware projector"))?;
         let recovery_minimum_grade = slope_recovery_minimum_grade();
         for mut peak in recovered.peaks {
+            // At a staff boundary the same oriented projection that
+            // straightens a bar also straightens a brace flank or bracket.
+            // Boundary recovery therefore needs a separate semantic decision;
+            // this numeric recovery is deliberately interior-only.
+            let boundary_margin = scale_parameters.maximum_bar_width;
+            let interior = peak.start()
+                > (staff.left().round_ties_even() as i32).saturating_add(boundary_margin)
+                && peak.stop()
+                    < (staff.right().round_ties_even() as i32).saturating_sub(boundary_margin);
             let full_height = peak.impacts().is_some_and(|impacts| {
                 impacts.core() >= 0.9
                     && impacts.gap() >= 0.8
@@ -1699,7 +1737,7 @@ fn project_staff_peaks(
                 existing.start() <= peak.stop().saturating_add(1)
                     && peak.start() <= existing.stop().saturating_add(1)
             });
-            if full_height && !duplicate {
+            if interior && full_height && !duplicate {
                 peak.set(StaffPeakAttribute::SlopeRecovered);
                 result.peaks.push(peak);
             }
@@ -1782,7 +1820,7 @@ fn slope_recovery_minimum_grade() -> f64 {
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && (0.08..=0.8).contains(value))
-        .unwrap_or(0.72)
+        .unwrap_or(0.74)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1860,6 +1898,48 @@ fn estimate_bar_vertical_slope(
     Some(BarVerticalSlopeModel {
         at_x_zero: intercepts[intercepts.len() / 2],
         gradient,
+    })
+}
+
+/// Estimate the page's transformed vertical direction from the two staff
+/// starts in each piano grand staff.  Under an affine/projective capture the
+/// displacement between those two left endpoints follows the same local
+/// vertical direction as a barline, even when too few slanted bars survive the
+/// ordinary fixed-x projection to estimate it from peaks.
+fn estimate_bar_slope_from_piano_staff_edges(
+    staves: &[StaffCandidate],
+) -> Option<BarVerticalSlopeModel> {
+    let mut edges = Vec::new();
+    for pair in staves.chunks_exact(2) {
+        let midpoint_y = |staff: &StaffCandidate| {
+            let middle = staff.line_filaments().get(staff.line_ids().len() / 2)?;
+            middle.geometry().ok()?.position_at(staff.left()).ok()
+        };
+        let (Some(top_y), Some(bottom_y)) = (midpoint_y(&pair[0]), midpoint_y(&pair[1])) else {
+            continue;
+        };
+        let dy = bottom_y - top_y;
+        edges.push((pair[1].left() - pair[0].left(), dy));
+    }
+    median_piano_edge_slope(&edges)
+}
+
+fn median_piano_edge_slope(edges: &[(f64, f64)]) -> Option<BarVerticalSlopeModel> {
+    let mut slopes = edges
+        .iter()
+        .filter_map(|&(dx, dy)| {
+            (dy > 0.0)
+                .then_some(dx / dy)
+                .filter(|slope| slope.is_finite() && slope.abs() <= 0.15)
+        })
+        .collect::<Vec<_>>();
+    if slopes.len() < 2 {
+        return None;
+    }
+    slopes.sort_by(f64::total_cmp);
+    Some(BarVerticalSlopeModel {
+        at_x_zero: slopes[slopes.len() / 2],
+        gradient: 0.0,
     })
 }
 
@@ -2004,10 +2084,18 @@ fn build_peak_graph(
         for &key in stick_state.removed_peaks() {
             graph.remove_vertex(key);
         }
+        // The pristine graph predates stick construction.  Its staff-side
+        // index must be filtered in lockstep with stickless vertices before a
+        // second alignment pass; otherwise `find_all_alignments` is handed a
+        // key that was deliberately removed and aborts with `MissingPeak`.
+        let mut wide_alignment_staffs = alignment_staffs.to_vec();
+        for staff in &mut wide_alignment_staffs {
+            staff.peaks.retain(|key| graph.vertex(*key).is_some());
+        }
         let mut wide_report = AlignmentBuildReport::default();
         find_all_alignments(
             &mut graph,
-            alignment_staffs,
+            &wide_alignment_staffs,
             AlignmentParameters {
                 sheet_slope: alignment_sheet_slope,
                 maximum_alignment_slope: wide_slope,
@@ -2628,7 +2716,7 @@ pub fn recognize_grid_lines_raster(
             projector_pixels,
             staff,
             &projector_scale,
-            None,
+            &[],
         )?;
         let projected = &live.result.peaks;
         let peaks = projected
@@ -2696,21 +2784,37 @@ pub fn recognize_grid_lines_raster(
             short: staff.is_short(),
             line_count: staff.line_ids().len(),
             peaks,
+            projection_rejections: live.result.peak_rejections.clone(),
+            raw_projection_ranges: raw_projection_ranges(
+                &live.result,
+                projector_scale.bar_threshold,
+            ),
         });
         live_projectors.push(live);
     }
     let slope_recovery_enabled = std::env::var("AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    let mut recovery_models = Vec::new();
     if slope_recovery_enabled
         && let Some(model) = estimate_bar_vertical_slope(&staff_peaks, global_slope)
     {
+        recovery_models.push(model);
+    }
+    let staff_edge_recovery = std::env::var("AUDIVERIS_STAFF_EDGE_BAR_PROJECTION")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    if staff_edge_recovery
+        && let Some(model) = estimate_bar_slope_from_piano_staff_edges(result.staffs())
+    {
+        recovery_models.push(model);
+    }
+    if !recovery_models.is_empty() {
         for (index, staff) in result.staffs().iter().enumerate() {
             let live = project_staff_peaks(
                 &scale_recognition,
                 projector_pixels,
                 staff,
                 &projector_scale,
-                Some(model),
+                &recovery_models,
             )?;
             let projected = &live.result.peaks;
             alignment_staffs[index].peaks = projected.iter().map(StaffPeak::key).collect();
@@ -2738,6 +2842,9 @@ pub fn recognize_grid_lines_raster(
                     )
                 })
                 .collect();
+            staves[index].projection_rejections = live.result.peak_rejections.clone();
+            staves[index].raw_projection_ranges =
+                raw_projection_ranges(&live.result, projector_scale.bar_threshold);
             staff_peaks[index] = projected.clone();
             live_projectors[index] = live;
         }
@@ -3148,6 +3255,15 @@ mod tests {
         assert!(!should_run_connected_alignment_second_pass(2, 3));
         assert!(should_run_connected_alignment_second_pass(3, 3));
         assert!(should_run_connected_alignment_second_pass(42, 3));
+    }
+
+    #[test]
+    fn piano_edge_slope_uses_the_median_and_rejects_implausible_pairs() {
+        let model = median_piano_edge_slope(&[(5.0, 100.0), (6.0, 100.0), (50.0, 100.0)])
+            .expect("two plausible grand-staff edges");
+        assert_eq!(model.at_x_zero, 0.06);
+        assert_eq!(model.gradient, 0.0);
+        assert_eq!(median_piano_edge_slope(&[(50.0, 100.0)]), None);
     }
 
     #[test]
@@ -4155,7 +4271,12 @@ mod tests {
         // judge cannot tell a deliberate purge from a miss.
         assert_eq!(
             json.matches("\"rejected_by\":").count(),
-            recognition.peak_graph.rejections.len(),
+            recognition.peak_graph.rejections.len()
+                + recognition
+                    .staves
+                    .iter()
+                    .map(|staff| staff.projection_rejections.len())
+                    .sum::<usize>(),
             "each rejection should carry its stage"
         );
     }
