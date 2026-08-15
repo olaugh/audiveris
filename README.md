@@ -69,6 +69,25 @@ is a weighted geometric mean of — plus the candidates that were rejected and t
 purge that rejected each. A recogniser that emits only its answer cannot be judged on
 what it missed.
 
+### Experimental stem/barline disambiguation
+
+The `codex/barline-precision` branch adds an opt-in post-parity filter for weak
+interior peaks that are aligned across staves but have no actual connector ink.
+It preserves staff boundaries, double/final-bar siblings, connected bars, and
+full-height low-resolution evidence. Enable the current measured cutoff with:
+
+```sh
+AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
+  cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
+```
+
+The default is off to retain exact Java behavior. On the local synthetic
+evaluation this changes ordinary piano barline precision from 97.41% to 100%
+without changing recall; deliberately extreme 48-DPI failures show why the
+low-resolution preservation clause is necessary. The corpus generator,
+physical-stroke ground truth, and full taxonomy live in the separate
+`stage-omr-data` repository.
+
 ## Layout
 
 ```

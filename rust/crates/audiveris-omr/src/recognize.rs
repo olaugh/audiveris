@@ -1884,6 +1884,10 @@ fn build_peak_graph(
     .map_err(grid_stage("brace portions"))?;
 
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
+    let weak_unconnected_min_grade = std::env::var("AUDIVERIS_WEAK_BAR_MIN_GRADE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value));
     let bars = ProductionProcessBars::new(
         RawProductionRetrieveLines::new(
             production.raw_primary.clone(),
@@ -1908,6 +1912,11 @@ fn build_peak_graph(
         },
     )
     .with_staff_limit_refinement(root_evidence, right_evidence);
+    let bars = if let Some(minimum_grade) = weak_unconnected_min_grade {
+        bars.with_weak_unconnected_filter(minimum_grade)
+    } else {
+        bars
+    };
     // The full ported decorator chain, composed as
     // `HeadlessGridExecutor::from_completed_raw_bars_complete_lines` does.
     // `retrieveLines` runs inside it and republishes the staffs, so

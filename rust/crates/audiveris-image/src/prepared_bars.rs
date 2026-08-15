@@ -17,7 +17,8 @@ use crate::{
         BarsRootEvidence, BarsSystemState, BarsWidthInterParameters, CClefParameters, RemovedPeak,
         process_bars_after_braces, process_bars_connections_and_groups, process_bars_peak_purges,
         process_bars_right_ends_and_c_clefs, process_bars_system,
-        process_bars_through_too_far_left, process_bars_widths_and_inters,
+        process_bars_through_too_far_left, process_bars_weak_unconnected_purge,
+        process_bars_widths_and_inters,
     },
     bars_logic::{ConnectionInterPlan, VerticalInterPlan},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
@@ -109,6 +110,7 @@ pub struct ProductionProcessBars<Upstream> {
     completed_brace_prefixes: Option<Vec<CompletedBracePrefix>>,
     handoff: Option<PreparedBarsHandoff>,
     removals: Vec<(usize, RemovedPeak)>,
+    weak_unconnected_min_grade: Option<f64>,
 }
 
 /// A system already advanced through `detectBracePortions`, `buildBraces`,
@@ -170,6 +172,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             completed_brace_prefixes: None,
             handoff: None,
             removals: Vec::new(),
+            weak_unconnected_min_grade: None,
         })
     }
 
@@ -243,6 +246,14 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         self
     }
 
+    /// Enable the fork's weak, unconnected interior-bar rejection. The
+    /// default remains off so the ordinary API retains exact Java parity.
+    #[must_use]
+    pub fn with_weak_unconnected_filter(mut self, minimum_grade: f64) -> Self {
+        self.weak_unconnected_min_grade = Some(minimum_grade);
+        self
+    }
+
     #[must_use]
     pub const fn upstream(&self) -> &Upstream {
         &self.upstream
@@ -287,6 +298,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         extending: Option<&ExtendingPurge>,
         limits: Option<&StaffLimitRefinement>,
         completed_brace_prefix: Option<&CompletedBracePrefix>,
+        weak_unconnected_min_grade: Option<f64>,
     ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
         let (Some(extending), Some(limits)) = (extending, limits) else {
             return process_bars_system(system, parameters);
@@ -324,6 +336,15 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             },
         )?;
         removed.extend_from_slice(right.removed_peaks());
+
+        if let Some(minimum_grade) = weak_unconnected_min_grade {
+            removed.extend(process_bars_weak_unconnected_purge(
+                system,
+                minimum_grade,
+                parameters.maximum_double_bar_gap(),
+                parameters.interline(),
+            )?);
+        }
 
         // `partitionWidths` and `createInters` need a SIG to register glyphs and
         // inters into. The sheet builds its own from the published plans, so
@@ -387,6 +408,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         let limits = self.limits.clone();
         let completed_brace_prefixes = self.completed_brace_prefixes.clone();
         let parameters = self.parameters;
+        let weak_unconnected_min_grade = self.weak_unconnected_min_grade;
         for (system_index, system) in self.systems.iter_mut().enumerate() {
             let system_id = system.system_id();
             let result = match Self::staged_system(
@@ -397,6 +419,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
                 completed_brace_prefixes
                     .as_ref()
                     .and_then(|prefixes| prefixes.get(system_index)),
+                weak_unconnected_min_grade,
             ) {
                 Ok(result) => result,
                 Err(source) => {
