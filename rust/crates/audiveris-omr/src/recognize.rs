@@ -237,6 +237,8 @@ pub struct StaffCandidateReport {
 pub struct PeakGraphReport {
     /// Vertical `dx/dy` reference used to build cross-staff alignments.
     pub alignment_vertical_slope: f64,
+    /// Linear change in alignment vertical slope per x pixel.
+    pub alignment_vertical_slope_gradient: f64,
     pub alignment_count: usize,
     pub connection_count: usize,
     /// Peaks that yielded a registered bar filament.
@@ -1738,12 +1740,18 @@ fn bar_alignment_slope_from_environment() -> f64 {
         .unwrap_or(0.06)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BarVerticalSlopeModel {
+    at_x_zero: f64,
+    gradient: f64,
+}
+
 fn estimate_bar_vertical_slope(
     staff_peaks: &[Vec<StaffPeak>],
     global_slope: f64,
-) -> Option<f64> {
+) -> Option<BarVerticalSlopeModel> {
     let expected = -global_slope;
-    let mut slopes = Vec::new();
+    let mut observations = Vec::new();
     for pair in staff_peaks.windows(2) {
         let top = &pair[0];
         let bottom = &pair[1];
@@ -1767,23 +1775,45 @@ fn estimate_bar_vertical_slope(
                         let bottom_x =
                             (f64::from(peak.start()) + f64::from(peak.stop())) / 2.0;
                         let slope = (bottom_x - top_x) / dy;
-                        ((slope - expected).abs(), index, slope)
+                        ((slope - expected).abs(), index, slope, bottom_x)
                     })
                 })
                 .min_by(|left, right| left.0.total_cmp(&right.0));
-            if let Some((residual, index, slope)) = best
+            if let Some((residual, index, slope, bottom_x)) = best
                 && residual <= 0.2
             {
                 used.insert(index);
-                slopes.push(slope);
+                observations.push(((top_x + bottom_x) / 2.0, slope));
             }
         }
     }
-    if slopes.len() < 3 {
+    if observations.len() < 3 {
         return None;
     }
-    slopes.sort_by(f64::total_cmp);
-    Some(slopes[slopes.len() / 2])
+    let mut gradients = Vec::new();
+    for (left_index, &(left_x, left_slope)) in observations.iter().enumerate() {
+        for &(right_x, right_slope) in &observations[left_index + 1..] {
+            let dx = right_x - left_x;
+            if dx.abs() >= 50.0 {
+                gradients.push((right_slope - left_slope) / dx);
+            }
+        }
+    }
+    gradients.sort_by(f64::total_cmp);
+    let gradient = gradients
+        .get(gradients.len() / 2)
+        .copied()
+        .filter(|value| value.abs() <= 0.001)
+        .unwrap_or(0.0);
+    let mut intercepts = observations
+        .iter()
+        .map(|(x, slope)| slope - gradient * x)
+        .collect::<Vec<_>>();
+    intercepts.sort_by(f64::total_cmp);
+    Some(BarVerticalSlopeModel {
+        at_x_zero: intercepts[intercepts.len() / 2],
+        gradient,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1826,7 +1856,11 @@ fn build_peak_graph(
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
         .then(|| estimate_bar_vertical_slope(staff_peaks, global_slope))
         .flatten();
-    let alignment_sheet_slope = adaptive_vertical.map_or(global_slope, |vertical| -vertical);
+    let vertical_model = adaptive_vertical.unwrap_or(BarVerticalSlopeModel {
+        at_x_zero: -global_slope,
+        gradient: 0.0,
+    });
+    let alignment_sheet_slope = -vertical_model.at_x_zero;
     find_all_alignments(
         &mut graph,
         alignment_staffs,
@@ -1839,6 +1873,8 @@ fn build_peak_graph(
             maximum_alignment_slope: bar_alignment_slope_from_environment(),
             // maxAlignmentDeltaWidth = rint(0.6 * interline).
             maximum_alignment_delta_width: (0.6 * f64::from(interline)).round_ties_even() as i32,
+            vertical_slope_gradient: vertical_model.gradient,
+            vertical_slope_reference_x: 0.0,
         },
         &mut report,
     )
@@ -2202,6 +2238,7 @@ fn build_peak_graph(
 
         sheet_staffs: executor.sheet.staffs.clone(),
         alignment_vertical_slope: -alignment_sheet_slope,
+        alignment_vertical_slope_gradient: vertical_model.gradient,
         alignment_count,
         connection_count,
         stick_count,
@@ -2954,8 +2991,30 @@ mod tests {
             ],
         ];
 
-        assert_eq!(estimate_bar_vertical_slope(&peaks, 0.0), Some(0.1));
+        assert_eq!(
+            estimate_bar_vertical_slope(&peaks, 0.0),
+            Some(BarVerticalSlopeModel {
+                at_x_zero: 0.1,
+                gradient: 0.0,
+            })
+        );
         assert_eq!(estimate_bar_vertical_slope(&peaks[..1], 0.0), None);
+    }
+
+    #[test]
+    fn strong_bar_pairs_fit_a_projective_vertical_field() {
+        let strong = StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let make = |staff, top, x| {
+            StaffPeak::with_impacts(StaffId::new(staff), top, top + 40, x, x, strong).unwrap()
+        };
+        let peaks = vec![
+            vec![make(1, 10, 100), make(1, 10, 200), make(1, 10, 300)],
+            vec![make(2, 110, 105), make(2, 110, 210), make(2, 110, 315)],
+        ];
+
+        let model = estimate_bar_vertical_slope(&peaks, 0.0).unwrap();
+        assert!(model.at_x_zero.abs() < 1e-12);
+        assert!((model.at_x_zero + model.gradient * 102.5 - 0.05).abs() < 1e-12);
     }
 
     #[test]

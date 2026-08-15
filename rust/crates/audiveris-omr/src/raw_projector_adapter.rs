@@ -946,6 +946,8 @@ pub fn bridge_raw_projectors_through_alignments(
             sheet_slope: skew.slope,
             maximum_alignment_slope: parameters.maximum_alignment_slope,
             maximum_alignment_delta_width: parameters.maximum_alignment_delta_width,
+            vertical_slope_gradient: 0.0,
+            vertical_slope_reference_x: 0.0,
         },
         &mut alignments,
     )
@@ -1045,6 +1047,8 @@ pub fn bridge_raw_projectors_through_splits(
             .connections
             .alignments
             .maximum_alignment_delta_width,
+        vertical_slope_gradient: 0.0,
+        vertical_slope_reference_x: 0.0,
     };
     let connection_parameters = ConnectionParameters {
         maximum_gap: parameters.connections.maximum_connection_gap,

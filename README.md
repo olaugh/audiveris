@@ -101,9 +101,9 @@ AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
 ```
 
 The first widens the residual slope accepted between peaks after global
-deskewing (valid range 0.06–0.25). The adaptive control robustly estimates a
-page vertical direction from at least three pairs of intrinsic-grade ≥0.72
-peaks; unlike a blanket tolerance increase, this recovered 12 warped-page
+deskewing (valid range 0.06–0.25). The adaptive control robustly fits a linear
+vertical-slope field across x from at least three pairs of intrinsic-grade
+≥0.72 peaks; unlike a blanket tolerance increase, this recovered 12 warped-page
 strokes with no new false positives in the 50-page benchmark. The final control
 runs a supplemental projection
 that follows the global vertical skew and retains only unique, high-grade,
