@@ -474,6 +474,7 @@ fn grid_raw_lines_vector() -> Result<String, Box<dyn Error>> {
             minimum_delta_y: 10,
             maximum_delta_y: 10,
             retrieval,
+            projective_slope: false,
         },
     )?;
     let slope = built.global_slope();
@@ -2534,6 +2535,7 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             x_max: 99,
         },
         peaks: vec![result_first, result_last],
+        peak_rejections: Vec::new(),
         brace_candidate: None,
     };
     let initial_start = result_operations

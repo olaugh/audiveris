@@ -368,6 +368,11 @@ fn recognition_json(
     scale(&mut json, &recognition.scale);
 
     json.field_number("slope", recognition.global_slope);
+    json.key("bar_projection_staff_edge_slope");
+    match recognition.bar_projection_staff_edge_slope {
+        Some(slope) => json.number(slope),
+        None => json.null(),
+    }
     json.field_number(
         "bar_alignment_vertical_slope",
         recognition.peak_graph.alignment_vertical_slope,
@@ -746,6 +751,19 @@ fn inters(
                         "maximum_lateral_extension",
                         lateral.maximum_extension as i64,
                     );
+                    json.field_number("top_terminal_lateral_ratio", lateral.top_terminal_ratio);
+                    json.field_number(
+                        "bottom_terminal_lateral_ratio",
+                        lateral.bottom_terminal_ratio,
+                    );
+                    json.field_integer(
+                        "top_terminal_maximum_extension",
+                        lateral.top_terminal_maximum_extension as i64,
+                    );
+                    json.field_integer(
+                        "bottom_terminal_maximum_extension",
+                        lateral.bottom_terminal_maximum_extension as i64,
+                    );
                     let binary_lateral = lateral_ink_evidence(
                         &recognition.scale.binary,
                         recognition.scale.width,
@@ -832,6 +850,10 @@ struct LateralInkEvidence {
     ratio: f64,
     wide_rows: usize,
     maximum_extension: usize,
+    top_terminal_ratio: f64,
+    bottom_terminal_ratio: f64,
+    top_terminal_maximum_extension: usize,
+    bottom_terminal_maximum_extension: usize,
 }
 
 /// Measure ink horizontally attached to a vertical candidate after staff-line
@@ -866,6 +888,11 @@ fn lateral_ink_evidence(
     let mut lateral_pixels = 0usize;
     let mut wide_rows = 0usize;
     let mut maximum_extension = 0usize;
+    let terminal_rows = reach.min(y1.saturating_sub(y0) + 1);
+    let mut top_terminal_pixels = 0usize;
+    let mut bottom_terminal_pixels = 0usize;
+    let mut top_terminal_maximum_extension = 0usize;
+    let mut bottom_terminal_maximum_extension = 0usize;
     for y in y0..=y1 {
         let row = &pixels[y * raster_width..(y + 1) * raster_width];
         if !row[x0..=x1].contains(&0) {
@@ -883,12 +910,25 @@ fn lateral_ink_evidence(
         lateral_pixels += extension;
         maximum_extension = maximum_extension.max(left.max(right));
         wide_rows += usize::from(extension >= wide_threshold);
+        if y < y0.saturating_add(terminal_rows) {
+            top_terminal_pixels += extension;
+            top_terminal_maximum_extension = top_terminal_maximum_extension.max(left.max(right));
+        }
+        if y > y1.saturating_sub(terminal_rows) {
+            bottom_terminal_pixels += extension;
+            bottom_terminal_maximum_extension =
+                bottom_terminal_maximum_extension.max(left.max(right));
+        }
     }
     let height = y1.saturating_sub(y0) + 1;
     LateralInkEvidence {
         ratio: lateral_pixels as f64 / (height * reach) as f64,
         wide_rows,
         maximum_extension,
+        top_terminal_ratio: top_terminal_pixels as f64 / (terminal_rows * reach) as f64,
+        bottom_terminal_ratio: bottom_terminal_pixels as f64 / (terminal_rows * reach) as f64,
+        top_terminal_maximum_extension,
+        bottom_terminal_maximum_extension,
     }
 }
 
@@ -2758,6 +2798,8 @@ pub(crate) mod tests {
         assert!(attached_evidence.ratio > 0.0);
         assert_eq!(attached_evidence.wide_rows, 1);
         assert_eq!(attached_evidence.maximum_extension, 5);
+        assert!(attached_evidence.top_terminal_ratio > 0.0);
+        assert_eq!(attached_evidence.bottom_terminal_ratio, 0.0);
     }
 
     #[test]

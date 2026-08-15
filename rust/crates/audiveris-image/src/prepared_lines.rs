@@ -788,6 +788,7 @@ mod tests {
             minimum_delta_y: 9,
             maximum_delta_y: 11,
             retrieval,
+            projective_slope: false,
         }
     }
 

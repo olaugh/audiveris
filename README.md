@@ -94,21 +94,23 @@ low-resolution preservation clause is necessary. The corpus generator,
 physical-stroke ground truth, and full taxonomy live in the separate
 `stage-omr-data` repository.
 
-Two additional opt-in research controls target projectively captured pages:
+The best validated opt-in configuration for projectively captured piano pages
+is:
 
 ```sh
-AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE=0.16 \
-AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
-AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
-AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.74 \
 AUDIVERIS_STAFF_EDGE_BAR_PROJECTION=1 \
 AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY=1 \
 AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
 AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE=0.10 \
 AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS=1 \
+AUDIVERIS_PROJECTIVE_STAFF_SLOPE=1 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
+
+The wider global-alignment, bar-self-calibrated vertical-field, and generic
+slope-aware projection variables described below remain diagnostic controls;
+they are not part of this retained configuration.
 
 The first widens the residual slope accepted between peaks after global
 deskewing (valid range 0.06–0.25). The adaptive control robustly fits a linear
@@ -130,10 +132,15 @@ The staff-edge projection is piano-specific and avoids the circular failure in
 which too few slanted bars survive to estimate their own direction. It measures
 `dx/dy` from the left endpoints of each adjacent two-staff grand staff, takes a
 robust median, shears one supplemental projection along that direction, and
-admits only interior candidates with core ≥0.9, gap ≥0.8, and grade ≥0.74.
+requires at least three plausible grand-staff pairs, and admits only interior
+candidates with core ≥0.9, gap ≥0.8, and grade ≥0.74.
+The same robust direction now guides cross-staff alignment; previously a bar
+could be strengthened by the oriented projection and then rejected against the
+unrelated global staff-line skew.
 Boundary recovery is excluded because the same transform straightens brace
 flanks. On the fresh 50-page warped audit it changes 2,462 TP / 9 FP / 326 FN
-to **2,539 / 9 / 249**; the older connected holdout reaches 2,797 / 2 / 59.
+to **2,537 / 9 / 251** with the combined mitigations; the older connected
+holdout reaches 2,798 / 2 / 58.
 Clean disconnected pages remain 700 / 0 / 0, low-DPI pages retain 1,074 TP / 46
 FN, and the independent disconnected warp is unchanged at 425 / 14 / 255. It
 is opt-in and should be enabled only for piano-like staff pairing.
@@ -155,28 +162,86 @@ outline edges as staff-start barlines. The fallback searches through peak zero,
 skips rejected right-hand candidates (for example, a straight clef fragment),
 and accepts only a brace filament that begins to the left of the boundary. It
 retains the replacement's structural staff-boundary role but suppresses its
-publication as a barline. On the independent warped ordinary set it removed
-the last 2 false positives (2,748 TP / 0 FP / 108 FN), and on the 56-page
-low-DPI set it removed another brace pair (1,074 / 0 / 46), without changing
-clean or disconnected recall. GRID JSON now includes `brace_probes`, recording
-every lookup window and the exact outcome (`NoCandidate`, width/filament/
-height/curvature rejection, boundary-overlap rejection, or acceptance).
+publication as a barline. Because unconditional fallback removed eight valid
+opening bars on rectified pages, the opt-in now activates only when independent
+staff-edge geometry has absolute transformed vertical slope at least 0.02, or
+when the main interline is at most 11 pixels. This removes all twelve residual
+brace flanks in the fresh projective audit and the low-DPI brace pair while
+preserving all 2,856 bars in the non-projective control. GRID JSON includes
+`brace_probes`, recording every lookup window and exact outcome (`NoCandidate`,
+width/filament/height/curvature rejection, boundary-overlap rejection, or
+acceptance).
 
 The connected-score alignment control first builds the conservative 0.06
 graph, then rebuilds at the requested slope only when at least three concrete
 cross-staff connections already establish a connected score. The partial
-column control retains only isolated candidates at least 7 pixels wide with a
-core impact of at least 0.8788; recovered peaks remain subject to downstream
-purges and carry `partial_recovered` provenance in JSON. Both controls remain
-opt-in pending real-scan validation.
+column control retains either a candidate at least 7 pixels wide with core
+impact ≥0.8788, or a five-pixel candidate with core ≥0.60, gap ≥0.9, and both
+lateral chunks ≥0.9. The latter balanced-chunk signature recovered five true
+bars on the overlapping warped disconnected control and a further bar in the
+final fresh connected audit without adding a false positive across the fresh,
+held-out, unwarped, or low-DPI controls. Recovered peaks remain subject to
+downstream purges and carry `partial_recovered` provenance in JSON. Both
+controls remain opt-in pending real-scan validation.
 
 Accepted vertical JSON evidence also includes staff-free and original-binary
-lateral-ink measurements. They quantify notehead/beam-like attachment around a
-candidate but do not change recognition. On the synthetic warped disconnected
-sets a combined lateral/grade rule catches several surviving stems, yet a plain
-lateral threshold overlaps damaged true bars. The intended next discriminator
-is post-HEADS same-staff notehead attachment; the current pinned Bravura head
-catalog must first cover the low point sizes where these residual errors occur.
+lateral-ink measurements, plus separate top/bottom terminal attachment ratios
+and maximum extensions. They quantify notehead/beam-like attachment around a
+candidate but do not change recognition. The terminal signature catches all
+six residual stems in the evaluated 45-page subset, but also catches two true
+damaged bars, so it is not a safe numeric veto. The intended next discriminator
+is post-HEADS same-staff notehead attachment: all nine labelled residual stem
+false positives are near a stem, versus 0 of 1,554 matched true bars. The
+current pinned Bravura head catalog must first cover the low point sizes where
+these residual errors occur.
+
+On the nine real example rasters, the retained GRID controls remove 24
+default-accepted verticals; all 24 intersect a same-staff HEADS notehead graded
+at least 0.5. Four surviving interior verticals also intersect high-grade
+heads, so proximity alone is not promoted to a veto. A later STEMS-stage rule
+should require an actual head--stem relation and protect staff boundaries and
+connected bar columns.
+
+HEADS also completed on 11 generated connected pages covered by the pinned
+Bravura sizes: all 605 reported bars matched vector truth and none overlapped a
+high-grade same-staff head. Other synthetic point sizes currently fail closed,
+so this supports the semantic design but does not yet justify enabling it.
+
+On the fresh audit, 244 of the remaining 251 misses occur on ten pages where
+staff detection is incomplete. Restricting evaluation to the 38 pages with
+exact staff geometry gives **2,139 TP / 0 FP / 7 FN**: 100% precision and
+99.674% recall. The remaining stage-local misses are four unaligned strokes,
+two below-minimum-grade projection peaks, and one partial column.
+
+The projective-staff control targets that upstream cause. Audiveris normally
+compares every long horizontal filament with one global page slope and rejects
+a residual above 0.025. In the synthetic perspective captures, staff-perfect
+pages have mean top-to-bottom slope spread 0.019, while underdetected pages
+average 0.064. `AUDIVERIS_PROJECTIVE_STAFF_SLOPE=1` robustly fits line slope as
+a linear function of page ordinate from the 24 longest straight candidates,
+then applies the unchanged 0.025 gate to the local residual. On the fresh
+warped audit it removes all ten underdetected-staff cases, raises exact staff
+recovery from 38/49 to 46/49. With adaptive brace suppression and balanced
+partial recovery, the complete 50-page set reaches **2,812 TP / 0 FP / 44 FN**
+(98.459% recall); the older holdout reaches **2,848 / 0 / 8** (99.720%). The 50
+unwarped counterparts remain exactly **2,856 / 0 / 0**, and the low-DPI control
+is **1,074 / 0 / 46**. All nine real example rasters emit byte-identical GRID
+JSON with the projective option on and off. It remains opt-in because the
+current fit assumes planar projective convergence rather than nonlinear page
+curl.
+
+Forty of the 50 fresh hard pages are fully exact. All 44 residual misses occur
+on ten pages combining the maximum 0.02 perspective setting with at least 3.2
+degrees of rotation; the worst page contributes 15 misses. The failure is thus
+concentrated at the synthetic stress boundary rather than spread over ordinary
+pages.
+
+One hard page previously aborted when two derivative candidates refined to the
+same `StaffPeakKey`. Rust materialized the candidate list before applying
+Java's mutable cursor, so both equal intervals escaped. Accepted projection
+intervals are now explicitly non-overlapping and graph vertex insertion follows
+Java's idempotent semantics. The recovered page contributes 64 matched bars;
+the other 49 reports are byte-for-byte unchanged.
 
 ## Layout
 

@@ -1747,12 +1747,10 @@ fn purge_partial_columns(
             .collect::<Result<Vec<_>, _>>()?;
         if recover_strong_wide
             && keys.iter().all(|&key| {
-                state.graph.vertex(key).is_some_and(|peak| {
-                    peak.width() >= 7
-                        && peak
-                            .impacts()
-                            .is_some_and(|impacts| impacts.core() >= 0.878_787_878_787_878_8)
-                })
+                state
+                    .graph
+                    .vertex(key)
+                    .is_some_and(is_recoverable_partial_peak)
             })
         {
             for &key in &keys {
@@ -1777,6 +1775,22 @@ fn purge_partial_columns(
         remove_keys_without_columns(state, &keys, PeakRemovalStage::PartialColumn, removed);
     }
     Ok(())
+}
+
+fn is_recoverable_partial_peak(peak: &StaffPeak) -> bool {
+    peak.impacts().is_some_and(|impacts| {
+        let strong_wide = peak.width() >= 7 && impacts.core() >= 0.878_787_878_787_878_8;
+        // A warped/thinned bar can be only five pixels wide while retaining
+        // unambiguous full-height ink on both sides. Requiring balanced,
+        // nearly perfect chunks prevents this narrow path from admitting the
+        // one-sided attachment signature of an ordinary note stem.
+        let balanced_narrow = peak.width() >= 5
+            && impacts.core() >= 0.60
+            && impacts.gap() >= 0.9
+            && impacts.left() >= 0.9
+            && impacts.right() >= 0.9;
+        strong_wide || balanced_narrow
+    })
 }
 
 fn remove_keys(
@@ -2101,6 +2115,41 @@ mod tests {
             StaffPeak::with_impacts(StaffId::new(staff), 10, 20, start, start, impacts).unwrap();
         peak.compute_deskewed_center(|point| point).unwrap();
         peak
+    }
+
+    #[test]
+    fn narrow_partial_recovery_requires_balanced_lateral_chunks() {
+        let balanced = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.61, 1.0, 0.5, 0.5, 1.0, 1.0),
+        )
+        .unwrap();
+        let stem_like = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.61, 1.0, 0.5, 0.5, 1.0, 0.5),
+        )
+        .unwrap();
+        let weak_core = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.59, 1.0, 0.5, 0.5, 1.0, 1.0),
+        )
+        .unwrap();
+
+        assert!(is_recoverable_partial_peak(&balanced));
+        assert!(!is_recoverable_partial_peak(&stem_like));
+        assert!(!is_recoverable_partial_peak(&weak_core));
     }
 
     fn parameters() -> BarsCoordinatorParameters {

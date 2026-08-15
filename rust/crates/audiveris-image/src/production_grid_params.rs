@@ -250,6 +250,7 @@ pub fn production_grid_parameters(
         minimum_delta_y: (scale.interline.min - rint(0.05 * interline)) as isize,
         maximum_delta_y: (scale.interline.max + rint(0.05 * interline)) as isize,
         retrieval,
+        projective_slope: false,
     };
 
     let lines = LinesCoordinatorParameters::new(

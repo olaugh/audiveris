@@ -16,7 +16,7 @@ use crate::{
     line_cluster::FilamentId,
     line_rejection::{
         LineCandidate, LinePoint, LineRejectionError, LineRejectionParameters,
-        reject_line_candidates,
+        reject_line_candidates, reject_line_candidates_projective,
     },
     line_short_sections::HorizontalSectionLag,
     lines_coordinator::ClusterPassState,
@@ -31,6 +31,8 @@ pub struct RawPrimaryPassParameters {
     pub minimum_delta_y: isize,
     pub maximum_delta_y: isize,
     pub retrieval: ClusterRetrievalParameters,
+    /// Opt-in local staff-line slope model for projective page captures.
+    pub projective_slope: bool,
 }
 
 /// Sampling and cluster parameters for Java's optional small-interline pass.
@@ -169,7 +171,7 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
         curved_ids,
         sloped_ids,
         sloped_filaments,
-    } = filter_raw_filaments(values, rejection_parameters)?;
+    } = filter_raw_filaments(values, rejection_parameters, parameters.projective_slope)?;
 
     let samples = filament_order
         .iter()
@@ -311,6 +313,7 @@ struct FilteredRawFilaments {
 fn filter_raw_filaments(
     values: Vec<(u64, crate::filament::StaffFilament)>,
     parameters: LineRejectionParameters,
+    projective_slope: bool,
 ) -> Result<FilteredRawFilaments, RawLineAdapterError> {
     let mut all = BTreeMap::new();
     let mut candidates = Vec::with_capacity(values.len());
@@ -332,7 +335,11 @@ fn filter_raw_filaments(
         all.insert(id, filament);
     }
 
-    let report = reject_line_candidates(candidates, parameters)?;
+    let report = if projective_slope {
+        reject_line_candidates_projective(candidates, parameters)?
+    } else {
+        reject_line_candidates(candidates, parameters)?
+    };
     let curved_ids = report
         .curved
         .iter()
@@ -525,6 +532,7 @@ mod tests {
             minimum_delta_y: 9,
             maximum_delta_y: 11,
             retrieval: retrieval_parameters(),
+            projective_slope: false,
         }
     }
 
@@ -802,8 +810,12 @@ mod tests {
             .enumerate()
             .map(|(index, filament)| ((index + 1) as u64, filament))
             .collect();
-        let filtered =
-            filter_raw_filaments(identified, LineRejectionParameters::java_defaults(10.0)).unwrap();
+        let filtered = filter_raw_filaments(
+            identified,
+            LineRejectionParameters::java_defaults(10.0),
+            false,
+        )
+        .unwrap();
 
         assert!((filtered.global_slope - (6.0 / 119.0)).abs() < 1e-12);
         assert_eq!(

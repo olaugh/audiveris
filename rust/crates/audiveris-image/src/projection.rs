@@ -1713,6 +1713,13 @@ impl ShortProjection {
         }
 
         let mut candidates = Vec::new();
+        // `browse_peak_range` materializes all derivative-delimited
+        // candidates for one count range before this caller can mutate `x`.
+        // Refinement can make two of those candidates collapse onto the same
+        // (or an overlapping) final interval. Java's mutable scan cursor skips
+        // the later candidate after the first is accepted; retain that
+        // invariant explicitly here.
+        let mut accepted_stop: Option<i32> = None;
         let half_mode = request.mode.is_half();
         let mut start = None;
         let mut stop = None;
@@ -1732,8 +1739,12 @@ impl ShortProjection {
                     request.added_chunk,
                 );
                 for candidate in self.browse_peak_range(range, params)? {
+                    if accepted_stop.is_some_and(|stop| candidate.start <= stop) {
+                        continue;
+                    }
                     if let Some(accepted) = accept(candidate)? {
                         x = x.max(candidate.stop);
+                        accepted_stop = Some(candidate.stop);
                         candidates.push(accepted);
                     }
                 }
@@ -1753,6 +1764,7 @@ impl ShortProjection {
                 request.added_chunk,
             );
             if let Some(candidate) = self.construct_peak_candidate(construction, params)?
+                && accepted_stop.is_none_or(|stop| candidate.start > stop)
                 && let Some(accepted) = accept(candidate)?
             {
                 candidates.push(accepted);
@@ -3823,6 +3835,46 @@ mod tests {
         assert_eq!(tentative_ranges, [(2, 4), (4, 4)]);
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].raw_start, 4);
+    }
+
+    #[test]
+    fn accepted_refined_peaks_never_overlap_within_one_count_range() {
+        let refinement = PeakRefinementParams::new(10, 2, 5, 8, 3).unwrap();
+        let params = PeakConstructionParams::new(refinement, 12).unwrap();
+        let mut seed = 0x5eed_u32;
+        let mut witnessed_collapsed_candidates = false;
+
+        for _ in 0..2_000 {
+            let mut projection = ShortProjection::new(0, 20).unwrap();
+            for position in 0..20 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                projection.increment(position, 1 + i32::try_from(seed % 20).unwrap());
+            }
+            let browsed = projection
+                .browse_peak_range(PeakRangeRequest::new(0, 19, false, 2, 2, 0), params)
+                .unwrap();
+            if !browsed.windows(2).any(|pair| pair[1].start <= pair[0].stop) {
+                continue;
+            }
+            witnessed_collapsed_candidates = true;
+            let accepted = projection
+                .find_peaks_in_range(
+                    PeakScanRequest::new(0, 20, ProjectionPeakMode::Full, 1, 2, 2, 0),
+                    params,
+                    |candidate| Ok(Some(candidate)),
+                )
+                .unwrap();
+            assert!(
+                accepted.windows(2).all(|pair| pair[1].start > pair[0].stop),
+                "accepted refined intervals must be disjoint: {accepted:?}"
+            );
+            break;
+        }
+
+        assert!(
+            witnessed_collapsed_candidates,
+            "deterministic stress sequence must exercise refinement collapse"
+        );
     }
 
     #[test]

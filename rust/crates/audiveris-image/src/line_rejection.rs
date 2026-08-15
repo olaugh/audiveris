@@ -82,6 +82,11 @@ impl LineCandidate {
     pub fn central_rotation(self) -> f64 {
         central_rotation(self.start, self.stop, self.spline_midpoint)
     }
+
+    #[must_use]
+    pub fn center_y(self) -> f64 {
+        (self.start.y + self.stop.y) / 2.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -225,6 +230,26 @@ pub fn reject_line_candidates(
     candidates: Vec<LineCandidate>,
     parameters: LineRejectionParameters,
 ) -> Result<LineRejectionReport, LineRejectionError> {
+    reject_line_candidates_with_model(candidates, parameters, false)
+}
+
+/// Experimental projective variant: fit the expected staff-line slope as a
+/// robust linear function of page ordinate before applying the usual 0.025
+/// residual gate. A planar capture maps parallel engraved staff lines to a
+/// converging pencil, so one sheet-global slope systematically rejects the
+/// upper and lower systems.
+pub fn reject_line_candidates_projective(
+    candidates: Vec<LineCandidate>,
+    parameters: LineRejectionParameters,
+) -> Result<LineRejectionReport, LineRejectionError> {
+    reject_line_candidates_with_model(candidates, parameters, true)
+}
+
+fn reject_line_candidates_with_model(
+    candidates: Vec<LineCandidate>,
+    parameters: LineRejectionParameters,
+    projective: bool,
+) -> Result<LineRejectionReport, LineRejectionError> {
     let parameters = parameters.validate()?;
     let mut straight = Vec::with_capacity(candidates.len());
     let mut curved = Vec::new();
@@ -243,6 +268,9 @@ pub fn reject_line_candidates(
         parameters.top_ratio_for_slope,
         parameters.minimum_significant_slope,
     )?;
+    let projective_model = projective
+        .then(|| fit_slope_by_ordinate(&straight))
+        .flatten();
 
     let minimum_short_slope = if global_slope > 0.0 {
         -parameters.maximum_slope_difference / 2.0
@@ -258,7 +286,10 @@ pub fn reject_line_candidates(
     let mut sloped = Vec::new();
     for candidate in straight {
         let filament_slope = candidate.slope();
-        let slope_difference = (global_slope - filament_slope).abs();
+        let expected_slope = projective_model.map_or(global_slope, |(intercept, gradient)| {
+            intercept + gradient * candidate.center_y()
+        });
+        let slope_difference = (expected_slope - filament_slope).abs();
         let short_tolerance = candidate.horizontal_length
             < parameters.minimum_length_for_strict_slope
             && filament_slope >= minimum_short_slope
@@ -282,6 +313,37 @@ pub fn reject_line_candidates(
     })
 }
 
+fn fit_slope_by_ordinate(candidates: &[LineCandidate]) -> Option<(f64, f64)> {
+    let sample_count = candidates.len().min(24);
+    if sample_count < 6 {
+        return None;
+    }
+    let samples = &candidates[..sample_count];
+    let mut gradients = Vec::new();
+    for (index, left) in samples.iter().enumerate() {
+        for right in &samples[index + 1..] {
+            let dy = right.center_y() - left.center_y();
+            if dy.abs() >= 10.0 {
+                let gradient = (right.slope() - left.slope()) / dy;
+                if gradient.is_finite() && gradient.abs() <= 0.001 {
+                    gradients.push(gradient);
+                }
+            }
+        }
+    }
+    if gradients.len() < 5 {
+        return None;
+    }
+    gradients.sort_by(f64::total_cmp);
+    let gradient = gradients[gradients.len() / 2];
+    let mut intercepts = samples
+        .iter()
+        .map(|candidate| candidate.slope() - gradient * candidate.center_y())
+        .collect::<Vec<_>>();
+    intercepts.sort_by(f64::total_cmp);
+    Some((intercepts[intercepts.len() / 2], gradient))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,6 +357,41 @@ mod tests {
             length,
         )
         .unwrap()
+    }
+
+    fn line_at(id: usize, length: usize, y: f64, slope: f64) -> LineCandidate {
+        LineCandidate::new(
+            id,
+            LinePoint::new(0.0, y),
+            LinePoint::new(length as f64, y + length as f64 * slope),
+            y + length as f64 * slope / 2.0,
+            length,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn projective_model_preserves_staff_lines_converging_by_ordinate() {
+        let candidates = (0..8)
+            .map(|index| {
+                let y = index as f64 * 100.0;
+                line_at(index + 1, 1000, y, -0.07 + 0.0002 * y)
+            })
+            .collect::<Vec<_>>();
+        let parameters = LineRejectionParameters {
+            top_ratio_for_slope: 1.0,
+            maximum_filament_rotation: 0.1,
+            maximum_slope_difference: 0.025,
+            minimum_significant_slope: 0.0,
+            minimum_length_for_strict_slope: 40,
+        };
+
+        let global = reject_line_candidates(candidates.clone(), parameters).unwrap();
+        let projective = reject_line_candidates_projective(candidates, parameters).unwrap();
+
+        assert!(global.sloped.len() >= 4);
+        assert_eq!(projective.survivors.len(), 8);
+        assert!(projective.sloped.is_empty());
     }
 
     fn bowed(id: usize, length: usize, slope: f64, rotation: f64) -> LineCandidate {

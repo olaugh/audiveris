@@ -378,6 +378,8 @@ pub struct GridLinesRecognition {
     pub scale: ScaleRecognition,
     /// Sheet slope measured from the top filaments, as Java re-measures it.
     pub global_slope: f64,
+    /// Piano staff-edge `dx/dy` used by the optional oriented bar projection.
+    pub bar_projection_staff_edge_slope: Option<f64>,
     pub filament_count: usize,
     pub sloped_reject_count: usize,
     pub discarded_filament_count: usize,
@@ -1815,6 +1817,15 @@ fn should_run_connected_alignment_second_pass(
     seed_connection_count >= minimum_connections
 }
 
+fn should_use_brace_self_inclusive_fallback(
+    requested: bool,
+    interline: i32,
+    vertical_model: Option<BarVerticalSlopeModel>,
+) -> bool {
+    requested
+        && (interline <= 11 || vertical_model.is_some_and(|model| model.at_x_zero.abs() >= 0.02))
+}
+
 fn slope_recovery_minimum_grade() -> f64 {
     std::env::var("AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE")
         .ok()
@@ -1919,7 +1930,11 @@ fn estimate_bar_slope_from_piano_staff_edges(
             continue;
         };
         let dy = bottom_y - top_y;
-        edges.push((pair[1].left() - pair[0].left(), dy));
+        let maximum_grand_staff_gap =
+            25.0 * (pair[0].interline() as f64 + pair[1].interline() as f64) / 2.0;
+        if dy <= maximum_grand_staff_gap {
+            edges.push((pair[1].left() - pair[0].left(), dy));
+        }
     }
     median_piano_edge_slope(&edges)
 }
@@ -1933,7 +1948,7 @@ fn median_piano_edge_slope(edges: &[(f64, f64)]) -> Option<BarVerticalSlopeModel
                 .filter(|slope| slope.is_finite() && slope.abs() <= 0.15)
         })
         .collect::<Vec<_>>();
-    if slopes.len() < 2 {
+    if slopes.len() < 3 {
         return None;
     }
     slopes.sort_by(f64::total_cmp);
@@ -1957,6 +1972,7 @@ fn build_peak_graph(
     production: &ProductionGridParameters,
     source: &RunTable,
     (width, height): (usize, usize),
+    projection_vertical_model: Option<BarVerticalSlopeModel>,
 ) -> Result<PeakGraphReport, GridRecognitionError> {
     let mut bars_parameters = production.bars;
     if std::env::var("AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS")
@@ -1974,12 +1990,12 @@ fn build_peak_graph(
         for peak in peaks.iter_mut() {
             peak.compute_deskewed_center(|point| skew.deskewed(point))
                 .map_err(grid_stage("deskewed center"))?;
-            if !graph.add_vertex(peak.clone()) {
-                return Err(GridRecognitionError::Stage {
-                    stage: "peak graph",
-                    message: format!("duplicate peak key {:?}", peak.key()),
-                });
-            }
+            // JGraphT `addVertex` returns false for an equal vertex and Java's
+            // `PeakGraph` deliberately ignores that return value.  A heavily
+            // degraded projection can emit the same refined interval twice;
+            // treating that benign idempotent insertion as a fatal Rust-only
+            // error dropped the whole page before bar retrieval.
+            graph.add_vertex(peak.clone());
         }
     }
     let conservative_graph = graph.clone();
@@ -1989,10 +2005,17 @@ fn build_peak_graph(
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
         .then(|| estimate_bar_vertical_slope(staff_peaks, global_slope))
         .flatten();
-    let vertical_model = adaptive_vertical.unwrap_or(BarVerticalSlopeModel {
-        at_x_zero: -global_slope,
-        gradient: 0.0,
-    });
+    // A reliable staff-edge model is evidence about the page's transformed
+    // vertical direction, not merely a projection trick.  Reuse it for peak
+    // alignment so a bar recovered/strengthened in the sheared raster is not
+    // subsequently judged against the unrelated global staff-line skew.
+    let vertical_model =
+        adaptive_vertical
+            .or(projection_vertical_model)
+            .unwrap_or(BarVerticalSlopeModel {
+                at_x_zero: -global_slope,
+                gradient: 0.0,
+            });
     let alignment_sheet_slope = -vertical_model.at_x_zero;
     let connected_alignment_slope = connected_bar_alignment_slope_from_environment();
     let mut alignment_maximum_slope = if connected_alignment_slope.is_some() {
@@ -2215,6 +2238,17 @@ fn build_peak_graph(
         })
         .collect::<Vec<_>>();
     let brace_parameters = production.braces;
+    // The self-inclusive brace fallback is useful when geometric shear makes
+    // the brace's own bar-like flank dominate the ordinary outside-stick
+    // lookup, but on rectified pages it can consume a legitimate opening
+    // bar. Gate the opt-in fallback on independent staff-edge evidence of a
+    // materially non-vertical page transform.
+    let brace_self_inclusive_fallback = should_use_brace_self_inclusive_fallback(
+        std::env::var("AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")),
+        interline,
+        projection_vertical_model,
+    );
     let brace_stage = advance_live_bars_through_braces(
         &mut derived.systems,
         &detached_projectors,
@@ -2230,10 +2264,7 @@ fn build_peak_graph(
                 minimum_portion_height: f64::from(brace_parameters.minimum_portion_height),
                 maximum_curvature: f64::from(brace_parameters.maximum_curvature),
                 lookup_extension: f64::from(brace_parameters.lookup_extension),
-                self_inclusive_fallback: std::env::var("AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK")
-                    .is_ok_and(|value| {
-                        matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
-                    }),
+                self_inclusive_fallback: brace_self_inclusive_fallback,
             },
             stick: BarStickParameters {
                 vertical_extension: brace_parameters.lookup_extension,
@@ -2661,8 +2692,11 @@ pub fn recognize_grid_lines_raster(
 ) -> Result<GridLinesRecognition, GridRecognitionError> {
     let scale_recognition = recognize_scale_raster(loaded)?;
 
-    let seed_parameters = production_grid_parameters(&scale_recognition.scale, 0.0)
+    let projective_staff_slope = std::env::var("AUDIVERIS_PROJECTIVE_STAFF_SLOPE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    let mut seed_parameters = production_grid_parameters(&scale_recognition.scale, 0.0)
         .map_err(grid_stage("parameter derivation"))?;
+    seed_parameters.raw_primary.projective_slope = projective_staff_slope;
     let tables = create_grid_run_tables(
         &scale_recognition.vertical_runs,
         seed_parameters.raster.max_fore,
@@ -2678,8 +2712,9 @@ pub fn recognize_grid_lines_raster(
         .map_err(grid_stage("primary pass (slope seed)"))?;
     let global_slope = seed_pass.global_slope();
 
-    let parameters = production_grid_parameters(&scale_recognition.scale, global_slope)
+    let mut parameters = production_grid_parameters(&scale_recognition.scale, global_slope)
         .map_err(grid_stage("parameter derivation"))?;
+    parameters.raw_primary.projective_slope = projective_staff_slope;
     let pass = build_primary_cluster_pass(&lag, parameters.raw_primary.clone())
         .map_err(grid_stage("primary pass"))?;
     let filament_count = pass.factory_creation_ids().len();
@@ -2802,9 +2837,10 @@ pub fn recognize_grid_lines_raster(
     }
     let staff_edge_recovery = std::env::var("AUDIVERIS_STAFF_EDGE_BAR_PROJECTION")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
-    if staff_edge_recovery
-        && let Some(model) = estimate_bar_slope_from_piano_staff_edges(result.staffs())
-    {
+    let staff_edge_recovery_model = staff_edge_recovery
+        .then(|| estimate_bar_slope_from_piano_staff_edges(result.staffs()))
+        .flatten();
+    if let Some(model) = staff_edge_recovery_model {
         recovery_models.push(model);
     }
     if !recovery_models.is_empty() {
@@ -2862,6 +2898,7 @@ pub fn recognize_grid_lines_raster(
         &parameters,
         &scale_recognition.vertical_runs,
         (scale_recognition.width, scale_recognition.height),
+        staff_edge_recovery_model,
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
@@ -3038,6 +3075,7 @@ pub fn recognize_grid_lines_raster(
     Ok(GridLinesRecognition {
         scale: scale_recognition,
         global_slope,
+        bar_projection_staff_edge_slope: staff_edge_recovery_model.map(|model| model.at_x_zero),
         filament_count,
         sloped_reject_count,
         discarded_filament_count,
@@ -3258,12 +3296,31 @@ mod tests {
     }
 
     #[test]
+    fn brace_fallback_requires_geometric_risk_or_low_resolution() {
+        let rectified = Some(BarVerticalSlopeModel {
+            at_x_zero: 0.0,
+            gradient: 0.0,
+        });
+        let sheared = Some(BarVerticalSlopeModel {
+            at_x_zero: -0.056,
+            gradient: 0.0,
+        });
+        assert!(!should_use_brace_self_inclusive_fallback(false, 9, sheared));
+        assert!(!should_use_brace_self_inclusive_fallback(
+            true, 19, rectified
+        ));
+        assert!(should_use_brace_self_inclusive_fallback(true, 19, sheared));
+        assert!(should_use_brace_self_inclusive_fallback(true, 9, rectified));
+    }
+
+    #[test]
     fn piano_edge_slope_uses_the_median_and_rejects_implausible_pairs() {
-        let model = median_piano_edge_slope(&[(5.0, 100.0), (6.0, 100.0), (50.0, 100.0)])
-            .expect("two plausible grand-staff edges");
+        let model =
+            median_piano_edge_slope(&[(5.0, 100.0), (6.0, 100.0), (6.2, 100.0), (50.0, 100.0)])
+                .expect("three plausible grand-staff edges");
         assert_eq!(model.at_x_zero, 0.06);
         assert_eq!(model.gradient, 0.0);
-        assert_eq!(median_piano_edge_slope(&[(50.0, 100.0)]), None);
+        assert_eq!(median_piano_edge_slope(&[(5.0, 100.0), (6.0, 100.0)]), None);
     }
 
     #[test]
