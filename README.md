@@ -236,6 +236,11 @@ degrees of rotation; the worst page contributes 15 misses. The failure is thus
 concentrated at the synthetic stress boundary rather than spread over ordinary
 pages.
 
+With 18 page workers, three warm 50-page runs measured median wall time 2.78 s
+for default GRID and 3.19 s for the full retained configuration (about 15%
+overhead). The supplemental staff-edge raster projection dominates that cost;
+the projective line model fits only 24 candidates.
+
 One hard page previously aborted when two derivative candidates refined to the
 same `StaffPeakKey`. Rust materialized the candidate list before applying
 Java's mutable cursor, so both equal intervals escaped. Accepted projection
