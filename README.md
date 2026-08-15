@@ -180,7 +180,11 @@ graph, then rebuilds at the requested slope only when at least three concrete
 cross-staff connections already establish a connected score. The partial
 column control retains either a candidate at least 7 pixels wide with core
 impact ≥0.8788, or a five-pixel candidate with core ≥0.60, gap ≥0.9, and both
-lateral chunks ≥0.9. The latter balanced-chunk signature recovered five true
+lateral chunks ≥0.9. Both paths now require width at most 0.75 interline: a
+dense Joplin holdout exposed eleven chord/stem columns 1.20--1.43 interlines
+wide, while all six recovered true bars across the evaluated corpora are at
+most 0.591 interline. The scale-relative ceiling removes all eleven impostors
+without losing a recovered bar. The latter balanced-chunk signature recovered five true
 bars on the overlapping warped disconnected control and a further bar in the
 final fresh connected audit without adding a false positive across the fresh,
 held-out, unwarped, or low-DPI controls. Recovered peaks remain subject to

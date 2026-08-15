@@ -1593,6 +1593,7 @@ fn process_prefix(
         start_column_index,
         &id_to_key,
         parameters.strong_wide_partial_recovery,
+        parameters.interline,
         &mut removed_peaks,
     )?;
     for staff_index in 0..next.staffs.len() {
@@ -1725,6 +1726,7 @@ fn purge_partial_columns(
     start: Option<usize>,
     id_to_key: &[(PeakId, StaffPeakKey)],
     recover_strong_wide: bool,
+    interline: i32,
     removed: &mut Vec<RemovedPeak>,
 ) -> Result<(), BarsCoordinatorError> {
     let first = start.map_or(0, |index| index + 1);
@@ -1750,7 +1752,7 @@ fn purge_partial_columns(
                 state
                     .graph
                     .vertex(key)
-                    .is_some_and(is_recoverable_partial_peak)
+                    .is_some_and(|peak| is_recoverable_partial_peak(peak, interline))
             })
         {
             for &key in &keys {
@@ -1777,14 +1779,22 @@ fn purge_partial_columns(
     Ok(())
 }
 
-fn is_recoverable_partial_peak(peak: &StaffPeak) -> bool {
+fn is_recoverable_partial_peak(peak: &StaffPeak, interline: i32) -> bool {
     peak.impacts().is_some_and(|impacts| {
-        let strong_wide = peak.width() >= 7 && impacts.core() >= 0.878_787_878_787_878_8;
+        // Dense chord columns can satisfy every vertical impact while spanning
+        // more than a full interline horizontally. Across the held-out piano
+        // cohorts all recovered true bars are at most 0.591 interline wide,
+        // whereas the newly exposed chord impostors are 1.2--1.43. Keep a
+        // generous scale-relative ceiling rather than a raster-pixel cutoff.
+        let width_is_bar_like = peak.width().saturating_mul(4) <= interline.saturating_mul(3);
+        let strong_wide =
+            peak.width() >= 7 && width_is_bar_like && impacts.core() >= 0.878_787_878_787_878_8;
         // A warped/thinned bar can be only five pixels wide while retaining
         // unambiguous full-height ink on both sides. Requiring balanced,
         // nearly perfect chunks prevents this narrow path from admitting the
         // one-sided attachment signature of an ordinary note stem.
         let balanced_narrow = peak.width() >= 5
+            && width_is_bar_like
             && impacts.core() >= 0.60
             && impacts.gap() >= 0.9
             && impacts.left() >= 0.9
@@ -2147,9 +2157,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(is_recoverable_partial_peak(&balanced));
-        assert!(!is_recoverable_partial_peak(&stem_like));
-        assert!(!is_recoverable_partial_peak(&weak_core));
+        assert!(is_recoverable_partial_peak(&balanced, 10));
+        assert!(!is_recoverable_partial_peak(&stem_like, 10));
+        assert!(!is_recoverable_partial_peak(&weak_core, 10));
     }
 
     fn parameters() -> BarsCoordinatorParameters {
@@ -2277,6 +2287,15 @@ mod tests {
                 .all(|removed| removed.peak != partial.key())
         );
         assert_eq!(result.vertical_inters().len(), 3);
+    }
+
+    #[test]
+    fn strong_wide_partial_recovery_rejects_a_chord_width_column() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let bar = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 46, impacts).unwrap();
+        let chord = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 50, impacts).unwrap();
+        assert!(is_recoverable_partial_peak(&bar, 10));
+        assert!(!is_recoverable_partial_peak(&chord, 10));
     }
 
     #[test]
