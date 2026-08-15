@@ -106,6 +106,7 @@ AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE=0.10 \
 AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS=1 \
 AUDIVERIS_PROJECTIVE_STAFF_SLOPE=1 \
 AUDIVERIS_RECOVER_PAIRED_ZERO_CHUNK_BOUNDARIES=1 \
+AUDIVERIS_RECOVER_PAIRED_SUBTHRESHOLD_BOUNDARIES=1 \
 AUDIVERIS_GLOBAL_BAR_ALIGNMENT_MATCHING=1 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
@@ -278,7 +279,19 @@ px and 0.710/0.657 px, while 14 true bars exceed 0.50 px centerline residual and
 cohorts. The pixel-only rule is therefore rejected; downstream head--stem and
 arpeggiation--chord relations are the safer future veto.
 
-Forty-five of the 50 fresh hard pages are fully exact. All 24 residual misses occur
+`AUDIVERIS_RECOVER_PAIRED_SUBTHRESHOLD_BOUNDARIES=1` addresses a different
+failure: both opening strokes of a grand staff can sit below the ordinary
+projection threshold after severe capture. It requires both half-threshold
+ranges to lie at their detected left edges, align under the fitted projective
+vertical field, and sum to one normalized threshold. Applying the same vote in
+the interior is forbidden: the audit finds 3,121 aligned nonbar pairs there.
+The boundary-only rule recovers 10 strokes on the primary hard set and 14 over
+the two unseen extra-hard seeds, with no new false positive. Final results are
+**2,842/0/14** on the primary hard set and **5,573/9/139** combined extra-hard
+(99.839% precision, 97.567% recall). Clean, older holdout, low-DPI,
+disconnected, and nine real-example results are unchanged.
+
+Forty-five of the 50 fresh hard pages are fully exact. All 14 residual misses occur
 on five pages combining the maximum 0.02 perspective setting with at least 3.2
 degrees of rotation; the worst page contributes 13 misses. The failure is thus
 concentrated at the synthetic stress boundary rather than spread over ordinary

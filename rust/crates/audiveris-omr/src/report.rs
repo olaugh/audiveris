@@ -1477,6 +1477,20 @@ fn projection_ranges(json: &mut Json, recognition: &GridLinesRecognition) {
         }
     }
     json.close(']');
+    json.key("projection_subthreshold_ranges");
+    json.open('[');
+    for staff in &recognition.staves {
+        for (start, stop, maximum) in &staff.subthreshold_projection_ranges {
+            json.open('{');
+            json.field_integer("staff", staff.id as i64);
+            json.field_integer("start", i64::from(*start));
+            json.field_integer("stop", i64::from(*stop));
+            json.field_integer("maximum", i64::from(*maximum));
+            json.field_integer("bar_threshold", i64::from(staff.projection_bar_threshold));
+            json.close('}');
+        }
+    }
+    json.close(']');
 }
 
 /// Brace lookup attempts, including the negative evidence hidden by the

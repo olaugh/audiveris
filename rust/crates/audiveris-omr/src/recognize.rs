@@ -235,6 +235,10 @@ pub struct StaffCandidateReport {
     /// Contiguous x ranges whose staff projection reaches the resolved bar
     /// threshold, before derivative splitting and peak construction.
     pub raw_projection_ranges: Vec<(i32, i32, i32)>,
+    /// The same compact ranges at half the bar threshold, retained only for
+    /// diagnosing paired sub-threshold grand-staff evidence.
+    pub subthreshold_projection_ranges: Vec<(i32, i32, i32)>,
+    pub projection_bar_threshold: i32,
 }
 
 fn raw_projection_ranges(
@@ -1514,6 +1518,7 @@ struct LiveStaffProjector {
     maximum_left_extremum: i32,
     maximum_right_extremum: i32,
     brace_threshold: i32,
+    bar_threshold: i32,
     first_geometry: FilamentGeometry,
     last_geometry: FilamentGeometry,
     result: NeutralStaffProjectorResult,
@@ -1775,6 +1780,7 @@ fn project_staff_peaks(
         maximum_left_extremum: scale_parameters.maximum_left_extremum,
         maximum_right_extremum: scale_parameters.maximum_right_extremum,
         brace_threshold: scale_parameters.brace_threshold,
+        bar_threshold: scale_parameters.bar_threshold,
         first_geometry,
         last_geometry,
         result,
@@ -1975,6 +1981,147 @@ fn recover_paired_zero_chunk_boundary_peaks(
                 peak.set_staff_end(side);
                 additions.push((own_index, peak));
             }
+        }
+    }
+    let recovered = additions.len();
+    for (index, peak) in additions {
+        staff_peaks[index].push(peak);
+        staff_peaks[index].sort_by_key(StaffPeak::start);
+    }
+    Ok(recovered)
+}
+
+/// Recover only a mutually supported left boundary when neither staff reaches
+/// the ordinary projection threshold. Interior pairing is intentionally
+/// forbidden: aligned piano stems outnumber true sub-threshold bars there by
+/// roughly two orders of magnitude in the stress audit.
+fn paired_subthreshold_score(
+    upper_maximum: i32,
+    upper_threshold: i32,
+    lower_maximum: i32,
+    lower_threshold: i32,
+    alignment_residual: f64,
+    alignment_tolerance: f64,
+) -> Option<f64> {
+    if upper_threshold <= 0
+        || lower_threshold <= 0
+        || upper_maximum >= upper_threshold
+        || lower_maximum >= lower_threshold
+        || alignment_tolerance <= 0.0
+        || alignment_residual > alignment_tolerance
+    {
+        return None;
+    }
+    let joint_fraction = f64::from(upper_maximum) / f64::from(upper_threshold)
+        + f64::from(lower_maximum) / f64::from(lower_threshold);
+    (joint_fraction >= 1.0).then_some(joint_fraction - alignment_residual / alignment_tolerance)
+}
+
+fn recover_paired_subthreshold_left_boundaries(
+    staff_peaks: &mut [Vec<StaffPeak>],
+    live_projectors: &[LiveStaffProjector],
+    alignment_staffs: &[AlignmentStaff],
+    vertical_model: BarVerticalSlopeModel,
+    interline: i32,
+) -> Result<usize, GridRecognitionError> {
+    let alignment_tolerance = (f64::from(interline) * 0.25).max(3.0);
+    let boundary_tolerance = f64::from(interline).max(4.0);
+    let mut additions = Vec::new();
+
+    for pair_start in (0..staff_peaks.len()).step_by(2) {
+        if pair_start + 1 >= staff_peaks.len() {
+            break;
+        }
+        let indexes = [pair_start, pair_start + 1];
+        let mut candidates = [Vec::new(), Vec::new()];
+        for (slot, index) in indexes.into_iter().enumerate() {
+            let live = &live_projectors[index];
+            let threshold = live.bar_threshold;
+            for (start, stop, maximum) in raw_projection_ranges(&live.result, (threshold + 1) / 2) {
+                if maximum >= threshold {
+                    continue;
+                }
+                let x = f64::from(start + stop) / 2.0;
+                if (x - alignment_staffs[index].left).abs() > boundary_tolerance
+                    || staff_peaks[index].iter().any(|peak| {
+                        peak.start() <= stop.saturating_add(1)
+                            && start <= peak.stop().saturating_add(1)
+                    })
+                {
+                    continue;
+                }
+                candidates[slot].push((start, stop, maximum, x));
+            }
+        }
+
+        let mut best = None;
+        for &upper in &candidates[0] {
+            let upper_x = upper.3;
+            let upper_live = &live_projectors[pair_start];
+            let upper_y = (
+                upper_live.first_geometry.position_at(upper_x).ok(),
+                upper_live.last_geometry.position_at(upper_x).ok(),
+            );
+            let (Some(upper_top), Some(upper_bottom)) = upper_y else {
+                continue;
+            };
+            for &lower in &candidates[1] {
+                let lower_x = lower.3;
+                let lower_live = &live_projectors[pair_start + 1];
+                let lower_y = (
+                    lower_live.first_geometry.position_at(lower_x).ok(),
+                    lower_live.last_geometry.position_at(lower_x).ok(),
+                );
+                let (Some(lower_top), Some(lower_bottom)) = lower_y else {
+                    continue;
+                };
+                let upper_center = (upper_top + upper_bottom) / 2.0;
+                let lower_center = (lower_top + lower_bottom) / 2.0;
+                let local_slope = vertical_model.at_x_zero
+                    + vertical_model.gradient * ((upper_x + lower_x) / 2.0);
+                let residual =
+                    ((upper_x - lower_x) - local_slope * (upper_center - lower_center)).abs();
+                if let Some(score) = paired_subthreshold_score(
+                    upper.2,
+                    upper_live.bar_threshold,
+                    lower.2,
+                    lower_live.bar_threshold,
+                    residual,
+                    alignment_tolerance,
+                ) {
+                    if best.is_none_or(|(best_score, _, _)| score > best_score) {
+                        best = Some((score, upper, lower));
+                    }
+                }
+            }
+        }
+        let Some((_, upper, lower)) = best else {
+            continue;
+        };
+        for (index, candidate) in [(pair_start, upper), (pair_start + 1, lower)] {
+            let live = &live_projectors[index];
+            let fraction = f64::from(candidate.2) / f64::from(live.bar_threshold);
+            let top = live
+                .first_geometry
+                .position_at(candidate.3)
+                .map_err(grid_stage("paired subthreshold boundary top"))?
+                .round_ties_even() as i32;
+            let bottom = live
+                .last_geometry
+                .position_at(candidate.3)
+                .map_err(grid_stage("paired subthreshold boundary bottom"))?
+                .round_ties_even() as i32;
+            let mut peak = StaffPeak::with_impacts(
+                live.staff_id,
+                top,
+                bottom,
+                candidate.0,
+                candidate.1,
+                StaffVerticalImpacts::new(fraction, 1.0, 1.0, 1.0, 1.0, 1.0),
+            )
+            .map_err(grid_stage("paired subthreshold boundary peak"))?;
+            peak.set_staff_end(HorizontalSide::Left);
+            additions.push((index, peak));
         }
     }
     let recovered = additions.len();
@@ -2983,6 +3130,11 @@ pub fn recognize_grid_lines_raster(
                 &live.result,
                 projector_scale.bar_threshold,
             ),
+            subthreshold_projection_ranges: raw_projection_ranges(
+                &live.result,
+                (projector_scale.bar_threshold + 1) / 2,
+            ),
+            projection_bar_threshold: projector_scale.bar_threshold,
         });
         live_projectors.push(live);
     }
@@ -3040,6 +3192,8 @@ pub fn recognize_grid_lines_raster(
             staves[index].projection_rejections = live.result.peak_rejections.clone();
             staves[index].raw_projection_ranges =
                 raw_projection_ranges(&live.result, projector_scale.bar_threshold);
+            staves[index].subthreshold_projection_ranges =
+                raw_projection_ranges(&live.result, (projector_scale.bar_threshold + 1) / 2);
             staff_peaks[index] = projected.clone();
             live_projectors[index] = live;
         }
@@ -3049,6 +3203,44 @@ pub fn recognize_grid_lines_raster(
             .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
     if paired_zero_chunk_recovery && let Some(model) = staff_edge_recovery_model {
         let recovered = recover_paired_zero_chunk_boundary_peaks(
+            &mut staff_peaks,
+            &live_projectors,
+            &alignment_staffs,
+            model,
+            scale_recognition.scale.interline.main,
+        )?;
+        if recovered > 0 {
+            for index in 0..staff_peaks.len() {
+                alignment_staffs[index].peaks =
+                    staff_peaks[index].iter().map(StaffPeak::key).collect();
+                for peak in &staff_peaks[index] {
+                    staff_blanks[index].entry(peak.key()).or_insert_with(|| {
+                        has_blank_between(
+                            &live_projectors[index].result.all_blanks,
+                            peak.stop(),
+                            live_projectors[index].staff_left,
+                            live_projectors[index].minimum_standard_blank_width,
+                        )
+                    });
+                }
+                staves[index].peaks = staff_peaks[index]
+                    .iter()
+                    .map(|peak| {
+                        (
+                            peak.start(),
+                            peak.stop(),
+                            peak.impacts().map_or(0.0, |impacts| impacts.grade()),
+                        )
+                    })
+                    .collect();
+            }
+        }
+    }
+    let paired_subthreshold_recovery =
+        std::env::var("AUDIVERIS_RECOVER_PAIRED_SUBTHRESHOLD_BOUNDARIES")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    if paired_subthreshold_recovery && let Some(model) = staff_edge_recovery_model {
+        let recovered = recover_paired_subthreshold_left_boundaries(
             &mut staff_peaks,
             &live_projectors,
             &alignment_staffs,
@@ -6658,5 +6850,15 @@ mod tests {
         let error = recognize_scale(repo_path("data/examples/does-not-exist.png"))
             .expect_err("missing file must fail");
         assert!(matches!(error, ScaleRecognitionError::Load(_)));
+    }
+
+    #[test]
+    fn paired_subthreshold_score_requires_joint_weak_aligned_evidence() {
+        let score = paired_subthreshold_score(6, 10, 5, 10, 0.5, 2.0)
+            .expect("joint aligned evidence should qualify");
+        assert!((score - 0.85).abs() < f64::EPSILON);
+        assert_eq!(paired_subthreshold_score(4, 10, 5, 10, 0.5, 2.0), None);
+        assert_eq!(paired_subthreshold_score(10, 10, 5, 10, 0.5, 2.0), None);
+        assert_eq!(paired_subthreshold_score(6, 10, 5, 10, 2.1, 2.0), None);
     }
 }
