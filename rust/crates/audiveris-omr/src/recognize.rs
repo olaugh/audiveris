@@ -239,6 +239,12 @@ pub struct PeakGraphReport {
     pub alignment_vertical_slope: f64,
     /// Linear change in alignment vertical slope per x pixel.
     pub alignment_vertical_slope_gradient: f64,
+    /// Final residual-slope envelope used for cross-staff alignment.
+    pub alignment_maximum_slope: f64,
+    /// Concrete connections found by the conservative first pass.
+    pub alignment_seed_connection_count: usize,
+    /// Whether a connected-score second pass rebuilt the graph more widely.
+    pub connected_alignment_second_pass: bool,
     pub alignment_count: usize,
     pub connection_count: usize,
     /// Peaks that yielded a registered bar filament.
@@ -1747,6 +1753,28 @@ fn bar_alignment_slope_from_environment() -> f64 {
         .unwrap_or(0.06)
 }
 
+fn connected_bar_alignment_slope_from_environment() -> Option<f64> {
+    std::env::var("AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (0.06..=0.25).contains(value))
+}
+
+fn connected_bar_minimum_connections_from_environment() -> usize {
+    std::env::var("AUDIVERIS_CONNECTED_BAR_MIN_CONNECTIONS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (2..=20).contains(value))
+        .unwrap_or(3)
+}
+
+fn should_run_connected_alignment_second_pass(
+    seed_connection_count: usize,
+    minimum_connections: usize,
+) -> bool {
+    seed_connection_count >= minimum_connections
+}
+
 fn slope_recovery_minimum_grade() -> f64 {
     std::env::var("AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE")
         .ok()
@@ -1867,6 +1895,7 @@ fn build_peak_graph(
             }
         }
     }
+    let conservative_graph = graph.clone();
 
     let mut report = AlignmentBuildReport::default();
     let adaptive_vertical = std::env::var("AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE")
@@ -1878,6 +1907,12 @@ fn build_peak_graph(
         gradient: 0.0,
     });
     let alignment_sheet_slope = -vertical_model.at_x_zero;
+    let connected_alignment_slope = connected_bar_alignment_slope_from_environment();
+    let mut alignment_maximum_slope = if connected_alignment_slope.is_some() {
+        0.06
+    } else {
+        bar_alignment_slope_from_environment()
+    };
     find_all_alignments(
         &mut graph,
         alignment_staffs,
@@ -1887,7 +1922,7 @@ fn build_peak_graph(
             // PeakGraph.maxAlignmentSlope = 0.06 (ratio). An opt-in wider
             // envelope supports projective captures whose vertical vanishing
             // direction cannot be represented by one global sheet skew.
-            maximum_alignment_slope: bar_alignment_slope_from_environment(),
+            maximum_alignment_slope: alignment_maximum_slope,
             // maxAlignmentDeltaWidth = rint(0.6 * interline).
             maximum_alignment_delta_width: (0.6 * f64::from(interline)).round_ties_even() as i32,
             vertical_slope_gradient: vertical_model.gradient,
@@ -1897,7 +1932,7 @@ fn build_peak_graph(
     )
     .map_err(grid_stage("alignments"))?;
 
-    let alignment_count = graph.edges().len();
+    let mut alignment_count = graph.edges().len();
 
     // Java `PeakGraph.buildBarSticks` registers one vertical filament per
     // peak; peaks without an acceptable stick are dropped from the graph.
@@ -1949,6 +1984,54 @@ fn build_peak_graph(
         &mut connection_report,
     )
     .map_err(grid_stage("connections"))?;
+
+    let alignment_seed_connection_count = connection_report.promoted_count();
+    let mut connected_alignment_second_pass = false;
+    if let Some(wide_slope) = connected_alignment_slope
+        && should_run_connected_alignment_second_pass(
+            alignment_seed_connection_count,
+            connected_bar_minimum_connections_from_environment(),
+        )
+    {
+        graph = conservative_graph;
+        for &key in stick_state.removed_peaks() {
+            graph.remove_vertex(key);
+        }
+        let mut wide_report = AlignmentBuildReport::default();
+        find_all_alignments(
+            &mut graph,
+            alignment_staffs,
+            AlignmentParameters {
+                sheet_slope: alignment_sheet_slope,
+                maximum_alignment_slope: wide_slope,
+                maximum_alignment_delta_width: (0.6 * f64::from(interline)).round_ties_even()
+                    as i32,
+                vertical_slope_gradient: vertical_model.gradient,
+                vertical_slope_reference_x: 0.0,
+            },
+            &mut wide_report,
+        )
+        .map_err(grid_stage("connected alignments"))?;
+        alignment_count = graph.edges().len();
+        connection_report = ConnectionBuildReport::default();
+        find_connections(
+            &mut graph,
+            ConnectionRaster {
+                width,
+                height,
+                pixels: raster_pixels,
+            },
+            stick_state.sticks(),
+            ConnectionParameters {
+                maximum_gap: pixels(1.0, interline),
+                maximum_white_ratio: 0.25,
+            },
+            &mut connection_report,
+        )
+        .map_err(grid_stage("connected connections"))?;
+        alignment_maximum_slope = wide_slope;
+        connected_alignment_second_pass = true;
+    }
 
     // Java `PeakGraph.buildSystems` order: findAllAlignments, findConnections,
     // splitMergedGroups, then purgeAlignments -- on one sheet-wide graph, which
@@ -2268,6 +2351,9 @@ fn build_peak_graph(
         sheet_staffs: executor.sheet.staffs.clone(),
         alignment_vertical_slope: -alignment_sheet_slope,
         alignment_vertical_slope_gradient: vertical_model.gradient,
+        alignment_maximum_slope,
+        alignment_seed_connection_count,
+        connected_alignment_second_pass,
         alignment_count,
         connection_count,
         stick_count,
@@ -3040,6 +3126,14 @@ mod tests {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join(relative)
+    }
+
+    #[test]
+    fn connected_alignment_second_pass_requires_the_configured_seed_count() {
+        assert!(!should_run_connected_alignment_second_pass(0, 3));
+        assert!(!should_run_connected_alignment_second_pass(2, 3));
+        assert!(should_run_connected_alignment_second_pass(3, 3));
+        assert!(should_run_connected_alignment_second_pass(42, 3));
     }
 
     #[test]

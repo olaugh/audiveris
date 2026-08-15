@@ -374,6 +374,18 @@ fn recognition_json(
         "bar_alignment_vertical_slope_gradient",
         recognition.peak_graph.alignment_vertical_slope_gradient,
     );
+    json.field_number(
+        "bar_alignment_maximum_slope",
+        recognition.peak_graph.alignment_maximum_slope,
+    );
+    json.field_integer(
+        "bar_alignment_seed_connections",
+        recognition.peak_graph.alignment_seed_connection_count as i64,
+    );
+    json.field_boolean(
+        "bar_alignment_connected_second_pass",
+        recognition.peak_graph.connected_alignment_second_pass,
+    );
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
