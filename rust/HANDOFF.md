@@ -33,6 +33,15 @@ invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
 final heads, source provenance, exact glyph evidence, beam decisions, and
 tally-scale rows without fabricating Java SIG or glyph IDs.
 
+Ordinary native batch recognition now schedules independent input/PDF pages on
+a hardware-bounded worker set. Each page retains private recognition state, a
+PDF loader is shared immutably rather than reparsed per page, and a coordinator
+publishes reports in original argument/sheet order. A four-page GRID integration
+pin proves `AUDIVERIS_PAGE_THREADS=4` is byte-identical to serial execution;
+`AUDIVERIS_PAGE_THREADS=1` remains the diagnostic escape hatch. The interactive
+`-stream-json` path remains serial so its stage timing markers keep their current
+meaning.
+
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
 HEADERS, STEM_SEEDS, BEAMS, LEDGERS, or HEADS, and the viewer can select any
