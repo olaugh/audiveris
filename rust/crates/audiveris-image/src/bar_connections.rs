@@ -53,6 +53,7 @@ pub struct ConnectionDecision {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConnectionBuildReport {
     decisions: Vec<ConnectionDecision>,
+    invalid_probe_ranges: usize,
 }
 
 impl ConnectionBuildReport {
@@ -67,6 +68,11 @@ impl ConnectionBuildReport {
             .iter()
             .filter(|decision| decision.promoted_edge.is_some())
             .count()
+    }
+
+    #[must_use]
+    pub const fn invalid_probe_range_count(&self) -> usize {
+        self.invalid_probe_ranges
     }
 
     /// Append one immediate split-peak `checkConnection` decision.
@@ -151,9 +157,17 @@ pub fn find_connections(
         if alignment.kind() != BarAlignmentKind::Alignment {
             return Err(ConnectionBuildError::WrongRelation(edge_id));
         }
-        report.decisions.push(check_connection_edge(
-            graph, edge_id, raster, sticks, parameters,
-        )?);
+        match check_connection_edge(graph, edge_id, raster, sticks, parameters) {
+            Ok(decision) => report.decisions.push(decision),
+            Err(ConnectionBuildError::InvalidProbeRange { .. }) => {
+                // A severely projective or upstream-misgrouped staff pair can
+                // overlap vertically. That one relation cannot be a valid
+                // inter-staff connection, but it must not abort every other
+                // independent relation and the entire page.
+                report.invalid_probe_ranges += 1;
+            }
+            Err(error) => return Err(error),
+        }
     }
     Ok(())
 }
@@ -466,6 +480,37 @@ mod tests {
             }
         );
         assert_eq!(connection.grade(), 0.8);
+    }
+
+    #[test]
+    fn batch_connection_search_skips_an_inverted_pair_without_aborting() {
+        let top = peak(1, 20, 25, 5, 6);
+        let bottom = peak(2, 10, 15, 5, 6);
+        let mut graph = PeakGraph::new();
+        assert!(graph.add_vertex(top.clone()));
+        assert!(graph.add_vertex(bottom.clone()));
+        let alignment = graph
+            .add_edge(top.key(), bottom.key(), relation(&top, &bottom, 1, 2))
+            .unwrap();
+        let pixels = vec![255; 30 * 30];
+        let mut report = ConnectionBuildReport::default();
+
+        find_connections(
+            &mut graph,
+            ConnectionRaster {
+                width: 30,
+                height: 30,
+                pixels: &pixels,
+            },
+            &[stick(1, top.key()), stick(2, bottom.key())],
+            parameters(),
+            &mut report,
+        )
+        .unwrap();
+
+        assert_eq!(report.invalid_probe_range_count(), 1);
+        assert!(report.decisions().is_empty());
+        assert!(graph.edge(alignment).is_some());
     }
 
     #[test]

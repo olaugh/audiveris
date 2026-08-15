@@ -389,6 +389,10 @@ fn recognition_json(
         "bar_alignment_seed_connections",
         recognition.peak_graph.alignment_seed_connection_count as i64,
     );
+    json.field_integer(
+        "bar_alignment_invalid_connection_probes",
+        recognition.peak_graph.invalid_connection_probe_count as i64,
+    );
     json.field_boolean(
         "bar_alignment_connected_second_pass",
         recognition.peak_graph.connected_alignment_second_pass,
@@ -751,6 +755,12 @@ fn inters(
                         "maximum_lateral_extension",
                         lateral.maximum_extension as i64,
                     );
+                    json.field_integer("centerline_rows", lateral.centerline_rows as i64);
+                    json.field_number("centerline_residual_rms", lateral.centerline_residual_rms);
+                    json.field_number(
+                        "core_ink_width_residual_rms",
+                        lateral.core_ink_width_residual_rms,
+                    );
                     json.field_number("top_terminal_lateral_ratio", lateral.top_terminal_ratio);
                     json.field_number(
                         "bottom_terminal_lateral_ratio",
@@ -850,6 +860,9 @@ struct LateralInkEvidence {
     ratio: f64,
     wide_rows: usize,
     maximum_extension: usize,
+    centerline_rows: usize,
+    centerline_residual_rms: f64,
+    core_ink_width_residual_rms: f64,
     top_terminal_ratio: f64,
     bottom_terminal_ratio: f64,
     top_terminal_maximum_extension: usize,
@@ -888,6 +901,8 @@ fn lateral_ink_evidence(
     let mut lateral_pixels = 0usize;
     let mut wide_rows = 0usize;
     let mut maximum_extension = 0usize;
+    let mut centerline_samples = Vec::new();
+    let mut core_width_samples = Vec::new();
     let terminal_rows = reach.min(y1.saturating_sub(y0) + 1);
     let mut top_terminal_pixels = 0usize;
     let mut bottom_terminal_pixels = 0usize;
@@ -898,6 +913,13 @@ fn lateral_ink_evidence(
         if !row[x0..=x1].contains(&0) {
             continue;
         }
+        let first = row[x0..=x1].iter().position(|pixel| *pixel == 0).unwrap() + x0;
+        let last = row[x0..=x1].iter().rposition(|pixel| *pixel == 0).unwrap() + x0;
+        centerline_samples.push((y as f64, (first + last) as f64 / 2.0));
+        core_width_samples.push((
+            y as f64,
+            row[x0..=x1].iter().filter(|pixel| **pixel == 0).count() as f64,
+        ));
         let mut left = 0usize;
         while left < reach && x0 > left && row[x0 - left - 1] == 0 {
             left += 1;
@@ -921,15 +943,50 @@ fn lateral_ink_evidence(
         }
     }
     let height = y1.saturating_sub(y0) + 1;
+    let centerline_residual_rms = linear_residual_rms(&centerline_samples);
+    let core_ink_width_residual_rms = linear_residual_rms(&core_width_samples);
     LateralInkEvidence {
         ratio: lateral_pixels as f64 / (height * reach) as f64,
         wide_rows,
         maximum_extension,
+        centerline_rows: centerline_samples.len(),
+        centerline_residual_rms,
+        core_ink_width_residual_rms,
         top_terminal_ratio: top_terminal_pixels as f64 / (terminal_rows * reach) as f64,
         bottom_terminal_ratio: bottom_terminal_pixels as f64 / (terminal_rows * reach) as f64,
         top_terminal_maximum_extension,
         bottom_terminal_maximum_extension,
     }
+}
+
+fn linear_residual_rms(samples: &[(f64, f64)]) -> f64 {
+    if samples.len() < 3 {
+        return 0.0;
+    }
+    let count = samples.len() as f64;
+    let mean_y = samples.iter().map(|sample| sample.0).sum::<f64>() / count;
+    let mean_x = samples.iter().map(|sample| sample.1).sum::<f64>() / count;
+    let denominator = samples
+        .iter()
+        .map(|sample| (sample.0 - mean_y).powi(2))
+        .sum::<f64>();
+    let slope = if denominator > 0.0 {
+        samples
+            .iter()
+            .map(|sample| (sample.0 - mean_y) * (sample.1 - mean_x))
+            .sum::<f64>()
+            / denominator
+    } else {
+        0.0
+    };
+    let squared = samples
+        .iter()
+        .map(|sample| {
+            let predicted = mean_x + slope * (sample.0 - mean_y);
+            (sample.1 - predicted).powi(2)
+        })
+        .sum::<f64>();
+    (squared / count).sqrt()
 }
 
 fn header_inters(
@@ -2800,7 +2857,9 @@ pub(crate) mod tests {
             bare[y * 20 + 10] = 0;
         }
         let bare_evidence = lateral_ink_evidence(&bare, 20, 20, 10.0, 2.0, 17.0, 1.0, 8);
-        assert_eq!(bare_evidence, LateralInkEvidence::default());
+        assert_eq!(bare_evidence.ratio, 0.0);
+        assert_eq!(bare_evidence.centerline_rows, 16);
+        assert_eq!(bare_evidence.centerline_residual_rms, 0.0);
 
         let mut attached = bare;
         for x in 4..=10 {
@@ -2812,6 +2871,14 @@ pub(crate) mod tests {
         assert_eq!(attached_evidence.maximum_extension, 5);
         assert!(attached_evidence.top_terminal_ratio > 0.0);
         assert_eq!(attached_evidence.bottom_terminal_ratio, 0.0);
+    }
+
+    #[test]
+    fn centerline_residual_removes_linear_skew_but_retains_oscillation() {
+        let straight = [(0.0, 4.0), (1.0, 5.0), (2.0, 6.0), (3.0, 7.0)];
+        assert!(linear_residual_rms(&straight) < 1e-12);
+        let wavy = [(0.0, 4.0), (1.0, 7.0), (2.0, 4.0), (3.0, 7.0)];
+        assert!(linear_residual_rms(&wavy) > 1.0);
     }
 
     #[test]

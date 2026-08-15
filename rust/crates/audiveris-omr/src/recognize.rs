@@ -269,6 +269,8 @@ pub struct PeakGraphReport {
     pub alignment_maximum_slope: f64,
     /// Concrete connections found by the conservative first pass.
     pub alignment_seed_connection_count: usize,
+    /// Overlapping/inverted staff-pair probes skipped as non-connections.
+    pub invalid_connection_probe_count: usize,
     /// Whether a connected-score second pass rebuilt the graph more widely.
     pub connected_alignment_second_pass: bool,
     pub alignment_count: usize,
@@ -2299,6 +2301,7 @@ fn build_peak_graph(
         alignment_maximum_slope = wide_slope;
         connected_alignment_second_pass = true;
     }
+    let invalid_connection_probe_count = connection_report.invalid_probe_range_count();
 
     // Java `PeakGraph.buildSystems` order: findAllAlignments, findConnections,
     // splitMergedGroups, then purgeAlignments -- on one sheet-wide graph, which
@@ -2641,6 +2644,7 @@ fn build_peak_graph(
         alignment_vertical_slope_gradient: vertical_model.gradient,
         alignment_maximum_slope,
         alignment_seed_connection_count,
+        invalid_connection_probe_count,
         connected_alignment_second_pass,
         alignment_count,
         connection_count,

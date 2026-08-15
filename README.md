@@ -255,13 +255,22 @@ connections lexicographically dominant over geometric alignments. It recovers
 14 hard-warp and nine disconnected true strokes with no new false positives,
 while clean, low-DPI, held-out, and nine real-example results remain unchanged.
 Locally selected sheared-projection edges are frozen rather than globally
-rematched: an independent 49-page 5-degree/2.5%-perspective stress run showed
+rematched: an independent 50-page 5-degree/2.5%-perspective stress run showed
 that unrestricted rematching could retain two extra sheared impostors. The
-hybrid changes that cohort from 2,700/3/88 to **2,711/3/77**, adding eleven true
-bars without adding an error; one further page fails earlier in connection
-probing under both configurations.
+hybrid changes that cohort from 2,767/4/89 to **2,778/4/78**, adding eleven true
+bars without adding an error. One page has overlapping predicted staves and 11
+inverted connection probes; those relations now fail individually instead of
+aborting the sheet, yielding 67/68 labelled bars on that page.
 Three alternating warm 18-worker runs measured 3.00 s median for local conflict
 votes and 3.06 s for global matching, about 2% wall-time overhead.
+
+GRID JSON also reports detrended centerline and core-ink-width residuals for
+accepted verticals. They were added to test a rotation-invariant arpeggiation
+veto, but remain diagnostic only: the two extra-hard impostors score 0.154/0.308
+px and 0.710/0.657 px, while 14 true bars exceed 0.50 px centerline residual and
+58 exceed 1.00 px core-width residual across the two independent 50-page
+cohorts. The pixel-only rule is therefore rejected; downstream head--stem and
+arpeggiation--chord relations are the safer future veto.
 
 Forty-five of the 50 fresh hard pages are fully exact. All 24 residual misses occur
 on five pages combining the maximum 0.02 perspective setting with at least 3.2
