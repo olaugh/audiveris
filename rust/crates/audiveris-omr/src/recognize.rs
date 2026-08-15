@@ -59,10 +59,10 @@ use audiveris_image::production_grid_params::{
 use audiveris_image::projection::{
     BarlineHeightSpec, MultiRestSideRequest, NeutralStaffProjectorRequest,
     NeutralStaffProjectorResult, PeakConstructionParams, PeakCoreGeometry, PeakCoreParams,
-    PeakRefinementParams, ProjectionPeakRejection, ShortProjection, StaffProjectionRequest,
-    StaffProjectorProcessRequest, StaffProjectorProcessTuning, StaffProjectorScaleParameters,
-    StaffProjectorScaleRatios, StaffProjectorScaleRequest, has_blank_between,
-    process_staff_projection, staff_projector_scale_parameters,
+    PeakRefinementParams, ProjectionPeakRejection, ProjectionPeakRejectionStage, ShortProjection,
+    StaffProjectionRequest, StaffProjectorProcessRequest, StaffProjectorProcessTuning,
+    StaffProjectorScaleParameters, StaffProjectorScaleRatios, StaffProjectorScaleRequest,
+    has_blank_between, process_staff_projection, staff_projector_scale_parameters,
 };
 use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
 use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
@@ -1834,6 +1834,155 @@ fn slope_recovery_minimum_grade() -> f64 {
         .unwrap_or(0.74)
 }
 
+fn is_strong_one_sided_zero_chunk(impacts: StaffVerticalImpacts) -> bool {
+    [
+        impacts.core(),
+        impacts.gap(),
+        impacts.start(),
+        impacts.stop(),
+    ]
+    .into_iter()
+    .all(|impact| impact >= 0.35)
+        && impacts.left().min(impacts.right()) == 0.0
+        && impacts.left().max(impacts.right()) >= 0.75
+}
+
+/// Recover a boundary peak whose geometric-mean grade was annihilated solely
+/// by one zero side-chunk impact when the paired piano staff already has a
+/// strong peak at the same projectively transformed boundary.
+///
+/// This is deliberately narrower than generic cross-staff voting. Aligned
+/// note stems are common inside piano systems, while a matching outer boundary
+/// on the paired staff is strong structural evidence. Mutual support between
+/// two rejected candidates is also forbidden: at least one ordinary accepted
+/// projection must anchor the decision.
+fn recover_paired_zero_chunk_boundary_peaks(
+    staff_peaks: &mut [Vec<StaffPeak>],
+    live_projectors: &[LiveStaffProjector],
+    alignment_staffs: &[AlignmentStaff],
+    vertical_model: BarVerticalSlopeModel,
+    interline: i32,
+) -> Result<usize, GridRecognitionError> {
+    let alignment_tolerance = f64::from(interline).mul_add(0.25, 0.0).max(3.0);
+    let boundary_tolerance = f64::from(interline).mul_add(0.5, 0.0).max(4.0);
+    let mut additions = Vec::new();
+
+    for pair_start in (0..staff_peaks.len()).step_by(2) {
+        if pair_start + 1 >= staff_peaks.len() {
+            break;
+        }
+        for (own_index, peer_index) in [(pair_start, pair_start + 1), (pair_start + 1, pair_start)]
+        {
+            let own = &live_projectors[own_index];
+            let peer = &live_projectors[peer_index];
+            let own_alignment = &alignment_staffs[own_index];
+            let peer_alignment = &alignment_staffs[peer_index];
+            for rejection in &own.result.peak_rejections {
+                if rejection.stage != ProjectionPeakRejectionStage::BelowMinimumGrade {
+                    continue;
+                }
+                let Some(impacts) = rejection.impacts else {
+                    continue;
+                };
+                if !is_strong_one_sided_zero_chunk(impacts) {
+                    continue;
+                }
+                let x = f64::from(rejection.start + rejection.stop) / 2.0;
+                let side = if (x - own_alignment.left).abs() <= boundary_tolerance {
+                    Some(HorizontalSide::Left)
+                } else if (x - own_alignment.right).abs() <= boundary_tolerance {
+                    Some(HorizontalSide::Right)
+                } else {
+                    None
+                };
+                let Some(side) = side else {
+                    continue;
+                };
+                let (Ok(own_top), Ok(own_bottom)) = (
+                    own.first_geometry.position_at(x),
+                    own.last_geometry.position_at(x),
+                ) else {
+                    continue;
+                };
+                let own_y = (own_top + own_bottom) / 2.0;
+                let supported = staff_peaks[peer_index].iter().any(|peak| {
+                    if peak.impacts().is_none_or(|evidence| evidence.grade() < 0.5) {
+                        return false;
+                    }
+                    let peer_x = f64::from(peak.start() + peak.stop()) / 2.0;
+                    let at_same_boundary = match side {
+                        HorizontalSide::Left => {
+                            (peer_x - peer_alignment.left).abs() <= boundary_tolerance
+                        }
+                        HorizontalSide::Right => {
+                            (peer_x - peer_alignment.right).abs() <= boundary_tolerance
+                        }
+                    };
+                    if !at_same_boundary {
+                        return false;
+                    }
+                    let (Ok(peer_top), Ok(peer_bottom)) = (
+                        peer.first_geometry.position_at(peer_x),
+                        peer.last_geometry.position_at(peer_x),
+                    ) else {
+                        return false;
+                    };
+                    let peer_y = (peer_top + peer_bottom) / 2.0;
+                    let local_slope =
+                        vertical_model.at_x_zero + vertical_model.gradient * ((x + peer_x) / 2.0);
+                    ((x - peer_x) - local_slope * (own_y - peer_y)).abs() <= alignment_tolerance
+                });
+                if !supported
+                    || staff_peaks[own_index].iter().any(|peak| {
+                        peak.start() <= rejection.stop.saturating_add(1)
+                            && rejection.start <= peak.stop().saturating_add(1)
+                    })
+                {
+                    continue;
+                }
+                // A modest contextual floor preserves all measured evidence;
+                // it only prevents an exactly-zero side chunk from collapsing
+                // the multiplicative grade to zero.
+                let contextual = StaffVerticalImpacts::new(
+                    impacts.core(),
+                    impacts.gap(),
+                    impacts.start(),
+                    impacts.stop(),
+                    impacts.left().max(0.25),
+                    impacts.right().max(0.25),
+                );
+                let top = own
+                    .first_geometry
+                    .position_at(x)
+                    .map_err(grid_stage("paired boundary top"))?
+                    .round_ties_even() as i32;
+                let bottom = own
+                    .last_geometry
+                    .position_at(x)
+                    .map_err(grid_stage("paired boundary bottom"))?
+                    .round_ties_even() as i32;
+                let mut peak = StaffPeak::with_impacts(
+                    own.staff_id,
+                    top,
+                    bottom,
+                    rejection.start,
+                    rejection.stop,
+                    contextual,
+                )
+                .map_err(grid_stage("paired boundary peak"))?;
+                peak.set_staff_end(side);
+                additions.push((own_index, peak));
+            }
+        }
+    }
+    let recovered = additions.len();
+    for (index, peak) in additions {
+        staff_peaks[index].push(peak);
+        staff_peaks[index].sort_by_key(StaffPeak::start);
+    }
+    Ok(recovered)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct BarVerticalSlopeModel {
     at_x_zero: f64,
@@ -2885,6 +3034,44 @@ pub fn recognize_grid_lines_raster(
             live_projectors[index] = live;
         }
     }
+    let paired_zero_chunk_recovery =
+        std::env::var("AUDIVERIS_RECOVER_PAIRED_ZERO_CHUNK_BOUNDARIES")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    if paired_zero_chunk_recovery && let Some(model) = staff_edge_recovery_model {
+        let recovered = recover_paired_zero_chunk_boundary_peaks(
+            &mut staff_peaks,
+            &live_projectors,
+            &alignment_staffs,
+            model,
+            scale_recognition.scale.interline.main,
+        )?;
+        if recovered > 0 {
+            for index in 0..staff_peaks.len() {
+                alignment_staffs[index].peaks =
+                    staff_peaks[index].iter().map(StaffPeak::key).collect();
+                for peak in &staff_peaks[index] {
+                    staff_blanks[index].entry(peak.key()).or_insert_with(|| {
+                        has_blank_between(
+                            &live_projectors[index].result.all_blanks,
+                            peak.stop(),
+                            live_projectors[index].staff_left,
+                            live_projectors[index].minimum_standard_blank_width,
+                        )
+                    });
+                }
+                staves[index].peaks = staff_peaks[index]
+                    .iter()
+                    .map(|peak| {
+                        (
+                            peak.start(),
+                            peak.stop(),
+                            peak.impacts().map_or(0.0, |impacts| impacts.grade()),
+                        )
+                    })
+                    .collect();
+            }
+        }
+    }
     let peak_graph = build_peak_graph(
         &mut staff_peaks,
         &alignment_staffs,
@@ -3311,6 +3498,22 @@ mod tests {
         ));
         assert!(should_use_brace_self_inclusive_fallback(true, 19, sheared));
         assert!(should_use_brace_self_inclusive_fallback(true, 9, rectified));
+    }
+
+    #[test]
+    fn paired_boundary_recovery_requires_one_and_only_one_zero_chunk() {
+        assert!(is_strong_one_sided_zero_chunk(StaffVerticalImpacts::new(
+            0.9, 1.0, 0.6, 0.7, 0.0, 0.8,
+        )));
+        assert!(!is_strong_one_sided_zero_chunk(StaffVerticalImpacts::new(
+            0.9, 1.0, 0.6, 0.7, 0.0, 0.7,
+        )));
+        assert!(!is_strong_one_sided_zero_chunk(StaffVerticalImpacts::new(
+            0.9, 1.0, 0.3, 0.7, 0.0, 0.8,
+        )));
+        assert!(!is_strong_one_sided_zero_chunk(StaffVerticalImpacts::new(
+            0.9, 1.0, 0.6, 0.7, 0.2, 0.8,
+        )));
     }
 
     #[test]

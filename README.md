@@ -105,6 +105,7 @@ AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
 AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE=0.10 \
 AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS=1 \
 AUDIVERIS_PROJECTIVE_STAFF_SLOPE=1 \
+AUDIVERIS_RECOVER_PAIRED_ZERO_CHUNK_BOUNDARIES=1 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
 
@@ -222,16 +223,29 @@ a linear function of page ordinate from the 24 longest straight candidates,
 then applies the unchanged 0.025 gate to the local residual. On the fresh
 warped audit it removes all ten underdetected-staff cases, raises exact staff
 recovery from 38/49 to 46/49. With adaptive brace suppression and balanced
-partial recovery, the complete 50-page set reaches **2,812 TP / 0 FP / 44 FN**
-(98.459% recall); the older holdout reaches **2,848 / 0 / 8** (99.720%). The 50
+partial recovery, the complete 50-page set reaches **2,818 TP / 0 FP / 38 FN**
+(98.669% recall); the older holdout reaches **2,852 / 0 / 4** (99.860%). The 50
 unwarped counterparts remain exactly **2,856 / 0 / 0**, and the low-DPI control
 is **1,074 / 0 / 46**. All nine real example rasters emit byte-identical GRID
 JSON with the projective option on and off. It remains opt-in because the
 current fit assumes planar projective convergence rather than nonlinear page
 curl.
 
-Forty of the 50 fresh hard pages are fully exact. All 44 residual misses occur
-on ten pages combining the maximum 0.02 perspective setting with at least 3.2
+The final boundary recovery addresses a discontinuity in the inherited grade:
+the weighted geometric mean becomes exactly zero when either side-chunk impact
+is zero, even if core, gap, and both edge derivatives are strong. It only
+imputes a modest chunk floor when an already accepted peak on the paired piano
+staff agrees at the same projectively transformed outer boundary. Two rejected
+candidates cannot support each other, because that experiment selected ten
+aligned non-bars for only two true bars. The accepted-boundary rule recovers six
+fresh and four held-out strokes with no change on clean, low-DPI, or disconnected
+controls. It remains an opt-in piano-structure policy.
+Three alternating warm 18-worker runs measured 3.05 s median without this
+last rule and 3.03 s with it, so its report scan and boundary checks add no
+measurable wall-time cost at this scale.
+
+Forty-one of the 50 fresh hard pages are fully exact. All 38 residual misses occur
+on nine pages combining the maximum 0.02 perspective setting with at least 3.2
 degrees of rotation; the worst page contributes 15 misses. The failure is thus
 concentrated at the synthetic stress boundary rather than spread over ordinary
 pages.

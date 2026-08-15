@@ -1355,6 +1355,18 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
                 },
             );
             json.field_integer("projection_maximum", i64::from(rejection.maximum_value));
+            if let Some(impacts) = rejection.impacts {
+                json.key("impacts");
+                json.open('{');
+                json.field_number("core", impacts.core());
+                json.field_number("gap", impacts.gap());
+                json.field_number("start_derivative", impacts.start());
+                json.field_number("stop_derivative", impacts.stop());
+                json.field_number("left_chunk", impacts.left());
+                json.field_number("right_chunk", impacts.right());
+                json.field_number("grade", impacts.grade());
+                json.close('}');
+            }
             json.close('}');
             json.close('}');
         }
