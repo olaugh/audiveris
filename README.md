@@ -96,6 +96,7 @@ Two additional opt-in research controls target projectively captured pages:
 AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE=0.16 \
 AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
 AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
+AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.72 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
@@ -105,14 +106,16 @@ deskewing (valid range 0.06–0.25). The adaptive control robustly fits a linear
 vertical-slope field across x from at least three pairs of intrinsic-grade
 ≥0.72 peaks; unlike a blanket tolerance increase, this recovered 12 warped-page
 strokes with no new false positives in the 50-page benchmark. The final control
-runs a supplemental projection
-that follows the global vertical skew and retains only unique, high-grade,
+runs a supplemental projection that follows the fitted local vertical field
+and retains only unique, high-grade,
 full-height candidates; recovered peaks carry a provenance attribute so they
 cannot lend double-bar protection to nearby weak ordinary peaks. These controls
 confirm projection smear and perspective convergence as missed-bar causes, but
 remain experimental: the tested global approximation is not yet as precise as
 a per-system projective vertical field and lowered ordinary warped-page
-precision in the stress benchmark.
+precision in the first global-shear prototype. The current two-pass local-field
+version preserves ordinary precision; `AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE`
+sets its inclusive intrinsic-grade threshold (0.72 by default).
 
 ## Layout
 

@@ -1486,14 +1486,20 @@ fn shear_vertical_projection_raster(
     source: &[u8],
     width: usize,
     height: usize,
-    vertical_slope: f64,
+    model: BarVerticalSlopeModel,
     center_y: f64,
 ) -> Vec<u8> {
     let mut result = vec![255; source.len()];
     for y in 0..height {
-        let shift = vertical_slope * (y as f64 - center_y);
+        let dy = y as f64 - center_y;
         for x in 0..width {
-            let source_x = (x as f64 + shift).round_ties_even() as isize;
+            let source_x = if model.gradient.abs() < 1e-12 {
+                x as f64 + model.at_x_zero * dy
+            } else {
+                let offset = model.at_x_zero / model.gradient;
+                (x as f64 + offset) * (model.gradient * dy).exp() - offset
+            }
+            .round_ties_even() as isize;
             if (0..width as isize).contains(&source_x) {
                 result[y * width + x] = source[y * width + source_x as usize];
             }
@@ -1512,7 +1518,7 @@ fn project_staff_peaks(
     projector_pixels: &[u8],
     staff: &StaffCandidate,
     scale_parameters: &StaffProjectorScaleParameters,
-    global_slope: f64,
+    recovery_model: Option<BarVerticalSlopeModel>,
 ) -> Result<LiveStaffProjector, GridRecognitionError> {
     // The cluster's own line filaments, not the factory's pre-merge ones: a
     // line seeded by a short fragment keeps that fragment's id after absorbing
@@ -1539,16 +1545,14 @@ fn project_staff_peaks(
     let first_geometry = geometry_of(first, "first")?;
     let last_geometry = geometry_of(last, "last")?;
     let middle_geometry = geometry_of(middle, "middle")?;
-    let slope_aware = std::env::var("AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION")
-        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
-    let sheared_pixels = slope_aware.then(|| {
+    let sheared_pixels = recovery_model.map(|model| {
         let center_x = (staff.left() + staff.right()) / 2.0;
         let center_y = middle_geometry.position_at(center_x).unwrap_or(0.0);
         shear_vertical_projection_raster(
             projector_pixels,
             recognition.width,
             recognition.height,
-            -global_slope,
+            model,
             center_y,
         )
     });
@@ -1674,11 +1678,14 @@ fn project_staff_peaks(
                 },
             )
             .map_err(grid_stage("slope-aware projector"))?;
+        let recovery_minimum_grade = slope_recovery_minimum_grade();
         for mut peak in recovered.peaks {
             let full_height = peak
                 .impacts()
                 .is_some_and(|impacts| {
-                    impacts.core() >= 0.9 && impacts.gap() >= 0.8 && impacts.grade() >= 0.67
+                    impacts.core() >= 0.9
+                        && impacts.gap() >= 0.8
+                        && impacts.grade() >= recovery_minimum_grade
                 });
             let duplicate = result.peaks.iter().any(|existing| {
                 existing.start() <= peak.stop().saturating_add(1)
@@ -1738,6 +1745,14 @@ fn bar_alignment_slope_from_environment() -> f64 {
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && (0.06..=0.25).contains(value))
         .unwrap_or(0.06)
+}
+
+fn slope_recovery_minimum_grade() -> f64 {
+    std::env::var("AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (0.08..=0.8).contains(value))
+        .unwrap_or(0.72)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2498,7 +2513,7 @@ pub fn recognize_grid_lines_raster(
             projector_pixels,
             staff,
             &projector_scale,
-            global_slope,
+            None,
         )?;
         let projected = &live.result.peaks;
         let peaks = projected
@@ -2568,6 +2583,49 @@ pub fn recognize_grid_lines_raster(
             peaks,
         });
         live_projectors.push(live);
+    }
+    let slope_recovery_enabled = std::env::var("AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    if slope_recovery_enabled
+        && let Some(model) = estimate_bar_vertical_slope(&staff_peaks, global_slope)
+    {
+        for (index, staff) in result.staffs().iter().enumerate() {
+            let live = project_staff_peaks(
+                &scale_recognition,
+                projector_pixels,
+                staff,
+                &projector_scale,
+                Some(model),
+            )?;
+            let projected = &live.result.peaks;
+            alignment_staffs[index].peaks = projected.iter().map(StaffPeak::key).collect();
+            staff_blanks[index] = projected
+                .iter()
+                .map(|peak| {
+                    (
+                        peak.key(),
+                        has_blank_between(
+                            &live.result.all_blanks,
+                            peak.stop(),
+                            live.staff_left,
+                            live.minimum_standard_blank_width,
+                        ),
+                    )
+                })
+                .collect();
+            staves[index].peaks = projected
+                .iter()
+                .map(|peak| {
+                    (
+                        peak.start(),
+                        peak.stop(),
+                        peak.impacts().map_or(0.0, |impacts| impacts.grade()),
+                    )
+                })
+                .collect();
+            staff_peaks[index] = projected.clone();
+            live_projectors[index] = live;
+        }
     }
     let peak_graph = build_peak_graph(
         &mut staff_peaks,
@@ -3015,6 +3073,32 @@ mod tests {
         let model = estimate_bar_vertical_slope(&peaks, 0.0).unwrap();
         assert!(model.at_x_zero.abs() < 1e-12);
         assert!((model.at_x_zero + model.gradient * 102.5 - 0.05).abs() < 1e-12);
+    }
+
+    #[test]
+    fn local_field_projection_straightens_its_integral_curve() {
+        let width = 40;
+        let height = 21;
+        let center_y = 10.0;
+        let destination_x = 15_usize;
+        let model = BarVerticalSlopeModel {
+            at_x_zero: 0.08,
+            gradient: 0.002,
+        };
+        let mut source = vec![255; width * height];
+        for y in 0..height {
+            let dy = y as f64 - center_y;
+            let offset = model.at_x_zero / model.gradient;
+            let source_x = ((destination_x as f64 + offset) * (model.gradient * dy).exp()
+                - offset)
+                .round_ties_even() as usize;
+            source[y * width + source_x] = 0;
+        }
+
+        let straightened =
+            shear_vertical_projection_raster(&source, width, height, model, center_y);
+
+        assert!((0..height).all(|y| straightened[y * width + destination_x] == 0));
     }
 
     #[test]
