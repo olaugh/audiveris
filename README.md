@@ -76,7 +76,10 @@ missed.
 The `codex/barline-precision` branch adds an opt-in post-parity filter for weak
 interior peaks that are aligned across staves but have no actual connector ink.
 It preserves staff boundaries, double/final-bar siblings, connected bars, and
-full-height low-resolution evidence. Enable the current measured cutoff with:
+full-height low-resolution evidence. If removing one weak half leaves a newly
+orphaned aligned peer, a narrow 0.02 grade shoulder removes that peer only when
+all of its removed partners also lack full-height core/gap evidence. Enable the
+current measured cutoff with:
 
 ```sh
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
@@ -97,6 +100,7 @@ AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE=0.16 \
 AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
 AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
 AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.72 \
+AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
@@ -116,6 +120,16 @@ a per-system projective vertical field and lowered ordinary warped-page
 precision in the first global-shear prototype. The current two-pass local-field
 version preserves ordinary precision; `AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE`
 sets its inclusive intrinsic-grade threshold (0.72 by default).
+
+The boundary-reassignment control targets a different projective failure: a
+brace fragment can become the first connected vertical on both piano staves,
+while the genuine system-start bars about one interline to the right are later
+discarded as unaligned. It replaces the boundary only when both staves offer a
+nearby candidate with at least 0.5 core evidence, their normalized offsets
+agree within 0.45 interline, and their combined core exceeds the old pair by
+at least 0.4. On the independent projective set this changed 2,742 TP / 9 FP /
+114 FN to 2,748 / 2 / 108; ordinary, disconnected, and low-DPI unwarped sets
+were unchanged. It remains opt-in pending validation on real scans.
 
 ## Layout
 

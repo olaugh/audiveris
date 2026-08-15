@@ -804,6 +804,8 @@ fn grid_bar_alignments_vector() -> Result<String, Box<dyn Error>> {
     ];
     let parameters = AlignmentParameters {
         sheet_slope: SHEET_SLOPE,
+        vertical_slope_gradient: 0.0,
+        vertical_slope_reference_x: 0.0,
         maximum_alignment_slope: MAXIMUM_SLOPE,
         maximum_alignment_delta_width: MAXIMUM_DELTA_WIDTH,
     };

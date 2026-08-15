@@ -15,7 +15,8 @@ use crate::{
         BarsConnectionGroupParameters, BarsCoordinatorError, BarsCoordinatorParameters,
         BarsCoordinatorResult, BarsPurgeParameters, BarsRightCClefParameters, BarsRightEvidence,
         BarsRootEvidence, BarsSystemState, BarsWidthInterParameters, CClefParameters, RemovedPeak,
-        process_bars_after_braces, process_bars_connections_and_groups, process_bars_peak_purges,
+        process_bars_after_braces, process_bars_connections_and_groups,
+        process_bars_left_boundary_reassignment, process_bars_peak_purges,
         process_bars_right_ends_and_c_clefs, process_bars_system,
         process_bars_through_too_far_left, process_bars_weak_unconnected_purge,
         process_bars_widths_and_inters,
@@ -111,6 +112,7 @@ pub struct ProductionProcessBars<Upstream> {
     handoff: Option<PreparedBarsHandoff>,
     removals: Vec<(usize, RemovedPeak)>,
     weak_unconnected_min_grade: Option<f64>,
+    left_boundary_reassignment: bool,
 }
 
 /// A system already advanced through `detectBracePortions`, `buildBraces`,
@@ -173,6 +175,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             handoff: None,
             removals: Vec::new(),
             weak_unconnected_min_grade: None,
+            left_boundary_reassignment: false,
         })
     }
 
@@ -254,6 +257,14 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         self
     }
 
+    /// Enable the fork's conservative two-staff left-boundary reassignment.
+    /// The default remains off to preserve Java parity.
+    #[must_use]
+    pub const fn with_left_boundary_reassignment(mut self) -> Self {
+        self.left_boundary_reassignment = true;
+        self
+    }
+
     #[must_use]
     pub const fn upstream(&self) -> &Upstream {
         &self.upstream
@@ -299,6 +310,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         limits: Option<&StaffLimitRefinement>,
         completed_brace_prefix: Option<&CompletedBracePrefix>,
         weak_unconnected_min_grade: Option<f64>,
+        left_boundary_reassignment: bool,
     ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
         let (Some(extending), Some(limits)) = (extending, limits) else {
             return process_bars_system(system, parameters);
@@ -316,6 +328,13 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             removed.extend_from_slice(braces.removed_peaks());
             (prefix.start_column_index(), removed)
         };
+
+        if left_boundary_reassignment {
+            removed.extend(process_bars_left_boundary_reassignment(
+                system,
+                parameters.interline(),
+            )?);
+        }
 
         let purges =
             process_bars_peak_purges(system, &extending.filament_bounds, extending.parameters)?;
@@ -409,6 +428,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         let completed_brace_prefixes = self.completed_brace_prefixes.clone();
         let parameters = self.parameters;
         let weak_unconnected_min_grade = self.weak_unconnected_min_grade;
+        let left_boundary_reassignment = self.left_boundary_reassignment;
         for (system_index, system) in self.systems.iter_mut().enumerate() {
             let system_id = system.system_id();
             let result = match Self::staged_system(
@@ -420,6 +440,7 @@ impl<Upstream> ProductionProcessBars<Upstream> {
                     .as_ref()
                     .and_then(|prefixes| prefixes.get(system_index)),
                 weak_unconnected_min_grade,
+                left_boundary_reassignment,
             ) {
                 Ok(result) => result,
                 Err(source) => {

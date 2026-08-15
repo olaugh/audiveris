@@ -1680,13 +1680,11 @@ fn project_staff_peaks(
             .map_err(grid_stage("slope-aware projector"))?;
         let recovery_minimum_grade = slope_recovery_minimum_grade();
         for mut peak in recovered.peaks {
-            let full_height = peak
-                .impacts()
-                .is_some_and(|impacts| {
-                    impacts.core() >= 0.9
-                        && impacts.gap() >= 0.8
-                        && impacts.grade() >= recovery_minimum_grade
-                });
+            let full_height = peak.impacts().is_some_and(|impacts| {
+                impacts.core() >= 0.9
+                    && impacts.gap() >= 0.8
+                    && impacts.grade() >= recovery_minimum_grade
+            });
             let duplicate = result.peaks.iter().any(|existing| {
                 existing.start() <= peak.stop().saturating_add(1)
                     && peak.start() <= existing.stop().saturating_add(1)
@@ -1772,7 +1770,8 @@ fn estimate_bar_vertical_slope(
         let bottom = &pair[1];
         let mut used = std::collections::BTreeSet::new();
         for top_peak in top.iter().filter(|peak| {
-            peak.impacts().is_some_and(|impacts| impacts.grade() >= 0.72)
+            peak.impacts()
+                .is_some_and(|impacts| impacts.grade() >= 0.72)
         }) {
             let top_y = (f64::from(top_peak.top()) + f64::from(top_peak.bottom())) / 2.0;
             let top_x = (f64::from(top_peak.start()) + f64::from(top_peak.stop())) / 2.0;
@@ -1781,14 +1780,15 @@ fn estimate_bar_vertical_slope(
                 .enumerate()
                 .filter(|(index, peak)| {
                     !used.contains(index)
-                        && peak.impacts().is_some_and(|impacts| impacts.grade() >= 0.72)
+                        && peak
+                            .impacts()
+                            .is_some_and(|impacts| impacts.grade() >= 0.72)
                 })
                 .filter_map(|(index, peak)| {
                     let bottom_y = (f64::from(peak.top()) + f64::from(peak.bottom())) / 2.0;
                     let dy = bottom_y - top_y;
                     (dy > 0.0).then(|| {
-                        let bottom_x =
-                            (f64::from(peak.start()) + f64::from(peak.stop())) / 2.0;
+                        let bottom_x = (f64::from(peak.start()) + f64::from(peak.stop())) / 2.0;
                         let slope = (bottom_x - top_x) / dy;
                         ((slope - expected).abs(), index, slope, bottom_x)
                     })
@@ -2096,6 +2096,9 @@ fn build_peak_graph(
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && (0.0..=1.0).contains(value));
+    let left_boundary_reassignment = std::env::var("AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY")
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
     let bars = ProductionProcessBars::new(
         RawProductionRetrieveLines::new(
             production.raw_primary.clone(),
@@ -2122,6 +2125,11 @@ fn build_peak_graph(
     .with_staff_limit_refinement(root_evidence, right_evidence);
     let bars = if let Some(minimum_grade) = weak_unconnected_min_grade {
         bars.with_weak_unconnected_filter(minimum_grade)
+    } else {
+        bars
+    };
+    let bars = if left_boundary_reassignment {
+        bars.with_left_boundary_reassignment()
     } else {
         bars
     };
@@ -3089,8 +3097,7 @@ mod tests {
         for y in 0..height {
             let dy = y as f64 - center_y;
             let offset = model.at_x_zero / model.gradient;
-            let source_x = ((destination_x as f64 + offset) * (model.gradient * dy).exp()
-                - offset)
+            let source_x = ((destination_x as f64 + offset) * (model.gradient * dy).exp() - offset)
                 .round_ties_even() as usize;
             source[y * width + source_x] = 0;
         }

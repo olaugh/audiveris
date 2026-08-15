@@ -500,13 +500,21 @@ mod tests {
             sheet_slope: 0.0,
             ..parameters()
         };
-        assert!(alignment_for_pair(&graph, top.key(), bottom.key(), plain).unwrap().is_none());
+        assert!(
+            alignment_for_pair(&graph, top.key(), bottom.key(), plain)
+                .unwrap()
+                .is_none()
+        );
 
         let local = AlignmentParameters {
             vertical_slope_gradient: 0.2 / 210.5,
             ..plain
         };
-        assert!(alignment_for_pair(&graph, top.key(), bottom.key(), local).unwrap().is_some());
+        assert!(
+            alignment_for_pair(&graph, top.key(), bottom.key(), local)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
