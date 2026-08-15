@@ -366,6 +366,10 @@ fn recognition_json(
     scale(&mut json, &recognition.scale);
 
     json.field_number("slope", recognition.global_slope);
+    json.field_number(
+        "bar_alignment_vertical_slope",
+        recognition.peak_graph.alignment_vertical_slope,
+    );
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);

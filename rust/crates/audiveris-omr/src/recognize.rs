@@ -235,6 +235,8 @@ pub struct StaffCandidateReport {
 /// Cross-staff barline structure recovered by the peak graph.
 #[derive(Debug, Clone)]
 pub struct PeakGraphReport {
+    /// Vertical `dx/dy` reference used to build cross-staff alignments.
+    pub alignment_vertical_slope: f64,
     pub alignment_count: usize,
     pub connection_count: usize,
     /// Peaks that yielded a registered bar filament.
@@ -1736,6 +1738,54 @@ fn bar_alignment_slope_from_environment() -> f64 {
         .unwrap_or(0.06)
 }
 
+fn estimate_bar_vertical_slope(
+    staff_peaks: &[Vec<StaffPeak>],
+    global_slope: f64,
+) -> Option<f64> {
+    let expected = -global_slope;
+    let mut slopes = Vec::new();
+    for pair in staff_peaks.windows(2) {
+        let top = &pair[0];
+        let bottom = &pair[1];
+        let mut used = std::collections::BTreeSet::new();
+        for top_peak in top.iter().filter(|peak| {
+            peak.impacts().is_some_and(|impacts| impacts.grade() >= 0.72)
+        }) {
+            let top_y = (f64::from(top_peak.top()) + f64::from(top_peak.bottom())) / 2.0;
+            let top_x = (f64::from(top_peak.start()) + f64::from(top_peak.stop())) / 2.0;
+            let best = bottom
+                .iter()
+                .enumerate()
+                .filter(|(index, peak)| {
+                    !used.contains(index)
+                        && peak.impacts().is_some_and(|impacts| impacts.grade() >= 0.72)
+                })
+                .filter_map(|(index, peak)| {
+                    let bottom_y = (f64::from(peak.top()) + f64::from(peak.bottom())) / 2.0;
+                    let dy = bottom_y - top_y;
+                    (dy > 0.0).then(|| {
+                        let bottom_x =
+                            (f64::from(peak.start()) + f64::from(peak.stop())) / 2.0;
+                        let slope = (bottom_x - top_x) / dy;
+                        ((slope - expected).abs(), index, slope)
+                    })
+                })
+                .min_by(|left, right| left.0.total_cmp(&right.0));
+            if let Some((residual, index, slope)) = best
+                && residual <= 0.2
+            {
+                used.insert(index);
+                slopes.push(slope);
+            }
+        }
+    }
+    if slopes.len() < 3 {
+        return None;
+    }
+    slopes.sort_by(f64::total_cmp);
+    Some(slopes[slopes.len() / 2])
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_peak_graph(
     staff_peaks: &mut [Vec<StaffPeak>],
@@ -1772,12 +1822,17 @@ fn build_peak_graph(
     }
 
     let mut report = AlignmentBuildReport::default();
+    let adaptive_vertical = std::env::var("AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
+        .then(|| estimate_bar_vertical_slope(staff_peaks, global_slope))
+        .flatten();
+    let alignment_sheet_slope = adaptive_vertical.map_or(global_slope, |vertical| -vertical);
     find_all_alignments(
         &mut graph,
         alignment_staffs,
         AlignmentParameters {
             // Java uses the negated sheet skew slope as its vertical reference.
-            sheet_slope: global_slope,
+            sheet_slope: alignment_sheet_slope,
             // PeakGraph.maxAlignmentSlope = 0.06 (ratio). An opt-in wider
             // envelope supports projective captures whose vertical vanishing
             // direction cannot be represented by one global sheet skew.
@@ -2146,6 +2201,7 @@ fn build_peak_graph(
         sig: executor.sheet.sig.clone(),
 
         sheet_staffs: executor.sheet.staffs.clone(),
+        alignment_vertical_slope: -alignment_sheet_slope,
         alignment_count,
         connection_count,
         stick_count,
@@ -2874,6 +2930,32 @@ mod tests {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join(relative)
+    }
+
+    #[test]
+    fn strong_bar_pairs_self_calibrate_vertical_direction() {
+        let strong = StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let weak = StaffVerticalImpacts::new(0.2, 0.2, 0.2, 0.2, 0.2, 0.2);
+        let make = |staff, top, x, impacts| {
+            StaffPeak::with_impacts(StaffId::new(staff), top, top + 40, x, x, impacts).unwrap()
+        };
+        let peaks = vec![
+            vec![
+                make(1, 10, 100, strong),
+                make(1, 10, 200, strong),
+                make(1, 10, 300, strong),
+                make(1, 10, 400, weak),
+            ],
+            vec![
+                make(2, 110, 110, strong),
+                make(2, 110, 210, strong),
+                make(2, 110, 310, strong),
+                make(2, 110, 350, weak),
+            ],
+        ];
+
+        assert_eq!(estimate_bar_vertical_slope(&peaks, 0.0), Some(0.1));
+        assert_eq!(estimate_bar_vertical_slope(&peaks[..1], 0.0), None);
     }
 
     #[test]

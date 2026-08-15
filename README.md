@@ -94,13 +94,18 @@ Two additional opt-in research controls target projectively captured pages:
 
 ```sh
 AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE=0.16 \
+AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
 AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
 
 The first widens the residual slope accepted between peaks after global
-deskewing (valid range 0.06–0.25). The second runs a supplemental projection
+deskewing (valid range 0.06–0.25). The adaptive control robustly estimates a
+page vertical direction from at least three pairs of intrinsic-grade ≥0.72
+peaks; unlike a blanket tolerance increase, this recovered 12 warped-page
+strokes with no new false positives in the 50-page benchmark. The final control
+runs a supplemental projection
 that follows the global vertical skew and retains only unique, high-grade,
 full-height candidates; recovered peaks carry a provenance attribute so they
 cannot lend double-bar protection to nearby weak ordinary peaks. These controls
