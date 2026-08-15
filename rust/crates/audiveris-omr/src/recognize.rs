@@ -73,7 +73,9 @@ use audiveris_image::scale_estimate::{
 use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, Section, build_initial_grid_lags};
 use audiveris_image::staff_line_conversion::StaffGlyph;
-use audiveris_image::staff_peak::{HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey};
+use audiveris_image::staff_peak::{
+    HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey, StaffVerticalImpacts,
+};
 use audiveris_image::system_population::{
     PopulationStaffArea, PopulationStaffGeometry, PopulationSystemArea, PopulationSystemGeometry,
     StaffBoundary, SystemStaffBoundaries, boundary_from_points, build_population_staff_areas,
@@ -1421,6 +1423,7 @@ pub struct PeakRejection {
     pub start: i32,
     pub stop: i32,
     pub stage: PeakRemovalStage,
+    pub impacts: Option<StaffVerticalImpacts>,
 }
 
 /// Failure of the native GRID staff-line slice.
@@ -1884,6 +1887,11 @@ fn build_peak_graph(
     .map_err(grid_stage("brace portions"))?;
 
     let candidate_peaks: usize = staff_peaks.iter().map(Vec::len).sum();
+    let candidate_impacts = staff_peaks
+        .iter()
+        .flatten()
+        .map(|peak| (peak.key(), peak.impacts()))
+        .collect::<BTreeMap<_, _>>();
     let weak_unconnected_min_grade = std::env::var("AUDIVERIS_WEAK_BAR_MIN_GRADE")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -1990,6 +1998,7 @@ fn build_peak_graph(
             start: removed.peak.start(),
             stop: removed.peak.stop(),
             stage: removed.stage,
+            impacts: candidate_impacts.get(&removed.peak).copied().flatten(),
         })
         .collect();
     if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {

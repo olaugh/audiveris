@@ -1168,6 +1168,20 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
         json.key("evidence");
         json.open('{');
         json.field_string("rejected_by", &format!("{:?}", rejection.stage));
+        json.key("impacts");
+        match rejection.impacts {
+            Some(impacts) => {
+                json.open('{');
+                json.field_number("core", impacts.core());
+                json.field_number("gap", impacts.gap());
+                json.field_number("start_derivative", impacts.start());
+                json.field_number("stop_derivative", impacts.stop());
+                json.field_number("left_chunk", impacts.left());
+                json.field_number("right_chunk", impacts.right());
+                json.close('}');
+            }
+            None => json.null(),
+        }
         json.close('}');
         json.close('}');
     }

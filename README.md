@@ -66,8 +66,10 @@ cargo run --release -p audiveris-cli -- -batch -step GRID -json score.pdf
 
 Each promoted inter carries its grade, its contextual grade, and the impacts the grade
 is a weighted geometric mean of — plus the candidates that were rejected and the named
-purge that rejected each. A recogniser that emits only its answer cannot be judged on
-what it missed.
+purge that rejected each. Rejected peaks that reached a named purge retain the same six
+intrinsic impacts, so a missed bar can be separated from a location where no candidate
+was ever formed. A recogniser that emits only its answer cannot be judged on what it
+missed.
 
 ### Experimental stem/barline disambiguation
 
