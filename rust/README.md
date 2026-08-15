@@ -15,6 +15,15 @@ cargo run -p xtask -- vectors
 cargo run -p xtask -- manifest
 ```
 
+For a maximum-throughput local CLI build without profile-guided optimization:
+
+```sh
+RUSTFLAGS="-C target-cpu=native" cargo build --release -p audiveris-cli
+```
+
+The release profile uses fat LTO, one codegen unit, and abort-on-panic. The CPU
+flag stays explicit so ordinary release artifacts remain portable.
+
 `xtask vectors` compiles a probe against the frozen production Java classes and
 compares 59 canonical utility, geometry, assignment, image, run-table, section,
 projection, StaffProjector, and pipeline-order results with Rust. Floating fields use

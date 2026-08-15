@@ -42,6 +42,15 @@ pin proves `AUDIVERIS_PAGE_THREADS=4` is byte-identical to serial execution;
 `-stream-json` path remains serial so its stage timing markers keep their current
 meaning.
 
+The release profile now enables fat LTO, one codegen unit, and abort-on-panic;
+the documented local throughput build additionally passes
+`-C target-cpu=native` without making portable release artifacts depend on the
+builder's CPU. On the same nine-page GRID batch, two tuned serial runs were
+5.10/5.11 seconds versus the earlier 5.57 seconds, while three automatic
+page-parallel runs were 3.32/3.02/3.03 seconds versus the earlier 3.06 seconds.
+The generated-code tuning therefore helps the serial path but does not materially
+move this already-concurrent batch's wall time. No PGO is used.
+
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
 HEADERS, STEM_SEEDS, BEAMS, LEDGERS, or HEADS, and the viewer can select any
