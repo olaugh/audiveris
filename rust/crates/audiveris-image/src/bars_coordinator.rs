@@ -1105,18 +1105,18 @@ pub fn process_bars_weak_unconnected_purge(
     for staff in &state.staffs {
         for (index, peak) in staff.peaks.iter().enumerate() {
             let impacts = peak.impacts();
-            // At very small raster scales, anti-aliasing can destroy the
-            // horizontal chunk score of a genuine disconnected bar while its
-            // full-height core and gap remain intact. Preserve that distinct
-            // signature. Coincident stems have incomplete core/gap evidence.
-            let low_resolution_full_height = interline <= 11
-                && impacts.is_some_and(|value| value.core() >= 0.9 && value.gap() >= 0.8);
+            // At very small raster scales anti-aliasing can destroy horizontal
+            // chunk scores while a genuine bar's full-height core and gap
+            // remain intact. At larger scales this signature is not unique to
+            // bars, so only the opt-in slope-recovery pass may claim it.
+            let full_height = impacts.is_some_and(|value| value.core() >= 0.9 && value.gap() >= 0.8)
+                && (interline <= 11 || peak.is_set(StaffPeakAttribute::SlopeRecovered));
             if peak.is_brace()
                 || peak.is_bracket()
                 || peak.is_staff_end(HorizontalSide::Left)
                 || peak.is_staff_end(HorizontalSide::Right)
                 || impacts.is_none_or(|value| value.grade() >= minimum_grade)
-                || low_resolution_full_height
+                || full_height
             {
                 continue;
             }
@@ -1132,6 +1132,9 @@ pub fn process_bars_weak_unconnected_purge(
                 .flatten()
                 .filter_map(|other| staff.peaks.get(other))
                 .filter(|other| !other.is_brace() && !other.is_bracket())
+                // A supplemental slope-recovered peak must not make a nearby
+                // weak ordinary peak masquerade as a double bar.
+                .filter(|other| !other.is_set(StaffPeakAttribute::SlopeRecovered))
                 .any(|other| {
                     let gap = if other.start() > peak.stop() {
                         other.start().wrapping_sub(peak.stop()).wrapping_sub(1)
@@ -1961,6 +1964,36 @@ mod tests {
 
         assert!(removed.is_empty());
         assert_eq!(state.graph().vertices().len(), 2);
+    }
+
+    #[test]
+    fn weak_unconnected_purge_preserves_marked_slope_recovery_at_high_resolution() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 0.2, 0.3);
+        let mut top = StaffPeak::with_impacts(StaffId::new(1), 10, 30, 30, 30, impacts).unwrap();
+        let mut bottom = StaffPeak::with_impacts(StaffId::new(2), 40, 60, 30, 30, impacts).unwrap();
+        top.set(StaffPeakAttribute::SlopeRecovered);
+        bottom.set(StaffPeakAttribute::SlopeRecovered);
+        top.compute_deskewed_center(|point| point).unwrap();
+        bottom.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top.clone());
+        graph.add_vertex(bottom.clone());
+        graph
+            .add_edge(top.key(), bottom.key(), alignment(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(StaffId::new(1), 0, false, vec![top], BTreeMap::new()).unwrap(),
+                BarsStaffState::new(StaffId::new(2), 0, false, vec![bottom], BTreeMap::new()).unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 20).unwrap();
+
+        assert!(removed.is_empty());
     }
 
     #[test]

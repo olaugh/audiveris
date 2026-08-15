@@ -74,7 +74,7 @@ use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, Section, build_initial_grid_lags};
 use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{
-    HorizontalSide, PeakBounds, StaffPeak, StaffPeakKey, StaffVerticalImpacts,
+    HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey, StaffVerticalImpacts,
 };
 use audiveris_image::system_population::{
     PopulationStaffArea, PopulationStaffGeometry, PopulationSystemArea, PopulationSystemGeometry,
@@ -1475,6 +1475,29 @@ struct LiveStaffProjector {
     result: NeutralStaffProjectorResult,
 }
 
+/// Shear a raster so a line with `dx/dy == vertical_slope` becomes vertical.
+/// Destination x is referenced at `center_y`, so detected peak abscissae stay
+/// in the source coordinate system at the middle staff line.
+fn shear_vertical_projection_raster(
+    source: &[u8],
+    width: usize,
+    height: usize,
+    vertical_slope: f64,
+    center_y: f64,
+) -> Vec<u8> {
+    let mut result = vec![255; source.len()];
+    for y in 0..height {
+        let shift = vertical_slope * (y as f64 - center_y);
+        for x in 0..width {
+            let source_x = (x as f64 + shift).round_ties_even() as isize;
+            if (0..width as isize).contains(&source_x) {
+                result[y * width + x] = source[y * width + source_x as usize];
+            }
+        }
+    }
+    result
+}
+
 /// Runs one staff's `StaffProjector`, returning its graded bar peaks.
 ///
 /// Reproduces Java `StaffProjector.process`: raster accumulation over the
@@ -1485,6 +1508,7 @@ fn project_staff_peaks(
     projector_pixels: &[u8],
     staff: &StaffCandidate,
     scale_parameters: &StaffProjectorScaleParameters,
+    global_slope: f64,
 ) -> Result<LiveStaffProjector, GridRecognitionError> {
     // The cluster's own line filaments, not the factory's pre-merge ones: a
     // line seeded by a short fragment keeps that fragment's id after absorbing
@@ -1511,6 +1535,19 @@ fn project_staff_peaks(
     let first_geometry = geometry_of(first, "first")?;
     let last_geometry = geometry_of(last, "last")?;
     let middle_geometry = geometry_of(middle, "middle")?;
+    let slope_aware = std::env::var("AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    let sheared_pixels = slope_aware.then(|| {
+        let center_x = (staff.left() + staff.right()) / 2.0;
+        let center_y = middle_geometry.position_at(center_x).unwrap_or(0.0);
+        shear_vertical_projection_raster(
+            projector_pixels,
+            recognition.width,
+            recognition.height,
+            -global_slope,
+            center_y,
+        )
+    });
     // `StaffFilament.yAt(int x)` is `(int) Math.rint(yAt((double) x))`, and
     // `rint` rounds a half to *even* where Rust's `round` rounds it away from
     // zero. The two differ only when the ordinate lands exactly on a half, and
@@ -1567,33 +1604,33 @@ fn project_staff_peaks(
         scale_parameters.chunk_width.max(1),
     )
     .map_err(grid_stage("peak refinement parameters"))?;
+    let neutral_request = NeutralStaffProjectorRequest {
+        staff_id: StaffId::new(staff.id()),
+        staff_left: staff.left().round() as i32,
+        staff_right: staff.right().round() as i32,
+        blank_threshold,
+        minimum_wide_blank_width: scale_parameters.minimum_wide_blank_width,
+        top_derivative_count: 5,
+        minimum_derivative_ratio: 0.3,
+        use_one_line_half_mode: scale_parameters.use_one_line_half_mode,
+        is_one_line_staff: false,
+        bar_threshold: scale_parameters.bar_threshold,
+        total_height,
+        peak_construction: PeakConstructionParams::new(
+            refinement,
+            scale_parameters.maximum_bar_width,
+        )
+        .map_err(grid_stage("peak construction parameters"))?,
+        peak_core: PeakCoreParams::new(scale_parameters.gap_threshold, 0.3)
+            .map_err(grid_stage("peak core parameters"))?,
+        brace_search: None,
+    };
     let mut result = accumulation
         .finish_neutral(
             recognition.width,
             recognition.height,
             projector_pixels,
-            NeutralStaffProjectorRequest {
-                staff_id: StaffId::new(staff.id()),
-                staff_left: staff.left().round() as i32,
-                staff_right: staff.right().round() as i32,
-                blank_threshold,
-                minimum_wide_blank_width: scale_parameters.minimum_wide_blank_width,
-                // Java topDerivativeNumber = 5, minDerivativeRatio = 0.3.
-                top_derivative_count: 5,
-                minimum_derivative_ratio: 0.3,
-                use_one_line_half_mode: scale_parameters.use_one_line_half_mode,
-                is_one_line_staff: false,
-                bar_threshold: scale_parameters.bar_threshold,
-                total_height,
-                peak_construction: PeakConstructionParams::new(
-                    refinement,
-                    scale_parameters.maximum_bar_width,
-                )
-                .map_err(grid_stage("peak construction parameters"))?,
-                peak_core: PeakCoreParams::new(scale_parameters.gap_threshold, 0.3)
-                    .map_err(grid_stage("peak core parameters"))?,
-                brace_search: None,
-            },
+            neutral_request,
             |x| {
                 PeakCoreGeometry::new(
                     ordinate(&first_geometry, x),
@@ -1603,6 +1640,53 @@ fn project_staff_peaks(
             },
         )
         .map_err(grid_stage("projector"))?;
+
+    if let Some(sheared) = sheared_pixels.as_deref() {
+        let recovery_accumulation = ShortProjection::from_staff_raster(
+            recognition.width,
+            recognition.height,
+            sheared,
+            StaffProjectionRequest::new(
+                staff.left().round() as i32,
+                staff.right().round() as i32,
+                scale_parameters.staff_abscissa_margin,
+            ),
+            |x| ordinate(&first_geometry, x),
+            |x| ordinate(&last_geometry, x),
+        )
+        .map_err(grid_stage("slope-aware projection accumulation"))?;
+        let recovered = recovery_accumulation
+            .finish_neutral(
+                recognition.width,
+                recognition.height,
+                sheared,
+                neutral_request,
+                |x| {
+                    PeakCoreGeometry::new(
+                        ordinate(&first_geometry, x),
+                        ordinate(&last_geometry, x),
+                        ordinate(&middle_geometry, x),
+                    )
+                },
+            )
+            .map_err(grid_stage("slope-aware projector"))?;
+        for mut peak in recovered.peaks {
+            let full_height = peak
+                .impacts()
+                .is_some_and(|impacts| {
+                    impacts.core() >= 0.9 && impacts.gap() >= 0.8 && impacts.grade() >= 0.67
+                });
+            let duplicate = result.peaks.iter().any(|existing| {
+                existing.start() <= peak.stop().saturating_add(1)
+                    && peak.start() <= existing.stop().saturating_add(1)
+            });
+            if full_height && !duplicate {
+                peak.set(StaffPeakAttribute::SlopeRecovered);
+                result.peaks.push(peak);
+            }
+        }
+        result.peaks.sort_by_key(StaffPeak::start);
+    }
 
     // Java's projector marks the peak sitting at the staff's left end as
     // STAFF_LEFT_END, and `purgeTooLeft` exempts marked peaks. Without the
@@ -1644,6 +1728,14 @@ fn project_staff_peaks(
 /// candidate pair by inverted-slope agreement and width delta. Systems are the
 /// connected components over the surviving alignment edges, which is how Java
 /// derives its staff grouping before the connection purges.
+fn bar_alignment_slope_from_environment() -> f64 {
+    std::env::var("AUDIVERIS_BAR_MAX_ALIGNMENT_SLOPE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && (0.06..=0.25).contains(value))
+        .unwrap_or(0.06)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_peak_graph(
     staff_peaks: &mut [Vec<StaffPeak>],
@@ -1686,8 +1778,10 @@ fn build_peak_graph(
         AlignmentParameters {
             // Java uses the negated sheet skew slope as its vertical reference.
             sheet_slope: global_slope,
-            // PeakGraph.maxAlignmentSlope = 0.06 (ratio).
-            maximum_alignment_slope: 0.06,
+            // PeakGraph.maxAlignmentSlope = 0.06 (ratio). An opt-in wider
+            // envelope supports projective captures whose vertical vanishing
+            // direction cannot be represented by one global sheet skew.
+            maximum_alignment_slope: bar_alignment_slope_from_environment(),
             // maxAlignmentDeltaWidth = rint(0.6 * interline).
             maximum_alignment_delta_width: (0.6 * f64::from(interline)).round_ties_even() as i32,
         },
@@ -2311,6 +2405,7 @@ pub fn recognize_grid_lines_raster(
             projector_pixels,
             staff,
             &projector_scale,
+            global_slope,
         )?;
         let projected = &live.result.peaks;
         let peaks = projected
