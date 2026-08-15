@@ -1189,6 +1189,7 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
         json.key("evidence");
         json.open('{');
         json.field_string("rejected_by", &format!("{:?}", rejection.stage));
+        json.field_boolean("slope_recovered", rejection.slope_recovered);
         json.key("impacts");
         match rejection.impacts {
             Some(impacts) => {

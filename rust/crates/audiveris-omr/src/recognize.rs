@@ -1436,6 +1436,8 @@ pub struct PeakRejection {
     pub stop: i32,
     pub stage: PeakRemovalStage,
     pub impacts: Option<StaffVerticalImpacts>,
+    /// True when the supplemental slope-aware projection created this peak.
+    pub slope_recovered: bool,
 }
 
 /// Failure of the native GRID staff-line slice.
@@ -2181,6 +2183,12 @@ fn build_peak_graph(
         .flatten()
         .map(|peak| (peak.key(), peak.impacts()))
         .collect::<BTreeMap<_, _>>();
+    let slope_recovered_candidates = staff_peaks
+        .iter()
+        .flatten()
+        .filter(|peak| peak.is_set(StaffPeakAttribute::SlopeRecovered))
+        .map(StaffPeak::key)
+        .collect::<std::collections::BTreeSet<_>>();
     let weak_unconnected_min_grade = std::env::var("AUDIVERIS_WEAK_BAR_MIN_GRADE")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -2296,6 +2304,7 @@ fn build_peak_graph(
             stop: removed.peak.stop(),
             stage: removed.stage,
             impacts: candidate_impacts.get(&removed.peak).copied().flatten(),
+            slope_recovered: slope_recovered_candidates.contains(&removed.peak),
         })
         .collect();
     if std::env::var_os("AUDIVERIS_DEBUG_PURGE").is_some() {
