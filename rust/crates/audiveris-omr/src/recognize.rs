@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::brace_portions::BracePortionParameters;
+use crate::brace_portions::{BracePortionParameters, BracePortionReport};
 use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::production_stages::TerminalRasterStages;
 use crate::raw_projector_adapter::{
@@ -249,6 +249,8 @@ pub struct PeakGraphReport {
     /// order. Their member identities are retained for the later full brace
     /// glyph/SIG promotion boundary.
     pub brace_filaments: Vec<DetachedBraceFilamentEvidence>,
+    /// Accepted and rejected brace lookup attempts grouped by system.
+    pub brace_portions: Vec<(usize, BracePortionReport)>,
     /// Candidate peaks a `BarsRetriever` purge removed, each with the stage
     /// that removed it.
     ///
@@ -2050,6 +2052,10 @@ fn build_peak_graph(
                 minimum_portion_height: f64::from(brace_parameters.minimum_portion_height),
                 maximum_curvature: f64::from(brace_parameters.maximum_curvature),
                 lookup_extension: f64::from(brace_parameters.lookup_extension),
+                self_inclusive_fallback: std::env::var("AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK")
+                    .is_ok_and(|value| {
+                        matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES")
+                    }),
             },
             stick: BarStickParameters {
                 vertical_extension: brace_parameters.lookup_extension,
@@ -2267,6 +2273,7 @@ fn build_peak_graph(
         stick_count,
         stickless_peak_count,
         brace_filaments: brace_stage.filaments,
+        brace_portions: brace_stage.portions,
         retained_peaks,
         purged_peaks,
         rejections,

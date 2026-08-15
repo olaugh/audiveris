@@ -3406,6 +3406,7 @@ mod tests {
                     minimum_portion_height: 5.0,
                     maximum_curvature: 10.0,
                     lookup_extension: 2.0,
+                    self_inclusive_fallback: false,
                 },
                 filament: BraceFilamentParameters {
                     interline: 5,

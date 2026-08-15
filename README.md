@@ -101,6 +101,7 @@ AUDIVERIS_ADAPTIVE_BAR_VERTICAL_SLOPE=1 \
 AUDIVERIS_SLOPE_AWARE_BAR_PROJECTION=1 \
 AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.72 \
 AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY=1 \
+AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
@@ -130,6 +131,20 @@ agree within 0.45 interline, and their combined core exceeds the old pair by
 at least 0.4. On the independent projective set this changed 2,742 TP / 9 FP /
 114 FN to 2,748 / 2 / 108; ordinary, disconnected, and low-DPI unwarped sets
 were unchanged. It remains opt-in pending validation on real scans.
+
+The brace fallback addresses the complementary case where a warped brace edge
+has already become peak zero. Java's brace lookup searches strictly to its
+left, so it can miss the visible brace by only a few pixels and freeze both
+outline edges as staff-start barlines. The fallback searches through peak zero,
+skips rejected right-hand candidates (for example, a straight clef fragment),
+and accepts only a brace filament that begins to the left of the boundary. It
+retains the replacement's structural staff-boundary role but suppresses its
+publication as a barline. On the independent warped ordinary set it removed
+the last 2 false positives (2,748 TP / 0 FP / 108 FN), and on the 56-page
+low-DPI set it removed another brace pair (1,074 / 0 / 46), without changing
+clean or disconnected recall. GRID JSON now includes `brace_probes`, recording
+every lookup window and the exact outcome (`NoCandidate`, width/filament/
+height/curvature rejection, boundary-overlap rejection, or acceptance).
 
 ## Layout
 

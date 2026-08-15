@@ -383,6 +383,7 @@ fn recognition_json(
     }
     let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
+    brace_probes(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
     if let Some(stem_seeds) = stem_seeds {
         stem_scale(&mut json, stem_seeds);
@@ -1192,6 +1193,47 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
         }
         json.close('}');
         json.close('}');
+    }
+    json.close(']');
+}
+
+/// Brace lookup attempts, including the negative evidence hidden by the
+/// original accepted-filament-only report.
+fn brace_probes(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("brace_probes");
+    json.open('[');
+    for (system, report) in &recognition.peak_graph.brace_portions {
+        for decision in &report.decisions {
+            json.open('{');
+            json.field_integer("system", *system as i64);
+            json.field_integer("staff", decision.staff_id.value() as i64);
+            json.field_string("outcome", &format!("{:?}", decision.outcome));
+            json.key("window");
+            json.open('{');
+            json.field_integer("minimum_x", i64::from(decision.minimum_x));
+            json.field_integer("maximum_x", i64::from(decision.maximum_x));
+            json.close('}');
+            if let Some(peak) = decision.peak {
+                json.key("peak");
+                json.open('{');
+                json.field_integer("start", i64::from(peak.start()));
+                json.field_integer("stop", i64::from(peak.stop()));
+                if let Some(width) = decision.peak_width {
+                    json.field_integer("width", i64::from(width));
+                }
+                json.close('}');
+            }
+            if let Some(filament) = decision.filament {
+                json.key("filament");
+                json.open('{');
+                json.field_number("vertical_length", filament.vertical_length);
+                json.field_number("mean_curvature", filament.mean_curvature);
+                json.field_number("extension_top", filament.extension_top);
+                json.field_number("extension_bottom", filament.extension_bottom);
+                json.close('}');
+            }
+            json.close('}');
+        }
     }
     json.close(']');
 }
