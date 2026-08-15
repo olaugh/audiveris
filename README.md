@@ -261,6 +261,12 @@ hybrid changes that cohort from 2,767/4/89 to **2,778/4/78**, adding eleven true
 bars without adding an error. One page has overlapping predicted staves and 11
 inverted connection probes; those relations now fail individually instead of
 aborting the sheet, yielding 67/68 labelled bars on that page.
+A post-freeze fourth 50-page seed at the same severity scores 2,781/5/75; the
+two unseen extra-hard seeds combine to **5,559/9/153** (99.838% precision,
+97.321% recall). All 1,878 bars below 2 degrees are recovered, versus 129 misses
+among 1,338 bars at or above 3.5 degrees; the difficult rotation sign reverses
+between seeds, so this is magnitude/capture interaction rather than a fixed
+clockwise bias.
 Three alternating warm 18-worker runs measured 3.00 s median for local conflict
 votes and 3.06 s for global matching, about 2% wall-time overhead.
 
