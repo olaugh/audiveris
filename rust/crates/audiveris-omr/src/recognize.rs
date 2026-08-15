@@ -1878,7 +1878,12 @@ fn build_peak_graph(
     source: &RunTable,
     (width, height): (usize, usize),
 ) -> Result<PeakGraphReport, GridRecognitionError> {
-    let bars_parameters = &production.bars;
+    let mut bars_parameters = production.bars;
+    if std::env::var("AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        bars_parameters = bars_parameters.with_strong_wide_partial_recovery();
+    }
     let skew = HeadlessSkew::new(
         global_slope,
         i32::try_from(width).unwrap_or(i32::MAX),
@@ -2128,7 +2133,7 @@ fn build_peak_graph(
         &lags.vertical,
         &lags.horizontal,
         &skew,
-        *bars_parameters,
+        bars_parameters,
         DetachedBraceStageParameters {
             portions: BracePortionParameters {
                 neutral_gap: brace_parameters.neutral_gap,
@@ -2203,7 +2208,7 @@ fn build_peak_graph(
             TerminalRasterStages::new(),
         ),
         derived.systems,
-        *bars_parameters,
+        bars_parameters,
         production.maximum_group_gap,
     )
     .map_err(grid_stage("process bars"))?

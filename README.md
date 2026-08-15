@@ -103,6 +103,8 @@ AUDIVERIS_SLOPE_RECOVERY_MIN_GRADE=0.72 \
 AUDIVERIS_REASSIGN_LEFT_BAR_BOUNDARY=1 \
 AUDIVERIS_BRACE_SELF_INCLUSIVE_FALLBACK=1 \
 AUDIVERIS_WEAK_BAR_MIN_GRADE=0.71 \
+AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE=0.10 \
+AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS=1 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
 
@@ -145,6 +147,14 @@ low-DPI set it removed another brace pair (1,074 / 0 / 46), without changing
 clean or disconnected recall. GRID JSON now includes `brace_probes`, recording
 every lookup window and the exact outcome (`NoCandidate`, width/filament/
 height/curvature rejection, boundary-overlap rejection, or acceptance).
+
+The connected-score alignment control first builds the conservative 0.06
+graph, then rebuilds at the requested slope only when at least three concrete
+cross-staff connections already establish a connected score. The partial
+column control retains only isolated candidates at least 7 pixels wide with a
+core impact of at least 0.8788; recovered peaks remain subject to downstream
+purges and carry `partial_recovered` provenance in JSON. Both controls remain
+opt-in pending real-scan validation.
 
 ## Layout
 

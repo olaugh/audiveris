@@ -280,6 +280,7 @@ pub struct BarsCoordinatorParameters {
     interline: i32,
     minimum_normalized_width_delta: f64,
     c_clef: Option<CClefParameters>,
+    strong_wide_partial_recovery: bool,
 }
 
 impl BarsCoordinatorParameters {
@@ -320,7 +321,16 @@ impl BarsCoordinatorParameters {
             interline,
             minimum_normalized_width_delta,
             c_clef,
+            strong_wide_partial_recovery: false,
         })
+    }
+
+    /// Keep exceptionally wide, high-core partial columns for later semantic
+    /// validation. This is a conservative fork-only recovery experiment.
+    #[must_use]
+    pub const fn with_strong_wide_partial_recovery(mut self) -> Self {
+        self.strong_wide_partial_recovery = true;
+        self
     }
 
     #[must_use]
@@ -1582,6 +1592,7 @@ fn process_prefix(
         &mut *next,
         start_column_index,
         &id_to_key,
+        parameters.strong_wide_partial_recovery,
         &mut removed_peaks,
     )?;
     for staff_index in 0..next.staffs.len() {
@@ -1713,6 +1724,7 @@ fn purge_partial_columns(
     state: &mut BarsSystemState,
     start: Option<usize>,
     id_to_key: &[(PeakId, StaffPeakKey)],
+    recover_strong_wide: bool,
     removed: &mut Vec<RemovedPeak>,
 ) -> Result<(), BarsCoordinatorError> {
     let first = start.map_or(0, |index| index + 1);
@@ -1733,6 +1745,34 @@ fn purge_partial_columns(
                     .ok_or(BarsCoordinatorError::MissingColumnPeak(peak.id()))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if recover_strong_wide
+            && keys.iter().all(|&key| {
+                state.graph.vertex(key).is_some_and(|peak| {
+                    peak.width() >= 7
+                        && peak
+                            .impacts()
+                            .is_some_and(|impacts| impacts.core() >= 0.878_787_878_787_878_8)
+                })
+            })
+        {
+            for &key in &keys {
+                state
+                    .graph
+                    .vertex_mut(key)
+                    .expect("qualified partial remains in graph")
+                    .set(StaffPeakAttribute::PartialRecovered);
+                if let Some(peak) = state
+                    .staffs
+                    .iter_mut()
+                    .flat_map(|staff| &mut staff.peaks)
+                    .find(|peak| peak.key() == key)
+                {
+                    peak.set(StaffPeakAttribute::PartialRecovered);
+                }
+            }
+            index += 1;
+            continue;
+        }
         state.columns.remove(index);
         remove_keys_without_columns(state, &keys, PeakRemovalStage::PartialColumn, removed);
     }
@@ -2124,6 +2164,70 @@ mod tests {
         assert_eq!(result.vertical_inters().len(), 2);
         assert_eq!(result.connection_inters().len(), 1);
         assert!(result.connection_inters()[0].endpoints_complete);
+    }
+
+    #[test]
+    fn strong_wide_partial_recovery_survives_the_unaligned_purge() {
+        let top = peak(1, 10, 11);
+        let bottom = peak(2, 10, 11);
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let mut partial =
+            StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 46, impacts).unwrap();
+        partial.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        for peak in [&top, &bottom, &partial] {
+            graph.add_vertex(peak.clone());
+        }
+        graph
+            .add_edge(top.key(), bottom.key(), connection(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![top, partial.clone()],
+                    BTreeMap::from([(
+                        StaffPeak::new(StaffId::new(1), 10, 20, 10, 11)
+                            .unwrap()
+                            .key(),
+                        false,
+                    )]),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    0,
+                    false,
+                    vec![bottom],
+                    BTreeMap::from([(
+                        StaffPeak::new(StaffId::new(2), 10, 20, 10, 11)
+                            .unwrap()
+                            .key(),
+                        false,
+                    )]),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+        let result =
+            process_bars_system(&mut state, parameters().with_strong_wide_partial_recovery())
+                .unwrap();
+
+        assert_eq!(state.columns().len(), 2);
+        assert!(state.graph().contains_vertex(partial.key()));
+        assert!(state.staffs()[0].peaks()[1].is_set(StaffPeakAttribute::PartialRecovered));
+        assert!(
+            result
+                .removed_peaks()
+                .iter()
+                .all(|removed| removed.peak != partial.key())
+        );
+        assert_eq!(result.vertical_inters().len(), 3);
     }
 
     #[test]

@@ -35,6 +35,7 @@ use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
 use audiveris_image::beam_structure::BeamImpacts;
 use audiveris_image::grid_sig::{GridSigNode, GridSigRelation};
 use audiveris_image::lines_coordinator::StaffCandidateKind;
+use audiveris_image::staff_peak::StaffPeakAttribute;
 use audiveris_image::system_population::BoundarySegment;
 
 use crate::beam_inters::{RawBeam, beam_bounds};
@@ -716,6 +717,21 @@ fn inters(
                     json.key("evidence");
                     json.open('{');
                     json.field_boolean("frozen", *frozen);
+                    let source_peak = system
+                        .staff_peaks
+                        .iter()
+                        .flatten()
+                        .find(|peak| peak.key() == plan.peak);
+                    json.field_boolean(
+                        "slope_recovered",
+                        source_peak
+                            .is_some_and(|peak| peak.is_set(StaffPeakAttribute::SlopeRecovered)),
+                    );
+                    json.field_boolean(
+                        "partial_recovered",
+                        source_peak
+                            .is_some_and(|peak| peak.is_set(StaffPeakAttribute::PartialRecovered)),
+                    );
                     json.key("impacts");
                     match plan.impacts {
                         Some(impacts) => {
