@@ -106,6 +106,7 @@ AUDIVERIS_CONNECTED_BAR_MAX_ALIGNMENT_SLOPE=0.10 \
 AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS=1 \
 AUDIVERIS_PROJECTIVE_STAFF_SLOPE=1 \
 AUDIVERIS_RECOVER_PAIRED_ZERO_CHUNK_BOUNDARIES=1 \
+AUDIVERIS_GLOBAL_BAR_ALIGNMENT_MATCHING=1 \
   cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
 ```
 
@@ -223,8 +224,9 @@ a linear function of page ordinate from the 24 longest straight candidates,
 then applies the unchanged 0.025 gate to the local residual. On the fresh
 warped audit it removes all ten underdetected-staff cases, raises exact staff
 recovery from 38/49 to 46/49. With adaptive brace suppression and balanced
-partial recovery, the complete 50-page set reaches **2,818 TP / 0 FP / 38 FN**
-(98.669% recall); the older holdout reaches **2,852 / 0 / 4** (99.860%). The 50
+partial recovery and global matching, the complete 50-page set reaches
+**2,832 TP / 0 FP / 24 FN** (99.160% recall); the older holdout reaches
+**2,852 / 0 / 4** (99.860%). The 50
 unwarped counterparts remain exactly **2,856 / 0 / 0**, and the low-DPI control
 is **1,074 / 0 / 46**. All nine real example rasters emit byte-identical GRID
 JSON with the projective option on and off. It remains opt-in because the
@@ -244,9 +246,26 @@ Three alternating warm 18-worker runs measured 3.05 s median without this
 last rule and 3.03 s with it, so its report scan and boundary checks add no
 measurable wall-time cost at this scale.
 
-Forty-one of the 50 fresh hard pages are fully exact. All 38 residual misses occur
-on nine pages combining the maximum 0.02 perspective setting with at least 3.2
-degrees of rotation; the worst page contributes 15 misses. The failure is thus
+The alignment matcher addresses a separate failure in Java's local conflict
+resolution. Each peak independently votes for its best relation; in an
+ambiguous two-by-two neighborhood those votes can leave only one of two
+noncrossing bar pairs. The opt-in dynamic program chooses the maximum-weight,
+order-preserving matching per adjacent staff pair, with concrete ink
+connections lexicographically dominant over geometric alignments. It recovers
+14 hard-warp and nine disconnected true strokes with no new false positives,
+while clean, low-DPI, held-out, and nine real-example results remain unchanged.
+Locally selected sheared-projection edges are frozen rather than globally
+rematched: an independent 49-page 5-degree/2.5%-perspective stress run showed
+that unrestricted rematching could retain two extra sheared impostors. The
+hybrid changes that cohort from 2,700/3/88 to **2,711/3/77**, adding eleven true
+bars without adding an error; one further page fails earlier in connection
+probing under both configurations.
+Three alternating warm 18-worker runs measured 3.00 s median for local conflict
+votes and 3.06 s for global matching, about 2% wall-time overhead.
+
+Forty-five of the 50 fresh hard pages are fully exact. All 24 residual misses occur
+on five pages combining the maximum 0.02 perspective setting with at least 3.2
+degrees of rotation; the worst page contributes 13 misses. The failure is thus
 concentrated at the synthetic stress boundary rather than spread over ordinary
 pages.
 

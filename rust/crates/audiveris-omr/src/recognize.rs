@@ -2303,7 +2303,13 @@ fn build_peak_graph(
     // Java `PeakGraph.buildSystems` order: findAllAlignments, findConnections,
     // splitMergedGroups, then purgeAlignments -- on one sheet-wide graph, which
     // is also the graph the per-system columns are later built from.
-    graph.purge_alignments();
+    if std::env::var("AUDIVERIS_GLOBAL_BAR_ALIGNMENT_MATCHING")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        graph.purge_alignments_globally();
+    } else {
+        graph.purge_alignments();
+    }
 
     let mut connection_count = 0usize;
     let mut connected_pairs: Vec<(usize, usize)> = Vec::new();
