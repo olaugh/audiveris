@@ -290,6 +290,9 @@ the two unseen extra-hard seeds, with no new false positive. Final results are
 **2,842/0/14** on the primary hard set and **5,573/9/139** combined extra-hard
 (99.839% precision, 97.567% recall). Clean, older holdout, low-DPI,
 disconnected, and nine real-example results are unchanged.
+Three warm 18-worker runs measured 3.88 s median both with and without this
+boundary vote in the otherwise identical full configuration, so it adds no
+measurable wall-time cost on the 50-page cohort.
 
 Forty-five of the 50 fresh hard pages are fully exact. All 14 residual misses occur
 on five pages combining the maximum 0.02 perspective setting with at least 3.2
