@@ -83,15 +83,26 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
     if parameters.arguments.is_empty() {
         return Err(format!("-step {step:?} requires at least one input image"));
     }
+    let opened_books = parallel_collect_ordered(
+        parameters.arguments.len(),
+        page_worker_count(parameters.arguments.len()),
+        |index| {
+            let input = &parameters.arguments[index];
+            Loader::open(input).map_err(|error| format!("{}: {error}", input.display()))
+        },
+    );
+
     let mut books = Vec::new();
     let mut tasks = Vec::new();
-    for input in &parameters.arguments {
+    for (input, opened) in parameters.arguments.iter().zip(opened_books) {
         // Share one immutable loader across every selected page in a book. In
         // particular, this parses a PDF once even when its pages run in parallel.
-        let loader = match Loader::open(input) {
+        // Opening and raster decoding happened concurrently above; iteration here
+        // restores argument order and preserves the first-error boundary.
+        let loader = match opened {
             Ok(loader) => loader,
             Err(error) => {
-                tasks.push(NativeTask::Error(format!("{}: {error}", input.display())));
+                tasks.push(NativeTask::Error(error));
                 break;
             }
         };
@@ -230,6 +241,48 @@ fn page_worker_count(task_count: usize) -> usize {
             std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
         })
         .min(task_count.max(1))
+}
+
+fn parallel_collect_ordered<T, F>(task_count: usize, worker_count: usize, work: F) -> Vec<T>
+where
+    T: Send,
+    F: Fn(usize) -> T + Sync,
+{
+    if task_count == 0 {
+        return Vec::new();
+    }
+
+    let next_task = Arc::new(AtomicUsize::new(0));
+    let (sender, receiver) = mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count.min(task_count) {
+            let next_task = Arc::clone(&next_task);
+            let sender = sender.clone();
+            let work = &work;
+            scope.spawn(move || {
+                loop {
+                    let index = next_task.fetch_add(1, Ordering::Relaxed);
+                    if index >= task_count {
+                        break;
+                    }
+                    if sender.send((index, work(index))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+
+        let mut results: Vec<Option<T>> =
+            std::iter::repeat_with(|| None).take(task_count).collect();
+        for (index, result) in receiver {
+            results[index] = Some(result);
+        }
+        results
+            .into_iter()
+            .map(|result| result.expect("every parallel input task returns one result"))
+            .collect()
+    })
 }
 
 fn run_native_tasks(
@@ -767,11 +820,31 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_native_step, json_string, omrscope_marker_line, run_native, run_native_stream,
-        sheets_to_process, stream_stages_through, take_stream_json_flag,
+        is_native_step, json_string, omrscope_marker_line, parallel_collect_ordered, run_native,
+        run_native_stream, sheets_to_process, stream_stages_through, take_stream_json_flag,
     };
     use audiveris_cli::Parameters;
     use audiveris_core::step::OmrStep;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+
+    #[test]
+    fn parallel_collection_executes_concurrently_and_restores_input_order() {
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let results = parallel_collect_ordered(8, 4, |index| {
+            let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now_active, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(10));
+            active.fetch_sub(1, Ordering::SeqCst);
+            index
+        });
+
+        assert_eq!(results, (0..8).collect::<Vec<_>>());
+        assert!(peak.load(Ordering::SeqCst) > 1);
+    }
 
     #[test]
     fn no_selection_means_every_sheet() {

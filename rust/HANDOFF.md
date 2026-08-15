@@ -34,13 +34,16 @@ final heads, source provenance, exact glyph evidence, beam decisions, and
 tally-scale rows without fabricating Java SIG or glyph IDs.
 
 Ordinary native batch recognition now schedules independent input/PDF pages on
-a hardware-bounded worker set. Each page retains private recognition state, a
-PDF loader is shared immutably rather than reparsed per page, and a coordinator
-publishes reports in original argument/sheet order. A four-page GRID integration
-pin proves `AUDIVERIS_PAGE_THREADS=4` is byte-identical to serial execution;
-`AUDIVERIS_PAGE_THREADS=1` remains the diagnostic escape hatch. The interactive
-`-stream-json` path remains serial so its stage timing markers keep their current
-meaning.
+a hardware-bounded worker set. Input opening and single-image raster decoding
+use that pool as well; their results are restored to argument order before page
+scheduling so the first-error boundary is stable. Each page retains private
+recognition state, a PDF loader is shared immutably rather than reparsed per
+page, and a coordinator publishes reports in original argument/sheet order. A
+four-page GRID integration pin proves `AUDIVERIS_PAGE_THREADS=4` is
+byte-identical to serial execution; a focused scheduler unit proves concurrent
+execution plus ordered collection. `AUDIVERIS_PAGE_THREADS=1` remains the
+diagnostic escape hatch. The interactive `-stream-json` path remains serial so
+its stage timing markers keep their current meaning.
 
 The release profile now enables fat LTO, one codegen unit, and abort-on-panic;
 the documented local throughput build additionally passes
@@ -50,6 +53,13 @@ builder's CPU. On the same nine-page GRID batch, two tuned serial runs were
 page-parallel runs were 3.32/3.02/3.03 seconds versus the earlier 3.06 seconds.
 The generated-code tuning therefore helps the serial path but does not materially
 move this already-concurrent batch's wall time. No PGO is used.
+
+On a separate 50-sheet full-size GRID workload with 18 workers, page-only
+parallelism produced five runs of 4.27/4.23/4.25/4.24/4.27 seconds (4.25-second
+median). Parallel input opening/decoding produced 4.06/3.64/3.65/3.63/3.68
+seconds (3.65-second median), a further 14% wall-time reduction with total user
+CPU essentially unchanged near 30.5 seconds. The same files take 24.84 seconds
+with one worker, so the complete parallel path is 6.8x faster on this host.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,

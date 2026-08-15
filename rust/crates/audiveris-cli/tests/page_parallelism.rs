@@ -53,3 +53,25 @@ fn parallel_pages_preserve_serial_output_order_and_bytes() {
         );
     }
 }
+
+#[test]
+fn parallel_opening_preserves_the_first_input_error_boundary() {
+    let page = chula();
+    let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("missing-page.png");
+    let invoke = |thread_count: usize| {
+        Command::new(binary())
+            .args(["-batch", "-step", "GRID", "-json"])
+            .args([&page, &missing, &page])
+            .env("AUDIVERIS_PAGE_THREADS", thread_count.to_string())
+            .output()
+            .expect("run audiveris-cli")
+    };
+
+    let serial = invoke(1);
+    let parallel = invoke(3);
+    assert!(!serial.status.success());
+    assert_eq!(parallel.status, serial.status);
+    assert_eq!(parallel.stdout, serial.stdout);
+    assert_eq!(parallel.stderr, serial.stderr);
+    assert_eq!(serial.stdout.split(|byte| *byte == b'\n').count() - 1, 1);
+}
