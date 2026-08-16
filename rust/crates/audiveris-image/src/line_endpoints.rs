@@ -308,11 +308,11 @@ fn resolve_staff_endpoints(
         let mean = staff_mean_interline(staff, &owned_geometries, parameters.scale_interline)?;
         (&owned_geometries[..], mean)
     };
-    let left_ending_slope = ending_slope(staff, &geometries, HorizontalSide::Left)?;
-    let right_ending_slope = ending_slope(staff, &geometries, HorizontalSide::Right)?;
+    let left_ending_slope = ending_slope(staff, geometries, HorizontalSide::Left)?;
+    let right_ending_slope = ending_slope(staff, geometries, HorizontalSide::Right)?;
     let left = retrieve_side(
         staff,
-        &geometries,
+        geometries,
         parameters,
         mean_interline,
         left_ending_slope,

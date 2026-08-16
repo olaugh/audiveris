@@ -330,7 +330,7 @@ pub fn trace_staff_geometry(
         .enumerate()
         .filter(|(_, column)| column.terminal_coverage >= parameters.minimum_terminal_coverage)
         .map(|(offset, _)| seed_stop + offset)
-        .last()
+        .next_back()
         .filter(|index| right_index.saturating_sub(*index) <= 2);
     if left_index > right_index {
         return None;
