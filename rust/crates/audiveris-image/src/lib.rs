@@ -67,6 +67,7 @@ pub mod section;
 pub mod section_completion;
 pub mod section_tally;
 pub mod spots;
+pub mod staff_geometry_trace;
 pub mod staff_line_cleaner;
 pub mod staff_line_conversion;
 pub mod staff_pattern;

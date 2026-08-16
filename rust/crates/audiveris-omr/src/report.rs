@@ -414,6 +414,7 @@ fn recognition_json(
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
+    geometry_model(&mut json, recognition);
     if let Some(headers) = headers {
         staff_headers(&mut json, headers);
         header_erases(&mut json, headers);
@@ -440,6 +441,122 @@ fn recognition_json(
     json.close('}');
     json.out.push('\n');
     json.out
+}
+
+fn geometry_model(json: &mut Json, recognition: &GridLinesRecognition) {
+    let Some(model) = &recognition.page_geometry else {
+        return;
+    };
+    json.key("geometry_model");
+    json.open('{');
+    json.field_integer("schema", 1);
+    json.key("coordinate_spaces");
+    json.open('{');
+    json.key("scan");
+    json.open('{');
+    json.field_string("origin", "page-top-left");
+    json.field_string("units", "pixels");
+    json.field_string("x_axis", "right");
+    json.field_string("y_axis", "down");
+    json.close('}');
+    json.key("canonical");
+    json.open('{');
+    json.field_string("origin", "system-left-first-staff-line");
+    json.field_string("units", "staff-spaces");
+    json.field_string("u_axis", "system-centerline-arc-length");
+    json.field_string("v_axis", "down");
+    json.field_string(
+        "mapping",
+        "piecewise-linear mesh; interpolate anchors within columns and columns in u",
+    );
+    json.close('}');
+    json.close('}');
+
+    json.key("staves");
+    json.open('[');
+    for staff in &model.staves {
+        json.open('{');
+        json.field_integer("id", staff.staff_id as i64);
+        json.key("seed_extent");
+        json.open('{');
+        json.field_integer("left", i64::from(staff.seed_left));
+        json.field_integer("right", i64::from(staff.seed_right));
+        json.close('}');
+        json.key("scan_extent");
+        json.open('{');
+        json.field_integer("left", i64::from(staff.left));
+        json.field_integer("right", i64::from(staff.right));
+        json.close('}');
+        json.field_number("mean_confidence", staff.mean_confidence);
+        json.key("terminal_bar_x");
+        match staff.terminal_bar_x {
+            Some(x) => json.integer(i64::from(x)),
+            None => json.null(),
+        }
+        json.key("columns");
+        json.open('[');
+        for column in &staff.columns {
+            json.open('{');
+            json.field_number("scan_x", column.x);
+            json.field_number("upper_y", column.upper_y);
+            json.field_number("interline", column.interline);
+            json.field_number("confidence", column.confidence);
+            json.field_number("terminal_coverage", column.terminal_coverage);
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+
+    json.key("systems");
+    json.open('[');
+    for system in &model.systems {
+        json.open('{');
+        json.field_integer("id", system.system_id as i64);
+        json.key("staff_ids");
+        json.open('[');
+        for id in &system.staff_ids {
+            json.integer(*id as i64);
+        }
+        json.close(']');
+        json.key("scan_bounds");
+        json.open('{');
+        json.field_integer("left", i64::from(system.scan_left));
+        json.field_integer("right", i64::from(system.scan_right));
+        json.field_number("top", system.scan_top);
+        json.field_number("bottom", system.scan_bottom);
+        json.close('}');
+        json.key("canonical_size");
+        json.open('{');
+        json.field_number("width", system.canonical_width);
+        json.field_number("height", system.canonical_height);
+        json.field_number("interline_pixels", system.canonical_interline_pixels);
+        json.close('}');
+        json.key("mesh_columns");
+        json.open('[');
+        for column in &system.columns {
+            json.open('{');
+            json.field_number("scan_x", column.scan_x);
+            json.field_number("canonical_u", column.canonical_u);
+            json.key("anchors");
+            json.open('[');
+            for anchor in &column.anchors {
+                json.open('{');
+                json.field_integer("staff_id", anchor.staff_id as i64);
+                json.field_integer("line_index", anchor.line_index as i64);
+                json.field_number("scan_y", anchor.scan_y);
+                json.field_number("canonical_v", anchor.canonical_v);
+                json.close('}');
+            }
+            json.close(']');
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
 }
 
 fn image(json: &mut Json, scale: &ScaleRecognition) {

@@ -34,6 +34,7 @@ pub mod clef_column;
 pub mod clef_parameters;
 pub mod cue_beams_step;
 pub mod curves_step;
+pub mod geometry_model;
 pub mod grid_executor;
 pub mod head_glyph_retrieval;
 pub mod head_pair_predicates;

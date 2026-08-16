@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::brace_portions::{BracePortionParameters, BracePortionReport};
+use crate::geometry_model::{PageGeometryModel, build_page_geometry_model};
 use crate::grid_executor::{HeadlessSkew, HeadlessStaffLine};
 use crate::production_stages::TerminalRasterStages;
 use crate::raw_projector_adapter::{
@@ -72,6 +73,9 @@ use audiveris_image::scale_estimate::{
 };
 use audiveris_image::scale_runs::vertical_run_histograms;
 use audiveris_image::section::{InitialGridLags, Section, build_initial_grid_lags};
+use audiveris_image::staff_geometry_trace::{
+    StaffGeometrySeed, StaffTraceParameters, trace_staff_geometry,
+};
 use audiveris_image::staff_line_conversion::StaffGlyph;
 use audiveris_image::staff_peak::{
     HorizontalSide, PeakBounds, StaffPeak, StaffPeakAttribute, StaffPeakKey, StaffVerticalImpacts,
@@ -415,6 +419,10 @@ pub struct GridLinesRecognition {
     /// Piano systems whose abscissa bounds were conservatively expanded from
     /// page consensus after severe warp truncated both staves.
     pub piano_system_bounds_recovered: Vec<usize>,
+    /// Optional dense scan-space geometry and scan-to-canonical warp mesh.
+    /// This is a downstream hard-scan model; the Java-compatible GRID product
+    /// remains unchanged and available alongside it.
+    pub page_geometry: Option<PageGeometryModel>,
     /// Per-staff first and last line splines, in staff order.
     ///
     /// Everything in HEADERS that positions a lookup area against a staff reads
@@ -3125,6 +3133,14 @@ pub fn recognize_grid_lines_raster(
     let mut parameters = production_grid_parameters(&scale_recognition.scale, global_slope)
         .map_err(grid_stage("parameter derivation"))?;
     parameters.raw_primary.projective_slope = projective_staff_slope;
+    if std::env::var("AUDIVERIS_TRACE_TERMINAL_STAFF_BARS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        parameters
+            .completion
+            .define_end_points
+            .maximum_terminal_extension_dx = 12 * scale_recognition.scale.interline.main.max(1);
+    }
     let pass = build_primary_cluster_pass(&lag, parameters.raw_primary.clone())
         .map_err(grid_stage("primary pass"))?;
     let filament_count = pass.factory_creation_ids().len();
@@ -3395,6 +3411,49 @@ pub fn recognize_grid_lines_raster(
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
+    let page_geometry = if std::env::var("AUDIVERIS_TRACE_FULL_STAFF_GEOMETRY")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        let traces = peak_graph
+            .sheet_staffs
+            .iter()
+            .filter_map(|staff| {
+                let lines = staff
+                    .lines
+                    .iter()
+                    .map(|line| match line {
+                        HeadlessStaffLine::Persistent { line, .. } => {
+                            boundary_from_points(&line.points).ok()
+                        }
+                        HeadlessStaffLine::Filament { .. } => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let seed = StaffGeometrySeed {
+                    staff_id: staff.id,
+                    left: staff.left.round_ties_even() as i32,
+                    right: staff.right.round_ties_even() as i32,
+                    interline: i32::try_from(staff.interline).ok()?,
+                    lines,
+                };
+                let mut parameters = StaffTraceParameters::from_interline(seed.interline);
+                // Search the whole raster. Evidence continuity, rather than a
+                // fixed extension budget, decides the measured staff extent.
+                parameters.maximum_extension = i32::try_from(scale_recognition.width).ok()?;
+                parameters.vertical_search_radius = 6 * seed.interline;
+                trace_staff_geometry(
+                    &seed,
+                    parameters,
+                    scale_recognition.width,
+                    scale_recognition.height,
+                    &scale_recognition.binary,
+                )
+            })
+            .collect();
+        Some(build_page_geometry_model(traces, &peak_graph.systems))
+    } else {
+        None
+    };
+
     // Java builds NO_STAFF by painting each staff line's glyph white over the
     // binary raster, so it erases exactly the ink GRID assigned to a line and
     // leaves everything it could not explain.
@@ -3587,6 +3646,7 @@ pub fn recognize_grid_lines_raster(
         system_areas,
         system_bounds,
         piano_system_bounds_recovered,
+        page_geometry,
         staff_lines: staff_line_geometry,
     })
 }

@@ -599,6 +599,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
             maximum_ending_dx: 10,
             pattern_width: 10,
             pattern_jitter: 2,
+            maximum_terminal_extension_dx: 0,
         },
     )?;
 

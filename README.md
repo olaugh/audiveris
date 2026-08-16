@@ -145,6 +145,33 @@ GRID JSON publishes `piano_system_pair_recovery_applied` and
 Each `systems[]` record also includes the staff-extreme `bounds` and exact
 curved operational `area` boundaries consumed by downstream dispatch.
 
+### Full-width curved staff geometry and rectification coordinates
+
+GRID's Java-parity staff splines remain unchanged. An optional downstream
+geometry product traces the five lines jointly against the original binary
+raster, measures their connected extent through terminal bars, and publishes a
+reversible scan-to-canonical mesh:
+
+```sh
+AUDIVERIS_TRACE_FULL_STAFF_GEOMETRY=1 \
+  cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
+```
+
+`geometry_model.staves[]` contains dense scan-pixel columns with local
+interline, evidence confidence, the original sparse seed extent, the measured
+full extent, and any terminal bar coincident with that extent. Five line paths
+are represented without independently drifting their spacing or phase.
+
+`geometry_model.systems[].mesh_columns[]` maps those scan coordinates into a
+canonical space where `u` is system-centerline arc length and `v` is measured
+in staff spaces; adjacent staff lines differ by exactly one. The Rust model
+implements both `scan_to_canonical` and `canonical_to_scan`, including
+piecewise-linear extrapolation above and below the outer staff lines. This is a
+local warp mesh, not a global homography, so it can represent book curl and
+different curvature at the top and bottom of a grand staff. Consumers must
+still treat a long extrapolation beyond GRID's seed as lower-confidence because
+five-line imagery is periodic and can be phase-ambiguous under heavy occlusion.
+
 The first widens the residual slope accepted between peaks after global
 deskewing (valid range 0.06–0.25). The adaptive control robustly fits a linear
 vertical-slope field across x from at least three pairs of intrinsic-grade

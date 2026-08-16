@@ -1694,6 +1694,7 @@ mod tests {
                 maximum_ending_dx: 10,
                 pattern_width: 10,
                 pattern_jitter: 3,
+                maximum_terminal_extension_dx: 0,
             },
             include_discarded_filaments: IncludeDiscardedFilamentsParameters {
                 scale_interline: 10,
