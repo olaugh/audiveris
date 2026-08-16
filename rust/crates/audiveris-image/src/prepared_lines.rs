@@ -365,7 +365,11 @@ where
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
         let global_slope = built.global_slope();
         let retained_sloped = built.sloped_filaments().clone();
-        let sloped_ids = built.sloped_ids().to_vec();
+        // Only IDs actually held outside primary clustering belong in the
+        // legacy discarded-filament side channel. Native staff discovery now
+        // defers slope rejection, so this is normally empty even though
+        // `built.sloped_ids()` still reports the diagnostic classification.
+        let retained_sloped_ids = retained_sloped.keys().copied().collect::<Vec<_>>();
         let lines_parameters = self
             .lines_parameters
             .with_global_slope(global_slope)
@@ -406,7 +410,7 @@ where
                     .map(crate::cluster_pipeline::ClusterRetrievalResult::discarded_filaments),
                 primary,
                 self.secondary.as_ref(),
-                &sloped_ids,
+                &retained_sloped_ids,
                 &retained_sloped,
             )
             .map_err(GridStageFailure::Other)?,

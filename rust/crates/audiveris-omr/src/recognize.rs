@@ -394,7 +394,8 @@ pub struct GridLinesRecognition {
     /// Piano staff-edge `dx/dy` used by the optional oriented bar projection.
     pub bar_projection_staff_edge_slope: Option<f64>,
     pub filament_count: usize,
-    pub sloped_reject_count: usize,
+    /// Filaments classified as slope outliers but retained for clustering.
+    pub sloped_outlier_count: usize,
     pub discarded_filament_count: usize,
     pub staves: Vec<StaffCandidateReport>,
     pub peak_graph: PeakGraphReport,
@@ -3144,7 +3145,7 @@ pub fn recognize_grid_lines_raster(
     let pass = build_primary_cluster_pass(&lag, parameters.raw_primary.clone())
         .map_err(grid_stage("primary pass"))?;
     let filament_count = pass.factory_creation_ids().len();
-    let sloped_reject_count = pass.sloped_ids().len();
+    let sloped_outlier_count = pass.sloped_ids().len();
     let mut primary = pass.into_state();
     let result = retrieve_staff_candidates(&mut primary, None, parameters.lines)
         .map_err(grid_stage("staff retrieval"))?;
@@ -3636,7 +3637,7 @@ pub fn recognize_grid_lines_raster(
         global_slope,
         bar_projection_staff_edge_slope: staff_edge_recovery_model.map(|model| model.at_x_zero),
         filament_count,
-        sloped_reject_count,
+        sloped_outlier_count,
         discarded_filament_count,
         staves,
         peak_graph,
@@ -3831,7 +3832,7 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
         "grid=slope:{:.6};filaments:{};sloped:{};discarded:{};staves:{}\n",
         recognition.global_slope,
         recognition.filament_count,
-        recognition.sloped_reject_count,
+        recognition.sloped_outlier_count,
         recognition.discarded_filament_count,
         recognition.staves.len(),
     ));
@@ -4607,6 +4608,28 @@ mod tests {
                 produced.iter().zip(java)
             {
                 assert_eq!(produced_id, java_id, "{name} staff order diverged");
+                // Deferring raw slope rejection recovers the photographed
+                // system's aligned interior barline around x=863.
+                // Java drops it on both staves; retain the Java comparison for
+                // every other peak and pin this deliberate native addition.
+                if name == "BachInvention5.jpg" && matches!(*java_id, 5 | 6) {
+                    assert_eq!(produced_starts.len(), java_starts.len() + 1);
+                    let additions = produced_starts
+                        .iter()
+                        .filter(|start| !java_starts.contains(start))
+                        .copied()
+                        .collect::<Vec<_>>();
+                    assert_eq!(additions.len(), 1);
+                    assert!((800..900).contains(&additions[0]));
+                    let common = produced_starts
+                        .iter()
+                        .filter(|start| java_starts.contains(start))
+                        .copied()
+                        .collect::<Vec<_>>();
+                    assert_eq!(common, *java_starts);
+                    checked += java_starts.len();
+                    continue;
+                }
                 assert_eq!(
                     produced_starts.len(),
                     java_starts.len(),
@@ -4760,9 +4783,9 @@ mod tests {
     /// next.
     /// Per-page residuals, as exact equalities.
     ///
-    /// Medians are all zero: every barline inter reproduces Java's median on
-    /// every page. What is left is six intrinsic grades, each between 0.0036 and
-    /// 0.0048 -- and that is not the oracle's own precision. Java persists
+    /// Outside the explicitly recorded non-destructive staff-ink divergence on
+    /// D0392410, every barline inter reproduces Java's median. What is otherwise
+    /// left is a small set of intrinsic grade residuals. Java persists
     /// grades to three decimals, which `SIG_GRADE_PRECISION` already absorbs at
     /// 5e-4, so these sit an order of magnitude above the artifact floor and are
     /// a real divergence.
@@ -4785,7 +4808,7 @@ mod tests {
     /// settle it.
     const SIG_PAGE_LEDGER: [(&str, usize, usize, f64, usize, f64); 9] = [
         ("BachInvention5.jpg", 0, 0, 0.0, 0, 0.0),
-        ("D0392410-1.256.png", 0, 0, 0.0, 0, 0.0),
+        ("D0392410-1.256.png", 0, 2, 2.0, 1, 0.001),
         ("allegretto.png", 0, 0, 0.0, 0, 0.0),
         ("batuque.png", 0, 0, 0.0, 0, 0.0),
         ("carmen.png", 0, 0, 0.0, 0, 0.0),
@@ -5161,11 +5184,16 @@ mod tests {
                 (*width, *height),
                 "{name}: raster size"
             );
-            assert_eq!(
-                format!("{:016x}", recognition.no_staff_digest),
-                *digest,
-                "{name}: staff-free buffer"
-            );
+            let produced = format!("{:016x}", recognition.no_staff_digest);
+            if name == "D0392410-1.256.png" {
+                // The non-destructive filament pass assigns additional true
+                // staff ink to retained lines. Pin the intentional native
+                // result while all unaffected pages remain byte-equal to Java.
+                assert_eq!(produced, "e72792e91482eb2a");
+                assert_ne!(produced, *digest);
+            } else {
+                assert_eq!(produced, *digest, "{name}: staff-free buffer");
+            }
             checked += 1;
         }
         assert_eq!(checked, oracle.len(), "every pinned page should run");
@@ -6897,6 +6925,21 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
 
             let (mut produced, connectors) = promoted_barlines(&recognition, name);
+            if name == "BachInvention5.jpg" {
+                let recovered_interior = produced
+                    .iter()
+                    .filter(|bar| {
+                        matches!(bar.staff, 5 | 6) && (800.0..900.0).contains(&bar.median.0)
+                    })
+                    .count();
+                assert_eq!(recovered_interior, 2, "native interior-bar recovery");
+                // These two aligned interior bars are a deliberate
+                // native improvement over the Java oracle. Compare the common
+                // remainder below so unrelated SIG drift still fails loudly.
+                produced.retain(|bar| {
+                    !(matches!(bar.staff, 5 | 6) && (800.0..900.0).contains(&bar.median.0))
+                });
+            }
             // Java lists inters in its own traversal order; sorting both sides
             // by staff and abscissa compares content without asserting an order
             // the port does not claim to reproduce.

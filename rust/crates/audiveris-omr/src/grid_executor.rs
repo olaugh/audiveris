@@ -3019,7 +3019,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_raster_constructor_uses_measured_slope_and_installs_sloped_fallback() {
+    fn raw_raster_constructor_uses_measured_slope_and_defers_sloped_rejection() {
         let base = executor();
         let mut executor = HeadlessGridExecutor::from_raw_raster_lines(
             positive_slope_source(),
@@ -3045,14 +3045,10 @@ mod tests {
         assert_ne!(slope, placeholder_slope_lines_parameters().global_slope());
         assert_eq!(executor.sheet.staffs.len(), 1);
         assert_eq!(executor.sheet.staffs[0].lines.len(), 5);
-        assert_eq!(executor.sheet.sloped_line_fallbacks.len(), 1);
-        let fallback_geometry = executor.sheet.sloped_line_fallbacks[0]
-            .filament
-            .geometry()
-            .unwrap();
-        let (start_x, start_y) = fallback_geometry.start();
-        let (stop_x, stop_y) = fallback_geometry.stop();
-        assert!((stop_y - start_y) / (stop_x - start_x) > 0.08);
+        // Slope is diagnostic evidence now, not an early exclusion. The
+        // outlier participates in primary clustering rather than being held in
+        // the legacy late fallback side channel.
+        assert!(executor.sheet.sloped_line_fallbacks.is_empty());
 
         // A system geometry can be attached or refreshed after RetrieveLines.
         // The population entry point must derive its deskewed abscissa from

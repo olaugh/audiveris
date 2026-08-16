@@ -17,6 +17,7 @@ use crate::{
     line_rejection::{
         LineCandidate, LinePoint, LineRejectionError, LineRejectionParameters,
         reject_line_candidates, reject_line_candidates_projective,
+        sort_by_reverse_horizontal_length,
     },
     line_short_sections::HorizontalSectionLag,
     lines_coordinator::ClusterPassState,
@@ -68,8 +69,9 @@ impl RawPrimaryPassBuild {
         &self.state
     }
 
-    /// Rejection survivors in Java's stable reverse-length order, before the
-    /// comb network is allowed to merge roots.
+    /// All classified candidates in stable reverse-length order, before the
+    /// comb network is allowed to merge roots. Curvature and slope outliers
+    /// remain present; their IDs are available separately as diagnostics.
     #[must_use]
     pub fn survivor_order(&self) -> &[FilamentId] {
         &self.survivor_order
@@ -90,20 +92,23 @@ impl RawPrimaryPassBuild {
         self.global_slope
     }
 
-    /// Java `FilamentIndex` IDs rejected for curvature, in pre-sort order.
+    /// Filament IDs classified as curvature outliers, in pre-sort order.
     #[must_use]
     pub fn curved_ids(&self) -> &[FilamentId] {
         &self.curved_ids
     }
 
-    /// Java `FilamentIndex` IDs rejected for slope, in post-length-sort order.
+    /// Filament IDs classified as slope outliers, in post-length-sort order.
     #[must_use]
     pub fn sloped_ids(&self) -> &[FilamentId] {
         &self.sloped_ids
     }
 
-    /// Slope rejects retained for Java's later discarded-filament fallback.
-    /// Curvature rejects are intentionally unavailable here.
+    /// Legacy side channel for slope rejects excluded from primary clustering.
+    ///
+    /// The native pipeline now keeps every geometrically valid filament in the
+    /// primary candidate pool, so this is empty. It remains temporarily for
+    /// compatibility with the prepared-lines handoff.
     #[must_use]
     pub const fn sloped_filaments(&self) -> &BTreeMap<FilamentId, crate::filament::StaffFilament> {
         &self.sloped_filaments
@@ -233,8 +238,7 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
 /// Lazily construct Java's secondary/small-interline clustering state.
 ///
 /// `primary_discarded` comes from a transactional preview of the primary
-/// cluster pass. Java does not feed slope rejects into this pass; it retains
-/// them separately for `includeDiscardedFilaments`. Every value is cloned from
+/// cluster pass. Every value is cloned from
 /// the original main-interline [`StaffFilament`], preserving its ID, sections
 /// and geometry; no filament is rebuilt with the small interline.
 pub fn build_secondary_cluster_pass(
@@ -350,8 +354,17 @@ fn filter_raw_filaments(
         .iter()
         .map(|rejected| FilamentId::new(rejected.candidate.id() as u64))
         .collect::<Vec<_>>();
-    let filament_order = report
-        .survivors
+    // Curvature and slope are weak priors, not proof that a filament cannot be
+    // part of a staff. Dropping either category here is irrecoverable: no later
+    // dense trace can grow a staff that never reaches comb formation. Preserve
+    // the diagnostic categories above, but let all geometrically valid factory
+    // filaments participate in clustering. The common reverse-length order
+    // keeps seed selection deterministic and retains Java's survivor priority.
+    let mut retained_candidates = report.survivors;
+    retained_candidates.extend(report.curved.iter().map(|rejected| rejected.candidate));
+    retained_candidates.extend(report.sloped.iter().map(|rejected| rejected.candidate));
+    sort_by_reverse_horizontal_length(&mut retained_candidates);
+    let filament_order = retained_candidates
         .iter()
         .map(|candidate| FilamentId::new(candidate.id() as u64))
         .collect::<Vec<_>>();
@@ -365,14 +378,10 @@ fn filter_raw_filaments(
         ownership.register_filament(*id, &filament)?;
         filaments.insert(*id, filament);
     }
-    let mut sloped_filaments = BTreeMap::new();
-    for id in &sloped_ids {
-        let filament = all
-            .remove(id)
-            .ok_or(RawLineAdapterError::MissingFilament(*id))?;
-        sloped_filaments.insert(*id, filament);
-    }
-    // Curvature rejects deliberately remain unregistered and are dropped.
+    // No candidate is held outside the clustering pass. Keeping the legacy map
+    // empty also prevents a filament rejected by final cluster validation from
+    // being appended twice to the later discarded-filament completion input.
+    let sloped_filaments = BTreeMap::new();
 
     Ok(FilteredRawFilaments {
         ownership,
@@ -673,6 +682,39 @@ mod tests {
     }
 
     #[test]
+    fn strongly_bowed_five_line_staff_survives_early_classification() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 118, 70).unwrap();
+        // Five parallel, piecewise-horizontal arches. Their roughly 0.48-rad
+        // central rotation is far beyond the legacy 0.1-rad early gate, but
+        // their mutual one-interline spacing makes them a strong staff group.
+        let offsets = [0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0];
+        for base_y in [10, 20, 30, 40, 50] {
+            for (index, dy) in offsets.into_iter().enumerate() {
+                runs.add_run(base_y + dy, Run::new(index * 7, 9)).unwrap();
+            }
+        }
+        let lag = HorizontalSectionLag::from_long_runs(runs).unwrap();
+        let built = build_primary_cluster_pass(&lag, parameters()).unwrap();
+
+        // The factory represents each arch as two monotone filaments. Five of
+        // those halves are classified as slope outliers; all ten still reach
+        // the comb network and can form one staff.
+        assert_eq!(built.sloped_ids().len(), 5);
+        assert_eq!(built.survivor_order().len(), 10);
+        assert!(built.sloped_filaments().is_empty());
+
+        let mut state = built.into_state();
+        let result = retrieve_staff_candidates(
+            &mut state,
+            None,
+            LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result.staffs().len(), 1);
+        assert_eq!(result.staffs()[0].line_ids().len(), 5);
+    }
+
+    #[test]
     fn adapter_failure_does_not_mutate_live_lag() {
         let mut runs = RunTable::new(Orientation::Horizontal, 20, 12).unwrap();
         runs.add_run(10, Run::new(0, 20)).unwrap();
@@ -789,7 +831,7 @@ mod tests {
     }
 
     #[test]
-    fn rejection_precedes_combs_and_preserves_ids_ownership_and_discard_classes() {
+    fn geometric_outliers_reach_combs_with_diagnostic_classes_intact() {
         let values = rejection_fixture_filaments();
         let survivor_sections = values
             .iter()
@@ -820,42 +862,39 @@ mod tests {
         assert!((filtered.global_slope - (6.0 / 119.0)).abs() < 1e-12);
         assert_eq!(
             filtered.filament_order,
-            [FilamentId::new(3), FilamentId::new(5), FilamentId::new(1)]
+            [
+                FilamentId::new(3),
+                FilamentId::new(2),
+                FilamentId::new(5),
+                FilamentId::new(4),
+                FilamentId::new(1),
+            ]
         );
         assert_eq!(filtered.curved_ids, [FilamentId::new(2)]);
         assert_eq!(filtered.sloped_ids, [FilamentId::new(4)]);
         assert_eq!(
             filtered.filaments.keys().copied().collect::<Vec<_>>(),
-            [FilamentId::new(1), FilamentId::new(3), FilamentId::new(5)]
+            [
+                FilamentId::new(1),
+                FilamentId::new(2),
+                FilamentId::new(3),
+                FilamentId::new(4),
+                FilamentId::new(5),
+            ]
         );
-        assert_eq!(
-            filtered
-                .sloped_filaments
-                .keys()
-                .copied()
-                .collect::<Vec<_>>(),
-            [FilamentId::new(4)]
-        );
+        assert!(filtered.sloped_filaments.is_empty());
 
-        for id in [FilamentId::new(1), FilamentId::new(3), FilamentId::new(5)] {
+        for id in [
+            FilamentId::new(1),
+            FilamentId::new(2),
+            FilamentId::new(3),
+            FilamentId::new(4),
+            FilamentId::new(5),
+        ] {
             for section in &survivor_sections[&id] {
                 assert_eq!(filtered.ownership.section_owner(*section), Some(id));
             }
         }
-        for id in [FilamentId::new(2), FilamentId::new(4)] {
-            for section in &survivor_sections[&id] {
-                assert_eq!(filtered.ownership.section_owner(*section), None);
-            }
-        }
-        assert_eq!(
-            filtered.sloped_filaments[&FilamentId::new(4)]
-                .sections()
-                .iter()
-                .map(|section| section.id())
-                .collect::<Vec<_>>(),
-            survivor_sections[&FilamentId::new(4)]
-        );
-        assert!(!filtered.sloped_filaments.contains_key(&FilamentId::new(2)));
     }
 
     #[test]
