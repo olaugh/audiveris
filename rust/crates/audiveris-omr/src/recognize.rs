@@ -3676,7 +3676,9 @@ impl SystemBounds {
 
 /// Expands anomalously short systems on a known piano page.
 ///
-/// The final system may genuinely be short, so it is never touched. Interior
+/// The final system may genuinely be short, so right-short endings are never
+/// touched; a final system is recoverable only when its right edge agrees with
+/// the page and catastrophic loss affects the left edge alone. Interior
 /// candidates must be less than 85% of the page's median system width and have
 /// a left edge more than 10% of that width inside the median. A first system is
 /// protected against ordinary title/instrument indentation by a much stricter
@@ -3725,12 +3727,16 @@ fn recover_piano_system_bounds(bounds: &mut [SystemBounds], systems: &[Vec<usize
         let extreme_first = index == 0
             && width < 0.80 * f64::from(median_width)
             && f64::from(system.left - median_left) > 0.20 * f64::from(median_width);
+        let extreme_final_left = index == final_index
+            && width < 0.80 * f64::from(median_width)
+            && f64::from(system.left - median_left) > 0.20 * f64::from(median_width)
+            && f64::from(median_right - system.right) < 0.10 * f64::from(median_width);
         let truncated_interior = index > 0
             && index < final_index
             && width < 0.85 * f64::from(median_width)
             && left_is_truncated
             && f64::from(gaps_by_boundary[index - 1]) <= 1.5 * f64::from(median_vertical_gap);
-        if index == final_index || !(extreme_first || truncated_interior) {
+        if !(extreme_first || extreme_final_left || truncated_interior) {
             continue;
         }
         let old = (system.left, system.right);
@@ -3951,6 +3957,20 @@ mod tests {
         assert_eq!(recover_piano_system_bounds(&mut bounds, &piano), [1]);
         assert_eq!((bounds[0].left, bounds[0].right), (100, 900));
         assert_eq!((bounds[4].left, bounds[4].right), (500, 700));
+
+        let mut final_left_truncation = bounds.clone();
+        final_left_truncation[4].right = 900;
+        assert_eq!(
+            recover_piano_system_bounds(&mut final_left_truncation, &piano),
+            [5]
+        );
+        assert_eq!(
+            (
+                final_left_truncation[4].left,
+                final_left_truncation[4].right
+            ),
+            (100, 900)
+        );
 
         let mut ordinary_first_indent = bounds.clone();
         ordinary_first_indent[0].left = 260;

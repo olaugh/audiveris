@@ -135,9 +135,10 @@ requires at least four vertically stacked two-staff systems and normally
 expands only a severely shortened
 interior left edge. A first system must pass a stricter 80%-width and 20%-left
 disagreement gate; this catches catastrophic crop-like loss while protecting
-ordinary title and instrument indentation. Final systems, right-only short
-systems, and interior systems after a large vertical section gap remain
-protected, preserving ragged endings and mid-page movement starts.
+ordinary title and instrument indentation. Final systems use the same strict
+gate and must retain a page-consistent right edge, protecting normal ragged
+endings; right-only short systems and interior systems after a large vertical
+section gap also remain protected.
 
 GRID JSON publishes `piano_system_pair_recovery_applied` and
 `piano_system_bounds_recovery_count` plus the recovered system IDs for audit.
