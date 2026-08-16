@@ -852,8 +852,25 @@ impl ProjectionPeakCandidate {
 
         let width = self.stop.wrapping_sub(self.start).wrapping_add(1);
         let dx = i32::from(width <= 2);
-        let x_min = self.start.wrapping_sub(dx);
-        let x_max = self.stop.wrapping_add(dx);
+        let raster_x_max = i32::try_from(raster_width - 1).map_err(|_| {
+            ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            }
+        })?;
+        if self.stop < 0 || self.start > raster_x_max {
+            return Err(ProjectionError::CoreProbeOutOfBounds {
+                x_min: self.start,
+                x_max: self.stop,
+                y_min: geometry.y_top,
+                y_max: geometry.y_bottom,
+            });
+        }
+        // Java's image-area probe is effectively clipped at the raster edge.
+        // A narrow peak on the first or final column still carries useful
+        // evidence; expanding its serif probe must not abort the whole sheet.
+        let x_min = self.start.wrapping_sub(dx).max(0);
+        let x_max = self.stop.wrapping_add(dx).min(raster_x_max);
 
         let full_height_core = if added_chunk != 0 {
             Some(vertical_core_data(
@@ -4210,12 +4227,17 @@ mod tests {
 
         let pixels = vec![255; 8 * 9];
         let params = PeakCoreParams::new(1, 0.3).unwrap();
-        assert_eq!(
+        assert!(
             candidate(0, 0)
+                .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params,)
+                .is_ok()
+        );
+        assert_eq!(
+            candidate(8, 8)
                 .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params,),
             Err(ProjectionError::CoreProbeOutOfBounds {
-                x_min: -1,
-                x_max: 1,
+                x_min: 8,
+                x_max: 8,
                 y_min: 0,
                 y_max: 8,
             })
