@@ -277,6 +277,9 @@ pub struct PeakGraphReport {
     pub invalid_connection_probe_count: usize,
     /// Whether a connected-score second pass rebuilt the graph more widely.
     pub connected_alignment_second_pass: bool,
+    /// Whether the explicit piano prior recovered one or more adjacent system
+    /// pairs after ordinary connector recognition left them missing.
+    pub piano_system_pair_recovery_applied: bool,
     pub alignment_count: usize,
     pub connection_count: usize,
     /// Peaks that yielded a registered bar filament.
@@ -409,6 +412,9 @@ pub struct GridLinesRecognition {
     /// Each system's own staff extremes, which `dispatchSheetSpots` tests as
     /// well as the area.
     pub system_bounds: Vec<SystemBounds>,
+    /// Piano systems whose abscissa bounds were conservatively expanded from
+    /// page consensus after severe warp truncated both staves.
+    pub piano_system_bounds_recovered: Vec<usize>,
     /// Per-staff first and last line splines, in staff order.
     ///
     /// Everything in HEADERS that positions a lookup area against a staff reads
@@ -2475,6 +2481,13 @@ fn build_peak_graph(
             connected_pairs.push((source, target));
         }
     }
+    let mut piano_system_pair_recovery_applied = false;
+    if std::env::var("AUDIVERIS_RECOVER_PIANO_SYSTEM_PAIRS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        piano_system_pair_recovery_applied =
+            complete_piano_system_pairs(&mut connected_pairs, alignment_staffs);
+    }
 
     // Every staff starts alone; connected pairs merge their groups.
     let mut systems: Vec<Vec<usize>> = alignment_staffs
@@ -2793,6 +2806,7 @@ fn build_peak_graph(
         alignment_seed_connection_count,
         invalid_connection_probe_count,
         connected_alignment_second_pass,
+        piano_system_pair_recovery_applied,
         alignment_count,
         connection_count,
         stick_count,
@@ -2938,6 +2952,96 @@ fn staff_of_key(
         .position(|peaks| peaks.iter().any(|peak| peak.key() == key))
         .and_then(|index| staffs.get(index))
         .map(|staff| staff.staff_id.value())
+}
+
+/// Conservative piano-only fallback when severe warp destroys vertical bar
+/// connections. Adjacent pairs must look like five-line grand-staff rows:
+/// substantial horizontal overlap, a plausible within-pair gap, and a page-level
+/// alternating-gap pattern. Requiring every individual system boundary to be
+/// much larger is brittle under curl, which can compress one boundary while the
+/// page-level pattern remains decisive. The opt-in caller supplies the musical
+/// prior; ordinary Java-parity recognition never reaches this function.
+fn piano_system_pair_fallback(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> {
+    if staffs.len() < 4 || staffs.len() % 2 != 0 {
+        return Vec::new();
+    }
+    let mut pair_gaps = Vec::new();
+    for pair in staffs.chunks_exact(2) {
+        let upper = &pair[0];
+        let lower = &pair[1];
+        let overlap = (upper.right.min(lower.right) - upper.left.max(lower.left)).max(0.0);
+        let minimum_width = (upper.right - upper.left).min(lower.right - lower.left);
+        let interline = ((upper.bottom - upper.top) + (lower.bottom - lower.top)) / 8.0;
+        let gap = lower.top - upper.bottom;
+        if minimum_width <= 0.0
+            || overlap / minimum_width < 0.70
+            || interline <= 0.0
+            || gap <= 0.0
+            || gap > 14.0 * interline
+        {
+            return Vec::new();
+        }
+        pair_gaps.push(gap);
+    }
+    let mut between_gaps = Vec::new();
+    for (index, boundary) in staffs.windows(2).enumerate() {
+        if index % 2 == 0 {
+            continue;
+        }
+        let between_gap = boundary[1].top - boundary[0].bottom;
+        let adjacent_pair_gap = pair_gaps[index / 2].min(
+            *pair_gaps
+                .get(index / 2 + 1)
+                .unwrap_or(&pair_gaps[index / 2]),
+        );
+        if between_gap <= 1.05 * adjacent_pair_gap {
+            return Vec::new();
+        }
+        between_gaps.push(between_gap);
+    }
+    pair_gaps.sort_by(f64::total_cmp);
+    between_gaps.sort_by(f64::total_cmp);
+    let pair_median = pair_gaps[pair_gaps.len() / 2];
+    let between_median = between_gaps[between_gaps.len() / 2];
+    if between_median <= 1.25 * pair_median {
+        return Vec::new();
+    }
+    staffs
+        .chunks_exact(2)
+        .map(|pair| (pair[0].staff_id.value(), pair[1].staff_id.value()))
+        .collect()
+}
+
+/// Complete missing canonical piano pairs without overriding connector
+/// evidence. Any existing noncanonical connection vetoes the fallback; this
+/// allows one or more curl-damaged boundaries to recover while refusing to
+/// reinterpret a page whose observed topology disagrees with the piano prior.
+fn complete_piano_system_pairs(
+    connected_pairs: &mut Vec<(usize, usize)>,
+    staffs: &[AlignmentStaff],
+) -> bool {
+    let recovered = piano_system_pair_fallback(staffs);
+    if recovered.is_empty()
+        || connected_pairs.iter().any(|existing| {
+            !recovered
+                .iter()
+                .any(|candidate| existing == candidate || *existing == (candidate.1, candidate.0))
+        })
+    {
+        return false;
+    }
+    let mut changed = false;
+    for candidate in recovered {
+        if connected_pairs
+            .iter()
+            .any(|existing| *existing == candidate || *existing == (candidate.1, candidate.0))
+        {
+            continue;
+        }
+        connected_pairs.push(candidate);
+        changed = true;
+    }
+    changed
 }
 
 /// Collapses staff groups that share a staff into single systems.
@@ -3428,6 +3532,13 @@ pub fn recognize_grid_lines_raster(
             bottom,
         });
     }
+    let piano_system_bounds_recovered = if std::env::var("AUDIVERIS_RECOVER_PIANO_SYSTEM_BOUNDS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        recover_piano_system_bounds(&mut system_bounds, &peak_graph.systems)
+    } else {
+        Vec::new()
+    };
     let system_areas = build_population_system_areas(
         &system_geometries,
         &system_boundaries,
@@ -3475,6 +3586,7 @@ pub fn recognize_grid_lines_raster(
         staff_areas,
         system_areas,
         system_bounds,
+        piano_system_bounds_recovered,
         staff_lines: staff_line_geometry,
     })
 }
@@ -3560,6 +3672,77 @@ impl SystemBounds {
     pub const fn java_right(self) -> i32 {
         self.right.saturating_add(1)
     }
+}
+
+/// Expands anomalously short systems on a known piano page.
+///
+/// The final system may genuinely be short, so it is never touched. Interior
+/// candidates must be less than 85% of the page's median system width and have
+/// a left edge more than 10% of that width inside the median. A first system is
+/// protected against ordinary title/instrument indentation by a much stricter
+/// 80%-width/20%-left-disagreement gate. A large preceding vertical gap protects
+/// a new movement's legitimately indented first system; right-only short systems
+/// are never expanded. This is an opt-in departure from Java parity for
+/// warped-piano recognition.
+fn recover_piano_system_bounds(bounds: &mut [SystemBounds], systems: &[Vec<usize>]) -> Vec<usize> {
+    if bounds.len() < 4
+        || bounds.len() != systems.len()
+        || systems.iter().any(|staffs| staffs.len() != 2)
+        || bounds
+            .windows(2)
+            .any(|neighbors| neighbors[1].top <= neighbors[0].bottom)
+    {
+        return Vec::new();
+    }
+    let mut widths: Vec<i32> = bounds
+        .iter()
+        .map(|system| system.right - system.left)
+        .collect();
+    let mut lefts: Vec<i32> = bounds.iter().map(|system| system.left).collect();
+    let mut rights: Vec<i32> = bounds.iter().map(|system| system.right).collect();
+    widths.sort_unstable();
+    lefts.sort_unstable();
+    rights.sort_unstable();
+    let median_width = widths[widths.len() / 2];
+    let median_left = lefts[lefts.len() / 2];
+    let median_right = rights[rights.len() / 2];
+    if median_width <= 0 {
+        return Vec::new();
+    }
+    let mut recovered = Vec::new();
+    let final_index = bounds.len() - 1;
+    let gaps_by_boundary: Vec<i32> = bounds
+        .windows(2)
+        .map(|neighbors| neighbors[1].top - neighbors[0].bottom)
+        .collect();
+    let mut vertical_gaps = gaps_by_boundary.clone();
+    vertical_gaps.sort_unstable();
+    let median_vertical_gap = vertical_gaps[vertical_gaps.len() / 2];
+    for (index, system) in bounds.iter_mut().enumerate() {
+        let width = f64::from(system.right - system.left);
+        let left_is_truncated =
+            f64::from(system.left - median_left) > 0.10 * f64::from(median_width);
+        let extreme_first = index == 0
+            && width < 0.80 * f64::from(median_width)
+            && f64::from(system.left - median_left) > 0.20 * f64::from(median_width);
+        let truncated_interior = index > 0
+            && index < final_index
+            && width < 0.85 * f64::from(median_width)
+            && left_is_truncated
+            && f64::from(gaps_by_boundary[index - 1]) <= 1.5 * f64::from(median_vertical_gap);
+        if index == final_index || !(extreme_first || truncated_interior) {
+            continue;
+        }
+        let old = (system.left, system.right);
+        system.left = median_left;
+        if f64::from(median_right - system.right) > 0.10 * f64::from(median_width) {
+            system.right = median_right;
+        }
+        if old != (system.left, system.right) {
+            recovered.push(system.system_id);
+        }
+    }
+    recovered
 }
 
 /// Java `StaffManager.constants.verticalAreaMargin`, 0.9 interline.
@@ -3674,6 +3857,119 @@ mod tests {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .join(relative)
+    }
+
+    fn pairing_staff(id: usize, top: f64, bottom: f64) -> AlignmentStaff {
+        AlignmentStaff {
+            staff_id: StaffId::new(id),
+            left: 100.0,
+            right: 900.0,
+            top,
+            bottom,
+            short: false,
+            peaks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn piano_pair_fallback_requires_alternating_grand_staff_gaps() {
+        let piano = vec![
+            pairing_staff(1, 0.0, 40.0),
+            pairing_staff(2, 80.0, 120.0),
+            pairing_staff(3, 240.0, 280.0),
+            pairing_staff(4, 320.0, 360.0),
+        ];
+        assert_eq!(piano_system_pair_fallback(&piano), [(1, 2), (3, 4)]);
+
+        let one_compressed_boundary = vec![
+            pairing_staff(1, 0.0, 40.0),
+            pairing_staff(2, 90.0, 130.0),
+            pairing_staff(3, 280.0, 320.0),
+            pairing_staff(4, 390.0, 430.0),
+            pairing_staff(5, 510.0, 550.0),
+            pairing_staff(6, 600.0, 640.0),
+        ];
+        assert_eq!(
+            piano_system_pair_fallback(&one_compressed_boundary),
+            [(1, 2), (3, 4), (5, 6)],
+        );
+
+        let uniform = vec![
+            pairing_staff(1, 0.0, 40.0),
+            pairing_staff(2, 80.0, 120.0),
+            pairing_staff(3, 160.0, 200.0),
+            pairing_staff(4, 240.0, 280.0),
+        ];
+        assert!(piano_system_pair_fallback(&uniform).is_empty());
+        assert!(piano_system_pair_fallback(&piano[..3]).is_empty());
+
+        let mut partial = vec![(1, 2)];
+        assert!(complete_piano_system_pairs(&mut partial, &piano));
+        assert_eq!(partial, [(1, 2), (3, 4)]);
+        assert!(!complete_piano_system_pairs(&mut partial, &piano));
+
+        let mut contradictory = vec![(2, 3)];
+        assert!(!complete_piano_system_pairs(&mut contradictory, &piano));
+        assert_eq!(contradictory, [(2, 3)]);
+    }
+
+    #[test]
+    fn piano_bounds_recovery_expands_only_short_interior_systems() {
+        let mut bounds: Vec<SystemBounds> = (0..5)
+            .map(|index| SystemBounds {
+                system_id: index + 1,
+                left: if index == 2 { 350 } else { 100 },
+                right: if index == 2 { 700 } else { 900 },
+                top: index as i32 * 100,
+                bottom: index as i32 * 100 + 80,
+            })
+            .collect();
+        let piano = vec![vec![1, 2], vec![3, 4], vec![5, 6], vec![7, 8], vec![9, 10]];
+        assert_eq!(recover_piano_system_bounds(&mut bounds, &piano), [3]);
+        assert_eq!((bounds[2].left, bounds[2].right), (100, 900));
+
+        let mut right_only = bounds.clone();
+        right_only[2].right = 500;
+        assert!(recover_piano_system_bounds(&mut right_only, &piano).is_empty());
+        assert_eq!((right_only[2].left, right_only[2].right), (100, 500));
+
+        let mut movement_start = bounds.clone();
+        movement_start[2].left = 350;
+        movement_start[2].top = 350;
+        movement_start[2].bottom = 430;
+        movement_start[3].top = 450;
+        movement_start[3].bottom = 530;
+        movement_start[4].top = 550;
+        movement_start[4].bottom = 630;
+        assert!(recover_piano_system_bounds(&mut movement_start, &piano).is_empty());
+        assert_eq!(movement_start[2].left, 350);
+
+        bounds[0].left = 500;
+        bounds[0].right = 900;
+        bounds[4].left = 500;
+        bounds[4].right = 700;
+        assert_eq!(recover_piano_system_bounds(&mut bounds, &piano), [1]);
+        assert_eq!((bounds[0].left, bounds[0].right), (100, 900));
+        assert_eq!((bounds[4].left, bounds[4].right), (500, 700));
+
+        let mut ordinary_first_indent = bounds.clone();
+        ordinary_first_indent[0].left = 260;
+        ordinary_first_indent[0].right = 900;
+        assert!(recover_piano_system_bounds(&mut ordinary_first_indent, &piano).is_empty());
+        assert_eq!(
+            (
+                ordinary_first_indent[0].left,
+                ordinary_first_indent[0].right
+            ),
+            (260, 900)
+        );
+
+        let ensemble = vec![vec![1], vec![2], vec![3], vec![4], vec![5]];
+        assert!(recover_piano_system_bounds(&mut bounds, &ensemble).is_empty());
+
+        let mut side_by_side = bounds.clone();
+        side_by_side[2].top = side_by_side[1].top;
+        assert!(recover_piano_system_bounds(&mut side_by_side, &piano).is_empty());
     }
 
     #[test]
@@ -4713,6 +5009,10 @@ mod tests {
             "\"producer\"",
             "\"gray_digest\"",
             "\"systems\"",
+            "\"piano_system_pair_recovery_applied\"",
+            "\"piano_system_bounds_recovered_ids\"",
+            "\"bounds_recovered\"",
+            "\"area\"",
             "\"staves\"",
             "\"inters\"",
             "\"relations\"",
@@ -4723,6 +5023,16 @@ mod tests {
         ] {
             assert!(json.contains(key), "the report should carry {key}");
         }
+        assert_eq!(
+            json.matches("\"bounds_recovered\":").count(),
+            recognition.peak_graph.systems.len(),
+            "every system should audit whether its bounds were recovered",
+        );
+        assert_eq!(
+            json.matches("\"area\":").count(),
+            recognition.system_areas.len(),
+            "every operational curved system area should be published",
+        );
         // The evidence is the reason this exists; an empty impacts block would
         // be well formed and useless.
         assert!(

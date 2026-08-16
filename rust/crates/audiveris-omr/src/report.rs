@@ -397,6 +397,20 @@ fn recognition_json(
         "bar_alignment_connected_second_pass",
         recognition.peak_graph.connected_alignment_second_pass,
     );
+    json.field_boolean(
+        "piano_system_pair_recovery_applied",
+        recognition.peak_graph.piano_system_pair_recovery_applied,
+    );
+    json.field_integer(
+        "piano_system_bounds_recovery_count",
+        recognition.piano_system_bounds_recovered.len() as i64,
+    );
+    json.key("piano_system_bounds_recovered_ids");
+    json.open('[');
+    for system_id in &recognition.piano_system_bounds_recovered {
+        json.integer(*system_id as i64);
+    }
+    json.close(']');
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
@@ -498,6 +512,48 @@ fn systems(json: &mut Json, recognition: &GridLinesRecognition) {
             json.integer(*id as i64);
         }
         json.close(']');
+        if let Some(bounds) = recognition
+            .system_bounds
+            .iter()
+            .find(|bounds| bounds.system_id == index + 1)
+        {
+            json.key("bounds");
+            json.open('{');
+            json.field_integer("left", i64::from(bounds.left));
+            json.field_integer("right", i64::from(bounds.right));
+            json.field_integer("top", i64::from(bounds.top));
+            json.field_integer("bottom", i64::from(bounds.bottom));
+            json.close('}');
+            json.field_boolean(
+                "bounds_recovered",
+                recognition
+                    .piano_system_bounds_recovered
+                    .contains(&(index + 1)),
+            );
+        }
+        if let Some(area) = recognition
+            .system_areas
+            .iter()
+            .find(|area| area.system_id == index + 1)
+        {
+            json.key("area");
+            json.open('{');
+            json.field_integer("left", i64::from(area.left));
+            json.field_integer("right", i64::from(area.right));
+            json.key("north");
+            json.open('[');
+            for segment in &area.north().segments {
+                boundary_segment(json, *segment);
+            }
+            json.close(']');
+            json.key("south");
+            json.open('[');
+            for segment in &area.south().segments {
+                boundary_segment(json, *segment);
+            }
+            json.close(']');
+            json.close('}');
+        }
         json.close('}');
     }
     json.close(']');

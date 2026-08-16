@@ -115,6 +115,35 @@ The wider global-alignment, bar-self-calibrated vertical-field, and generic
 slope-aware projection variables described below remain diagnostic controls;
 they are not part of this retained configuration.
 
+### Experimental warped-piano system recovery
+
+Two additional controls harden system geometry after severe page warp without
+changing the Java-parity default:
+
+```sh
+AUDIVERIS_RECOVER_PIANO_SYSTEM_PAIRS=1 \
+AUDIVERIS_RECOVER_PIANO_SYSTEM_BOUNDS=1 \
+  cargo run --release -p audiveris-cli -- -batch -step GRID -json score.png
+```
+
+Pair recovery fills only canonical adjacent pairs left missing by ordinary
+connector recognition. Existing connector evidence must agree with every
+canonical pair or the fallback is vetoed. It requires an even page of at least
+four staves, strong horizontal overlap within adjacent pairs, plausible
+grand-staff spacing, and a page-wide alternating-gap pattern. Bounds recovery
+requires at least four vertically stacked two-staff systems and normally
+expands only a severely shortened
+interior left edge. A first system must pass a stricter 80%-width and 20%-left
+disagreement gate; this catches catastrophic crop-like loss while protecting
+ordinary title and instrument indentation. Final systems, right-only short
+systems, and interior systems after a large vertical section gap remain
+protected, preserving ragged endings and mid-page movement starts.
+
+GRID JSON publishes `piano_system_pair_recovery_applied` and
+`piano_system_bounds_recovery_count` plus the recovered system IDs for audit.
+Each `systems[]` record also includes the staff-extreme `bounds` and exact
+curved operational `area` boundaries consumed by downstream dispatch.
+
 The first widens the residual slope accepted between peaks after global
 deskewing (valid range 0.06–0.25). The adaptive control robustly fits a linear
 vertical-slope field across x from at least three pairs of intrinsic-grade
