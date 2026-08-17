@@ -144,6 +144,10 @@ pub struct NeutralStaffProjectorRequest {
     pub is_one_line_staff: bool,
     pub bar_threshold: i32,
     pub total_height: i32,
+    /// Minimum contextual grade retained as a neutral peak. Java parity is
+    /// [`MINIMUM_STAFF_PEAK_GRADE`]; evaluation profiles may lower this to
+    /// audit evidence that Java's early irreversible filter would discard.
+    pub minimum_peak_grade: f64,
     pub peak_construction: PeakConstructionParams,
     pub peak_core: PeakCoreParams,
     pub brace_search: Option<BraceSearchRequest>,
@@ -943,6 +947,23 @@ impl ProjectionPeakCandidate {
         staff_id: StaffId,
         params: PeakGradeParams,
     ) -> Result<Option<StaffPeak>, ProjectionError> {
+        self.into_staff_peak_with_minimum_grade(
+            validation,
+            staff_id,
+            params,
+            MINIMUM_STAFF_PEAK_GRADE,
+        )
+    }
+
+    /// Variant used by diagnostic/evaluation profiles that retain weaker
+    /// candidates for later contextual grading instead of pruning them here.
+    pub fn into_staff_peak_with_minimum_grade(
+        self,
+        validation: PeakCoreValidation,
+        staff_id: StaffId,
+        params: PeakGradeParams,
+        minimum_grade: f64,
+    ) -> Result<Option<StaffPeak>, ProjectionError> {
         if self.start != validation.start || self.stop != validation.stop {
             return Err(ProjectionError::MismatchedCoreValidation);
         }
@@ -951,7 +972,7 @@ impl ProjectionPeakCandidate {
         }
 
         let impacts = self.staff_vertical_impacts(validation, params);
-        if impacts.grade() < MINIMUM_STAFF_PEAK_GRADE || impacts.grade().is_nan() {
+        if impacts.grade() < minimum_grade || impacts.grade().is_nan() {
             return Ok(None);
         }
 
@@ -1925,8 +1946,12 @@ impl StaffProjectionAccumulation {
                         half_mode,
                     );
                     let impacts = candidate.staff_vertical_impacts(validation, grade_params);
-                    let peak =
-                        candidate.into_staff_peak(validation, request.staff_id, grade_params)?;
+                    let peak = candidate.into_staff_peak_with_minimum_grade(
+                        validation,
+                        request.staff_id,
+                        grade_params,
+                        request.minimum_peak_grade,
+                    )?;
                     if peak.is_none() {
                         peak_rejections.push(ProjectionPeakRejection {
                             start: candidate.start,
@@ -2244,6 +2269,7 @@ where
             is_one_line_staff: request.scale.is_one_line_staff,
             bar_threshold: scale_parameters.bar_threshold,
             total_height,
+            minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
             peak_construction: construction,
             peak_core: core,
             brace_search: None,
@@ -2765,6 +2791,7 @@ mod tests {
                     is_one_line_staff: false,
                     bar_threshold: 4,
                     total_height: 5,
+                    minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
                     peak_construction: PeakConstructionParams::new(peak_refinement, 4).unwrap(),
                     peak_core: PeakCoreParams::new(1, 0.3).unwrap(),
                     brace_search: Some(BraceSearchRequest::new(5, 0, 7, 2, 4)),
@@ -2847,6 +2874,7 @@ mod tests {
                     is_one_line_staff: false,
                     bar_threshold: 8,
                     total_height: 10,
+                    minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
                     peak_construction: PeakConstructionParams::new(
                         PeakRefinementParams::new(8, 2, 4, 2, 1).unwrap(),
                         4,
@@ -4323,6 +4351,16 @@ mod tests {
             )
             .unwrap(),
             None
+        );
+        assert!(
+            weak.into_staff_peak_with_minimum_grade(
+                validation,
+                StaffId::new(2),
+                PeakGradeParams::new(4, 12, false),
+                0.0,
+            )
+            .unwrap()
+            .is_some()
         );
         assert!(matches!(
             candidate(4, 4).into_staff_peak(

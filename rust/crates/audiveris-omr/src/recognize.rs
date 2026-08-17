@@ -1675,6 +1675,28 @@ fn project_staff_peaks(
         scale_parameters.chunk_width.max(1),
     )
     .map_err(grid_stage("peak refinement parameters"))?;
+    let minimum_peak_grade = match std::env::var("AUDIVERIS_MINIMUM_STAFF_PEAK_GRADE") {
+        Ok(value) => {
+            let grade = value
+                .parse::<f64>()
+                .map_err(|_| GridRecognitionError::Stage {
+                    stage: "peak projection",
+                    message: format!(
+                        "AUDIVERIS_MINIMUM_STAFF_PEAK_GRADE must be in [0, 1], got {value:?}"
+                    ),
+                })?;
+            if !grade.is_finite() || !(0.0..=1.0).contains(&grade) {
+                return Err(GridRecognitionError::Stage {
+                    stage: "peak projection",
+                    message: format!(
+                        "AUDIVERIS_MINIMUM_STAFF_PEAK_GRADE must be in [0, 1], got {value:?}"
+                    ),
+                });
+            }
+            grade
+        }
+        Err(_) => 0.08,
+    };
     let neutral_request = NeutralStaffProjectorRequest {
         staff_id: StaffId::new(staff.id()),
         staff_left: staff.left().round() as i32,
@@ -1687,6 +1709,7 @@ fn project_staff_peaks(
         is_one_line_staff: false,
         bar_threshold: scale_parameters.bar_threshold,
         total_height,
+        minimum_peak_grade,
         peak_construction: PeakConstructionParams::new(
             refinement,
             scale_parameters.maximum_bar_width,
@@ -3134,6 +3157,44 @@ pub fn recognize_grid_lines_raster(
     let mut parameters = production_grid_parameters(&scale_recognition.scale, global_slope)
         .map_err(grid_stage("parameter derivation"))?;
     parameters.raw_primary.projective_slope = projective_staff_slope;
+    if let Ok(value) = std::env::var("AUDIVERIS_MINIMUM_CLUSTER_LENGTH_RATIO") {
+        let ratio = value
+            .parse::<f64>()
+            .map_err(|_| GridRecognitionError::Stage {
+                stage: "parameter derivation",
+                message: format!(
+                    "AUDIVERIS_MINIMUM_CLUSTER_LENGTH_RATIO must be nonnegative, got {value:?}"
+                ),
+            })?;
+        parameters.raw_primary.retrieval = parameters
+            .raw_primary
+            .retrieval
+            .with_minimum_cluster_length_ratio(ratio)
+            .map_err(grid_stage("minimum cluster length ratio"))?;
+    }
+    if let Ok(value) = std::env::var("AUDIVERIS_MINIMUM_STAFF_WIDTH_INTERLINES") {
+        let interlines = value.parse::<f64>().map_err(|_| GridRecognitionError::Stage {
+            stage: "parameter derivation",
+            message: format!(
+                "AUDIVERIS_MINIMUM_STAFF_WIDTH_INTERLINES must be a positive number, got {value:?}"
+            ),
+        })?;
+        if !interlines.is_finite() || interlines <= 0.0 {
+            return Err(GridRecognitionError::Stage {
+                stage: "parameter derivation",
+                message: format!(
+                    "AUDIVERIS_MINIMUM_STAFF_WIDTH_INTERLINES must be positive, got {value:?}"
+                ),
+            });
+        }
+        let minimum_width = (interlines * f64::from(scale_recognition.scale.interline.main))
+            .round_ties_even()
+            .max(1.0) as usize;
+        parameters.lines = parameters
+            .lines
+            .with_minimum_staff_width(minimum_width)
+            .map_err(grid_stage("minimum staff width"))?;
+    }
     if std::env::var("AUDIVERIS_TRACE_TERMINAL_STAFF_BARS")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
     {

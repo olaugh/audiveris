@@ -284,9 +284,31 @@ impl LinesCoordinatorParameters {
         Ok(self)
     }
 
+    /// Override Java's minimum accepted five-line cluster width.
+    ///
+    /// Production parity uses 30 interlines.  Difficult piano pages can carry
+    /// legitimate very short final systems, so an opt-in caller may retain a
+    /// smaller cluster for late staff pairing and bar evidence instead of
+    /// irreversibly discarding it here.
+    pub fn with_minimum_staff_width(
+        mut self,
+        minimum_staff_width: usize,
+    ) -> Result<Self, LinesCoordinatorError> {
+        if minimum_staff_width == 0 {
+            return Err(LinesCoordinatorError::InvalidParameters);
+        }
+        self.minimum_staff_width = minimum_staff_width;
+        Ok(self)
+    }
+
     #[must_use]
     pub const fn global_slope(self) -> f64 {
         self.global_slope
+    }
+
+    #[must_use]
+    pub const fn minimum_staff_width(self) -> usize {
+        self.minimum_staff_width
     }
 }
 
@@ -857,6 +879,19 @@ mod tests {
         assert!(!result.staffs()[1].is_small());
         assert_eq!(result.staffs()[0].id(), 1);
         assert_eq!(result.staffs()[1].id(), 2);
+    }
+
+    #[test]
+    fn minimum_staff_width_override_is_explicit_and_positive() {
+        let parameters = LinesCoordinatorParameters::new(0.0, 300, None, 1.0, 0.0, 100.0)
+            .unwrap()
+            .with_minimum_staff_width(150)
+            .unwrap();
+        assert_eq!(parameters.minimum_staff_width(), 150);
+        assert_eq!(
+            parameters.with_minimum_staff_width(0),
+            Err(LinesCoordinatorError::InvalidParameters)
+        );
     }
 
     #[test]

@@ -90,6 +90,27 @@ impl ClusterRetrievalParameters {
     pub const fn interline(&self) -> usize {
         self.interline
     }
+
+    /// Override Java's page-relative minimum cluster length ratio.
+    ///
+    /// This is intentionally explicit: retaining short five-line clusters is
+    /// useful for abbreviated final systems, but production parity remains at
+    /// the constructor's 0.2 default unless an opt-in caller changes it.
+    pub fn with_minimum_cluster_length_ratio(
+        mut self,
+        ratio: f64,
+    ) -> Result<Self, ClusterPipelineError> {
+        if !ratio.is_finite() || ratio < 0.0 {
+            return Err(ClusterPipelineError::InvalidParameters);
+        }
+        self.minimum_cluster_length_ratio = ratio;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn minimum_cluster_length_ratio(&self) -> f64 {
+        self.minimum_cluster_length_ratio
+    }
 }
 
 /// Stable observable partitions produced by the complete neutral pipeline.
