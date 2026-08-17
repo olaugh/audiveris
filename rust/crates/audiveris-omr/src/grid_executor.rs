@@ -12,6 +12,7 @@ use std::convert::Infallible;
 
 use audiveris_image::{
     bar_alignment::BarAlignment,
+    bar_column::StaffId,
     bars_coordinator::{BarsCoordinatorParameters, BarsSystemState},
     bars_logic::{BarsLogicError, ConnectionInterPlan, VerticalInterPlan},
     discarded_completion::PreparedCompletionSystem,
@@ -1042,14 +1043,42 @@ fn promote_grid_sigs(
     }
 
     // Java continues in exact order with recordBars, createGroups, then
-    // createParts for every system.
+    // createParts for every system. Use the system-owned staff sequence rather
+    // than reconstructing it from surviving peaks: a valid staff can reach
+    // this tail with no peak at all after the ProcessBars purges.
     for system in &mut state.systems {
+        let staff_ids = system
+            .staff_ids
+            .iter()
+            .copied()
+            .map(StaffId::new)
+            .collect::<Vec<_>>();
         system
             .sig
-            .build_bar_tail(
+            .record_bars_for_staffs(&mut system.bar_tail, &staff_ids, &system.staff_peaks)
+            .map_err(|source| HeadlessGridPromotionError::BarTail {
+                system_id: system.system_id,
+                source,
+            })?;
+        system
+            .sig
+            .create_groups_for_staffs(
                 &mut system.bar_tail,
+                &staff_ids,
                 &system.staff_peaks,
                 &system.brace_peaks,
+                &state.peak_graph,
+            )
+            .map_err(|source| HeadlessGridPromotionError::BarTail {
+                system_id: system.system_id,
+                source,
+            })?;
+        system
+            .sig
+            .create_parts_for_staffs(
+                &mut system.bar_tail,
+                &staff_ids,
+                &system.staff_peaks,
                 &state.peak_graph,
                 bar_tail_parameters,
             )
@@ -2288,6 +2317,26 @@ mod tests {
     }
 
     #[test]
+    fn process_bars_tail_preserves_a_system_staff_with_no_surviving_peak() {
+        let mut state = grid_sig_state(
+            sig_state(vec![Vec::new()], Vec::new()),
+            PeakGraph::new(),
+            Vec::new(),
+        );
+
+        promote_grid_sigs(&mut state, BarTailParameters::default()).unwrap();
+
+        let system = &state.systems[0];
+        assert_eq!(system.staff_ids, [1]);
+        assert_eq!(system.bar_tail.staff_barlines[&1], []);
+        assert!(system.bar_tail.part_groups.is_empty());
+        assert_eq!(system.bar_tail.parts.len(), 1);
+        assert_eq!(system.bar_tail.parts[0].first_staff_id, 1);
+        assert_eq!(system.bar_tail.parts[0].last_staff_id, 1);
+        assert!(system.bar_tail.contextualized);
+    }
+
+    #[test]
     fn connection_extension_failure_is_caught_per_edge_with_partial_sig_retained() {
         let top = peak(1, 10);
         let bottom = peak(2, 10);
@@ -2422,6 +2471,7 @@ mod tests {
             vec![vertical_plan(&two_top), vertical_plan(&two_bottom)],
         );
         second_system.system_id = 2;
+        second_system.staff_ids = vec![3, 4];
         let mut state = HeadlessGridSigState {
             systems: vec![
                 sig_state(

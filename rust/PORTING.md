@@ -28,6 +28,33 @@ differential tests against the frozen Java executable.
 5. Whole-score MusicXML and recognition metrics are evaluated separately from unit
    test parity.
 
+## GRID hard-scan policy
+
+The production GRID path now carries system-owned staff IDs all the way through
+`recordBars`, `createGroups`, and `createParts`. It never reconstructs the staff
+range from surviving bar peaks, because a valid staff can legitimately reach the
+bar tail with no peak. An ordinary `ProcessBars` exception is still swallowed at
+the Java-compatible lifecycle boundary, but the recognition result retains and
+reports its original stage and typed cause instead of later replacing it with a
+generic missing-completion error.
+
+Hard-scan recovery deliberately diverges from Java's connector-only system
+hypothesis. Connector evidence remains primary, while a conservative page-wide
+five-line geometry test can complete missing piano pairs. Systems whose pairing
+is geometrically plausible but not yet stable retain partial columns and peaks
+that extend beyond their provisional staff bounds; those irreversible purges run
+only after the hypothesis stabilizes. Independently, a late cluster guard samples
+all five completed staff filaments across their shared span and rejects
+non-contiguous or repeatedly implausible interline gaps, preventing a cluster
+assembled from two neighboring staves from becoming a staff. This guard runs
+after cluster construction, not as an early filament filter.
+
+The regression gate includes the 17 Schenker pages that formerly ended in a
+swallowed `ProcessBars -> BarTail::MissingStaffRange`; all 17 now complete. A
+release sweep over all 613 local Schenker pages also completes with zero GRID
+fatal errors. Completion is not a staff/barline accuracy claim; geometry and
+measure-count evaluation remain separate gates.
+
 ## Pipeline
 
 `LOAD -> BINARY -> SCALE -> GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS ->`

@@ -281,6 +281,7 @@ pub struct BarsCoordinatorParameters {
     minimum_normalized_width_delta: f64,
     c_clef: Option<CClefParameters>,
     strong_wide_partial_recovery: bool,
+    defer_partial_column_rejection: bool,
 }
 
 impl BarsCoordinatorParameters {
@@ -322,6 +323,7 @@ impl BarsCoordinatorParameters {
             minimum_normalized_width_delta,
             c_clef,
             strong_wide_partial_recovery: false,
+            defer_partial_column_rejection: false,
         })
     }
 
@@ -330,6 +332,15 @@ impl BarsCoordinatorParameters {
     #[must_use]
     pub const fn with_strong_wide_partial_recovery(mut self) -> Self {
         self.strong_wide_partial_recovery = true;
+        self
+    }
+
+    /// Keep incomplete columns while the caller's staff-to-system hypothesis
+    /// is still provisional. Partial-column deletion cannot be undone after a
+    /// later geometric pairing joins the missing peer staff.
+    #[must_use]
+    pub const fn with_deferred_partial_column_rejection(mut self) -> Self {
+        self.defer_partial_column_rejection = true;
         self
     }
 
@@ -382,6 +393,9 @@ pub struct BarsPurgeParameters {
     pub large_system_staff_count: usize,
     pub maximum_foreground_thickness: i32,
     pub maximum_bar_extension: f64,
+    /// False while staff-to-system membership is provisional. Extension past
+    /// a singleton boundary may actually be ink reaching its missing peer.
+    pub system_hypothesis_stable: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -918,7 +932,10 @@ pub fn process_bars_peak_purges(
         }
     }
 
-    if state.staffs.len() < parameters.large_system_staff_count && !state.staffs.is_empty() {
+    if parameters.system_hypothesis_stable
+        && state.staffs.len() < parameters.large_system_staff_count
+        && !state.staffs.is_empty()
+    {
         for (side, staff_index, stage) in [
             (VerticalSide::Top, 0, PeakRemovalStage::ExtendingTop),
             (
@@ -1588,14 +1605,16 @@ fn process_prefix(
     };
 
     let mut removed_peaks = Vec::new();
-    purge_partial_columns(
-        &mut *next,
-        start_column_index,
-        &id_to_key,
-        parameters.strong_wide_partial_recovery,
-        parameters.interline,
-        &mut removed_peaks,
-    )?;
+    if !parameters.defer_partial_column_rejection {
+        purge_partial_columns(
+            &mut *next,
+            start_column_index,
+            &id_to_key,
+            parameters.strong_wide_partial_recovery,
+            parameters.interline,
+            &mut removed_peaks,
+        )?;
+    }
     for staff_index in 0..next.staffs.len() {
         let start = next.staffs[staff_index]
             .peaks
@@ -2223,6 +2242,21 @@ mod tests {
         assert_eq!(result.vertical_inters().len(), 2);
         assert_eq!(result.connection_inters().len(), 1);
         assert!(result.connection_inters()[0].endpoints_complete);
+    }
+
+    #[test]
+    fn provisional_system_defers_partial_column_rejection() {
+        let mut state = system(true);
+        let result = process_bars_through_too_far_left(
+            &mut state,
+            parameters().with_deferred_partial_column_rejection(),
+        )
+        .unwrap();
+
+        assert_eq!(result.start_column_index(), Some(0));
+        assert!(result.removed_peaks().is_empty());
+        assert_eq!(state.columns().len(), 2);
+        assert_eq!(state.graph().vertices().len(), 3);
     }
 
     #[test]
@@ -2925,6 +2959,30 @@ mod tests {
             ),
         ];
 
+        let mut provisional = state.clone();
+        let provisional_result = process_bars_peak_purges(
+            &mut provisional,
+            &bounds,
+            BarsPurgeParameters {
+                large_system_staff_count: 10,
+                maximum_foreground_thickness: 2,
+                maximum_bar_extension: 5.0,
+                system_hypothesis_stable: false,
+            },
+        )
+        .unwrap();
+        assert!(
+            provisional_result
+                .removed_peaks()
+                .iter()
+                .all(|removed| !matches!(
+                    removed.stage,
+                    PeakRemovalStage::ExtendingTop | PeakRemovalStage::ExtendingBottom
+                ))
+        );
+        assert!(provisional.graph().contains_vertex(top_long.key()));
+        assert!(provisional.graph().contains_vertex(bottom_long.key()));
+
         let result = process_bars_peak_purges(
             &mut state,
             &bounds,
@@ -2932,6 +2990,7 @@ mod tests {
                 large_system_staff_count: 10,
                 maximum_foreground_thickness: 2,
                 maximum_bar_extension: 5.0,
+                system_hypothesis_stable: true,
             },
         )
         .unwrap();
@@ -2996,6 +3055,7 @@ mod tests {
                     large_system_staff_count: 10,
                     maximum_foreground_thickness: 2,
                     maximum_bar_extension: 5.0,
+                    system_hypothesis_stable: true,
                 },
             ),
             Err(BarsCoordinatorError::MissingFilamentBounds(bar.key()))

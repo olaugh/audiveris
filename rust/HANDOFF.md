@@ -25,6 +25,19 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
+On 2026-08-17 the hard-scan GRID path permanently moved its final bar tail to
+the explicit system staff sequence for `recordBars`, `createGroups`, and
+`createParts`; empty surviving-peak sets no longer erase staff ownership.
+Swallowed `ProcessBars` errors now retain their stage and typed cause through
+the public recognition error. Piano pairing uses connector evidence plus a
+conservative geometry fallback, and provisional geometry-only systems defer
+partial-column and extending-peak rejection. Five-line clustering separately
+performs a late multi-position gap-consistency check against cross-staff
+mixtures. Focused image/OMR tests, strict Clippy, formatting, and the full
+workspace suite pass. All 17 formerly fatal Schenker pages and all 613 pages in
+the local edition complete GRID; this is a completion gate, not a recognition
+accuracy result.
+
 The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
 human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
 and HEADS require `-json` and compose in Java stage order rather than accepting

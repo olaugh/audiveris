@@ -284,6 +284,10 @@ pub struct PeakGraphReport {
     /// Whether the explicit piano prior recovered one or more adjacent system
     /// pairs after ordinary connector recognition left them missing.
     pub piano_system_pair_recovery_applied: bool,
+    /// One-based system hypotheses whose incomplete-column and extension
+    /// rejection was deferred because plausible grand-staff geometry remained
+    /// unresolved after connector evidence.
+    pub deferred_geometry_systems: Vec<usize>,
     pub alignment_count: usize,
     pub connection_count: usize,
     /// Peaks that yielded a registered bar filament.
@@ -1523,6 +1527,21 @@ fn grid_stage<E: std::fmt::Debug>(stage: &'static str) -> impl FnOnce(E) -> Grid
     }
 }
 
+fn swallowed_grid_error<E: std::fmt::Debug>(
+    outcome: Option<&audiveris_image::grid_lifecycle::GridBuildOutcome<E>>,
+) -> Option<GridRecognitionError> {
+    let audiveris_image::grid_lifecycle::GridBuildOutcome::Swallowed { stage, error } = outcome?
+    else {
+        return None;
+    };
+    Some(GridRecognitionError::Stage {
+        stage: stage.label(),
+        message: format!(
+            "swallowed by the Java-compatible GridBuilder lifecycle; original cause: {error:?}"
+        ),
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct LiveStaffProjector {
     staff_id: StaffId,
@@ -2513,13 +2532,21 @@ fn build_peak_graph(
             connected_pairs.push((source, target));
         }
     }
-    let mut piano_system_pair_recovery_applied = false;
-    if std::env::var("AUDIVERIS_RECOVER_PIANO_SYSTEM_PAIRS")
-        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-    {
-        piano_system_pair_recovery_applied =
-            complete_piano_system_pairs(&mut connected_pairs, alignment_staffs);
-    }
+    let plausible_piano_pairs = plausible_piano_staff_pairs(alignment_staffs);
+    let geometric_pairing_contradicted = connected_pairs.iter().any(|existing| {
+        !plausible_piano_pairs
+            .iter()
+            .any(|candidate| existing == candidate || *existing == (candidate.1, candidate.0))
+    });
+    // Connector ink remains the strongest system evidence, but it cannot be
+    // the only evidence on curved book scans: a fold can erase one opening
+    // connector while leaving both complete five-line staves. Complete only a
+    // page-wide, alternating grand-staff pattern and veto the geometric prior
+    // if any observed connection contradicts it. This happens before
+    // `derive_bars_systems`, so geometry-sensitive partial-column and extension
+    // rejection never runs against the connector-only singleton hypothesis.
+    let piano_system_pair_recovery_applied =
+        complete_piano_system_pairs(&mut connected_pairs, alignment_staffs);
 
     // Every staff starts alone; connected pairs merge their groups.
     let mut systems: Vec<Vec<usize>> = alignment_staffs
@@ -2530,6 +2557,16 @@ fn build_peak_graph(
         systems.push(vec![source, target]);
     }
     merge_overlapping(&mut systems);
+
+    // A page can be geometrically piano-like without satisfying the stricter
+    // alternating-gap proof needed to merge its staves. Keep the affected
+    // singleton hypotheses provisional and retain their partial/extended
+    // candidates for later evidence instead of deleting them irreversibly.
+    let deferred_geometry_systems = deferred_geometry_system_ids(
+        &systems,
+        &plausible_piano_pairs,
+        geometric_pairing_contradicted,
+    );
 
     let mut derived = derive_bars_systems(
         staff_peaks,
@@ -2691,8 +2728,10 @@ fn build_peak_graph(
             maximum_foreground_thickness: fore,
             // maxBarExtension = rint(1.0 * interline).
             maximum_bar_extension: f64::from(pixels(1.0, interline)),
+            system_hypothesis_stable: true,
         },
     )
+    .with_deferred_geometry_rejection_for_systems(deferred_geometry_systems.iter().copied())
     .with_staff_limit_refinement(root_evidence, right_evidence);
     let bars = if let Some(minimum_grade) = weak_unconnected_min_grade {
         bars.with_weak_unconnected_filter(minimum_grade)
@@ -2760,6 +2799,7 @@ fn build_peak_graph(
     executor
         .run_grid_step_stage(GridStepStage::CleanStaffLines)
         .map_err(grid_stage("clean staff lines"))?;
+    let swallowed_build_error = swallowed_grid_error(executor.build_outcome.as_ref());
     let builder = &mut executor.builder;
 
     // The purges are where a barline candidate dies, so the removals are
@@ -2792,9 +2832,11 @@ fn build_peak_graph(
     let completion = builder
         .stages()
         .state()
-        .ok_or_else(|| GridRecognitionError::Stage {
-            stage: "complete lines",
-            message: "stage published no completion state".to_owned(),
+        .ok_or_else(|| {
+            swallowed_build_error.unwrap_or_else(|| GridRecognitionError::Stage {
+                stage: "complete lines",
+                message: "stage published no completion state".to_owned(),
+            })
         })
         .map(|state| LineCompletionReport {
             completed_stages: state.completed_stages.clone(),
@@ -2839,6 +2881,7 @@ fn build_peak_graph(
         invalid_connection_probe_count,
         connected_alignment_second_pass,
         piano_system_pair_recovery_applied,
+        deferred_geometry_systems,
         alignment_count,
         connection_count,
         stick_count,
@@ -2991,13 +3034,13 @@ fn staff_of_key(
 /// substantial horizontal overlap, a plausible within-pair gap, and a page-level
 /// alternating-gap pattern. Requiring every individual system boundary to be
 /// much larger is brittle under curl, which can compress one boundary while the
-/// page-level pattern remains decisive. The opt-in caller supplies the musical
-/// prior; ordinary Java-parity recognition never reaches this function.
-fn piano_system_pair_fallback(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> {
+/// page-level pattern remains decisive. This is intentionally conservative
+/// enough to run as a second, geometric system hypothesis after connector
+/// evidence on every page.
+fn plausible_piano_staff_pairs(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> {
     if staffs.len() < 4 || staffs.len() % 2 != 0 {
         return Vec::new();
     }
-    let mut pair_gaps = Vec::new();
     for pair in staffs.chunks_exact(2) {
         let upper = &pair[0];
         let lower = &pair[1];
@@ -3013,8 +3056,22 @@ fn piano_system_pair_fallback(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> 
         {
             return Vec::new();
         }
-        pair_gaps.push(gap);
     }
+    staffs
+        .chunks_exact(2)
+        .map(|pair| (pair[0].staff_id.value(), pair[1].staff_id.value()))
+        .collect()
+}
+
+fn piano_system_pair_fallback(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> {
+    let pairs = plausible_piano_staff_pairs(staffs);
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    let mut pair_gaps = staffs
+        .chunks_exact(2)
+        .map(|pair| pair[1].top - pair[0].bottom)
+        .collect::<Vec<_>>();
     let mut between_gaps = Vec::new();
     for (index, boundary) in staffs.windows(2).enumerate() {
         if index % 2 == 0 {
@@ -3038,10 +3095,7 @@ fn piano_system_pair_fallback(staffs: &[AlignmentStaff]) -> Vec<(usize, usize)> 
     if between_median <= 1.25 * pair_median {
         return Vec::new();
     }
-    staffs
-        .chunks_exact(2)
-        .map(|pair| (pair[0].staff_id.value(), pair[1].staff_id.value()))
-        .collect()
+    pairs
 }
 
 /// Complete missing canonical piano pairs without overriding connector
@@ -3074,6 +3128,27 @@ fn complete_piano_system_pairs(
         changed = true;
     }
     changed
+}
+
+fn deferred_geometry_system_ids(
+    systems: &[Vec<usize>],
+    plausible_pairs: &[(usize, usize)],
+    contradicted: bool,
+) -> Vec<usize> {
+    if contradicted {
+        return Vec::new();
+    }
+    systems
+        .iter()
+        .enumerate()
+        .filter(|(_, members)| {
+            members.len() == 1
+                && plausible_pairs
+                    .iter()
+                    .any(|pair| pair.0 == members[0] || pair.1 == members[0])
+        })
+        .map(|(index, _)| index + 1)
+        .collect()
 }
 
 /// Collapses staff groups that share a staff into single systems.
@@ -4000,6 +4075,21 @@ mod tests {
     }
 
     #[test]
+    fn swallowed_process_bars_error_keeps_its_original_stage_and_cause() {
+        let outcome = audiveris_image::grid_lifecycle::GridBuildOutcome::Swallowed {
+            stage: audiveris_image::grid_lifecycle::GridBuildStage::ProcessBars,
+            error: "missing explicit staff range",
+        };
+
+        let error = swallowed_grid_error(Some(&outcome)).expect("swallowed failure");
+
+        assert_eq!(
+            error.to_string(),
+            "GRID retrieveBarlines failed: swallowed by the Java-compatible GridBuilder lifecycle; original cause: \"missing explicit staff range\""
+        );
+    }
+
+    #[test]
     fn piano_pair_fallback_requires_alternating_grand_staff_gaps() {
         let piano = vec![
             pairing_staff(1, 0.0, 40.0),
@@ -4028,6 +4118,7 @@ mod tests {
             pairing_staff(3, 160.0, 200.0),
             pairing_staff(4, 240.0, 280.0),
         ];
+        assert_eq!(plausible_piano_staff_pairs(&uniform), [(1, 2), (3, 4)]);
         assert!(piano_system_pair_fallback(&uniform).is_empty());
         assert!(piano_system_pair_fallback(&piano[..3]).is_empty());
 
@@ -4039,6 +4130,12 @@ mod tests {
         let mut contradictory = vec![(2, 3)];
         assert!(!complete_piano_system_pairs(&mut contradictory, &piano));
         assert_eq!(contradictory, [(2, 3)]);
+
+        assert_eq!(
+            deferred_geometry_system_ids(&[vec![1], vec![2], vec![3, 4]], &[(1, 2), (3, 4)], false,),
+            [1, 2]
+        );
+        assert!(deferred_geometry_system_ids(&[vec![1], vec![2]], &[(1, 2)], true,).is_empty());
     }
 
     #[test]
@@ -5174,6 +5271,7 @@ mod tests {
             "\"gray_digest\"",
             "\"systems\"",
             "\"piano_system_pair_recovery_applied\"",
+            "\"deferred_geometry_system_ids\"",
             "\"piano_system_bounds_recovered_ids\"",
             "\"bounds_recovered\"",
             "\"area\"",

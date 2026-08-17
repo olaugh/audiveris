@@ -2415,6 +2415,7 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             is_one_line_staff: false,
             bar_threshold: 4,
             total_height: 10,
+            minimum_peak_grade: 0.08,
             peak_construction: PeakConstructionParams::new(
                 PeakRefinementParams::new(4, 2, 4, 2, 1)?,
                 4,

@@ -212,6 +212,9 @@ impl StaffCandidate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClusterRejectionReason {
     TooShort,
+    /// Five ordered filaments span implausibly different adjacent gaps and
+    /// therefore mix ink from separate staves (or non-staff text rows).
+    CrossStaffMixture,
     OneLineSlope,
     OneLineTrueLength,
     OneLineRightIndentation,
@@ -415,6 +418,7 @@ fn retrieve_staff_candidates_inner(
     }
 
     let mut rejected_clusters = purge_clusters(&mut located, parameters)?;
+    rejected_clusters.extend(purge_cross_staff_mixtures(&mut located)?);
     sort_by_layout(&mut located, parameters.global_slope)?;
     rejected_clusters.extend(purge_right_indented_one_lines(
         &mut located,
@@ -532,6 +536,55 @@ fn purge_clusters(
         },
     )?;
     Ok(rejected)
+}
+
+/// Reject only fully assembled five-line clusters whose physical spacing is
+/// incompatible with one staff. This runs after all cluster expansion/merge
+/// passes, rather than pruning a filament before the recognizer has had a
+/// chance to complete its hypothesis.
+fn purge_cross_staff_mixtures(
+    clusters: &mut Vec<LocatedCluster>,
+) -> Result<Vec<RejectedCluster>, LinesCoordinatorError> {
+    let mut rejected = Vec::new();
+    retain_with_reason(
+        clusters,
+        &mut rejected,
+        ClusterRejectionReason::CrossStaffMixture,
+        |cluster| five_line_cross_staff_mixture(&cluster.value),
+    )?;
+    Ok(rejected)
+}
+
+fn five_line_cross_staff_mixture(cluster: &LineCluster) -> Result<bool, LinesCoordinatorError> {
+    if cluster.size() != 5 {
+        return Ok(false);
+    }
+    let positions = cluster
+        .lines()
+        .map(|(position, _)| position)
+        .collect::<Vec<_>>();
+    if positions.windows(2).any(|pair| pair[1] != pair[0] + 1) {
+        return Ok(true);
+    }
+
+    let bounds = cluster.bounds()?;
+    let left = bounds.x as f64;
+    let span = bounds.width.saturating_sub(1) as f64;
+    let expected = cluster.interline() as f64;
+    let mut implausible_samples = 0_usize;
+    for fraction in [0.25, 0.5, 0.75] {
+        let x = left + (span * fraction);
+        let ordinates = cluster
+            .lines()
+            .map(|(_, line)| Ok(line.filament().geometry()?.position_at(x)?))
+            .collect::<Result<Vec<_>, LinesCoordinatorError>>()?;
+        let implausible = ordinates.windows(2).any(|pair| {
+            let gap = pair[1] - pair[0];
+            gap <= 0.0 || gap < 0.35 * expected || gap > 2.25 * expected
+        });
+        implausible_samples += usize::from(implausible);
+    }
+    Ok(implausible_samples >= 2)
 }
 
 fn retain_with_reason(
@@ -819,6 +872,62 @@ mod tests {
             1,
         )
         .unwrap()
+    }
+
+    fn five_line_cluster(seed: u64, ordinates: [usize; 5]) -> LineCluster {
+        let mut table = RunTable::new(Orientation::Horizontal, 42, 128).unwrap();
+        for y in ordinates {
+            table.add_run(y, Run::new(0, 40)).unwrap();
+        }
+        let source = build_sections(&table, JunctionPolicy::All);
+        let seed_id = FilamentId::new(seed);
+        let mut cluster = LineCluster::new(10, seed_id, filament(10, source[0].clone())).unwrap();
+        for (index, section) in source.into_iter().enumerate().skip(1) {
+            cluster
+                .include_line(
+                    index as i32,
+                    FilamentId::new(seed + index as u64),
+                    filament(10, section),
+                )
+                .unwrap();
+        }
+        cluster
+    }
+
+    #[test]
+    fn five_line_guard_rejects_cross_staff_gap_after_full_clustering() {
+        let good_seed = FilamentId::new(10);
+        let mixed_seed = FilamentId::new(20);
+        let mut located = vec![
+            LocatedCluster {
+                id: LocatedClusterId {
+                    pass: ClusterPass::Main,
+                    cluster: ClusterId::from_seed(good_seed),
+                },
+                value: five_line_cluster(good_seed.value(), [10, 20, 30, 40, 50]),
+            },
+            LocatedCluster {
+                id: LocatedClusterId {
+                    pass: ClusterPass::Main,
+                    cluster: ClusterId::from_seed(mixed_seed),
+                },
+                value: five_line_cluster(mixed_seed.value(), [10, 20, 30, 40, 100]),
+            },
+        ];
+
+        let rejected = purge_cross_staff_mixtures(&mut located).unwrap();
+
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].id.cluster(), ClusterId::from_seed(good_seed));
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(
+            rejected[0].source.cluster(),
+            ClusterId::from_seed(mixed_seed)
+        );
+        assert_eq!(
+            rejected[0].reason(),
+            ClusterRejectionReason::CrossStaffMixture
+        );
     }
 
     #[test]

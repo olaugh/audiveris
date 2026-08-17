@@ -401,6 +401,12 @@ fn recognition_json(
         "piano_system_pair_recovery_applied",
         recognition.peak_graph.piano_system_pair_recovery_applied,
     );
+    json.key("deferred_geometry_system_ids");
+    json.open('[');
+    for system_id in &recognition.peak_graph.deferred_geometry_systems {
+        json.integer(*system_id as i64);
+    }
+    json.close(']');
     json.field_integer(
         "piano_system_bounds_recovery_count",
         recognition.piano_system_bounds_recovered.len() as i64,

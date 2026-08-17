@@ -3528,6 +3528,7 @@ mod tests {
                     large_system_staff_count: 10,
                     maximum_foreground_thickness: 1,
                     maximum_bar_extension: 5.0,
+                    system_hypothesis_stable: true,
                 },
             },
         )

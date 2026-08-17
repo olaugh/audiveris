@@ -18,6 +18,17 @@ Java implementation are kept separately in the
 [upstream findings catalog](https://github.com/olaugh/audiveris/blob/master/rust/AUDIVERIS_UPSTREAM_FINDINGS.md),
 including the evidence and the Rust parity policy for each finding.
 
+**Hard-scan GRID checkpoint:** bar-tail ownership is now explicit even when a
+staff has no surviving bar peak, and swallowed `ProcessBars` failures preserve
+their original typed cause in the CLI error. Piano system formation combines
+connector evidence with conservative five-line geometry; destructive
+partial-column and extension purges are deferred while a geometry-only system
+hypothesis is provisional. A separate late five-line guard rejects clusters
+whose sampled line gaps reveal a cross-staff mixture. The 17 Schenker pages that
+previously failed at the bar tail now complete, and a release sweep completes
+all 613 local Schenker pages without a GRID fatal error. These are lifecycle and
+robustness gates, not claims that all detected systems or barlines are correct.
+
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.
 `omrscope` now runs Java and Rust concurrently and retains selectable immutable
