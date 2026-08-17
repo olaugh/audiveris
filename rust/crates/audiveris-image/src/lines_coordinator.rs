@@ -11,7 +11,7 @@ use std::{cmp::Ordering, collections::BTreeMap, error::Error, fmt};
 use crate::{
     cluster_coordinator::RecursiveCombSnapshot,
     cluster_merge::{ClusterMergeError, cluster_deskewed_ordinate},
-    cluster_ownership::{ClusterId, ClusterOwnership, CombId},
+    cluster_ownership::{ClusterId, ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::{
         ClusterPipelineError, ClusterRetrievalParameters, ClusterRetrievalResult, retrieve_clusters,
     },
@@ -77,6 +77,55 @@ impl ClusterPassState {
     #[must_use]
     pub const fn parameters(&self) -> &ClusterRetrievalParameters {
         &self.parameters
+    }
+
+    /// Seed one independently verified five-line staff hypothesis before the
+    /// ordinary comb traversal.
+    ///
+    /// This is used only after a tall, overgrown filament has been split into
+    /// five strong periodic ridges. The provisional cluster still goes through
+    /// the normal expansion, merge, trim, desired-size, consistency, and staff
+    /// rejection passes; seeding merely prevents the generic comb graph from
+    /// losing all five lines a second time.
+    pub fn seed_recovered_cluster(
+        &mut self,
+        line_ids: &[FilamentId],
+    ) -> Result<ClusterId, LinesCoordinatorError> {
+        if line_ids.len() != 5 {
+            return Err(LinesCoordinatorError::InvalidRecoveredCluster);
+        }
+        let distinct = line_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        if distinct.len() != line_ids.len() {
+            return Err(LinesCoordinatorError::InvalidRecoveredCluster);
+        }
+
+        let mut next = self.clone();
+        let seed = line_ids[0];
+        let seed_value = next
+            .filaments
+            .get(&seed)
+            .cloned()
+            .ok_or(LinesCoordinatorError::MissingRecoveredFilament(seed))?;
+        let cluster_id = next.ownership.register_cluster(seed)?;
+        let mut cluster = LineCluster::new(next.parameters.interline(), seed, seed_value)?;
+        for (position, &id) in line_ids.iter().enumerate().skip(1) {
+            let value = next
+                .filaments
+                .get(&id)
+                .cloned()
+                .ok_or(LinesCoordinatorError::MissingRecoveredFilament(id))?;
+            cluster.include_line(position as i32, id, value)?;
+            next.ownership
+                .assign_filament(id, cluster_id, position as i32)?;
+        }
+        if next.clusters.insert(cluster_id, cluster).is_some() {
+            return Err(LinesCoordinatorError::DuplicateClusterValue(cluster_id));
+        }
+        *self = next;
+        Ok(cluster_id)
     }
 }
 
@@ -773,10 +822,14 @@ fn y_overlaps(one: (f64, f64), two: (f64, f64)) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub enum LinesCoordinatorError {
     InvalidParameters,
+    InvalidRecoveredCluster,
+    MissingRecoveredFilament(FilamentId),
     MissingSecondaryFilament(FilamentId),
     MissingClusterValue(LocatedClusterId),
+    DuplicateClusterValue(ClusterId),
     Pipeline(ClusterPipelineError),
     Merge(ClusterMergeError),
+    Ownership(ClusterOwnershipError),
     Cluster(LineClusterError),
     Filament(FilamentError),
 }
@@ -793,6 +846,7 @@ macro_rules! coordinator_from {
 
 coordinator_from!(ClusterPipelineError, Pipeline);
 coordinator_from!(ClusterMergeError, Merge);
+coordinator_from!(ClusterOwnershipError, Ownership);
 coordinator_from!(LineClusterError, Cluster);
 coordinator_from!(FilamentError, Filament);
 
@@ -802,6 +856,14 @@ impl fmt::Display for LinesCoordinatorError {
             Self::InvalidParameters => {
                 formatter.write_str("line coordinator parameters are invalid")
             }
+            Self::InvalidRecoveredCluster => {
+                formatter.write_str("recovered staff cluster must contain five distinct lines")
+            }
+            Self::MissingRecoveredFilament(id) => write!(
+                formatter,
+                "recovered staff cluster is missing filament {}",
+                id.value()
+            ),
             Self::MissingSecondaryFilament(id) => write!(
                 formatter,
                 "small-interline pass is missing discarded filament {}",
@@ -813,8 +875,16 @@ impl fmt::Display for LinesCoordinatorError {
                 id.pass,
                 id.cluster.value()
             ),
+            Self::DuplicateClusterValue(id) => {
+                write!(
+                    formatter,
+                    "duplicate recovered cluster value {}",
+                    id.value()
+                )
+            }
             Self::Pipeline(error) => write!(formatter, "cluster pass failed: {error}"),
             Self::Merge(error) => write!(formatter, "cluster layout failed: {error}"),
+            Self::Ownership(error) => write!(formatter, "cluster ownership failed: {error}"),
             Self::Cluster(error) => write!(formatter, "cluster geometry failed: {error}"),
             Self::Filament(error) => write!(formatter, "filament geometry failed: {error}"),
         }

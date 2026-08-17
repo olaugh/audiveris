@@ -186,6 +186,7 @@ pub fn retrieve_clusters(
     let mut next_combs = combs.clone();
     let mut working_filaments = reverse_length_order(filaments, filament_order)?;
     let all_filaments = working_filaments.clone();
+    let seeded_cluster_order = next_clusters.keys().copied().collect::<Vec<_>>();
     let formation = form_clusters_from_combs(
         &mut next_ownership,
         &mut next_clusters,
@@ -195,7 +196,17 @@ pub fn retrieve_clusters(
         parameters.interline,
         false,
     )?;
-    let mut cluster_order = formation.cluster_ids().to_vec();
+    let mut cluster_order = Vec::new();
+    let mut seen_clusters = BTreeSet::new();
+    for id in seeded_cluster_order
+        .into_iter()
+        .chain(formation.cluster_ids().iter().copied())
+    {
+        let root = next_ownership.cluster_ancestor(id)?;
+        if next_clusters.contains_key(&root) && seen_clusters.insert(root) {
+            cluster_order.push(root);
+        }
+    }
     let popular_comb_size = formation.popular_comb_size();
 
     cluster_order = expand_clusters_in_order(

@@ -38,6 +38,20 @@ workspace suite pass. All 17 formerly fatal Schenker pages and all 613 pages in
 the local edition complete GRID; this is a completion gate, not a recognition
 accuracy result.
 
+The same checkpoint now recovers dense staffs that comb following had already
+collapsed into one tall composite. It requires a root at least 20 interlines
+wide with five strong periodic ridges, rebuilds five thin line filaments, checks
+seven shared-span gap samples, and seeds a provisional cluster that still runs
+through the normal late validators. Recovered ridges cannot re-enter generic
+comb recursion, and the adapter preserves every unaffected frozen comb rather
+than resampling the page. The reported Schenker Sonata 1 page 1 regression moves
+from 11 staves (one bass-only system) to 12 staves / six piano systems and
+restores the system's five paired bar boundaries. On all 613 Schenker pages the
+release sweep remains 613/613 complete, detected staves move 7,017 -> 7,135,
+odd-staff pages 157 -> 117, and 12 under-detected pages gain 14 systems; no page
+loses a system. The focused synthetic regression is
+`overgrown_five_ridge_root_is_split_and_seeded_through_late_validation`.
+
 The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
 human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
 and HEADS require `-json` and compose in Java stage order rather than accepting

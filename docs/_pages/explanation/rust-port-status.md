@@ -28,6 +28,16 @@ whose sampled line gaps reveal a cross-staff mixture. The 17 Schenker pages that
 previously failed at the bar tail now complete, and a release sweep completes
 all 613 local Schenker pages without a GRID fatal error. These are lifecycle and
 robustness gates, not claims that all detected systems or barlines are correct.
+Dense-page recovery also handles the inverse clustering failure, where early
+comb following collapses five real staff ridges and bridging notation into one
+tall root. It requires five strong periodic ridges across at least 20
+interlines, extracts only thin near-ridge sections, validates seven shared-span
+gap samples, and sends the provisional staff through the ordinary late cluster
+checks. Recovered lines are isolated from recursive comb inclusion and all
+unaffected frozen combs remain unchanged. On the 613-page Schenker sweep this
+raises detected staves from 7,017 to 7,135, reduces odd-staff pages from 157 to
+117, and adds 14 systems on 12 previously under-detected pages without removing
+a system.
 
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.

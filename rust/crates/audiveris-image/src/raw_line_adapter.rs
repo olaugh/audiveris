@@ -2,14 +2,21 @@
 
 //! Adapter from a live horizontal section lag to the primary clustering pass.
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use crate::{
-    cluster_coordinator::{FollowCombsNetworkError, RecursiveCombSnapshot, follow_combs_network},
+    cluster_coordinator::{
+        FollowCombsNetworkError, RecursiveCombSnapshot, follow_combs_network, popular_snapshot_size,
+    },
     cluster_ownership::{ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombBuilderError, CombFilament, popular_comb_size, retrieve_combs},
     filament::FilamentError,
+    filament_comb::{FilamentComb, FilamentCombError},
     filament_factory::{
         FilamentFactory, FilamentFactoryIdentityError, FilamentFactoryParams, OverlapParams,
     },
@@ -20,7 +27,7 @@ use crate::{
         sort_by_reverse_horizontal_length,
     },
     line_short_sections::HorizontalSectionLag,
-    lines_coordinator::ClusterPassState,
+    lines_coordinator::{ClusterPassState, LinesCoordinatorError},
 };
 
 /// Pixel-resolved inputs needed before Java's primary `ClustersRetriever` pass.
@@ -60,6 +67,8 @@ pub struct RawPrimaryPassBuild {
     sloped_ids: Vec<FilamentId>,
     sloped_filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
     factory_creation_ids: Vec<FilamentId>,
+    recovered_composite_sources: Vec<FilamentId>,
+    recovered_line_ids: Vec<FilamentId>,
     next_filament_id: FilamentId,
 }
 
@@ -121,6 +130,20 @@ impl RawPrimaryPassBuild {
         &self.factory_creation_ids
     }
 
+    /// Root filaments whose five periodic ridges were recovered after the
+    /// comb network had irreversibly combined them.
+    #[must_use]
+    pub fn recovered_composite_sources(&self) -> &[FilamentId] {
+        &self.recovered_composite_sources
+    }
+
+    /// Fresh identities allocated to the five recovered line filaments for
+    /// each source in [`Self::recovered_composite_sources`].
+    #[must_use]
+    pub fn recovered_line_ids(&self) -> &[FilamentId] {
+        &self.recovered_line_ids
+    }
+
     /// Next ID for another factory sharing the same Java `FilamentIndex`.
     #[must_use]
     pub const fn next_filament_id(&self) -> FilamentId {
@@ -160,7 +183,7 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
         .copied()
         .map(FilamentId::new)
         .collect::<Vec<_>>();
-    let next_filament_id = FilamentId::new(identified.next_creation_id());
+    let mut next_filament_id = identified.next_creation_id();
     let values = identified
         .into_survivors()
         .into_iter()
@@ -198,7 +221,7 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
         parameters.maximum_delta_y,
         &samples,
     )?;
-    let popular_comb_size = popular_comb_size(&columns);
+    let mut popular_size = popular_comb_size(&columns);
     let survivor_order = filament_order.clone();
 
     let mut combs = BTreeMap::new();
@@ -213,26 +236,278 @@ pub fn build_primary_cluster_pass_with_first_filament_id(
     }
 
     follow_combs_network(&mut ownership, &mut filaments, &combs, &mut filament_order)?;
+    let recovery = recover_overgrown_staff_roots(
+        &filaments,
+        &filament_order,
+        &parameters,
+        &mut next_filament_id,
+    )?;
+    let recovered_groups = recovery.groups.clone();
+    let recovered_source_set = recovery.source_ids.iter().copied().collect::<BTreeSet<_>>();
+    let (recovered_composite_sources, recovered_line_ids) = if recovery.source_ids.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        let followed_ownership = ownership.clone();
+        filaments = recovery.filaments;
+        filament_order = recovery.order;
+        ownership = ClusterOwnership::new();
+        for (&id, filament) in &filaments {
+            ownership.register_filament(id, filament)?;
+        }
+        // Preserve the frozen post-follow graph everywhere except the
+        // recovered composite's ancestry. Re-sampling the whole page here
+        // subtly changes unrelated systems; retaining each original comb and
+        // resolving its members to the already chosen roots makes recovery
+        // local and deterministic.
+        combs.clear();
+        let mut rebuilt_index = 1_u64;
+        for original in columns.iter().flat_map(|column| column.combs()) {
+            let mut rebuilt = FilamentComb::new(original.column());
+            let mut seen_roots = BTreeSet::new();
+            for &raw_id in original.filament_ids() {
+                let member = FilamentId::new(
+                    u64::try_from(raw_id).map_err(|_| RawLineAdapterError::IdentityOverflow)?,
+                );
+                let root = followed_ownership.filament_ancestor(member)?;
+                if recovered_source_set.contains(&root) || !seen_roots.insert(root) {
+                    continue;
+                }
+                let root_value = filaments
+                    .get(&root)
+                    .ok_or(RawLineAdapterError::MissingFilament(root))?;
+                rebuilt.append_root(
+                    usize::try_from(root.value())
+                        .map_err(|_| RawLineAdapterError::IdentityOverflow)?,
+                    root_value
+                        .geometry()?
+                        .position_at(f64::from(original.column()))?,
+                )?;
+            }
+            if rebuilt.count() < 2 {
+                continue;
+            }
+            let id = CombId::new(rebuilt_index);
+            rebuilt_index = rebuilt_index
+                .checked_add(1)
+                .ok_or(RawLineAdapterError::IdentityOverflow)?;
+            ownership.register_comb(id, &rebuilt)?;
+            combs.insert(id, RecursiveCombSnapshot::from_comb(&rebuilt));
+        }
+        popular_size = popular_snapshot_size(&combs);
+        (recovery.source_ids, recovery.recovered_ids)
+    };
     let root_order = filament_order.clone();
-    let state = ClusterPassState::new(
+    let mut state = ClusterPassState::new(
         ownership,
         filaments,
         combs,
         filament_order,
         parameters.retrieval,
     );
+    for group in recovered_groups {
+        state.seed_recovered_cluster(&group)?;
+    }
     Ok(RawPrimaryPassBuild {
         state,
         survivor_order,
         root_order,
-        popular_comb_size,
+        popular_comb_size: popular_size,
         global_slope,
         curved_ids,
         sloped_ids,
         sloped_filaments,
         factory_creation_ids,
-        next_filament_id,
+        recovered_composite_sources,
+        recovered_line_ids,
+        next_filament_id: FilamentId::new(next_filament_id),
     })
+}
+
+#[derive(Debug)]
+struct RecoveredStaffRoots {
+    filaments: BTreeMap<FilamentId, crate::filament::StaffFilament>,
+    order: Vec<FilamentId>,
+    source_ids: Vec<FilamentId>,
+    recovered_ids: Vec<FilamentId>,
+    groups: Vec<[FilamentId; 5]>,
+}
+
+fn recover_overgrown_staff_roots(
+    filaments: &BTreeMap<FilamentId, crate::filament::StaffFilament>,
+    order: &[FilamentId],
+    parameters: &RawPrimaryPassParameters,
+    next_id: &mut u64,
+) -> Result<RecoveredStaffRoots, RawLineAdapterError> {
+    let mut recovered_filaments = BTreeMap::new();
+    let mut recovered_order = Vec::with_capacity(order.len());
+    let mut source_ids = Vec::new();
+    let mut recovered_ids = Vec::new();
+    let mut groups = Vec::new();
+
+    for &id in order {
+        let filament = filaments
+            .get(&id)
+            .ok_or(RawLineAdapterError::MissingFilament(id))?;
+        let Some(lines) = split_five_ridge_composite(filament, parameters)? else {
+            recovered_filaments.insert(id, filament.clone());
+            recovered_order.push(id);
+            continue;
+        };
+
+        source_ids.push(id);
+        let mut group = [FilamentId::new(0); 5];
+        for (index, line) in lines.into_iter().enumerate() {
+            let line_id = FilamentId::new(*next_id);
+            *next_id = next_id
+                .checked_add(1)
+                .ok_or(RawLineAdapterError::IdentityOverflow)?;
+            recovered_filaments.insert(line_id, line);
+            recovered_order.push(line_id);
+            recovered_ids.push(line_id);
+            group[index] = line_id;
+        }
+        groups.push(group);
+    }
+
+    Ok(RecoveredStaffRoots {
+        filaments: recovered_filaments,
+        order: recovered_order,
+        source_ids,
+        recovered_ids,
+        groups,
+    })
+}
+
+/// Split a tall root only when it contains five independently strong,
+/// near-equidistant horizontal ridges. Sections between those ridges are not
+/// assigned, so the staff hypothesis is not polluted by the stems, slurs, and
+/// other bridges that caused the original comb-network merge.
+fn split_five_ridge_composite(
+    filament: &crate::filament::StaffFilament,
+    parameters: &RawPrimaryPassParameters,
+) -> Result<Option<Vec<crate::filament::StaffFilament>>, RawLineAdapterError> {
+    const LINE_COUNT: usize = 5;
+    let interline = parameters.factory.interline;
+    let bounds = filament.bounds()?;
+    let minimum_gap = parameters.minimum_delta_y.max(1) as usize;
+    let maximum_gap = parameters
+        .maximum_delta_y
+        .max(parameters.minimum_delta_y)
+        .max(1) as usize;
+    if bounds.width < 20 * interline
+        || bounds.height < (LINE_COUNT - 1) * minimum_gap
+        || bounds.height > 9 * interline
+    {
+        return Ok(None);
+    }
+
+    let mut row_coverage = vec![0_usize; bounds.height];
+    for section in filament.sections() {
+        for (offset, run) in section.runs().iter().enumerate() {
+            let y = section.first_pos() + offset;
+            row_coverage[y - bounds.y] = row_coverage[y - bounds.y].saturating_add(run.length);
+        }
+    }
+
+    let radius = (interline / 6).max(1);
+    let last_y = bounds.y + bounds.height - 1;
+    let mut best: Option<(usize, usize, [usize; LINE_COUNT], usize)> = None;
+    for gap in minimum_gap..=maximum_gap {
+        let span = (LINE_COUNT - 1) * gap;
+        if span >= bounds.height {
+            continue;
+        }
+        for first in bounds.y..=last_y - span {
+            let mut scores = [0_usize; LINE_COUNT];
+            for (index, score) in scores.iter_mut().enumerate() {
+                let center = first + (index * gap);
+                let start = center.saturating_sub(radius).max(bounds.y);
+                let stop = (center + radius).min(last_y);
+                *score = (start..=stop).map(|y| row_coverage[y - bounds.y]).sum();
+            }
+            let minimum = scores.iter().copied().min().unwrap_or(0);
+            let total: usize = scores.iter().sum();
+            let rank = minimum.saturating_mul(LINE_COUNT).saturating_add(total);
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, _, old_rank)| rank > *old_rank)
+            {
+                best = Some((first, gap, scores, rank));
+            }
+        }
+    }
+    let Some((first, gap, scores, _)) = best else {
+        return Ok(None);
+    };
+    if scores.iter().any(|score| *score < (bounds.width * 2) / 5) {
+        return Ok(None);
+    }
+
+    let centers = std::array::from_fn::<_, LINE_COUNT, _>(|index| first + (index * gap));
+    let assignment_radius = (0.34 * interline as f64).max(1.5);
+    let maximum_section_height = ((interline as f64) * 0.5).ceil() as usize;
+    let mut lines = (0..LINE_COUNT)
+        .map(|_| crate::filament::StaffFilament::new(interline))
+        .collect::<Result<Vec<_>, _>>()?;
+    for section in filament.sections() {
+        if section.bounds().height > maximum_section_height {
+            continue;
+        }
+        let (_, y) = section.centroid_2d();
+        let (index, distance) = centers
+            .iter()
+            .enumerate()
+            .map(|(index, center)| (index, (y - *center as f64).abs()))
+            .min_by(|one, two| one.1.total_cmp(&two.1))
+            .expect("five ridge centers");
+        if distance <= assignment_radius {
+            lines[index].add_section(section.clone())?;
+        }
+    }
+
+    let minimum_line_width = (bounds.width * 3) / 4;
+    let minimum_true_length = (bounds.width * 2) / 5;
+    for line in &lines {
+        if line.bounds()?.width < minimum_line_width
+            || line.true_length()? < minimum_true_length
+            || line.geometry().is_err()
+        {
+            return Ok(None);
+        }
+    }
+
+    let shared_left = lines
+        .iter()
+        .map(|line| line.bounds().map(|value| value.x))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max()
+        .expect("five recovered lines");
+    let shared_right = lines
+        .iter()
+        .map(|line| line.bounds().map(|value| value.x + value.width - 1))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .min()
+        .expect("five recovered lines");
+    if shared_right <= shared_left || shared_right - shared_left < minimum_line_width {
+        return Ok(None);
+    }
+    for sample in 0..=6 {
+        let x = shared_left as f64 + ((shared_right - shared_left) as f64 * sample as f64 / 6.0);
+        let ordinates = lines
+            .iter()
+            .map(|line| line.geometry()?.position_at(x))
+            .collect::<Result<Vec<_>, _>>()?;
+        if ordinates.windows(2).any(|pair| {
+            let observed = pair[1] - pair[0];
+            observed < minimum_gap as f64 * 0.7 || observed > maximum_gap as f64 * 1.3
+        }) {
+            return Ok(None);
+        }
+    }
+
+    Ok(Some(lines))
 }
 
 /// Lazily construct Java's secondary/small-interline clustering state.
@@ -400,8 +675,10 @@ pub enum RawLineAdapterError {
     FactoryIdentity(FilamentFactoryIdentityError),
     Rejection(LineRejectionError),
     Comb(CombBuilderError),
+    FilamentComb(FilamentCombError),
     Ownership(ClusterOwnershipError),
     Follow(FollowCombsNetworkError),
+    Coordinator(LinesCoordinatorError),
     MissingFilament(FilamentId),
     DuplicateSecondaryFilament(FilamentId),
     IdentityOverflow,
@@ -431,6 +708,12 @@ impl From<CombBuilderError> for RawLineAdapterError {
     }
 }
 
+impl From<FilamentCombError> for RawLineAdapterError {
+    fn from(value: FilamentCombError) -> Self {
+        Self::FilamentComb(value)
+    }
+}
+
 impl From<ClusterOwnershipError> for RawLineAdapterError {
     fn from(value: ClusterOwnershipError) -> Self {
         Self::Ownership(value)
@@ -443,6 +726,12 @@ impl From<FollowCombsNetworkError> for RawLineAdapterError {
     }
 }
 
+impl From<LinesCoordinatorError> for RawLineAdapterError {
+    fn from(value: LinesCoordinatorError) -> Self {
+        Self::Coordinator(value)
+    }
+}
+
 impl fmt::Display for RawLineAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -452,8 +741,10 @@ impl fmt::Display for RawLineAdapterError {
             }
             Self::Rejection(error) => write!(formatter, "raw filament rejection failed: {error}"),
             Self::Comb(error) => write!(formatter, "raw comb sampling failed: {error}"),
+            Self::FilamentComb(error) => write!(formatter, "raw comb rebuild failed: {error}"),
             Self::Ownership(error) => write!(formatter, "raw ownership failed: {error}"),
             Self::Follow(error) => write!(formatter, "raw comb network failed: {error}"),
+            Self::Coordinator(error) => write!(formatter, "raw staff recovery failed: {error}"),
             Self::MissingFilament(id) => write!(formatter, "missing raw filament {}", id.value()),
             Self::DuplicateSecondaryFilament(id) => {
                 write!(formatter, "duplicate secondary raw filament {}", id.value())
@@ -712,6 +1003,55 @@ mod tests {
         .unwrap();
         assert_eq!(result.staffs().len(), 1);
         assert_eq!(result.staffs()[0].line_ids().len(), 5);
+    }
+
+    #[test]
+    fn overgrown_five_ridge_root_is_split_and_seeded_through_late_validation() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 240, 80).unwrap();
+        for y in [15, 25, 35, 45, 55] {
+            runs.add_run(y, Run::new(10, 220)).unwrap();
+        }
+        let mut composite = StaffFilament::new(10).unwrap();
+        for section in build_sections(&runs, JunctionPolicy::All) {
+            composite.add_section(section).unwrap();
+        }
+
+        let source = FilamentId::new(1);
+        let mut next_id = 2;
+        let recovered = recover_overgrown_staff_roots(
+            &BTreeMap::from([(source, composite)]),
+            &[source],
+            &parameters(),
+            &mut next_id,
+        )
+        .unwrap();
+        assert_eq!(recovered.source_ids, [source]);
+        assert_eq!(recovered.groups.len(), 1);
+        assert_eq!(recovered.recovered_ids.len(), 5);
+        assert_eq!(next_id, 7);
+        let group = recovered.groups[0];
+
+        let mut ownership = ClusterOwnership::new();
+        for (&id, filament) in &recovered.filaments {
+            ownership.register_filament(id, filament).unwrap();
+        }
+        let mut state = ClusterPassState::new(
+            ownership,
+            recovered.filaments,
+            BTreeMap::new(),
+            recovered.order,
+            retrieval_parameters(),
+        );
+        state.seed_recovered_cluster(&group).unwrap();
+        let result = retrieve_staff_candidates(
+            &mut state,
+            None,
+            LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(result.staffs().len(), 1);
+        assert_eq!(result.staffs()[0].line_ids(), group);
     }
 
     #[test]
