@@ -40,22 +40,36 @@ accuracy result.
 
 The same checkpoint now recovers dense staffs that comb following had already
 collapsed into one tall composite. It requires a root at least 20 interlines
-wide with five strong periodic ridges, rebuilds five thin line filaments, checks
-seven shared-span gap samples, and seeds a provisional cluster that still runs
-through the normal late validators. Recovered ridges cannot re-enter generic
-comb recursion, and the adapter preserves every unaffected frozen comb rather
-than resampling the page. The reported Schenker Sonata 1 page 1 regression moves
-from 11 staves (one bass-only system) to 12 staves / six piano systems and
-restores the system's five paired bar boundaries. On all 613 Schenker pages the
-release sweep remains 613/613 complete, detected staves move 7,017 -> 7,135,
-odd-staff pages 157 -> 117, and 12 under-detected pages gain 14 systems; no page
-loses a system. The focused synthetic regression is
+wide with one or more strong periodic five-ridge fields, rebuilds thin line
+filaments, checks seven shared-span gap samples, and seeds provisional clusters
+that still run through the normal late validators. Recovered ridges cannot
+re-enter generic comb recursion, and the adapter preserves every unaffected
+frozen comb rather than resampling the page. The reported Schenker Sonata 1 page
+1 regression moves from 11 staves (one bass-only system) to 12 staves / six
+piano systems and restores the system's five paired bar boundaries. The focused
+synthetic regression is
 `overgrown_five_ridge_root_is_split_and_seeded_through_late_validation`.
 
+A second, explicitly tentative path now covers periodic staff fields that
+survive in the horizontal raster but never form a comb cluster. It runs only
+after ordinary clustering, requires five wide near-equidistant ridges, and
+cannot duplicate an accepted staff within two interlines. Tentative staves are
+kept through the real `RawProductionRetrieveLines` and bar tail rather than
+being pruned, while schema-1 JSON marks each staff's `tentative` state and
+`hypothesis_source` and marks every affected system with its tentative staff
+IDs. This restores Schenker Sonata 4 page 3 from 10 staves / 5 systems to 12 / 6
+at native resolution. The 613-page release sweep remains 613/613 complete and
+reports 7,309 staves / 3,673 systems, with 172 tentative staves and 156 tentative
+systems on 126 pages. Against the previous 3,652-system cache, 23 pages gain one
+system and two lose an old spurious split. These hypotheses are downstream
+evidence, not accepted accuracy labels; score them separately until real-scan
+review validates them.
+
 The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
-human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
-and HEADS require `-json` and compose in Java stage order rather than accepting
-invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
+human-readable report remains supported and now identifies tentative staff
+hypotheses and their source; HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS
+require `-json` and compose in Java stage order rather than accepting invented
+downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
 -> LEDGERS -> HEADS, retains every upstream product, and adds identity-free
 final heads, source provenance, exact glyph evidence, beam decisions, and
 tally-scale rows without fabricating Java SIG or glyph IDs.

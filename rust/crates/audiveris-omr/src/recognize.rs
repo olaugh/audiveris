@@ -66,7 +66,9 @@ use audiveris_image::projection::{
     has_blank_between, process_staff_projection, staff_projector_scale_parameters,
 };
 use audiveris_image::raster_grid_builder::HeadlessRasterGridBuilder;
-use audiveris_image::raw_line_adapter::build_primary_cluster_pass;
+use audiveris_image::raw_line_adapter::{
+    build_primary_cluster_pass, recover_tentative_staffs_from_ridges,
+};
 use audiveris_image::run_table::{Orientation, RunTable, RunTableError, create_grid_run_tables};
 use audiveris_image::scale_estimate::{
     ScaleEstimate, ScaleEstimateError, ScaleOptions, estimate_scale,
@@ -226,6 +228,10 @@ pub fn scale_report(recognition: &ScaleRecognition) -> String {
 pub struct StaffCandidateReport {
     pub id: usize,
     pub kind: String,
+    /// True when ordinary comb clustering failed and a strong five-line
+    /// raster field was retained as a recoverable hypothesis.
+    pub tentative: bool,
+    pub hypothesis_source: String,
     pub left: f64,
     pub right: f64,
     pub interline: usize,
@@ -3282,9 +3288,66 @@ pub fn recognize_grid_lines_raster(
         .map_err(grid_stage("primary pass"))?;
     let filament_count = pass.factory_creation_ids().len();
     let sloped_outlier_count = pass.sloped_ids().len();
+    let mut next_tentative_line_id = pass.next_filament_id().value();
+    let trace_tentative_staffs = std::env::var("AUDIVERIS_TRACE_TENTATIVE_STAVES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    if trace_tentative_staffs {
+        eprintln!(
+            "GRID staff trace: roots={} recovered_sources={:?} recovered_lines={:?}",
+            pass.root_order().len(),
+            pass.recovered_composite_sources(),
+            pass.recovered_line_ids()
+        );
+        for &id in pass.root_order() {
+            if let Some(filament) = pass.state().filaments().get(&id)
+                && let Ok(bounds) = filament.bounds()
+                && bounds.y < 260
+            {
+                eprintln!(
+                    "GRID staff trace: root={} bounds={:?} sections={}",
+                    id.value(),
+                    bounds,
+                    filament.sections().len()
+                );
+            }
+        }
+    }
     let mut primary = pass.into_state();
-    let result = retrieve_staff_candidates(&mut primary, None, parameters.lines)
+    let mut result = retrieve_staff_candidates(&mut primary, None, parameters.lines)
         .map_err(grid_stage("staff retrieval"))?;
+    if trace_tentative_staffs {
+        for rejected in result.rejected_clusters() {
+            if rejected.source().pass() == audiveris_image::lines_coordinator::ClusterPass::Main
+                && let Some(cluster) = primary.clusters().get(&rejected.source().cluster())
+                && let Ok(bounds) = cluster.bounds()
+                && bounds.y < 260
+            {
+                eprintln!(
+                    "GRID staff trace: rejected={:?} cluster={} size={} bounds={:?}",
+                    rejected.reason(),
+                    rejected.source().cluster().value(),
+                    cluster.size(),
+                    bounds
+                );
+            }
+        }
+    }
+    let tentative = recover_tentative_staffs_from_ridges(
+        &lag,
+        result.staffs(),
+        &parameters.raw_primary,
+        &mut next_tentative_line_id,
+    )
+    .map_err(grid_stage("tentative staff recovery"))?;
+    if trace_tentative_staffs {
+        eprintln!(
+            "GRID staff trace: retained {} late five-line hypotheses",
+            tentative.len()
+        );
+    }
+    result
+        .retain_tentative_staffs(tentative, global_slope)
+        .map_err(grid_stage("tentative staff ordering"))?;
 
     // The adaptive filter already emits Java ByteProcessor semantics
     // (`FOREGROUND == 0`, `BACKGROUND == 255`), which is exactly what the
@@ -3375,6 +3438,12 @@ pub fn recognize_grid_lines_raster(
         staves.push(StaffCandidateReport {
             id: staff.id(),
             kind: format!("{:?}", staff.kind()).to_lowercase(),
+            tentative: staff.is_tentative(),
+            hypothesis_source: if staff.is_tentative() {
+                "late-five-line-ridge".to_owned()
+            } else {
+                "clustered".to_owned()
+            },
             left: staff.left(),
             right: staff.right(),
             interline: staff.interline(),
@@ -4023,7 +4092,7 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
     }
     for staff in &recognition.staves {
         report.push_str(&format!(
-            "staff={}:{}:x{:.0}-{:.0}:interline:{}:lines:{}{}{}:peaks:{}\n",
+            "staff={}:{}:x{:.0}-{:.0}:interline:{}:lines:{}{}{}{}:source:{}:peaks:{}\n",
             staff.id,
             staff.kind,
             staff.left,
@@ -4032,6 +4101,8 @@ pub fn grid_lines_report(recognition: &GridLinesRecognition) -> String {
             staff.line_count,
             if staff.small { ":small" } else { "" },
             if staff.short { ":short" } else { "" },
+            if staff.tentative { ":tentative" } else { "" },
+            staff.hypothesis_source,
             staff.peaks.len(),
         ));
         if !staff.peaks.is_empty() {
@@ -5276,6 +5347,9 @@ mod tests {
             "\"bounds_recovered\"",
             "\"area\"",
             "\"staves\"",
+            "\"tentative\"",
+            "\"tentative_staff_ids\"",
+            "\"hypothesis_source\"",
             "\"inters\"",
             "\"relations\"",
             "\"contextual_grade\"",
@@ -5294,6 +5368,11 @@ mod tests {
             json.matches("\"area\":").count(),
             recognition.system_areas.len(),
             "every operational curved system area should be published",
+        );
+        assert_eq!(
+            json.matches("\"hypothesis_source\":").count(),
+            recognition.peak_graph.sheet_staffs.len(),
+            "every installed staff should publish its hypothesis provenance",
         );
         // The evidence is the reason this exists; an empty impacts block would
         // be well formed and useless.

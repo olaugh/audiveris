@@ -50,24 +50,43 @@ assembled from two neighboring staves from becoming a staff. This guard runs
 after cluster construction, not as an early filament filter.
 
 Dense low-resolution engraving can trigger the opposite failure: comb following
-may merge all five staff ridges and the intervening stems or slurs into one tall
-root before cluster formation. A guarded recovery now considers only roots at
-least 20 interlines wide whose raster coverage contains five independently
-strong, near-equidistant ridges over a plausible four-interline span. It assigns
-only thin sections close to those ridges, verifies line length and seven sampled
-interline gaps, and seeds the resulting five-line hypothesis into the ordinary
-late cluster pipeline. The recovered ridges are removed from generic comb
-recursion, while every unaffected frozen comb is preserved; recovery therefore
-cannot rebuild or perturb unrelated systems on the page.
+may merge five or ten staff ridges and the intervening stems or slurs into one
+tall root before cluster formation. A guarded recovery now considers only roots
+at least 20 interlines wide whose raster coverage contains one or more
+independently strong, near-equidistant five-line fields. It assigns only thin
+sections close to those ridges, verifies line length and seven sampled interline
+gaps, and seeds each resulting five-line hypothesis into the ordinary late
+cluster pipeline. The recovered ridges are removed from generic comb recursion,
+while every unaffected frozen comb is preserved; recovery therefore cannot
+rebuild or perturb unrelated systems on the page.
+
+That root-local recovery is not enough when dense notation fragments several
+staff ridges before the comb network can form any cluster. The final line pass
+therefore scans the existing horizontal run raster for a five-ridge periodic
+field and retains it as an explicitly **tentative** staff when no accepted staff
+lies within two interlines. This is additive, not a replacement for ordinary
+clustering: all five ridges must cover at least 40% of the page, the recovered
+line spans must cover 60%, and their true assigned ink must cover 25%. Tentative
+staffs participate in piano system and bar-tail construction so downstream
+stages can test them, but schema-1 JSON records `tentative` and
+`hypothesis_source` on each staff and the contributing tentative staff IDs on
+each system. The diagnostic `AUDIVERIS_TRACE_TENTATIVE_STAVES=1` reports the
+ridge candidates and the construction gate rather than hiding an early loss.
 
 The regression gate includes the 17 Schenker pages that formerly ended in a
 swallowed `ProcessBars -> BarTail::MissingStaffRange`; all 17 now complete. A
 release sweep over all 613 local Schenker pages also completes with zero GRID
-fatal errors. The overgrown-root sweep raises detected staves from 7,017 to
-7,135, reduces odd-staff pages from 157 to 117, and adds 14 systems across 12
-previously under-detected pages without removing a system. Completion and these
-structural counts are not a barline-accuracy claim; geometry and measure-count
-evaluation remain separate gates.
+fatal errors. The earlier root-local checkpoint raised detected staves from
+7,017 to 7,135 and added 14 systems across 12 pages. With late tentative-ridge
+retention enabled, the same sweep reports 7,309 staves and 3,673 systems,
+including 172 tentative staves and 156 tentative systems on 126 pages. Relative
+to the prior cached 3,652-system result, 23 pages gain one system and two pages
+lose one; visual inspection of those two reductions confirms that each removed
+an old spurious split. On Schenker Sonata 4 page 3, the motivating dense top
+grand staff moves from 10 staves / 5 systems to 12 / 6, and only the two
+recovered staves are tentative. Completion and these structural counts are not
+an accuracy claim; geometry, false-positive, and measure-count evaluation
+remain separate gates.
 
 ## Pipeline
 
@@ -112,7 +131,7 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | GRID section tally | stable first-position indexing with explicit sorted/range validation for staff-line sticker retrieval |
 | GRID line stickers | owned-member exclusion, stable full-position order, cumulative above/below contact, one-run retention, top-before-bottom adjacent discovery, exact thick/thin dispatch, typed section/filament inclusion decisions, and Java-ordered section assignment with endpoint restoration intent |
 | GRID staff pattern scoring | zero-valued foreground matching with fractional interlines, inclusive line span, ties-even placement, and out-of-bounds penalties |
-| GRID comb and cluster core | ties-even comb discovery, weighted popular size, stable-ID ownership, exact comb-network fragment following with Java length/tie/traversal semantics, recursive formation, transactional inclusion, general merges, same-size pair pass, short/inconsistent/undesired discard, upper-median acceptable length, two-sided expansion, filament partition, trim, geometry, extrapolation, and an executable stage-ordered retrieval pipeline with optional one-line recovery and ledger-like rejection; dense-page recovery splits a full-width overgrown root only when it contains five strong periodic ridges, seeds the provisional five-line cluster through the same late validators, and preserves every unaffected frozen comb; live-lag primary and lazy small-interline secondary construction are concrete, preserve original main-interline filament identity/geometry, and keep slope rejects outside the secondary pass as Java does |
+| GRID comb and cluster core | ties-even comb discovery, weighted popular size, stable-ID ownership, exact comb-network fragment following with Java length/tie/traversal semantics, recursive formation, transactional inclusion, general merges, same-size pair pass, short/inconsistent/undesired discard, upper-median acceptable length, two-sided expansion, filament partition, trim, geometry, extrapolation, and an executable stage-ordered retrieval pipeline with optional one-line recovery and ledger-like rejection; dense-page recovery can split multiple non-overlapping five-ridge fields from a full-width overgrown root, while a final additive raster pass retains wide periodic fields that never formed a cluster as provenance-marked tentative staves; accepted geometry wins within two interlines, recovered candidates flow through the production bar tail, and every unaffected frozen comb is preserved; live-lag primary and lazy small-interline secondary construction are concrete, preserve original main-interline filament identity/geometry, and keep slope rejects outside the secondary pass as Java does |
 | GRID peaks, bars, and systems | raw registry peaks materialize in exact order and proceed through sticks, alignments, pixel connections, fixed-point splits, systems/columns, brace and bracket evidence, every ordered purge/refinement, width partition, vertical/connection inter creation, grouping, bar recording, staff groups, parts, and contextual grades; stable IDs, graph/projector/column/SIG ownership, Java quirks, and non-transactional failure prefixes are covered |
 | GRID StaffProjector | scale parameters, raster accumulation, adaptive thresholds, blanks, peak refinement, core validation, multi-rest serif rejection, six-impact grading, brace discovery, and composed neutral process; result, lines-root, and right-end decisions; ordered BarsRetriever registry; graph edges and sheet ownership queued |
 | GRID LinesRetriever | exact outer `GridBuilder` and inner `completeLines` stage/exception lifecycles; source-preserving run dispatch, long/short partitions, initial vertical/horizontal lag policies, append-only short-section registration, live-lag primary filament construction, Java-ordered curvature and slope rejection with short-horizontal tolerance, comb-network joining, and concrete `toStaffLine`; the raw path now executes all 11 completion stages in Java order through inner `Finish`: raster endpoints, discarded lines, three live-geometry hole-fill passes, horizontal dispatch, thick/thin inclusion, curvature polishing, isolated sticker inclusion, and crossing-chunk inspection, with measured slope, explicit ordered system ownership, typed audits, and retained mutation prefixes |

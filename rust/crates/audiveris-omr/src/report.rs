@@ -635,6 +635,23 @@ fn systems(json: &mut Json, recognition: &GridLinesRecognition) {
             json.integer(*id as i64);
         }
         json.close(']');
+        let tentative_staff_ids = staff_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                recognition
+                    .staves
+                    .iter()
+                    .any(|staff| staff.id == *id && staff.tentative)
+            })
+            .collect::<Vec<_>>();
+        json.field_boolean("tentative", !tentative_staff_ids.is_empty());
+        json.key("tentative_staff_ids");
+        json.open('[');
+        for id in tentative_staff_ids {
+            json.integer(id as i64);
+        }
+        json.close(']');
         if let Some(bounds) = recognition
             .system_bounds
             .iter()
@@ -696,6 +713,10 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
                 StaffCandidateKind::Tablature => "tablature",
             },
         );
+        if let Some(candidate) = recognition.staves.iter().find(|item| item.id == staff.id) {
+            json.field_boolean("tentative", candidate.tentative);
+            json.field_string("hypothesis_source", &candidate.hypothesis_source);
+        }
         json.field_number("left", staff.left);
         json.field_number("right", staff.right);
         json.field_integer("interline", staff.interline as i64);

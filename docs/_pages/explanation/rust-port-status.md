@@ -29,15 +29,22 @@ previously failed at the bar tail now complete, and a release sweep completes
 all 613 local Schenker pages without a GRID fatal error. These are lifecycle and
 robustness gates, not claims that all detected systems or barlines are correct.
 Dense-page recovery also handles the inverse clustering failure, where early
-comb following collapses five real staff ridges and bridging notation into one
-tall root. It requires five strong periodic ridges across at least 20
-interlines, extracts only thin near-ridge sections, validates seven shared-span
-gap samples, and sends the provisional staff through the ordinary late cluster
-checks. Recovered lines are isolated from recursive comb inclusion and all
-unaffected frozen combs remain unchanged. On the 613-page Schenker sweep this
-raises detected staves from 7,017 to 7,135, reduces odd-staff pages from 157 to
-117, and adds 14 systems on 12 previously under-detected pages without removing
-a system.
+comb following collapses five or ten real staff ridges and bridging notation
+into one tall root. It can extract multiple non-overlapping periodic five-line
+fields, keeps only thin near-ridge sections, validates seven shared-span gap
+samples, and sends each provisional staff through the ordinary late cluster
+checks. A final additive pass covers the harder case where page-wide periodic
+ridges remain in the horizontal raster but no comb cluster survives: five
+ridges with 40% row coverage, 60% span, and 25% assigned ink become an explicitly
+tentative staff only when no accepted staff lies within two interlines.
+Tentative geometry participates in system and bar-tail construction, while JSON
+marks staff provenance and every affected system's tentative staff IDs. On the
+613-page Schenker sweep all pages still complete, with 7,309 staves and 3,673
+systems; 172 staves and 156 systems on 126 pages are tentative. Against the
+previous 3,652-system cache, 23 pages gain one system and two lose an old
+spurious split. The motivating Schenker Sonata 4 page 3 moves from 10 staves / 5
+systems to 12 / 6 at native resolution. These are retained hypotheses, not
+accuracy labels.
 
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.

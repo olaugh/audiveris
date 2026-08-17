@@ -27,7 +27,7 @@ use crate::{
         sort_by_reverse_horizontal_length,
     },
     line_short_sections::HorizontalSectionLag,
-    lines_coordinator::{ClusterPassState, LinesCoordinatorError},
+    lines_coordinator::{ClusterPassState, LinesCoordinatorError, StaffCandidate},
 };
 
 /// Pixel-resolved inputs needed before Java's primary `ClustersRetriever` pass.
@@ -348,25 +348,27 @@ fn recover_overgrown_staff_roots(
         let filament = filaments
             .get(&id)
             .ok_or(RawLineAdapterError::MissingFilament(id))?;
-        let Some(lines) = split_five_ridge_composite(filament, parameters)? else {
+        let Some(line_groups) = split_staff_ridge_composite(filament, parameters)? else {
             recovered_filaments.insert(id, filament.clone());
             recovered_order.push(id);
             continue;
         };
 
         source_ids.push(id);
-        let mut group = [FilamentId::new(0); 5];
-        for (index, line) in lines.into_iter().enumerate() {
-            let line_id = FilamentId::new(*next_id);
-            *next_id = next_id
-                .checked_add(1)
-                .ok_or(RawLineAdapterError::IdentityOverflow)?;
-            recovered_filaments.insert(line_id, line);
-            recovered_order.push(line_id);
-            recovered_ids.push(line_id);
-            group[index] = line_id;
+        for lines in line_groups {
+            let mut group = [FilamentId::new(0); 5];
+            for (index, line) in lines.into_iter().enumerate() {
+                let line_id = FilamentId::new(*next_id);
+                *next_id = next_id
+                    .checked_add(1)
+                    .ok_or(RawLineAdapterError::IdentityOverflow)?;
+                recovered_filaments.insert(line_id, line);
+                recovered_order.push(line_id);
+                recovered_ids.push(line_id);
+                group[index] = line_id;
+            }
+            groups.push(group);
         }
-        groups.push(group);
     }
 
     Ok(RecoveredStaffRoots {
@@ -378,14 +380,38 @@ fn recover_overgrown_staff_roots(
     })
 }
 
-/// Split a tall root only when it contains five independently strong,
-/// near-equidistant horizontal ridges. Sections between those ridges are not
-/// assigned, so the staff hypothesis is not polluted by the stems, slurs, and
-/// other bridges that caused the original comb-network merge.
-fn split_five_ridge_composite(
+#[derive(Clone, Copy, Debug)]
+struct RidgeStaffPattern {
+    first: usize,
+    gap: usize,
+    rank: usize,
+}
+
+impl RidgeStaffPattern {
+    fn last(self) -> usize {
+        self.first + (4 * self.gap)
+    }
+
+    fn overlaps(self, other: Self, margin: usize) -> bool {
+        self.first <= other.last().saturating_add(margin)
+            && other.first <= self.last().saturating_add(margin)
+    }
+}
+
+/// Split a tall root when it contains one or more independently strong,
+/// near-equidistant five-line patterns.
+///
+/// Dense piano engraving can join *both* staves through repeated stems and
+/// chords before the comb graph sees them. The old recovery accepted only a
+/// component no taller than nine interlines, so a fused grand staff vanished
+/// before system formation. This version keeps every non-overlapping five-line
+/// hypothesis in the component. Sections between the selected ridges remain
+/// unassigned, so stems, slurs, beams, and the inter-staff bridge do not pollute
+/// either tentative staff.
+fn split_staff_ridge_composite(
     filament: &crate::filament::StaffFilament,
     parameters: &RawPrimaryPassParameters,
-) -> Result<Option<Vec<crate::filament::StaffFilament>>, RawLineAdapterError> {
+) -> Result<Option<Vec<Vec<crate::filament::StaffFilament>>>, RawLineAdapterError> {
     const LINE_COUNT: usize = 5;
     let interline = parameters.factory.interline;
     let bounds = filament.bounds()?;
@@ -396,7 +422,7 @@ fn split_five_ridge_composite(
         .max(1) as usize;
     if bounds.width < 20 * interline
         || bounds.height < (LINE_COUNT - 1) * minimum_gap
-        || bounds.height > 9 * interline
+        || bounds.height > 30 * interline
     {
         return Ok(None);
     }
@@ -411,7 +437,7 @@ fn split_five_ridge_composite(
 
     let radius = (interline / 6).max(1);
     let last_y = bounds.y + bounds.height - 1;
-    let mut best: Option<(usize, usize, [usize; LINE_COUNT], usize)> = None;
+    let mut patterns = Vec::<RidgeStaffPattern>::new();
     for gap in minimum_gap..=maximum_gap {
         let span = (LINE_COUNT - 1) * gap;
         if span >= bounds.height {
@@ -428,22 +454,63 @@ fn split_five_ridge_composite(
             let minimum = scores.iter().copied().min().unwrap_or(0);
             let total: usize = scores.iter().sum();
             let rank = minimum.saturating_mul(LINE_COUNT).saturating_add(total);
-            if best
-                .as_ref()
-                .is_none_or(|(_, _, _, old_rank)| rank > *old_rank)
-            {
-                best = Some((first, gap, scores, rank));
+            if minimum >= (bounds.width * 2) / 5 {
+                patterns.push(RidgeStaffPattern { first, gap, rank });
             }
         }
     }
-    let Some((first, gap, scores, _)) = best else {
-        return Ok(None);
-    };
-    if scores.iter().any(|score| *score < (bounds.width * 2) / 5) {
+    if patterns.is_empty() {
         return Ok(None);
     }
 
-    let centers = std::array::from_fn::<_, LINE_COUNT, _>(|index| first + (index * gap));
+    patterns.sort_by(|one, two| {
+        two.rank
+            .cmp(&one.rank)
+            .then_with(|| one.first.cmp(&two.first))
+            .then_with(|| one.gap.cmp(&two.gap))
+    });
+    let separation_margin = (interline / 2).max(1);
+    let mut selected = Vec::<RidgeStaffPattern>::new();
+    for pattern in patterns {
+        if selected
+            .iter()
+            .all(|existing| !pattern.overlaps(*existing, separation_margin))
+        {
+            selected.push(pattern);
+        }
+    }
+    selected.sort_by_key(|pattern| pattern.first);
+    // A tall component plausibly contains more than one staff. Recovering
+    // only the strongest five ridges would delete the remaining evidence, so
+    // keep the composite intact until at least two independent hypotheses are
+    // available.
+    if bounds.height > 9 * interline && selected.len() < 2 {
+        return Ok(None);
+    }
+
+    let mut recovered = Vec::with_capacity(selected.len());
+    for pattern in selected {
+        let Some(lines) = recovered_staff_lines(filament, parameters, pattern)? else {
+            continue;
+        };
+        recovered.push(lines);
+    }
+    if recovered.is_empty() || (bounds.height > 9 * interline && recovered.len() < 2) {
+        return Ok(None);
+    }
+    Ok(Some(recovered))
+}
+
+fn recovered_staff_lines(
+    filament: &crate::filament::StaffFilament,
+    parameters: &RawPrimaryPassParameters,
+    pattern: RidgeStaffPattern,
+) -> Result<Option<Vec<crate::filament::StaffFilament>>, RawLineAdapterError> {
+    const LINE_COUNT: usize = 5;
+    let interline = parameters.factory.interline;
+    let bounds = filament.bounds()?;
+    let centers =
+        std::array::from_fn::<_, LINE_COUNT, _>(|index| pattern.first + (index * pattern.gap));
     let assignment_radius = (0.34 * interline as f64).max(1.5);
     let maximum_section_height = ((interline as f64) * 0.5).ceil() as usize;
     let mut lines = (0..LINE_COUNT)
@@ -493,6 +560,11 @@ fn split_five_ridge_composite(
     if shared_right <= shared_left || shared_right - shared_left < minimum_line_width {
         return Ok(None);
     }
+    let minimum_gap = parameters.minimum_delta_y.max(1) as f64;
+    let maximum_gap = parameters
+        .maximum_delta_y
+        .max(parameters.minimum_delta_y)
+        .max(1) as f64;
     for sample in 0..=6 {
         let x = shared_left as f64 + ((shared_right - shared_left) as f64 * sample as f64 / 6.0);
         let ordinates = lines
@@ -501,13 +573,194 @@ fn split_five_ridge_composite(
             .collect::<Result<Vec<_>, _>>()?;
         if ordinates.windows(2).any(|pair| {
             let observed = pair[1] - pair[0];
-            observed < minimum_gap as f64 * 0.7 || observed > maximum_gap as f64 * 1.3
+            observed < minimum_gap * 0.7 || observed > maximum_gap * 1.3
         }) {
             return Ok(None);
         }
     }
 
     Ok(Some(lines))
+}
+
+/// Recover strong five-line raster fields that survived run extraction but
+/// were never assembled by the comb network.
+///
+/// This is deliberately late and additive. Ordinary accepted staves win; a
+/// periodic raster field becomes a tentative candidate only when no accepted
+/// five-line staff occupies the same ordinate. That keeps title text and
+/// already-stable geometry from being promoted merely because early pruning
+/// was relaxed.
+pub fn recover_tentative_staffs_from_ridges(
+    lag: &HorizontalSectionLag,
+    accepted: &[StaffCandidate],
+    parameters: &RawPrimaryPassParameters,
+    next_id: &mut u64,
+) -> Result<Vec<StaffCandidate>, RawLineAdapterError> {
+    const LINE_COUNT: usize = 5;
+    let table = lag.run_table();
+    let interline = parameters.factory.interline;
+    let minimum_gap = parameters.minimum_delta_y.max(1) as usize;
+    let maximum_gap = parameters
+        .maximum_delta_y
+        .max(parameters.minimum_delta_y)
+        .max(1) as usize;
+    let radius = (interline / 6).max(1);
+    let row_coverage = (0..table.height())
+        .map(|y| {
+            table
+                .sequence(y)
+                .unwrap_or_default()
+                .iter()
+                .map(|run| run.length)
+                .sum::<usize>()
+        })
+        .collect::<Vec<_>>();
+    let trace = std::env::var("AUDIVERIS_TRACE_TENTATIVE_STAVES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));
+    if trace {
+        let mut strongest = row_coverage.iter().copied().enumerate().collect::<Vec<_>>();
+        strongest.sort_by_key(|(_, coverage)| std::cmp::Reverse(*coverage));
+        eprintln!(
+            "GRID ridge trace: strongest rows {:?}",
+            strongest.into_iter().take(24).collect::<Vec<_>>()
+        );
+    }
+    let mut patterns = Vec::<RidgeStaffPattern>::new();
+    for gap in minimum_gap..=maximum_gap {
+        let span = (LINE_COUNT - 1) * gap;
+        if span >= table.height() {
+            continue;
+        }
+        for first in 0..table.height() - span {
+            let mut scores = [0_usize; LINE_COUNT];
+            for (index, score) in scores.iter_mut().enumerate() {
+                let center = first + (index * gap);
+                let start = center.saturating_sub(radius);
+                let stop = (center + radius).min(table.height() - 1);
+                *score = row_coverage[start..=stop].iter().sum();
+            }
+            let minimum = scores.iter().copied().min().unwrap_or(0);
+            if minimum < (table.width() * 2) / 5 {
+                continue;
+            }
+            patterns.push(RidgeStaffPattern {
+                first,
+                gap,
+                rank: minimum
+                    .saturating_mul(LINE_COUNT)
+                    .saturating_add(scores.iter().sum()),
+            });
+        }
+    }
+    patterns.sort_by(|one, two| {
+        two.rank
+            .cmp(&one.rank)
+            .then_with(|| one.first.cmp(&two.first))
+            .then_with(|| one.gap.cmp(&two.gap))
+    });
+    if trace {
+        eprintln!("GRID ridge trace: {} thresholded patterns", patterns.len());
+    }
+    let mut selected = Vec::<RidgeStaffPattern>::new();
+    for pattern in patterns {
+        if selected
+            .iter()
+            .all(|existing| !pattern.overlaps(*existing, (interline / 2).max(1)))
+        {
+            selected.push(pattern);
+        }
+    }
+    selected.sort_by_key(|pattern| pattern.first);
+    if trace {
+        eprintln!("GRID ridge trace: selected patterns {selected:?}");
+    }
+
+    let mut tentative = Vec::new();
+    for pattern in selected {
+        let center_y = pattern.first as f64 + (2.0 * pattern.gap as f64);
+        let already_accepted = accepted.iter().any(|staff| {
+            if staff.line_filaments().len() != LINE_COUNT {
+                return false;
+            }
+            let x = (staff.left() + staff.right()) / 2.0;
+            staff.line_filaments()[2]
+                .geometry()
+                .and_then(|geometry| geometry.position_at(x))
+                // Dense noteheads can make the strongest periodic window
+                // slide by one staff space. Treat that as the same accepted
+                // staff rather than emitting a shifted duplicate hypothesis.
+                .is_ok_and(|y| (y - center_y).abs() <= 2.0 * interline as f64)
+        });
+        if already_accepted {
+            continue;
+        }
+
+        let centers =
+            std::array::from_fn::<_, LINE_COUNT, _>(|index| pattern.first + (index * pattern.gap));
+        let assignment_radius = (0.34 * interline as f64).max(1.5);
+        let maximum_section_height = ((interline as f64) * 0.5).ceil() as usize;
+        let minimum_section_width = (2 * interline).max(1);
+        let mut lines = (0..LINE_COUNT)
+            .map(|_| crate::filament::StaffFilament::new(interline))
+            .collect::<Result<Vec<_>, _>>()?;
+        for section in lag.sections() {
+            let bounds = section.bounds();
+            if bounds.height > maximum_section_height || bounds.width < minimum_section_width {
+                continue;
+            }
+            let (_, y) = section.centroid_2d();
+            let (index, distance) = centers
+                .iter()
+                .enumerate()
+                .map(|(index, center)| (index, (y - *center as f64).abs()))
+                .min_by(|one, two| one.1.total_cmp(&two.1))
+                .expect("five raster ridge centers");
+            if distance <= assignment_radius {
+                lines[index].add_section(section.clone())?;
+            }
+        }
+        let minimum_line_width = (table.width() * 3) / 5;
+        // Dense chords, aligned stems, and clefs can fragment the physical
+        // staff ink while all five ridge spans and the raster periodicity stay
+        // unequivocal. This is a tentative path: require one quarter-page of
+        // actual line ink, not the ordinary two-fifths acceptance threshold.
+        let minimum_true_length = table.width() / 4;
+        let line_metrics = lines
+            .iter()
+            .map(|line| {
+                (
+                    line.bounds().ok().map(|bounds| bounds.width),
+                    line.true_length().ok(),
+                    line.geometry().is_ok(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if line_metrics.iter().any(|(width, true_length, geometry)| {
+            width.is_none_or(|width| width < minimum_line_width)
+                || true_length.is_none_or(|length| length < minimum_true_length)
+                || !geometry
+        }) {
+            if trace {
+                eprintln!(
+                    "GRID ridge trace: rejected pattern {pattern:?} line metrics {line_metrics:?}"
+                );
+            }
+            continue;
+        }
+        let line_ids = (0..LINE_COUNT)
+            .map(|_| {
+                let id = FilamentId::new(*next_id);
+                *next_id = next_id
+                    .checked_add(1)
+                    .ok_or(RawLineAdapterError::IdentityOverflow)?;
+                Ok(id)
+            })
+            .collect::<Result<Vec<_>, RawLineAdapterError>>()?;
+        tentative.push(StaffCandidate::tentative_standard(
+            interline, line_ids, lines,
+        )?);
+    }
+    Ok(tentative)
 }
 
 /// Lazily construct Java's secondary/small-interline clustering state.
@@ -1052,6 +1305,99 @@ mod tests {
 
         assert_eq!(result.staffs().len(), 1);
         assert_eq!(result.staffs()[0].line_ids(), group);
+    }
+
+    #[test]
+    fn fused_grand_staff_root_preserves_two_tentative_five_line_hypotheses() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 240, 170).unwrap();
+        for y in [15, 25, 35, 45, 55, 105, 115, 125, 135, 145] {
+            runs.add_run(y, Run::new(10, 220)).unwrap();
+        }
+        let mut composite = StaffFilament::new(10).unwrap();
+        for section in build_sections(&runs, JunctionPolicy::All) {
+            composite.add_section(section).unwrap();
+        }
+
+        let source = FilamentId::new(1);
+        let mut next_id = 2;
+        let recovered = recover_overgrown_staff_roots(
+            &BTreeMap::from([(source, composite)]),
+            &[source],
+            &parameters(),
+            &mut next_id,
+        )
+        .unwrap();
+        assert_eq!(recovered.source_ids, [source]);
+        assert_eq!(recovered.groups.len(), 2);
+        assert_eq!(recovered.recovered_ids.len(), 10);
+        assert_eq!(next_id, 12);
+
+        let mut ownership = ClusterOwnership::new();
+        for (&id, filament) in &recovered.filaments {
+            ownership.register_filament(id, filament).unwrap();
+        }
+        let mut state = ClusterPassState::new(
+            ownership,
+            recovered.filaments,
+            BTreeMap::new(),
+            recovered.order,
+            retrieval_parameters(),
+        );
+        for group in &recovered.groups {
+            state.seed_recovered_cluster(group).unwrap();
+        }
+        let result = retrieve_staff_candidates(
+            &mut state,
+            None,
+            LinesCoordinatorParameters::new(0.0, 1, None, 1.0, 0.0, 100.0).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(result.staffs().len(), 2);
+        assert_eq!(result.staffs()[0].line_ids(), recovered.groups[0]);
+        assert_eq!(result.staffs()[1].line_ids(), recovered.groups[1]);
+    }
+
+    #[test]
+    fn late_ridge_recovery_retains_missing_staves_without_duplicating_accepted_geometry() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 240, 180).unwrap();
+        for y in [15, 25, 35, 45, 55, 105, 115, 125, 135, 145] {
+            runs.add_run(y, Run::new(10, 220)).unwrap();
+        }
+        let lag = HorizontalSectionLag::from_long_runs(runs).unwrap();
+        let mut next_id = 1;
+        let recovered =
+            recover_tentative_staffs_from_ridges(&lag, &[], &parameters(), &mut next_id).unwrap();
+
+        assert_eq!(recovered.len(), 2);
+        assert!(recovered.iter().all(StaffCandidate::is_tentative));
+        assert_eq!(next_id, 11);
+
+        let mut second_next_id = next_id;
+        let duplicates = recover_tentative_staffs_from_ridges(
+            &lag,
+            &recovered,
+            &parameters(),
+            &mut second_next_id,
+        )
+        .unwrap();
+        assert!(duplicates.is_empty());
+        assert_eq!(second_next_id, next_id);
+    }
+
+    #[test]
+    fn late_ridge_recovery_does_not_promote_four_text_like_rows() {
+        let mut runs = RunTable::new(Orientation::Horizontal, 240, 90).unwrap();
+        for y in [15, 25, 35, 45] {
+            runs.add_run(y, Run::new(10, 220)).unwrap();
+        }
+        let lag = HorizontalSectionLag::from_long_runs(runs).unwrap();
+        let mut next_id = 1;
+        let recovered =
+            recover_tentative_staffs_from_ridges(&lag, &[], &parameters(), &mut next_id).unwrap();
+
+        assert!(recovered.is_empty());
+        assert_eq!(next_id, 1);
     }
 
     #[test]
