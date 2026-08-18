@@ -44,6 +44,7 @@ use audiveris_omr::{
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
+        continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_first_stems_bridge,
         remove_native_stems_beam_competing_hook_and_resume,
     },
@@ -8244,6 +8245,47 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(final_stem.inter_id, Some(2379));
     assert!(final_stem.sig_attached);
 
+    // Boundary 29: carry the successful first-head mutation into Java's next
+    // stable reverse-grade queue entry.  This is still a read-only frontier;
+    // the next CLinker mutation and phase-1 retry bookkeeping remain open.
+    let head_after_first = head_phase.clone();
+    let second_head_phase = continue_native_stems_head_linking_phase1(
+        &head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native second-head phase-1 frontier");
+    assert_eq!(head_phase, head_after_first);
+    assert_eq!(second_head_phase.current_index, 2);
+    assert!(second_head_phase.frontier_consumed);
+    assert_eq!(second_head_phase.unlinked_heads.len(), 1);
+    assert_eq!(second_head_phase.unlinked_heads[0].sig_ordinal, 23);
+    assert_eq!(
+        second_head_phase.heads[1]
+            .sides
+            .iter()
+            .map(|cell| { (cell.reference.horizontal, cell.linked, cell.closed,) })
+            .collect::<Vec<_>>(),
+        vec![
+            (NativeStemHeadSide::Left, true, false),
+            (NativeStemHeadSide::Right, false, false),
+        ]
+    );
+    let mut invalid_second_head = head_phase.clone();
+    invalid_second_head.current_index = 0;
+    let invalid_second_head_before = invalid_second_head.clone();
+    assert!(
+        continue_native_stems_head_linking_phase1(
+            &invalid_second_head,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+        )
+        .is_err()
+    );
+    assert_eq!(invalid_second_head, invalid_second_head_before);
+
     let mut corrupted = head_phase_entry.clone();
     let mut corrupt_canonical = head_phase
         .beam_state
@@ -8898,6 +8940,28 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(java_result, "nextSides"),
         "[LEFT:true:false,RIGHT:false:false]"
     );
+    assert_eq!(
+        head_field(java_result, "nextHeadSig")
+            .parse::<usize>()
+            .expect("numeric next head SIG ordinal"),
+        second_head_phase.unlinked_heads[0].sig_ordinal
+    );
+    let native_next_sides = format!(
+        "[{}]",
+        second_head_phase.heads[1]
+            .sides
+            .iter()
+            .map(|cell| {
+                let side = match cell.reference.horizontal {
+                    NativeStemHeadSide::Left => "LEFT",
+                    NativeStemHeadSide::Right => "RIGHT",
+                };
+                format!("{}:{}:{}", side, cell.linked, cell.closed)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    assert_eq!(head_field(java_result, "nextSides"), native_next_sides);
     let create = head_phase_rows[4];
     assert_eq!(head_field(create, "registeredAlias"), "glyph:307");
     assert_eq!(head_field(create, "registeredId"), "307");

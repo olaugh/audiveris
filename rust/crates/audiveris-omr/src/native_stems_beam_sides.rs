@@ -706,6 +706,273 @@ fn bounded_head_can_link(
     Ok(true)
 }
 
+/// Continue Java `HeadLinker.linkSides` phase 1 after one successful C-link.
+///
+/// The first head mutation is already owned by
+/// [`advance_native_stems_head_single_item_c_link`].  This seam deliberately
+/// stops at the next ordered head frontier, or records one no-link head and
+/// advances the queue when both open corners fail STRICT `canLink`.  It
+/// refreshes the queued S-linker view from the carried persistent cells,
+/// revalidates the stable reverse-grade order, and applies only the bounded
+/// STRICT decision.  It does not mutate SIG, glyph, stem, or S-cell state.
+pub fn continue_native_stems_head_linking_phase1(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Carrier, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed || carrier.current_index == 0 {
+        return Err(stage(
+            "HEADS-phase1-continue",
+            "continuation requires one consumed head frontier",
+        ));
+    }
+    if carrier.current_index >= carrier.heads.len() {
+        return Err(stage(
+            "HEADS-phase1-continue",
+            "head continuation index is outside the ordered queue",
+        ));
+    }
+    if carrier.beam_state.scheduler.system_id != head_corners.system_id
+        || carrier.beam_state.sig.system_id != head_corners.system_id
+        || carrier.beam_state.bindings.system_id != head_corners.system_id
+        || head_builders.system_id != head_corners.system_id
+        || plans.system_id != head_corners.system_id
+    {
+        return Err(stage(
+            "HEADS-phase1-continue-system",
+            "continued carrier and head products differ by system",
+        ));
+    }
+    let NativeStemsBeamSchedulerStatus::Completed { .. } = &carrier.beam_state.scheduler.status
+    else {
+        return Err(stage(
+            "HEADS-phase1-continue-terminal",
+            "continued head phase does not own a completed STUMPS carrier",
+        ));
+    };
+    carrier
+        .beam_state
+        .bindings
+        .validate_against(&carrier.beam_state.sig)
+        .map_err(|error| stage("HEADS-phase1-continue-bindings", error))?;
+
+    let mut expected_grade_order = (0..head_corners.heads_in_sig_order.len()).collect::<Vec<_>>();
+    expected_grade_order.sort_by(|&left, &right| {
+        java_double_compare(
+            f64::from_bits(head_corners.heads_in_sig_order[right].grade_bits),
+            f64::from_bits(head_corners.heads_in_sig_order[left].grade_bits),
+        )
+        .cmp(&0)
+    });
+    if expected_grade_order != head_corners.heads_by_reverse_grade
+        || carrier.heads.len() != expected_grade_order.len()
+    {
+        return Err(stage(
+            "HEADS-phase1-continue-order",
+            "continued head queue is not Java's stable reverse-grade order",
+        ));
+    }
+    let expected_cells = initialize_native_stems_beam_s_linker_cells(head_corners)
+        .map_err(|error| stage("HEADS-phase1-continue-S-topology", error))?;
+    if expected_cells.len() != carrier.beam_state.s_cells.len() {
+        return Err(stage(
+            "HEADS-phase1-continue-S-topology",
+            "continued persistent S-cell catalogue is not exhaustive",
+        ));
+    }
+    let mut live_refs = BTreeSet::new();
+    for cell in &carrier.beam_state.s_cells {
+        if !live_refs.insert(cell.reference) {
+            return Err(stage(
+                "HEADS-phase1-continue-S-topology",
+                "duplicate persistent S-cell reference",
+            ));
+        }
+        let expected = expected_cells
+            .iter()
+            .find(|expected| expected.reference == cell.reference)
+            .ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-continue-S-topology",
+                    "persistent S cell is absent from constructor topology",
+                )
+            })?;
+        if cell.ordered_observer_corners != expected.ordered_observer_corners {
+            return Err(stage(
+                "HEADS-phase1-continue-S-topology",
+                "persistent S-cell observer order differs",
+            ));
+        }
+    }
+
+    let mut shadow = carrier.clone();
+    for (queue_index, &sig_ordinal) in expected_grade_order.iter().enumerate() {
+        let head = &head_corners.heads_in_sig_order[sig_ordinal];
+        let x_ordinal = head_corners
+            .heads_by_abscissa
+            .iter()
+            .position(|&candidate| candidate == sig_ordinal)
+            .ok_or_else(|| stage("HEADS-phase1-continue-order", "head lacks x order"))?;
+        let reference = NativeStemsBeamHeadLinkHeadRef {
+            reference: head.reference,
+            sig_ordinal,
+            x_ordinal,
+        };
+        if shadow.heads[queue_index].reference != reference {
+            return Err(stage(
+                "HEADS-phase1-continue-order",
+                "continued queue head identity differs",
+            ));
+        }
+        let vertex_id = shadow
+            .beam_state
+            .bindings
+            .head_vertices
+            .get(&head.reference)
+            .ok_or_else(|| stage("HEADS-phase1-continue-head", "head binding is missing"))?;
+        let vertex = shadow.beam_state.sig.vertex(vertex_id.0).ok_or_else(|| {
+            stage(
+                "HEADS-phase1-continue-head",
+                "head binding points outside the live SIG",
+            )
+        })?;
+        if !vertex.active
+            || vertex.removed
+            || vertex.kind != NativeSigInterKind::Head
+            || vertex.grade.to_bits() != head.grade_bits
+        {
+            return Err(stage(
+                "HEADS-phase1-continue-head",
+                "continued head binding is not the exact live graded HeadInter",
+            ));
+        }
+        let sides = [
+            crate::stems_step::NativeStemHeadSide::Left,
+            crate::stems_step::NativeStemHeadSide::Right,
+        ]
+        .into_iter()
+        .map(|horizontal| {
+            let reference = NativeStemsBeamHeadSLinkerRef {
+                head: shadow.heads[queue_index].reference,
+                horizontal,
+            };
+            shadow
+                .beam_state
+                .s_cells
+                .iter()
+                .find(|cell| cell.reference == reference)
+                .cloned()
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-phase1-continue-S-topology",
+                        "head side cell is missing",
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+        shadow.heads[queue_index].sides = sides;
+        shadow.heads[queue_index].grade = vertex.grade;
+    }
+
+    let current = shadow.heads[shadow.current_index].clone();
+    let mut side_decisions = Vec::new();
+    let mut next_corner = None;
+    for side in &current.sides {
+        if side.linked {
+            side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                side: side.reference.horizontal,
+                linked_before: true,
+                closed_before: side.closed,
+                top_can_link: None,
+                bottom_can_link: None,
+            });
+            continue;
+        }
+        if side.closed {
+            side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                side: side.reference.horizontal,
+                linked_before: false,
+                closed_before: true,
+                top_can_link: None,
+                bottom_can_link: None,
+            });
+            continue;
+        }
+        let top = side.ordered_observer_corners[0];
+        let bottom = side.ordered_observer_corners[1];
+        let top = NativeStemsHeadCornerRef {
+            head: top.head,
+            sig_ordinal: top.sig_ordinal,
+            x_ordinal: top.x_ordinal,
+            horizontal: top.horizontal,
+            vertical: top.vertical,
+        };
+        let bottom = NativeStemsHeadCornerRef {
+            head: bottom.head,
+            sig_ordinal: bottom.sig_ordinal,
+            x_ordinal: bottom.x_ordinal,
+            horizontal: bottom.horizontal,
+            vertical: bottom.vertical,
+        };
+        let top_ok = bounded_head_can_link(
+            top,
+            0,
+            head_builders,
+            &shadow.beam_state.s_cells,
+            plans.min_linker_length,
+        )?;
+        let bottom_ok = bounded_head_can_link(
+            bottom,
+            0,
+            head_builders,
+            &shadow.beam_state.s_cells,
+            plans.min_linker_length,
+        )?;
+        side_decisions.push(NativeStemsHeadPhase1SideDecision {
+            side: side.reference.horizontal,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(top_ok),
+            bottom_can_link: Some(bottom_ok),
+        });
+        match (top_ok, bottom_ok) {
+            (true, false) => next_corner = Some(top),
+            (false, true) => next_corner = Some(bottom),
+            (true, true) => {
+                return Err(stage(
+                    "HEADS-phase1-continue-frontier",
+                    "continued head reaches the dual-corner selection branch",
+                ));
+            }
+            (false, false) => {}
+        }
+        if next_corner.is_some() {
+            break;
+        }
+    }
+    let Some(next_corner) = next_corner else {
+        // Java phase 1 records a head whose open sides have no STRICT
+        // candidate and continues with the next reverse-grade head.  The
+        // caller's later append/retry phase remains outside this boundary.
+        shadow.unlinked_heads.push(current.reference);
+        shadow.current_index += 1;
+        shadow.frontier_consumed = true;
+        return Ok(shadow);
+    };
+
+    shadow.frontier = NativeStemsHeadPhase1Frontier {
+        head: current.reference,
+        stem_profile: 0,
+        link_profile: plans.link_profile,
+        append: false,
+        side_decisions,
+        next_corner,
+    };
+    shadow.frontier_consumed = false;
+    Ok(shadow)
+}
+
 /// Execute the bounded single-item head-origin C-link frontier selected by
 /// [`begin_native_stems_head_linking_phase1`].
 ///
