@@ -470,6 +470,32 @@ impl LinesRetrievalResult {
             .collect();
         Ok(())
     }
+
+    /// Apply a late staff-hypothesis gate after ordinary and tentative
+    /// retrieval have both had a chance to contribute evidence.
+    ///
+    /// Rejected candidates are returned intact for diagnostics. Survivors are
+    /// renumbered in their already-established page order so every downstream
+    /// GRID structure continues to use compact one-based staff ids.
+    pub fn retain_staff_hypotheses(
+        &mut self,
+        mut predicate: impl FnMut(&StaffCandidate) -> bool,
+    ) -> Vec<StaffCandidate> {
+        let mut retained = Vec::with_capacity(self.staffs.len());
+        let mut rejected = Vec::new();
+        for staff in self.staffs.drain(..) {
+            if predicate(&staff) {
+                retained.push(staff);
+            } else {
+                rejected.push(staff);
+            }
+        }
+        for (index, staff) in retained.iter_mut().enumerate() {
+            staff.id = index + 1;
+        }
+        self.staffs = retained;
+        rejected
+    }
 }
 
 /// Execute main clustering, optional small-interline clustering, and

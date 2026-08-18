@@ -251,6 +251,25 @@ pub struct StaffCandidateReport {
     pub projection_bar_threshold: i32,
 }
 
+/// A five-line hypothesis withheld from the published staff set by a late,
+/// auditable page-substrate check.
+///
+/// This is deliberately not an early cluster rejection: all line evidence is
+/// first allowed to form a staff. The record preserves where that hypothesis
+/// was and why it was not allowed to seed systems and barlines.
+#[derive(Debug, Clone)]
+pub struct RejectedStaffHypothesisReport {
+    pub original_id: usize,
+    pub tentative: bool,
+    pub left: f64,
+    pub right: f64,
+    pub top: usize,
+    pub bottom: usize,
+    pub local_max_luminance: u8,
+    pub page_max_luminance: u8,
+    pub reason: String,
+}
+
 fn raw_projection_ranges(
     result: &NeutralStaffProjectorResult,
     minimum_count: i32,
@@ -270,6 +289,89 @@ fn raw_projection_ranges(
         ranges.push((start, result.peak_search_bounds.x_max, maximum));
     }
     ranges
+}
+
+/// Return a rejection only when an entire staff-height neighborhood has no
+/// paper-bright pixels. This catches five-line patterns in a dark scanner bed
+/// beyond the physical sheet without penalizing faint ink, broken lines, or
+/// locally shadowed notation that still sits on paper.
+fn non_page_substrate_rejection(
+    staff: &StaffCandidate,
+    raster: &ingest::GrayRaster,
+    page_max_luminance: u8,
+) -> Option<RejectedStaffHypothesisReport> {
+    if page_max_luminance == 0 || raster.width() == 0 || raster.height() == 0 {
+        return None;
+    }
+
+    let mut top = raster.height();
+    let mut bottom = 0usize;
+    for line in staff.line_filaments() {
+        let bounds = line.bounds().ok()?;
+        top = top.min(bounds.y);
+        bottom = bottom.max(bounds.y.saturating_add(bounds.height.saturating_sub(1)));
+    }
+    if top > bottom {
+        return None;
+    }
+
+    // Include one interline above and below. A legitimate staff can be dense,
+    // but this surrounding band should still encounter the page substrate.
+    let margin = staff.interline().max(1);
+    let sample_top = top.saturating_sub(margin);
+    let sample_bottom = bottom
+        .saturating_add(margin)
+        .min(raster.height().saturating_sub(1));
+    let sample_left = staff
+        .left()
+        .floor()
+        .max(0.0)
+        .min((raster.width().saturating_sub(1)) as f64) as usize;
+    let sample_right = staff
+        .right()
+        .ceil()
+        .max(0.0)
+        .min((raster.width().saturating_sub(1)) as f64) as usize;
+    if sample_left > sample_right || sample_top > sample_bottom {
+        return None;
+    }
+    let near_outer_page_edge = sample_top.saturating_mul(10) <= raster.height()
+        || sample_bottom.saturating_mul(10) >= raster.height().saturating_mul(9);
+    if !near_outer_page_edge {
+        return None;
+    }
+
+    let mut local_max_luminance = 0u8;
+    for y in sample_top..=sample_bottom {
+        let row = y * raster.width();
+        for &pixel in &raster.pixels()[row + sample_left..=row + sample_right] {
+            local_max_luminance = local_max_luminance.max(pixel);
+        }
+    }
+
+    // Scanner-bed false staves in the independent Op. 109 scan top out at
+    // 44% gray while the sheet reaches white. Keep a wide margin: the gate
+    // fires only in the outer page band and when even its brightest pixel is
+    // below 60% of page white.
+    if !is_dark_non_page_substrate(local_max_luminance, page_max_luminance) {
+        return None;
+    }
+
+    Some(RejectedStaffHypothesisReport {
+        original_id: staff.id(),
+        tentative: staff.is_tentative(),
+        left: staff.left(),
+        right: staff.right(),
+        top,
+        bottom,
+        local_max_luminance,
+        page_max_luminance,
+        reason: "outside-page-dark-substrate".to_owned(),
+    })
+}
+
+fn is_dark_non_page_substrate(local_max_luminance: u8, page_max_luminance: u8) -> bool {
+    page_max_luminance > 0 && u16::from(local_max_luminance) * 5 < u16::from(page_max_luminance) * 3
 }
 
 /// Cross-staff barline structure recovered by the peak graph.
@@ -408,6 +510,9 @@ pub struct GridLinesRecognition {
     pub sloped_outlier_count: usize,
     pub discarded_filament_count: usize,
     pub staves: Vec<StaffCandidateReport>,
+    /// Late staff hypotheses kept out of the published sheet, with enough
+    /// evidence to audit or revive the decision.
+    pub rejected_staff_hypotheses: Vec<RejectedStaffHypothesisReport>,
     pub peak_graph: PeakGraphReport,
     /// Java `Picture.getSource(NO_STAFF)`: the binary raster with every staff
     /// line's glyph painted white.
@@ -2334,6 +2439,7 @@ fn build_peak_graph(
     source: &RunTable,
     (width, height): (usize, usize),
     projection_vertical_model: Option<BarVerticalSlopeModel>,
+    excluded_staff_ids: &[usize],
 ) -> Result<PeakGraphReport, GridRecognitionError> {
     let mut bars_parameters = production.bars;
     if std::env::var("AUDIVERIS_RECOVER_STRONG_WIDE_PARTIAL_COLUMNS")
@@ -2718,7 +2824,8 @@ fn build_peak_graph(
             production.raw_primary.clone(),
             production.lines,
             TerminalRasterStages::new(),
-        ),
+        )
+        .with_excluded_staff_ids(excluded_staff_ids.iter().copied()),
         derived.systems,
         bars_parameters,
         production.maximum_group_gap,
@@ -3349,6 +3456,41 @@ pub fn recognize_grid_lines_raster(
         .retain_tentative_staffs(tentative, global_slope)
         .map_err(grid_stage("tentative staff ordering"))?;
 
+    // Staff candidates are intentionally allowed to survive all line and
+    // ridge construction before this check. A dark scanner bed can contain
+    // parallel acquisition artifacts that make an internally coherent
+    // five-line cluster, but it cannot contain the bright substrate of the
+    // physical page. Withhold only that narrow, directly observable case and
+    // retain a full rejection record rather than erasing the evidence.
+    let page_max_luminance = loaded.pixels().iter().copied().max().unwrap_or(0);
+    let rejected_staff_hypotheses = result
+        .staffs()
+        .iter()
+        .filter_map(|staff| non_page_substrate_rejection(staff, loaded, page_max_luminance))
+        .collect::<Vec<_>>();
+    let rejected_staff_ids = rejected_staff_hypotheses
+        .iter()
+        .map(|report| report.original_id)
+        .collect::<Vec<_>>();
+    let rejected_staffs =
+        result.retain_staff_hypotheses(|staff| !rejected_staff_ids.contains(&staff.id()));
+    debug_assert_eq!(rejected_staffs.len(), rejected_staff_hypotheses.len());
+    if trace_tentative_staffs {
+        for report in &rejected_staff_hypotheses {
+            eprintln!(
+                "GRID staff trace: withheld staff={} reason={} bounds=({:.1},{})-({:.1},{}) local_max={} page_max={}",
+                report.original_id,
+                report.reason,
+                report.left,
+                report.top,
+                report.right,
+                report.bottom,
+                report.local_max_luminance,
+                report.page_max_luminance,
+            );
+        }
+    }
+
     // The adaptive filter already emits Java ByteProcessor semantics
     // (`FOREGROUND == 0`, `BACKGROUND == 255`), which is exactly what the
     // projector expects; no inversion.
@@ -3614,6 +3756,7 @@ pub fn recognize_grid_lines_raster(
         &scale_recognition.vertical_runs,
         (scale_recognition.width, scale_recognition.height),
         staff_edge_recovery_model,
+        &rejected_staff_ids,
     )?;
     let discarded_filament_count = result.primary().discarded_filaments().len();
 
@@ -3845,6 +3988,7 @@ pub fn recognize_grid_lines_raster(
         sloped_outlier_count,
         discarded_filament_count,
         staves,
+        rejected_staff_hypotheses,
         peak_graph,
         no_staff,
         no_staff_digest,
@@ -4143,6 +4287,14 @@ mod tests {
             short: false,
             peaks: Vec::new(),
         }
+    }
+
+    #[test]
+    fn dark_substrate_gate_keeps_faint_staffs_that_still_reach_paper_white() {
+        assert!(is_dark_non_page_substrate(127, 255));
+        assert!(!is_dark_non_page_substrate(153, 255));
+        assert!(!is_dark_non_page_substrate(255, 255));
+        assert!(!is_dark_non_page_substrate(0, 0));
     }
 
     #[test]

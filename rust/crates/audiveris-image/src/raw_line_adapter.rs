@@ -640,7 +640,12 @@ pub fn recover_tentative_staffs_from_ridges(
                 *score = row_coverage[start..=stop].iter().sum();
             }
             let minimum = scores.iter().copied().min().unwrap_or(0);
-            if minimum < (table.width() * 2) / 5 {
+            // This is only a proposal gate. Dense engraving and page curl can
+            // fragment one of the five staff rows below the ordinary 40%
+            // cluster threshold even though the later per-line geometry is
+            // coherent. Keep quarter-page ridge evidence here and let the
+            // five independently materialized lines decide below.
+            if minimum < table.width() / 4 {
                 continue;
             }
             patterns.push(RidgeStaffPattern {
@@ -719,7 +724,11 @@ pub fn recover_tentative_staffs_from_ridges(
                 lines[index].add_section(section.clone())?;
             }
         }
-        let minimum_line_width = (table.width() * 3) / 5;
+        // Requiring every recovered line to span three fifths of the entire
+        // raster loses genuine indented or locally occluded piano staves. The
+        // path remains tentative and still requires all five lines, coherent
+        // spacing, valid geometry, and a quarter-page of actual ink each.
+        let minimum_line_width = (table.width() * 2) / 5;
         // Dense chords, aligned stems, and clefs can fragment the physical
         // staff ink while all five ridge spans and the raster periodicity stay
         // unequivocal. This is a tentative path: require one quarter-page of

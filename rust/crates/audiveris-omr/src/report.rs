@@ -420,6 +420,7 @@ fn recognition_json(
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
+    rejected_staff_hypotheses(&mut json, recognition);
     geometry_model(&mut json, recognition);
     if let Some(headers) = headers {
         staff_headers(&mut json, headers);
@@ -755,6 +756,25 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
             json.close('}');
         }
         json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn rejected_staff_hypotheses(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("rejected_staff_hypotheses");
+    json.open('[');
+    for staff in &recognition.rejected_staff_hypotheses {
+        json.open('{');
+        json.field_integer("original_id", staff.original_id as i64);
+        json.field_boolean("tentative", staff.tentative);
+        json.field_number("left", staff.left);
+        json.field_number("right", staff.right);
+        json.field_integer("top", staff.top as i64);
+        json.field_integer("bottom", staff.bottom as i64);
+        json.field_integer("local_max_luminance", i64::from(staff.local_max_luminance));
+        json.field_integer("page_max_luminance", i64::from(staff.page_max_luminance));
+        json.field_string("reason", &staff.reason);
         json.close('}');
     }
     json.close(']');

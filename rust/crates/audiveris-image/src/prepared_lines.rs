@@ -149,6 +149,10 @@ pub struct RawProductionRetrieveLines<Downstream> {
     secondary: Option<ClusterPassState>,
     handoff: Option<PreparedStaffHandoff>,
     raw_metadata_handoff: Option<RawLineMetadataHandoff>,
+    /// Staff ids withheld by a late caller-side audit after the same raw line
+    /// retrieval. The lifecycle replay applies these only after ordinary and
+    /// tentative hypotheses have both been constructed.
+    excluded_staff_ids: BTreeSet<usize>,
 }
 
 impl<Downstream> RawProductionRetrieveLines<Downstream> {
@@ -167,7 +171,20 @@ impl<Downstream> RawProductionRetrieveLines<Downstream> {
             secondary: None,
             handoff: None,
             raw_metadata_handoff: None,
+            excluded_staff_ids: BTreeSet::new(),
         }
+    }
+
+    /// Mirror late staff-hypothesis exclusions into the lifecycle replay.
+    ///
+    /// `recognize_grid_lines_raster` derives bar systems before driving the
+    /// Java-compatible GRID decorator chain. The chain deliberately reruns
+    /// line retrieval; supplying the original ids here keeps its prepared
+    /// staff handoff identical to the already-audited system input.
+    #[must_use]
+    pub fn with_excluded_staff_ids(mut self, ids: impl IntoIterator<Item = usize>) -> Self {
+        self.excluded_staff_ids.extend(ids);
+        self
     }
 
     /// Enable Java's lazy small-interline pass while retaining the existing
@@ -413,6 +430,9 @@ where
         result
             .retain_tentative_staffs(tentative, global_slope)
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        if !self.excluded_staff_ids.is_empty() {
+            result.retain_staff_hypotheses(|staff| !self.excluded_staff_ids.contains(&staff.id()));
+        }
         self.raw_metadata_handoff = Some(
             build_raw_metadata_handoff(
                 global_slope,
@@ -1033,6 +1053,34 @@ mod tests {
         let metadata = builder.stages().raw_metadata_handoff().unwrap();
         assert!(metadata.final_discarded_filaments.is_empty());
         assert!(metadata.sloped_filaments.is_empty());
+    }
+
+    #[test]
+    fn late_staff_exclusion_is_replayed_before_prepared_handoff() {
+        let stages = RawProductionRetrieveLines::new(
+            raw_parameters(),
+            lines_parameters(),
+            Downstream::default(),
+        )
+        .with_small_interline(small_parameters())
+        .with_excluded_staff_ids([2]);
+        let mut builder = HeadlessRasterGridBuilder::new(
+            mixed_main_and_small_source(),
+            raster_parameters(),
+            stages,
+        );
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        let handoff = builder
+            .stages()
+            .prepared_staff_handoff()
+            .expect("filtered prepared staff handoff");
+        assert_eq!(handoff.staffs.len(), 1);
+        assert_eq!(handoff.staffs[0].id, 1);
+        assert!(!handoff.staffs[0].small);
     }
 
     #[test]
