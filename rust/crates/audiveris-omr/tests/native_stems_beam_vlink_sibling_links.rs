@@ -6186,7 +6186,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "45c4234df7081bb237f4fea17c6238180dd26300be077078fcf5f71686741ec6"
+        "8523dd5d4e8a255ee913cc4d3fa6a40fdd30f4f9ca51423bb6ada168392c47b2"
     );
     let data = fixture
         .lines()
@@ -8431,7 +8431,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "28e3fdadb5eb1737b9d567a594a61fc61dcf001540efbc9fb7533e0d497b2f73"
+        "ce3e528c9168b10ae3e053c3d00601da97ee06f7f45ebdbaace99b34a04cce25"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -8555,7 +8555,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "6ac590a15b00319db993773f56c47497632543d18a30fb51d0efd326a46d0af5"
+        "1e7f1eff00700dc24c813e90c636445fa7e13eaad851cb63b3fdfa957a170f42"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -8642,7 +8642,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "df229fe8019e1ac75586a30b0e97a5b64f5f6ed336040241447a779a51ca0e5c"
+        "6b6f77fe652521fcd885be1d7bbeaf2b27b112a4d5e1c55040def572c19d75a6"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8738,7 +8738,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "223393c2c3c93780534ff431eb3c1eb1b2c106018b28037eed13030b5f67a4a9"
+        "a35a48fe05aadc2cf9e8ce594531391a0e0dbdea4bcccc7bbad6cf5567dab3e9"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8834,7 +8834,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "7636ad54017b8dc817f48679b672de4ab25e0ef4ce05c63fff1666385fa16cde"
+        "20ea6ec67b625d0507c84067f5e302dee377d740f7c9b1073cf5a5864236d149"
     );
     let complete_rows = complete_stumps_text
         .lines()
@@ -8947,13 +8947,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only post-STUMPS head-phase prefix");
     assert_eq!(
         sha256_hex(head_phase_text.as_bytes()),
-        "edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74"
+        "b56292470572f9064f3b49f73b41619ed21432cc27d3336de0da230dbbe29e4a"
     );
     let head_phase_rows = head_phase_text
         .lines()
         .filter(|line| !line.starts_with('#'))
         .collect::<Vec<_>>();
-    assert_eq!(head_phase_rows.len(), 10);
+    assert_eq!(head_phase_rows.len(), 15);
     let head_field = |line: &str, name: &str| {
         let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
         let index = tokens
@@ -9187,12 +9187,12 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(apply, "terminal"),
         "ReturnedHeadCLinkTransaction"
     );
-    let head_summary = head_phase_rows[9];
+    let head_summary = head_phase_rows[14];
     assert_eq!(
         head_field(head_summary, "schema"),
-        "stems-head-phase-prefix-v4"
+        "stems-head-phase-prefix-v5"
     );
-    assert_eq!(head_field(head_summary, "rows"), "9");
+    assert_eq!(head_field(head_summary, "rows"), "14");
     assert_eq!(head_field(head_summary, "freshRuns"), "2");
     assert_eq!(head_field(head_summary, "freshRunsByteIdentical"), "true");
     assert_eq!(
@@ -9213,6 +9213,124 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(head_summary, "completeStumpsFixtureSha256"),
         sha256_hex(complete_stumps_text.as_bytes())
     );
+
+    // Boundary 30: the rest of the prelinked run, driven from the fixture rows.
+    // Java's queue stays on the prelinked-success path through head order 8; each
+    // row's closure writes and value changes are asserted against the native
+    // continuation, so a queue entry that leaves this path fails the drive loudly
+    // rather than being skipped.
+    let mut rolling_phase = third_head_phase.clone();
+    for order in 3..=6usize {
+        let row = head_phase_rows[5 + order];
+        assert_eq!(head_field(row, "headOrder"), order.to_string());
+        assert_eq!(head_field(row, "returned"), "true");
+        assert_eq!(
+            head_field(row, "sigVerticesBefore"),
+            head_field(row, "sigVerticesAfter"),
+            "head order {order} mutates the SIG; the prelinked drive cannot own it"
+        );
+        let continuation = continue_native_stems_head_linking_phase1(
+            &rolling_phase,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+        )
+        .unwrap_or_else(|error| panic!("native continuation for head order {order}: {error}"));
+        assert_eq!(
+            continuation.processed_head.sig_ordinal.to_string(),
+            head_field(row, "headSig"),
+            "head order {order} processed a different head"
+        );
+        assert_eq!(continuation.returned_linked, Some(true));
+        assert_eq!(
+            continuation.closed_value_changes.to_string(),
+            head_field(row, "closedValueChanges"),
+            "head order {order} closure count"
+        );
+        let expected_writes: Vec<(usize, NativeStemHeadSide)> = {
+            let raw = head_field(row, "closureWrites");
+            let trimmed = raw.trim_start_matches('[').trim_end_matches(']');
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                trimmed
+                    .split(',')
+                    .map(|write| {
+                        let mut parts = write.split(':');
+                        let x = parts
+                            .next()
+                            .and_then(|token| token.strip_prefix('x'))
+                            .and_then(|token| token.parse().ok())
+                            .unwrap_or_else(|| panic!("closure write x in {write}"));
+                        let side = match parts.nth(1) {
+                            Some("LEFT") => NativeStemHeadSide::Left,
+                            Some("RIGHT") => NativeStemHeadSide::Right,
+                            other => panic!("closure write side {other:?} in {write}"),
+                        };
+                        (x, side)
+                    })
+                    .collect()
+            }
+        };
+        assert_eq!(
+            continuation
+                .closed_s_linkers
+                .iter()
+                .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+                .collect::<Vec<_>>(),
+            expected_writes,
+            "head order {order} closure writes"
+        );
+        rolling_phase = (*continuation.state_after).clone();
+        assert_eq!(rolling_phase.current_index, order + 1);
+        assert!(rolling_phase.frontier_consumed);
+        assert!(rolling_phase.unlinked_heads.is_empty());
+        assert_eq!(
+            rolling_phase.heads[order + 1]
+                .reference
+                .sig_ordinal
+                .to_string(),
+            head_field(row, "nextHeadSig"),
+            "head order {order} advanced to a different next head"
+        );
+    }
+
+    // Head order 7 (x76 / SIG 97) leaves the prelinked path: nothing is linked,
+    // LEFT:BOTTOM alone passes STRICT canLink, and Java runs a fresh C-link that
+    // creates a stem (679->680 vertices, systemStems 40->41 in the row). The
+    // native continuation must therefore stop at the typed C-link frontier
+    // rather than close anything; the mutation itself is the next boundary.
+    let divergent_row = head_phase_rows[5 + 7];
+    assert_eq!(head_field(divergent_row, "headOrder"), "7");
+    assert_eq!(head_field(divergent_row, "headSig"), "97");
+    assert_eq!(
+        head_field(divergent_row, "decisions"),
+        "[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    let divergent = continue_native_stems_head_linking_phase1(
+        &rolling_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native continuation reaches head order 7's C-link frontier");
+    assert_eq!(divergent.processed_head.sig_ordinal, 97);
+    assert_eq!(divergent.returned_linked, None);
+    assert!(divergent.closed_s_linkers.is_empty());
+    assert_eq!(divergent.closed_value_changes, 0);
+    let divergent_phase = (*divergent.state_after).clone();
+    assert!(!divergent_phase.frontier_consumed);
+    assert_eq!(divergent_phase.current_index, 7);
+    assert_eq!(divergent_phase.frontier.head.sig_ordinal, 97);
+    assert_eq!(
+        divergent_phase.frontier.next_corner.horizontal,
+        NativeStemHeadSide::Left
+    );
+    assert_eq!(
+        divergent_phase.frontier.next_corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(divergent_phase.frontier.next_corner.sig_ordinal, 97);
 
     let all_siblings = std::iter::once(&actual)
         .chain(std::iter::once(&second_siblings))

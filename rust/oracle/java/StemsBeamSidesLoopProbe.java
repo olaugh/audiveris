@@ -1114,9 +1114,9 @@ public final class StemsBeamSidesLoopProbe
             emitHeadCLinkMutation(
                     head, selectedCorner, candidate, existing, existingActive, existingStem,
                     planRelations, planGlyphs, before, expanded, after, linked);
-            emitHeadPhaseContinuation(ordered, 1, undefs);
-            emitHeadPhaseContinuation(ordered, 2, undefs);
-            emitHeadPhaseContinuation(ordered, 3, undefs);
+            for (int headOrder = 1; headOrder <= 8; headOrder++) {
+                emitHeadPhaseContinuation(ordered, headOrder, undefs);
+            }
         }
 
         /** One real completed {@code HeadLinker.linkSides} call after the first C-link. */
@@ -1193,7 +1193,7 @@ public final class StemsBeamSidesLoopProbe
                     "stemsheadphasecontinue %s system %d headOrder %d headX %d headSig %d "
                             + "headInterId %d grade %s stemProfile %d linkProfile %d append false "
                             + "sidesBefore %s decisions %s incident %s returned %s sidesAfter %s "
-                            + "undefs %s closureWrites %s closedValueChanges %d unlinkedCount 0 "
+                            + "undefs %s closureWrites %s closedValueChanges %d unlinkedCount %d "
                             + "sigVerticesBefore %d sigVerticesAfter %d sigEdgesBefore %d "
                             + "sigEdgesAfter %d systemStemsBefore %d systemStemsAfter %d "
                             + "relationStateHashBefore %s relationStateHashAfter %s "
@@ -1205,7 +1205,8 @@ public final class StemsBeamSidesLoopProbe
                     Profiles.STRICT, system.getProfile(), sidesBefore, list(decisions),
                     list(incident), returned, headSideState(linker),
                     undefs.get(head) == null ? "[]" : undefs.get(head), list(closureWrites),
-                    closedValueChanges, before.sig.vertices.size(), after.sig.vertices.size(),
+                    closedValueChanges, returned ? 0 : 1,
+                    before.sig.vertices.size(), after.sig.vertices.size(),
                     before.sig.edges.size(), after.sig.edges.size(),
                     before.systemStems.entries.size(), after.systemStems.entries.size(),
                     before.sig.relationStateHash, after.sig.relationStateHash,
@@ -1260,7 +1261,6 @@ public final class StemsBeamSidesLoopProbe
                             + "->" + next);
                 }
             }
-            Collections.sort(linkerChanges);
             System.out.printf(
                     "stemsheadclinkcreate %s system %d headSig %d cAlias %s "
                             + "candidate %s registeredAlias %s registeredId %d "
