@@ -4703,7 +4703,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `a629a2d63d223f28264c3fdc4dc20941e082402c27d75c2c6d884e2ce8282d08`.
 The Boundary-25 production library run is 695 passed / 0 failed / 2 ignored, and the
 full local workspace, formatting, and strict all-target Clippy gates are green;
-`9a9307163` Boundary 28 is the current CI baseline: all 12 Rust shards and the Java build
+`f04303831` Boundary 29 is the current CI baseline: all 12 Rust shards and the Java build
 passed with no failure or cancellation.
 This completes chula system 1's STUMPS worklist, not full STEMS. Wider-corpus authority
 and branch coverage, other systems, and later STEMS phases remain open.
@@ -4732,7 +4732,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `2cc4ad8e0aadf29b8055ce34c32b703c033c45880bef24ff26a707b6b6f0d3c5`.
 The Boundary-26 production library run is 696 passed / 0 failed / 2 ignored, and the
 full local workspace, formatting, and strict all-target Clippy gates are green;
-`9a9307163` remains the current remote CI baseline. Native
+`f04303831` remains the current remote CI baseline. Native
 Allegretto predecessor carriage, hook removal beyond this checkpoint, wider-corpus
 STUMPS authority, general dirty-state ownership, other systems, and later STEMS remain.
 
@@ -4763,7 +4763,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `4f7935d3353a1e4a0b8ab23d721f6c3d3c6e5510e390fb055fae12e131bb7645`, and
 `bac4407ed4cf3071895f36a083fcd1d2823c001c19d4e71d633cbeee1da34478`.
 Boundary 27's full local workspace, formatting, and strict all-target Clippy gates are
-green. `9a9307163` Boundary 28 is the current remote CI baseline: all 12 Rust
+green. `f04303831` Boundary 29 is the current remote CI baseline: all 12 Rust
 shards and the Java build passed without failure or cancellation.
 
 Boundary 28 adds `advance_native_stems_head_single_item_c_link`, an atomic consumer for
@@ -4799,8 +4799,8 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `4f7935d3353a1e4a0b8ab23d721f6c3d3c6e5510e390fb055fae12e131bb7645`, and
 `bac4407ed4cf3071895f36a083fcd1d2823c001c19d4e71d633cbeee1da34478`.
 Boundary 28's full local workspace, formatting, and strict all-target Clippy gates are
-green. `9a9307163` Boundary 28 is the current remote-CI baseline until Boundary 29's
-own commit reaches terminal.
+green. `f04303831` Boundary 29 is the current remote-CI baseline: its exact commit
+has reached terminal green.
 
 The bridge constructor fail-closes on the exact 1,650/1,058/592/2,339 census, duplicate
 IDs or fingerprints, non-dense/future modeled ordinals, malformed hashes, and any mismatch
