@@ -1114,6 +1114,103 @@ public final class StemsBeamSidesLoopProbe
             emitHeadCLinkMutation(
                     head, selectedCorner, candidate, existing, existingActive, existingStem,
                     planRelations, planGlyphs, before, expanded, after, linked);
+            emitHeadPhaseContinuation(ordered, 1, undefs);
+            emitHeadPhaseContinuation(ordered, 2, undefs);
+        }
+
+        /** One real completed {@code HeadLinker.linkSides} call after the first C-link. */
+        void emitHeadPhaseContinuation (List<Inter> ordered,
+                                        int headOrder,
+                                        LinkedHashMap<Inter, Set<HorizontalSide>> undefs)
+            throws Exception
+        {
+            final HeadInter head = (HeadInter) ordered.get(headOrder);
+            final HeadLinker linker = head.getLinker();
+            final String sidesBefore = headSideState(linker);
+            final List<String> decisions = new ArrayList<>();
+            final PersistentSnapshot beforeCanLink = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            for (HorizontalSide side : HorizontalSide.values()) {
+                final HeadLinker.SLinker s = linker.getSLinkers().get(side);
+                if (s.isLinked()) {
+                    decisions.add(side + ":SkipAlreadyLinked");
+                } else if (s.isClosed()) {
+                    decisions.add(side + ":SkipClosed");
+                } else {
+                    final boolean topOk = s.getCornerLinker(VerticalSide.TOP)
+                            .canLink(Profiles.STRICT, false);
+                    final boolean bottomOk = s.getCornerLinker(VerticalSide.BOTTOM)
+                            .canLink(Profiles.STRICT, false);
+                    final String branch = topOk
+                            ? (bottomOk ? "Both" : "TopOnly")
+                            : (bottomOk ? "BottomOnly" : "Neither");
+                    decisions.add(side + ":top=" + topOk + ":bottom=" + bottomOk
+                            + ":branch=" + branch);
+                }
+            }
+            beforeCanLink.assertSame(snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers));
+
+            final List<String> incident = new ArrayList<>();
+            final List<HeadInter> closureHeads = new ArrayList<>();
+            for (Relation relation : system.getSig().getRelations(head, HeadStemRelation.class)) {
+                final HeadStemRelation headStem = (HeadStemRelation) relation;
+                final StemInter stem = (StemInter) system.getSig().getOppositeInter(head, relation);
+                final List<String> stemHeads = new ArrayList<>();
+                for (Relation stemRelation : system.getSig()
+                        .getRelations(stem, HeadStemRelation.class)) {
+                    final HeadInter stemHead = (HeadInter) system.getSig()
+                            .getOppositeInter(stem, stemRelation);
+                    stemHeads.add("x" + headOrdinals.get(stemHead) + ":sig"
+                            + headSigOrdinals.get(stemHead) + ":id" + stemHead.getId()
+                            + ":side" + ((HeadStemRelation) stemRelation).getHeadSide());
+                    if (stemHead != head) closureHeads.add(stemHead);
+                }
+                incident.add("stem" + stem.getId() + ":headSide" + headStem.getHeadSide()
+                        + ":heads" + list(stemHeads));
+            }
+            final List<String> closureWrites = new ArrayList<>();
+            for (HeadInter closureHead : closureHeads) {
+                for (HorizontalSide side : HorizontalSide.values()) {
+                    final HeadLinker.SLinker s = closureHead.getLinker().getSLinkers().get(side);
+                    closureWrites.add("x" + headOrdinals.get(closureHead) + ":sig"
+                            + headSigOrdinals.get(closureHead) + ":" + side + ":"
+                            + s.isClosed() + "->true");
+                }
+            }
+            final PersistentSnapshot before = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            final boolean returned = linker.linkSides(
+                    Profiles.STRICT, system.getProfile(), undefs, false);
+            final PersistentSnapshot after = snapshot(
+                    sheet, retriever, inspectionBeams, heads, allLinkers);
+            final long closedValueChanges = closureWrites.stream()
+                    .filter(value -> value.endsWith("false->true"))
+                    .count();
+            final HeadInter next = (HeadInter) ordered.get(headOrder + 1);
+            System.out.printf(
+                    "stemsheadphasecontinue %s system %d headOrder %d headX %d headSig %d "
+                            + "headInterId %d grade %s stemProfile %d linkProfile %d append false "
+                            + "sidesBefore %s decisions %s incident %s returned %s sidesAfter %s "
+                            + "undefs %s closureWrites %s closedValueChanges %d unlinkedCount 0 "
+                            + "sigVerticesBefore %d sigVerticesAfter %d sigEdgesBefore %d "
+                            + "sigEdgesAfter %d systemStemsBefore %d systemStemsAfter %d "
+                            + "relationStateHashBefore %s relationStateHashAfter %s "
+                            + "linkerStateHashBefore %s linkerStateHashAfter %s "
+                            + "nextHeadOrder %d nextHeadX %d nextHeadSig %d nextHeadInterId %d "
+                            + "nextGrade %s nextSides %s terminal ReturnedBeforeNextHead%n",
+                    page, system.getId(), headOrder, headOrdinals.get(head),
+                    headSigOrdinals.get(head), head.getId(), hex(head.getGrade()),
+                    Profiles.STRICT, system.getProfile(), sidesBefore, list(decisions),
+                    list(incident), returned, headSideState(linker),
+                    undefs.get(head) == null ? "[]" : undefs.get(head), list(closureWrites),
+                    closedValueChanges, before.sig.vertices.size(), after.sig.vertices.size(),
+                    before.sig.edges.size(), after.sig.edges.size(),
+                    before.systemStems.entries.size(), after.systemStems.entries.size(),
+                    before.sig.relationStateHash, after.sig.relationStateHash,
+                    before.linkers.hash, after.linkers.hash, headOrder + 1,
+                    headOrdinals.get(next), headSigOrdinals.get(next), next.getId(),
+                    hex(next.getGrade()), headSideState(next.getLinker()));
         }
 
         void emitHeadCLinkMutation (HeadInter head,

@@ -73,13 +73,14 @@ if ! cmp -s "$stumps_actual" "$stumps_frozen"; then
 fi
 
 grep '^stemshead' "$pass_one" > "$rows"
-if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 6 ] || \
+if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 8 ] || \
         [ "$(grep -c '^stemsheadphaseprefixbaseline ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixfrontier ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixresult ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkexpand ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkcreate ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkapply ' "$rows")" -ne 1 ] || \
+        [ "$(grep -c '^stemsheadphasecontinue ' "$rows")" -ne 2 ] || \
         ! grep -q 'headOrder 0 headSig 45 headInterId 1375 ' "$rows" || \
         ! grep -q 'decisions \[LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly\] selectedC ' "$rows" || \
         ! grep -q 'terminal AwaitingHeadCLinkTransaction$' "$rows" || \
@@ -97,6 +98,11 @@ if ! grep -q 'lastIndex 0 maxIndex 0 relations 1 .* glyphs 1 .*candidateIdBefore
     echo "complete first-head CLinker transaction contract differs" >&2
     exit 1
 fi
+if ! grep -q 'headOrder 1 headX 90 headSig 23 headInterId 1331 .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2359:headSideLEFT:heads\[x89:sig22:id1329:sideLEFT,x90:sig23:id1331:sideLEFT\]\] returned true .*closureWrites \[x89:sig22:LEFT:false->true,x89:sig22:RIGHT:false->true\] closedValueChanges 2 unlinkedCount 0 ' "$rows" || \
+        ! grep -q 'headOrder 2 headX 81 headSig 33 headInterId 1351 grade .*3fe901efd26d99b1 .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2371:headSideLEFT:heads\[x79:sig40:id1365:sideLEFT,x80:sig32:id1349:sideLEFT,x81:sig33:id1351:sideLEFT\]\] returned true .*closureWrites \[x79:sig40:LEFT:false->true,x79:sig40:RIGHT:false->true,x80:sig32:LEFT:false->true,x80:sig32:RIGHT:false->true\] closedValueChanges 4 unlinkedCount 0 .*nextHeadOrder 3 nextHeadX 20 nextHeadSig 65 nextHeadInterId 1419 ' "$rows"; then
+    echo "post-first-head continuation contract differs" >&2
+    exit 1
+fi
 
 probe_sha=$(shasum -a 256 "$script_dir/StemsBeamSidesLoopProbe.java" | awk '{print $1}')
 runner_sha=$(shasum -a 256 "$0" | awk '{print $1}')
@@ -106,11 +112,11 @@ stumps_sha=$(shasum -a 256 "$complete_fixture" | awk '{print $1}')
 out="$repo_root/rust/oracle/stems-head-phase-prefix-chula-system1.txt"
 {
     echo '# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) post-STUMPS head phase.'
-    echo '# schema: stems-head-phase-prefix-v2'
-    echo '# First reverse-grade head decision and complete first CLinker transaction.'
+    echo '# schema: stems-head-phase-prefix-v3'
+    echo '# First CLinker transaction plus the next two real phase-1 linkSides calls.'
     echo '# Expected rows stay unread until the native transaction returns.'
     cat "$rows"
     printf '%s\n' \
-        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v2 page chula.png#1 system 1 rows 6 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope ReturnedHeadCLinkTransaction javaEvidence ReturnedBeforeSecondHead"
+        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v3 page chula.png#1 system 1 rows 8 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope ReturnedTwoHeadPhaseContinuations javaEvidence ReturnedBeforeFourthHead"
 } > "$out"
 echo "wrote $out"

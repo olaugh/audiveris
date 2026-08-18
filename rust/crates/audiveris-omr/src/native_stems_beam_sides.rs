@@ -220,6 +220,25 @@ pub struct NativeStemsHeadPhase1SideDecision {
     pub bottom_can_link: Option<bool>,
 }
 
+/// One completed outer `HeadLinker.linkSides` phase-1 call.
+///
+/// The carried state is returned separately from the ordered closure writes so
+/// callers can grade Java's control result without treating event evidence as
+/// persistent scheduler state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1Continuation {
+    pub processed_head: NativeStemsBeamHeadLinkHeadRef,
+    pub side_decisions: Vec<NativeStemsHeadPhase1SideDecision>,
+    /// `None` stops at an awaited C-link frontier; `Some` is Java's actual
+    /// `HeadLinker.linkSides` return after the call has completed.
+    pub returned_linked: Option<bool>,
+    /// Java write order: linked side, current HeadStem relation, opposite
+    /// Stem's HeadStem relation, then LEFT/RIGHT on each other head.
+    pub closed_s_linkers: Vec<NativeStemsBeamHeadSLinkerRef>,
+    pub closed_value_changes: usize,
+    pub state_after: Box<NativeStemsHeadPhase1Carrier>,
+}
+
 /// Atomic removal of one competing hook plus the following SIDES continuation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamHookRemovalTransaction {
@@ -710,17 +729,18 @@ fn bounded_head_can_link(
 ///
 /// The first head mutation is already owned by
 /// [`advance_native_stems_head_single_item_c_link`].  This seam deliberately
-/// stops at the next ordered head frontier, or records one no-link head and
-/// advances the queue when both open corners fail STRICT `canLink`.  It
+/// stops at the next ordered head frontier, or completes one already-linked
+/// head when both remaining open corners fail STRICT `canLink`.  It
 /// refreshes the queued S-linker view from the carried persistent cells,
-/// revalidates the stable reverse-grade order, and applies only the bounded
-/// STRICT decision.  It does not mutate SIG, glyph, stem, or S-cell state.
+/// revalidates the stable reverse-grade order, and applies Java's graph-derived
+/// closure of every other head sharing the linked stem.  It does not mutate
+/// SIG, glyph, stem, allocator, or linked-cell state.
 pub fn continue_native_stems_head_linking_phase1(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
-) -> Result<NativeStemsHeadPhase1Carrier, NativeStemsBeamSidesError> {
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     if !carrier.frontier_consumed || carrier.current_index == 0 {
         return Err(stage(
             "HEADS-phase1-continue",
@@ -878,8 +898,10 @@ pub fn continue_native_stems_head_linking_phase1(
     let current = shadow.heads[shadow.current_index].clone();
     let mut side_decisions = Vec::new();
     let mut next_corner = None;
+    let mut linked_before = false;
     for side in &current.sides {
         if side.linked {
+            linked_before = true;
             side_decisions.push(NativeStemsHeadPhase1SideDecision {
                 side: side.reference.horizontal,
                 linked_before: true,
@@ -952,13 +974,29 @@ pub fn continue_native_stems_head_linking_phase1(
         }
     }
     let Some(next_corner) = next_corner else {
-        // Java phase 1 records a head whose open sides have no STRICT
-        // candidate and continues with the next reverse-grade head.  The
-        // caller's later append/retry phase remains outside this boundary.
-        shadow.unlinked_heads.push(current.reference);
+        if !linked_before {
+            return Err(stage(
+                "HEADS-phase1-continue-retry",
+                "unlinked head requires Java's rather-good retry/closure branch",
+            ));
+        }
+        let (closed_s_linkers, closed_value_changes) = close_heads_sharing_prelinked_stems(
+            &shadow.beam_state.sig,
+            &shadow.beam_state.bindings,
+            &mut shadow.beam_state.s_cells,
+            &mut shadow.heads,
+            &current,
+        )?;
         shadow.current_index += 1;
         shadow.frontier_consumed = true;
-        return Ok(shadow);
+        return Ok(NativeStemsHeadPhase1Continuation {
+            processed_head: current.reference,
+            side_decisions,
+            returned_linked: Some(true),
+            closed_s_linkers,
+            closed_value_changes,
+            state_after: Box::new(shadow),
+        });
     };
 
     shadow.frontier = NativeStemsHeadPhase1Frontier {
@@ -966,11 +1004,171 @@ pub fn continue_native_stems_head_linking_phase1(
         stem_profile: 0,
         link_profile: plans.link_profile,
         append: false,
-        side_decisions,
+        side_decisions: side_decisions.clone(),
         next_corner,
     };
     shadow.frontier_consumed = false;
-    Ok(shadow)
+    Ok(NativeStemsHeadPhase1Continuation {
+        processed_head: current.reference,
+        side_decisions,
+        returned_linked: None,
+        closed_s_linkers: Vec::new(),
+        closed_value_changes: 0,
+        state_after: Box::new(shadow),
+    })
+}
+
+fn close_heads_sharing_prelinked_stems(
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    persistent_cells: &mut [NativeStemsBeamNativeSLinkerCell],
+    heads: &mut [NativeStemsHeadPhase1Head],
+    current: &NativeStemsHeadPhase1Head,
+) -> Result<(Vec<NativeStemsBeamHeadSLinkerRef>, usize), NativeStemsBeamSidesError> {
+    let current_vertex = *bindings
+        .head_vertices
+        .get(&current.reference.reference)
+        .ok_or_else(|| stage("HEADS-phase1-close", "current head binding is missing"))?;
+    let mut writes = Vec::new();
+    let mut written = BTreeSet::new();
+    let mut value_changes = 0;
+    for side in current.sides.iter().filter(|side| side.linked) {
+        let matching = sig
+            .incident_edges(current_vertex.0)
+            .map_err(|error| stage("HEADS-phase1-close-head-scan", error))?
+            .into_iter()
+            .filter(|edge| {
+                edge.kind == NativeSigRelationKind::HeadStem
+                    && edge
+                        .head_stem
+                        .as_ref()
+                        .is_some_and(|payload| payload.head_side == side.reference.horizontal)
+            })
+            .map(|edge| edge.ordinal)
+            .collect::<Vec<_>>();
+        let [edge_ordinal] = matching.as_slice() else {
+            return Err(stage(
+                "HEADS-phase1-close-head-scan",
+                "bounded linked head side needs exactly one matching HeadStem relation",
+            ));
+        };
+        {
+            let edge = &sig.edges[*edge_ordinal];
+            let stem_vertex = if edge.source == current_vertex.0 {
+                edge.target
+            } else if edge.target == current_vertex.0 {
+                edge.source
+            } else {
+                return Err(stage(
+                    "HEADS-phase1-close-head-scan",
+                    "incident HeadStem relation does not touch the current head",
+                ));
+            };
+            let stem = sig.vertex(stem_vertex).ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-close-stem-scan",
+                    "matching HeadStem points outside the live SIG",
+                )
+            })?;
+            if stem.kind != NativeSigInterKind::Stem {
+                return Err(stage(
+                    "HEADS-phase1-close-stem-scan",
+                    "matching HeadStem opposite is not a StemInter",
+                ));
+            }
+            let other_vertices = sig
+                .incident_edges(stem_vertex)
+                .map_err(|error| stage("HEADS-phase1-close-stem-scan", error))?
+                .into_iter()
+                .filter(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+                .map(|edge| {
+                    if edge.source == stem_vertex {
+                        edge.target
+                    } else {
+                        edge.source
+                    }
+                })
+                .filter(|&vertex| vertex != current_vertex.0)
+                .collect::<Vec<_>>();
+            let mut seen_other_vertices = BTreeSet::new();
+            for other_vertex in other_vertices {
+                if !seen_other_vertices.insert(other_vertex) {
+                    return Err(stage(
+                        "HEADS-phase1-close-stem-scan",
+                        "shared stem repeats one other HeadInter",
+                    ));
+                }
+                let matching_heads = bindings
+                    .head_vertices
+                    .iter()
+                    .filter(|(_, vertex)| vertex.0 == other_vertex)
+                    .map(|(head, _)| *head)
+                    .collect::<Vec<_>>();
+                let [other_head] = matching_heads.as_slice() else {
+                    return Err(stage(
+                        "HEADS-phase1-close-head-binding",
+                        "shared-stem head binding is missing or duplicated",
+                    ));
+                };
+                let queued_index = heads
+                    .iter()
+                    .position(|head| head.reference.reference == *other_head)
+                    .ok_or_else(|| {
+                        stage(
+                            "HEADS-phase1-close-head-binding",
+                            "shared-stem head is absent from the ordered queue",
+                        )
+                    })?;
+                for horizontal in [
+                    crate::stems_step::NativeStemHeadSide::Left,
+                    crate::stems_step::NativeStemHeadSide::Right,
+                ] {
+                    let reference = NativeStemsBeamHeadSLinkerRef {
+                        head: heads[queued_index].reference,
+                        horizontal,
+                    };
+                    if !written.insert(reference) {
+                        return Err(stage(
+                            "HEADS-phase1-close-S-cell",
+                            "bounded closure would write one S cell more than once",
+                        ));
+                    }
+                    let persistent = persistent_cells
+                        .iter_mut()
+                        .find(|cell| cell.reference == reference)
+                        .ok_or_else(|| {
+                            stage(
+                                "HEADS-phase1-close-S-cell",
+                                "shared-stem persistent S cell is missing",
+                            )
+                        })?;
+                    let queued = heads[queued_index]
+                        .sides
+                        .iter_mut()
+                        .find(|cell| cell.reference == reference)
+                        .ok_or_else(|| {
+                            stage(
+                                "HEADS-phase1-close-S-cell",
+                                "shared-stem queued S cell is missing",
+                            )
+                        })?;
+                    if persistent.linked != queued.linked || persistent.closed != queued.closed {
+                        return Err(stage(
+                            "HEADS-phase1-close-S-cell",
+                            "persistent and queued S cells differ before closure",
+                        ));
+                    }
+                    if !persistent.closed {
+                        value_changes += 1;
+                    }
+                    persistent.closed = true;
+                    queued.closed = true;
+                    writes.push(reference);
+                }
+            }
+        }
+    }
+    Ok((writes, value_changes))
 }
 
 /// Execute the bounded single-item head-origin C-link frontier selected by
@@ -1882,9 +2080,172 @@ fn current_stumps_status(
 mod tests {
     use super::*;
     use crate::{
+        native_heads_staff_epilog::NativeHeadStaffEpilogRef,
+        native_sig::NativeSigBounds,
         native_stems_beam_stumps::NativeStemsBeamSource,
         native_stems_beam_vlinkers::NativeStemsBeamBLinkerRef,
+        stems_step::{NativeStemPoint, NativeStemVerticalSide},
     };
+
+    #[test]
+    fn prelinked_head_closes_both_sides_of_the_other_head_in_sig_order() {
+        use std::collections::BTreeMap;
+
+        let other_ref = NativeHeadStaffEpilogRef {
+            staff_index: 0,
+            head_index: 0,
+        };
+        let current_ref = NativeHeadStaffEpilogRef {
+            staff_index: 0,
+            head_index: 1,
+        };
+        let head_ref = |reference, sig_ordinal, x_ordinal| NativeStemsBeamHeadLinkHeadRef {
+            reference,
+            sig_ordinal,
+            x_ordinal,
+        };
+        let other = head_ref(other_ref, 22, 89);
+        let current = head_ref(current_ref, 23, 90);
+        let cell = |head, horizontal, linked| NativeStemsBeamNativeSLinkerCell {
+            reference: NativeStemsBeamHeadSLinkerRef { head, horizontal },
+            linked,
+            closed: false,
+            ordered_observer_corners: [NativeStemVerticalSide::Top, NativeStemVerticalSide::Bottom]
+                .into_iter()
+                .map(|vertical| {
+                    crate::native_stems_beam_reachability::NativeStemsBeamHeadCornerRef {
+                        head: head.reference,
+                        sig_ordinal: head.sig_ordinal,
+                        x_ordinal: head.x_ordinal,
+                        horizontal,
+                        vertical,
+                    }
+                })
+                .collect(),
+        };
+        let mut persistent = vec![
+            cell(other, crate::stems_step::NativeStemHeadSide::Left, false),
+            cell(other, crate::stems_step::NativeStemHeadSide::Right, false),
+            cell(current, crate::stems_step::NativeStemHeadSide::Left, true),
+            cell(current, crate::stems_step::NativeStemHeadSide::Right, false),
+        ];
+        let mut heads = vec![
+            NativeStemsHeadPhase1Head {
+                reference: current,
+                grade: 0.8,
+                sides: persistent[2..].to_vec(),
+            },
+            NativeStemsHeadPhase1Head {
+                reference: other,
+                grade: 0.7,
+                sides: persistent[..2].to_vec(),
+            },
+        ];
+        let vertex = |ordinal, kind| NativeSigVertex {
+            ordinal,
+            active: true,
+            removed: false,
+            kind,
+            shape: None,
+            grade: 1.0,
+            bounds: NativeSigBounds {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            abnormal: false,
+            beam_geometry: None,
+        };
+        let relation = |ordinal, source, side| NativeSigEdge {
+            ordinal,
+            active: true,
+            source,
+            target: 2,
+            kind: NativeSigRelationKind::HeadStem,
+            origin: NativeSigRelationOrigin::BaselineGraph,
+            support: Some(NativeSigSupport {
+                grade: 1.0,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: None,
+            stem_extension: None,
+            head_stem: Some(NativeSigHeadStemPayload {
+                dx: 0.0,
+                dy: 0.0,
+                head_side: side,
+                extension_point: NativeStemPoint { x: 0.0, y: 0.0 },
+                consistency: 1.0,
+                manual: false,
+            }),
+        };
+        let sig = NativeSigSystem {
+            system_id: 1,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Head),
+                vertex(1, NativeSigInterKind::Head),
+                vertex(2, NativeSigInterKind::Stem),
+            ],
+            edges: vec![
+                relation(0, 0, crate::stems_step::NativeStemHeadSide::Left),
+                relation(1, 1, crate::stems_step::NativeStemHeadSide::Left),
+            ],
+        };
+        let bindings = NativeSigSystemBindings {
+            system_id: 1,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::from([(0, NativeSigVertexId(2))]),
+            head_vertices: BTreeMap::from([
+                (other_ref, NativeSigVertexId(0)),
+                (current_ref, NativeSigVertexId(1)),
+            ]),
+        };
+        let current_head = heads[0].clone();
+        let (writes, changes) = close_heads_sharing_prelinked_stems(
+            &sig,
+            &bindings,
+            &mut persistent,
+            &mut heads,
+            &current_head,
+        )
+        .expect("bounded shared-stem closure");
+        assert_eq!(
+            writes,
+            [
+                NativeStemsBeamHeadSLinkerRef {
+                    head: other,
+                    horizontal: crate::stems_step::NativeStemHeadSide::Left,
+                },
+                NativeStemsBeamHeadSLinkerRef {
+                    head: other,
+                    horizontal: crate::stems_step::NativeStemHeadSide::Right,
+                },
+            ]
+        );
+        assert_eq!(changes, 2);
+        assert!(persistent[..2].iter().all(|cell| cell.closed));
+        assert!(heads[1].sides.iter().all(|cell| cell.closed));
+
+        let mut missing = sig;
+        missing.edges.pop();
+        let mut rejected_cells = persistent.clone();
+        let mut rejected_heads = heads.clone();
+        let cells_before = rejected_cells.clone();
+        let heads_before = rejected_heads.clone();
+        assert!(
+            close_heads_sharing_prelinked_stems(
+                &missing,
+                &bindings,
+                &mut rejected_cells,
+                &mut rejected_heads,
+                &current_head,
+            )
+            .is_err()
+        );
+        assert_eq!(rejected_cells, cells_before);
+        assert_eq!(rejected_heads, heads_before);
+    }
 
     #[test]
     fn linked_b_authority_is_an_exact_true_cell_bijection() {
