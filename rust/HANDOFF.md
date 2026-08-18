@@ -4847,6 +4847,22 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 Later queue entries, a later C-link mutation, an actually unlinked head and rather-good
 retry/no-link closure, phase-2 append, and broader head branches remain open.
 
+Boundary 30 extends the same unchanged continuation through head order 3. Starting at
+`current_index=3`, x20 / SIG ordinal 65 / Java Inter 1419 has a prelinked LEFT side and
+both open RIGHT STRICT corners false. Java returns true and scans shared Stem 2361 in
+SIG order, closing x19 LEFT then RIGHT (two false-to-true writes), with no unlinked-head
+entry. Native reaches `current_index=4`, `frontier_consumed=true`, before x36 / SIG
+ordinal 69 / Java Inter 1427; graph, registry, stem, allocator, relation, and linked
+state remain unchanged apart from those two S-cell closures. Missing closure topology
+still rejects atomically. The schema-v4 fixture is 14 lines / 10,405 bytes with nine
+semantic rows plus summary, SHA-256
+`edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74`; probe, runner,
+emitted-body, and semantic-pass SHA-256 are
+`63c8b31f11a637d2fdee7427f953df71a60d4f460fb366ebcfb059af03f39ffc`,
+`9a6bf539d232a7d5d67f91361eb93ba389138b6093ee1ae24f7441706a15c421`,
+`4ccc4c8f1b206600b3af7964034dc3f0cc2fab5c7222037739000ea96589535c`, and
+`9f0a48ccf150c4b3793df117365218a4ca8aa7d21552e6cdce4c59562f7d59f3`.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
@@ -4858,7 +4874,7 @@ Commit each slice separately after the full verification block above.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with
    native-carried state and widen the graph-derived B13 linked-S and hook-removal paths;
    chula system 1's 68 executed head-side references are unique.
-3. Continue from Boundary 29 at head index 3: carry the remaining ordered phase-1 queue,
+3. Continue from Boundary 30 at head index 4: carry the remaining ordered phase-1 queue,
    then implement a later head C-link mutation, the first actually unlinked-head and
    rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive
    C-linkers, and the remaining head branches. In parallel, widen the bounded

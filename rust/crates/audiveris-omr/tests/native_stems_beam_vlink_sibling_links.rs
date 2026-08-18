@@ -6186,7 +6186,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "5e1d2eebc488e40684d3d944ba60d950196ece8b59adfb3c445fb875a5a0d301"
+        "45c4234df7081bb237f4fea17c6238180dd26300be077078fcf5f71686741ec6"
     );
     let data = fixture
         .lines()
@@ -6263,7 +6263,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
     assert_eq!(
         sha256_hex(predecessor_text.as_bytes()),
-        "913d3b80c36bf821ae7c99560ba39f564bd54598d71376bfdaed4291f7c3e686"
+        "9887b277bb5eb9e2a9113bf32aa2811594eeb4fa3cfb7e392a809a3d6a2ba284"
     );
     let predecessor_rows = predecessor_text
         .lines()
@@ -6556,7 +6556,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
     .expect("expected-only hook removal fixture");
     assert_eq!(
         sha256_hex(expected_text.as_bytes()),
-        "78d3f16d96954dd5d4e3a0c6dea70f3c4ce3c6e2125ca54029fa1fbf58116799"
+        "f6f59c98e2dceb82aed312e2e8a5ad40bd0cb83ba62cab9d09571658c761089e"
     );
     let expected = expected_text
         .lines()
@@ -8322,6 +8322,34 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(third_head_phase.heads[3].reference.x_ordinal, 20);
     assert_eq!(third_head_phase.heads[3].reference.sig_ordinal, 65);
 
+    let fourth_continuation = continue_native_stems_head_linking_phase1(
+        &third_head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native fourth-head phase-1 continuation");
+    assert_eq!(fourth_continuation.processed_head.sig_ordinal, 65);
+    assert_eq!(fourth_continuation.returned_linked, Some(true));
+    assert_eq!(fourth_continuation.closed_value_changes, 2);
+    assert_eq!(
+        fourth_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (19, NativeStemHeadSide::Left),
+            (19, NativeStemHeadSide::Right)
+        ]
+    );
+    let fourth_head_phase = (*fourth_continuation.state_after).clone();
+    assert_eq!(fourth_head_phase.current_index, 4);
+    assert!(fourth_head_phase.frontier_consumed);
+    assert!(fourth_head_phase.unlinked_heads.is_empty());
+    assert_eq!(fourth_head_phase.heads[4].reference.x_ordinal, 36);
+    assert_eq!(fourth_head_phase.heads[4].reference.sig_ordinal, 69);
+
     let mut corrupt_closure = head_phase.clone();
     let x89_ref = corrupt_closure
         .heads
@@ -8403,7 +8431,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "199d1a5da1700a1d2cddd000082bd24be7ae38b34babc6349b2ec003e57d455b"
+        "28e3fdadb5eb1737b9d567a594a61fc61dcf001540efbc9fb7533e0d497b2f73"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -8527,7 +8555,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "69e11e2d9172caad47823d7add89b7be9371934c76da391eeb9783b15a21545e"
+        "6ac590a15b00319db993773f56c47497632543d18a30fb51d0efd326a46d0af5"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -8614,7 +8642,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "1f748e037b0c5c00d374ee1624dc751f3d1f7e5f124640971b9832914db61e27"
+        "df229fe8019e1ac75586a30b0e97a5b64f5f6ed336040241447a779a51ca0e5c"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8710,7 +8738,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "b39d62756cd33da32c89a4cd0154272bf42cca16b1bfa16e949563f3d4a0e127"
+        "223393c2c3c93780534ff431eb3c1eb1b2c106018b28037eed13030b5f67a4a9"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8806,7 +8834,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "79c07122968a21eab05f646cdf6b9e03e607c9260375d5ca9a260d956326315a"
+        "7636ad54017b8dc817f48679b672de4ab25e0ef4ce05c63fff1666385fa16cde"
     );
     let complete_rows = complete_stumps_text
         .lines()
@@ -8919,13 +8947,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only post-STUMPS head-phase prefix");
     assert_eq!(
         sha256_hex(head_phase_text.as_bytes()),
-        "4adb4145b686f8a5550359209c132620f7a7476138416a7c1af9c9acdeffb2da"
+        "edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74"
     );
     let head_phase_rows = head_phase_text
         .lines()
         .filter(|line| !line.starts_with('#'))
         .collect::<Vec<_>>();
-    assert_eq!(head_phase_rows.len(), 9);
+    assert_eq!(head_phase_rows.len(), 10);
     let head_field = |line: &str, name: &str| {
         let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
         let index = tokens
@@ -9001,6 +9029,40 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(third_java, "nextGrade"),
         "0x1.8e97b8a9fa8cap-1/3fe8e97b8a9fa8ca"
     );
+
+    let fourth_java = head_phase_rows[8];
+    assert_eq!(head_field(fourth_java, "headOrder"), "3");
+    assert_eq!(
+        head_field(fourth_java, "headSig").parse::<usize>().unwrap(),
+        fourth_continuation.processed_head.sig_ordinal
+    );
+    assert_eq!(head_field(fourth_java, "headX"), "20");
+    assert_eq!(head_field(fourth_java, "headInterId"), "1419");
+    assert_eq!(
+        head_field(fourth_java, "grade"),
+        "0x1.8e97b8a9fa8cap-1/3fe8e97b8a9fa8ca"
+    );
+    assert_eq!(
+        head_field(fourth_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(head_field(fourth_java, "returned"), "true");
+    assert_eq!(fourth_continuation.returned_linked, Some(true));
+    assert_eq!(
+        head_field(fourth_java, "closedValueChanges")
+            .parse::<usize>()
+            .unwrap(),
+        fourth_continuation.closed_value_changes
+    );
+    assert_eq!(
+        head_field(fourth_java, "closureWrites"),
+        "[x19:sig64:LEFT:false->true,x19:sig64:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(fourth_java, "unlinkedCount"), "0");
+    assert_eq!(head_field(fourth_java, "nextHeadOrder"), "4");
+    assert_eq!(head_field(fourth_java, "nextHeadX"), "36");
+    assert_eq!(head_field(fourth_java, "nextHeadSig"), "69");
+    assert_eq!(head_field(fourth_java, "nextHeadInterId"), "1427");
 
     let frontier = head_phase_rows[1];
     assert_eq!(head_field(frontier, "headOrder"), "0");
@@ -9125,12 +9187,12 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(apply, "terminal"),
         "ReturnedHeadCLinkTransaction"
     );
-    let head_summary = head_phase_rows[8];
+    let head_summary = head_phase_rows[9];
     assert_eq!(
         head_field(head_summary, "schema"),
-        "stems-head-phase-prefix-v3"
+        "stems-head-phase-prefix-v4"
     );
-    assert_eq!(head_field(head_summary, "rows"), "8");
+    assert_eq!(head_field(head_summary, "rows"), "9");
     assert_eq!(head_field(head_summary, "freshRuns"), "2");
     assert_eq!(head_field(head_summary, "freshRunsByteIdentical"), "true");
     assert_eq!(

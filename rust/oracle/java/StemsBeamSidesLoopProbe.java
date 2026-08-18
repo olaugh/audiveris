@@ -1116,6 +1116,7 @@ public final class StemsBeamSidesLoopProbe
                     planRelations, planGlyphs, before, expanded, after, linked);
             emitHeadPhaseContinuation(ordered, 1, undefs);
             emitHeadPhaseContinuation(ordered, 2, undefs);
+            emitHeadPhaseContinuation(ordered, 3, undefs);
         }
 
         /** One real completed {@code HeadLinker.linkSides} call after the first C-link. */
@@ -1259,6 +1260,7 @@ public final class StemsBeamSidesLoopProbe
                             + "->" + next);
                 }
             }
+            Collections.sort(linkerChanges);
             System.out.printf(
                     "stemsheadclinkcreate %s system %d headSig %d cAlias %s "
                             + "candidate %s registeredAlias %s registeredId %d "

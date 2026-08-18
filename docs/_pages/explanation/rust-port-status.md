@@ -1073,11 +1073,27 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 Later queue entries, a later C-link mutation, an actually unlinked head and rather-good
 retry/no-link closure, phase-2 append, and wider branches remain open.
 
+Boundary 30 extends the same unchanged continuation through head order 3. Starting at
+`current_index=3`, x20 / SIG ordinal 65 / Java Inter 1419 is prelinked on LEFT; both
+RIGHT STRICT corners are false, so Java returns true and shared Stem 2361 closes x19
+LEFT then RIGHT (two ordered false-to-true writes) with no unlinked-head insertion.
+Native reaches `current_index=4` before x36 / SIG ordinal 69 / Java Inter 1427, with
+graph, registry, stem, allocator, relation, and linked state unchanged apart from those
+two S-cell closures. The schema-v4 fixture is 14 lines / 10,405 bytes, SHA-256
+`edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74`; probe, runner,
+emitted-body, and semantic-pass SHA-256 are
+`63c8b31f11a637d2fdee7427f953df71a60d4f460fb366ebcfb059af03f39ffc`,
+`9a6bf539d232a7d5d67f91361eb93ba389138b6093ee1ae24f7441706a15c421`,
+`4ccc4c8f1b206600b3af7964034dc3f0cc2fab5c7222037739000ea96589535c`, and
+`9f0a48ccf150c4b3793df117365218a4ca8aa7d21552e6cdce4c59562f7d59f3`. Missing closure
+topology still rejects atomically; actually-unlinked/retry, later C-link, phase-2
+append, and broader head branches remain open.
+
 ## Next work queue
 
 1. Replace the disclosed first-STEMS persistent snapshot and sparse 16-row selected-base Java identity authority; transactions 3-32 already need no per-frontier glyph rows.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with native-carried state and widen graph-derived B13 linked-S and hook-removal coverage.
-3. Continue from Boundary 29 at head index 3: carry the remaining ordered phase-1 queue, then implement a later head-origin C-link mutation, the first actually unlinked-head and rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive C-linkers, and remaining head branches; also widen STUMPS and competing-hook coverage beyond their single-system/checkpoint evidence.
+3. Continue from Boundary 30 at head index 4: carry the remaining ordered phase-1 queue, then implement a later head-origin C-link mutation, the first actually unlinked-head and rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive C-linkers, and remaining head branches; also widen STUMPS and competing-hook coverage beyond their single-system/checkpoint evidence.
 4. Expose `recognize_native_stems` once the full scheduler path runs from native products.
 5. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.
 6. Add end-to-end MusicXML differential grading after `PAGE` is meaningful.

@@ -205,3 +205,19 @@ arrangement generation, the pipeline-step enum, and CLI parsing.
 | Later recognition stages | the remaining dependency-light lifecycles are native for `STEMS`, `REDUCTION`, `CUE_BEAMS`, `TEXTS`, `MEASURES`, `CHORDS`, `CURVES`, `SYMBOLS`, `LINKS`, `RHYTHMS`, and `PAGE`; STEMS has twenty-nine exact semantic components. Chula system 1 now runs all 32 SIDES transactions through B12-B19 from carried state, reaches exact `SidesExhausted` at 253/331, carries all seven STUMPS transactions to typed completion at 260/353, enters the typed first head-origin C-link frontier, applies its bounded first mutation to 261/354, then carries two prelinked-success shared-stem closures to `current_index=3` without any unlinked head. A bounded later Allegretto reconstruction exercises one B13 linked-S selection and the first real competing-hook removal; native predecessor carriage remains open. Next is replacement of the disclosed first-STEMS snapshot and sparse 16-row selected-base Java identity authority, native predecessor carriage and wider linked-S/hook-removal coverage, wider-corpus STUMPS authority and branch coverage, remaining head iteration, later C-link mutation, actually-unlinked retry, and phase-2 iteration, then `recognize_native_stems` |
 | MusicXML differential suite | queued |
 | Swing UI | explicitly out of the initial headless milestone |
+
+Boundary 30 extends the unchanged head-phase continuation through head order 3. Starting
+at `current_index=3`, x20 / SIG 65 / Java Inter 1419 is prelinked on LEFT; both RIGHT
+STRICT corners are false, so Java returns true and shared Stem 2361 closes x19 LEFT then
+RIGHT (two ordered false-to-true writes) with no unlinked-head insertion. Native reaches
+`current_index=4` before x36 / SIG 69 / Java Inter 1427, preserving graph, registry,
+stem, allocator, relation, and linked state apart from those two S-cell closures. The
+schema-v4 fixture is 14 lines / 10,405 bytes, SHA-256
+`edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74`; probe, runner,
+emitted-body, and semantic-pass SHA-256 are
+`63c8b31f11a637d2fdee7427f953df71a60d4f460fb366ebcfb059af03f39ffc`,
+`9a6bf539d232a7d5d67f91361eb93ba389138b6093ee1ae24f7441706a15c421`,
+`4ccc4c8f1b206600b3af7964034dc3f0cc2fab5c7222037739000ea96589535c`, and
+`9f0a48ccf150c4b3793df117365218a4ca8aa7d21552e6cdce4c59562f7d59f3`. Missing closure
+topology still rejects atomically; actually-unlinked/retry, later C-link, phase-2
+append, and broader head branches remain open.
