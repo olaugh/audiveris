@@ -401,6 +401,7 @@ pub struct BarsPurgeParameters {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BarsPurgeResult {
     removed_peaks: Vec<RemovedPeak>,
+    retained_without_filament_bounds: Vec<StaffPeakKey>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -552,6 +553,17 @@ impl BarsPurgeResult {
     #[must_use]
     pub fn removed_peaks(&self) -> &[RemovedPeak] {
         &self.removed_peaks
+    }
+
+    /// Candidates that could not be judged by `purgeExtendingPeaks` because
+    /// their projector peak survived without a registered bar stick.
+    ///
+    /// Missing extension evidence is not evidence that the candidate extends
+    /// beyond the staff. Keep it for later stages rather than making the whole
+    /// GRID page fail or irreversibly deleting it.
+    #[must_use]
+    pub fn retained_without_filament_bounds(&self) -> &[StaffPeakKey] {
+        &self.retained_without_filament_bounds
     }
 }
 
@@ -953,11 +965,25 @@ pub fn process_bars_peak_purges(
             for (index, peak) in state.staffs[staff_index].peaks.iter().enumerate() {
                 let bounds = if index < first_eligible {
                     peak.bounds()
+                } else if let Some(bounds) = filament_bounds
+                    .iter()
+                    .find_map(|(key, bounds)| (*key == peak.key()).then_some(*bounds))
+                {
+                    bounds
                 } else {
-                    filament_bounds
-                        .iter()
-                        .find_map(|(key, bounds)| (*key == peak.key()).then_some(*bounds))
-                        .ok_or(BarsCoordinatorError::MissingFilamentBounds(peak.key()))?
+                    // A projector peak can legitimately survive without a
+                    // bar stick.  Its exact vertical extension is unknown, so
+                    // extension pruning cannot prove it false.  Using its own
+                    // bounds makes the measured extension zero and therefore
+                    // preserves the candidate for the later column/semantic
+                    // stages; the result records that fail-soft decision.
+                    if !result
+                        .retained_without_filament_bounds
+                        .contains(&peak.key())
+                    {
+                        result.retained_without_filament_bounds.push(peak.key());
+                    }
+                    peak.bounds()
                 };
                 facts.push((peak.clone(), bounds));
             }
@@ -3022,7 +3048,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_extension_evidence_retains_earlier_left_purge() {
+    fn missing_extension_evidence_retains_peak_and_earlier_left_purge() {
         let left = peak(1, 0, 1);
         let mut start = peak(1, 5, 6);
         start.set_staff_end(HorizontalSide::Left);
@@ -3047,22 +3073,21 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            process_bars_peak_purges(
-                &mut state,
-                &[],
-                BarsPurgeParameters {
-                    large_system_staff_count: 10,
-                    maximum_foreground_thickness: 2,
-                    maximum_bar_extension: 5.0,
-                    system_hypothesis_stable: true,
-                },
-            ),
-            Err(BarsCoordinatorError::MissingFilamentBounds(bar.key()))
-        );
+        let result = process_bars_peak_purges(
+            &mut state,
+            &[],
+            BarsPurgeParameters {
+                large_system_staff_count: 10,
+                maximum_foreground_thickness: 2,
+                maximum_bar_extension: 5.0,
+                system_hypothesis_stable: true,
+            },
+        )
+        .unwrap();
         assert!(!state.graph().contains_vertex(left.key()));
         assert_eq!(state.staffs()[0].peaks().len(), 2);
         assert!(state.graph().contains_vertex(bar.key()));
+        assert_eq!(result.retained_without_filament_bounds(), &[bar.key()]);
     }
 
     #[test]
