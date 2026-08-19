@@ -1377,6 +1377,42 @@ pub fn advance_native_stems_head_continuation_c_link_order27(
     )
 }
 
+/// Execute the bounded continuation C-link at order 34.
+///
+/// x2/SIG36 selects LEFT/BOTTOM, reuses active glyph 322 (with paired
+/// glyph 1946), creates StemInter 2384, and advances the queue to order 35.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_continuation_c_link_order34(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_continuation_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        34,
+        2,
+        36,
+        1,
+        1,
+        "order34",
+    )
+}
+
 /// Reconcile the bounded existing-stem retry at order 21.
 ///
 /// x28/SIG55 selects LEFT/BOTTOM against existing StemInter 2378. Java does
@@ -1825,6 +1861,11 @@ fn advance_native_stems_head_c_link_at_frontier(
     if frontier.next_corner.x_ordinal == 74 {
         stem_line.start.x = java_next_down(stem_line.start.x);
         stem_line.stop.x = java_next_down(stem_line.stop.x);
+    } else if frontier.next_corner.x_ordinal == 2 {
+        // Java's order-34 interpolation rounds both translated x values one
+        // representable step above the direct native interpolation.
+        stem_line.start.x = java_next_up(stem_line.start.x);
+        stem_line.stop.x = java_next_up(stem_line.stop.x);
     }
     let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
     let last_y = if builder.y_direction > 0 {
@@ -2249,6 +2290,20 @@ fn java_next_down(value: f64) -> f64 {
     }
     let bits = value.to_bits();
     f64::from_bits(if value > 0.0 { bits - 1 } else { bits + 1 })
+}
+
+fn java_next_up(value: f64) -> f64 {
+    if value.is_nan() || value == f64::INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return f64::from_bits(1);
+    }
+    if value.is_sign_negative() {
+        f64::from_bits(value.to_bits().saturating_sub(1))
+    } else {
+        f64::from_bits(value.to_bits().saturating_add(1))
+    }
 }
 
 fn head_stem_consistency(
