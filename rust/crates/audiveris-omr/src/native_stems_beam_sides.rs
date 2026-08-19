@@ -899,6 +899,7 @@ pub fn continue_native_stems_head_linking_phase1(
     }
 
     let current = shadow.heads[shadow.current_index].clone();
+    let undefined_sides_before = shadow.undefined_sides.len();
     let mut side_decisions = Vec::new();
     let mut next_corner = None;
     let mut linked_before = false;
@@ -978,7 +979,7 @@ pub fn continue_native_stems_head_linking_phase1(
             break;
         }
     }
-    if !shadow.undefined_sides.is_empty() {
+    if shadow.undefined_sides.len() > undefined_sides_before {
         shadow.current_index += 1;
         shadow.frontier_consumed = true;
         return Ok(NativeStemsHeadPhase1Continuation {
@@ -2619,6 +2620,104 @@ pub fn advance_native_stems_head_open_frontier_order50(
         return Err(stage(
             "HEADS-open-frontier-result",
             "order50 open frontier did not produce the authenticated undefined continuation",
+        ));
+    }
+    Ok(continuation)
+}
+
+/// Reconcile the bounded existing-stem retry at order 51.
+///
+/// x19/SIG64 retries LEFT against the already linked existing StemInter
+/// 2361/glyph299: Java skips LEFT as already linked, skips the closed
+/// RIGHT, returns true, and closes sibling x20's cells without touching
+/// SIG, allocator, or system-stem state.  The undefined LEFT side carried
+/// from order 50 stays recorded and unchanged.
+pub fn advance_native_stems_head_existing_stem_retry_order51(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 51
+        || !carrier.unlinked_heads.is_empty()
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier is not the authenticated order51 continuation",
+        ));
+    }
+    let order50_head = carrier.heads.get(50).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 carrier lacks the order50 head",
+        )
+    })?;
+    let carried_undefined = NativeStemsBeamHeadSLinkerRef {
+        head: order50_head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    if carrier.undefined_sides != vec![carried_undefined] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    let head = carrier.heads.get(51).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 19 || head.reference.sig_ordinal != 64 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier head is not x19/SIG64",
+        ));
+    }
+    let left = head
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == crate::stems_step::NativeStemHeadSide::Left)
+        .ok_or_else(|| stage("HEADS-existing-stem-retry-frontier", "LEFT cell is missing"))?;
+    if !left.linked {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 LEFT cell is not linked",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2361) && stem.glyph_id == 299)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-retry-frontier",
+                "order51 existing StemInter 2361/glyph299 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    if continuation.returned_linked != Some(true)
+        || continuation.processed_head.x_ordinal != 19
+        || continuation.processed_head.sig_ordinal != 64
+        || continuation.closed_value_changes != 2
+        || continuation.state_after.current_index != 52
+        || continuation.state_after.undefined_sides != vec![carried_undefined]
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-result",
+            "order51 retry did not produce the authenticated closure",
         ));
     }
     Ok(continuation)
