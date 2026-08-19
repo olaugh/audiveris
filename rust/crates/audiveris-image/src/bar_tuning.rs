@@ -1212,7 +1212,8 @@ mod tests {
             right_flank_noise: 0.30,
             flank_noise: 0.21,
         };
-        let selected = select_boundaries(&input, &[stemlike.clone()], &[], 3, &parameters);
+        let selected =
+            select_boundaries(&input, std::slice::from_ref(&stemlike), &[], 3, &parameters);
         assert_eq!(
             selected.iter().map(|point| point.x).collect::<Vec<_>>(),
             vec![0.0, 50.0, 100.0],
@@ -1250,7 +1251,7 @@ mod tests {
             right_flank_noise: 0.02,
             flank_noise: 0.02,
         };
-        let count = geometry_count(&input, &[degraded.clone()], &parameters);
+        let count = geometry_count(&input, std::slice::from_ref(&degraded), &parameters);
         assert_eq!((count.intervals, count.certain_bars), (2, 1));
         let stemlike = ProjectionCandidate {
             flank_noise: 0.25,
