@@ -308,6 +308,393 @@ impl ProjectionCandidate {
     }
 }
 
+/// A printed measure-number anchor (position plus decoded value).
+///
+/// Supplied externally: circled-number OCR stays in Python for now, so
+/// pure-Rust invocations pass an empty slice.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Anchor {
+    pub x: f64,
+    pub value: u32,
+}
+
+/// Provenance of a tuned boundary, mirroring the Python source labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BoundarySource {
+    /// Sorted by label to reproduce the Python `"+".join(sorted(...))`
+    /// convention: `paired_projection` < `printed_number` < `rust` <
+    /// `system_left` < `system_right`.
+    PairedProjection,
+    PrintedNumber,
+    Rust,
+    SystemLeft,
+    SystemRight,
+}
+
+impl BoundarySource {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::PairedProjection => "paired_projection",
+            Self::PrintedNumber => "printed_number",
+            Self::Rust => "rust",
+            Self::SystemLeft => "system_left",
+            Self::SystemRight => "system_right",
+        }
+    }
+}
+
+/// One boundary of the tuned hypothesis, edges included.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TunedBoundary {
+    pub x: f64,
+    pub evidence: f64,
+    /// Sorted and deduplicated provenance labels.
+    pub sources: Vec<BoundarySource>,
+}
+
+/// Result of the visual interval count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeometryCount {
+    /// Number of measure intervals implied by the counted bars.
+    pub intervals: usize,
+    /// Number of geometry-certain interior bars (strong, corroborated, or
+    /// certain-connector backed).
+    pub certain_bars: usize,
+}
+
+/// Counts measure intervals from strong or corroborated raw bars plus
+/// certain connectors.
+///
+/// Mirrors the Python `geometry_count`, including the signature-prefix
+/// guard, the edge margin for final/repeat double-bar strokes, and the
+/// height-scaled corroboration gap limit for clean-flanked candidates.
+#[must_use]
+pub fn geometry_count(
+    input: &SystemBarInput,
+    projected: &[ProjectionCandidate],
+    parameters: &BarTuningParameters,
+) -> GeometryCount {
+    let left = input.band.left;
+    let right = input.band.right;
+    let height = input.band.height();
+    let guard = left
+        + parameters
+            .signature_guard_floor
+            .max(parameters.signature_guard_ratio * height);
+    let mut xs: Vec<f64> = Vec::new();
+    let interior = if input.boundaries.len() >= 2 {
+        &input.boundaries[1..input.boundaries.len() - 1]
+    } else {
+        &[]
+    };
+    for boundary in interior {
+        // A weaker Rust boundary may be a real bar interrupted by noteheads
+        // or dense beams.  Preserve it when an independent grayscale
+        // projection is close and covers most of the system with only short
+        // gaps.  Taller systems open proportionally longer gaps on genuine
+        // bars, so the gap limit grows with system height — only for
+        // candidates whose flanks are clean, which aligned stems never are.
+        let corroborated = projected.iter().any(|item| {
+            (item.x - boundary.x).abs() <= parameters.corroboration_proximity
+                && item.paired_occupancy >= parameters.corroboration_paired
+                && item.full_occupancy >= parameters.corroboration_full
+                && (item.maximum_gap <= parameters.corroboration_max_gap
+                    || (item.maximum_gap as f64 <= parameters.tall_gap_height_ratio * height
+                        && item.flank_noise <= parameters.flank_noise_limit))
+        });
+        if boundary.support >= 2 && (boundary.max_grade >= parameters.strong_grade || corroborated)
+        {
+            xs.push(boundary.x);
+        }
+    }
+    // The thin stroke of a final or repeat double bar sits within the edge
+    // margin and duplicates the edge barline rather than closing a measure.
+    xs.extend(
+        projected
+            .iter()
+            .filter(|item| {
+                guard <= item.x
+                    && item.x <= right - parameters.edge_bar_margin
+                    && item.is_certain_connector(parameters)
+            })
+            .map(|item| item.x),
+    );
+    xs.sort_by(|a, b| a.partial_cmp(b).expect("finite bar positions"));
+    let mut merged: Vec<f64> = Vec::new();
+    for x in xs {
+        match merged.last_mut() {
+            Some(last) if x - *last <= parameters.geometry_merge => {
+                *last = (*last + x) / 2.0;
+            }
+            _ => merged.push(x),
+        }
+    }
+    GeometryCount {
+        intervals: merged.len() + 1,
+        certain_bars: merged.len(),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SelectCandidate {
+    x: f64,
+    evidence: f64,
+    sources: Vec<BoundarySource>,
+}
+
+impl SelectCandidate {
+    fn merge_sources(&mut self, other: &[BoundarySource]) {
+        for source in other {
+            if !self.sources.contains(source) {
+                self.sources.push(*source);
+            }
+        }
+        self.sources.sort();
+    }
+}
+
+/// Selects exactly `count - 1` interior boundaries (or honestly fewer).
+///
+/// Mirrors the Python `select_boundaries`: evidence-weighted candidate
+/// merging, a DP with a broad log-spacing prior, and a fallback that prefers
+/// an honestly short hypothesis to inventing crowded barlines.  The DP
+/// replicates the Python dict-iteration semantics: states are scanned in
+/// insertion order and ties keep the first optimum.
+#[must_use]
+pub fn select_boundaries(
+    input: &SystemBarInput,
+    projected: &[ProjectionCandidate],
+    anchors: &[Anchor],
+    count: usize,
+    parameters: &BarTuningParameters,
+) -> Vec<TunedBoundary> {
+    let left = input.band.left;
+    let right = input.band.right;
+    let height = input.band.height();
+    // Clef, key signature, and time signature occupy this prefix.  Their
+    // flats and cut-time strokes can be vertically aligned in both staves,
+    // but cannot be measure barlines.  Rust or a printed-number anchor may
+    // still support a boundary here; projection-only candidates may not.
+    let signature_guard_right = left
+        + parameters
+            .signature_guard_floor
+            .max(parameters.signature_guard_ratio * height);
+    let average = (right - left) / count.max(1) as f64;
+
+    let mut candidates: Vec<SelectCandidate> = Vec::new();
+    let interior = if input.boundaries.len() >= 2 {
+        &input.boundaries[1..input.boundaries.len() - 1]
+    } else {
+        &[]
+    };
+    for boundary in interior {
+        // Once both piano staves independently support a high-grade bar,
+        // weak count or spacing priors must not replace it with nearby ink.
+        let evidence = if boundary.is_strong(parameters) {
+            parameters.strong_evidence
+        } else {
+            parameters.weak_rust_evidence
+        };
+        candidates.push(SelectCandidate {
+            x: boundary.x,
+            evidence,
+            sources: vec![BoundarySource::Rust],
+        });
+    }
+    for item in projected {
+        if item.x < signature_guard_right {
+            continue;
+        }
+        let certain = item.is_certain_connector(parameters);
+        // An incomplete vertical whose flanks are crowded on both sides is an
+        // aligned-stem column, not a degraded barline; it must not stay in
+        // the lattice where a count target could draft it.
+        if !certain && item.flank_noise > parameters.flank_noise_limit {
+            continue;
+        }
+        let evidence = if certain {
+            parameters.strong_evidence
+        } else {
+            parameters.weak_projection_base
+                + parameters.weak_projection_paired_weight * item.paired_occupancy
+                + parameters.weak_projection_bridge_weight * item.bridge_occupancy
+        };
+        candidates.push(SelectCandidate {
+            x: item.x,
+            evidence,
+            sources: vec![BoundarySource::PairedProjection],
+        });
+    }
+    for anchor in anchors {
+        candidates.push(SelectCandidate {
+            x: anchor.x,
+            evidence: parameters.anchor_evidence,
+            sources: vec![BoundarySource::PrintedNumber],
+        });
+    }
+    candidates.sort_by(|a, b| a.x.partial_cmp(&b.x).expect("finite candidate positions"));
+
+    let mut merged: Vec<SelectCandidate> = Vec::new();
+    for item in candidates {
+        if item.x <= left + parameters.edge_bar_margin
+            || item.x >= right - parameters.edge_bar_margin
+        {
+            continue;
+        }
+        match merged.last_mut() {
+            Some(prior) if item.x - prior.x <= parameters.select_merge => {
+                let total = prior.evidence + item.evidence;
+                prior.x = (prior.x * prior.evidence + item.x * item.evidence) / total;
+                prior.evidence = total;
+                prior.merge_sources(&item.sources);
+            }
+            _ => merged.push(item),
+        }
+    }
+
+    let need = count.saturating_sub(1);
+    let points: Vec<SelectCandidate> = std::iter::once(SelectCandidate {
+        x: left,
+        evidence: 0.0,
+        sources: vec![BoundarySource::SystemLeft],
+    })
+    .chain(merged.iter().cloned())
+    .chain(std::iter::once(SelectCandidate {
+        x: right,
+        evidence: 0.0,
+        sources: vec![BoundarySource::SystemRight],
+    }))
+    .collect();
+
+    // DP selects exactly `need` interior boundaries.  Spacing is a broad
+    // prior, deliberately weaker than paired-staff ink and printed-number
+    // evidence.  States live in a Vec in insertion order, matching the
+    // Python dict semantics: candidate states are scanned oldest-first and
+    // a strict `<` keeps the first optimum on ties.
+    struct DpEntry {
+        chosen: usize,
+        index: usize,
+        cost: f64,
+        path: Vec<usize>,
+    }
+    let minimum_gap = parameters
+        .dp_min_gap_floor
+        .max(parameters.dp_min_gap_ratio * average);
+    let mut dp: Vec<DpEntry> = vec![DpEntry {
+        chosen: 0,
+        index: 0,
+        cost: 0.0,
+        path: vec![0],
+    }];
+    let last_index = points.len() - 1;
+    for chosen in 0..=need {
+        for index in 1..points.len() {
+            let mut best: Option<(f64, Vec<usize>)> = None;
+            for entry in &dp {
+                if entry.chosen != chosen || entry.index >= index {
+                    continue;
+                }
+                let is_right = index == last_index;
+                if is_right != (chosen == need) {
+                    continue;
+                }
+                let gap = points[index].x - points[entry.index].x;
+                if gap < minimum_gap {
+                    continue;
+                }
+                let ratio = (gap / average).max(parameters.spacing_floor);
+                let spacing = parameters.spacing_weight * ratio.ln() * ratio.ln();
+                let evidence = if is_right {
+                    0.0
+                } else {
+                    points[index].evidence
+                };
+                let cost = entry.cost + spacing - evidence;
+                if best.as_ref().is_none_or(|(current, _)| cost < *current) {
+                    let mut path = entry.path.clone();
+                    path.push(index);
+                    best = Some((cost, path));
+                }
+            }
+            if let Some((cost, path)) = best {
+                let key_chosen = chosen + usize::from(index != last_index);
+                if let Some(existing) = dp
+                    .iter_mut()
+                    .find(|entry| entry.chosen == key_chosen && entry.index == index)
+                {
+                    existing.cost = cost;
+                    existing.path = path;
+                } else {
+                    dp.push(DpEntry {
+                        chosen: key_chosen,
+                        index,
+                        cost,
+                        path,
+                    });
+                }
+            }
+        }
+    }
+
+    let interior: Vec<SelectCandidate> = match dp
+        .iter()
+        .find(|entry| entry.chosen == need && entry.index == last_index)
+    {
+        Some(final_entry) => final_entry.path[1..final_entry.path.len() - 1]
+            .iter()
+            .map(|index| points[*index].clone())
+            .collect(),
+        None => {
+            // Prefer an honestly short hypothesis to inventing crowded
+            // barlines merely to satisfy the count target.
+            let mut ordered: Vec<&SelectCandidate> = merged.iter().collect();
+            ordered.sort_by(|a, b| {
+                b.evidence
+                    .partial_cmp(&a.evidence)
+                    .expect("finite candidate evidence")
+            });
+            let mut chosen: Vec<SelectCandidate> = Vec::new();
+            for item in ordered {
+                if item.x - left < minimum_gap || right - item.x < minimum_gap {
+                    continue;
+                }
+                if chosen
+                    .iter()
+                    .any(|picked| (item.x - picked.x).abs() < minimum_gap)
+                {
+                    continue;
+                }
+                chosen.push(item.clone());
+                if chosen.len() == need {
+                    break;
+                }
+            }
+            chosen
+        }
+    };
+
+    let mut result: Vec<TunedBoundary> = Vec::with_capacity(interior.len() + 2);
+    result.push(TunedBoundary {
+        x: points[0].x,
+        evidence: 0.0,
+        sources: points[0].sources.clone(),
+    });
+    let mut sorted_interior = interior;
+    sorted_interior.sort_by(|a, b| a.x.partial_cmp(&b.x).expect("finite boundary positions"));
+    result.extend(sorted_interior.into_iter().map(|item| TunedBoundary {
+        x: item.x,
+        evidence: item.evidence,
+        sources: item.sources,
+    }));
+    result.push(TunedBoundary {
+        x: points[last_index].x,
+        evidence: 0.0,
+        sources: points[last_index].sources.clone(),
+    });
+    result
+}
+
 /// Maximum mean ink over any window of `length` samples.
 ///
 /// Mirrors the Python `_window_occupancy`: shorter inputs fall back to their
@@ -640,5 +1027,214 @@ mod tests {
     fn scale_derivation_reproduces_the_python_reference_at_interline_six() {
         let derived = BarTuningParameters::from_scale(6.0);
         assert_eq!(derived, BarTuningParameters::python_reference());
+    }
+
+    /// Mirror of the Python `row()` fixture helper: every boundary is a
+    /// strong two-staff bar unless the test weakens it afterwards.
+    fn system(boundaries: &[f64], right: f64, bottom: f64) -> SystemBarInput {
+        SystemBarInput {
+            band: SystemBand {
+                left: 0.0,
+                right,
+                top: 0.0,
+                bottom,
+            },
+            boundaries: boundaries
+                .iter()
+                .map(|x| RawBoundary {
+                    x: *x,
+                    support: 2,
+                    max_grade: 0.92,
+                    kind: RawBoundaryKind::Unknown,
+                })
+                .collect(),
+        }
+    }
+
+    fn perfect_connector(x: f64) -> ProjectionCandidate {
+        ProjectionCandidate {
+            x,
+            paired_occupancy: 1.0,
+            mean_occupancy: 1.0,
+            bridge_occupancy: 1.0,
+            full_occupancy: 1.0,
+            maximum_gap: 0,
+            left_flank_noise: 0.0,
+            right_flank_noise: 0.0,
+            flank_noise: 0.0,
+        }
+    }
+
+    #[test]
+    fn signature_prefix_rejects_projection_only_candidates() {
+        let input = system(&[0.0, 70.0, 100.0], 100.0, 100.0);
+        let parameters = BarTuningParameters::python_reference();
+        let selected = select_boundaries(
+            &input,
+            &[perfect_connector(35.0), perfect_connector(70.0)],
+            &[],
+            2,
+            &parameters,
+        );
+        assert!(!selected.iter().any(|point| (point.x - 35.0).abs() <= 2.0));
+    }
+
+    #[test]
+    fn complete_connectors_determine_count_without_partial_stem() {
+        let input = system(&[0.0, 200.0], 200.0, 40.0);
+        let parameters = BarTuningParameters::python_reference();
+        let mut projected: Vec<ProjectionCandidate> = [60.0, 90.0, 120.0, 150.0]
+            .iter()
+            .map(|x| perfect_connector(*x))
+            .collect();
+        projected.push(ProjectionCandidate {
+            x: 135.0,
+            paired_occupancy: 0.75,
+            mean_occupancy: 0.80,
+            bridge_occupancy: 0.65,
+            full_occupancy: 0.75,
+            maximum_gap: 8,
+            left_flank_noise: 0.0,
+            right_flank_noise: 0.0,
+            flank_noise: 0.0,
+        });
+        let count = geometry_count(&input, &projected, &parameters);
+        assert_eq!(
+            (count.intervals, count.certain_bars),
+            (5, 4),
+            "partial stem must not inflate the geometry count"
+        );
+    }
+
+    #[test]
+    fn projection_corroborates_an_interrupted_weak_raw_bar() {
+        let mut input = system(&[0.0, 50.0, 100.0], 100.0, 100.0);
+        input.boundaries[1].max_grade = 0.69;
+        let parameters = BarTuningParameters::python_reference();
+        let projected = [ProjectionCandidate {
+            x: 51.0,
+            paired_occupancy: 0.91,
+            mean_occupancy: 0.95,
+            bridge_occupancy: 0.78,
+            full_occupancy: 0.85,
+            maximum_gap: 6,
+            left_flank_noise: 0.0,
+            right_flank_noise: 0.0,
+            flank_noise: 0.0,
+        }];
+        let count = geometry_count(&input, &projected, &parameters);
+        assert_eq!((count.intervals, count.certain_bars), (2, 1));
+    }
+
+    #[test]
+    fn final_double_bar_stroke_does_not_inflate_geometry_count() {
+        // The thin stroke of a final/repeat double bar sits a few pixels
+        // inside the system's right edge: same physical boundary, not
+        // another measure.
+        let input = system(&[0.0, 100.0, 200.0], 200.0, 40.0);
+        let parameters = BarTuningParameters::python_reference();
+        let projected = [perfect_connector(100.0), perfect_connector(195.0)];
+        let count = geometry_count(&input, &projected, &parameters);
+        assert_eq!((count.intervals, count.certain_bars), (2, 1));
+    }
+
+    #[test]
+    fn count_target_cannot_draft_dirty_flank_projection() {
+        let input = system(&[0.0, 50.0, 100.0], 100.0, 40.0);
+        let parameters = BarTuningParameters::python_reference();
+        let stemlike = ProjectionCandidate {
+            x: 75.0,
+            paired_occupancy: 1.0,
+            mean_occupancy: 1.0,
+            bridge_occupancy: 0.74,
+            full_occupancy: 0.85,
+            maximum_gap: 10,
+            left_flank_noise: 0.21,
+            right_flank_noise: 0.30,
+            flank_noise: 0.21,
+        };
+        let selected = select_boundaries(&input, &[stemlike.clone()], &[], 3, &parameters);
+        assert_eq!(
+            selected.iter().map(|point| point.x).collect::<Vec<_>>(),
+            vec![0.0, 50.0, 100.0],
+            "dirty flanks leave the hypothesis honestly short"
+        );
+        let clean = ProjectionCandidate {
+            left_flank_noise: 0.02,
+            right_flank_noise: 0.02,
+            flank_noise: 0.02,
+            ..stemlike
+        };
+        let selected = select_boundaries(&input, &[clean], &[], 3, &parameters);
+        assert_eq!(
+            selected.iter().map(|point| point.x).collect::<Vec<_>>(),
+            vec![0.0, 50.0, 75.0, 100.0]
+        );
+    }
+
+    #[test]
+    fn tall_system_corroboration_scales_gap_limit_with_clean_flanks() {
+        // A warp-degraded real bar on a tall (high-resolution) system opens
+        // gaps past the reference limit; with clean flanks the limit scales
+        // with system height.  Dirty flanks (aligned stems) get no relief.
+        let mut input = system(&[0.0, 700.0, 1400.0], 1400.0, 220.0);
+        input.boundaries[1].max_grade = 0.79;
+        let parameters = BarTuningParameters::python_reference();
+        let degraded = ProjectionCandidate {
+            x: 701.0,
+            paired_occupancy: 1.0,
+            mean_occupancy: 1.0,
+            bridge_occupancy: 1.0,
+            full_occupancy: 0.95,
+            maximum_gap: 10,
+            left_flank_noise: 0.02,
+            right_flank_noise: 0.02,
+            flank_noise: 0.02,
+        };
+        let count = geometry_count(&input, &[degraded.clone()], &parameters);
+        assert_eq!((count.intervals, count.certain_bars), (2, 1));
+        let stemlike = ProjectionCandidate {
+            flank_noise: 0.25,
+            ..degraded.clone()
+        };
+        let count = geometry_count(&input, &[stemlike], &parameters);
+        assert_eq!((count.intervals, count.certain_bars), (1, 0));
+        // At the reference scale (short systems) the relaxed arm stays shut.
+        let mut short = system(&[0.0, 50.0, 100.0], 100.0, 100.0);
+        short.boundaries[1].max_grade = 0.79;
+        let count = geometry_count(
+            &short,
+            &[ProjectionCandidate {
+                x: 51.0,
+                ..degraded
+            }],
+            &parameters,
+        );
+        assert_eq!((count.intervals, count.certain_bars), (1, 0));
+    }
+
+    #[test]
+    fn impossible_count_prefers_honest_short_hypothesis_over_crowded_duplicate() {
+        let input = system(&[0.0, 100.0], 100.0, 40.0);
+        let parameters = BarTuningParameters::python_reference();
+        let projected = [
+            perfect_connector(50.0),
+            ProjectionCandidate {
+                x: 57.0,
+                paired_occupancy: 0.80,
+                mean_occupancy: 0.90,
+                bridge_occupancy: 0.72,
+                full_occupancy: 0.76,
+                maximum_gap: 10,
+                left_flank_noise: 0.0,
+                right_flank_noise: 0.0,
+                flank_noise: 0.0,
+            },
+        ];
+        let selected = select_boundaries(&input, &projected, &[], 3, &parameters);
+        assert_eq!(
+            selected.iter().map(|point| point.x).collect::<Vec<_>>(),
+            vec![0.0, 50.0, 100.0]
+        );
     }
 }
