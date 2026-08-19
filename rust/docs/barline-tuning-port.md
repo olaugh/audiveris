@@ -46,25 +46,25 @@ file headers (`export_barline_tuning_fixtures.py`,
   (insertion-order scan, strict-less ties keep the first optimum); states
   live in a Vec on purpose.
 
-## Remaining milestones
+## Wired end to end
 
-1. **PR3 - SIG adapter** (`audiveris-omr/src/tuned_barlines.rs`): build
-   `SystemBarInput` from the GRID SIG.  Resolved semantics, from
-   `stage-omr-data/scripts/eval_schenker_measure_checks.py`: cluster
-   accepted barline inters by running-mean x within tolerance; `support` =
-   distinct staves in the cluster; `grades` = plain `grade` values (not
-   `contextual_grade`); synthesized `SYSTEM_LEFT/RIGHT` edge entries.
-   **Wired byte-parity additionally requires porting that script's
-   `regularize_bar_rows`** (page-level median-gap spacing model that demotes
-   low-grade aligned strokes before the tuning layer ever runs) - the raw
-   JSON the Python consumed is post-regularization.
-2. **PR6 - wiring** (blocked until the working tree's uncommitted changes
-   land): env gate `AUDIVERIS_TUNE_PIANO_BARLINES` (default OFF), call at
-   the seam in `recognize_grid_lines_raster_with_scale_options` after
-   `build_peak_graph` (the only point where the final SIG, system bounds,
-   scale, and the grayscale raster coexist), results on a new
-   `Option<TunedBarlinesReport>` field of `GridLinesRecognition`, plus a
-   `tuned_barlines` section in `report.rs` after `candidates(...)`.
+The SIG adapter (`audiveris-omr/src/tuned_barlines.rs`) and the GRID
+wiring are landed.  `AUDIVERIS_TUNE_PIANO_BARLINES` (default OFF) runs
+the pass at the end of GRID - the only point where the final barline SIG,
+system bounds, scale, and grayscale raster coexist - and the report gains
+a `tuned_barlines` section after `candidates`; with the gate off the
+output is byte-identical to before.  Adapter semantics follow the Python
+exporter (running-mean clustering at `max(3, 0.9 * interline)`, support =
+distinct staves, plain intrinsic grade, synthetic edge entries;
+non-piano-pair systems are skipped with provenance).  Verified end to end
+on the warped Graceful Ghost crops: all adjudicated measure counts
+reproduce, and the p2s5 volta ending barline is recovered in pure Rust
+(`added [299.0]`, flagged volta).
+
+Still open from the original plan: porting `regularize_bar_rows` (the
+page-level demotion pre-pass) if wired byte-parity with the Python
+Schenker pipeline's *inputs* is ever needed - the wired path currently
+sees slightly rawer boundaries, by design and documented in the adapter.
 3. **Types layer, next slices**: volta-bracket detection landed (and now
    recovers the formerly pinned p2s5 ending barline on principle - the
    residual list is empty), but the

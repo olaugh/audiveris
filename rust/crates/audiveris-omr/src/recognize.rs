@@ -574,6 +574,10 @@ pub struct GridLinesRecognition {
     /// Everything in HEADERS that positions a lookup area against a staff reads
     /// these; see [`StaffLineGeometry`].
     pub staff_lines: Vec<StaffLineGeometry>,
+    /// Barline tuning enhancement (beyond Java parity), present only when
+    /// `AUDIVERIS_TUNE_PIANO_BARLINES` is set.  Raw GRID products above are
+    /// never altered by it; see `docs/barline-tuning-port.md`.
+    pub tuned_barlines: Option<crate::tuned_barlines::TunedBarlinesReport>,
 }
 
 /// Native BEAMS output before `MultipleRestsBuilder` replaces any long beam.
@@ -4018,6 +4022,20 @@ pub fn recognize_grid_lines_raster_with_scale_options(
         message: error.to_string(),
     })?;
 
+    // Enhancement pass, default OFF: this is the only point where the final
+    // barline SIG, the system bounds, the sheet scale, and the grayscale
+    // raster coexist, which is exactly the Python oracle's input set.
+    let tuned_barlines = std::env::var("AUDIVERIS_TUNE_PIANO_BARLINES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .then(|| {
+            crate::tuned_barlines::tune_grid_barlines(
+                loaded,
+                &peak_graph.sig,
+                &system_bounds,
+                f64::from(scale_recognition.scale.interline.main),
+            )
+        });
+
     Ok(GridLinesRecognition {
         scale: scale_recognition,
         global_slope,
@@ -4036,6 +4054,7 @@ pub fn recognize_grid_lines_raster_with_scale_options(
         piano_system_bounds_recovered,
         page_geometry,
         staff_lines: staff_line_geometry,
+        tuned_barlines,
     })
 }
 

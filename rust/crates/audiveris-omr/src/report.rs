@@ -31,6 +31,7 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
+use audiveris_image::bar_tuning::BarlineForm;
 use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
 use audiveris_image::beam_structure::BeamImpacts;
 use audiveris_image::grid_sig::{GridSigNode, GridSigRelation};
@@ -428,6 +429,7 @@ fn recognition_json(
     }
     let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
+    tuned_barlines_section(&mut json, recognition);
     projection_ranges(&mut json, recognition);
     brace_probes(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
@@ -870,6 +872,108 @@ fn header_erases(json: &mut Json, headers: &NativeHeaderRecognition) {
         json.close('}');
     }
     json.close(']');
+}
+
+/// The barline tuning enhancement's hypothesis layer, when enabled.
+///
+/// Emitted alongside — never instead of — the raw `inters`/`candidates`
+/// parity record.  Section is absent when `AUDIVERIS_TUNE_PIANO_BARLINES`
+/// is off, so default output is byte-identical to before the enhancement.
+fn tuned_barlines_section(json: &mut Json, recognition: &GridLinesRecognition) {
+    let Some(report) = &recognition.tuned_barlines else {
+        return;
+    };
+    json.key("tuned_barlines");
+    json.open('{');
+    json.field_integer("schema", 1);
+    json.field_number("interline", report.interline);
+    json.key("systems");
+    json.open('[');
+    for system in &report.systems {
+        json.open('{');
+        json.field_integer("system", system.system_id as i64);
+        if let Some(reason) = system.skipped {
+            json.field_string("skipped", reason);
+            json.close('}');
+            continue;
+        }
+        json.field_integer("raw_count", system.raw_count as i64);
+        json.field_integer("tuned_count", system.tuned_count as i64);
+        json.field_integer("geometry_count", system.geometry.intervals as i64);
+        json.field_integer("certain_bars", system.geometry.certain_bars as i64);
+        json.field_boolean("count_changed", system.tuned_count != system.raw_count);
+        json.key("raw_boundaries");
+        json.open('[');
+        for x in &system.raw_boundaries {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("tuned_boundaries");
+        json.open('[');
+        for (boundary, form) in system.tuned_boundaries.iter().zip(&system.forms) {
+            json.open('{');
+            json.field_number("x", boundary.x);
+            json.field_number("evidence", boundary.evidence);
+            json.key("sources");
+            json.open('[');
+            for source in &boundary.sources {
+                json.string(source.label());
+            }
+            json.close(']');
+            json.field_string(
+                "form",
+                match form.form {
+                    BarlineForm::Unknown => "unknown",
+                    BarlineForm::Single => "single",
+                    BarlineForm::Double => "double",
+                    BarlineForm::Final => "final",
+                    BarlineForm::RepeatStart => "rptstart",
+                    BarlineForm::RepeatEnd => "rptend",
+                    BarlineForm::RepeatBoth => "rptboth",
+                },
+            );
+            json.field_boolean(
+                "volta",
+                system
+                    .volta_hooks
+                    .iter()
+                    .any(|hook| (hook - boundary.x).abs() <= report.interline),
+            );
+            json.close('}');
+        }
+        json.close(']');
+        json.key("added_boundaries");
+        json.open('[');
+        for x in &system.diff.added {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("demoted_boundaries");
+        json.open('[');
+        for x in &system.diff.demoted {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("projection_candidates");
+        json.open('[');
+        for candidate in &system.candidates {
+            json.open('{');
+            json.field_number("x", candidate.x);
+            json.field_number("paired_occupancy", candidate.paired_occupancy);
+            json.field_number("mean_occupancy", candidate.mean_occupancy);
+            json.field_number("bridge_occupancy", candidate.bridge_occupancy);
+            json.field_number("full_occupancy", candidate.full_occupancy);
+            json.field_integer("maximum_gap", candidate.maximum_gap as i64);
+            json.field_number("left_flank_noise", candidate.left_flank_noise);
+            json.field_number("right_flank_noise", candidate.right_flank_noise);
+            json.field_number("flank_noise", candidate.flank_noise);
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
 }
 
 /// The promoted inters, each with the evidence it was graded from.

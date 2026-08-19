@@ -112,6 +112,7 @@ pub mod symbols_step;
 pub mod system_grouping;
 pub mod texts_step;
 pub mod time_classifier;
+pub mod tuned_barlines;
 pub mod xml;
 
 use sheet_xml::{SheetXml, SheetXmlError};
