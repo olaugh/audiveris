@@ -3216,6 +3216,519 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
     Ok(continuation)
 }
 
+/// Consume the bounded both-open existing-stem C-link at order 57.
+///
+/// x62/SIG16 opens a LEFT BottomOnly frontier whose selected seed resolves
+/// to glyph 328, already materialized as active StemInter 2381.  Java's
+/// `createStem` therefore reuses that stem instead of allocating: exactly
+/// one HeadStem relation is appended to the SIG, x62's LEFT S cell links,
+/// and sibling x63's cells close, all without vertex, allocator, ID, or
+/// system-stem mutation.  The undefined LEFT side carried from order 50
+/// stays recorded and unchanged.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_existing_stem_c_link_order57(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 57
+        || !carrier.unlinked_heads.is_empty()
+    {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "carrier is not the authenticated order57 continuation",
+        ));
+    }
+    let order50_head = carrier.heads.get(50).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 carrier lacks the order50 head",
+        )
+    })?;
+    let carried_undefined = NativeStemsBeamHeadSLinkerRef {
+        head: order50_head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    if carrier.undefined_sides != vec![carried_undefined] {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    let head = carrier.heads.get(57).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 62 || head.reference.sig_ordinal != 16 {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "carrier head is not x62/SIG16",
+        ));
+    }
+    if head.sides.iter().any(|cell| cell.linked || cell.closed) {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 sides are not the authenticated open cells",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2381) && stem.glyph_id == 328)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-CLink-frontier",
+                "order57 existing StemInter 2381/glyph328 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 existing stem is not SIG-attached",
+        ));
+    }
+
+    let awaited =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    if awaited.returned_linked.is_some()
+        || awaited.state_after.frontier_consumed
+        || awaited.state_after.current_index != 57
+        || awaited.state_after.frontier.head != head.reference
+        || awaited.state_after.frontier.next_corner.head != head.reference.reference
+        || awaited.state_after.frontier.next_corner.horizontal
+            != crate::stems_step::NativeStemHeadSide::Left
+        || awaited.state_after.frontier.next_corner.vertical
+            != crate::stems_step::NativeStemVerticalSide::Bottom
+        || awaited.side_decisions.len() != 1
+        || awaited.side_decisions[0].top_can_link != Some(false)
+        || awaited.side_decisions[0].bottom_can_link != Some(true)
+    {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 did not stop at the authenticated LEFT BottomOnly frontier",
+        ));
+    }
+    let mut shadow = (*awaited.state_after).clone();
+    let frontier = shadow.frontier.clone();
+
+    let builder = head_builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == frontier.next_corner)
+        .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
+    let bounded_shape = match builder.items.as_slice() {
+        [start] => {
+            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+                && start.glyph == builder.start_stump
+        }
+        [start, chunk] => {
+            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+                && start.glyph == builder.start_stump
+                && chunk.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
+                && chunk.glyph.is_some()
+        }
+        _ => false,
+    };
+    if !bounded_shape || builder.max_stem_profile != plans.link_profile {
+        return Err(stage(
+            "HEADS-CLink-expand",
+            "selected frontier is not the bounded start-C shape",
+        ));
+    }
+    let Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
+        corner: stump_corner,
+    }) = builder.start_stump
+    else {
+        return Err(stage(
+            "HEADS-CLink-glyph",
+            "bounded head frontier does not start from an attached head stump",
+        ));
+    };
+    if stump_corner != frontier.next_corner {
+        return Err(stage(
+            "HEADS-CLink-glyph",
+            "start stump belongs to a different C linker",
+        ));
+    }
+    let selected_constructor_ordinal = head_corners.heads_in_sig_order
+        [frontier.next_corner.sig_ordinal]
+        .corners_in_constructor_order
+        .iter()
+        .find(|corner| {
+            corner.horizontal == frontier.next_corner.horizontal
+                && corner.vertical == frontier.next_corner.vertical
+        })
+        .map(|corner| corner.constructor_ordinal)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-CLink-builder",
+                "selected constructor corner is missing",
+            )
+        })?;
+    if head_reachability.system_id != head_corners.system_id {
+        return Err(stage(
+            "HEADS-CLink-glyph",
+            "head reachability belongs to a different system",
+        ));
+    }
+    let reach_corner = head_reachability
+        .heads
+        .iter()
+        .flat_map(|head| &head.corners)
+        .find(|corner| corner.reference == frontier.next_corner)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-CLink-glyph",
+                "selected reachability corner is missing",
+            )
+        })?;
+    let stump = reach_corner.stump.ok_or_else(|| {
+        stage(
+            "HEADS-CLink-glyph",
+            "selected reachability stump is missing",
+        )
+    })?;
+    let NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } = stump.source else {
+        return Err(stage(
+            "HEADS-CLink-glyph",
+            "bounded selected stump is not a retained vertical seed",
+        ));
+    };
+    let seed = stem_seeds
+        .free_glyphs
+        .get(free_glyph_ordinal)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-CLink-glyph",
+                "selected free vertical-seed ordinal is unavailable",
+            )
+        })?;
+    if seed.bounds != stump.bounds || seed.weight != stump.weight {
+        return Err(stage(
+            "HEADS-CLink-glyph",
+            "reachability stump and free vertical seed differ",
+        ));
+    }
+    let candidate = crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+        bounds: seed.bounds,
+        weight: seed.weight,
+        run_table: seed.run_table.clone(),
+    };
+    let promoted = bridge
+        .resolve_native_content(&candidate)
+        .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
+    if !promoted.active_in_index || !promoted.strongly_retained || promoted.glyph_id != 328 {
+        return Err(stage(
+            "HEADS-CLink-first-STEMS-bridge",
+            "selected seed canonical is not the active strongly retained glyph 328",
+        ));
+    }
+    let known = &mut shadow
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .known_canonical_glyphs;
+    let existing = known
+        .iter()
+        .filter(|glyph| glyph.content == candidate)
+        .collect::<Vec<_>>();
+    match existing.as_slice() {
+        [] => known.push(
+            crate::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
+                canonical_alias: promoted.canonical_alias,
+                glyph_id: promoted.glyph_id,
+                content: candidate.clone(),
+                active_in_index: promoted.active_in_index,
+                strongly_retained: promoted.strongly_retained,
+            },
+        ),
+        [glyph]
+            if glyph.glyph_id == promoted.glyph_id
+                && glyph.canonical_alias == promoted.canonical_alias => {}
+        _ => {
+            return Err(stage(
+                "HEADS-CLink-first-STEMS-bridge",
+                "promoted seed conflicts with carried canonical state",
+            ));
+        }
+    }
+
+    let mut stem_line = if builder.y_direction > 0 {
+        builder.theoretical_line
+    } else {
+        crate::stems_step::NativeStemLine {
+            start: builder.theoretical_line.stop,
+            stop: builder.theoretical_line.start,
+        }
+    };
+    let geometry_candidate = compose_head_c_link_geometry(&candidate, builder)?;
+    let centroid = glyph_centroid(&geometry_candidate)?;
+    let intersection = if builder.items.len() == 2 {
+        let x = stem_line.start.x
+            + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
+                / (stem_line.stop.y - stem_line.start.y);
+        crate::stems_step::NativeStemPoint { x, y: centroid.1 }
+    } else {
+        generic_intersection(
+            Segment {
+                x1: stem_line.start.x,
+                y1: stem_line.start.y,
+                x2: stem_line.stop.x,
+                y2: stem_line.stop.y,
+            },
+            Segment {
+                x1: 0.0,
+                y1: centroid.1,
+                x2: 1000.0,
+                y2: centroid.1,
+            },
+        )
+    };
+    let shift = centroid.0 - intersection.x;
+    stem_line.start.x += shift;
+    stem_line.stop.x += shift;
+    let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
+    let last_y = if builder.y_direction > 0 {
+        builder.items[0]
+            .line
+            .start
+            .y
+            .max(builder.items[0].line.stop.y)
+    } else {
+        builder.items[0]
+            .line
+            .start
+            .y
+            .min(builder.items[0].line.stop.y)
+    };
+    let hard_y = builder.theoretical_line.start.y + f64::from(builder.y_direction * minimum_tail);
+    if builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
+        return Err(stage(
+            "HEADS-CLink-expand",
+            "single item fails Java's hard tail target",
+        ));
+    }
+    let relation = project_native_stems_head_c_link_relation(
+        head_corners,
+        head_builders,
+        frontier.next_corner,
+        stem_line,
+        Some(geometry_candidate.bounds),
+        frontier.link_profile,
+    )
+    .map_err(|error| stage("HEADS-CLink-relation", error))?;
+    if !relation.accepted || relation.derived_horizontal != frontier.next_corner.horizontal {
+        return Err(stage(
+            "HEADS-CLink-relation",
+            "start-head relation is rejected or changes horizontal side",
+        ));
+    }
+
+    let create = apply_native_stems_create_stem_candidate_transaction(
+        head_corners.system_id,
+        frontier.stem_profile,
+        candidate,
+        Some((promoted.glyph_id, promoted.canonical_alias)),
+        &mut shadow.beam_state.latest_base_apply.transaction_state,
+        checker,
+    )
+    .map_err(|error| stage("HEADS-CLink-createStem", error))?;
+    let NativeStemsBeamCreateStemDisposition::Reused { stem_identity } = create.disposition else {
+        return Err(stage(
+            "HEADS-CLink-createStem",
+            "bounded frontier did not reuse the existing checked stem",
+        ));
+    };
+    let stem = create
+        .stem
+        .clone()
+        .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
+    if stem.inter_id != Some(2381) || stem.glyph_id != 328 || !stem.sig_attached {
+        return Err(stage(
+            "HEADS-CLink-createStem",
+            "reused stem is not the authenticated StemInter 2381/glyph328",
+        ));
+    }
+    let stem_vertex = *shadow
+        .beam_state
+        .bindings
+        .stem_vertices
+        .get(&stem_identity)
+        .ok_or_else(|| stage("HEADS-CLink-stem-binding", "reused stem is unbound"))?;
+
+    let head_vertex = *shadow
+        .beam_state
+        .bindings
+        .head_vertices
+        .get(&frontier.next_corner.head)
+        .ok_or_else(|| stage("HEADS-CLink-head-binding", "selected head is unbound"))?;
+    if shadow
+        .beam_state
+        .sig
+        .directed_edges(head_vertex.0, stem_vertex.0)
+        .map_err(|error| stage("HEADS-CLink-pair", error))?
+        .iter()
+        .any(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+    {
+        return Err(stage(
+            "HEADS-CLink-pair",
+            "HeadStem relation already exists",
+        ));
+    }
+    let consistency = head_stem_consistency(
+        stem.geometry.median.start.y,
+        stem.geometry.median.stop.y,
+        head_builders.interline,
+    )?;
+    let extension = relation.extension_point.ok_or_else(|| {
+        stage(
+            "HEADS-CLink-relation",
+            "accepted relation has no extension point",
+        )
+    })?;
+    let head_stem_edge = NativeSigEdgeId(shadow.beam_state.sig.edges.len());
+    shadow
+        .beam_state
+        .sig
+        .append_edge(NativeSigEdge {
+            ordinal: head_stem_edge.0,
+            active: true,
+            source: head_vertex.0,
+            target: stem_vertex.0,
+            kind: NativeSigRelationKind::HeadStem,
+            origin: NativeSigRelationOrigin::HeadCLinkDraft {
+                head_sig_ordinal: frontier.next_corner.sig_ordinal,
+                constructor_ordinal: selected_constructor_ordinal,
+            },
+            support: Some(NativeSigSupport {
+                grade: relation.grade,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: None,
+            stem_extension: None,
+            head_stem: Some(NativeSigHeadStemPayload {
+                dx: relation.dx,
+                dy: relation.dy,
+                head_side: relation.derived_horizontal,
+                extension_point: extension,
+                consistency,
+                manual: false,
+            }),
+        })
+        .map_err(|error| stage("HEADS-CLink-HeadStem", error))?;
+    shadow
+        .beam_state
+        .sig
+        .set_abnormal(head_vertex, false)
+        .and_then(|()| shadow.beam_state.sig.set_abnormal(stem_vertex, false))
+        .map_err(|error| stage("HEADS-CLink-callback", error))?;
+
+    let s_ref = NativeStemsBeamHeadSLinkerRef {
+        head: frontier.head,
+        horizontal: relation.derived_horizontal,
+    };
+    let matching_count = shadow
+        .beam_state
+        .s_cells
+        .iter()
+        .filter(|cell| cell.reference == s_ref)
+        .count();
+    if matching_count != 1 {
+        return Err(stage(
+            "HEADS-CLink-S-cell",
+            "selected parent S cell is missing or duplicated",
+        ));
+    }
+    let cell = shadow
+        .beam_state
+        .s_cells
+        .iter_mut()
+        .find(|cell| cell.reference == s_ref)
+        .expect("unique selected S cell was counted");
+    let s_linked_before = cell.linked;
+    cell.linked = true;
+    let queued_cell = shadow
+        .heads
+        .get_mut(57)
+        .and_then(|head| head.sides.iter_mut().find(|cell| cell.reference == s_ref))
+        .ok_or_else(|| stage("HEADS-CLink-S-cell", "queued S-cell view is missing"))?;
+    if queued_cell.linked != s_linked_before || queued_cell.closed != cell.closed {
+        return Err(stage(
+            "HEADS-CLink-S-cell",
+            "queued and persistent S-cell views diverge before write",
+        ));
+    }
+    queued_cell.linked = true;
+
+    let current = shadow.heads[57].clone();
+    let (closed_s_linkers, closed_value_changes) = close_heads_sharing_prelinked_stems(
+        &shadow.beam_state.sig,
+        &shadow.beam_state.bindings,
+        &mut shadow.beam_state.s_cells,
+        &mut shadow.heads,
+        &current,
+    )?;
+    let closed_pairs = closed_s_linkers
+        .iter()
+        .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+        .collect::<Vec<_>>();
+    if closed_value_changes != 2
+        || closed_pairs
+            != vec![
+                (63, crate::stems_step::NativeStemHeadSide::Left),
+                (63, crate::stems_step::NativeStemHeadSide::Right),
+            ]
+    {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-result",
+            "order57 reuse did not close the authenticated x63 sibling",
+        ));
+    }
+    shadow.current_index = 58;
+    shadow.frontier_consumed = true;
+    shadow
+        .beam_state
+        .sig
+        .validate_integrity()
+        .map_err(|error| stage("HEADS-CLink-final-SIG", error))?;
+    shadow
+        .beam_state
+        .bindings
+        .validate_against(&shadow.beam_state.sig)
+        .map_err(|error| stage("HEADS-CLink-final-bindings", error))?;
+    if shadow.undefined_sides != vec![carried_undefined] {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-result",
+            "order57 reuse disturbed the carried undefined LEFT side",
+        ));
+    }
+
+    Ok(NativeStemsHeadPhase1Continuation {
+        processed_head: current.reference,
+        side_decisions: awaited.side_decisions,
+        returned_linked: Some(true),
+        closed_s_linkers,
+        closed_value_changes,
+        state_after: Box::new(shadow),
+    })
+}
+
 /// Reconcile the bounded existing-stem retry at order 21.
 ///
 /// x28/SIG55 selects LEFT/BOTTOM against existing StemInter 2378. Java does
