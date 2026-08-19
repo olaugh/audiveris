@@ -132,3 +132,83 @@ fn extended_ledger_pitches_recover_page9_run_peaks() {
         "sub-floor retention must record the range scanner's rejected matches"
     );
 }
+
+/// Range-scan lattice probe: for one staff, print every geometry's scan
+/// range, its spots' effective x-intervals, and its candidates inside an
+/// x-window, so "no attempt" is distinguishable from "attempted and lost".
+///
+/// ```text
+/// AUDIVERIS_SCHENKER_PAGES=... AUDIVERIS_PROBE_SPEC=page-09.png,3,325,372 \
+///   cargo test -p audiveris-omr --release --test credible_beam_vetoes \
+///   probe_range_scan_lattice -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "manual probe; needs AUDIVERIS_SCHENKER_PAGES and AUDIVERIS_PROBE_SPEC"]
+fn probe_range_scan_lattice() {
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let spec = std::env::var("AUDIVERIS_PROBE_SPEC").expect("AUDIVERIS_PROBE_SPEC");
+    let parts: Vec<&str> = spec.split(',').collect();
+    let (page_name, staff_id, x_min, x_max) = (
+        parts[0],
+        parts[1].parse::<usize>().unwrap(),
+        parts[2].parse::<i32>().unwrap(),
+        parts[3].parse::<i32>().unwrap(),
+    );
+    let page = std::path::Path::new(&pages).join(page_name);
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid, &headers, &stem_seeds, &beams, &ledgers,
+    )
+    .expect("HEADS");
+
+    for system in &heads.range_lookup.systems {
+        for staff in &system.staffs {
+            if staff.staff_id != staff_id {
+                continue;
+            }
+            for scan in &staff.scans {
+                if scan.scan_right < x_min || scan.scan_left > x_max {
+                    continue;
+                }
+                let spots: Vec<String> = scan
+                    .spots
+                    .iter()
+                    .filter_map(|spot| spot.effective_x)
+                    .filter(|(left, right)| *right >= x_min && *left <= x_max)
+                    .map(|(left, right)| format!("{left}..{right}"))
+                    .collect();
+                let candidates: Vec<String> = scan
+                    .candidates
+                    .iter()
+                    .filter(|candidate| candidate.x0 >= x_min && candidate.x0 <= x_max)
+                    .map(|candidate| {
+                        format!(
+                            "{:?}@x{} g{:.2}",
+                            candidate.shape, candidate.x0, candidate.grade
+                        )
+                    })
+                    .collect();
+                println!(
+                    "pitch {:3} range {}..{} source {:?} spots [{}] candidates [{}]",
+                    scan.pitch,
+                    scan.scan_left,
+                    scan.scan_right,
+                    match &scan.source {
+                        audiveris_omr::native_heads_scanner::NativeHeadScannerSource::StaffLine { .. } => "staff".to_owned(),
+                        audiveris_omr::native_heads_scanner::NativeHeadScannerSource::Ledger { ledger_index, bounds, .. } =>
+                            format!("ledger{} x{}w{}", ledger_index, bounds.x, bounds.width),
+                    },
+                    spots.join(" "),
+                    candidates.join(" "),
+                );
+            }
+        }
+    }
+}
