@@ -2,7 +2,10 @@
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
-use audiveris_image::{beam_structure::Segment, run_table::Orientation};
+use audiveris_image::{
+    beam_structure::Segment,
+    run_table::{BACKGROUND, FOREGROUND, Orientation, RunTable},
+};
 
 use crate::{
     native_sig::{
@@ -1247,19 +1250,93 @@ pub fn advance_native_stems_head_continuation_c_link(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &NativeStemsFirstGlyphIndexBridge,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
-    let queue_index = 7;
+    advance_native_stems_head_continuation_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        7,
+        76,
+        97,
+        0,
+        0,
+        "order7",
+    )
+}
+
+/// Execute the bounded continuation C-link at order 18.
+///
+/// This is the first open/unlinked continuation after the prelinked queue:
+/// x63/SIG17 selects LEFT/BOTTOM, reuses active glyph 328 (with its paired
+/// glyph 2063), creates StemInter 2381, and advances the queue to order 19.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_continuation_c_link_order18(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_continuation_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        18,
+        63,
+        17,
+        1,
+        1,
+        "order18",
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+fn advance_native_stems_head_continuation_c_link_at_queue(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+    queue_index: usize,
+    expected_x_ordinal: usize,
+    expected_sig_ordinal: usize,
+    expected_last_index: usize,
+    expected_max_index: usize,
+    order_label: &str,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     let shadow = carrier.clone();
     let head = shadow.heads.get(queue_index).ok_or_else(|| {
         stage(
             "HEADS-CLink-continuation-frontier",
-            "order7 head is missing",
+            format!("{order_label} head is missing"),
         )
     })?;
     let frontier = &shadow.frontier;
     let left = frontier.side_decisions.first().ok_or_else(|| {
         stage(
             "HEADS-CLink-continuation-frontier",
-            "order7 side decisions are missing",
+            format!("{order_label} side decisions are missing"),
         )
     })?;
     let expected_corner = frontier.next_corner;
@@ -1268,8 +1345,8 @@ pub fn advance_native_stems_head_continuation_c_link(
         || !shadow.unlinked_heads.is_empty()
         || !shadow.undefined_sides.is_empty()
         || frontier.head != head.reference
-        || head.reference.sig_ordinal != 97
-        || head.reference.x_ordinal != 76
+        || head.reference.sig_ordinal != expected_sig_ordinal
+        || head.reference.x_ordinal != expected_x_ordinal
         || frontier.stem_profile != 0
         || frontier.link_profile != plans.link_profile
         || frontier.append
@@ -1285,7 +1362,7 @@ pub fn advance_native_stems_head_continuation_c_link(
     {
         return Err(stage(
             "HEADS-CLink-continuation-frontier",
-            "carrier is not the authenticated order7 BottomOnly frontier",
+            format!("carrier is not the authenticated {order_label} BottomOnly frontier"),
         ));
     }
     advance_native_stems_head_c_link_at_frontier(
@@ -1298,8 +1375,8 @@ pub fn advance_native_stems_head_continuation_c_link(
         checker,
         bridge,
         queue_index,
-        0,
-        0,
+        expected_last_index,
+        expected_max_index,
         frontier,
     )
 }
@@ -1340,14 +1417,23 @@ fn advance_native_stems_head_c_link_at_frontier(
         .iter()
         .find(|builder| builder.start == frontier.next_corner)
         .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
-    if builder.items.len() != 1
-        || builder.items[0].kind != NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
-        || builder.items[0].glyph != builder.start_stump
-        || builder.max_stem_profile != plans.link_profile
-    {
+    let bounded_shape = match builder.items.as_slice() {
+        [start] => {
+            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+                && start.glyph == builder.start_stump
+        }
+        [start, chunk] => {
+            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+                && start.glyph == builder.start_stump
+                && chunk.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
+                && chunk.glyph.is_some()
+        }
+        _ => false,
+    };
+    if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
-            "selected frontier is not the bounded one-item start-C shape",
+            "selected frontier is not the bounded start-C shape",
         ));
     }
     let Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
@@ -1477,21 +1563,29 @@ fn advance_native_stems_head_c_link_at_frontier(
             stop: builder.theoretical_line.start,
         }
     };
-    let centroid = glyph_centroid(&candidate)?;
-    let intersection = generic_intersection(
-        Segment {
-            x1: stem_line.start.x,
-            y1: stem_line.start.y,
-            x2: stem_line.stop.x,
-            y2: stem_line.stop.y,
-        },
-        Segment {
-            x1: 0.0,
-            y1: centroid.1,
-            x2: 1000.0,
-            y2: centroid.1,
-        },
-    );
+    let geometry_candidate = compose_head_c_link_geometry(&candidate, builder)?;
+    let centroid = glyph_centroid(&geometry_candidate)?;
+    let intersection = if builder.items.len() == 2 {
+        let x = stem_line.start.x
+            + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
+                / (stem_line.stop.y - stem_line.start.y);
+        crate::stems_step::NativeStemPoint { x, y: centroid.1 }
+    } else {
+        generic_intersection(
+            Segment {
+                x1: stem_line.start.x,
+                y1: stem_line.start.y,
+                x2: stem_line.stop.x,
+                y2: stem_line.stop.y,
+            },
+            Segment {
+                x1: 0.0,
+                y1: centroid.1,
+                x2: 1000.0,
+                y2: centroid.1,
+            },
+        )
+    };
     let shift = centroid.0 - intersection.x;
     stem_line.start.x += shift;
     stem_line.stop.x += shift;
@@ -1521,7 +1615,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         head_builders,
         frontier.next_corner,
         stem_line,
-        Some(candidate.bounds),
+        Some(geometry_candidate.bounds),
         frontier.link_profile,
     )
     .map_err(|error| stage("HEADS-CLink-relation", error))?;
@@ -1772,35 +1866,130 @@ fn advance_native_stems_head_c_link_at_frontier(
     Ok(transaction)
 }
 
+fn compose_head_c_link_geometry(
+    candidate: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+    builder: &crate::native_stems_head_builders::NativeStemsHeadBuilder,
+) -> Result<
+    crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+    NativeStemsBeamSidesError,
+> {
+    let chunk_ref = builder.items.iter().find_map(|item| match item.glyph {
+        Some(NativeStemsHeadBuilderGlyphRef::Chunk {
+            builder_ordinal,
+            filament_ordinal,
+        }) if item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
+            && builder_ordinal == builder.builder_ordinal =>
+        {
+            Some(filament_ordinal)
+        }
+        _ => None,
+    });
+    let Some(filament_ordinal) = chunk_ref else {
+        return Ok(candidate.clone());
+    };
+    let chunk = builder
+        .chunks
+        .iter()
+        .find(|chunk| {
+            matches!(
+                chunk.glyph,
+                NativeStemsHeadBuilderGlyphRef::Chunk {
+                    builder_ordinal,
+                    filament_ordinal: chunk_filament,
+                } if builder_ordinal == builder.builder_ordinal
+                    && chunk_filament == filament_ordinal
+            )
+        })
+        .ok_or_else(|| stage("HEADS-CLink-glyph", "selected chunk glyph is missing"))?;
+    let min_x = candidate.bounds.x.min(chunk.bounds.x);
+    let min_y = candidate.bounds.y.min(chunk.bounds.y);
+    let max_x = candidate
+        .bounds
+        .x
+        .checked_add(candidate.bounds.width)
+        .and_then(|value| {
+            chunk
+                .bounds
+                .x
+                .checked_add(chunk.bounds.width)
+                .map(|chunk_max| value.max(chunk_max))
+        })
+        .ok_or_else(|| stage("HEADS-CLink-glyph", "composite glyph x bounds overflow"))?;
+    let max_y = candidate
+        .bounds
+        .y
+        .checked_add(candidate.bounds.height)
+        .and_then(|value| {
+            chunk
+                .bounds
+                .y
+                .checked_add(chunk.bounds.height)
+                .map(|chunk_max| value.max(chunk_max))
+        })
+        .ok_or_else(|| stage("HEADS-CLink-glyph", "composite glyph y bounds overflow"))?;
+    let bounds = audiveris_image::section::Bounds {
+        x: min_x,
+        y: min_y,
+        width: max_x
+            .checked_sub(min_x)
+            .ok_or_else(|| stage("HEADS-CLink-glyph", "composite glyph width underflow"))?,
+        height: max_y
+            .checked_sub(min_y)
+            .ok_or_else(|| stage("HEADS-CLink-glyph", "composite glyph height underflow"))?,
+    };
+    let mut pixels =
+        vec![
+            BACKGROUND;
+            bounds
+                .width
+                .checked_mul(bounds.height)
+                .ok_or_else(|| stage("HEADS-CLink-glyph", "composite glyph area overflow"))?
+        ];
+    let mut paint = |glyph_bounds: audiveris_image::section::Bounds, run_table: &RunTable| {
+        for sequence in 0..run_table.sequence_count() {
+            for run in run_table.sequence(sequence).unwrap_or_default() {
+                for coordinate in run.start..=run.stop() {
+                    let (local_x, local_y) = match run_table.orientation() {
+                        Orientation::Horizontal => (coordinate, sequence),
+                        Orientation::Vertical => (sequence, coordinate),
+                    };
+                    let x = glyph_bounds.x - bounds.x + local_x;
+                    let y = glyph_bounds.y - bounds.y + local_y;
+                    if x < bounds.width && y < bounds.height {
+                        pixels[y * bounds.width + x] = FOREGROUND;
+                    }
+                }
+            }
+        }
+    };
+    paint(candidate.bounds, &candidate.run_table);
+    paint(chunk.bounds, &chunk.run_table);
+    let run_table =
+        RunTable::from_pixels(Orientation::Vertical, bounds.width, bounds.height, &pixels)
+            .map_err(|error| stage("HEADS-CLink-glyph", error))?;
+    let weight = run_table.weight();
+    if weight == 0 {
+        return Err(stage("HEADS-CLink-glyph", "composite glyph has no pixels"));
+    }
+    Ok(
+        crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+            bounds,
+            weight,
+            run_table,
+        },
+    )
+}
+
 fn glyph_centroid(
     glyph: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
 ) -> Result<(f64, f64), NativeStemsBeamSidesError> {
-    let mut count = 0_usize;
-    let mut x_total = 0_f64;
-    let mut y_total = 0_f64;
-    for sequence in (0..glyph.run_table.sequence_count()).rev() {
-        for run in glyph
-            .run_table
-            .sequence(sequence)
-            .unwrap_or_default()
-            .iter()
-            .rev()
-        {
-            for coordinate in (run.start..=run.stop()).rev() {
-                match glyph.run_table.orientation() {
-                    Orientation::Horizontal => {
-                        x_total += glyph.bounds.x as f64 + coordinate as f64;
-                        y_total += glyph.bounds.y as f64 + sequence as f64;
-                    }
-                    Orientation::Vertical => {
-                        x_total += glyph.bounds.x as f64 + sequence as f64;
-                        y_total += glyph.bounds.y as f64 + coordinate as f64;
-                    }
-                }
-                count += 1;
-            }
-        }
-    }
+    let points = glyph
+        .run_table
+        .foreground_points((glyph.bounds.x as i32, glyph.bounds.y as i32));
+    let count = points.len();
+    let (x_total, y_total) = points.iter().fold((0_f64, 0_f64), |(x, y), (px, py)| {
+        (x + f64::from(*px), y + f64::from(*py))
+    });
     if count != glyph.weight || count == 0 {
         return Err(stage(
             "HEADS-CLink-centroid",

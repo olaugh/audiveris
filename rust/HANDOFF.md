@@ -120,7 +120,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS scheduler SIDES resume (fast evidence) | `resume_native_stems_beam_scheduler_after_transaction` is the nineteenth exact boundary: after Boundary 18, the SIDES worklist resumes from the suspended position with exact Java loop semantics - remaining V linkers of the completed B, the side result the outer assignment determined (`SideBLinkerResult` with `linked_flag_after` true), remaining sides and beams - and stops at the second `ReadyForCreateStem` frontier as a typed `AwaitingVLinkTransaction`, or reports SIDES exhaustion. Scope is SIDES only; the STUMPS continuation is a later boundary. On chula and BachInvention5 all nine systems reach a RIGHT-side second frontier on the same beam, and every resumed expand outcome equals the frozen Boundary-10 matrix even though Java ran it against the post-transaction SIG - an equivalence the gate checks per row, so a page where the mutation changes an outcome fails loudly. The probe re-emits Boundary-17 and Boundary-18 rows and the runner requires byte-identity with their frozen fixtures. The checkpoint has since raised it to full evidence: all eight sheets under two byte-identical passes, with the gate asserting it grades every installed sheet. The scheduler-only all-success chain reaches SIDES exhaustion on most systems and typed competing-hook frontiers on allegretto 1 and 3; Boundary 26 separately gates the first real Allegretto-system-1 removal from a reconstructed predecessor. The multi-V continuation occurs three times across two systems (batuque 1, BachInvention5 6) - multi-V B linkers are common but are almost never the frontier's own side linker, so that assertion is a deliberate floor of one and a failure there means the corpus stopped covering it. A failed link and an already-linked B linker are driven by re-running a real frontier with the one bit flipped, which shortens chula system 1 from 53 chained transactions to 36 |
 | STEMS SIDES-pass chain (historical diagnosis, now closed natively) | The early synthetic chain ran 53 transactions against Java's 32 because it carried no B16 sibling writes; the 21-transaction excess exactly matched Java's 21 `AlreadyLinked` skips. The production carrier now computes and carries all 29 sibling-write lists itself, executes Java's exact 32 plan/B-linker tuples, and reaches SIDES exhaustion. `scheduler_resume_chain_composes_without_repeating_a_v_linker` remains the narrow composition proof; `native_carrier_drives_full_sides_pass_before_oracle_read` is the current owned-state closure |
 | STEMS self-driving chain: original blocker survey (partly superseded) | This dated survey established that registry completeness, rather than per-transaction algebra, was the core problem. The SIG-bootstrap portion is now resolved by production `NativeSigSystem` assembly and native B14-B17 carriage. A validated first-STEMS bridge now joins the system-1-visible 1,058 native modeled objects to the disclosed 1,650-entry persistent snapshot and retains the other 592 entries as opaque fingerprints; transactions 3-32 therefore need no per-frontier glyph rows or exhaustive scan. The persistent IDs/allocator/union baseline remains fixture-backed, opaque fingerprints never answer `Glyph.equals`, and weak-index lifetime still needs resolution before claiming native-products-only execution |
-| STEMS chain self-drive: full chula beam passes carried | `advance_native_stems_beam_sides_transaction` owns each already-awaited B12-B19 transaction as an atomic shadow/swap over scheduler, latest B14/transaction state, SIG/bindings, and persistent B/S cells. Repeated calls execute all 32 chula-system-1 SIDES transactions, carry all 29 B16 sibling-write lists, and reach the explicit `SidesExhausted` state at the native 253-vertex / 331-edge terminal with 61 linked B and 68 linked S cells. Exact plan/B order and sibling aliases match Java only after return. `advance_native_stems_beam_sides_transaction_from_first_stems_bridge` drives transactions 3-32 from one validated page snapshot without candidate-specific Java evidence; transactions 1-2 and the snapshot itself remain fixture-backed. B14 consumes a sparse 16-entry identity bridge for the distinct selected base beams rather than all 48 live beams; those entries still disclose Java Inter ID, sorted InterIndex ordinal, and VIP, while native stump/SIG products own every graph fact. The graph-derived B13 projector is additionally gated on one measured later linked-S reconstruction at Allegretto system 1 transaction 28; native carriage of its predecessor transactions remains open. The bounded atomic STUMPS driver carries all seven chula-system-1 stump transactions through the typed post-STUMPS terminal; Boundaries 27-43 then carry the typed head phase through two bounded C-link mutations and the intervening prelinked-success continuations to `current_index=18`, with no unlinked head. Boundaries 38-43 use separate snapshot-minimized order-specific Java derivatives, not full predecessor-snapshot oracles. Boundary 43 exposes the first next frontier whose LEFT and RIGHT sides are both open/unlinked; its behavior remains the next slice. Boundary 26 additionally removes and resumes past the first real Allegretto competing hook from an explicitly reconstructed post-transaction-28 checkpoint; it does not natively carry transactions 1-27. Early registry corruption, missing identities/cells, malformed hook topology, or incoherent head products fail closed. Replacing the Allegretto reconstruction with native-carried state, remaining ordered head iteration/retry and wider C-link shapes, linked-S/hook-removal/STUMPS corpus coverage, and removal of the remaining fixture-backed authorities remain |
+| STEMS chain self-drive: full chula beam passes carried | `advance_native_stems_beam_sides_transaction` owns each already-awaited B12-B19 transaction as an atomic shadow/swap over scheduler, latest B14/transaction state, SIG/bindings, and persistent B/S cells. Repeated calls execute all 32 chula-system-1 SIDES transactions, carry all 29 B16 sibling-write lists, and reach the explicit `SidesExhausted` state at the native 253-vertex / 331-edge terminal with 61 linked B and 68 linked S cells. Exact plan/B order and sibling aliases match Java only after return. `advance_native_stems_beam_sides_transaction_from_first_stems_bridge` drives transactions 3-32 from one validated page snapshot without candidate-specific Java evidence; transactions 1-2 and the snapshot itself remain fixture-backed. B14 consumes a sparse 16-entry identity bridge for the distinct selected base beams rather than all 48 live beams; those entries still disclose Java Inter ID, sorted InterIndex ordinal, and VIP, while native stump/SIG products own every graph fact. The graph-derived B13 projector is additionally gated on one measured later linked-S reconstruction at Allegretto system 1 transaction 28; native carriage of its predecessor transactions remains open. The bounded atomic STUMPS driver carries all seven chula-system-1 stump transactions through the typed post-STUMPS terminal; Boundaries 27-44 then carry the typed head phase through three bounded C-link mutations and the intervening prelinked-success continuations to `current_index=19`, with no unlinked head. Boundaries 38-44 use separate snapshot-minimized order-specific Java derivatives, not full predecessor-snapshot oracles. Boundary 44 consumes the first continuation frontier whose LEFT and RIGHT sides were both open/unlinked, through an exact two-item LEFT/BOTTOM C-link geometry path; broader geometry and retry remain open. Boundary 26 additionally removes and resumes past the first real Allegretto competing hook from an explicitly reconstructed post-transaction-28 checkpoint; it does not natively carry transactions 1-27. Early registry corruption, missing identities/cells, malformed hook topology, or incoherent head products fail closed. Replacing the Allegretto reconstruction with native-carried state, remaining ordered head iteration/retry and wider C-link shapes, linked-S/hook-removal/STUMPS corpus coverage, and removal of the remaining fixture-backed authorities remain |
 | What finishing STEMS needed, measured 2026-08-12 (diagnosis now implemented) | This dated diagnosis correctly identified the absence of a production SIG as the cross-stage blocker. `NativeSigSystem` now assembles the exact GRID-through-HEADS graph with native identities and the production carrier runs chula system 1's full SIDES and STUMPS beam passes, so “the port owns no SIG,” “transaction 2 remains,” and “an iterative driver remains” are no longer current. There is still no `recognize_native_stems`: native carriage of the reconstructed Allegretto predecessor and wider linked-S/hook-removal coverage, replacement of the disclosed GlyphIndex/beam-identity bootstraps, wider-corpus STUMPS authority and branch coverage, general dirty state, and wider BEAMS-group coverage remain |
 | STEMS SIDES-to-STUMPS entry | `continue_native_stems_beam_sides_carrier_into_stumps` is the twenty-first exact production boundary. It accepts only the explicit `SidesExhausted` terminal and walks chula system 1's 34 retained beams in Java STUMPS order. Beam SIG 12 starts Java event 0. Its stump 0 is both a structural side stump and already linked; Java's structural test wins at event 1. Stump 1 is unlinked, and plan 147 at `BEAM_SEED` profile 3 / link profile 1 reaches `AwaitingVLinkTransaction` at Java event 2 with two relations, one glyph, and no line change. Native returns two scheduler event records plus that typed frontier and stops before `createStem`; graph, B/S cells, and registries are unchanged. This real prefix contains no pure already-linked skip or known-false plan; a focused synthetic unit covers the linked-only guard without claiming production equivalence. The refreshed 10-line fixture retains the same five semantic rows plus summary and now has SHA-256 `ef8f180110a409f85167ee1cc0f641c210144d6e5b5c737d5d8eb69e82d47bcb` after its probe provenance changed for Boundary 28 |
 | STEMS first STUMPS transaction and resume | `advance_native_stems_beam_stumps_transaction_from_first_stems_bridge` is the twenty-second exact production boundary. It atomically executes chula system 1's first stump frontier, beam SIG 12 / `beam:12:b:1` / plan 147, through B12-B17 and resumes the retained STUMPS worklist without Java's SIDES-only outer B18 assignment. Java reports glyph 310 `ReuseActive`, `CreatedChecked`, two `AllUnlinked` reads, final Stem Inter ID 2372, zero siblings, two heads, and `outerAssignment=false`. Native adds dense stem identity 32 and relation identity 331, reaches 254 vertices / 334 edges with 33 Stem bindings, 62 linked B cells, and 70 linked S cells, then skips two structural-and-linked side stumps and stops at worklist index 1, beam SIG 22 / `beam:22:b:1` / plan 622. The refreshed 11-line / 2,619-byte fixture retains six semantic rows plus summary and has SHA-256 `b1a312ddc690911b916971081ce21ea1c2211283df174a2175094ace7c144d5e`; its probe SHA-256 is `d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf` |
@@ -4706,8 +4706,8 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `a629a2d63d223f28264c3fdc4dc20941e082402c27d75c2c6d884e2ce8282d08`.
 The Boundary-25 production library run is 695 passed / 0 failed / 2 ignored, and the
 full local workspace, formatting, and strict all-target Clippy gates are green;
-`9cb613601` (including Boundary 32) is the current CI baseline: Rust run 32204202389 passed all 12
-shards and Build & Test run 32204202393 passed, with no failure or cancellation.
+`5f75f8708` (including Boundary 43) is the current CI baseline: Rust run 32217412749 passed all 12
+shards and Build & Test run 32217412751 passed, with no failure or cancellation.
 This completes chula system 1's STUMPS worklist, not full STEMS. Wider-corpus authority
 and branch coverage, other systems, and later STEMS phases remain open.
 
@@ -4735,7 +4735,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `2cc4ad8e0aadf29b8055ce34c32b703c033c45880bef24ff26a707b6b6f0d3c5`.
 The Boundary-26 production library run is 696 passed / 0 failed / 2 ignored, and the
 full local workspace, formatting, and strict all-target Clippy gates are green;
-`9cb613601` remains the current remote CI baseline. Native
+`5f75f8708` remains the current remote CI baseline. Native
 Allegretto predecessor carriage, hook removal beyond this checkpoint, wider-corpus
 STUMPS authority, general dirty-state ownership, other systems, and later STEMS remain.
 
@@ -4766,7 +4766,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and
 `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398`.
 Boundary 27's full local workspace, formatting, and strict all-target Clippy gates are
-green. `9cb613601` (including Boundary 32) is the current remote CI baseline: all 12 Rust
+green. `5f75f8708` (including Boundary 43) is the current remote CI baseline: all 12 Rust
 shards and the Java build passed without failure or cancellation.
 
 Boundary 28 adds `advance_native_stems_head_single_item_c_link`, an atomic consumer for
@@ -4802,7 +4802,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and
 `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398`.
 Boundary 28's full local workspace, formatting, and strict all-target Clippy gates are
-green. `9cb613601` (including Boundary 32) is the current remote-CI baseline: its exact commit
+green. `5f75f8708` (including Boundary 43) is the current remote-CI baseline: its exact commit
 has reached terminal green.
 
 The bridge constructor fail-closes on the exact 1,650/1,058/592/2,339 census, duplicate
@@ -5130,6 +5130,38 @@ This proves the bounded order-17 continuation, not independently snapshot-oracle
 predecessor states or the order-18 behavior. Actually-unlinked/retry, phase-2 append,
 later C-link shapes, and broader corpus/system coverage remain open.
 
+## Boundary 44: first open/unlinked continuation C-link
+
+Boundary 44 consumes head order 18 (x63 / SIG 17 / Java Inter 1319, grade bits
+`0x3fe8009e50c15bf8`) from the both-open/unlinked frontier. Java selects LEFT/BOTTOM
+(`BottomOnly`), expands a two-item builder (`lastIndex=maxIndex=1`) from active glyphs
+328 and 2063, reuses canonical glyph 328 without reinsertion, and creates checked Stem
+Inter 2381 with one HeadStem relation. Native creates dense Stem identity 41, moves SIG
+680/691 to 681/692 and Stem bindings 41 to 42, links the LEFT S cell, records no
+unlinked head or closure write, and advances to `current_index=19` before x69 / SIG 76 /
+Java Inter 1441 (grade bits `0x3fe7fe09c1461c49`).
+
+The geometry is deliberately bounded to this two-item continuation: the native path
+matches Java's RunTable centroid accumulation order and directly interpolates the
+theoretical stem line's x coordinate at the centroid y before translating the line.
+That does not establish generic multi-item/recursive geometry, other corner shapes,
+`reuseStem`, or retry/no-link behavior. The focused Boundary-44 gate and full 14-test
+sibling suite are green; formatting, strict all-target Clippy, and diff checks pass.
+
+The 14-line / 11,751-byte schema-v18 derivative contains nine semantic rows plus summary
+and remains snapshot-minimized: orders 1-17 reconstruct the predecessor without emitted
+or persisted full snapshots; order 18 alone emits its C-link envelope/result and
+continuation. Fixture, runner, transformed probe, emitted-body, and semantic-pass
+SHA-256 are `4972836c5e2718f9441a007840cfc5100caa95a12dc349d7822c0695ad0f5b2b`,
+`3bea814e71ba13374130351d0f5cc057779e5676e402e7b43b5c4ee4a263e332`,
+`4e15aa27d982b6ea848b5a7349819e3db7300349dded652f859492abe2ea7460`,
+`499b791dc34d2ca59666bbab20e4ca15a9dd335260d4714dbdd9042ed00456cd`, and
+`7045d9060ea8e6d930b94d28e79e3e6d8d0cc0bb0b57bb20c64a3780b876bcb3`;
+the Java fragment source is pinned by
+`f56fdd58606c3d5101ebea1690162b38f9db6a18f89a4fe0e441cedff1bac36c`.
+Remaining phase-1 iteration, actually-unlinked/retry, phase-2 append, broader C-link
+geometry, and broader corpus/system coverage remain open.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
@@ -5141,8 +5173,7 @@ Commit each slice separately after the full verification block above.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with
    native-carried state and widen the graph-derived B13 linked-S and hook-removal paths;
    chula system 1's 68 executed head-side references are unique.
-3. Continue from Boundary 43 at head index 18, where x63 / SIG 17 starts with both sides
-   open and unlinked: carry its behavior, then the remaining ordered phase-1 queue and
+3. Continue from Boundary 44 at head index 19: carry the remaining ordered phase-1 queue and
    rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive
    C-linkers, and the remaining head branches. In parallel, widen the bounded
    STUMPS driver and competing-hook removal beyond their single-system/checkpoint evidence
