@@ -6186,7 +6186,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let fixture = std::fs::read_to_string(&fixture_path).expect("bounded linked-S fixture");
     assert_eq!(
         sha256_hex(fixture.as_bytes()),
-        "45c4234df7081bb237f4fea17c6238180dd26300be077078fcf5f71686741ec6"
+        "6822c637f104bf0d0b8c2c61384c2d8df1fdfee34bb23518a66e5745da2ebf93"
     );
     let data = fixture
         .lines()
@@ -6263,7 +6263,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
     assert_eq!(
         sha256_hex(predecessor_text.as_bytes()),
-        "9887b277bb5eb9e2a9113bf32aa2811594eeb4fa3cfb7e392a809a3d6a2ba284"
+        "4993f9ac47e6a0dc2a88e9eab739b72703bf0eb27813c9327b9d1c14e9a47b99"
     );
     let predecessor_rows = predecessor_text
         .lines()
@@ -6556,7 +6556,7 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
     .expect("expected-only hook removal fixture");
     assert_eq!(
         sha256_hex(expected_text.as_bytes()),
-        "f6f59c98e2dceb82aed312e2e8a5ad40bd0cb83ba62cab9d09571658c761089e"
+        "e857a469d2f24b33a8758feff6157731a241fbef93a3f63d7f2c7403e59642b4"
     );
     let expected = expected_text
         .lines()
@@ -8350,6 +8350,37 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(fourth_head_phase.heads[4].reference.x_ordinal, 36);
     assert_eq!(fourth_head_phase.heads[4].reference.sig_ordinal, 69);
 
+    // Boundary 31: carry the next prelinked-success queue entry.  This is
+    // intentionally still the unchanged phase-1 continuation path: head x36
+    // closes both S cells of its shared Stem 2369 and stops before head x99.
+    let fifth_continuation = continue_native_stems_head_linking_phase1(
+        &fourth_head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native fifth-head phase-1 continuation");
+    assert_eq!(fifth_continuation.processed_head.sig_ordinal, 69);
+    assert_eq!(fifth_continuation.returned_linked, Some(true));
+    assert_eq!(fifth_continuation.closed_value_changes, 2);
+    assert_eq!(
+        fifth_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (35, NativeStemHeadSide::Left),
+            (35, NativeStemHeadSide::Right)
+        ]
+    );
+    let fifth_head_phase = (*fifth_continuation.state_after).clone();
+    assert_eq!(fifth_head_phase.current_index, 5);
+    assert!(fifth_head_phase.frontier_consumed);
+    assert!(fifth_head_phase.unlinked_heads.is_empty());
+    assert_eq!(fifth_head_phase.heads[5].reference.x_ordinal, 99);
+    assert_eq!(fifth_head_phase.heads[5].reference.sig_ordinal, 61);
+
     let mut corrupt_closure = head_phase.clone();
     let x89_ref = corrupt_closure
         .heads
@@ -8431,7 +8462,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only STUMPS prefix");
     assert_eq!(
         sha256_hex(stumps_prefix_text.as_bytes()),
-        "28e3fdadb5eb1737b9d567a594a61fc61dcf001540efbc9fb7533e0d497b2f73"
+        "b1c43f29ee909643707033f79abc166e90da72368ac248d9dae752c764da0dfb"
     );
     let stumps_rows = stumps_prefix_text
         .lines()
@@ -8555,7 +8586,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only first-STUMPS transaction");
     assert_eq!(
         sha256_hex(stumps_transaction_text.as_bytes()),
-        "6ac590a15b00319db993773f56c47497632543d18a30fb51d0efd326a46d0af5"
+        "267659af2190ca7e6901a9803cfd85440f9d981ac67afe2f638e5ca63372a999"
     );
     let transaction_rows = stumps_transaction_text
         .lines()
@@ -8642,7 +8673,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only second-STUMPS transaction");
     assert_eq!(
         sha256_hex(second_stumps_transaction_text.as_bytes()),
-        "df229fe8019e1ac75586a30b0e97a5b64f5f6ed336040241447a779a51ca0e5c"
+        "3cba09c13c555e56ea4ad1f65b0ba5610e5bacdb81e73fcc144473b3f3dce0f2"
     );
     let second_transaction_rows = second_stumps_transaction_text
         .lines()
@@ -8738,7 +8769,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only third-STUMPS transaction");
     assert_eq!(
         sha256_hex(third_stumps_transaction_text.as_bytes()),
-        "223393c2c3c93780534ff431eb3c1eb1b2c106018b28037eed13030b5f67a4a9"
+        "bd1fac9822659da8dbfd5159257c3f8005d96fb915dd1439773ac42183e4e321"
     );
     let third_transaction_rows = third_stumps_transaction_text
         .lines()
@@ -8834,7 +8865,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only complete STUMPS suffix");
     assert_eq!(
         sha256_hex(complete_stumps_text.as_bytes()),
-        "7636ad54017b8dc817f48679b672de4ab25e0ef4ce05c63fff1666385fa16cde"
+        "054ed437739a86f981d0579b4161b52e3983cb75a952f9e39817f4fdb039ffb1"
     );
     let complete_rows = complete_stumps_text
         .lines()
@@ -8947,13 +8978,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     .expect("expected-only post-STUMPS head-phase prefix");
     assert_eq!(
         sha256_hex(head_phase_text.as_bytes()),
-        "edc0459dc0957aad5ee574dcef3f49b7f8fa519e4fb043877a9a48145a93bb74"
+        "181d4bfcb5f2fe0a6442ee6826e74a10703039f567f00df7e33133ca4e15e798"
     );
     let head_phase_rows = head_phase_text
         .lines()
         .filter(|line| !line.starts_with('#'))
         .collect::<Vec<_>>();
-    assert_eq!(head_phase_rows.len(), 10);
+    assert_eq!(head_phase_rows.len(), 11);
     let head_field = |line: &str, name: &str| {
         let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
         let index = tokens
@@ -9063,6 +9094,56 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(head_field(fourth_java, "nextHeadX"), "36");
     assert_eq!(head_field(fourth_java, "nextHeadSig"), "69");
     assert_eq!(head_field(fourth_java, "nextHeadInterId"), "1427");
+
+    let fifth_java = head_phase_rows[9];
+    assert_eq!(head_field(fifth_java, "headOrder"), "4");
+    assert_eq!(
+        head_field(fifth_java, "headSig").parse::<usize>().unwrap(),
+        fifth_continuation.processed_head.sig_ordinal
+    );
+    assert_eq!(head_field(fifth_java, "headX"), "36");
+    assert_eq!(head_field(fifth_java, "headInterId"), "1427");
+    assert_eq!(
+        head_field(fifth_java, "grade"),
+        "0x1.8e37718100f0cp-1/3fe8e37718100f0c"
+    );
+    assert_eq!(
+        head_field(fifth_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(head_field(fifth_java, "returned"), "true");
+    assert_eq!(fifth_continuation.returned_linked, Some(true));
+    assert_eq!(
+        head_field(fifth_java, "closedValueChanges")
+            .parse::<usize>()
+            .unwrap(),
+        fifth_continuation.closed_value_changes
+    );
+    assert_eq!(
+        head_field(fifth_java, "closureWrites"),
+        "[x35:sig68:LEFT:false->true,x35:sig68:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(fifth_java, "unlinkedCount"), "0");
+    assert_eq!(head_field(fifth_java, "nextHeadOrder"), "5");
+    assert_eq!(head_field(fifth_java, "nextHeadX"), "99");
+    assert_eq!(head_field(fifth_java, "nextHeadSig"), "61");
+    assert_eq!(head_field(fifth_java, "nextHeadInterId"), "1411");
+    let native_fifth_next_sides = format!(
+        "[{}]",
+        fifth_head_phase.heads[5]
+            .sides
+            .iter()
+            .map(|cell| {
+                let side = match cell.reference.horizontal {
+                    NativeStemHeadSide::Left => "LEFT",
+                    NativeStemHeadSide::Right => "RIGHT",
+                };
+                format!("{}:{}:{}", side, cell.linked, cell.closed)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    assert_eq!(head_field(fifth_java, "nextSides"), native_fifth_next_sides);
 
     let frontier = head_phase_rows[1];
     assert_eq!(head_field(frontier, "headOrder"), "0");
@@ -9187,12 +9268,12 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         head_field(apply, "terminal"),
         "ReturnedHeadCLinkTransaction"
     );
-    let head_summary = head_phase_rows[9];
+    let head_summary = head_phase_rows[10];
     assert_eq!(
         head_field(head_summary, "schema"),
-        "stems-head-phase-prefix-v4"
+        "stems-head-phase-prefix-v5"
     );
-    assert_eq!(head_field(head_summary, "rows"), "9");
+    assert_eq!(head_field(head_summary, "rows"), "10");
     assert_eq!(head_field(head_summary, "freshRuns"), "2");
     assert_eq!(head_field(head_summary, "freshRunsByteIdentical"), "true");
     assert_eq!(

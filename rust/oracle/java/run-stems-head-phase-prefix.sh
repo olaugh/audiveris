@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Freeze the first exact head-phase-1 decision and three prelinked continuations after chula system-1 STUMPS.
+# Freeze the first exact head-phase-1 decision and four prelinked continuations after chula system-1 STUMPS.
 set -eu
 
 if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then
@@ -73,14 +73,14 @@ if ! cmp -s "$stumps_actual" "$stumps_frozen"; then
 fi
 
 grep '^stemshead' "$pass_one" > "$rows"
-if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 9 ] || \
+if [ "$(wc -l < "$rows" | tr -d ' ')" -ne 10 ] || \
         [ "$(grep -c '^stemsheadphaseprefixbaseline ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixfrontier ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadphaseprefixresult ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkexpand ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkcreate ' "$rows")" -ne 1 ] || \
         [ "$(grep -c '^stemsheadclinkapply ' "$rows")" -ne 1 ] || \
-        [ "$(grep -c '^stemsheadphasecontinue ' "$rows")" -ne 3 ] || \
+        [ "$(grep -c '^stemsheadphasecontinue ' "$rows")" -ne 4 ] || \
         ! grep -q 'headOrder 0 headSig 45 headInterId 1375 ' "$rows" || \
         ! grep -q 'decisions \[LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly\] selectedC ' "$rows" || \
         ! grep -q 'terminal AwaitingHeadCLinkTransaction$' "$rows" || \
@@ -100,7 +100,8 @@ if ! grep -q 'lastIndex 0 maxIndex 0 relations 1 .* glyphs 1 .*candidateIdBefore
 fi
 if ! grep -q 'headOrder 1 headX 90 headSig 23 headInterId 1331 .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2359:headSideLEFT:heads\[x89:sig22:id1329:sideLEFT,x90:sig23:id1331:sideLEFT\]\] returned true .*closureWrites \[x89:sig22:LEFT:false->true,x89:sig22:RIGHT:false->true\] closedValueChanges 2 unlinkedCount 0 ' "$rows" || \
         ! grep -q 'headOrder 2 headX 81 headSig 33 headInterId 1351 grade .*3fe901efd26d99b1 .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2371:headSideLEFT:heads\[x79:sig40:id1365:sideLEFT,x80:sig32:id1349:sideLEFT,x81:sig33:id1351:sideLEFT\]\] returned true .*closureWrites \[x79:sig40:LEFT:false->true,x79:sig40:RIGHT:false->true,x80:sig32:LEFT:false->true,x80:sig32:RIGHT:false->true\] closedValueChanges 4 unlinkedCount 0 .*nextHeadOrder 3 nextHeadX 20 nextHeadSig 65 nextHeadInterId 1419 ' "$rows" || \
-        ! grep -q 'headOrder 3 headX 20 headSig 65 headInterId 1419 grade .*3fe8e97b8a9fa8ca .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2361:headSideLEFT:heads\[x19:sig64:id1417:sideLEFT,x20:sig65:id1419:sideLEFT\]\] returned true .*closureWrites \[x19:sig64:LEFT:false->true,x19:sig64:RIGHT:false->true\] closedValueChanges 2 unlinkedCount 0 .*nextHeadOrder 4 nextHeadX 36 nextHeadSig 69 nextHeadInterId 1427 ' "$rows"; then
+        ! grep -q 'headOrder 3 headX 20 headSig 65 headInterId 1419 grade .*3fe8e97b8a9fa8ca .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2361:headSideLEFT:heads\[x19:sig64:id1417:sideLEFT,x20:sig65:id1419:sideLEFT\]\] returned true .*closureWrites \[x19:sig64:LEFT:false->true,x19:sig64:RIGHT:false->true\] closedValueChanges 2 unlinkedCount 0 .*nextHeadOrder 4 nextHeadX 36 nextHeadSig 69 nextHeadInterId 1427 ' "$rows" || \
+        ! grep -q 'headOrder 4 headX 36 headSig 69 headInterId 1427 grade .*3fe8e37718100f0c .*decisions \[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither\] incident \[stem2369:headSideLEFT:heads\[x35:sig68:id1425:sideLEFT,x36:sig69:id1427:sideLEFT\]\] returned true .*closureWrites \[x35:sig68:LEFT:false->true,x35:sig68:RIGHT:false->true\] closedValueChanges 2 unlinkedCount 0 .*nextHeadOrder 5 nextHeadX 99 nextHeadSig 61 nextHeadInterId 1411 ' "$rows"; then
     echo "post-first-head continuation contract differs" >&2
     exit 1
 fi
@@ -113,11 +114,11 @@ stumps_sha=$(shasum -a 256 "$complete_fixture" | awk '{print $1}')
 out="$repo_root/rust/oracle/stems-head-phase-prefix-chula-system1.txt"
 {
     echo '# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) post-STUMPS head phase.'
-    echo '# schema: stems-head-phase-prefix-v4'
-    echo '# First CLinker transaction plus the next three real phase-1 linkSides calls.'
+    echo '# schema: stems-head-phase-prefix-v5'
+    echo '# First CLinker transaction plus the next four real phase-1 linkSides calls.'
     echo '# Expected rows stay unread until the native transaction returns.'
     cat "$rows"
     printf '%s\n' \
-        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v4 page chula.png#1 system 1 rows 9 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope ReturnedThreeHeadPhaseContinuations javaEvidence ReturnedBeforeFifthHead"
+        "stemsheadphaseprefix summary schema stems-head-phase-prefix-v5 page chula.png#1 system 1 rows 10 probeSourceSha256 $probe_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha semanticPassSha256 $semantic_sha completeStumpsFixtureSha256 $stumps_sha freshRuns 2 freshRunsByteIdentical true nativeScope ReturnedFourHeadPhaseContinuations javaEvidence ReturnedBeforeSixthHead"
 } > "$out"
 echo "wrote $out"
