@@ -60,6 +60,7 @@ fn parse_fixture(path: &Path, workspace: &Path) -> Vec<TruthSystem> {
                 .unwrap()
                 .truths
                 .push((fields[1].parse().unwrap(), fields[2].to_string())),
+            Some("volta") => {} // ending hooks; graded by barline_classification
             Some("end") => systems.push(current.take().unwrap()),
             Some(other) => panic!("unknown fixture directive {other}"),
         }

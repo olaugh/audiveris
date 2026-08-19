@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use audiveris_image::bar_tuning::{
-    BarClassificationParameters, BarlineForm, SystemBand, classify_boundary,
+    BarClassificationParameters, BarlineForm, SystemBand, classify_boundary, volta_hook,
 };
 use audiveris_image::ingest::GrayRaster;
 
@@ -159,4 +159,178 @@ fn classification_matches_hand_verified_scan_boundaries() {
         );
     }
     eprintln!("barline_classification: 4 hand-verified scan boundaries reproduced");
+}
+
+#[test]
+fn volta_hooks_match_the_engraver_on_the_verovio_corpus() {
+    let Ok(workspace) = std::env::var("AUDIVERIS_BARLINE_TUNING_FIXTURES") else {
+        eprintln!(
+            "SKIPPED volta detection: set AUDIVERIS_BARLINE_TUNING_FIXTURES to the workspace \
+             root containing stage-omr-data"
+        );
+        return;
+    };
+    let workspace = PathBuf::from(workspace);
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../oracle/py-barline-tuning/verovio-synthetic.txt");
+    let text = std::fs::read_to_string(fixture).expect("fixture readable");
+    // First pass groups the fixture per system so volta truth is complete
+    // before boundaries are graded.
+    struct System {
+        id: String,
+        image: PathBuf,
+        band: SystemBand,
+        interline: f64,
+        truths: Vec<f64>,
+        hooks: Vec<f64>,
+    }
+    let mut systems: Vec<System> = Vec::new();
+    let mut image = PathBuf::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        match fields.first().copied() {
+            Some("image") => image = workspace.join(fields[1]),
+            Some("system") => systems.push(System {
+                id: fields[1].to_string(),
+                image: image.clone(),
+                band: SystemBand {
+                    left: fields[2].parse().unwrap(),
+                    right: fields[3].parse().unwrap(),
+                    top: fields[4].parse().unwrap(),
+                    bottom: fields[5].parse().unwrap(),
+                },
+                interline: fields[6].parse().unwrap(),
+                truths: Vec::new(),
+                hooks: Vec::new(),
+            }),
+            Some("truth") => systems
+                .last_mut()
+                .unwrap()
+                .truths
+                .push(fields[1].parse().unwrap()),
+            Some("volta") => systems
+                .last_mut()
+                .unwrap()
+                .hooks
+                .push(fields[1].parse().unwrap()),
+            _ => {}
+        }
+    }
+    let mut raster_cache: Option<(PathBuf, GrayRaster)> = None;
+    let mut positives = 0usize;
+    let mut negatives = 0usize;
+    for system in &systems {
+        let gray = match &raster_cache {
+            Some((path, raster)) if path == &system.image => raster.clone(),
+            _ => {
+                let dynamic = image::open(&system.image)
+                    .unwrap_or_else(|error| panic!("open {:?}: {error}", system.image));
+                let raster = GrayRaster::from_dynamic(&dynamic);
+                raster_cache = Some((system.image.clone(), raster.clone()));
+                raster
+            }
+        };
+        let parameters = BarClassificationParameters::from_scale(system.interline);
+        for x in &system.truths {
+            let expected = system
+                .hooks
+                .iter()
+                .any(|hook| (hook - x).abs() <= parameters.volta_search);
+            let detected = volta_hook(&gray, &system.band, *x, &parameters);
+            assert_eq!(
+                detected, expected,
+                "{} x={x}: volta hook (truth hooks {:?})",
+                system.id, system.hooks
+            );
+            if expected {
+                positives += 1;
+            } else {
+                negatives += 1;
+            }
+        }
+    }
+    assert!(positives >= 6, "corpus exercises volta positives");
+    eprintln!("volta detection: {positives} positives and {negatives} negatives reproduced");
+}
+
+#[test]
+fn volta_hooks_match_hand_verified_scan_boundaries() {
+    let Ok(workspace) = std::env::var("AUDIVERIS_BARLINE_TUNING_FIXTURES") else {
+        eprintln!(
+            "SKIPPED volta detection (scans): set AUDIVERIS_BARLINE_TUNING_FIXTURES to the \
+             workspace root containing stage-omr-data"
+        );
+        return;
+    };
+    let workspace = PathBuf::from(workspace);
+    // GGR p2s5: the first ending opens at the projection-only barline near
+    // x=299 (the pinned interline residual) and the second ending begins at
+    // the repeat close near x=540; the Grazioso bars carry no volta.  The
+    // Schenker cases put ties and slurs directly above genuine barlines —
+    // the classic false-positive source for hook detection.
+    type VoltaCase = (&'static str, [f64; 4], f64, f64, bool, &'static str);
+    let cases: &[VoltaCase] = &[
+        (
+            "stage-omr-data/data/real-datasets/ggr-warped/p2s5.png",
+            [74.0, 1483.0, 79.0, 275.0],
+            12.0,
+            299.0,
+            true,
+            "first ending opens",
+        ),
+        (
+            "stage-omr-data/data/real-datasets/ggr-warped/p2s5.png",
+            [74.0, 1483.0, 79.0, 275.0],
+            12.0,
+            540.0,
+            // This edition marks the second ending with plain text
+            // ("||2.") and no bracket line, so the ink-geometry detector
+            // correctly finds nothing; text-style ending marks are future
+            // (glyph recognition) work.
+            false,
+            "second ending is text-marked, no bracket to detect",
+        ),
+        (
+            "stage-omr-data/data/real-datasets/ggr-warped/p2s5.png",
+            [74.0, 1483.0, 79.0, 275.0],
+            12.0,
+            818.5,
+            false,
+            "Grazioso interior bar, no volta",
+        ),
+        (
+            "stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-05.png",
+            [38.0, 716.0, 707.0, 801.0],
+            6.0,
+            600.0,
+            false,
+            "genuine barline with a tie arcing directly above",
+        ),
+        (
+            "stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-05.png",
+            [39.0, 713.0, 80.0, 168.0],
+            6.0,
+            339.0,
+            false,
+            "recovered barline with slurs above",
+        ),
+    ];
+    for (image_rel, band, interline, x, expected, note) in cases {
+        let path = workspace.join(image_rel);
+        let dynamic = image::open(&path).unwrap_or_else(|error| panic!("open {path:?}: {error}"));
+        let gray = GrayRaster::from_dynamic(&dynamic);
+        let band = SystemBand {
+            left: band[0],
+            right: band[1],
+            top: band[2],
+            bottom: band[3],
+        };
+        let parameters = BarClassificationParameters::from_scale(*interline);
+        assert_eq!(
+            volta_hook(&gray, &band, *x, &parameters),
+            *expected,
+            "{image_rel} x={x} ({note})"
+        );
+    }
+    eprintln!("volta detection: 5 hand-verified scan cases reproduced");
 }

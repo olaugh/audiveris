@@ -1050,6 +1050,17 @@ pub struct BarClassificationParameters {
     /// beside a barline bridge the adjacent lines.  A side whose probe strip
     /// contains a vertical ink run taller than this cannot be dots.
     pub dot_max_run: f64,
+    /// Volta detection: the bracket region spans from this far above the
+    /// top staff line down to `volta_region_clear` above it.
+    pub volta_region_above: f64,
+    /// See [`BarClassificationParameters::volta_region_above`].
+    pub volta_region_clear: f64,
+    /// A hook is a vertical ink run at least this tall within the region.
+    pub volta_hook_min: f64,
+    /// The bracket line is a horizontal ink run at least this long.
+    pub volta_line_min: f64,
+    /// Hooks are searched within this distance of the boundary.
+    pub volta_search: f64,
 }
 
 impl BarClassificationParameters {
@@ -1072,6 +1083,11 @@ impl BarClassificationParameters {
             dot_density: 0.25,
             dot_boxes_required: 3,
             dot_max_run: 0.85 * interline,
+            volta_region_above: 4.5 * interline,
+            volta_region_clear: 0.5 * interline,
+            volta_hook_min: 0.8 * interline,
+            volta_line_min: 1.5 * interline,
+            volta_search: 0.7 * interline,
         }
     }
 }
@@ -1268,6 +1284,83 @@ pub fn classify_boundary(
         left_dot_density: left_density,
         right_dot_density: right_density,
     }
+}
+
+/// Detects a volta (ending) bracket hook above the staff at a boundary.
+///
+/// A volta bracket is a horizontal line above the top staff with a vertical
+/// hook descending at the ending's first (and often last) barline.  The
+/// detector requires both parts: a hook-height vertical run near the
+/// boundary within the bracket region, and a bracket-length horizontal run
+/// through the same region.  Ties and slurs crossing above a barline are
+/// curved and short in each row, so they fail the horizontal-run test.
+#[must_use]
+pub fn volta_hook(
+    gray: &GrayRaster,
+    band: &SystemBand,
+    x: f64,
+    parameters: &BarClassificationParameters,
+) -> bool {
+    let width = gray.width();
+    let pixels = gray.pixels();
+    let ink =
+        |column: usize, row: usize| 255 - pixels[row * width + column] > parameters.ink_threshold;
+    let region_top = ((band.top - parameters.volta_region_above) as i64).max(0) as usize;
+    let region_bottom = ((band.top - parameters.volta_region_clear) as i64).max(0) as usize;
+    if region_bottom <= region_top {
+        return false;
+    }
+    // A descending hook at the boundary.  At small interlines the engraved
+    // hook can drop below the ink threshold entirely, so the bracket line's
+    // own endpoint (below) is accepted as equivalent evidence.
+    let hook_lo = ((x - parameters.volta_search) as i64).max(0) as usize;
+    let hook_hi = (((x + parameters.volta_search) as i64).max(0) as usize + 1).min(width);
+    let mut hook_near = false;
+    'columns: for column in hook_lo..hook_hi {
+        let mut run = 0usize;
+        for row in region_top..region_bottom {
+            run = if ink(column, row) { run + 1 } else { 0 };
+            if run as f64 >= parameters.volta_hook_min {
+                hook_near = true;
+                break 'columns;
+            }
+        }
+    }
+    // The bracket line: a long horizontal run through the region.  A bar in
+    // the middle of an ending sits under a line that continues across the
+    // whole window - line evidence alone must not fire.  An ending begins or
+    // ends where the line's endpoint lies near the boundary (strictly inside
+    // the window, so clipped runs do not fabricate endpoints).
+    let window_lo = ((x - 3.0 * parameters.interline) as i64).max(0) as usize;
+    let window_hi = (((x + 3.0 * parameters.interline) as i64).max(0) as usize + 1).min(width);
+    let mut line_found = false;
+    let mut endpoint_near = false;
+    for row in region_top..region_bottom {
+        let mut run_start: Option<usize> = None;
+        for column in window_lo..=window_hi {
+            let inked = column < window_hi && ink(column, row);
+            match (inked, run_start) {
+                (true, None) => run_start = Some(column),
+                (false, Some(start)) => {
+                    let stop = column;
+                    if (stop - start) as f64 >= parameters.volta_line_min {
+                        line_found = true;
+                        let starts_inside = start > window_lo;
+                        let stops_inside = stop < window_hi;
+                        if (starts_inside && (start as f64 - x).abs() <= parameters.volta_search)
+                            || (stops_inside
+                                && (stop as f64 - 1.0 - x).abs() <= parameters.volta_search)
+                        {
+                            endpoint_near = true;
+                        }
+                    }
+                    run_start = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    line_found && (hook_near || endpoint_near)
 }
 
 #[cfg(test)]
