@@ -444,6 +444,10 @@ pub struct PeakGraphReport {
     /// The store those promotions live in: original glyphs and per-system
     /// SIG insertion order.
     pub brace_sig: BraceSigStore,
+    /// Systems whose brace promotion was skipped on a hard scan, with the
+    /// reason (for example a brace portion with no probed member sections
+    /// on a recovered staff).  Empty on the Java-parity corpus.
+    pub brace_promotion_skips: Vec<(usize, String)>,
     /// Accepted and rejected brace lookup attempts grouped by system.
     pub brace_portions: Vec<(usize, BracePortionReport)>,
     /// Candidate peaks a `BarsRetriever` purge removed, each with the stage
@@ -2863,6 +2867,7 @@ fn build_peak_graph(
     let mut brace_sig =
         BraceSigStore::new(0, 0, derived.systems.iter().map(BarsSystemState::system_id));
     let mut brace_promotions = Vec::new();
+    let mut brace_promotion_skips: Vec<(usize, String)> = Vec::new();
     {
         // Java caches `allBraceSections = getSectionsByWidth(maxBraceThickness)`.
         let located = audiveris_image::bars_logic::sections_by_width(
@@ -2911,47 +2916,51 @@ fn build_peak_graph(
             members_by_peak.insert(evidence.peak.key(), members);
         }
         for state in &mut derived.systems {
-            brace_promotions.extend(
-                build_and_promote_system_braces(
-                    state,
-                    &all_brace_sections,
-                    &skew,
-                    RawBraceStageParameters {
-                        portions: BracePortionParameters {
-                            neutral_gap: brace_parameters.neutral_gap,
-                            maximum_peak_width: brace_parameters.maximum_peak_width,
-                            maximum_bar_gap: brace_parameters.maximum_bar_gap,
-                            minimum_portion_height: f64::from(
-                                brace_parameters.minimum_portion_height,
-                            ),
-                            maximum_curvature: f64::from(brace_parameters.maximum_curvature),
-                            lookup_extension: f64::from(brace_parameters.lookup_extension),
-                            // Same shear-gated policy as the detached brace
-                            // stage above; the opt-in defaults off, so Java
-                            // parity gates see identical behavior.
-                            self_inclusive_fallback: brace_self_inclusive_fallback,
-                        },
-                        filament: BraceFilamentParameters {
-                            interline: usize::try_from(interline).unwrap_or(1).max(1),
-                            // BarFilamentFactory.segmentLength = rint(1.0 * interline).
-                            segment_length: pixels(1.0, interline).max(1) as usize,
-                            // BarsRetriever.braceLeftMargin = 0.5 interlines.
-                            left_margin: pixels(0.5, interline),
-                        },
-                        maximum_alignment_dx: f64::from(brace_parameters.maximum_alignment_dx),
+            let system_id = state.system_id();
+            match build_and_promote_system_braces(
+                state,
+                &all_brace_sections,
+                &skew,
+                RawBraceStageParameters {
+                    portions: BracePortionParameters {
+                        neutral_gap: brace_parameters.neutral_gap,
+                        maximum_peak_width: brace_parameters.maximum_peak_width,
+                        maximum_bar_gap: brace_parameters.maximum_bar_gap,
+                        minimum_portion_height: f64::from(brace_parameters.minimum_portion_height),
+                        maximum_curvature: f64::from(brace_parameters.maximum_curvature),
+                        lookup_extension: f64::from(brace_parameters.lookup_extension),
+                        // Same shear-gated policy as the detached brace
+                        // stage above; the opt-in defaults off, so Java
+                        // parity gates see identical behavior.
+                        self_inclusive_fallback: brace_self_inclusive_fallback,
                     },
-                    &mut brace_sig,
-                    &mut |key| {
-                        members_by_peak.get(&key).cloned().ok_or_else(|| {
-                            format!(
-                                "brace portion staff {} has no probed members",
-                                key.staff_id().value()
-                            )
-                        })
+                    filament: BraceFilamentParameters {
+                        interline: usize::try_from(interline).unwrap_or(1).max(1),
+                        // BarFilamentFactory.segmentLength = rint(1.0 * interline).
+                        segment_length: pixels(1.0, interline).max(1) as usize,
+                        // BarsRetriever.braceLeftMargin = 0.5 interlines.
+                        left_margin: pixels(0.5, interline),
                     },
-                )
-                .map_err(grid_stage("brace promotion"))?,
-            );
+                    maximum_alignment_dx: f64::from(brace_parameters.maximum_alignment_dx),
+                },
+                &mut brace_sig,
+                &mut |key| {
+                    members_by_peak.get(&key).cloned().ok_or_else(|| {
+                        format!(
+                            "brace portion staff {} has no probed members",
+                            key.staff_id().value()
+                        )
+                    })
+                },
+            ) {
+                Ok(promotions) => brace_promotions.extend(promotions),
+                // Hard scans can accept a brace portion whose member sections
+                // were never probed (recovered or tentative staves).  The
+                // Java-parity corpus never reaches this arm; on such pages
+                // the honest outcome is a system without a promoted brace,
+                // recorded rather than a failed page.
+                Err(error) => brace_promotion_skips.push((system_id, error.to_string())),
+            }
         }
     }
 
@@ -3157,6 +3166,7 @@ fn build_peak_graph(
         brace_filaments: brace_stage.filaments,
         brace_promotions,
         brace_sig,
+        brace_promotion_skips,
         brace_portions: brace_stage.portions,
         retained_peaks,
         purged_peaks,

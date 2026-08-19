@@ -203,9 +203,29 @@ fn materialize_system(
                 let ConnectorInterKind::Barline(width_class) = plan.kind else {
                     continue;
                 };
-                let top = connector_endpoint_plan(system, inter_id, VerticalSide::Top, plan.top)?;
-                let bottom =
-                    connector_endpoint_plan(system, inter_id, VerticalSide::Bottom, plan.bottom)?;
+                // On the Java-parity corpus a connector's endpoint barlines
+                // are always present in the SIG.  Hard scans can purge an
+                // endpoint bar after the connector was promoted (recovered or
+                // tentative staves); such a connector simply contributes no
+                // obstacle rather than failing the page.
+                let top =
+                    match connector_endpoint_plan(system, inter_id, VerticalSide::Top, plan.top) {
+                        Ok(plan) => plan,
+                        Err(NativeHeadsBarObstacleError::MissingConnectorEndpoint { .. }) => {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    };
+                let bottom = match connector_endpoint_plan(
+                    system,
+                    inter_id,
+                    VerticalSide::Bottom,
+                    plan.bottom,
+                ) {
+                    Ok(plan) => plan,
+                    Err(NativeHeadsBarObstacleError::MissingConnectorEndpoint { .. }) => continue,
+                    Err(error) => return Err(error),
+                };
                 let (median, thickness) =
                     connector_geometry(top.median, top.width, bottom.median, bottom.width);
                 obstacle(
