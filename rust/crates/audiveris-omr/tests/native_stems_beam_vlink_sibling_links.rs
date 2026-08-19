@@ -9778,6 +9778,34 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ]
     );
 
+    // Boundary 58: order 32 is a generic prelinked no-op closure.
+    let order32_continuation = continue_native_stems_head_linking_phase1(
+        &order31_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order32 prelinked no-op closure");
+    assert_eq!(order32_continuation.processed_head.x_ordinal, 34);
+    assert_eq!(order32_continuation.processed_head.sig_ordinal, 77);
+    assert_eq!(order32_continuation.returned_linked, Some(true));
+    assert_eq!(order32_continuation.closed_value_changes, 0);
+    assert_eq!(order32_continuation.state_after.current_index, 33);
+    assert!(order32_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order32_continuation.state_after.heads[33]
+            .reference
+            .x_ordinal,
+        88
+    );
+    assert_eq!(
+        order32_continuation.state_after.heads[33]
+            .reference
+            .sig_ordinal,
+        84
+    );
+    assert!(order32_continuation.closed_s_linkers.is_empty());
+
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
     let mut invalid_order18 = order18_frontier_before.clone();
@@ -13732,6 +13760,109 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v31_summary, "javaEvidence"),
         "ReturnedBeforeThirtySecondHead"
+    );
+
+    // Boundary 58 expected-only v32 rows cover the prelinked no-op closure.
+    let v32_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v32.txt"),
+    )
+    .expect("expected-only order32 continuation fixture");
+    assert_eq!(
+        sha256_hex(v32_text.as_bytes()),
+        "cceda3e1b00ccf9e4ca5f701c71a0a4da4e764488e192bf056ea645f11ad72c4"
+    );
+    let v32_rows = v32_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v32_rows.len(), 8);
+    let v32_body = format!("{}\n", v32_rows[..7].join("\n"));
+    assert_eq!(
+        sha256_hex(v32_body.as_bytes()),
+        "77810c34e97279aef05feaa043df82a7ab4ba1566edc5933f38ff80608f10191"
+    );
+    let v32_java = v32_rows[6];
+    assert_eq!(head_field(v32_java, "headOrder"), "32");
+    assert_eq!(head_field(v32_java, "headX"), "34");
+    assert_eq!(head_field(v32_java, "headSig"), "77");
+    assert_eq!(head_field(v32_java, "headInterId"), "1443");
+    assert_eq!(
+        head_field(v32_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(
+        head_field(v32_java, "incident"),
+        "[stem2368:headSideLEFT:heads[x34:sig77:id1443:sideLEFT]]"
+    );
+    assert_eq!(head_field(v32_java, "closureWrites"), "-");
+    assert_eq!(head_field(v32_java, "closedValueChanges"), "0");
+    assert_eq!(head_field(v32_java, "sigVerticesAfter"), "683");
+    assert_eq!(head_field(v32_java, "sigEdgesAfter"), "694");
+    assert_eq!(head_field(v32_java, "systemStemsAfter"), "44");
+    assert_eq!(
+        head_field(v32_java, "relationStateHashAfter"),
+        "c6dec8e3b73e751d8b552b377dd3fa2289d59644cda1674f4ff594247cbf60dd"
+    );
+    assert_eq!(
+        head_field(v32_java, "linkerStateHashAfter"),
+        "4713d6c479a46b49da415a3a74fa523427e566caa9a83719dac14f70f3f78beb"
+    );
+    assert_eq!(head_field(v32_java, "nextHeadOrder"), "33");
+    assert_eq!(head_field(v32_java, "nextHeadX"), "88");
+    assert_eq!(head_field(v32_java, "nextHeadSig"), "84");
+    assert_eq!(head_field(v32_java, "nextHeadInterId"), "1457");
+    assert_eq!(head_field(v32_java, "terminal"), "ReturnedBeforeNextHead");
+    let v32_summary = v32_rows[7];
+    assert_eq!(
+        head_field(v32_summary, "schema"),
+        "stems-head-phase-prefix-v32"
+    );
+    assert_eq!(head_field(v32_summary, "rows"), "7");
+    assert_eq!(
+        head_field(v32_summary, "baseProbeSourceSha256"),
+        "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf"
+    );
+    assert_eq!(
+        head_field(v32_summary, "baseV31RunnerSourceSha256"),
+        "e7b8cd3bc87ff55969aee203b6027f7af572428cf91d442f94ea58e8f82d3e42"
+    );
+    assert_eq!(
+        head_field(v32_summary, "baseV31FixtureSha256"),
+        "ab58a7bf9d7a62fe7f9531f8b0f11e845d483d732010e565a1579fb7f4558f85"
+    );
+    assert_eq!(
+        head_field(v32_summary, "fragmentSourceSha256"),
+        "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c"
+    );
+    assert_eq!(
+        head_field(v32_summary, "probeSourceSha256"),
+        "d1b3d61c46bfdfe540d33ae751d0006c4518142d8410277d8e4016a4b29b1fe5"
+    );
+    assert_eq!(
+        head_field(v32_summary, "runnerSourceSha256"),
+        "fecd661b0c9b9e03f17c9eba3482a86b7f2ae381e49ac93bbbcbfea4756c3cd8"
+    );
+    assert_eq!(
+        head_field(v32_summary, "emittedBodySha256"),
+        "77810c34e97279aef05feaa043df82a7ab4ba1566edc5933f38ff80608f10191"
+    );
+    assert_eq!(
+        head_field(v32_summary, "semanticPassSha256"),
+        "23a5e25617ef107a7f4b2b85ddb977d8d8b164d0203477d9f995d2d90df55bf5"
+    );
+    assert_eq!(
+        head_field(v32_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v32_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v32_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v32_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder32PrelinkedNoOpClosure"
+    );
+    assert_eq!(
+        head_field(v32_summary, "javaEvidence"),
+        "ReturnedBeforeThirtyThirdHead"
     );
 
     let all_siblings = std::iter::once(&actual)
