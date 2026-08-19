@@ -13,8 +13,9 @@
 use std::path::{Path, PathBuf};
 
 use audiveris_image::bar_tuning::{
-    Anchor, BarTuningParameters, RawBoundary, RawBoundaryKind, SystemBand, SystemBarInput,
-    diff_boundaries, geometry_count, projection_candidates, resolve_count, select_boundaries,
+    Anchor, BarClassificationParameters, BarTuningParameters, RawBoundary, RawBoundaryKind,
+    SystemBand, SystemBarInput, diff_boundaries, geometry_count, geometry_count_with_voltas,
+    projection_candidates, resolve_count, select_boundaries, volta_hook,
 };
 use audiveris_image::ingest::GrayRaster;
 
@@ -140,18 +141,12 @@ fn assert_close(context: &str, actual: f64, expected: f64, tolerance: f64, worst
 }
 
 /// Interline-mode divergences from the pixel oracle that are understood,
-/// deliberate, and pinned so further drift is caught.
-///
-/// `p2s5`: the volta first-ending barline at x=299 is projection-only with
-/// maximum gap 15 (the bracket junction interrupts it).  The pixel oracle
-/// recovers it only by accident: the section repeat's thin+thin strokes
-/// (7 px apart) escape the 6 px geometry merge, inflating the count by one,
-/// and the inflated count drafts the volta bar.  Interline mode merges the
-/// repeat pair correctly, the count honestly drops, and the volta bar loses
-/// its slot.  The proper recovery is the barline-type layer (repeat/volta
-/// modeling), not a threshold bent around one case.  Pinned: 5 boundaries,
-/// the volta bar absent.
-const KNOWN_INTERLINE_RESIDUALS: &[(&str, &str, usize)] = &[("graceful-ghost-rag.txt", "p2s5", 5)];
+/// deliberate, and pinned so further drift is caught.  Currently empty:
+/// the one prior residual (the GGR p2s5 volta first-ending barline, which
+/// the pixel oracle recovered only through an accidentally inflated count)
+/// is now recovered on principle - its detected volta bracket counts the
+/// interrupted, stem-clean candidate in the geometry.
+const KNOWN_INTERLINE_RESIDUALS: &[(&str, &str, usize)] = &[];
 
 /// How strictly a fixture run is graded.
 enum Comparison {
@@ -208,7 +203,17 @@ fn run_fixture(
             // two bars at the reference merge tolerance but folds into one
             // boundary at interline scale — the honest, better count.  The
             // graded decision is the final tuned boundary set.
-            let geometry = geometry_count(&system.input, &candidates, parameters);
+            // Interline mode is volta-aware: hooks detected over candidate
+            // positions let interrupted ending barlines count on principle.
+            let classification =
+                BarClassificationParameters::from_scale((parameters.geometry_merge).max(6.0));
+            let hooks: Vec<f64> = candidates
+                .iter()
+                .map(|candidate| candidate.x)
+                .filter(|x| volta_hook(&gray, &system.input.band, *x, &classification))
+                .collect();
+            let geometry =
+                geometry_count_with_voltas(&system.input, &candidates, &hooks, parameters);
             let count = resolve_count(geometry, system.decoded_count);
             if count != system.expected_count {
                 eprintln!(

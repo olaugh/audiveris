@@ -283,12 +283,11 @@ fn volta_hooks_match_hand_verified_scan_boundaries() {
             [74.0, 1483.0, 79.0, 275.0],
             12.0,
             540.0,
-            // This edition marks the second ending with plain text
-            // ("||2.") and no bracket line, so the ink-geometry detector
-            // correctly finds nothing; text-style ending marks are future
-            // (glyph recognition) work.
-            false,
-            "second ending is text-marked, no bracket to detect",
+            // The second ending is text-marked ("||2.", no bracket), but
+            // the FIRST ending's bracket line closes at this repeat bar -
+            // genuine ending evidence at this boundary either way.
+            true,
+            "first ending's bracket closes at the repeat bar",
         ),
         (
             "stage-omr-data/data/real-datasets/ggr-warped/p2s5.png",

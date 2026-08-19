@@ -375,6 +375,24 @@ pub fn geometry_count(
     projected: &[ProjectionCandidate],
     parameters: &BarTuningParameters,
 ) -> GeometryCount {
+    geometry_count_with_voltas(input, projected, &[], parameters)
+}
+
+/// [`geometry_count`] with ending-bracket evidence.
+///
+/// An ending barline is often interrupted exactly at its volta bracket
+/// junction, failing both the certain-connector predicate and the raw-bar
+/// corroboration path.  A candidate whose x carries a detected volta hook
+/// counts as a bar when its column is stem-clean: paired occupancy at the
+/// corroboration level, a bridge above the aligned-stem cut, and clean
+/// flanks.  Passing no hooks reproduces [`geometry_count`] exactly.
+#[must_use]
+pub fn geometry_count_with_voltas(
+    input: &SystemBarInput,
+    projected: &[ProjectionCandidate],
+    volta_hooks: &[f64],
+    parameters: &BarTuningParameters,
+) -> GeometryCount {
     let left = input.band.left;
     let right = input.band.right;
     let height = input.band.height();
@@ -416,7 +434,12 @@ pub fn geometry_count(
             .filter(|item| {
                 guard <= item.x
                     && item.x <= right - parameters.edge_bar_margin
-                    && item.is_certain_connector(parameters)
+                    && (item.is_certain_connector(parameters)
+                        || (volta_hooks.iter().any(|hook| {
+                            (hook - item.x).abs() <= parameters.corroboration_proximity
+                        }) && item.paired_occupancy >= parameters.corroboration_paired
+                            && item.bridge_occupancy >= parameters.bridge_cut
+                            && item.flank_noise <= parameters.flank_noise_limit))
             })
             .map(|item| item.x),
     );
@@ -1059,8 +1082,14 @@ pub struct BarClassificationParameters {
     pub volta_hook_min: f64,
     /// The bracket line is a horizontal ink run at least this long.
     pub volta_line_min: f64,
+    /// The bracket line is thin; beams over high notes are about half an
+    /// interline thick and must not qualify.
+    pub volta_line_max_thickness: f64,
     /// Hooks are searched within this distance of the boundary.
     pub volta_search: f64,
+    /// A bracket line endpoint associates with a boundary within this
+    /// distance; engravers align endings to barlines loosely.
+    pub volta_endpoint_search: f64,
 }
 
 impl BarClassificationParameters {
@@ -1087,7 +1116,9 @@ impl BarClassificationParameters {
             volta_region_clear: 0.5 * interline,
             volta_hook_min: 0.8 * interline,
             volta_line_min: 1.5 * interline,
+            volta_line_max_thickness: 0.45 * interline,
             volta_search: 0.7 * interline,
+            volta_endpoint_search: 1.5 * interline,
         }
     }
 }
@@ -1310,57 +1341,113 @@ pub fn volta_hook(
     if region_bottom <= region_top {
         return false;
     }
-    // A descending hook at the boundary.  At small interlines the engraved
-    // hook can drop below the ink threshold entirely, so the bracket line's
-    // own endpoint (below) is accepted as equivalent evidence.
+    // Candidate hooks near the boundary, remembered by their top row: a
+    // bracket hook hangs from the bracket line, so a hook only counts when
+    // a qualifying line runs at its top.  (A stem under a slur fails that
+    // connectivity; a beam fails the thin-line test below.)
     let hook_lo = ((x - parameters.volta_search) as i64).max(0) as usize;
     let hook_hi = (((x + parameters.volta_search) as i64).max(0) as usize + 1).min(width);
-    let mut hook_near = false;
-    'columns: for column in hook_lo..hook_hi {
+    let mut hook_tops: Vec<usize> = Vec::new();
+    for column in hook_lo..hook_hi {
         let mut run = 0usize;
         for row in region_top..region_bottom {
             run = if ink(column, row) { run + 1 } else { 0 };
             if run as f64 >= parameters.volta_hook_min {
-                hook_near = true;
-                break 'columns;
+                hook_tops.push(row + 1 - run);
+                break;
             }
         }
     }
-    // The bracket line: a long horizontal run through the region.  A bar in
-    // the middle of an ending sits under a line that continues across the
-    // whole window - line evidence alone must not fire.  An ending begins or
-    // ends where the line's endpoint lies near the boundary (strictly inside
-    // the window, so clipped runs do not fabricate endpoints).
+    // The bracket line: a long, thin, possibly sloped run through the
+    // region.  Warp and print tilt make single-row scanning useless, so the
+    // line is traced as a chain of thin vertical segments marching across
+    // columns with bounded drift.  Beams fail the thickness test; a bar in
+    // the middle of an ending sits under a chain that crosses the whole
+    // window (clipped, so no endpoint); an ending begins or ends where a
+    // chain endpoint lies near the boundary, or where a hook hangs from the
+    // chain.
     let window_lo = ((x - 3.0 * parameters.interline) as i64).max(0) as usize;
     let window_hi = (((x + 3.0 * parameters.interline) as i64).max(0) as usize + 1).min(width);
-    let mut line_found = false;
-    let mut endpoint_near = false;
-    for row in region_top..region_bottom {
+    struct Chain {
+        start_col: usize,
+        last_col: usize,
+        last_row: f64,
+        min_row: f64,
+        max_row: f64,
+        closed: bool,
+    }
+    let mut chains: Vec<Chain> = Vec::new();
+    for column in window_lo..window_hi {
+        // Thin ink segments in this column of the region.
+        let mut segments: Vec<f64> = Vec::new();
         let mut run_start: Option<usize> = None;
-        for column in window_lo..=window_hi {
-            let inked = column < window_hi && ink(column, row);
+        for row in region_top..=region_bottom {
+            let inked = row < region_bottom && ink(column, row);
             match (inked, run_start) {
-                (true, None) => run_start = Some(column),
-                (false, Some(start)) => {
-                    let stop = column;
-                    if (stop - start) as f64 >= parameters.volta_line_min {
-                        line_found = true;
-                        let starts_inside = start > window_lo;
-                        let stops_inside = stop < window_hi;
-                        if (starts_inside && (start as f64 - x).abs() <= parameters.volta_search)
-                            || (stops_inside
-                                && (stop as f64 - 1.0 - x).abs() <= parameters.volta_search)
-                        {
-                            endpoint_near = true;
-                        }
+                (true, None) => run_start = Some(row),
+                (false, Some(begin)) => {
+                    if (row - begin) as f64 <= parameters.volta_line_max_thickness {
+                        segments.push((begin + row - 1) as f64 / 2.0);
                     }
                     run_start = None;
                 }
                 _ => {}
             }
         }
+        for center in segments {
+            let mut extended = false;
+            for chain in chains.iter_mut() {
+                if !chain.closed
+                    && column - chain.last_col <= 2
+                    && (center - chain.last_row).abs() <= 2.0
+                {
+                    chain.last_col = column;
+                    chain.last_row = center;
+                    chain.min_row = chain.min_row.min(center);
+                    chain.max_row = chain.max_row.max(center);
+                    extended = true;
+                    break;
+                }
+            }
+            if !extended {
+                chains.push(Chain {
+                    start_col: column,
+                    last_col: column,
+                    last_row: center,
+                    min_row: center,
+                    max_row: center,
+                    closed: false,
+                });
+            }
+        }
+        for chain in chains.iter_mut() {
+            if column - chain.last_col > 2 {
+                chain.closed = true;
+            }
+        }
     }
-    line_found && (hook_near || endpoint_near)
+    let mut endpoint_near = false;
+    let mut hooked = false;
+    for chain in &chains {
+        if ((chain.last_col - chain.start_col) as f64) < parameters.volta_line_min {
+            continue;
+        }
+        let starts_inside = chain.start_col > window_lo + 1;
+        let stops_inside = chain.last_col + 2 < window_hi;
+        if (starts_inside && (chain.start_col as f64 - x).abs() <= parameters.volta_endpoint_search)
+            || (stops_inside
+                && (chain.last_col as f64 - x).abs() <= parameters.volta_endpoint_search)
+        {
+            endpoint_near = true;
+        }
+        if hook_tops.iter().any(|top| {
+            *top as f64 + 3.0 >= chain.min_row
+                && (*top as f64) <= chain.max_row + 0.5 * parameters.interline
+        }) {
+            hooked = true;
+        }
+    }
+    endpoint_near || hooked
 }
 
 #[cfg(test)]
@@ -1650,6 +1737,47 @@ mod tests {
             &parameters,
         );
         assert_eq!((count.intervals, count.certain_bars), (1, 0));
+    }
+
+    #[test]
+    fn volta_hook_evidence_counts_an_interrupted_ending_barline() {
+        // Modeled on Graceful Ghost p2s5 x=299: the first-ending barline is
+        // interrupted at the bracket junction (gap 15, full 0.77) but has
+        // perfect paired occupancy and clean flanks.  With its volta hook it
+        // counts; without, it does not; a dirty-flank column never does.
+        let input = system(&[0.0, 1400.0], 1400.0, 200.0);
+        let parameters = BarTuningParameters::python_reference();
+        let ending_bar = ProjectionCandidate {
+            x: 299.0,
+            paired_occupancy: 1.0,
+            mean_occupancy: 1.0,
+            bridge_occupancy: 0.62,
+            full_occupancy: 0.77,
+            maximum_gap: 15,
+            left_flank_noise: 0.07,
+            right_flank_noise: 0.10,
+            flank_noise: 0.07,
+        };
+        let with_hook = geometry_count_with_voltas(
+            &input,
+            std::slice::from_ref(&ending_bar),
+            &[299.0],
+            &parameters,
+        );
+        assert_eq!((with_hook.intervals, with_hook.certain_bars), (2, 1));
+        let without_hook = geometry_count(&input, std::slice::from_ref(&ending_bar), &parameters);
+        assert_eq!((without_hook.intervals, without_hook.certain_bars), (1, 0));
+        let stemlike = ProjectionCandidate {
+            flank_noise: 0.25,
+            ..ending_bar
+        };
+        let stem_hooked = geometry_count_with_voltas(
+            &input,
+            std::slice::from_ref(&stemlike),
+            &[299.0],
+            &parameters,
+        );
+        assert_eq!((stem_hooked.intervals, stem_hooked.certain_bars), (1, 0));
     }
 
     #[test]
