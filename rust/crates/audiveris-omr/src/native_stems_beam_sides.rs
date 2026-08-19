@@ -2341,6 +2341,87 @@ pub fn advance_native_stems_head_existing_stem_retry_order47(
     Ok(continuation)
 }
 
+/// Reconcile the bounded existing-stem retry at order 48.
+///
+/// x52/SIG2 selects LEFT/BOTTOM against existing StemInter 2344. Java does
+/// not allocate or mutate SIG here: it closes x53's two S cells and advances
+/// to order 49. The generic continuation performs the graph-derived closure;
+/// this wrapper authenticates the retry frontier and fails closed on mismatch.
+pub fn advance_native_stems_head_existing_stem_retry_order48(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 48
+        || !carrier.unlinked_heads.is_empty()
+        || !carrier.undefined_sides.is_empty()
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier is not the authenticated order48 continuation",
+        ));
+    }
+    let head = carrier.heads.get(48).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order48 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 52 || head.reference.sig_ordinal != 2 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier head is not x52/SIG2",
+        ));
+    }
+    let left = head
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == crate::stems_step::NativeStemHeadSide::Left)
+        .ok_or_else(|| stage("HEADS-existing-stem-retry-frontier", "LEFT cell is missing"))?;
+    if !left.linked {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order48 LEFT cell is not linked",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2344) && stem.glyph_id == 296)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-retry-frontier",
+                "order48 existing StemInter 2344/glyph296 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order48 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    if continuation.returned_linked != Some(true)
+        || continuation.processed_head.x_ordinal != 52
+        || continuation.processed_head.sig_ordinal != 2
+        || continuation.closed_value_changes != 2
+        || continuation.state_after.current_index != 49
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-result",
+            "order48 retry did not produce the authenticated closure",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Reconcile the bounded existing-stem retry at order 21.
 ///
 /// x28/SIG55 selects LEFT/BOTTOM against existing StemInter 2378. Java does
