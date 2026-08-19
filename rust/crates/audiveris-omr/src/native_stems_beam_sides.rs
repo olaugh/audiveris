@@ -699,9 +699,17 @@ fn bounded_head_can_link(
         .get(&stem_profile)
         .copied()
         .ok_or_else(|| stage("HEADS-phase1-canLink", "builder lacks STRICT gap threshold"))?;
+    let mut saw_gap = false;
     for item in builder.items.iter().skip(1) {
-        if item.kind == NativeStemsHeadBuilderItemKind::Gap && item.contribution > max_gap {
-            return Ok(true);
+        if item.kind == NativeStemsHeadBuilderItemKind::Gap {
+            // Java's getFirstCLinkerAfter stops at a too-wide gap and
+            // canLink then reports true; a narrow gap is remembered for
+            // the close-head branch below.
+            if item.contribution > max_gap {
+                return Ok(true);
+            }
+            saw_gap = true;
+            continue;
         }
         let Some(NativeStemsHeadBuilderTargetRef::Head(target)) = item.target else {
             continue;
@@ -719,6 +727,11 @@ fn bounded_head_can_link(
             .ok_or_else(|| stage("HEADS-phase1-canLink", "target C linker lacks S cell"))?;
         if target_side.linked {
             return Ok(false);
+        }
+        if !saw_gap {
+            // Java accepts the link when no stem gap separates the two
+            // heads (HeadLinker.CLinker.canLink's gapIndex == null branch).
+            return Ok(true);
         }
         return Err(stage(
             "HEADS-phase1-canLink",
