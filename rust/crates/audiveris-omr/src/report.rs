@@ -2208,6 +2208,9 @@ fn suppressed_ledgers(json: &mut Json, ledgers: &NativeLedgerRecognition) {
     for inter in &ledgers.post_discarded {
         inter_entry(json, "post_analysis", inter);
     }
+    for inter in &ledgers.chain_collapsed {
+        inter_entry(json, "chain_collapse", inter);
+    }
     json.close(']');
 }
 

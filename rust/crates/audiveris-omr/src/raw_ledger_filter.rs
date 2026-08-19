@@ -716,7 +716,12 @@ pub fn evaluate_ledger_line_audited(
     // Rectangle.grow(0, 2*yMargin) grows each vertical side by 2*yMargin.
     virtual_bounds.y -= 2.0 * margin;
     virtual_bounds.height += 4.0 * margin;
-    let minimum_overlap = f64::from(scale.large_interline) * parameters.minimum_abscissa_overlap;
+    // Java's minAbscissaOverlap is an int: (int) rint(0.75 * interline). At
+    // interline 21 that is 16, and an integer overlap of exactly 16 must fail
+    // the strict > — the unrounded 15.75 would wrongly accept it.
+    let minimum_overlap = f64::from(java_rint(
+        f64::from(scale.large_interline) * parameters.minimum_abscissa_overlap,
+    ));
     let minimum_wide = f64::from(java_rint(interline * parameters.minimum_wide_ledger_length));
     let mut audit = AuditedLedgerLine::default();
 

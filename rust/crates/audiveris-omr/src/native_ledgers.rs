@@ -47,6 +47,10 @@ pub struct NativeLedgerRecognition {
     /// First-pass inters that lost an overlap exclusion; their filaments carry
     /// tombstones into the rebuild, so they appear nowhere else.
     pub first_pass_excluded: Vec<MaterializedLedgerInter>,
+    /// First-pass survivors that vanished in the rebuild without being
+    /// discarded or excluded themselves: a lower rung's discard collapsed
+    /// their chain before their line was ever re-evaluated.
+    pub chain_collapsed: Vec<MaterializedLedgerInter>,
     pub ledger_lines: Vec<NativeLedgerLine>,
     /// Exact final fixed glyphs, in the same order as [`Self::ledgers`].
     pub ledger_glyphs: Vec<NativeLedgerGlyph>,
@@ -344,10 +348,27 @@ pub fn recognize_native_ledgers_with_options(
         })
         .cloned()
         .collect();
-    let first_pass_excluded = builder
+    let first_pass_excluded: Vec<MaterializedLedgerInter> = builder
         .inters()
         .iter()
         .filter(|inter| inter.removed)
+        .cloned()
+        .collect();
+    let final_filaments = materializer
+        .inters()
+        .iter()
+        .map(|inter| inter.filament_id)
+        .collect::<BTreeSet<_>>();
+    let chain_collapsed = builder
+        .inters()
+        .iter()
+        .filter(|inter| {
+            !inter.removed
+                && !discarded
+                    .get(&inter.system_id)
+                    .is_some_and(|ids| ids.contains(&inter.filament_id))
+                && !final_filaments.contains(&inter.filament_id)
+        })
         .cloned()
         .collect();
 
@@ -367,6 +388,7 @@ pub fn recognize_native_ledgers_with_options(
         line_rejections,
         post_discarded,
         first_pass_excluded,
+        chain_collapsed,
         ledger_lines,
         ledger_glyphs,
         materializer,
