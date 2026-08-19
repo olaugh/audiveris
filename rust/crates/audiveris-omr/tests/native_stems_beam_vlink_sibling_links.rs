@@ -77,6 +77,7 @@ use audiveris_omr::{
         advance_native_stems_head_existing_stem_retry_order64,
         advance_native_stems_head_existing_stem_retry_order65,
         advance_native_stems_head_existing_stem_retry_order66,
+        advance_native_stems_head_existing_stem_retry_order69,
         advance_native_stems_head_multi_head_reuse_c_link_order67,
         advance_native_stems_head_open_frontier_order50,
         advance_native_stems_head_open_frontier_order60,
@@ -11352,6 +11353,42 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ]
     );
 
+    // Boundary 95: order 69 reconciles an existing stem and closes x88
+    // while the four carried undefined LEFT sides and the phase-2 queue
+    // stay unchanged.
+    let order69_continuation = advance_native_stems_head_existing_stem_retry_order69(
+        &order68_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order69 existing-stem reconciliation");
+    assert_eq!(order69_continuation.processed_head.x_ordinal, 87);
+    assert_eq!(order69_continuation.processed_head.sig_ordinal, 83);
+    assert_eq!(order69_continuation.returned_linked, Some(true));
+    assert_eq!(order69_continuation.closed_value_changes, 2);
+    assert_eq!(order69_continuation.state_after.current_index, 70);
+    assert!(order69_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order69_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (88, NativeStemHeadSide::Left),
+            (88, NativeStemHeadSide::Right)
+        ]
+    );
+    assert_eq!(
+        order69_continuation.state_after.undefined_sides,
+        order68_continuation.state_after.undefined_sides
+    );
+    assert_eq!(
+        order69_continuation.state_after.unlinked_heads,
+        order68_continuation.state_after.unlinked_heads
+    );
+
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
     let mut invalid_order18 = order18_frontier_before.clone();
@@ -19998,6 +20035,132 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v68_summary, "javaEvidence"),
         "ReturnedBeforeSixtyNinthHead"
+    );
+
+    // Boundary 95 expected-only order69 existing-stem reconciliation.
+    let v69_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v69.txt"),
+    )
+    .expect("expected-only order69 existing-stem fixture");
+    assert_eq!(
+        sha256_hex(v69_text.as_bytes()),
+        "fff308360cc99c0039fc973b5c112ba68e1b5f24ff422461214cfa580063dc4b"
+    );
+    let v69_rows = v69_text
+        .lines()
+        .filter(|line| line.starts_with("stems"))
+        .collect::<Vec<_>>();
+    assert_eq!(v69_rows.len(), 10);
+    let v69_body = format!("{}\n", v69_rows[..9].join("\n"));
+    assert_eq!(
+        sha256_hex(v69_body.as_bytes()),
+        "a6404babf109901251274e03d38c9e7d79c53f9f1df29b2d96442d520e9b985c"
+    );
+    let v69_frontier = v69_rows[6];
+    assert_eq!(head_field(v69_frontier, "headOrder"), "69");
+    assert_eq!(head_field(v69_frontier, "headX"), "87");
+    assert_eq!(head_field(v69_frontier, "headSig"), "83");
+    assert_eq!(head_field(v69_frontier, "headInterId"), "1455");
+    assert_eq!(head_field(v69_frontier, "cAlias"), "h:87:LEFT:BOTTOM");
+    assert_eq!(head_field(v69_frontier, "lastIndex"), "0");
+    assert_eq!(head_field(v69_frontier, "maxIndex"), "0");
+    assert_eq!(head_field(v69_frontier, "relations"), "1");
+    assert_eq!(head_field(v69_frontier, "glyphs"), "1");
+    assert_eq!(head_field(v69_frontier, "candidateIdBefore"), "295");
+    assert_eq!(head_field(v69_frontier, "existingGlyph"), "glyph:295");
+    assert_eq!(head_field(v69_frontier, "existingActive"), "true");
+    assert_eq!(head_field(v69_frontier, "existingStem"), "2367");
+    let v69_result = v69_rows[7];
+    assert_eq!(head_field(v69_result, "headOrder"), "69");
+    assert_eq!(head_field(v69_result, "allocatorBefore"), "2385");
+    assert_eq!(head_field(v69_result, "allocatorAfter"), "2385");
+    assert_eq!(head_field(v69_result, "registeredGlyphs"), "-");
+    assert_eq!(head_field(v69_result, "addedVertices"), "-");
+    assert_eq!(head_field(v69_result, "addedEdges"), "-");
+    assert_eq!(head_field(v69_result, "addedSystemStems"), "-");
+    assert_eq!(
+        head_field(v69_result, "linkerChanges"),
+        "[h:88:LEFT:BOTTOM:true:false->true:true,h:88:LEFT:TOP:true:false->true:true,h:88:RIGHT:BOTTOM:false:false->false:true,h:88:RIGHT:TOP:false:false->false:true,linker:SLinker:head:88:false:false->false:true,linker:SLinker:head:88:true:false->true:true]"
+    );
+    assert_eq!(
+        head_field(v69_result, "linkerStateHashBefore"),
+        "6463417c29069adceaa804975dce202bdde97a42df7a9bc63f1007e2a52668ce"
+    );
+    assert_eq!(
+        head_field(v69_result, "linkerStateHashAfter"),
+        "07d58ecbcdff4104336dcdddb6bb3848425af95f590722ea814c9d3dddd99c2a"
+    );
+    let v69_java = v69_rows[8];
+    assert_eq!(head_field(v69_java, "headOrder"), "69");
+    assert_eq!(head_field(v69_java, "headX"), "87");
+    assert_eq!(head_field(v69_java, "headSig"), "83");
+    assert_eq!(head_field(v69_java, "headInterId"), "1455");
+    assert_eq!(
+        head_field(v69_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed]"
+    );
+    assert_eq!(
+        head_field(v69_java, "incident"),
+        "[stem2367:headSideLEFT:heads[x87:sig83:id1455:sideLEFT,x88:sig84:id1457:sideLEFT]]"
+    );
+    assert_eq!(head_field(v69_java, "returned"), "true");
+    assert_eq!(head_field(v69_java, "undefs"), "[]");
+    assert_eq!(
+        head_field(v69_java, "closureWrites"),
+        "[x88:sig84:LEFT:false->true,x88:sig84:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(v69_java, "closedValueChanges"), "2");
+    assert_eq!(head_field(v69_java, "sigVerticesAfter"), "685");
+    assert_eq!(head_field(v69_java, "sigEdgesAfter"), "700");
+    assert_eq!(head_field(v69_java, "systemStemsAfter"), "46");
+    assert_eq!(head_field(v69_java, "nextHeadOrder"), "70");
+    assert_eq!(head_field(v69_java, "nextHeadX"), "1");
+    assert_eq!(head_field(v69_java, "nextHeadSig"), "35");
+    assert_eq!(head_field(v69_java, "nextHeadInterId"), "1355");
+    assert_eq!(head_field(v69_java, "terminal"), "ReturnedBeforeNextHead");
+    let v69_summary = v69_rows[9];
+    assert_eq!(
+        head_field(v69_summary, "schema"),
+        "stems-head-phase-prefix-v69"
+    );
+    assert_eq!(head_field(v69_summary, "rows"), "9");
+    assert_eq!(
+        head_field(v69_summary, "baseV68RunnerSourceSha256"),
+        "0316c6aa084df10326c34f886443420360b82e81918d935ca0da7187b9f4acbf"
+    );
+    assert_eq!(
+        head_field(v69_summary, "baseV68FixtureSha256"),
+        "b6be7975fc45961e8d5ff869151c6b6fc03ceac63dd13cefb700c05a75d05e48"
+    );
+    assert_eq!(
+        head_field(v69_summary, "fragmentSourceSha256"),
+        "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c"
+    );
+    assert_eq!(
+        head_field(v69_summary, "probeSourceSha256"),
+        "3ae74f7a8aeda9808198f2cbbb3f8fec083533e394d33dd652a756bf1466223b"
+    );
+    assert_eq!(
+        head_field(v69_summary, "runnerSourceSha256"),
+        "6b1277bfd4169afb25a94034e52a31e938dcac3f02c5b98df5e0e3e383f4a40e"
+    );
+    assert_eq!(
+        head_field(v69_summary, "emittedBodySha256"),
+        "a6404babf109901251274e03d38c9e7d79c53f9f1df29b2d96442d520e9b985c"
+    );
+    assert_eq!(
+        head_field(v69_summary, "semanticPassSha256"),
+        "0443da7a172439769b2903f52cd479bab031f464ce4009eee0ac7b5c618e401c"
+    );
+    assert_eq!(head_field(v69_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v69_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v69_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder69ExistingStemReconciliation"
+    );
+    assert_eq!(
+        head_field(v69_summary, "javaEvidence"),
+        "ReturnedBeforeSeventiethHead"
     );
 
     let all_siblings = std::iter::once(&actual)
