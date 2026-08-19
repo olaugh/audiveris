@@ -2723,6 +2723,104 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
     Ok(continuation)
 }
 
+/// Reconcile the bounded existing-stem retry at order 52.
+///
+/// x15/SIG80 retries LEFT against the already linked existing StemInter
+/// 2360/glyph329: Java skips LEFT as already linked, skips the closed
+/// RIGHT, returns true, and closes sibling x16's cells without touching
+/// SIG, allocator, or system-stem state.  The undefined LEFT side carried
+/// from order 50 stays recorded and unchanged.
+pub fn advance_native_stems_head_existing_stem_retry_order52(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 52
+        || !carrier.unlinked_heads.is_empty()
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier is not the authenticated order52 continuation",
+        ));
+    }
+    let order50_head = carrier.heads.get(50).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 carrier lacks the order50 head",
+        )
+    })?;
+    let carried_undefined = NativeStemsBeamHeadSLinkerRef {
+        head: order50_head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    if carrier.undefined_sides != vec![carried_undefined] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    let head = carrier.heads.get(52).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 15 || head.reference.sig_ordinal != 80 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier head is not x15/SIG80",
+        ));
+    }
+    let left = head
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == crate::stems_step::NativeStemHeadSide::Left)
+        .ok_or_else(|| stage("HEADS-existing-stem-retry-frontier", "LEFT cell is missing"))?;
+    if !left.linked {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 LEFT cell is not linked",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2360) && stem.glyph_id == 329)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-retry-frontier",
+                "order52 existing StemInter 2360/glyph329 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    if continuation.returned_linked != Some(true)
+        || continuation.processed_head.x_ordinal != 15
+        || continuation.processed_head.sig_ordinal != 80
+        || continuation.closed_value_changes != 2
+        || continuation.state_after.current_index != 53
+        || continuation.state_after.undefined_sides != vec![carried_undefined]
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-result",
+            "order52 retry did not produce the authenticated closure",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Reconcile the bounded existing-stem retry at order 21.
 ///
 /// x28/SIG55 selects LEFT/BOTTOM against existing StemInter 2378. Java does
