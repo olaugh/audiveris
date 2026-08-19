@@ -3548,6 +3548,139 @@ pub fn advance_native_stems_head_open_frontier_order60(
     Ok(continuation)
 }
 
+/// Continue the bounded open/undefined frontier at order 61.
+///
+/// x70/SIG46 reaches the same already materialized StemInter 2382/glyph332
+/// as order 60.  The C-link envelope is again a no-op: Java reports LEFT
+/// Both and RIGHT TopOnly, records a third undefined LEFT side, returns
+/// false, and advances to order 62 without changing SIG, linker, or
+/// allocator state.  Authenticate the exact existing stem and side
+/// decisions before exposing that continuation.
+pub fn advance_native_stems_head_open_frontier_order61(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 61
+        || !carrier.unlinked_heads.is_empty()
+    {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier is not the authenticated order61 continuation",
+        ));
+    }
+    let carried_undefined = [50usize, 60usize]
+        .iter()
+        .map(|&queue_index| {
+            carrier
+                .heads
+                .get(queue_index)
+                .map(|head| NativeStemsBeamHeadSLinkerRef {
+                    head: head.reference,
+                    horizontal: crate::stems_step::NativeStemHeadSide::Left,
+                })
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-open-frontier",
+                        "order61 carrier lacks an undef predecessor head",
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if carrier.undefined_sides != carried_undefined {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order61 carrier lacks the carried order50/order60 undefined LEFT sides",
+        ));
+    }
+    let head = carrier
+        .heads
+        .get(61)
+        .ok_or_else(|| stage("HEADS-open-frontier", "order61 head is missing"))?;
+    if head.reference.x_ordinal != 70 || head.reference.sig_ordinal != 46 {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier head is not x70/SIG46",
+        ));
+    }
+    for horizontal in [
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemHeadSide::Right,
+    ] {
+        let cell = head
+            .sides
+            .iter()
+            .find(|cell| cell.reference.horizontal == horizontal)
+            .ok_or_else(|| stage("HEADS-open-frontier", "order61 side cell is missing"))?;
+        if cell.linked || cell.closed {
+            return Err(stage(
+                "HEADS-open-frontier",
+                "order61 side is not the authenticated open cell",
+            ));
+        }
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2382) && stem.glyph_id == 332)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-open-frontier",
+                "order61 existing StemInter 2382/glyph332 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order61 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let expected_left = NativeStemsBeamHeadSLinkerRef {
+        head: head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    let mut expected_undefined = carried_undefined.clone();
+    expected_undefined.push(expected_left);
+    let expected_decisions = [
+        (crate::stems_step::NativeStemHeadSide::Left, true, true),
+        (crate::stems_step::NativeStemHeadSide::Right, true, false),
+    ];
+    if continuation.returned_linked != Some(false)
+        || continuation.processed_head.x_ordinal != 70
+        || continuation.processed_head.sig_ordinal != 46
+        || continuation.closed_value_changes != 0
+        || !continuation.closed_s_linkers.is_empty()
+        || continuation.state_after.current_index != 62
+        || continuation.state_after.undefined_sides != expected_undefined
+        || continuation.side_decisions.len() != expected_decisions.len()
+        || !continuation
+            .side_decisions
+            .iter()
+            .zip(expected_decisions)
+            .all(|(decision, (side, top, bottom))| {
+                decision.side == side
+                    && !decision.linked_before
+                    && !decision.closed_before
+                    && decision.top_can_link == Some(top)
+                    && decision.bottom_can_link == Some(bottom)
+            })
+    {
+        return Err(stage(
+            "HEADS-open-frontier-result",
+            "order61 open frontier did not produce the authenticated undefined continuation",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Consume the bounded both-open existing-stem C-link at order 57.
 ///
 /// x62/SIG16 opens a LEFT BottomOnly frontier whose selected seed resolves
