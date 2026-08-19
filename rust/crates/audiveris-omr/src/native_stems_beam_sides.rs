@@ -4938,6 +4938,31 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
     let mut included: Vec<
         crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
     > = Vec::new();
+    // Java's expand() aliases stemLine to the corner's theoLine, so a prior
+    // link() attempt on the same corner leaves the line already shifted by the
+    // start stump's centroid.  Replaying that shift before the walk keeps the
+    // crossed-head relations, which project from the evolving line, on Java's
+    // line rather than on a singly shifted one.
+    for _ in 1..expectation.line_shift_repeats {
+        let centroid = glyph_centroid(&candidate)?;
+        let intersection = generic_intersection(
+            Segment {
+                x1: stem_line.start.x,
+                y1: stem_line.start.y,
+                x2: stem_line.stop.x,
+                y2: stem_line.stop.y,
+            },
+            Segment {
+                x1: 0.0,
+                y1: centroid.1,
+                x2: 1000.0,
+                y2: centroid.1,
+            },
+        );
+        let shift = centroid.0 - intersection.x;
+        stem_line.start.x += shift;
+        stem_line.stop.x += shift;
+    }
     let update_stem_line =
         |content: crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
          included: &mut Vec<
@@ -5251,38 +5276,6 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             "HEADS-CLink-expand",
             format!("{} needs at least one line shift", expectation.order_label),
         ));
-    }
-    if expectation.line_shift_repeats > 1 {
-        if !crossed.is_empty() {
-            return Err(stage(
-                "HEADS-CLink-expand",
-                format!(
-                    "{} repeated line shift with crossed heads is unported",
-                    expectation.order_label
-                ),
-            ));
-        }
-        let composed = compose_glyph_content_set(&included)?;
-        let centroid = glyph_centroid(&composed)?;
-        for _ in 1..expectation.line_shift_repeats {
-            let intersection = generic_intersection(
-                Segment {
-                    x1: stem_line.start.x,
-                    y1: stem_line.start.y,
-                    x2: stem_line.stop.x,
-                    y2: stem_line.stop.y,
-                },
-                Segment {
-                    x1: 0.0,
-                    y1: centroid.1,
-                    x2: 1000.0,
-                    y2: centroid.1,
-                },
-            );
-            let shift = centroid.0 - intersection.x;
-            stem_line.start.x += shift;
-            stem_line.stop.x += shift;
-        }
     }
     let start_relation = project_native_stems_head_c_link_relation(
         head_corners,
@@ -5687,6 +5680,54 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
             closed_value_changes: 2,
             line_shift_repeats: 2,
             order_label: "order72",
+        },
+    )
+}
+
+/// Consume the bounded multi-head existing-stem C-link at order 73.
+///
+/// x75/SIG96 walks its seed and the crossed head x72, whose stump is the
+/// same already-registered glyph 319, so Java's glyph set stays a single
+/// entry.  The seed resolves to Stem 2380, reused through two appended
+/// HeadStem relations, and the transaction closes the already linked x76
+/// plus the freshly linked x72.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_multi_head_reuse_c_link_order73(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 73,
+            head_x_ordinal: 75,
+            head_sig_ordinal: 96,
+            stem_inter_id: 2380,
+            stem_glyph_id: 319,
+            carried_undef_indexes: &[50, 60, 61, 68],
+            crossed_x_ordinals: &[72],
+            included_glyph_count: 1,
+            appended_edge_count: 2,
+            closed_x_ordinals: &[72, 76],
+            closed_value_changes: 4,
+            line_shift_repeats: 2,
+            order_label: "order73",
         },
     )
 }
