@@ -4663,6 +4663,12 @@ struct NativeStemsHeadMultiHeadReuseExpectation {
     appended_edge_count: usize,
     closed_x_ordinals: &'static [usize],
     closed_value_changes: usize,
+    /// Java's `expand` aliases the C linker's own theoretical line when the
+    /// corner points downward (`stemLine = theoLine`), so an earlier failed
+    /// recursive `link()` on this corner leaves the line already shifted and
+    /// the successful expansion shifts it again.  The frozen relation bits
+    /// attest the repeat count; anything else fails closed.
+    line_shift_repeats: usize,
     order_label: &'static str,
 }
 
@@ -5240,6 +5246,44 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             ),
         ));
     }
+    if expectation.line_shift_repeats == 0 {
+        return Err(stage(
+            "HEADS-CLink-expand",
+            format!("{} needs at least one line shift", expectation.order_label),
+        ));
+    }
+    if expectation.line_shift_repeats > 1 {
+        if !crossed.is_empty() {
+            return Err(stage(
+                "HEADS-CLink-expand",
+                format!(
+                    "{} repeated line shift with crossed heads is unported",
+                    expectation.order_label
+                ),
+            ));
+        }
+        let composed = compose_glyph_content_set(&included)?;
+        let centroid = glyph_centroid(&composed)?;
+        for _ in 1..expectation.line_shift_repeats {
+            let intersection = generic_intersection(
+                Segment {
+                    x1: stem_line.start.x,
+                    y1: stem_line.start.y,
+                    x2: stem_line.stop.x,
+                    y2: stem_line.stop.y,
+                },
+                Segment {
+                    x1: 0.0,
+                    y1: centroid.1,
+                    x2: 1000.0,
+                    y2: centroid.1,
+                },
+            );
+            let shift = centroid.0 - intersection.x;
+            stem_line.start.x += shift;
+            stem_line.stop.x += shift;
+        }
+    }
     let start_relation = project_native_stems_head_c_link_relation(
         head_corners,
         head_builders,
@@ -5545,6 +5589,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
             appended_edge_count: 3,
             closed_x_ordinals: &[70, 71, 74],
             closed_value_changes: 6,
+            line_shift_repeats: 1,
             order_label: "order67",
         },
     )
@@ -5593,7 +5638,55 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
             appended_edge_count: 2,
             closed_x_ordinals: &[0, 2],
             closed_value_changes: 4,
+            line_shift_repeats: 1,
             order_label: "order70",
+        },
+    )
+}
+
+/// Consume the bounded single-head existing-stem C-link at order 72.
+///
+/// x26/SIG13 opens a LEFT BottomOnly frontier whose seed resolves directly
+/// to active glyph 324, already materialized as Stem 2385, with no chunk
+/// item and no crossed head.  Java reuses the stem through one appended
+/// HeadStem relation, links x26's LEFT cell, and closes stem-sharing x23.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 72,
+            head_x_ordinal: 26,
+            head_sig_ordinal: 13,
+            stem_inter_id: 2385,
+            stem_glyph_id: 324,
+            carried_undef_indexes: &[50, 60, 61, 68],
+            crossed_x_ordinals: &[],
+            included_glyph_count: 1,
+            appended_edge_count: 1,
+            closed_x_ordinals: &[23],
+            closed_value_changes: 2,
+            line_shift_repeats: 2,
+            order_label: "order72",
         },
     )
 }
@@ -7044,9 +7137,15 @@ fn glyph_centroid(
         .run_table
         .foreground_points((glyph.bounds.x as i32, glyph.bounds.y as i32));
     let count = points.len();
-    let (x_total, y_total) = points.iter().fold((0_f64, 0_f64), |(x, y), (px, py)| {
-        (x + f64::from(*px), y + f64::from(*py))
-    });
+    // Java's RunTable.computeCentroidDouble accumulates from the last
+    // collected point down to the first; double addition is not
+    // associative, so the summation direction is part of the contract.
+    let (x_total, y_total) = points
+        .iter()
+        .rev()
+        .fold((0_f64, 0_f64), |(x, y), (px, py)| {
+            (x + f64::from(*px), y + f64::from(*py))
+        });
     if count != glyph.weight || count == 0 {
         return Err(stage(
             "HEADS-CLink-centroid",
