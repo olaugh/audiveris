@@ -63,6 +63,15 @@ file headers (`export_barline_tuning_fixtures.py`,
    scale, and the grayscale raster coexist), results on a new
    `Option<TunedBarlinesReport>` field of `GridLinesRecognition`, plus a
    `tuned_barlines` section in `report.rs` after `candidates(...)`.
-3. **Types layer, next slices**: volta-bracket detection (associates
-   endings with boundaries; also the principled fix for the pinned p2s5
-   residual), and wiring classification output into the report.
+3. **Types layer, next slices**: volta-bracket detection landed (and now
+   recovers the formerly pinned p2s5 ending barline on principle - the
+   residual list is empty), but the
+   `examples/classify_barlines.rs` survey over all 692 real-corpus tuned
+   boundaries shows the repeat-dot probe over-fires on dense pages
+   (101 repeat classifications and 159 volta flags, far beyond the true
+   counts; line-end bars with adjacent noteheads are the main victims)
+   even though all 60 engraved forms and the hand-verified spot cases
+   classify correctly.  Next: precision work on the dot probe (dot size
+   upper bound, per-staff both-spaces requirement, clear-column check
+   between dots and following content), then wiring classification into
+   the report.
