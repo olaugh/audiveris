@@ -63,7 +63,7 @@ use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
 use crate::native_stem_seeds::{
     NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
 };
-use crate::raw_ledger_filter::MaterializedLedgerInter;
+use crate::raw_ledger_filter::{LedgerLineRejection, MaterializedLedgerInter};
 use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
 use crate::staff_header::{HeaderBounds, StaffHeaderRange};
 use crate::stem_seeds_step::{NativeStemCheckResult, NativeStemCounts, NativeStemImpacts};
@@ -441,6 +441,8 @@ fn recognition_json(
         beam_groups(&mut json, beams);
     }
     if let Some(ledgers) = ledgers {
+        ledger_candidates(&mut json, ledgers);
+        suppressed_ledgers(&mut json, ledgers);
         ledger_lines(&mut json, &ledgers.ledger_lines);
     }
     if let Some(heads) = heads {
@@ -2081,6 +2083,130 @@ fn beam_groups(json: &mut Json, beams: &NativeBeamRecognition) {
         json.field_integer("system", *system_id as i64);
         json.field_integer("count", *count as i64);
         json.close('}');
+    }
+    json.close(']');
+}
+
+/// Every stick the LEDGERS candidate factory sourced, before any line
+/// evaluation. This is the raw ledger lattice: a candidate absent from every
+/// other ledger section was visited here and nowhere else, so "was there even
+/// ink?" is answerable without a recognition re-run.
+fn ledger_candidates(json: &mut Json, ledgers: &NativeLedgerRecognition) {
+    json.key("ledger_candidates");
+    json.open('[');
+    for (system_id, candidate) in &ledgers.candidates {
+        json.open('{');
+        json.field_integer("system", *system_id as i64);
+        json.field_integer("filament", candidate.id as i64);
+        bounds(
+            json,
+            candidate.bounds.x,
+            candidate.bounds.y,
+            candidate.bounds.width,
+            candidate.bounds.height,
+        );
+        horizontal_median(
+            json,
+            candidate.start.0,
+            candidate.start.1,
+            candidate.stop.0,
+            candidate.stop.1,
+        );
+        json.field_number("mean_thickness", candidate.mean_thickness);
+        json.field_number("mean_distance", candidate.mean_distance);
+        json.field_integer("convex_ends", i64::from(candidate.convex_end_count));
+        json.field_boolean("overlaps_good_beam", candidate.overlaps_good_beam);
+        json.close('}');
+    }
+    json.close(']');
+}
+
+/// The ledger candidates that were visited and lost, and which pass rejected
+/// them. Mirrors `suppressed_heads`: every exclusion the LEDGERS stage makes
+/// is recorded so later joint reasoning can revisit it. The four reasons:
+/// `no_previous_overlap` and `below_minimum_grade` from line evaluation,
+/// `overlap_exclusion` from SIG reduction (either pass), and `post_analysis`
+/// from the sheet-wide statistical filter.
+fn suppressed_ledgers(json: &mut Json, ledgers: &NativeLedgerRecognition) {
+    fn inter_entry(json: &mut Json, reason: &str, inter: &MaterializedLedgerInter) {
+        json.open('{');
+        json.field_string("reason", reason);
+        json.field_integer("system", inter.system_id as i64);
+        json.field_integer("staff", inter.staff_id as i64);
+        json.field_integer("ledger_index", i64::from(inter.ledger_index));
+        json.field_integer("filament", inter.filament_id as i64);
+        bounds(
+            json,
+            inter.bounds.x,
+            inter.bounds.y,
+            inter.bounds.width,
+            inter.bounds.height,
+        );
+        json.field_number("grade", inter.grade);
+        json.close('}');
+    }
+
+    json.key("suppressed_ledgers");
+    json.open('[');
+    for rejection in &ledgers.line_rejections {
+        json.open('{');
+        json.field_string(
+            "reason",
+            match rejection.reason {
+                LedgerLineRejection::NoPreviousOverlap => "no_previous_overlap",
+                LedgerLineRejection::BelowMinimumGrade => "below_minimum_grade",
+            },
+        );
+        json.field_integer("system", rejection.system_id as i64);
+        json.field_integer("staff", rejection.staff_id as i64);
+        json.field_integer("ledger_index", i64::from(rejection.index));
+        json.field_integer("filament", rejection.candidate.id as i64);
+        bounds(
+            json,
+            rejection.candidate.bounds.x,
+            rejection.candidate.bounds.y,
+            rejection.candidate.bounds.width,
+            rejection.candidate.bounds.height,
+        );
+        json.key("grade");
+        match &rejection.grade {
+            Some(grade) => {
+                json.number(grade.grade);
+                json.key("impacts");
+                json.open('{');
+                for (name, impact) in [
+                    "min_thickness",
+                    "max_thickness",
+                    "length",
+                    "convexity",
+                    "straightness",
+                    "left_pitch",
+                    "right_pitch",
+                ]
+                .into_iter()
+                .zip(grade.impacts)
+                {
+                    json.field_number(name, impact.grade);
+                }
+                json.close('}');
+            }
+            None => json.null(),
+        }
+        json.close('}');
+    }
+    for inter in &ledgers.first_pass_excluded {
+        inter_entry(json, "overlap_exclusion", inter);
+    }
+    for inter in ledgers
+        .materializer
+        .inters()
+        .iter()
+        .filter(|inter| inter.removed)
+    {
+        inter_entry(json, "overlap_exclusion", inter);
+    }
+    for inter in &ledgers.post_discarded {
+        inter_entry(json, "post_analysis", inter);
     }
     json.close(']');
 }

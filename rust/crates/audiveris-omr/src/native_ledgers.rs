@@ -17,11 +17,12 @@ use audiveris_image::{
 use crate::{
     beam_inters::{BeamKind, beam_bounds},
     raw_ledger_filter::{
-        LedgerGlyphRasterError, LedgerMaterializationError, LedgerMaterializer,
-        LedgerPreviousReference, MaterializedLedgerInter, NativeLedgerCandidateOutcome,
-        RawLedgerBeamArea, RawLedgerCandidate, RawLedgerCandidateParameters, RawLedgerFilterError,
+        LedgerCandidateGrade, LedgerGlyphRasterError, LedgerLineRejection,
+        LedgerMaterializationError, LedgerMaterializer, LedgerPreviousReference,
+        MaterializedLedgerInter, NativeLedgerCandidateOutcome, RawLedgerBeamArea,
+        RawLedgerCandidate, RawLedgerCandidateParameters, RawLedgerFilterError,
         RawLedgerFilterParameters, RawLedgerScale, RawLedgerStaffZone, RawLedgerSystemZone,
-        evaluate_ledger_line_unreduced, filter_raw_ledger_sections, materialize_fixed_ledger_glyph,
+        evaluate_ledger_line_audited, filter_raw_ledger_sections, materialize_fixed_ledger_glyph,
         source_native_ledger_candidates,
     },
     recognize::{GridLinesRecognition, NativeBeamRecognition},
@@ -37,6 +38,14 @@ pub struct NativeLedgerRecognition {
     pub builder_survivor_count: usize,
     pub discarded_filament_ids: Vec<usize>,
     pub rebuilt_system_ids: Vec<usize>,
+    /// In-band candidates the final line evaluation visited and rejected.
+    pub line_rejections: Vec<LedgerLineRejectionRecord>,
+    /// First-pass inters removed by the sheet-wide statistical post-analysis
+    /// (and therefore withheld from the rebuild).
+    pub post_discarded: Vec<MaterializedLedgerInter>,
+    /// First-pass inters that lost an overlap exclusion; their filaments carry
+    /// tombstones into the rebuild, so they appear nowhere else.
+    pub first_pass_excluded: Vec<MaterializedLedgerInter>,
     pub ledger_lines: Vec<NativeLedgerLine>,
     /// Exact final fixed glyphs, in the same order as [`Self::ledgers`].
     pub ledger_glyphs: Vec<NativeLedgerGlyph>,
@@ -99,6 +108,18 @@ fn hash_ledger_glyph_row(hash: &mut u64, row: &str) {
         *hash ^= u64::from(byte);
         *hash = hash.wrapping_mul(0x100_0000_01b3);
     }
+}
+
+/// One rejected visit from [`evaluate_ledger_line_audited`], with the line it
+/// was rejected from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LedgerLineRejectionRecord {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub index: i32,
+    pub candidate: RawLedgerCandidate,
+    pub reason: LedgerLineRejection,
+    pub grade: Option<LedgerCandidateGrade>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -250,7 +271,8 @@ pub fn recognize_native_ledgers(
         system_candidates.push((system.id, sourced.candidates));
     }
 
-    let builder = materialize_ledgers(&staves, &system_candidates, scale, parameters)?;
+    let (builder, _first_pass_rejections) =
+        materialize_ledgers(&staves, &system_candidates, scale, parameters)?;
     let builder_survivor_count = builder
         .inters()
         .iter()
@@ -290,9 +312,27 @@ pub fn recognize_native_ledgers(
             )
         })
         .collect::<Vec<_>>();
-    let materializer = materialize_ledgers(&staves, &rebuilt_candidates, scale, parameters)?;
+    let (materializer, line_rejections) =
+        materialize_ledgers(&staves, &rebuilt_candidates, scale, parameters)?;
     let ledger_lines = build_ledger_lines(&staves, &materializer);
     let ledger_glyphs = materialize_final_ledger_glyphs(&materializer, &filtered.sections)?;
+    let post_discarded = builder
+        .inters()
+        .iter()
+        .filter(|inter| {
+            !inter.removed
+                && discarded
+                    .get(&inter.system_id)
+                    .is_some_and(|ids| ids.contains(&inter.filament_id))
+        })
+        .cloned()
+        .collect();
+    let first_pass_excluded = builder
+        .inters()
+        .iter()
+        .filter(|inter| inter.removed)
+        .cloned()
+        .collect();
 
     Ok(NativeLedgerRecognition {
         filtered_run_count: filtered.run_table.total_run_count(),
@@ -307,6 +347,9 @@ pub fn recognize_native_ledgers(
         builder_survivor_count,
         discarded_filament_ids,
         rebuilt_system_ids,
+        line_rejections,
+        post_discarded,
+        first_pass_excluded,
         ledger_lines,
         ledger_glyphs,
         materializer,
@@ -407,17 +450,32 @@ fn materialize_ledgers(
     system_candidates: &[(usize, Vec<RawLedgerCandidate>)],
     scale: RawLedgerScale,
     parameters: RawLedgerCandidateParameters,
-) -> Result<LedgerMaterializer, NativeLedgerRecognitionError> {
+) -> Result<(LedgerMaterializer, Vec<LedgerLineRejectionRecord>), NativeLedgerRecognitionError> {
     let mut materializer = LedgerMaterializer::new(1, 1, 1);
+    let mut rejections = Vec::new();
     for (system_id, candidates) in system_candidates {
         for staff in staves.iter().filter(|staff| staff.system_id == *system_id) {
             for increment in [-1, 1] {
                 let mut index = increment;
                 let mut previous = Vec::new();
                 loop {
-                    let evaluated = evaluate_ledger_line_unreduced(
+                    let audit = evaluate_ledger_line_audited(
                         staff, index, candidates, &previous, scale, parameters,
                     );
+                    // The rejects of the first line that accepts nothing are
+                    // still recorded: that failing rung is exactly where a
+                    // chain-recall investigation needs evidence.
+                    rejections.extend(audit.rejected.into_iter().map(|rejected| {
+                        LedgerLineRejectionRecord {
+                            system_id: *system_id,
+                            staff_id: staff.id,
+                            index,
+                            candidate: rejected.candidate,
+                            reason: rejected.reason,
+                            grade: rejected.grade,
+                        }
+                    }));
+                    let evaluated = audit.accepted;
                     if evaluated.is_empty() {
                         break;
                     }
@@ -450,7 +508,7 @@ fn materialize_ledgers(
             }
         }
     }
-    Ok(materializer)
+    Ok((materializer, rejections))
 }
 
 #[derive(Clone, Copy)]
@@ -893,5 +951,132 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(100, 100, 10, 10), (102, 102, 12, 12)]
         );
+    }
+
+    /// Interactive lattice probe: dumps every LEDGERS intermediate inside a
+    /// bounding box of a real page, from no-staff runs down to candidates.
+    ///
+    /// ```text
+    /// AUDIVERIS_PROBE_PAGE=/path/page.png AUDIVERIS_PROBE_BBOX=676,848,704,890 \
+    ///   cargo test -p audiveris-omr --release probe_ledger_lattice -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "manual probe; needs AUDIVERIS_PROBE_PAGE/AUDIVERIS_PROBE_BBOX"]
+    fn probe_ledger_lattice() {
+        let page = std::env::var("AUDIVERIS_PROBE_PAGE").expect("AUDIVERIS_PROBE_PAGE");
+        let bbox: Vec<i64> = std::env::var("AUDIVERIS_PROBE_BBOX")
+            .expect("AUDIVERIS_PROBE_BBOX")
+            .split(',')
+            .map(|value| value.trim().parse().expect("bbox coordinate"))
+            .collect();
+        let [x0, y0, x1, y1] = bbox[..] else {
+            panic!("AUDIVERIS_PROBE_BBOX wants x0,y0,x1,y1");
+        };
+        let in_box = |x: i64, y: i64| x >= x0 && x <= x1 && y >= y0 && y <= y1;
+
+        let grid = crate::recognize::recognize_grid_lines(&page).expect("GRID");
+        let headers = crate::native_headers::recognize_native_headers(&grid).expect("HEADERS");
+        let stem_seeds = crate::native_stem_seeds::recognize_native_stem_seeds(&grid, &headers)
+            .expect("STEM_SEEDS");
+        let beams = crate::recognize::recognize_native_beams_with_stem_seeds(
+            &grid,
+            headers.beam_erases(),
+            &stem_seeds,
+        )
+        .expect("BEAMS");
+
+        println!("== no_staff horizontal runs in box ==");
+        for y in 0..grid.no_staff.sequence_count() {
+            for run in grid.no_staff.sequence(y).unwrap_or_default() {
+                if in_box(run.start as i64, y as i64)
+                    || in_box((run.start + run.length) as i64, y as i64)
+                {
+                    println!("  y {y} x {} len {}", run.start, run.length);
+                }
+            }
+        }
+
+        let scale = RawLedgerScale {
+            large_interline: grid.scale.scale.interline.main,
+            mean_line_thickness: f64::from(grid.scale.scale.line.main),
+        };
+        let staves = build_staff_zones(&grid).expect("staff zones");
+        let systems = build_system_zones(&grid, &beams).expect("system zones");
+        let filtered = filter_raw_ledger_sections(
+            &grid.no_staff,
+            &staves,
+            &systems,
+            RawLedgerFilterParameters::default(),
+        )
+        .expect("LEDGERS filter");
+
+        println!("== filtered runs in box ==");
+        for y in 0..filtered.run_table.sequence_count() {
+            for run in filtered.run_table.sequence(y).unwrap_or_default() {
+                if in_box(run.start as i64, y as i64) {
+                    println!("  y {y} x {} len {}", run.start, run.length);
+                }
+            }
+        }
+
+        println!("== sections in box (with system assignment) ==");
+        for section in &filtered.sections {
+            let bounds = section.bounds();
+            if in_box(bounds.x as i64, bounds.y as i64) {
+                let owners = filtered
+                    .by_system
+                    .iter()
+                    .filter(|sections| {
+                        sections
+                            .sections
+                            .iter()
+                            .any(|candidate| candidate.id() == section.id())
+                    })
+                    .map(|sections| sections.system_id)
+                    .collect::<Vec<_>>();
+                println!(
+                    "  section {} x {} y {} w {} h {} systems {owners:?}",
+                    section.id(),
+                    bounds.x,
+                    bounds.y,
+                    bounds.width,
+                    bounds.height
+                );
+            }
+        }
+
+        println!("== stick candidates in box ==");
+        let mut next_filament_id = 1_u64;
+        for system in &systems {
+            let sections = filtered
+                .by_system
+                .iter()
+                .find(|sections| sections.system_id == system.id)
+                .map_or(&[][..], |sections| sections.sections.as_slice());
+            let sourced = source_native_ledger_candidates(
+                &grid.no_staff,
+                system,
+                sections,
+                scale,
+                RawLedgerCandidateParameters::default(),
+                next_filament_id,
+            );
+            next_filament_id = sourced.next_filament_id;
+            for candidate in &sourced.candidates {
+                if in_box(candidate.bounds.x as i64, candidate.bounds.y as i64) {
+                    println!(
+                        "  system {} fil {} x {} y {} w {} h {} thick {:.2} sections {:?}",
+                        system.id,
+                        candidate.id,
+                        candidate.bounds.x,
+                        candidate.bounds.y,
+                        candidate.bounds.width,
+                        candidate.bounds.height,
+                        candidate.mean_thickness,
+                        candidate.section_ids
+                    );
+                }
+            }
+        }
     }
 }

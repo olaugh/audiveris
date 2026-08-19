@@ -652,13 +652,51 @@ pub fn evaluate_ledger_line_unreduced(
     scale: RawLedgerScale,
     parameters: RawLedgerCandidateParameters,
 ) -> Vec<LedgerLineCandidate> {
+    evaluate_ledger_line_audited(staff, index, candidates, previous, scale, parameters).accepted
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerLineRejection {
+    /// `|index| >= 2` and no previous-rung survivor overlapped the candidate
+    /// by more than the minimum abscissa overlap, so it was never graded.
+    NoPreviousOverlap,
+    BelowMinimumGrade,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RejectedLedgerLineCandidate {
+    pub candidate: RawLedgerCandidate,
+    pub reason: LedgerLineRejection,
+    /// Present only for [`LedgerLineRejection::BelowMinimumGrade`].
+    pub grade: Option<LedgerCandidateGrade>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AuditedLedgerLine {
+    pub accepted: Vec<LedgerLineCandidate>,
+    /// In-band candidates that were visited and rejected. Candidates whose
+    /// midpoint falls outside the line's virtual band are not recorded; they
+    /// belong to other lines or to no line at all.
+    pub rejected: Vec<RejectedLedgerLineCandidate>,
+}
+
+/// [`evaluate_ledger_line_unreduced`] with every in-band candidate's fate.
+#[must_use]
+pub fn evaluate_ledger_line_audited(
+    staff: &RawLedgerStaffZone,
+    index: i32,
+    candidates: &[RawLedgerCandidate],
+    previous: &[LedgerPreviousReference],
+    scale: RawLedgerScale,
+    parameters: RawLedgerCandidateParameters,
+) -> AuditedLedgerLine {
     if staff.tablature || index == 0 || staff.specific_interline <= 0 {
-        return Vec::new();
+        return AuditedLedgerLine::default();
     }
     if staff.merged_part
         && ((staff.first_in_part && index > 1) || (staff.last_in_part && index < 0))
     {
-        return Vec::new();
+        return AuditedLedgerLine::default();
     }
     let interline = f64::from(staff.specific_interline);
     let margin = f64::from(java_rint(interline * parameters.ledger_margin_y));
@@ -680,7 +718,7 @@ pub fn evaluate_ledger_line_unreduced(
     virtual_bounds.height += 4.0 * margin;
     let minimum_overlap = f64::from(scale.large_interline) * parameters.minimum_abscissa_overlap;
     let minimum_wide = f64::from(java_rint(interline * parameters.minimum_wide_ledger_length));
-    let mut accepted = Vec::new();
+    let mut audit = AuditedLedgerLine::default();
 
     for candidate in candidates {
         let middle = (
@@ -702,6 +740,11 @@ pub fn evaluate_ledger_line_unreduced(
                 .iter()
                 .find(|reference| reference.bounds.x_overlap(candidate.bounds) > minimum_overlap)
             else {
+                audit.rejected.push(RejectedLedgerLineCandidate {
+                    candidate: candidate.clone(),
+                    reason: LedgerLineRejection::NoPreviousOverlap,
+                    grade: None,
+                });
                 continue;
             };
             let y = y_on_reference(reference, reference_x);
@@ -718,14 +761,20 @@ pub fn evaluate_ledger_line_unreduced(
             parameters,
         );
         if grade.grade >= parameters.minimum_grade {
-            accepted.push(LedgerLineCandidate {
+            audit.accepted.push(LedgerLineCandidate {
                 candidate: candidate.clone(),
                 grade,
+            });
+        } else {
+            audit.rejected.push(RejectedLedgerLineCandidate {
+                candidate: candidate.clone(),
+                reason: LedgerLineRejection::BelowMinimumGrade,
+                grade: Some(grade),
             });
         }
     }
 
-    accepted
+    audit
 }
 
 fn y_on_reference(reference: &LedgerPreviousReference, x: f64) -> f64 {
