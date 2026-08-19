@@ -4563,19 +4563,35 @@ pub fn advance_native_stems_head_existing_stem_retry_order69(
     Ok(continuation)
 }
 
-/// Consume the bounded multi-head existing-stem C-link at order 67.
+/// Bounded expectations for one multi-head existing-stem C-link reuse.
+#[derive(Clone, Copy, Debug)]
+struct NativeStemsHeadMultiHeadReuseExpectation {
+    queue_index: usize,
+    head_x_ordinal: usize,
+    head_sig_ordinal: usize,
+    stem_inter_id: i32,
+    stem_glyph_id: i32,
+    carried_undef_indexes: &'static [usize],
+    crossed_x_ordinals: &'static [usize],
+    included_glyph_count: usize,
+    appended_edge_count: usize,
+    closed_x_ordinals: &'static [usize],
+    closed_value_changes: usize,
+    order_label: &'static str,
+}
+
+/// Consume one bounded multi-head existing-stem C-link reuse.
 ///
-/// x73/SIG18 opens a LEFT BottomOnly frontier whose expansion walks two
-/// further head C-linkers (x70 and x71, the carried undef heads) before the
-/// stem length target.  The selected seed resolves to active glyph 332,
-/// already materialized as Stem 2382, so Java's `createStem` reuses it and
-/// the connection loop appends exactly three HeadStem relations (x73, x70,
-/// x71), links all three LEFT S cells, and closes the other stem-sharing
-/// heads (x74, x70, x71), all without vertex, allocator, ID, registry, or
-/// system-stem mutation.  The stem line evolves per Java `updateStemLine`:
-/// each newly included glyph translates the line horizontally through the
-/// composed centroid, so the crossed heads' relations use the line state at
-/// their walk position while the start head's relation uses the final line.
+/// The start corner opens a LEFT BottomOnly frontier whose expansion walks
+/// the frontier chunk and further head C-linkers before the stem length
+/// target.  The selected seed resolves to a glyph already materialized as a
+/// StemInter, so Java's `createStem` reuses it and the connection loop
+/// appends one HeadStem relation per collected linker, links each LEFT S
+/// cell, and closes the other stem-sharing heads, all without vertex,
+/// allocator, ID, registry, or system-stem mutation.  The stem line evolves
+/// per Java `updateStemLine`: the applied relation bits prove the chunk's
+/// line shift precedes the crossed projections, so the bounded walk orders
+/// the chunk before the crossed heads and fails closed on anything else.
 #[expect(
     clippy::too_many_arguments,
     reason = "the atomic boundary authenticates each independently owned native authority"
@@ -4584,7 +4600,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order69(
     clippy::too_many_lines,
     reason = "the bounded expansion walk mirrors Java's single link() body"
 )]
-pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
+fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
     head_reachability: &NativeStemsHeadCornerReachabilitySystem,
@@ -4593,31 +4609,46 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &NativeStemsFirstGlyphIndexBridge,
+    expectation: NativeStemsHeadMultiHeadReuseExpectation,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed || carrier.current_index != 67 {
+    if !carrier.frontier_consumed || carrier.current_index != expectation.queue_index {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "carrier is not the authenticated order67 continuation",
+            format!(
+                "carrier is not the authenticated {} continuation",
+                expectation.order_label
+            ),
         ));
     }
-    let carried_undefined =
-        authenticated_carried_undefined_sides(carrier, &[50, 60, 61], "order67")?;
-    let head = carrier.heads.get(67).ok_or_else(|| {
+    let carried_undefined = authenticated_carried_undefined_sides(
+        carrier,
+        expectation.carried_undef_indexes,
+        expectation.order_label,
+    )?;
+    let head = carrier.heads.get(expectation.queue_index).ok_or_else(|| {
         stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "order67 head is missing",
+            format!("{} head is missing", expectation.order_label),
         )
     })?;
-    if head.reference.x_ordinal != 73 || head.reference.sig_ordinal != 18 {
+    if head.reference.x_ordinal != expectation.head_x_ordinal
+        || head.reference.sig_ordinal != expectation.head_sig_ordinal
+    {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "carrier head is not x73/SIG18",
+            format!(
+                "carrier head is not x{}/SIG{}",
+                expectation.head_x_ordinal, expectation.head_sig_ordinal
+            ),
         ));
     }
     if head.sides.iter().any(|cell| cell.linked || cell.closed) {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "order67 sides are not the authenticated open cells",
+            format!(
+                "{} sides are not the authenticated open cells",
+                expectation.order_label
+            ),
         ));
     }
     let existing_stem = carrier
@@ -4627,17 +4658,26 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2382) && stem.glyph_id == 332)
+        .find(|stem| {
+            stem.inter_id == Some(expectation.stem_inter_id)
+                && stem.glyph_id == expectation.stem_glyph_id
+        })
         .ok_or_else(|| {
             stage(
                 "HEADS-multi-reuse-CLink-frontier",
-                "order67 existing StemInter 2382/glyph332 is missing",
+                format!(
+                    "{} existing StemInter {}/glyph{} is missing",
+                    expectation.order_label, expectation.stem_inter_id, expectation.stem_glyph_id
+                ),
             )
         })?;
     if !existing_stem.sig_attached {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "order67 existing stem is not SIG-attached",
+            format!(
+                "{} existing stem is not SIG-attached",
+                expectation.order_label
+            ),
         ));
     }
     if head_reachability.system_id != head_corners.system_id {
@@ -4656,7 +4696,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     )?;
     if awaited.returned_linked.is_some()
         || awaited.state_after.frontier_consumed
-        || awaited.state_after.current_index != 67
+        || awaited.state_after.current_index != expectation.queue_index
         || awaited.state_after.frontier.head != head.reference
         || awaited.state_after.frontier.next_corner.head != head.reference.reference
         || awaited.state_after.frontier.next_corner.horizontal
@@ -4669,7 +4709,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
-            "order67 did not stop at the authenticated LEFT BottomOnly frontier",
+            format!(
+                "{} did not stop at the authenticated LEFT BottomOnly frontier",
+                expectation.order_label
+            ),
         ));
     }
     let mut shadow = (*awaited.state_after).clone();
@@ -4738,17 +4781,26 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     let start_stump = start_reach.stump.ok_or_else(|| {
         stage(
             "HEADS-CLink-glyph",
-            "order67 start reachability stump is missing",
+            format!(
+                "{} start reachability stump is missing",
+                expectation.order_label
+            ),
         )
     })?;
     let candidate = seed_content(start_stump)?;
     let promoted = bridge
         .resolve_native_content(&candidate)
         .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
-    if !promoted.active_in_index || !promoted.strongly_retained || promoted.glyph_id != 332 {
+    if !promoted.active_in_index
+        || !promoted.strongly_retained
+        || promoted.glyph_id != expectation.stem_glyph_id
+    {
         return Err(stage(
             "HEADS-CLink-first-STEMS-bridge",
-            "selected seed canonical is not the active strongly retained glyph 332",
+            format!(
+                "selected seed canonical is not the active strongly retained glyph {}",
+                expectation.stem_glyph_id
+            ),
         ));
     }
     let known = &mut shadow
@@ -4854,14 +4906,19 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     // filtered items in pre-sort order.  The bounded walk therefore orders
     // the start item, then chunk glyphs, then head linkers, and fails closed
     // on any other item composition.
-    let start_item = builder
-        .items
-        .first()
-        .ok_or_else(|| stage("HEADS-CLink-expand", "order67 builder has no items"))?;
+    let start_item = builder.items.first().ok_or_else(|| {
+        stage(
+            "HEADS-CLink-expand",
+            format!("{} builder has no items", expectation.order_label),
+        )
+    })?;
     if start_item.kind != NativeStemsHeadBuilderItemKind::StartHeadHalfLinker {
         return Err(stage(
             "HEADS-CLink-expand",
-            "order67 builder does not start from the head half linker",
+            format!(
+                "{} builder does not start from the head half linker",
+                expectation.order_label
+            ),
         ));
     }
     let mut ordered_items = vec![start_item];
@@ -4888,13 +4945,19 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                 if item.contribution > max_gap {
                     return Err(stage(
                         "HEADS-CLink-expand",
-                        "order67 expansion reaches an unported wide-gap stop",
+                        format!(
+                            "{} expansion reaches an unported wide-gap stop",
+                            expectation.order_label
+                        ),
                     ));
                 }
                 if y_dir * java_double_compare(last_y, y_soft) >= 0 {
                     return Err(stage(
                         "HEADS-CLink-expand",
-                        "order67 expansion reaches an unported soft-target stop",
+                        format!(
+                            "{} expansion reaches an unported soft-target stop",
+                            expectation.order_label
+                        ),
                     ));
                 }
                 last_gap = Some(item);
@@ -4904,7 +4967,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                 let Some(NativeStemsHeadBuilderTargetRef::Head(target)) = item.target else {
                     return Err(stage(
                         "HEADS-CLink-expand",
-                        "order67 head item lacks a head target",
+                        format!("{} head item lacks a head target", expectation.order_label),
                     ));
                 };
                 if let Some(gap) = last_gap {
@@ -4934,7 +4997,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                             .ok_or_else(|| {
                                 stage(
                                     "HEADS-CLink-expand",
-                                    "order67 opposite corner has no builder",
+                                    format!(
+                                        "{} opposite corner has no builder",
+                                        expectation.order_label
+                                    ),
                                 )
                             })?;
                         let opposite_length = opposite_builder
@@ -4944,13 +5010,19 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                             .ok_or_else(|| {
                                 stage(
                                     "HEADS-CLink-expand",
-                                    "order67 opposite corner lacks a profile length",
+                                    format!(
+                                        "{} opposite corner lacks a profile length",
+                                        expectation.order_label
+                                    ),
                                 )
                             })?;
                         if opposite_length >= plans.min_linker_length {
                             return Err(stage(
                                 "HEADS-CLink-expand",
-                                "order67 expansion reaches an unported head separation",
+                                format!(
+                                    "{} expansion reaches an unported head separation",
+                                    expectation.order_label
+                                ),
                             ));
                         }
                     }
@@ -4971,7 +5043,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                 crossed.push((target, relation));
                 if item.glyph.is_some() {
                     let stump = target_reach.stump.ok_or_else(|| {
-                        stage("HEADS-CLink-glyph", "order67 crossed head stump is missing")
+                        stage(
+                            "HEADS-CLink-glyph",
+                            format!("{} crossed head stump is missing", expectation.order_label),
+                        )
                     })?;
                     update_stem_line(seed_content(stump)?, &mut included, &mut stem_line)?;
                 }
@@ -4984,13 +5059,16 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                 else {
                     return Err(stage(
                         "HEADS-CLink-glyph",
-                        "order67 chunk item lacks a chunk glyph",
+                        format!("{} chunk item lacks a chunk glyph", expectation.order_label),
                     ));
                 };
                 if builder_ordinal != builder.builder_ordinal {
                     return Err(stage(
                         "HEADS-CLink-glyph",
-                        "order67 chunk belongs to a different builder",
+                        format!(
+                            "{} chunk belongs to a different builder",
+                            expectation.order_label
+                        ),
                     ));
                 }
                 let chunk = builder
@@ -5006,7 +5084,12 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                                 && chunk_filament == filament_ordinal
                         )
                     })
-                    .ok_or_else(|| stage("HEADS-CLink-glyph", "order67 chunk glyph is missing"))?;
+                    .ok_or_else(|| {
+                        stage(
+                            "HEADS-CLink-glyph",
+                            format!("{} chunk glyph is missing", expectation.order_label),
+                        )
+                    })?;
                 let content =
                     crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
                         bounds: chunk.bounds,
@@ -5036,7 +5119,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
                     if (centroid.0 - intersection.x).abs() > 0.2 * f64::from(interline) {
                         return Err(stage(
                             "HEADS-CLink-expand",
-                            "order67 expansion reaches an unported chunk rejection",
+                            format!(
+                                "{} expansion reaches an unported chunk rejection",
+                                expectation.order_label
+                            ),
                         ));
                     }
                 }
@@ -5046,7 +5132,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
             | NativeStemsHeadBuilderItemKind::BeamLinker => {
                 return Err(stage(
                     "HEADS-CLink-expand",
-                    "order67 expansion reaches an unported item kind",
+                    format!(
+                        "{} expansion reaches an unported item kind",
+                        expectation.order_label
+                    ),
                 ));
             }
         }
@@ -5059,7 +5148,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     if y_dir * java_double_compare(last_y, y_hard) < 0 {
         return Err(stage(
             "HEADS-CLink-expand",
-            "order67 expansion fails Java's hard tail target",
+            format!(
+                "{} expansion fails Java's hard tail target",
+                expectation.order_label
+            ),
         ));
     }
     let start_relation = project_native_stems_head_c_link_relation(
@@ -5076,17 +5168,25 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     {
         return Err(stage(
             "HEADS-CLink-relation",
-            "order67 start relation is rejected or changes horizontal side",
+            format!(
+                "{} start relation is rejected or changes horizontal side",
+                expectation.order_label
+            ),
         ));
     }
-    if crossed.len() != 2
-        || crossed[0].0.x_ordinal != 70
-        || crossed[1].0.x_ordinal != 71
-        || included.len() != 2
+    if crossed
+        .iter()
+        .map(|(corner, _)| corner.x_ordinal)
+        .collect::<Vec<_>>()
+        != expectation.crossed_x_ordinals
+        || included.len() != expectation.included_glyph_count
     {
         return Err(stage(
             "HEADS-CLink-expand",
-            "order67 expansion did not select the authenticated x70/x71 pair",
+            format!(
+                "{} expansion did not select the authenticated crossed heads",
+                expectation.order_label
+            ),
         ));
     }
 
@@ -5109,10 +5209,16 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
         .stem
         .clone()
         .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
-    if stem.inter_id != Some(2382) || stem.glyph_id != 332 || !stem.sig_attached {
+    if stem.inter_id != Some(expectation.stem_inter_id)
+        || stem.glyph_id != expectation.stem_glyph_id
+        || !stem.sig_attached
+    {
         return Err(stage(
             "HEADS-CLink-createStem",
-            "reused stem is not the authenticated StemInter 2382/glyph332",
+            format!(
+                "reused stem is not the authenticated StemInter {}/glyph{}",
+                expectation.stem_inter_id, expectation.stem_glyph_id
+            ),
         ));
     }
     let stem_vertex = *shadow
@@ -5242,14 +5348,17 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
         .sig
         .set_abnormal(stem_vertex, false)
         .map_err(|error| stage("HEADS-CLink-callback", error))?;
-    if shadow.beam_state.sig.edges.len() != edges_before + 3 {
+    if shadow.beam_state.sig.edges.len() != edges_before + expectation.appended_edge_count {
         return Err(stage(
             "HEADS-multi-reuse-CLink-result",
-            "order67 reuse did not append exactly three HeadStem relations",
+            format!(
+                "{} reuse did not append exactly {} HeadStem relations",
+                expectation.order_label, expectation.appended_edge_count
+            ),
         ));
     }
 
-    let current = shadow.heads[67].clone();
+    let current = shadow.heads[expectation.queue_index].clone();
     let (closed_s_linkers, closed_value_changes) = close_heads_sharing_prelinked_stems(
         &shadow.beam_state.sig,
         &shadow.beam_state.bindings,
@@ -5261,16 +5370,24 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
         .iter()
         .map(|cell| cell.head.x_ordinal)
         .collect::<std::collections::BTreeSet<_>>();
-    if closed_value_changes != 6
-        || closed_s_linkers.len() != 6
-        || closed_x != [70usize, 71, 74].into_iter().collect()
+    if closed_value_changes != expectation.closed_value_changes
+        || closed_s_linkers.len() != expectation.closed_x_ordinals.len() * 2
+        || closed_x
+            != expectation
+                .closed_x_ordinals
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
     {
         return Err(stage(
             "HEADS-multi-reuse-CLink-result",
-            "order67 reuse did not close the authenticated x70/x71/x74 siblings",
+            format!(
+                "{} reuse did not close the authenticated siblings",
+                expectation.order_label
+            ),
         ));
     }
-    shadow.current_index = 68;
+    shadow.current_index = expectation.queue_index + 1;
     shadow.frontier_consumed = true;
     shadow
         .beam_state
@@ -5285,7 +5402,10 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     if shadow.undefined_sides != carried_undefined {
         return Err(stage(
             "HEADS-multi-reuse-CLink-result",
-            "order67 reuse disturbed the carried undefined LEFT sides",
+            format!(
+                "{} reuse disturbed the carried undefined LEFT sides",
+                expectation.order_label
+            ),
         ));
     }
 
@@ -5297,6 +5417,99 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
         closed_value_changes,
         state_after: Box::new(shadow),
     })
+}
+
+/// Consume the bounded multi-head existing-stem C-link at order 67.
+///
+/// x73/SIG18 walks the frontier chunk plus the carried undef heads x70 and
+/// x71, reuses Stem 2382 (glyph 332) through three appended HeadStem
+/// relations, and closes x70, x71, and x74.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 67,
+            head_x_ordinal: 73,
+            head_sig_ordinal: 18,
+            stem_inter_id: 2382,
+            stem_glyph_id: 332,
+            carried_undef_indexes: &[50, 60, 61],
+            crossed_x_ordinals: &[70, 71],
+            included_glyph_count: 2,
+            appended_edge_count: 3,
+            closed_x_ordinals: &[70, 71, 74],
+            closed_value_changes: 6,
+            order_label: "order67",
+        },
+    )
+}
+
+/// Consume the bounded multi-head existing-stem C-link at order 70.
+///
+/// x1/SIG35 walks the frontier chunk plus the carried undef head x0, reuses
+/// Stem 2384 (glyph 322, the stem order 68 left undefined) through two
+/// appended HeadStem relations, and closes x0 and x2.  The carried undef
+/// list and phase-2 queue stay unchanged: Java never retracts an undef
+/// entry, and `checkNeededStems` simply skips heads that now hold a
+/// HeadStem relation.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 70,
+            head_x_ordinal: 1,
+            head_sig_ordinal: 35,
+            stem_inter_id: 2384,
+            stem_glyph_id: 322,
+            carried_undef_indexes: &[50, 60, 61, 68],
+            crossed_x_ordinals: &[0],
+            included_glyph_count: 2,
+            appended_edge_count: 2,
+            closed_x_ordinals: &[0, 2],
+            closed_value_changes: 4,
+            order_label: "order70",
+        },
+    )
 }
 
 /// Compose a set of glyph contents into one Java-composite glyph.
