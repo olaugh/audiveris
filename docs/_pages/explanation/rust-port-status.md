@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first thirty-six semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, the thirtieth through thirty-second carry three further prelinked-success heads to index 6, the thirty-third consumes the first later BottomOnly head C-link to index 8, the thirty-fourth carries the next prelinked-success head to index 9, the thirty-fifth carries the next prelinked-success head to index 10, and the thirty-sixth carries the next prelinked-success head to index 11).
+The first thirty-seven semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, the thirtieth through thirty-second carry three further prelinked-success heads to index 6, the thirty-third consumes the first later BottomOnly head C-link to index 8, the thirty-fourth carries the next prelinked-success head to index 9, the thirty-fifth carries the next prelinked-success head to index 10, the thirty-sixth carries the next prelinked-success head to index 11, and the thirty-seventh carries the next prelinked-success head to index 12).
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1144,6 +1144,18 @@ queue changes. Claims here stay deliberately short and must point back to exact
 tests or oracle counts in [`rust/PORTING.md`][porting] and
 [`rust/HANDOFF.md`][handoff]. A stage moves to **Native and graded** only when it
 consumes native upstream state and the oracle is a grader rather than an input.
+
+[Boundary 37] extends the same prelinked-success continuation to head order 11 (x46 / SIG
+57 / Inter 1403). Shared Stem 2377 closes x44 LEFT/RIGHT and x45 LEFT/RIGHT, four
+ordered writes, without adding SIG vertices, edges, or system stems; native reaches
+`current_index=12` before x55 / SIG 79 / Inter 1447. The v11 fixture SHA-256 is
+`cad1527e556481a073ead938094de9edce09954e366bf5608ebc57a30ef946a3`, with
+runner/probe/body/semantic pins `f05ea06f61193785a84440b457b4e79b10e7d88e765b81bce51d6f996beb1702`,
+`24f67a53e407909d07e1fc12bb2e180b15e6dfcf74983d52d1326cff906284ca`,
+`a0716a3379db5d268419624a193d6a6d1dc0105f78ff56fecd44fa70272165e4`, and
+`eefa750fd63fa91fec84c2fd9afc62b82d51081da606a0687496a111f5059602`.
+Actually-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
 
 [Boundary 36] extends the same prelinked-success continuation to head order 10 (x65 / SIG
 95 / Inter 1479). Shared Stem 2346 closes x64 LEFT then RIGHT, two ordered writes,

@@ -4957,6 +4957,22 @@ transformed probe, emitted body, and semantic pass are
 Actual-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
 coverage remain open.
 
+## Boundary 37: eleventh prelinked head continuation
+
+Boundary 37 reuses the unchanged continuation at head order 11 (x46 / SIG 57 / Java
+Inter 1403). LEFT is prelinked and RIGHT is `Neither`; shared Stem 2377 closes x44
+LEFT/RIGHT then x45 LEFT/RIGHT, four ordered value changes and no unlinked insertion.
+SIG remains 680/691 and Stem bindings remain 41; native reaches `current_index=12`
+before x55 / SIG 79 / Java Inter 1447. The v11 fixture is SHA-256
+`cad1527e556481a073ead938094de9edce09954e366bf5608ebc57a30ef946a3`; runner,
+transformed probe, emitted body, and semantic pass are
+`f05ea06f61193785a84440b457b4e79b10e7d88e765b81bce51d6f996beb1702`,
+`24f67a53e407909d07e1fc12bb2e180b15e6dfcf74983d52d1326cff906284ca`,
+`a0716a3379db5d268419624a193d6a6d1dc0105f78ff56fecd44fa70272165e4`, and
+`eefa750fd63fa91fec84c2fd9afc62b82d51081da606a0687496a111f5059602`.
+Actually-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
