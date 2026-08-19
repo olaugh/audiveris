@@ -894,9 +894,9 @@ emitted-body, and semantic-pass SHA-256 are
 `a629a2d63d223f28264c3fdc4dc20941e082402c27d75c2c6d884e2ce8282d08`.
 This completes chula system 1's STUMPS worklist, not full STEMS. Its production library
 run is 695 passed / 0 failed / 2 ignored, and the full local workspace, formatting, and
-strict all-target Clippy gates are green; `d757dbba7` (including Boundary 31) is the current
-full-workspace and CI baseline. Rust run 32200477394 passed all 12 shards and Build & Test
-run 32200477390 passed, with no failure or cancellation. Wider-corpus authority and branch
+strict all-target Clippy gates are green; `9cb613601` (including Boundary 32) is the current
+full-workspace and CI baseline. Rust run 32204202389 passed all 12 shards and Build & Test
+run 32204202393 passed, with no failure or cancellation. Wider-corpus authority and branch
 coverage, other systems, and later STEMS phases remain open.
 
 Boundary 26 adds `remove_native_stems_beam_competing_hook_and_resume`, an atomic
@@ -920,7 +920,7 @@ runner, emitted-body, and semantic-pass SHA-256 are
 `52432167156b75e4754259ae6c2a634e87788f028e85e6ea14754859e12ccb1f`, and
 `2cc4ad8e0aadf29b8055ce34c32b703c033c45880bef24ff26a707b6b6f0d3c5`.
 Its production library run is 696 passed / 0 failed / 2 ignored, and the full local
-workspace, formatting, and strict all-target Clippy gates are green; `d757dbba7`
+workspace, formatting, and strict all-target Clippy gates are green; `9cb613601`
 remains the current remote CI baseline. Native Allegretto
 predecessor carriage, hook removal beyond this checkpoint, wider-corpus STUMPS authority,
 general dirty-state ownership, other systems, and later STEMS remain open.
@@ -949,7 +949,7 @@ runner, emitted-body, and semantic-pass SHA-256 are
 `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and
 `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398`.
 Boundary 27's full local workspace, formatting, and strict all-target Clippy gates are
-green. `d757dbba7` (including Boundary 31) is the current remote-CI baseline: all 12 Rust
+green. `9cb613601` (including Boundary 32) is the current remote-CI baseline: all 12 Rust
 shards and the Java build passed without failure or cancellation.
 
 Boundary 28 adds `advance_native_stems_head_single_item_c_link`, an atomic consumer for
@@ -977,7 +977,7 @@ Probe, runner, emitted-body, and semantic-pass SHA-256 are
 `dedc03783647ab198966cc87d1bfc491e990ad17c66564b3c0fe00a5231ba310`, and
 `e98f8181cce2d0bae08fda7617d63c313180ad2d8464902d870c189cafe4a398`.
 Boundary 28's full local workspace, formatting, and strict all-target Clippy gates are
-green. `d757dbba7` (including Boundary 31) is the current remote-CI baseline: its exact commit
+green. `9cb613601` (including Boundary 32) is the current remote-CI baseline: its exact commit
 has reached terminal green.
 Broader pre-STEMS SIG assembly remains bounded where later corpus
 systems still lack complete BEAMS group products.
