@@ -1118,6 +1118,7 @@ public final class StemsBeamSidesLoopProbe
             emitHeadPhaseContinuation(ordered, 2, undefs);
             emitHeadPhaseContinuation(ordered, 3, undefs);
             emitHeadPhaseContinuation(ordered, 4, undefs);
+            emitHeadPhaseContinuation(ordered, 5, undefs);
         }
 
         /** One real completed {@code HeadLinker.linkSides} call after the first C-link. */
