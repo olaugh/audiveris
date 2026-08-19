@@ -3799,6 +3799,90 @@ pub fn advance_native_stems_head_existing_stem_retry_order62(
     Ok(continuation)
 }
 
+/// Reconcile the bounded existing-stem retry at order 63.
+///
+/// x41/SIG92 retries LEFT against the already linked existing StemInter
+/// 2352/glyph293: Java skips LEFT as already linked, skips the closed
+/// RIGHT, returns true, and closes sibling x42's cells without touching
+/// SIG, allocator, or system-stem state.  The three undefined LEFT sides
+/// carried from orders 50, 60, and 61 stay recorded and unchanged.
+pub fn advance_native_stems_head_existing_stem_retry_order63(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 63
+        || !carrier.unlinked_heads.is_empty()
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier is not the authenticated order63 continuation",
+        ));
+    }
+    let carried_undefined =
+        authenticated_carried_undefined_sides(carrier, &[50, 60, 61], "order63")?;
+    let head = carrier.heads.get(63).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order63 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 41 || head.reference.sig_ordinal != 92 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier head is not x41/SIG92",
+        ));
+    }
+    let left = head
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == crate::stems_step::NativeStemHeadSide::Left)
+        .ok_or_else(|| stage("HEADS-existing-stem-retry-frontier", "LEFT cell is missing"))?;
+    if !left.linked {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order63 LEFT cell is not linked",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2352) && stem.glyph_id == 293)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-retry-frontier",
+                "order63 existing StemInter 2352/glyph293 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order63 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    if continuation.returned_linked != Some(true)
+        || continuation.processed_head.x_ordinal != 41
+        || continuation.processed_head.sig_ordinal != 92
+        || continuation.closed_value_changes != 2
+        || continuation.state_after.current_index != 64
+        || continuation.state_after.undefined_sides != carried_undefined
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-result",
+            "order63 retry did not produce the authenticated closure",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Consume the bounded both-open existing-stem C-link at order 57.
 ///
 /// x62/SIG16 opens a LEFT BottomOnly frontier whose selected seed resolves
