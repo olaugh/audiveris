@@ -14,7 +14,7 @@ parity-port code only).
 | Engine: geometry count (edge margin, corroboration, height-scaled gap), DP boundary selection with honest-short fallback | same module | done |
 | Parameters | `BarTuningParameters::python_reference()` (frozen pixel constants) and `from_scale(interline)` (identical at the Schenker calibration interline of 6 px) | done |
 | Python-oracle parity | `tests/barline_tuning_parity.rs` + `oracle/py-barline-tuning/{schenker-sonata01,graceful-ghost-rag}.txt` | **bit-exact**: 104 + 20 systems, worst float delta 0.0 |
-| Interline-mode decisions | same test, `from_scale(12)` on the warped GGR corpus | 19/20 systems identical; one pinned residual (below) |
+| Interline-mode decisions | same test, `from_scale(12)` on the warped GGR corpus | all 20 systems match the oracle's boundaries (volta-aware; the residual list is empty) |
 | Engraver ground truth | `tests/barline_tuning_synthetic.rs` + `oracle/py-barline-tuning/verovio-synthetic.txt` | 15 synthetic systems at interlines 6/12/18; projection alone recovers every barline, fabricates none |
 | Barline-form classification (types layer, first slice) | `classify_boundary` in `bar_tuning.rs`, `tests/barline_classification.rs` | 60/60 engraved forms + 4 hand-verified scan boundaries |
 
@@ -35,11 +35,13 @@ file headers (`export_barline_tuning_fixtures.py`,
   so certainty/corroboration/evidence all see rounded values; the engine
   rounds at the same point (found by the parity harness, which is exactly
   what it is for).
-- **Pinned interline residual** (`KNOWN_INTERLINE_RESIDUALS`): GGR p2s5's
-  volta first-ending barline is projection-only with gap 15; the pixel
-  oracle recovers it only because a double-counted repeat bar inflates the
-  count.  Interline mode counts honestly and loses it.  The principled fix
-  is repeat/volta modeling, not a threshold bent around one case.
+- **Volta-backed counting** replaced the one pinned interline residual:
+  GGR p2s5's first-ending barline is projection-only with gap 15 (the
+  bracket junction interrupts it), and the pixel oracle recovered it only
+  because a double-counted repeat bar inflated the count.  With
+  `geometry_count_with_voltas`, its detected bracket counts the
+  interrupted, stem-clean candidate on principle, and
+  `KNOWN_INTERLINE_RESIDUALS` is empty.
 - **DP determinism**: the selection DP replicates Python dict semantics
   (insertion-order scan, strict-less ties keep the first optimum); states
   live in a Vec on purpose.
