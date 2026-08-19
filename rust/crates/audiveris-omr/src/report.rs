@@ -2219,6 +2219,49 @@ fn heads_system(
         head_beam_decision(json, staff_system, system, decision);
     }
     json.close(']');
+
+    // The complete epilog input pool minus the final heads: every candidate
+    // the purge passes removed, with the pass that removed it.  Retained so
+    // later joint reasoning can revisit exclusions instead of re-running
+    // recognition; scanner candidates below the acceptance floor are not in
+    // the epilog pool and therefore not recoverable here.
+    let final_set: std::collections::BTreeSet<(usize, usize)> = system
+        .final_heads
+        .iter()
+        .map(|reference| (reference.staff_index, reference.head_index))
+        .collect();
+    let beam_removed: std::collections::BTreeSet<(usize, usize)> = system
+        .beam_removed_heads
+        .iter()
+        .map(|reference| (reference.staff_index, reference.head_index))
+        .collect();
+    json.key("suppressed_heads");
+    json.open('[');
+    for (staff_index, staff) in staff_system.staffs.iter().enumerate() {
+        for (head_index, head) in staff.heads.iter().enumerate() {
+            let key = (staff_index, head_index);
+            if final_set.contains(&key) {
+                continue;
+            }
+            let reason = if head.duplicate_removed {
+                "duplicate"
+            } else if beam_removed.contains(&key) {
+                "beam_arbitration"
+            } else {
+                "overlap"
+            };
+            json.open('{');
+            json.field_integer("staff", staff.staff_id as i64);
+            json.field_string("reason", reason);
+            json.field_string("shape", head_shape(head.shape));
+            json.field_number("pitch", head.pitch());
+            integer_bounds(json, "bounds", head.bounds);
+            json.field_number("grade", head.grade());
+            head_origin(json, head.origin);
+            json.close('}');
+        }
+    }
+    json.close(']');
     json.close('}');
 }
 
