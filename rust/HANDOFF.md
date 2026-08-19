@@ -38,6 +38,13 @@ workspace suite pass. All 17 formerly fatal Schenker pages and all 613 pages in
 the local edition complete GRID; this is a completion gate, not a recognition
 accuracy result.
 
+On 2026-08-19 the Python barline tuning layer landed as the enhancement module
+`audiveris-image/src/bar_tuning.rs` (bit-exact against its Python oracle on
+124 real-scan systems, Verovio-engraved ground truth at three scales, plus a
+first barline-form classification slice); it is engine-plus-tests only, not
+yet wired into GRID. Status, design decisions, and the remaining
+adapter/wiring milestones are in `docs/barline-tuning-port.md`.
+
 The same checkpoint now recovers dense staffs that comb following had already
 collapsed into one tall composite. It requires a root at least 20 interlines
 wide with one or more strong periodic five-ridge fields, rebuilds thin line
