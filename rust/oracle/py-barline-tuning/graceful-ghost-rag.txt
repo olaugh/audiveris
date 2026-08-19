@@ -1,0 +1,335 @@
+# Barline-tuning parity fixture: Graceful Ghost Rag warped system crops.
+# Oracle: stage-omr-data/scripts/tune_sonata_barlines.py; raw boundaries from
+# the slimmed GRID reports in data/real-datasets/ggr-warped/grid/.
+# Regenerate: stage-omr-data$ .venv/bin/python scripts/export_barline_tuning_fixtures.py --output ../audiveris-page-threading/rust/oracle/py-barline-tuning
+image stage-omr-data/data/real-datasets/ggr-warped/p1s1.png
+system p1s1 78.0 1448.0 99.0 301.0 5 5
+raw 77.5 2 0.8 thin
+raw 350.5 2 0.8 thin
+raw 605.5 2 0.7936221424868737 thick
+raw 612.5 2 0.8 thin
+raw 1045.5 2 0.7936221424868737 thin
+raw 1448.25 2 0.8 thin
+expect_candidate 348.0 1.0 1.0 0.9118 0.9851 2 0.0966 0.8693 0.0966
+expect_candidate 601.0 1.0 1.0 1.0 1.0 0 0.0 1.0 0.0
+expect_candidate 606.0 1.0 1.0 1.0 1.0 0 1.0 0.3556 0.3556
+expect_candidate 611.0 1.0 1.0 0.9706 0.995 1 1.0 0.4111 0.4111
+expect_candidate 1044.0 1.0 1.0 1.0 1.0 0 0.0 0.118 0.0
+expect_geometry 5 4
+expect_count 5
+expect_tuned 78.0 349.25 603.56 1044.08 1448.0
+expect_added 
+expect_demoted 612.5
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p1s2.png
+system p1s2 41.0 1450.0 58.0 242.0 4 4
+raw 40.5 2 0.7850671438445556 thin
+raw 543.25 2 0.7909067285111653 thin
+raw 854.75 2 0.7909067285111653 thin
+raw 1128.0 2 0.7909067285111653 thin
+raw 1451.0 2 0.7909067285111653 thin
+expect_candidate 541.0 1.0 1.0 1.0 1.0 0 0.0061 0.5183 0.0061
+expect_candidate 853.0 1.0 1.0 1.0 0.9891 2 0.0061 0.1091 0.0061
+expect_candidate 1126.0 1.0 1.0 1.0 1.0 0 0.0122 0.3476 0.0122
+expect_geometry 4 3
+expect_count 4
+expect_tuned 41.0 541.13 853.1 1126.11 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p1s3.png
+system p1s3 41.0 1450.0 70.0 260.0 4 4
+raw 41.5 2 0.7704260075785068 thin
+raw 487.0 2 0.7813749470889392 thin
+raw 764.75 2 0.7909067285111653 thin
+raw 1125.5 2 0.7846013654853938 thin
+raw 1451.0 2 0.7909067285111653 thin
+expect_candidate 485.0 1.0 1.0 1.0 1.0 0 0.0299 0.8683 0.0299
+expect_candidate 763.0 1.0 1.0 1.0 1.0 0 0.0237 0.0947 0.0237
+expect_candidate 1124.0 1.0 1.0 1.0 1.0 0 0.0294 0.0529 0.0294
+expect_geometry 4 3
+expect_count 4
+expect_tuned 41.0 485.11 763.1 1124.08 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p1s4.png
+system p1s4 41.0 1451.0 72.0 254.0 4 4
+raw 40.5 2 0.8 thin
+raw 505.25 2 0.7861986157249169 thin
+raw 827.5 2 0.7930692861156166 thin
+raw 1120.5 2 0.8 thin
+raw 1451.25 2 0.8 thin
+expect_candidate 503.0 1.0 1.0 1.0 1.0 0 0.0064 0.7949 0.0064
+expect_candidate 826.0 1.0 1.0 1.0 1.0 0 0.0125 0.5312 0.0125
+expect_candidate 1119.0 1.0 1.0 1.0 1.0 0 0.0375 0.25 0.0375
+expect_geometry 4 3
+expect_count 4
+expect_tuned 41.0 503.13 826.08 1119.75 1451.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p1s5.png
+system p1s5 39.0 1452.0 63.0 246.0 4 4
+raw 38.25 2 0.7840547932054843 thin
+raw 636.5 2 0.7813749470889392 thin
+raw 960.5 2 0.7813749470889392 thin
+raw 968.75 2 0.7840547932054843 thick
+raw 1447.25 2 0.7813749470889392 thin
+expect_candidate 635.0 1.0 1.0 1.0 1.0 0 0.0 0.5478 0.0
+expect_candidate 959.0 1.0 1.0 1.0 1.0 0 0.141 0.0769 0.0769
+expect_candidate 965.0 1.0 1.0 1.0 1.0 0 1.0 1.0 1.0
+expect_candidate 970.0 1.0 1.0 1.0 1.0 0 1.0 0.0382 0.0382
+expect_candidate 1011.0 0.9783 0.9891 0.7097 0.7268 30 0.0755 0.3774 0.0755
+expect_candidate 1444.0 1.0 1.0 1.0 0.9672 6 0.1475 0.847 0.1475
+expect_geometry 4 3
+expect_count 4
+expect_tuned 39.0 635.08 967.54 1452.0
+expect_added 
+expect_demoted 960.5
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p2s1.png
+system p2s1 73.0 1466.0 94.0 294.0 5 5
+raw 72.25 2 0.7751455744928641 thin
+raw 207.5 2 0.7846013654853938 thick
+raw 492.75 2 0.7262227495364479 thin
+raw 815.5 2 0.7846013654853938 thin
+raw 1145.75 2 0.7846013654853938 thin
+raw 1465.25 2 0.768430184248419 thin
+expect_candidate 201.0 1.0 1.0 1.0 1.0 0 0.0112 1.0 0.0112
+expect_candidate 206.0 1.0 1.0 1.0 1.0 0 1.0 1.0 1.0
+expect_candidate 211.0 1.0 1.0 1.0 1.0 0 0.9722 0.1444 0.1444
+expect_candidate 491.0 1.0 1.0 1.0 0.99 2 0.0339 0.0678 0.0339
+expect_candidate 813.0 1.0 1.0 1.0 0.995 1 0.0166 0.8066 0.0166
+expect_candidate 1144.0 1.0 1.0 1.0 0.995 1 0.0559 0.1006 0.0559
+expect_geometry 5 4
+expect_count 5
+expect_tuned 73.0 207.5 491.1 813.14 1144.1 1466.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p2s2.png
+system p2s2 73.0 1468.0 68.0 279.0 4 4
+raw 73.5 2 0.7813749470889392 thin
+raw 525.0 2 0.7813749470889392 thin
+raw 849.0 2 0.7813749470889392 thin
+raw 1163.75 2 0.7534538114129494 thin
+raw 1468.0 2 0.768430184248419 thin
+expect_candidate 524.0 1.0 1.0 1.0 0.9953 1 0.0421 0.0526 0.0421
+expect_candidate 848.0 1.0 1.0 1.0 0.9953 1 0.0266 0.0426 0.0266
+expect_candidate 1162.0 1.0 1.0 1.0 0.9858 3 0.0376 0.328 0.0376
+expect_geometry 4 3
+expect_count 4
+expect_tuned 73.0 524.06 848.06 1162.83 1468.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p2s3.png
+system p2s3 73.0 1468.0 64.0 277.0 4 4
+raw 72.75 2 0.8 thin
+raw 519.5 2 0.6797161168711368 thin
+raw 829.75 2 0.7909067285111653 thin
+raw 1138.5 2 0.7813749470889392 thin
+raw 1468.5 2 0.7813749470889392 thin
+expect_candidate 518.0 1.0 1.0 1.0 0.9906 2 0.0622 0.0881 0.0622
+expect_candidate 829.0 1.0 1.0 1.0 1.0 0 0.0105 0.0052 0.0052
+expect_candidate 1138.0 0.9623 0.9811 1.0 0.9859 2 0.0363 0.0363 0.0363
+expect_geometry 4 3
+expect_count 4
+expect_tuned 73.0 518.08 829.04 1138.03 1468.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p2s4.png
+system p2s4 74.0 1480.0 75.0 279.0 3 3
+raw 73.25 2 0.7909067285111653 thin
+raw 624.25 2 0.7882301637901611 thin
+raw 1040.0 2 0.7792706751963703 thin
+raw 1480.5 2 0.7909067285111653 thin
+expect_candidate 623.0 1.0 1.0 1.0 0.9902 1 0.011 0.0497 0.011
+expect_candidate 1038.0 1.0 1.0 1.0 0.9853 3 0.0055 0.221 0.0055
+expect_candidate 1439.0 1.0 1.0 1.0 0.8235 9 0.2487 0.4249 0.2487
+expect_geometry 3 2
+expect_count 3
+expect_tuned 74.0 623.07 1038.95 1480.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p2s5.png
+system p2s5 74.0 1483.0 79.0 275.0 6 6
+raw 73.25 2 0.7813749470889392 thin
+raw 535.75 2 0.7909067285111653 thin
+raw 544.75 2 0.7846013654853938 thick
+raw 816.0 2 0.7909067285111653 thin
+raw 823.0 2 0.7813749470889392 thin
+raw 1248.5 2 0.7751455744928641 thin
+raw 1483.75 2 0.7672578807394455 thin
+expect_candidate 242.0 0.9592 0.9796 1.0 0.9031 9 0.1543 0.0514 0.0514
+expect_candidate 299.0 1.0 1.0 0.6176 0.7704 15 0.0682 0.3977 0.0682
+expect_candidate 534.0 1.0 1.0 1.0 1.0 0 0.0226 0.2034 0.0226
+expect_candidate 540.0 1.0 1.0 1.0 1.0 0 1.0 1.0 1.0
+expect_candidate 545.0 1.0 1.0 1.0 1.0 0 1.0 0.1156 0.1156
+expect_candidate 592.0 1.0 1.0 1.0 0.8724 7 0.1734 0.0925 0.0925
+expect_candidate 814.0 1.0 1.0 1.0 0.9949 1 0.0057 0.6457 0.0057
+expect_candidate 821.0 1.0 1.0 1.0 0.9949 1 0.9943 0.76 0.76
+expect_candidate 1246.0 1.0 1.0 1.0 0.9898 2 0.0698 0.843 0.0698
+expect_geometry 5 4
+expect_count 5
+expect_tuned 74.0 299.0 542.57 821.11 1246.14 1483.0
+expect_added 299.0
+expect_demoted 535.75
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p3s1.png
+system p3s1 37.0 1450.0 102.0 331.0 4 4
+raw 36.25 2 0.7909067285111653 thin
+raw 486.75 2 0.787762508819232 thin
+raw 824.5 2 0.7882301637901611 thin
+raw 1163.0 2 0.7448152988641626 thin
+raw 1450.0 2 0.7909067285111653 thin
+expect_candidate 485.0 1.0 1.0 1.0 0.9651 8 0.0622 0.0813 0.0622
+expect_candidate 823.0 1.0 1.0 1.0 0.952 11 0.0048 0.019 0.0048
+expect_candidate 1163.0 1.0 1.0 1.0 0.9476 11 0.0383 0.0191 0.0191
+expect_geometry 4 3
+expect_count 4
+expect_tuned 37.0 485.83 823.71 1163.0 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p3s2.png
+system p3s2 38.0 1450.0 79.0 290.0 4 4
+raw 37.25 2 0.7809378131223942 thin
+raw 513.25 2 0.7698791281568036 thin
+raw 799.75 2 0.7909067285111653 thin
+raw 1096.0 2 0.7909067285111653 thin
+raw 1450.25 2 0.7909067285111653 thin
+expect_candidate 512.0 1.0 1.0 1.0 0.9621 7 0.0628 0.0785 0.0628
+expect_candidate 798.0 1.0 1.0 1.0 0.9621 8 0.0052 0.0466 0.0052
+expect_candidate 1095.0 1.0 1.0 1.0 0.9526 10 0.0156 0.0208 0.0156
+expect_geometry 4 3
+expect_count 4
+expect_tuned 38.0 512.6 798.83 1095.48 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p3s3.png
+system p3s3 38.0 1450.0 72.0 279.0 4 4
+raw 37.25 2 0.7813749470889392 thin
+raw 486.25 2 0.7909067285111653 thin
+raw 830.5 2 0.7940932760275262 thin
+raw 1131.5 2 0.7909067285111653 thin
+raw 1451.0 2 0.7909067285111653 thin
+expect_candidate 485.0 1.0 1.0 1.0 1.0 0 0.0106 0.0266 0.0106
+expect_candidate 829.0 1.0 1.0 1.0 0.9952 1 0.0368 0.1737 0.0368
+expect_candidate 1130.0 1.0 1.0 1.0 0.9855 2 0.0053 0.2834 0.0053
+expect_geometry 4 3
+expect_count 4
+expect_tuned 38.0 485.07 829.08 1130.08 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p3s4.png
+system p3s4 39.0 1450.0 68.0 281.0 3 3
+raw 38.75 2 0.7756057394246132 thin
+raw 602.75 2 0.77305807853317 thin
+raw 1047.5 2 0.7909067285111653 thin
+raw 1450.75 2 0.7909067285111653 thin
+expect_candidate 601.0 1.0 1.0 1.0 1.0 0 0.0535 0.5134 0.0535
+expect_candidate 1046.0 1.0 1.0 1.0 1.0 0 0.0674 0.0933 0.0674
+expect_geometry 3 2
+expect_count 3
+expect_tuned 39.0 601.1 1046.08 1450.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p3s5.png
+system p3s5 39.0 1449.0 63.0 278.0 3 3
+raw 38.75 2 0.7623513715218593 thin
+raw 525.5 2 0.7813749470889392 thin
+raw 1003.0 2 0.7641850665329919 thin
+raw 1449.5 2 0.7813749470889392 thin
+expect_candidate 524.0 1.0 1.0 1.0 0.9767 5 0.0 0.0311 0.0
+expect_candidate 1003.0 1.0 1.0 1.0 0.9814 4 0.041 0.0359 0.0359
+expect_geometry 3 2
+expect_count 3
+expect_tuned 39.0 524.71 1003.0 1449.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p4s1.png
+system p4s1 73.0 1468.0 94.0 300.0 3 3
+raw 72.5 2 0.7909067285111653 thin
+raw 620.75 2 0.7909067285111653 thin
+raw 1030.5 2 0.7832265672601141 thin
+raw 1468.0 0 0.0 edge
+expect_candidate 619.0 1.0 1.0 1.0 0.9951 1 0.0109 0.6066 0.0109
+expect_candidate 1029.0 1.0 1.0 1.0 1.0 0 0.0165 0.0549 0.0165
+expect_geometry 3 2
+expect_count 3
+expect_tuned 73.0 619.1 1029.08 1468.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p4s2.png
+system p4s2 73.0 1468.0 71.0 289.0 4 4
+raw 73.0 2 0.7909067285111653 thin
+raw 582.0 2 0.7846013654853938 thin
+raw 902.5 2 0.7846013654853938 thin
+raw 1188.0 2 0.7846013654853938 thin
+raw 1468.75 2 0.6045958297527134 thin
+expect_candidate 581.0 1.0 1.0 1.0 1.0 0 0.0359 0.0462 0.0359
+expect_candidate 901.0 1.0 1.0 1.0 1.0 0 0.0254 0.0355 0.0254
+expect_candidate 1186.0 1.0 1.0 1.0 0.9954 1 0.0052 0.1237 0.0052
+expect_candidate 1461.0 0.7037 0.7315 0.6111 0.6101 10 0.289 0.7615 0.289
+expect_geometry 4 3
+expect_count 4
+expect_tuned 73.0 581.06 901.08 1186.11 1468.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p4s3.png
+system p4s3 73.0 1471.0 57.0 278.0 3 3
+raw 72.75 2 0.7828345617747505 thin
+raw 638.75 2 0.7909067285111653 thin
+raw 1028.5 2 0.7909067285111653 thin
+raw 1471.25 2 0.7151161100377684 thin
+expect_candidate 637.0 1.0 1.0 1.0 1.0 0 0.0101 0.2778 0.0101
+expect_candidate 1026.0 1.0 1.0 1.0 0.991 2 0.0051 0.7857 0.0051
+expect_geometry 3 2
+expect_count 3
+expect_tuned 73.0 637.1 1026.14 1471.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p4s4.png
+system p4s4 74.0 1468.0 63.0 273.0 4 4
+raw 73.75 2 0.7813749470889392 thin
+raw 631.25 2 0.7576626319527237 thin
+raw 1024.0 2 0.7909067285111653 thin
+raw 1388.5 2 0.7909067285111653 thin
+raw 1468.0 0 0.0 edge
+expect_candidate 629.0 1.0 1.0 1.0 1.0 0 0.1058 0.7037 0.1058
+expect_candidate 1023.0 1.0 1.0 1.0 0.9952 1 0.0695 0.0802 0.0695
+expect_candidate 1246.0 1.0 1.0 1.0 0.8905 9 0.2074 0.1064 0.1064
+expect_candidate 1285.0 1.0 1.0 1.0 0.8905 9 0.2204 0.0699 0.0699
+expect_candidate 1384.0 1.0 1.0 1.0 0.9952 1 0.0881 0.2176 0.0881
+expect_candidate 1390.0 1.0 1.0 1.0 0.9952 1 0.9948 0.1554 0.1554
+expect_geometry 4 3
+expect_count 4
+expect_tuned 74.0 629.13 1023.06 1384.25 1468.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/ggr-warped/p4s5.png
+system p4s5 74.0 1486.0 75.0 295.0 3 3
+raw 73.5 2 0.7909067285111653 thin
+raw 550.25 2 0.7813749470889392 thin
+raw 1017.0 2 0.778346270843306 thin
+raw 1487.0 2 0.7481798823930674 thin
+expect_candidate 548.0 1.0 1.0 1.0 1.0 0 0.0 0.8832 0.0
+expect_candidate 1015.0 1.0 1.0 1.0 0.9909 2 0.0104 0.1295 0.0104
+expect_geometry 3 2
+expect_count 3
+expect_tuned 74.0 548.13 1015.11 1486.0
+expect_added 
+expect_demoted 
+end

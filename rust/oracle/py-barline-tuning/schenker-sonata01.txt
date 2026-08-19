@@ -1,0 +1,1863 @@
+# Barline-tuning parity fixture: Schenker Sonata 1 (17 pages).
+# Oracle: stage-omr-data/scripts/tune_sonata_barlines.py.
+# Regenerate: stage-omr-data$ .venv/bin/python scripts/export_barline_tuning_fixtures.py --output ../audiveris-page-threading/rust/oracle/py-barline-tuning
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-01.png
+system s01-p001o0 83.0 715.0 181.0 259.0 5 5
+raw 83.0 2 1.0 unknown
+raw 185.25 2 0.9148 thin
+raw 288.25 2 0.9412 thin
+raw 432.0 2 0.9296 thin
+raw 556.5 2 0.9315 thin
+raw 715.0 2 1.0 unknown
+expect_candidate 184.0 1.0 1.0 1.0 1.0 0 0.0462 0.0154 0.0154
+expect_candidate 287.0 1.0 1.0 1.0 1.0 0 0.0455 0.0303 0.0303
+expect_candidate 430.0 1.0 1.0 1.0 1.0 0 0.0303 0.0303 0.0303
+expect_candidate 555.0 1.0 1.0 1.0 1.0 0 0.0735 0.0588 0.0588
+expect_geometry 5 4
+expect_count 5
+expect_tuned 83.0 184.62 287.62 431.0 555.75 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p001o1 41.0 715.0 312.0 398.0 5 5
+raw 41.0 2 1.0 unknown
+raw 234.5 2 0.9345 thin
+raw 370.5 2 0.9361 thin
+raw 494.5 2 0.9343 thin
+raw 613.0 2 0.9435 thin
+raw 715.0 2 1.0 unknown
+anchor 234.5 5
+expect_candidate 233.0 1.0 1.0 1.0 1.0 0 0.0137 0.0137 0.0137
+expect_candidate 369.0 1.0 1.0 1.0 1.0 0 0.0135 0.0541 0.0135
+expect_candidate 459.0 0.9545 0.9773 0.7778 0.8488 5 0.1233 0.411 0.1233
+expect_candidate 493.0 1.0 1.0 1.0 1.0 0 0.0405 0.0811 0.0405
+expect_candidate 548.0 1.0 1.0 0.7222 0.8372 13 0.1733 0.3467 0.1733
+expect_candidate 611.0 1.0 1.0 1.0 1.0 0 0.027 0.027 0.027
+expect_geometry 5 4
+expect_count 5
+expect_tuned 41.0 233.78 369.75 493.75 612.0 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p001o2 41.0 715.0 453.0 536.0 5 5
+raw 41.0 2 1.0 unknown
+raw 225.0 2 0.9426 thin
+raw 346.75 2 0.9341 thin
+raw 463.0 2 0.9426 thin
+raw 580.75 2 0.9409 thin
+raw 715.0 2 1.0 unknown
+anchor 225.0 10
+expect_candidate 224.0 1.0 1.0 1.0 1.0 0 0.0137 0.0822 0.0137
+expect_candidate 345.0 1.0 1.0 1.0 1.0 0 0.0921 0.25 0.0921
+expect_candidate 461.0 1.0 1.0 1.0 1.0 0 0.0676 0.0676 0.0676
+expect_candidate 579.0 1.0 1.0 1.0 1.0 0 0.0137 0.0137 0.0137
+expect_geometry 5 4
+expect_count 5
+expect_tuned 41.0 224.52 345.88 462.0 579.88 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p001o3 40.0 716.0 592.0 677.0 6 6
+raw 40.0 2 1.0 unknown
+raw 196.75 2 0.9369 thin
+raw 295.0 2 0.9285 thin
+raw 387.5 2 0.9334 thin
+raw 485.5 2 0.9305 thin
+raw 580.5 2 0.9352 thin
+raw 716.0 2 1.0 unknown
+anchor 196.75 15
+anchor 716.0 20
+expect_candidate 195.0 1.0 1.0 1.0 1.0 0 0.0526 0.0526 0.0526
+expect_candidate 294.0 1.0 1.0 1.0 1.0 0 0.0694 0.0556 0.0556
+expect_candidate 386.0 1.0 1.0 1.0 1.0 0 0.0267 0.0267 0.0267
+expect_candidate 484.0 1.0 1.0 1.0 1.0 0 0.0811 0.1081 0.0811
+expect_candidate 579.0 1.0 1.0 1.0 1.0 0 0.0411 0.0411 0.0411
+expect_geometry 6 5
+expect_count 6
+expect_tuned 40.0 195.91 294.5 386.75 484.75 579.75 716.0
+expect_added 
+expect_demoted 
+end
+system s01-p001o4 40.0 717.0 734.0 819.0 5 4
+raw 40.0 2 1.0 unknown
+raw 347.0 2 0.9431 thin
+raw 468.0 2 0.9292 thin
+raw 592.75 2 0.9189 thin
+raw 717.0 2 1.0 unknown
+anchor 717.0 25
+expect_candidate 219.0 1.0 1.0 1.0 1.0 0 0.0133 0.0533 0.0133
+expect_candidate 345.0 1.0 1.0 1.0 1.0 0 0.0139 0.0278 0.0139
+expect_candidate 467.0 1.0 1.0 1.0 1.0 0 0.0811 0.0946 0.0811
+expect_candidate 541.0 0.7143 0.7143 0.7647 0.5529 15 0.3816 0.0921 0.0921
+expect_candidate 591.0 1.0 1.0 1.0 1.0 0 0.0519 0.039 0.039
+expect_geometry 5 4
+expect_count 5
+expect_tuned 40.0 219.0 346.0 467.5 591.88 717.0
+expect_added 219.0
+expect_demoted 
+end
+system s01-p001o5 39.0 717.0 884.0 964.0 5 5
+raw 39.0 2 1.0 unknown
+raw 219.0 2 0.9424 thin
+raw 347.0 2 0.9435 thin
+raw 468.0 2 0.9435 thin
+raw 592.5 2 0.9343 thin
+raw 717.0 2 1.0 unknown
+anchor 717.0 30
+expect_candidate 218.0 1.0 1.0 1.0 1.0 0 0.0435 0.029 0.029
+expect_candidate 346.0 1.0 1.0 1.0 1.0 0 0.0282 0.0282 0.0282
+expect_candidate 466.0 1.0 1.0 1.0 1.0 0 0.0429 0.0143 0.0143
+expect_candidate 591.0 1.0 1.0 1.0 1.0 0 0.0714 0.0286 0.0286
+expect_geometry 5 4
+expect_count 5
+expect_tuned 39.0 218.5 346.5 467.0 591.75 717.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-02.png
+system s01-p002o0 51.0 726.0 106.0 189.0 5 5
+raw 51.0 2 1.0 unknown
+raw 233.0 2 0.9396 thin
+raw 356.5 2 0.934 thin
+raw 483.75 2 0.937 thin
+raw 600.25 2 0.9292 thin
+raw 726.0 2 1.0 unknown
+anchor 726.0 35
+expect_candidate 232.0 1.0 1.0 1.0 0.988 1 0.0833 0.0972 0.0833
+expect_candidate 355.0 1.0 1.0 1.0 0.9759 2 0.0548 0.0822 0.0548
+expect_candidate 483.0 1.0 1.0 1.0 0.9759 2 0.0789 0.0658 0.0658
+expect_candidate 599.0 1.0 1.0 1.0 0.988 1 0.0533 0.0933 0.0533
+expect_geometry 5 4
+expect_count 5
+expect_tuned 51.0 232.5 355.75 483.38 599.62 726.0
+expect_added 
+expect_demoted 
+end
+system s01-p002o1 50.0 726.0 254.0 345.0 6 6
+raw 50.0 2 1.0 unknown
+raw 216.75 2 0.9348 thin
+raw 320.0 2 0.9395 thin
+raw 424.25 2 0.9392 thin
+raw 523.25 2 0.9335 thin
+raw 629.0 2 0.9434 thin
+raw 726.0 2 1.0 unknown
+anchor 629.0 40
+expect_candidate 216.0 1.0 1.0 1.0 1.0 0 0.2805 0.0488 0.0488
+expect_candidate 319.0 1.0 1.0 1.0 1.0 0 0.0127 0.0127 0.0127
+expect_candidate 423.0 1.0 1.0 1.0 1.0 0 0.0357 0.0833 0.0357
+expect_candidate 522.0 1.0 1.0 1.0 1.0 0 0.2857 0.0238 0.0238
+expect_candidate 628.0 1.0 1.0 1.0 1.0 0 0.0488 0.0488 0.0488
+expect_geometry 6 5
+expect_count 6
+expect_tuned 50.0 216.38 319.5 423.62 522.62 628.52 726.0
+expect_added 
+expect_demoted 
+end
+system s01-p002o2 49.0 723.0 421.0 506.0 7 7
+raw 49.0 2 1.0 unknown
+raw 202.75 2 0.9401 thin
+raw 302.75 2 0.9329 thin
+raw 395.0 2 0.9429 thin
+raw 503.0 2 0.9377 thin
+raw 598.0 2 0.9434 thin
+raw 643.25 2 0.9115 thin
+raw 723.0 2 1.0 unknown
+anchor 503.0 45
+expect_candidate 201.0 1.0 1.0 1.0 1.0 0 0.0263 0.1053 0.0263
+expect_candidate 209.0 0.7143 0.8571 0.6471 0.6 14 0.1053 0.3947 0.1053
+expect_candidate 301.0 1.0 1.0 1.0 1.0 0 0.0395 0.0132 0.0132
+expect_candidate 394.0 1.0 1.0 1.0 1.0 0 0.0132 0.1053 0.0132
+expect_candidate 502.0 1.0 1.0 1.0 1.0 0 0.0133 0.0267 0.0133
+expect_candidate 597.0 1.0 1.0 1.0 1.0 0 0.1184 0.1711 0.1184
+expect_candidate 642.0 1.0 1.0 0.8824 0.9647 1 0.1081 0.0946 0.0946
+expect_candidate 651.0 1.0 1.0 1.0 0.9529 3 0.1081 0.4189 0.1081
+expect_geometry 7 6
+expect_count 7
+expect_tuned 49.0 201.88 301.88 394.5 502.52 597.5 643.18 723.0
+expect_added 
+expect_demoted 
+end
+system s01-p002o3 51.0 725.0 581.0 666.0 6 6
+raw 51.0 2 1.0 unknown
+raw 139.0 2 0.9354 thin
+raw 224.0 2 0.9429 thin
+raw 342.0 2 0.9429 thin
+raw 487.0 2 0.9386 thin
+raw 575.0 2 0.9418 thin
+raw 725.0 2 1.0 unknown
+expect_candidate 137.0 1.0 1.0 1.0 1.0 0 0.04 0.08 0.04
+expect_candidate 222.0 1.0 1.0 1.0 1.0 0 0.0759 0.0759 0.0759
+expect_candidate 341.0 1.0 1.0 1.0 0.9882 1 0.039 0.0519 0.039
+expect_candidate 486.0 1.0 1.0 1.0 0.9882 1 0.0513 0.0513 0.0513
+expect_candidate 573.0 1.0 1.0 1.0 0.9882 1 0.04 0.0133 0.0133
+expect_geometry 6 5
+expect_count 6
+expect_tuned 51.0 138.0 223.0 341.5 486.5 574.0 725.0
+expect_added 
+expect_demoted 
+end
+system s01-p002o4 49.0 725.0 733.0 826.0 5 5
+raw 49.0 2 1.0 unknown
+raw 262.0 2 0.9418 thin
+raw 382.0 2 0.9423 thin
+raw 497.5 2 0.9226 thin
+raw 614.0 2 0.9317 thin
+raw 725.0 2 1.0 unknown
+anchor 382.0 55
+expect_candidate 260.0 1.0 1.0 1.0 1.0 0 0.0366 0.0366 0.0366
+expect_candidate 380.0 1.0 1.0 1.0 1.0 0 0.0814 0.0349 0.0349
+expect_candidate 496.0 1.0 1.0 1.0 1.0 0 0.0235 0.2471 0.0235
+expect_candidate 613.0 1.0 1.0 0.9474 0.9785 1 0.0361 0.0361 0.0361
+expect_geometry 5 4
+expect_count 5
+expect_tuned 49.0 261.0 381.04 496.75 613.5 725.0
+expect_added 
+expect_demoted 
+end
+system s01-p002o5 49.0 724.0 892.0 988.0 5 5
+raw 49.0 2 1.0 unknown
+raw 226.75 2 0.922 thin
+raw 343.0 2 0.9399 thin
+raw 462.5 2 0.9332 thin
+raw 599.0 2 0.9021 thin
+raw 724.0 2 1.0 unknown
+anchor 343.0 60
+expect_candidate 125.0 0.7083 0.8125 0.65 0.5729 19 0.2556 0.1 0.1
+expect_candidate 177.0 0.75 0.75 0.55 0.5417 23 0.2907 0.093 0.093
+expect_candidate 225.0 1.0 1.0 1.0 1.0 0 0.0341 0.0341 0.0341
+expect_candidate 341.0 1.0 1.0 1.0 1.0 0 0.0341 0.0568 0.0341
+expect_candidate 461.0 1.0 1.0 1.0 1.0 0 0.0795 0.0227 0.0227
+expect_candidate 599.0 1.0 1.0 0.8 0.9167 3 0.0581 0.0814 0.0581
+expect_geometry 5 4
+expect_count 5
+expect_tuned 49.0 225.88 342.04 461.75 599.0 724.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-03.png
+system s01-p003o0 45.0 718.0 78.0 175.0 3 2
+raw 45.0 2 1.0 unknown
+raw 588.0 2 0.9361 thin
+raw 718.0 2 1.0 unknown
+anchor 346.0 65
+expect_candidate 222.0 1.0 1.0 1.0 1.0 0 0.0909 0.0682 0.0682
+expect_candidate 343.0 1.0 1.0 1.0 0.9897 1 0.0795 0.0227 0.0227
+expect_candidate 467.0 1.0 1.0 1.0 0.9897 1 0.0227 0.0909 0.0227
+expect_candidate 587.0 1.0 1.0 1.0 0.9897 1 0.0581 0.0465 0.0465
+expect_geometry 5 4
+expect_count 5
+expect_tuned 45.0 222.0 343.23 467.0 587.5 718.0
+expect_added 222.0 343.23 467.0
+expect_demoted 
+end
+system s01-p003o1 42.0 717.0 239.0 334.0 6 2
+raw 42.0 2 1.0 unknown
+raw 230.5 2 0.9361 thin
+raw 717.0 2 1.0 unknown
+anchor 348.1 70
+expect_candidate 229.0 1.0 1.0 1.0 1.0 0 0.0595 0.0238 0.0238
+expect_candidate 239.0 0.875 0.8958 0.5789 0.6 14 0.069 0.3448 0.069
+expect_candidate 266.0 0.8333 0.8542 0.5789 0.6211 8 0.0741 0.2963 0.0741
+expect_candidate 347.0 1.0 1.0 1.0 1.0 0 0.0238 0.1071 0.0238
+expect_candidate 450.0 0.75 0.8333 0.6316 0.6526 19 0.075 0.3875 0.075
+expect_candidate 477.0 1.0 1.0 1.0 1.0 0 0.0476 0.0476 0.0476
+expect_candidate 486.0 0.75 0.7917 0.7368 0.5789 12 0.0476 0.2381 0.0476
+expect_candidate 513.0 0.7083 0.75 0.7368 0.5579 13 0.0385 0.2051 0.0385
+expect_candidate 594.0 1.0 1.0 1.0 1.0 0 0.0476 0.0238 0.0238
+expect_candidate 690.0 0.75 0.7917 0.6316 0.5579 19 0.0494 0.2593 0.0494
+expect_geometry 5 4
+expect_count 5
+expect_tuned 42.0 229.75 347.09 477.0 594.0 717.0
+expect_added 347.09 477.0 594.0
+expect_demoted 
+end
+system s01-p003o2 40.0 717.0 396.0 492.0 4 1
+raw 40.0 2 1.0 unknown
+raw 717.0 2 1.0 unknown
+anchor 338.6 75
+expect_candidate 217.0 1.0 1.0 1.0 1.0 0 0.023 0.023 0.023
+expect_candidate 309.0 0.7083 0.7292 0.9 0.5625 14 0.0843 0.2651 0.0843
+expect_candidate 338.0 1.0 1.0 1.0 1.0 0 0.0588 0.0353 0.0353
+expect_candidate 347.0 0.7917 0.7917 0.9 0.6458 13 0.0588 0.3176 0.0588
+expect_candidate 461.0 1.0 1.0 1.0 1.0 0 0.0 0.0118 0.0
+expect_candidate 589.0 1.0 1.0 1.0 1.0 0 0.0 0.0 0.0
+expect_geometry 5 4
+expect_count 5
+expect_tuned 40.0 217.0 338.05 461.0 589.0 717.0
+expect_added 217.0 338.05 461.0 589.0
+expect_demoted 
+end
+system s01-p003o3 38.0 717.0 561.0 655.0 6 4
+raw 38.0 2 1.0 unknown
+raw 334.5 2 0.935 thin
+raw 465.5 2 0.9374 thin
+raw 581.5 2 0.9213 thin
+raw 717.0 2 1.0 unknown
+anchor 334.5 80
+expect_candidate 105.0 0.7917 0.8542 1.0 0.734 8 0.0238 0.2976 0.0238
+expect_candidate 213.0 1.0 1.0 1.0 1.0 0 0.0241 0.1687 0.0241
+expect_candidate 333.0 1.0 1.0 1.0 1.0 0 0.1905 0.0595 0.0595
+expect_candidate 464.0 1.0 1.0 1.0 1.0 0 0.0238 0.0238 0.0238
+expect_candidate 580.0 1.0 1.0 1.0 1.0 0 0.0361 0.0241 0.0241
+expect_geometry 5 4
+expect_count 5
+expect_tuned 38.0 213.0 333.78 464.75 580.75 717.0
+expect_added 213.0
+expect_demoted 
+end
+system s01-p003o4 32.0 715.0 728.0 815.0 5 5
+raw 32.0 2 1.0 unknown
+raw 219.75 2 0.9277 thin
+raw 345.75 2 0.9414 thin
+raw 461.5 2 0.9364 thin
+raw 588.5 2 0.93 thin
+raw 715.0 2 1.0 unknown
+anchor 345.75 85
+expect_candidate 35.0 1.0 1.0 1.0 1.0 0 0.5632 0.2069 0.2069
+expect_candidate 219.0 1.0 1.0 1.0 1.0 0 0.0617 0.1481 0.0617
+expect_candidate 345.0 1.0 1.0 1.0 1.0 0 0.1481 0.0247 0.0247
+expect_candidate 460.0 1.0 1.0 1.0 1.0 0 0.0128 0.1154 0.0128
+expect_candidate 587.0 1.0 1.0 1.0 1.0 0 0.026 0.026 0.026
+expect_geometry 5 4
+expect_count 5
+expect_tuned 32.0 219.38 345.39 460.75 587.75 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p003o5 35.0 714.0 888.0 976.0 5 4
+raw 35.0 2 1.0 unknown
+raw 207.5 2 0.9366 thin
+raw 327.0 2 0.9417 thin
+raw 448.0 2 0.9408 thin
+raw 714.0 2 1.0 unknown
+anchor 327.0 90
+expect_candidate 206.0 1.0 1.0 1.0 1.0 0 0.038 0.0253 0.0253
+expect_candidate 297.0 0.9091 0.9545 0.5556 0.7045 11 0.2375 0.1875 0.1875
+expect_candidate 326.0 1.0 1.0 1.0 1.0 0 0.05 0.1 0.05
+expect_candidate 399.0 0.7273 0.7727 0.6667 0.5227 15 0.275 0.175 0.175
+expect_candidate 447.0 1.0 1.0 1.0 1.0 0 0.038 0.0633 0.038
+expect_candidate 565.0 1.0 1.0 1.0 1.0 0 0.0886 0.0886 0.0886
+expect_candidate 640.0 1.0 1.0 1.0 1.0 0 0.0247 0.037 0.0247
+expect_geometry 6 5
+expect_count 6
+expect_tuned 35.0 206.75 326.52 447.5 565.0 640.0 714.0
+expect_added 565.0 640.0
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-04.png
+system s01-p004o0 56.0 729.0 98.0 192.0 5 4
+raw 56.0 2 1.0 unknown
+raw 279.75 2 0.9136 thin
+raw 419.5 2 0.938 thin
+raw 582.75 2 0.9204 thin
+raw 729.0 2 1.0 unknown
+anchor 279.75 95
+expect_candidate 279.0 1.0 1.0 1.0 1.0 0 0.0482 0.0 0.0
+expect_candidate 418.0 1.0 1.0 1.0 1.0 0 0.0238 0.0 0.0
+expect_candidate 582.0 1.0 1.0 0.95 0.9894 1 0.0353 0.0235 0.0235
+expect_candidate 596.0 0.7917 0.7917 0.7 0.5745 17 0.3333 0.1905 0.1905
+expect_geometry 4 3
+expect_count 4
+expect_tuned 56.0 279.39 418.75 582.38 729.0
+expect_added 
+expect_demoted 
+end
+system s01-p004o1 56.0 729.0 258.0 353.0 3 3
+raw 56.0 2 1.0 unknown
+raw 287.5 2 0.9063 thin
+raw 565.5 2 0.9377 thin
+raw 729.0 2 1.0 unknown
+anchor 452.1 100
+expect_candidate 286.0 1.0 1.0 1.0 1.0 0 0.0241 0.0241 0.0241
+expect_candidate 452.0 1.0 1.0 1.0 1.0 0 0.0581 0.0581 0.0581
+expect_candidate 564.0 1.0 1.0 1.0 0.9895 1 0.0233 0.0233 0.0233
+expect_geometry 4 3
+expect_count 4
+expect_tuned 56.0 286.75 452.01 564.75 729.0
+expect_added 452.01
+expect_demoted 
+end
+system s01-p004o2 54.0 728.0 418.0 512.0 5 4
+raw 54.0 2 1.0 unknown
+raw 238.0 2 0.9289 thin
+raw 409.25 2 0.9404 thin
+raw 566.5 2 0.9376 thin
+raw 728.0 2 1.0 unknown
+anchor 566.5 105
+expect_candidate 237.0 1.0 1.0 1.0 1.0 0 0.0698 0.0465 0.0465
+expect_candidate 408.0 1.0 1.0 1.0 1.0 0 0.0476 0.0595 0.0476
+expect_candidate 565.0 1.0 1.0 1.0 1.0 0 0.0349 0.0349 0.0349
+expect_geometry 4 3
+expect_count 4
+expect_tuned 54.0 237.5 408.62 565.78 728.0
+expect_added 
+expect_demoted 
+end
+system s01-p004o3 54.0 727.0 576.0 671.0 5 4
+raw 54.0 2 1.0 unknown
+raw 227.0 2 0.929 thin
+raw 461.0 2 0.9414 thin
+raw 591.5 2 0.9291 thin
+raw 727.0 2 1.0 unknown
+anchor 591.5 110
+expect_candidate 225.0 1.0 1.0 1.0 1.0 0 0.0488 0.0732 0.0488
+expect_candidate 349.0 1.0 1.0 1.0 1.0 0 0.0244 0.0 0.0
+expect_candidate 460.0 1.0 1.0 1.0 1.0 0 0.1786 0.0119 0.0119
+expect_candidate 590.0 1.0 1.0 1.0 1.0 0 0.0238 0.0357 0.0238
+expect_geometry 5 4
+expect_count 5
+expect_tuned 54.0 226.0 349.0 460.5 590.78 727.0
+expect_added 349.0
+expect_demoted 
+end
+system s01-p004o4 53.0 727.0 738.0 822.0 4 4
+raw 53.0 2 1.0 unknown
+raw 271.25 2 0.9374 thin
+raw 421.75 2 0.9346 thin
+raw 564.5 2 0.9348 thin
+raw 727.0 2 1.0 unknown
+anchor 727.0 115
+expect_candidate 270.0 1.0 1.0 1.0 1.0 0 0.0411 0.0548 0.0411
+expect_candidate 420.0 1.0 1.0 1.0 1.0 0 0.0676 0.0541 0.0541
+expect_candidate 563.0 1.0 1.0 1.0 0.9881 1 0.027 0.027 0.027
+expect_geometry 4 3
+expect_count 4
+expect_tuned 53.0 270.62 420.88 563.75 727.0
+expect_added 
+expect_demoted 
+end
+system s01-p004o5 53.0 725.0 886.0 978.0 5 4
+raw 53.0 2 1.0 unknown
+raw 336.0 2 0.9438 thin
+raw 454.5 2 0.9385 thin
+raw 594.0 2 0.9025 thin
+raw 725.0 2 1.0 unknown
+anchor 725.0 120
+expect_candidate 221.0 1.0 1.0 1.0 1.0 0 0.0 0.0482 0.0
+expect_candidate 334.0 1.0 1.0 1.0 1.0 0 0.0843 0.0361 0.0361
+expect_candidate 453.0 1.0 1.0 1.0 1.0 0 0.0824 0.0235 0.0235
+expect_candidate 593.0 1.0 1.0 1.0 1.0 0 0.0238 0.0119 0.0119
+expect_geometry 5 4
+expect_count 5
+expect_tuned 53.0 221.0 335.0 453.75 593.5 725.0
+expect_added 221.0
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-05.png
+system s01-p005o0 39.0 713.0 80.0 168.0 5 4
+raw 39.0 2 1.0 unknown
+raw 218.0 2 0.9306 thin
+raw 455.5 2 0.9386 thin
+raw 580.0 2 0.943 thin
+raw 713.0 2 1.0 unknown
+anchor 713.0 125
+expect_candidate 217.0 1.0 1.0 1.0 1.0 0 0.0375 0.0375 0.0375
+expect_candidate 339.0 1.0 1.0 1.0 1.0 0 0.0253 0.038 0.0253
+expect_candidate 454.0 0.9091 0.9545 1.0 0.9659 2 0.0506 0.0506 0.0506
+expect_candidate 579.0 1.0 1.0 1.0 1.0 0 0.0385 0.0385 0.0385
+expect_geometry 5 4
+expect_count 5
+expect_tuned 39.0 217.5 339.0 455.41 579.5 713.0
+expect_added 339.0
+expect_demoted 
+end
+system s01-p005o1 39.0 715.0 233.0 316.0 4 4
+raw 39.0 2 1.0 unknown
+raw 244.0 2 0.943 thin
+raw 400.5 2 0.9266 thin
+raw 565.75 2 0.9387 thin
+raw 715.0 2 1.0 unknown
+expect_candidate 242.0 1.0 1.0 1.0 1.0 0 0.0405 0.0405 0.0405
+expect_candidate 399.0 1.0 1.0 1.0 1.0 0 0.0526 0.0658 0.0526
+expect_candidate 564.0 1.0 1.0 1.0 1.0 0 0.0405 0.027 0.027
+expect_geometry 4 3
+expect_count 4
+expect_tuned 39.0 243.0 399.75 564.88 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p005o2 38.0 715.0 387.0 472.0 4 4
+raw 38.0 2 1.0 unknown
+raw 346.0 2 0.9402 thin
+raw 471.0 2 0.9435 thin
+raw 585.75 2 0.9389 thin
+raw 715.0 2 1.0 unknown
+anchor 227.3 130
+expect_candidate 225.0 1.0 1.0 1.0 1.0 0 0.04 0.0267 0.0267
+expect_candidate 345.0 1.0 1.0 1.0 1.0 0 0.0263 0.0395 0.0263
+expect_candidate 470.0 1.0 1.0 1.0 1.0 0 0.026 0.026 0.026
+expect_candidate 584.0 1.0 1.0 1.0 1.0 0 0.0395 0.0395 0.0395
+expect_geometry 5 4
+expect_count 5
+expect_tuned 38.0 225.18 345.5 470.5 584.88 715.0
+expect_added 225.18
+expect_demoted 
+end
+system s01-p005o3 39.0 715.0 544.0 636.0 6 5
+raw 39.0 2 1.0 unknown
+raw 216.5 2 0.9311 thin
+raw 340.0 2 0.943 thin
+raw 458.75 2 0.9359 thin
+raw 586.25 2 0.9384 thin
+raw 715.0 2 1.0 unknown
+anchor 216.5 135
+expect_candidate 81.0 0.7826 0.8913 0.6111 0.5978 19 0.3049 0.2073 0.2073
+expect_candidate 98.0 0.7826 0.7826 0.6111 0.5326 6 0.1325 0.2651 0.1325
+expect_candidate 215.0 1.0 1.0 1.0 1.0 0 0.037 0.037 0.037
+expect_candidate 339.0 1.0 1.0 1.0 1.0 0 0.0247 0.0247 0.0247
+expect_candidate 457.0 1.0 1.0 1.0 1.0 0 0.0125 0.0375 0.0125
+expect_candidate 585.0 1.0 1.0 1.0 1.0 0 0.0123 0.0247 0.0123
+expect_geometry 5 4
+expect_count 5
+expect_tuned 39.0 215.78 339.5 457.88 585.62 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p005o4 38.0 716.0 707.0 801.0 6 5
+raw 38.0 2 1.0 unknown
+raw 195.75 2 0.9343 thin
+raw 291.5 2 0.9347 thin
+raw 397.0 2 0.9378 thin
+raw 491.75 2 0.9394 thin
+raw 716.0 2 1.0 unknown
+anchor 195.75 140
+anchor 716.0 145
+expect_candidate 195.0 1.0 1.0 1.0 1.0 0 0.0952 0.0238 0.0238
+expect_candidate 290.0 1.0 1.0 1.0 1.0 0 0.0471 0.0706 0.0471
+expect_candidate 301.0 0.7917 0.8125 0.55 0.5426 18 0.1071 0.2024 0.1071
+expect_candidate 396.0 1.0 1.0 1.0 1.0 0 0.093 0.0465 0.0465
+expect_candidate 490.0 1.0 1.0 1.0 1.0 0 0.0357 0.0238 0.0238
+expect_candidate 600.0 1.0 1.0 1.0 1.0 0 0.0588 0.0824 0.0588
+expect_geometry 6 5
+expect_count 6
+expect_tuned 38.0 195.39 290.75 396.5 490.88 600.0 716.0
+expect_added 600.0
+expect_demoted 
+end
+system s01-p005o5 36.0 715.0 872.0 965.0 7 5
+raw 36.0 2 1.0 unknown
+raw 138.0 2 0.9416 thin
+raw 299.0 2 0.9359 thin
+raw 398.25 2 0.9255 thin
+raw 628.0 2 0.9435 thin
+raw 715.0 2 1.0 unknown
+anchor 507.7 150
+expect_candidate 136.0 1.0 1.0 1.0 1.0 0 0.0238 0.0238 0.0238
+expect_candidate 242.0 1.0 1.0 1.0 1.0 0 0.0353 0.0235 0.0235
+expect_candidate 297.0 1.0 1.0 1.0 1.0 0 0.0118 0.1412 0.0118
+expect_candidate 397.0 1.0 1.0 1.0 1.0 0 0.0118 0.0235 0.0118
+expect_candidate 435.0 1.0 1.0 0.5789 0.8495 11 0.3103 0.3908 0.3103
+expect_candidate 479.0 1.0 1.0 0.6316 0.9032 9 0.1647 0.4235 0.1647
+expect_candidate 505.0 1.0 1.0 1.0 1.0 0 0.0361 0.0482 0.0361
+expect_candidate 627.0 1.0 1.0 1.0 1.0 0 0.0241 0.0361 0.0241
+expect_candidate 710.0 1.0 1.0 1.0 1.0 0 0.1398 1.0 0.1398
+expect_geometry 7 6
+expect_count 7
+expect_tuned 36.0 137.0 242.0 298.0 397.62 505.21 627.5 715.0
+expect_added 242.0 505.21
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-06.png
+system s01-p006o0 81.0 730.0 90.0 183.0 2 2
+raw 81.0 2 1.0 unknown
+raw 356.75 2 0.9246 thin
+raw 730.0 2 1.0 unknown
+expect_candidate 197.0 1.0 1.0 1.0 1.0 0 0.0238 0.0119 0.0119
+expect_candidate 218.0 0.7826 0.8478 0.5789 0.5914 20 0.3929 0.0357 0.0357
+expect_candidate 311.0 0.913 0.9348 0.5789 0.6667 7 0.4198 0.1111 0.1111
+expect_candidate 355.0 1.0 1.0 1.0 1.0 0 0.0119 0.0357 0.0119
+expect_candidate 525.0 1.0 1.0 1.0 1.0 0 0.0238 0.0238 0.0238
+expect_geometry 4 3
+expect_count 4
+expect_tuned 81.0 197.0 355.88 525.0 730.0
+expect_added 197.0 525.0
+expect_demoted 
+end
+system s01-p006o1 55.0 732.0 245.0 336.0 4 3
+raw 55.0 2 1.0 unknown
+raw 281.5 2 0.9236 thin
+raw 558.25 2 0.9162 thin
+raw 732.0 2 1.0 unknown
+anchor 418.1 5
+expect_candidate 280.0 1.0 1.0 1.0 1.0 0 0.0357 0.0476 0.0357
+expect_candidate 299.0 0.7826 0.8043 0.7895 0.5824 21 0.3095 0.0476 0.0476
+expect_candidate 380.0 0.913 0.9565 0.6842 0.6593 10 0.4643 0.0952 0.0952
+expect_candidate 418.0 1.0 1.0 1.0 1.0 0 0.0119 0.0238 0.0119
+expect_candidate 557.0 1.0 1.0 1.0 1.0 0 0.025 0.025 0.025
+expect_geometry 4 3
+expect_count 4
+expect_tuned 55.0 280.75 418.01 557.62 732.0
+expect_added 418.01
+expect_demoted 
+end
+system s01-p006o2 56.0 730.0 404.0 498.0 3 2
+raw 56.0 2 1.0 unknown
+raw 253.0 2 0.9434 thin
+raw 730.0 2 1.0 unknown
+anchor 730.0 10
+expect_candidate 107.0 0.75 0.7708 0.55 0.5319 17 0.0595 0.4405 0.0595
+expect_candidate 251.0 1.0 1.0 1.0 1.0 0 0.0116 0.0233 0.0116
+expect_candidate 488.0 1.0 1.0 1.0 1.0 0 0.0449 0.0562 0.0449
+expect_geometry 3 2
+expect_count 3
+expect_tuned 56.0 252.0 488.0 730.0
+expect_added 488.0
+expect_demoted 
+end
+system s01-p006o3 56.0 731.0 566.0 660.0 3 3
+raw 56.0 2 1.0 unknown
+raw 320.0 2 0.9434 thin
+raw 554.5 2 0.9347 thin
+raw 731.0 2 1.0 unknown
+expect_candidate 318.0 1.0 1.0 1.0 1.0 0 0.046 0.023 0.023
+expect_candidate 553.0 1.0 1.0 1.0 0.9894 1 0.0349 0.0465 0.0349
+expect_geometry 3 2
+expect_count 3
+expect_tuned 56.0 319.0 553.75 731.0
+expect_added 
+expect_demoted 
+end
+system s01-p006o4 56.0 729.0 728.0 821.0 3 2
+raw 56.0 2 1.0 unknown
+raw 534.75 2 0.9291 thin
+raw 729.0 2 1.0 unknown
+anchor 431.1 15
+expect_candidate 206.0 1.0 1.0 1.0 1.0 0 0.0241 0.0241 0.0241
+expect_candidate 428.0 1.0 1.0 1.0 1.0 0 0.0814 0.0581 0.0581
+expect_candidate 533.0 1.0 1.0 1.0 1.0 0 0.0471 0.0588 0.0471
+expect_geometry 4 3
+expect_count 4
+expect_tuned 56.0 206.0 428.24 533.88 729.0
+expect_added 206.0 428.24
+expect_demoted 
+end
+system s01-p006o5 54.0 728.0 898.0 992.0 4 3
+raw 54.0 2 1.0 unknown
+raw 310.0 2 0.9434 thin
+raw 531.5 2 0.9378 thin
+raw 728.0 2 1.0 unknown
+anchor 728.0 20
+expect_candidate 308.0 1.0 1.0 1.0 1.0 0 0.0 0.0 0.0
+expect_candidate 530.0 1.0 1.0 1.0 1.0 0 0.0233 0.0116 0.0116
+expect_candidate 676.0 0.75 0.8542 1.0 0.6596 5 0.0476 0.2619 0.0476
+expect_geometry 3 2
+expect_count 3
+expect_tuned 54.0 309.0 530.75 728.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-07.png
+system s01-p007o0 46.0 718.0 98.0 185.0 2 2
+raw 46.0 2 1.0 unknown
+raw 511.0 2 0.9437 thin
+raw 718.0 2 1.0 unknown
+expect_candidate 296.0 1.0 1.0 1.0 1.0 0 0.1975 0.0494 0.0494
+expect_candidate 510.0 1.0 1.0 1.0 1.0 0 0.0253 0.0127 0.0127
+expect_geometry 3 2
+expect_count 3
+expect_tuned 46.0 296.0 510.5 718.0
+expect_added 296.0
+expect_demoted 
+end
+system s01-p007o1 44.0 719.0 264.0 344.0 3 2
+raw 44.0 2 1.0 unknown
+raw 365.5 2 0.9404 thin
+raw 719.0 2 1.0 unknown
+anchor 719.0 25
+expect_candidate 364.0 1.0 1.0 1.0 1.0 0 0.0417 0.0278 0.0278
+expect_candidate 386.0 0.8 0.9 0.7222 0.7625 10 0.2958 0.2254 0.2254
+expect_geometry 2 1
+expect_count 3
+expect_tuned 44.0 364.75 719.0
+expect_added 
+expect_demoted 
+end
+system s01-p007o2 43.0 718.0 409.0 501.0 2 3
+raw 43.0 2 1.0 unknown
+raw 386.25 2 0.6883 thin
+raw 497.0 2 0.9432 thin
+raw 718.0 2 1.0 unknown
+expect_candidate 95.0 1.0 1.0 0.5556 0.8587 8 0.1928 0.5301 0.1928
+expect_candidate 387.0 0.913 0.9565 0.7778 0.8478 6 0.1325 0.4578 0.1325
+expect_candidate 496.0 1.0 1.0 1.0 1.0 0 0.0241 0.012 0.012
+expect_candidate 587.0 0.8696 0.9348 1.0 0.8478 5 0.3765 0.0706 0.0706
+expect_candidate 620.0 0.9565 0.9783 1.0 0.8478 5 0.2658 0.038 0.038
+expect_candidate 653.0 1.0 1.0 1.0 0.913 4 0.4938 0.0741 0.0741
+expect_candidate 687.0 1.0 1.0 1.0 0.8804 5 0.4286 0.0476 0.0476
+expect_geometry 3 2
+expect_count 3
+expect_tuned 43.0 386.25 496.5 718.0
+expect_added 
+expect_demoted 
+end
+system s01-p007o3 42.0 719.0 562.0 645.0 2 2
+raw 42.0 2 1.0 unknown
+raw 372.0 2 0.9391 thin
+raw 719.0 2 1.0 unknown
+expect_candidate 246.0 1.0 1.0 1.0 0.8675 5 0.4167 0.0972 0.0972
+expect_candidate 371.0 1.0 1.0 1.0 1.0 0 0.027 0.0135 0.0135
+expect_candidate 392.0 1.0 1.0 1.0 0.8313 5 0.2027 0.0946 0.0946
+expect_geometry 2 1
+expect_count 2
+expect_tuned 42.0 371.5 719.0
+expect_added 
+expect_demoted 
+end
+system s01-p007o4 42.0 718.0 715.0 817.0 3 3
+raw 42.0 2 1.0 unknown
+raw 341.0 2 0.94 thin
+raw 601.25 2 0.9415 thin
+raw 718.0 2 1.0 unknown
+anchor 341.0 30
+expect_candidate 340.0 1.0 1.0 1.0 0.9902 1 0.0326 0.0543 0.0326
+expect_candidate 400.0 0.8462 0.9231 0.8 0.7353 9 0.3077 0.2418 0.2418
+expect_candidate 600.0 1.0 1.0 1.0 0.9608 2 0.0435 0.0435 0.0435
+expect_geometry 3 2
+expect_count 3
+expect_tuned 42.0 340.52 600.62 718.0
+expect_added 
+expect_demoted 
+end
+system s01-p007o5 41.0 719.0 879.0 971.0 3 3
+raw 41.0 2 1.0 unknown
+raw 226.0 2 0.9437 thin
+raw 444.75 2 0.9382 thin
+raw 719.0 2 1.0 unknown
+anchor 719.0 35
+expect_candidate 224.0 1.0 1.0 1.0 1.0 0 0.0125 0.1625 0.0125
+expect_candidate 443.0 1.0 1.0 1.0 1.0 0 0.037 0.037 0.037
+expect_geometry 3 2
+expect_count 3
+expect_tuned 41.0 225.0 443.88 719.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-08.png
+system s01-p008o0 52.0 727.0 89.0 177.0 2 2
+raw 52.0 2 1.0 unknown
+raw 415.5 2 0.9329 thin
+raw 727.0 2 1.0 unknown
+expect_candidate 414.0 1.0 1.0 1.0 1.0 0 0.1646 0.0127 0.0127
+expect_geometry 2 1
+expect_count 2
+expect_tuned 52.0 414.75 727.0
+expect_added 
+expect_demoted 
+end
+system s01-p008o1 54.0 728.0 250.0 339.0 2 2
+raw 54.0 2 1.0 unknown
+raw 432.75 2 0.9257 thin
+raw 728.0 2 1.0 unknown
+expect_candidate 431.0 1.0 1.0 1.0 1.0 0 0.025 0.025 0.025
+expect_geometry 2 1
+expect_count 2
+expect_tuned 54.0 431.88 728.0
+expect_added 
+expect_demoted 
+end
+system s01-p008o2 55.0 729.0 410.0 496.0 2 2
+raw 55.0 2 1.0 unknown
+raw 413.0 2 0.929 thin
+raw 729.0 2 1.0 unknown
+anchor 413.0 40
+expect_candidate 412.0 1.0 1.0 1.0 1.0 0 0.039 0.026 0.026
+expect_geometry 2 1
+expect_count 2
+expect_tuned 55.0 412.52 729.0
+expect_added 
+expect_demoted 
+end
+system s01-p008o3 56.0 729.0 566.0 655.0 2 2
+raw 56.0 2 1.0 unknown
+raw 414.0 2 0.9253 thin
+raw 729.0 2 1.0 unknown
+expect_candidate 413.0 1.0 1.0 0.8421 0.9663 2 0.037 0.037 0.037
+expect_geometry 2 1
+expect_count 2
+expect_tuned 56.0 413.94 729.0
+expect_added 
+expect_demoted 
+end
+system s01-p008o4 57.0 729.0 721.0 809.0 2 2
+raw 57.0 2 1.0 unknown
+raw 565.25 2 0.9127 thin
+raw 729.0 2 1.0 unknown
+anchor 729.0 45
+expect_candidate 267.0 0.8182 0.9091 0.7778 0.6364 10 0.2099 0.1605 0.1605
+expect_candidate 564.0 1.0 1.0 1.0 1.0 0 0.0769 0.0256 0.0256
+expect_geometry 2 1
+expect_count 2
+expect_tuned 57.0 564.62 729.0
+expect_added 
+expect_demoted 
+end
+system s01-p008o5 57.0 730.0 880.0 970.0 2 2
+raw 57.0 2 1.0 unknown
+raw 469.0 2 0.9296 thin
+raw 730.0 2 1.0 unknown
+expect_candidate 467.0 1.0 1.0 1.0 0.9889 1 0.037 0.037 0.037
+expect_geometry 2 1
+expect_count 2
+expect_tuned 57.0 468.0 730.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-09.png
+system s01-p009o0 42.0 714.0 82.0 177.0 2 2
+raw 42.0 2 1.0 unknown
+raw 397.25 2 0.695 thin
+raw 714.0 2 1.0 unknown
+expect_candidate 164.0 1.0 1.0 0.6316 0.6737 19 0.1829 0.1463 0.1463
+expect_candidate 224.0 1.0 1.0 0.6842 0.7579 17 0.2267 0.0533 0.0533
+expect_candidate 374.0 1.0 1.0 0.8421 0.9263 5 0.012 0.1084 0.012
+expect_geometry 1 0
+expect_count 2
+expect_tuned 42.0 374.0 714.0
+expect_added 374.0
+expect_demoted 397.25
+end
+system s01-p009o1 42.0 714.0 242.0 324.0 2 2
+raw 42.0 2 1.0 unknown
+raw 431.0 2 0.9408 thin
+raw 714.0 2 1.0 unknown
+expect_candidate 219.0 0.8 0.825 0.7222 0.6463 10 0.3429 0.3286 0.3286
+expect_candidate 430.0 1.0 1.0 1.0 1.0 0 0.0556 0.1667 0.0556
+expect_candidate 643.0 0.7 0.725 0.7222 0.6341 7 0.4429 0.1714 0.1714
+expect_geometry 2 1
+expect_count 2
+expect_tuned 42.0 430.5 714.0
+expect_added 
+expect_demoted 
+end
+system s01-p009o2 40.0 714.0 376.0 467.0 2 2
+raw 40.0 2 1.0 unknown
+raw 318.75 2 0.9415 thin
+raw 714.0 2 1.0 unknown
+expect_candidate 248.0 0.8261 0.913 0.7368 0.7253 15 0.2963 0.0741 0.0741
+expect_candidate 286.0 0.9565 0.9783 1.0 0.9011 4 0.2805 0.1585 0.1585
+expect_candidate 317.0 1.0 1.0 1.0 0.989 1 0.061 0.0488 0.0488
+expect_candidate 340.0 0.8261 0.913 0.9474 0.7692 9 0.3373 0.1205 0.1205
+expect_candidate 541.0 0.8696 0.9348 1.0 0.8681 5 0.321 0.1358 0.1358
+expect_geometry 2 1
+expect_count 2
+expect_tuned 40.0 317.88 714.0
+expect_added 
+expect_demoted 
+end
+system s01-p009o3 41.0 715.0 543.0 637.0 2 2
+raw 41.0 2 1.0 unknown
+raw 417.5 2 0.9276 thin
+raw 715.0 2 1.0 unknown
+anchor 715.0 55
+expect_candidate 416.0 1.0 1.0 1.0 1.0 0 0.012 0.0482 0.012
+expect_geometry 2 1
+expect_count 2
+expect_tuned 41.0 416.75 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p009o4 36.0 716.0 698.0 780.0 2 2
+raw 36.0 2 1.0 unknown
+raw 494.0 2 0.9352 thin
+raw 716.0 2 1.0 unknown
+expect_candidate 39.0 1.0 1.0 1.0 1.0 0 0.6341 0.2317 0.2317
+expect_candidate 492.0 1.0 1.0 1.0 1.0 0 0.3425 0.0274 0.0274
+expect_candidate 506.0 0.8 0.9 0.5556 0.5976 12 0.2466 0.3151 0.2466
+expect_geometry 2 1
+expect_count 2
+expect_tuned 36.0 493.0 716.0
+expect_added 
+expect_demoted 
+end
+system s01-p009o5 40.0 713.0 848.0 937.0 3 3
+raw 40.0 2 1.0 unknown
+raw 343.0 2 0.9436 thin
+raw 620.0 2 0.9427 thin
+raw 713.0 2 1.0 unknown
+anchor 620.0 60
+expect_candidate 98.0 0.7273 0.8636 0.7368 0.7303 12 0.2436 0.0513 0.0513
+expect_candidate 341.0 1.0 1.0 1.0 1.0 0 0.0385 0.0385 0.0385
+expect_candidate 503.0 1.0 1.0 1.0 1.0 0 0.0253 0.2152 0.0253
+expect_candidate 550.0 0.8182 0.8182 0.7368 0.5843 10 0.375 0.175 0.175
+expect_candidate 618.0 1.0 1.0 1.0 1.0 0 0.1266 0.0506 0.0506
+expect_candidate 633.0 1.0 1.0 0.8421 0.9551 2 0.2208 0.7273 0.2208
+expect_candidate 709.0 1.0 1.0 1.0 1.0 0 0.1798 1.0 0.1798
+expect_geometry 4 3
+expect_count 4
+expect_tuned 40.0 342.0 503.0 619.04 713.0
+expect_added 503.0
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-10.png
+system s01-p010o0 74.0 725.0 91.0 182.0 9 6
+raw 74.0 2 1.0 unknown
+raw 169.25 2 0.9333 thin
+raw 277.5 2 0.9213 thin
+raw 399.5 2 0.9291 thin
+raw 616.25 2 0.92 thin
+raw 669.25 2 0.9301 thin
+raw 725.0 2 1.0 unknown
+anchor 450.7 5
+anchor 725.0 10
+expect_candidate 168.0 1.0 1.0 1.0 1.0 0 0.0123 0.0123 0.0123
+expect_candidate 222.0 1.0 1.0 1.0 1.0 0 0.0244 0.0366 0.0244
+expect_candidate 276.0 1.0 1.0 1.0 1.0 0 0.0375 0.0125 0.0125
+expect_candidate 290.0 0.7826 0.8913 0.6316 0.6703 11 0.1707 0.3537 0.1707
+expect_candidate 307.0 0.7826 0.8043 0.6316 0.5934 14 0.025 0.3 0.025
+expect_candidate 326.0 0.7826 0.8913 0.6842 0.6374 15 0.1728 0.3086 0.1728
+expect_candidate 339.0 1.0 1.0 1.0 1.0 0 0.0366 0.0366 0.0366
+expect_candidate 399.0 1.0 1.0 1.0 1.0 0 0.0238 0.0357 0.0238
+expect_candidate 453.0 1.0 1.0 1.0 1.0 0 0.0 0.0 0.0
+expect_candidate 507.0 1.0 1.0 1.0 1.0 0 0.0244 0.0488 0.0244
+expect_candidate 561.0 1.0 1.0 1.0 1.0 0 0.0122 0.0488 0.0122
+expect_candidate 615.0 1.0 1.0 1.0 1.0 0 0.0741 0.0988 0.0741
+expect_candidate 668.0 1.0 1.0 1.0 1.0 0 0.0247 0.0247 0.0247
+expect_geometry 11 10
+expect_count 11
+expect_tuned 74.0 168.62 222.0 276.75 339.0 399.25 452.82 507.0 561.0 615.62 668.62 725.0
+expect_added 222.0 339.0 452.82 507.0 561.0
+expect_demoted 
+end
+system s01-p010o1 47.0 724.0 246.0 338.0 12 12
+raw 47.0 2 1.0 unknown
+raw 157.75 2 0.9216 thin
+raw 219.0 2 0.9368 thin
+raw 266.75 2 0.9241 thin
+raw 310.0 2 0.9256 thin
+raw 339.5 2 0.9171 thin
+raw 397.75 2 0.9249 thin
+raw 449.5 2 0.9213 thin
+raw 510.5 2 0.9224 thin
+raw 562.5 2 0.9211 thin
+raw 613.5 2 0.9251 thin
+raw 675.0 2 0.9304 thin
+raw 724.0 2 1.0 unknown
+anchor 397.75 15
+anchor 675.0 20
+expect_candidate 156.0 1.0 1.0 1.0 1.0 0 0.012 0.1325 0.012
+expect_candidate 217.0 1.0 1.0 1.0 1.0 0 0.0824 0.0706 0.0706
+expect_candidate 266.0 1.0 1.0 1.0 1.0 0 0.0122 0.0122 0.0122
+expect_candidate 305.0 1.0 1.0 1.0 1.0 0 0.1463 1.0 0.1463
+expect_candidate 310.0 1.0 1.0 1.0 1.0 0 1.0 0.9518 0.9518
+expect_candidate 340.0 1.0 1.0 1.0 1.0 0 0.0241 0.0602 0.0241
+expect_candidate 396.0 1.0 1.0 1.0 1.0 0 0.0241 0.0361 0.0241
+expect_candidate 448.0 1.0 1.0 1.0 1.0 0 0.0366 0.0366 0.0366
+expect_candidate 509.0 1.0 1.0 1.0 1.0 0 0.0244 0.0244 0.0244
+expect_candidate 547.0 0.7826 0.8261 0.5556 0.587 15 0.0732 0.3171 0.0732
+expect_candidate 561.0 1.0 1.0 1.0 1.0 0 0.0366 0.061 0.0366
+expect_candidate 612.0 1.0 1.0 1.0 0.9891 1 0.0366 0.0976 0.0366
+expect_candidate 674.0 1.0 1.0 1.0 0.9891 1 0.061 0.1585 0.061
+expect_candidate 681.0 1.0 1.0 0.6111 0.8261 5 0.0854 0.3293 0.0854
+expect_geometry 12 11
+expect_count 12
+expect_tuned 47.0 156.88 218.0 266.38 308.33 339.75 396.91 448.75 509.75 561.75 612.75 674.52 724.0
+expect_added 
+expect_demoted 
+end
+system s01-p010o2 47.0 724.0 403.0 495.0 8 8
+raw 47.0 2 1.0 unknown
+raw 170.75 2 0.9277 thin
+raw 236.5 2 0.9174 thin
+raw 297.25 2 0.9156 thin
+raw 368.25 2 0.9241 thin
+raw 444.75 2 0.9339 thin
+raw 524.25 2 0.9287 thin
+raw 586.75 2 0.9265 thin
+raw 724.0 2 1.0 unknown
+anchor 368.25 25
+anchor 724.0 30
+expect_candidate 170.0 1.0 1.0 1.0 1.0 0 0.0976 0.0488 0.0488
+expect_candidate 236.0 1.0 1.0 1.0 0.9891 1 0.0595 0.0476 0.0476
+expect_candidate 260.0 0.7391 0.7826 0.5556 0.5109 18 0.1707 0.1098 0.1098
+expect_candidate 296.0 1.0 1.0 1.0 1.0 0 0.061 0.0244 0.0244
+expect_candidate 367.0 1.0 1.0 1.0 1.0 0 0.1481 0.037 0.037
+expect_candidate 444.0 1.0 1.0 1.0 1.0 0 0.3333 0.3333 0.3333
+expect_candidate 523.0 1.0 1.0 1.0 1.0 0 0.4405 0.0714 0.0714
+expect_candidate 571.0 1.0 1.0 1.0 0.8804 5 0.0741 0.2593 0.0741
+expect_candidate 586.0 1.0 1.0 1.0 1.0 0 0.037 0.0247 0.0247
+expect_candidate 595.0 1.0 1.0 1.0 0.8696 5 0.0247 0.2963 0.0247
+expect_candidate 613.0 1.0 1.0 1.0 0.8587 5 0.0494 0.284 0.0494
+expect_candidate 635.0 1.0 1.0 1.0 0.8913 4 0.1728 0.284 0.1728
+expect_candidate 651.0 1.0 1.0 1.0 1.0 0 0.0494 0.0617 0.0494
+expect_candidate 658.0 1.0 1.0 1.0 0.8696 5 0.0617 0.2593 0.0617
+expect_candidate 676.0 0.913 0.9565 1.0 0.8261 5 0.05 0.2125 0.05
+expect_geometry 9 8
+expect_count 9
+expect_tuned 47.0 170.38 236.25 296.62 367.65 444.38 523.62 586.38 651.0 724.0
+expect_added 651.0
+expect_demoted 
+end
+system s01-p010o3 48.0 724.0 560.0 651.0 10 10
+raw 48.0 2 1.0 unknown
+raw 172.75 2 0.9274 thin
+raw 236.25 2 0.9251 thin
+raw 321.5 2 0.9245 thin
+raw 386.0 2 0.9108 thin
+raw 438.75 2 0.9194 thin
+raw 504.0 2 0.9256 thin
+raw 556.0 2 0.932 thin
+raw 607.75 2 0.9309 thin
+raw 643.5 2 0.917 thin
+raw 724.0 2 1.0 unknown
+anchor 438.75 35
+anchor 724.0 40
+expect_candidate 172.0 1.0 1.0 1.0 1.0 0 0.0357 0.4524 0.0357
+expect_candidate 194.0 0.7391 0.7609 0.6842 0.5495 10 0.0494 0.3086 0.0494
+expect_candidate 235.0 1.0 1.0 1.0 1.0 0 0.0602 0.253 0.0602
+expect_candidate 320.0 1.0 1.0 1.0 1.0 0 0.1687 0.0241 0.0241
+expect_candidate 385.0 1.0 1.0 1.0 1.0 0 0.0357 0.0595 0.0357
+expect_candidate 438.0 1.0 1.0 1.0 1.0 0 0.0244 0.3659 0.0244
+expect_candidate 503.0 1.0 1.0 1.0 1.0 0 0.061 0.3293 0.061
+expect_candidate 555.0 1.0 1.0 1.0 1.0 0 0.0244 0.0854 0.0244
+expect_candidate 608.0 1.0 1.0 1.0 1.0 0 0.0732 0.2561 0.0732
+expect_candidate 642.0 1.0 1.0 1.0 1.0 0 0.0361 0.0361 0.0361
+expect_candidate 685.0 1.0 1.0 1.0 1.0 0 0.1728 1.0 0.1728
+expect_candidate 690.0 1.0 1.0 1.0 1.0 0 1.0 0.037 0.037
+expect_geometry 11 10
+expect_count 11
+expect_tuned 48.0 172.38 235.62 320.75 385.5 438.39 503.5 555.5 607.88 642.75 687.5 724.0
+expect_added 687.5
+expect_demoted 
+end
+system s01-p010o4 47.0 723.0 721.0 814.0 10 10
+raw 47.0 2 1.0 unknown
+raw 103.62 2 0.9253 thick
+raw 131.0 2 0.9333 thin
+raw 199.0 2 0.9368 thin
+raw 267.0 2 0.9362 thin
+raw 347.0 2 0.9339 thin
+raw 415.75 2 0.926 thin
+raw 495.0 2 0.9287 thin
+raw 568.0 2 0.9269 thin
+raw 646.0 2 0.9362 thin
+raw 723.0 2 1.0 unknown
+anchor 495.0 45
+expect_candidate 100.0 1.0 1.0 1.0 1.0 0 0.0361 0.988 0.0361
+expect_candidate 106.0 1.0 1.0 1.0 1.0 0 1.0 0.2143 0.2143
+expect_candidate 130.0 1.0 1.0 1.0 1.0 0 0.0476 0.0833 0.0476
+expect_candidate 198.0 1.0 1.0 1.0 1.0 0 0.2143 0.2976 0.2143
+expect_candidate 266.0 1.0 1.0 1.0 1.0 0 0.2024 0.0595 0.0595
+expect_candidate 345.0 1.0 1.0 1.0 1.0 0 0.0732 0.0488 0.0488
+expect_candidate 414.0 1.0 1.0 1.0 1.0 0 0.2048 0.0843 0.0843
+expect_candidate 494.0 1.0 1.0 1.0 1.0 0 0.369 0.0952 0.0952
+expect_candidate 567.0 1.0 1.0 1.0 1.0 0 0.2439 0.2561 0.2439
+expect_candidate 644.0 1.0 1.0 1.0 1.0 0 0.2439 0.0244 0.0244
+expect_geometry 10 9
+expect_count 10
+expect_tuned 47.0 103.62 131.0 198.5 266.5 346.0 414.88 494.52 567.5 645.0 723.0
+expect_added 
+expect_demoted 
+end
+system s01-p010o5 46.0 722.0 884.0 975.0 8 8
+raw 46.0 2 1.0 unknown
+raw 165.0 2 0.9304 thin
+raw 240.0 2 0.9297 thin
+raw 317.0 2 0.9297 thin
+raw 399.5 2 0.9248 thin
+raw 492.5 2 0.9209 thin
+raw 569.0 2 0.93 thin
+raw 644.0 2 0.9297 thin
+raw 722.0 2 1.0 unknown
+anchor 240.0 50
+anchor 644.0 55
+expect_candidate 163.0 1.0 1.0 1.0 1.0 0 0.3293 0.0488 0.0488
+expect_candidate 205.0 1.0 1.0 1.0 1.0 0 0.1585 1.0 0.1585
+expect_candidate 210.0 1.0 1.0 1.0 1.0 0 1.0 1.0 1.0
+expect_candidate 239.0 1.0 1.0 1.0 1.0 0 0.0247 0.0247 0.0247
+expect_candidate 316.0 1.0 1.0 1.0 1.0 0 0.2651 0.1807 0.1807
+expect_candidate 398.0 1.0 1.0 1.0 1.0 0 0.2738 0.2262 0.2262
+expect_candidate 491.0 1.0 1.0 1.0 1.0 0 0.2289 0.0241 0.0241
+expect_candidate 568.0 1.0 1.0 1.0 1.0 0 0.1687 0.0361 0.0361
+expect_candidate 643.0 1.0 1.0 1.0 1.0 0 0.2222 0.1605 0.1605
+expect_geometry 9 8
+expect_count 9
+expect_tuned 46.0 164.0 207.5 239.52 316.5 398.75 491.75 568.5 643.52 722.0
+expect_added 207.5
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-11.png
+system s01-p011o0 43.0 720.0 77.0 172.0 8 7
+raw 43.0 2 1.0 unknown
+raw 254.75 2 0.9274 thin
+raw 423.0 2 0.9294 thin
+raw 508.5 2 0.9239 thin
+raw 608.0 2 0.926 thin
+raw 643.0 2 0.9294 thin
+raw 682.5 2 0.9221 thin
+raw 720.0 2 1.0 unknown
+anchor 423.0 60
+anchor 720.0 65
+expect_candidate 168.0 1.0 1.0 1.0 1.0 0 0.3529 0.0353 0.0353
+expect_candidate 253.0 1.0 1.0 1.0 1.0 0 0.0941 0.0235 0.0235
+expect_candidate 338.0 1.0 1.0 1.0 0.9895 1 0.2941 0.0471 0.0471
+expect_candidate 421.0 1.0 1.0 1.0 1.0 0 0.1294 0.0353 0.0353
+expect_candidate 507.0 1.0 1.0 1.0 0.9684 1 0.0824 0.0588 0.0588
+expect_candidate 607.0 1.0 1.0 1.0 0.9789 1 0.0714 0.0714 0.0714
+expect_candidate 642.0 1.0 1.0 1.0 0.9895 1 0.0465 0.0581 0.0465
+expect_candidate 681.0 1.0 1.0 1.0 0.9895 1 0.0471 0.0706 0.0471
+expect_geometry 9 8
+expect_count 9
+expect_tuned 43.0 168.0 253.88 338.0 422.04 507.75 607.5 642.5 681.75 720.0
+expect_added 168.0 338.0
+expect_demoted 
+end
+system s01-p011o1 43.0 720.0 235.0 322.0 7 7
+raw 43.0 2 1.0 unknown
+raw 162.0 2 0.9285 thin
+raw 245.5 2 0.926 thin
+raw 334.5 2 0.9352 thin
+raw 411.5 2 0.936 thin
+raw 498.0 2 0.9294 thin
+raw 581.75 2 0.9265 thin
+raw 720.0 2 1.0 unknown
+anchor 498.0 70
+expect_candidate 160.0 1.0 1.0 1.0 1.0 0 0.2179 0.0641 0.0641
+expect_candidate 244.0 1.0 1.0 1.0 1.0 0 0.1923 0.0513 0.0513
+expect_candidate 333.0 1.0 1.0 1.0 1.0 0 0.1139 0.0506 0.0506
+expect_candidate 412.0 1.0 1.0 1.0 1.0 0 0.0256 0.0256 0.0256
+expect_candidate 497.0 1.0 1.0 1.0 1.0 0 0.3125 0.05 0.05
+expect_candidate 580.0 1.0 1.0 1.0 0.9885 1 0.2597 0.039 0.039
+expect_candidate 668.0 1.0 1.0 1.0 0.9885 1 0.3247 0.0649 0.0649
+expect_candidate 714.0 1.0 1.0 1.0 0.9885 1 0.2759 0.9885 0.2759
+expect_geometry 8 7
+expect_count 8
+expect_tuned 43.0 161.0 244.75 333.75 411.75 497.52 580.88 668.0 720.0
+expect_added 668.0
+expect_demoted 
+end
+system s01-p011o2 69.0 719.0 396.0 488.0 5 5
+raw 69.0 2 1.0 unknown
+raw 216.5 2 0.9239 thick
+raw 296.0 2 0.9294 thin
+raw 438.0 2 0.936 thin
+raw 576.0 2 0.9294 thin
+raw 719.0 2 1.0 unknown
+expect_candidate 212.0 1.0 1.0 1.0 1.0 0 0.0714 1.0 0.0714
+expect_candidate 217.0 1.0 1.0 1.0 1.0 0 1.0 0.2262 0.2262
+expect_candidate 295.0 1.0 1.0 1.0 1.0 0 0.1084 0.012 0.012
+expect_candidate 437.0 1.0 1.0 1.0 1.0 0 0.2353 0.0471 0.0471
+expect_candidate 575.0 1.0 1.0 1.0 1.0 0 0.0952 0.1071 0.0952
+expect_geometry 5 4
+expect_count 5
+expect_tuned 69.0 215.17 295.5 437.5 575.5 719.0
+expect_added 
+expect_demoted 
+end
+system s01-p011o3 42.0 720.0 549.0 646.0 9 5
+raw 42.0 2 1.0 unknown
+raw 171.0 2 0.6472 thin
+raw 333.12 2 0.9288 thin
+raw 484.5 2 0.9203 thin
+raw 615.0 2 0.9294 thin
+raw 720.0 2 1.0 unknown
+anchor 171.0 5
+anchor 543.7 10
+expect_candidate 199.0 1.0 1.0 1.0 1.0 0 0.0115 0.023 0.0115
+expect_candidate 260.0 1.0 1.0 1.0 1.0 0 0.0795 0.0341 0.0341
+expect_candidate 329.0 1.0 1.0 1.0 1.0 0 0.0115 0.0115 0.0115
+expect_candidate 402.0 1.0 1.0 0.8947 0.9794 1 0.0114 0.125 0.0114
+expect_candidate 483.0 1.0 1.0 1.0 1.0 0 0.0465 0.0116 0.0116
+expect_candidate 545.0 1.0 1.0 1.0 1.0 0 0.0795 0.0341 0.0341
+expect_candidate 614.0 1.0 1.0 1.0 1.0 0 0.0341 0.1023 0.0341
+expect_geometry 7 6
+expect_count 7
+expect_tuned 42.0 199.0 260.0 331.06 483.75 544.9 614.5 720.0
+expect_added 199.0 260.0 544.9
+expect_demoted 171.0
+end
+system s01-p011o4 40.0 720.0 711.0 802.0 4 3
+raw 40.0 2 1.0 unknown
+raw 239.25 2 0.9274 thin
+raw 396.25 2 0.9181 thin
+raw 720.0 2 1.0 unknown
+anchor 558.9 15
+expect_candidate 238.0 1.0 1.0 0.9474 0.989 1 0.1566 0.1566 0.1566
+expect_candidate 395.0 1.0 1.0 1.0 1.0 0 0.1566 0.1566 0.1566
+expect_candidate 557.0 1.0 1.0 1.0 1.0 0 0.2195 0.1707 0.1707
+expect_geometry 4 3
+expect_count 4
+expect_tuned 40.0 238.62 395.62 557.15 720.0
+expect_added 557.15
+expect_demoted 
+end
+system s01-p011o5 39.0 720.0 874.0 963.0 4 3
+raw 39.0 2 1.0 unknown
+raw 252.0 2 0.9309 thin
+raw 409.0 2 0.9309 thin
+raw 720.0 2 1.0 unknown
+anchor 720.0 20
+expect_candidate 251.0 1.0 1.0 1.0 1.0 0 0.2658 0.038 0.038
+expect_candidate 408.0 1.0 1.0 1.0 0.9888 1 0.275 0.025 0.025
+expect_candidate 565.0 0.8636 0.9318 1.0 0.8539 4 0.1 0.0875 0.0875
+expect_geometry 3 2
+expect_count 3
+expect_tuned 39.0 251.5 408.5 720.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-12.png
+system s01-p012o0 39.0 717.0 78.0 169.0 4 4
+raw 39.0 2 1.0 unknown
+raw 260.0 2 0.9417 thin
+raw 411.75 2 0.9311 thin
+raw 564.5 2 0.9319 thin
+raw 717.0 2 1.0 unknown
+expect_candidate 258.0 1.0 1.0 1.0 1.0 0 0.0843 0.0602 0.0602
+expect_candidate 410.0 1.0 1.0 1.0 1.0 0 0.2405 0.038 0.038
+expect_candidate 563.0 1.0 1.0 0.8947 0.967 1 0.2152 0.0 0.0
+expect_geometry 4 3
+expect_count 4
+expect_tuned 39.0 259.0 410.88 564.41 717.0
+expect_added 
+expect_demoted 
+end
+system s01-p012o1 40.0 717.0 234.0 331.0 3 3
+raw 40.0 2 1.0 unknown
+raw 304.5 2 0.9322 thin
+raw 499.5 2 0.9362 thin
+raw 717.0 2 1.0 unknown
+anchor 304.5 25
+expect_candidate 303.0 1.0 1.0 1.0 1.0 0 0.0341 0.0341 0.0341
+expect_candidate 499.0 1.0 1.0 1.0 0.9897 1 0.0241 0.0241 0.0241
+expect_geometry 3 2
+expect_count 3
+expect_tuned 40.0 303.78 499.25 717.0
+expect_added 
+expect_demoted 
+end
+system s01-p012o2 40.0 716.0 397.0 487.0 3 3
+raw 40.0 2 1.0 unknown
+raw 315.75 2 0.9386 thin
+raw 517.5 2 0.9364 thin
+raw 716.0 2 1.0 unknown
+anchor 716.0 30
+expect_candidate 314.0 1.0 1.0 1.0 1.0 0 0.013 0.026 0.013
+expect_candidate 516.0 1.0 1.0 1.0 1.0 0 0.0256 0.0385 0.0256
+expect_geometry 3 2
+expect_count 3
+expect_tuned 40.0 314.88 516.75 716.0
+expect_added 
+expect_demoted 
+end
+system s01-p012o3 40.0 715.0 558.0 646.0 3 3
+raw 40.0 2 1.0 unknown
+raw 297.25 2 0.9421 thin
+raw 517.5 2 0.9311 thin
+raw 715.0 2 1.0 unknown
+expect_candidate 296.0 1.0 1.0 1.0 1.0 0 0.013 0.013 0.013
+expect_candidate 351.0 0.9091 0.9545 1.0 0.7273 5 0.1538 0.0256 0.0256
+expect_candidate 398.0 0.9091 0.9545 1.0 0.7386 5 0.1688 0.026 0.026
+expect_candidate 436.0 0.7727 0.8636 1.0 0.7614 5 0.1688 0.0779 0.0779
+expect_candidate 453.0 1.0 1.0 0.9444 0.7614 5 0.1316 0.0263 0.0263
+expect_candidate 489.0 0.8636 0.9318 1.0 0.7045 5 0.1818 0.0779 0.0779
+expect_candidate 505.0 0.8636 0.9318 1.0 0.7159 5 0.12 0.0 0.0
+expect_candidate 516.0 1.0 1.0 1.0 1.0 0 0.0519 0.039 0.039
+expect_candidate 545.0 0.8636 0.9318 1.0 0.7727 5 0.1795 0.141 0.141
+expect_candidate 558.0 1.0 1.0 1.0 0.7614 5 0.1558 0.0519 0.0519
+expect_candidate 588.0 0.9091 0.9545 1.0 0.7614 5 0.141 0.141 0.141
+expect_candidate 602.0 1.0 1.0 1.0 0.7614 5 0.1667 0.0385 0.0385
+expect_candidate 639.0 0.8636 0.9318 1.0 0.7386 5 0.1333 0.2533 0.1333
+expect_candidate 657.0 0.9091 0.9318 1.0 0.75 5 0.1467 0.0267 0.0267
+expect_candidate 686.0 0.8636 0.9318 1.0 0.7614 5 0.1579 0.1184 0.1184
+expect_candidate 700.0 1.0 1.0 1.0 0.7841 5 0.1351 0.0 0.0
+expect_geometry 3 2
+expect_count 3
+expect_tuned 40.0 296.62 516.75 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p012o4 39.0 716.0 723.0 814.0 4 4
+raw 39.0 2 1.0 unknown
+raw 244.5 2 0.9378 thin
+raw 402.25 2 0.9421 thin
+raw 557.0 2 0.9393 thin
+raw 716.0 2 1.0 unknown
+anchor 402.25 35
+expect_candidate 243.0 1.0 1.0 1.0 1.0 0 0.1235 0.2593 0.1235
+expect_candidate 401.0 1.0 1.0 1.0 1.0 0 0.1951 0.0488 0.0488
+expect_candidate 555.0 1.0 1.0 1.0 1.0 0 0.0723 0.0602 0.0602
+expect_geometry 4 3
+expect_count 4
+expect_tuned 39.0 243.75 401.65 556.0 716.0
+expect_added 
+expect_demoted 
+end
+system s01-p012o5 39.0 716.0 877.0 974.0 4 4
+raw 39.0 2 1.0 unknown
+raw 253.0 2 0.9438 thin
+raw 407.5 2 0.934 thin
+raw 555.5 2 0.9388 thin
+raw 716.0 2 1.0 unknown
+anchor 555.5 40
+expect_candidate 252.0 1.0 1.0 1.0 1.0 0 0.0114 0.0227 0.0114
+expect_candidate 406.0 1.0 1.0 1.0 1.0 0 0.236 0.0225 0.0225
+expect_candidate 554.0 1.0 1.0 1.0 1.0 0 0.0337 0.0337 0.0337
+expect_geometry 4 3
+expect_count 4
+expect_tuned 39.0 252.5 406.75 554.78 716.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-13.png
+system s01-p013o0 44.0 720.0 73.0 166.0 4 3
+raw 44.0 2 1.0 unknown
+raw 410.25 2 0.9358 thin
+raw 566.0 2 0.9405 thin
+raw 720.0 2 1.0 unknown
+anchor 720.0 45
+expect_candidate 248.0 1.0 1.0 1.0 1.0 0 0.0345 0.1839 0.0345
+expect_candidate 409.0 1.0 1.0 1.0 1.0 0 0.0471 0.0353 0.0353
+expect_candidate 565.0 1.0 1.0 1.0 1.0 0 0.0353 0.0353 0.0353
+expect_geometry 4 3
+expect_count 4
+expect_tuned 44.0 248.0 409.62 565.5 720.0
+expect_added 248.0
+expect_demoted 
+end
+system s01-p013o1 44.0 720.0 237.0 328.0 4 4
+raw 44.0 2 1.0 unknown
+raw 254.5 2 0.9351 thin
+raw 409.5 2 0.9368 thin
+raw 528.75 2 0.7038 thin
+raw 720.0 2 1.0 unknown
+expect_candidate 253.0 1.0 1.0 1.0 1.0 0 0.0349 0.0465 0.0349
+expect_candidate 408.0 1.0 1.0 1.0 1.0 0 0.2235 0.0353 0.0353
+expect_candidate 557.0 1.0 1.0 1.0 1.0 0 0.2024 0.0476 0.0476
+expect_geometry 4 3
+expect_count 4
+expect_tuned 44.0 253.75 408.75 557.0 720.0
+expect_added 557.0
+expect_demoted 528.75
+end
+system s01-p013o2 38.0 719.0 394.0 490.0 4 3
+raw 38.0 2 1.0 unknown
+raw 252.5 2 0.938 thin
+raw 564.5 2 0.9309 thin
+raw 719.0 2 1.0 unknown
+anchor 252.5 50
+expect_candidate 42.0 1.0 1.0 1.0 1.0 0 0.5417 0.2188 0.2188
+expect_candidate 166.0 0.7083 0.8542 0.55 0.5729 9 0.1685 0.3034 0.1685
+expect_candidate 251.0 1.0 1.0 1.0 1.0 0 0.0333 0.0111 0.0111
+expect_candidate 412.0 1.0 1.0 1.0 1.0 0 0.0116 0.0 0.0
+expect_candidate 563.0 1.0 1.0 1.0 1.0 0 0.0682 0.0341 0.0341
+expect_geometry 4 3
+expect_count 4
+expect_tuned 38.0 251.78 412.0 563.75 719.0
+expect_added 412.0
+expect_demoted 
+end
+system s01-p013o3 42.0 717.0 555.0 642.0 3 2
+raw 42.0 2 1.0 unknown
+raw 274.25 2 0.9412 thin
+raw 717.0 2 1.0 unknown
+anchor 446.7 55
+expect_candidate 273.0 1.0 1.0 1.0 1.0 0 0.05 0.05 0.05
+expect_candidate 443.0 1.0 1.0 1.0 1.0 0 0.025 0.0375 0.025
+expect_candidate 619.0 1.0 1.0 1.0 1.0 0 0.038 0.038 0.038
+expect_candidate 713.0 1.0 1.0 1.0 1.0 0 0.2414 1.0 0.2414
+expect_geometry 4 3
+expect_count 4
+expect_tuned 42.0 273.62 443.29 619.0 717.0
+expect_added 443.29 619.0
+expect_demoted 
+end
+system s01-p013o4 41.0 718.0 709.0 800.0 5 5
+raw 41.0 2 1.0 unknown
+raw 168.0 2 0.9423 thin
+raw 283.25 2 0.9406 thin
+raw 458.25 2 0.9375 thin
+raw 629.75 2 0.9223 thin
+raw 718.0 2 1.0 unknown
+anchor 544.6 60
+expect_candidate 167.0 1.0 1.0 1.0 1.0 0 0.0241 0.0361 0.0241
+expect_candidate 282.0 1.0 1.0 1.0 1.0 0 0.0122 0.0122 0.0122
+expect_candidate 365.0 1.0 1.0 1.0 1.0 0 0.0241 1.0 0.0241
+expect_candidate 370.0 1.0 1.0 1.0 1.0 0 1.0 0.2073 0.2073
+expect_candidate 457.0 1.0 1.0 1.0 1.0 0 0.0122 0.0122 0.0122
+expect_candidate 542.0 1.0 1.0 1.0 1.0 0 0.0488 0.0122 0.0122
+expect_candidate 628.0 1.0 1.0 1.0 1.0 0 0.0366 0.0244 0.0244
+expect_geometry 7 6
+expect_count 7
+expect_tuned 41.0 167.5 282.62 367.5 457.62 542.2 628.88 718.0
+expect_added 367.5 542.2
+expect_demoted 
+end
+system s01-p013o5 40.0 718.0 866.0 958.0 7 6
+raw 40.0 2 1.0 unknown
+raw 195.25 2 0.9163 thin
+raw 291.75 2 0.9375 thin
+raw 431.0 2 0.9382 thin
+raw 526.0 2 0.9438 thin
+raw 622.0 2 0.9438 thin
+raw 718.0 2 1.0 unknown
+anchor 431.0 65
+expect_candidate 194.0 1.0 1.0 1.0 1.0 0 0.0465 0.0349 0.0349
+expect_candidate 290.0 1.0 1.0 1.0 1.0 0 0.0235 0.0471 0.0235
+expect_candidate 429.0 1.0 1.0 1.0 1.0 0 0.0357 0.0357 0.0357
+expect_candidate 524.0 1.0 1.0 1.0 1.0 0 0.0353 0.0353 0.0353
+expect_candidate 621.0 1.0 1.0 1.0 0.9891 1 0.0581 0.0465 0.0465
+expect_geometry 6 5
+expect_count 6
+expect_tuned 40.0 194.62 290.88 430.04 525.0 621.5 718.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-14.png
+system s01-p014o0 34.0 716.0 95.0 179.0 7 7
+raw 34.0 2 1.0 unknown
+raw 188.5 2 0.9357 thin
+raw 271.5 2 0.9185 thin
+raw 356.75 2 0.9221 thin
+raw 442.5 2 0.9199 thin
+raw 525.5 2 0.9151 thin
+raw 607.25 2 0.9222 thin
+raw 716.0 2 1.0 unknown
+expect_candidate 187.0 1.0 1.0 1.0 0.9881 1 0.04 0.04 0.04
+expect_candidate 270.0 1.0 1.0 1.0 1.0 0 0.027 0.027 0.027
+expect_candidate 355.0 1.0 1.0 1.0 0.9881 1 0.027 0.0135 0.0135
+expect_candidate 441.0 1.0 1.0 1.0 0.9881 1 0.0 0.027 0.0
+expect_candidate 524.0 1.0 1.0 1.0 0.9881 1 0.0137 0.0137 0.0137
+expect_candidate 606.0 1.0 1.0 1.0 0.9881 1 0.0405 0.027 0.027
+expect_geometry 7 6
+expect_count 7
+expect_tuned 34.0 187.75 270.75 355.88 441.75 524.75 606.62 716.0
+expect_added 
+expect_demoted 
+end
+system s01-p014o1 34.0 715.0 242.0 328.0 7 7
+raw 34.0 2 1.0 unknown
+raw 177.0 2 0.9296 thin
+raw 259.75 2 0.9253 thin
+raw 342.75 2 0.9263 thin
+raw 440.25 2 0.9198 thin
+raw 535.75 2 0.9343 thin
+raw 617.75 2 0.9152 thin
+raw 715.0 2 1.0 unknown
+anchor 535.75 80
+expect_candidate 175.0 1.0 1.0 1.0 1.0 0 0.027 0.0135 0.0135
+expect_candidate 260.0 1.0 1.0 1.0 1.0 0 0.0135 0.0135 0.0135
+expect_candidate 341.0 1.0 1.0 1.0 1.0 0 0.0263 0.0526 0.0263
+expect_candidate 440.0 1.0 1.0 1.0 1.0 0 0.039 0.039 0.039
+expect_candidate 534.0 1.0 1.0 1.0 0.9884 1 0.0263 0.0132 0.0132
+expect_candidate 616.0 1.0 1.0 1.0 0.9884 1 0.0519 0.0519 0.0519
+expect_geometry 7 6
+expect_count 7
+expect_tuned 34.0 176.0 259.88 341.88 440.12 534.91 616.88 715.0
+expect_added 
+expect_demoted 
+end
+system s01-p014o2 33.0 714.0 396.0 489.0 5 5
+raw 33.0 2 1.0 unknown
+raw 219.0 2 0.9296 thin
+raw 348.0 2 0.9333 thin
+raw 445.0 2 0.9298 thin
+raw 529.25 2 0.92 thin
+raw 714.0 2 1.0 unknown
+anchor 445.0 85
+expect_candidate 217.0 1.0 1.0 1.0 1.0 0 0.0122 0.0122 0.0122
+expect_candidate 346.0 1.0 1.0 1.0 1.0 0 0.0366 0.0488 0.0366
+expect_candidate 443.0 1.0 1.0 1.0 1.0 0 0.061 0.0732 0.061
+expect_candidate 528.0 1.0 1.0 1.0 1.0 0 0.0366 0.0366 0.0366
+expect_candidate 609.0 1.0 1.0 1.0 1.0 0 0.0241 0.0241 0.0241
+expect_geometry 6 5
+expect_count 6
+expect_tuned 33.0 218.0 347.0 444.04 528.62 609.0 714.0
+expect_added 609.0
+expect_demoted 
+end
+system s01-p014o3 34.0 714.0 559.0 648.0 8 7
+raw 34.0 2 1.0 unknown
+raw 176.5 2 0.916 thin
+raw 287.0 2 0.9345 thin
+raw 373.0 2 0.9338 thin
+raw 462.25 2 0.927 thin
+raw 547.0 2 0.9361 thin
+raw 630.5 2 0.9189 thin
+raw 714.0 2 1.0 unknown
+anchor 287.0 90
+anchor 714.0 95
+expect_candidate 175.0 1.0 1.0 1.0 1.0 0 0.026 0.0909 0.026
+expect_candidate 286.0 1.0 1.0 1.0 1.0 0 0.0253 0.0253 0.0253
+expect_candidate 372.0 1.0 1.0 1.0 1.0 0 0.05 0.05 0.05
+expect_candidate 462.0 1.0 1.0 1.0 1.0 0 0.05 0.0625 0.05
+expect_candidate 545.0 1.0 1.0 1.0 1.0 0 0.0375 0.05 0.0375
+expect_candidate 629.0 1.0 1.0 1.0 0.9888 1 0.0253 0.0127 0.0127
+expect_geometry 7 6
+expect_count 7
+expect_tuned 34.0 175.75 286.52 372.5 462.12 546.0 629.75 714.0
+expect_added 
+expect_demoted 
+end
+system s01-p014o4 34.0 712.0 720.0 809.0 6 6
+raw 34.0 2 1.0 unknown
+raw 188.0 2 0.9296 thin
+raw 269.0 2 0.9278 thin
+raw 364.0 2 0.9286 thin
+raw 488.5 2 0.9198 thin
+raw 619.0 2 0.9266 thin
+raw 712.0 2 1.0 unknown
+anchor 619.0 100
+expect_candidate 186.0 1.0 1.0 1.0 1.0 0 0.0375 0.0375 0.0375
+expect_candidate 267.0 1.0 1.0 1.0 1.0 0 0.0253 0.0253 0.0253
+expect_candidate 363.0 1.0 1.0 1.0 1.0 0 0.0128 0.0256 0.0128
+expect_candidate 487.0 1.0 1.0 1.0 1.0 0 0.05 0.0375 0.0375
+expect_candidate 618.0 1.0 1.0 1.0 1.0 0 0.038 0.038 0.038
+expect_geometry 6 5
+expect_count 6
+expect_tuned 34.0 187.0 268.0 363.5 487.75 618.52 712.0
+expect_added 
+expect_demoted 
+end
+system s01-p014o5 34.0 713.0 886.0 978.0 7 7
+raw 34.0 2 1.0 unknown
+raw 175.0 2 0.9296 thin
+raw 256.0 2 0.9296 thin
+raw 355.0 2 0.9296 thin
+raw 436.0 2 0.9303 thin
+raw 542.5 2 0.9128 thin
+raw 625.75 2 0.9141 thin
+raw 713.0 2 1.0 unknown
+anchor 436.0 105
+expect_candidate 174.0 1.0 1.0 1.0 1.0 0 0.0353 0.0235 0.0235
+expect_candidate 255.0 1.0 1.0 1.0 1.0 0 0.0 0.0244 0.0
+expect_candidate 354.0 1.0 1.0 1.0 1.0 0 0.0244 0.061 0.0244
+expect_candidate 435.0 1.0 1.0 1.0 1.0 0 0.0238 0.0952 0.0238
+expect_candidate 541.0 1.0 1.0 1.0 1.0 0 0.0357 0.0357 0.0357
+expect_candidate 624.0 1.0 1.0 1.0 1.0 0 0.012 0.012 0.012
+expect_geometry 7 6
+expect_count 7
+expect_tuned 34.0 174.5 255.5 354.5 435.52 541.75 624.88 713.0
+expect_added 
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-15.png
+system s01-p015o0 39.0 715.0 71.0 169.0 4 4
+raw 39.0 2 1.0 unknown
+raw 244.0 2 0.9071 thin
+raw 474.5 2 0.9311 thin
+raw 552.0 2 0.9362 thin
+raw 715.0 2 1.0 unknown
+anchor 390.8 110
+expect_candidate 243.0 1.0 1.0 1.0 1.0 0 0.0568 0.0114 0.0114
+expect_candidate 388.0 1.0 1.0 1.0 1.0 0 0.2472 0.0337 0.0337
+expect_candidate 473.0 1.0 1.0 1.0 1.0 0 0.0 0.0 0.0
+expect_candidate 483.0 0.7083 0.8542 0.55 0.6633 9 0.0698 0.3372 0.0698
+expect_candidate 551.0 1.0 1.0 1.0 0.9898 1 0.0337 0.1573 0.0337
+expect_candidate 646.0 1.0 1.0 0.6 0.7959 12 0.2955 0.1705 0.1705
+expect_candidate 671.0 0.7917 0.875 0.6 0.602 12 0.4205 0.2045 0.2045
+expect_geometry 5 4
+expect_count 5
+expect_tuned 39.0 243.5 388.22 473.75 551.5 715.0
+expect_added 388.22
+expect_demoted 
+end
+system s01-p015o1 37.0 714.0 233.0 330.0 6 4
+raw 37.0 2 1.0 unknown
+raw 250.0 2 0.9362 thin
+raw 337.25 2 0.9229 thin
+raw 653.0 2 0.7714 thin
+raw 714.0 2 1.0 unknown
+anchor 337.25 115
+expect_candidate 248.0 1.0 1.0 1.0 1.0 0 0.2069 0.0115 0.0115
+expect_candidate 336.0 1.0 1.0 1.0 1.0 0 0.0225 0.1798 0.0225
+expect_candidate 420.0 1.0 1.0 1.0 1.0 0 0.0227 0.1705 0.0227
+expect_candidate 570.0 1.0 1.0 1.0 1.0 0 0.25 0.0455 0.0455
+expect_geometry 5 4
+expect_count 5
+expect_tuned 37.0 249.0 336.65 420.0 570.0 714.0
+expect_added 420.0 570.0
+expect_demoted 653.0
+end
+system s01-p015o2 36.0 716.0 393.0 486.0 7 6
+raw 36.0 2 1.0 unknown
+raw 178.5 2 0.918 thin
+raw 257.5 2 0.9289 thin
+raw 358.0 2 0.9281 thin
+raw 459.0 2 0.9289 thin
+raw 635.5 2 0.9251 thin
+raw 716.0 2 1.0 unknown
+anchor 257.5 120
+anchor 716.0 125
+expect_candidate 177.0 1.0 1.0 1.0 1.0 0 0.0123 0.0617 0.0123
+expect_candidate 256.0 1.0 1.0 1.0 1.0 0 0.0241 0.0482 0.0241
+expect_candidate 357.0 1.0 1.0 1.0 1.0 0 0.0123 0.2222 0.0123
+expect_candidate 458.0 1.0 1.0 1.0 1.0 0 0.0 0.0741 0.0
+expect_candidate 535.0 1.0 1.0 1.0 1.0 0 0.0122 0.0366 0.0122
+expect_candidate 634.0 1.0 1.0 1.0 1.0 0 0.0 0.0494 0.0
+expect_candidate 646.0 0.8261 0.8261 0.6316 0.6559 7 0.2195 0.2195 0.2195
+expect_geometry 7 6
+expect_count 7
+expect_tuned 36.0 177.75 256.78 357.5 458.5 535.0 634.75 716.0
+expect_added 535.0
+expect_demoted 
+end
+system s01-p015o3 35.0 715.0 548.0 642.0 4 3
+raw 35.0 2 1.0 unknown
+raw 184.75 2 0.9282 thin
+raw 535.5 2 0.9364 thin
+raw 715.0 2 1.0 unknown
+expect_candidate 127.0 0.9583 0.9792 0.75 0.7128 11 0.2289 0.0843 0.0843
+expect_candidate 183.0 1.0 1.0 1.0 1.0 0 0.0241 0.1084 0.0241
+expect_candidate 365.0 1.0 1.0 1.0 1.0 0 0.2143 0.0357 0.0357
+expect_candidate 534.0 1.0 1.0 1.0 1.0 0 0.0244 0.0122 0.0122
+expect_geometry 4 3
+expect_count 4
+expect_tuned 35.0 183.88 365.0 534.75 715.0
+expect_added 365.0
+expect_demoted 
+end
+system s01-p015o4 34.0 715.0 704.0 802.0 3 2
+raw 34.0 2 1.0 unknown
+raw 406.75 2 0.9085 thin
+raw 715.0 2 1.0 unknown
+anchor 250.1 130
+expect_candidate 247.0 1.0 1.0 1.0 1.0 0 0.2556 0.0222 0.0222
+expect_candidate 405.0 1.0 1.0 1.0 1.0 0 0.0989 0.044 0.044
+expect_candidate 560.0 1.0 1.0 1.0 1.0 0 0.0455 0.0341 0.0341
+expect_geometry 4 3
+expect_count 4
+expect_tuned 34.0 247.24 405.88 560.0 715.0
+expect_added 247.24 560.0
+expect_demoted 
+end
+system s01-p015o5 34.0 716.0 864.0 962.0 6 3
+raw 34.0 2 1.0 unknown
+raw 248.0 2 0.9362 thin
+raw 402.5 2 0.9353 thin
+raw 716.0 2 1.0 unknown
+anchor 402.5 135
+expect_candidate 246.0 1.0 1.0 1.0 1.0 0 0.0337 0.0112 0.0112
+expect_candidate 401.0 1.0 1.0 1.0 1.0 0 0.0337 0.1461 0.0337
+expect_candidate 559.0 1.0 1.0 1.0 1.0 0 0.2667 0.1 0.1
+expect_geometry 4 3
+expect_count 4
+expect_tuned 34.0 247.0 401.78 559.0 716.0
+expect_added 559.0
+expect_demoted 
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-16.png
+system s01-p016o0 60.0 738.0 82.0 164.0 2 1
+raw 60.0 2 1.0 unknown
+raw 738.0 2 1.0 unknown
+anchor 581.1 140
+expect_candidate 220.0 0.8 0.9 0.5556 0.7683 8 0.274 0.1918 0.1918
+expect_candidate 267.0 1.0 1.0 1.0 0.9878 1 0.0556 0.0278 0.0278
+expect_candidate 428.0 1.0 1.0 1.0 0.9878 1 0.3014 0.0548 0.0548
+expect_candidate 536.0 0.8 0.9 0.5556 0.7683 8 0.3151 0.2466 0.2466
+expect_candidate 546.0 1.0 1.0 0.5556 0.7805 6 0.1918 0.4658 0.1918
+expect_candidate 581.0 1.0 1.0 1.0 1.0 0 0.2027 0.0676 0.0676
+expect_geometry 4 3
+expect_count 4
+expect_tuned 60.0 267.0 428.0 581.01 738.0
+expect_added 267.0 428.0 581.01
+expect_demoted 
+end
+system s01-p016o1 60.0 740.0 218.0 308.0 7 5
+raw 60.0 2 1.0 unknown
+raw 238.25 2 0.9207 thin
+raw 326.25 2 0.921 thin
+raw 520.0 2 0.9354 thin
+raw 634.0 2 0.9296 thin
+raw 740.0 2 1.0 unknown
+anchor 520.0 145
+expect_candidate 237.0 1.0 1.0 1.0 1.0 0 0.025 0.1875 0.025
+expect_candidate 325.0 1.0 1.0 1.0 1.0 0 0.0247 0.1235 0.0247
+expect_candidate 419.0 1.0 1.0 1.0 1.0 0 0.025 0.025 0.025
+expect_candidate 518.0 1.0 1.0 1.0 1.0 0 0.0375 0.025 0.025
+expect_candidate 632.0 1.0 1.0 1.0 1.0 0 0.061 0.0488 0.0488
+expect_geometry 6 5
+expect_count 6
+expect_tuned 60.0 237.62 325.62 419.0 519.04 633.0 740.0
+expect_added 419.0
+expect_demoted 
+end
+system s01-p016o2 61.0 739.0 366.0 451.0 5 4
+raw 61.0 2 1.0 unknown
+raw 223.0 2 0.9372 thin
+raw 328.0 2 0.9353 thin
+raw 451.0 2 0.9296 thin
+raw 739.0 2 1.0 unknown
+anchor 451.0 150
+expect_candidate 153.0 0.9524 0.9762 0.7059 0.6706 11 0.1026 0.2179 0.1026
+expect_candidate 222.0 1.0 1.0 1.0 1.0 0 0.0513 0.0385 0.0385
+expect_candidate 327.0 1.0 1.0 1.0 1.0 0 0.0506 0.0506 0.0506
+expect_candidate 363.0 0.9524 0.9762 0.7059 0.6824 9 0.0933 0.2 0.0933
+expect_candidate 449.0 1.0 1.0 1.0 1.0 0 0.0253 0.038 0.0253
+expect_candidate 581.0 1.0 1.0 1.0 1.0 0 0.0385 0.0385 0.0385
+expect_geometry 5 4
+expect_count 5
+expect_tuned 61.0 222.5 327.5 450.04 581.0 739.0
+expect_added 581.0
+expect_demoted 
+end
+system s01-p016o3 62.0 738.0 500.0 584.0 4 3
+raw 62.0 2 1.0 unknown
+raw 270.25 2 0.9219 thin
+raw 428.25 2 0.9127 thin
+raw 738.0 2 1.0 unknown
+anchor 583.0 155
+expect_candidate 198.0 0.7143 0.8571 0.7222 0.8214 6 0.3514 0.3378 0.3378
+expect_candidate 269.0 1.0 1.0 1.0 1.0 0 0.2763 0.3026 0.2763
+expect_candidate 427.0 1.0 1.0 1.0 1.0 0 0.1053 0.2237 0.1053
+expect_candidate 586.0 1.0 1.0 1.0 1.0 0 0.0267 0.16 0.0267
+expect_geometry 4 3
+expect_count 4
+expect_tuned 62.0 269.62 427.62 585.77 738.0
+expect_added 585.77
+expect_demoted 
+end
+system s01-p016o4 62.0 739.0 640.0 720.0 4 3
+raw 62.0 2 1.0 unknown
+raw 272.0 2 0.929 thin
+raw 428.5 2 0.9152 thin
+raw 739.0 2 1.0 unknown
+anchor 739.0 160
+expect_candidate 271.0 1.0 1.0 1.0 1.0 0 0.0429 0.1571 0.0429
+expect_candidate 427.0 1.0 1.0 1.0 1.0 0 0.0423 0.1268 0.0423
+expect_candidate 587.0 1.0 1.0 1.0 1.0 0 0.0571 0.0286 0.0286
+expect_geometry 4 3
+expect_count 4
+expect_tuned 62.0 271.5 427.75 587.0 739.0
+expect_added 587.0
+expect_demoted 
+end
+system s01-p016o5 61.0 739.0 773.0 856.0 4 3
+raw 61.0 2 1.0 unknown
+raw 430.25 2 0.9226 thin
+raw 586.0 2 0.9296 thin
+raw 739.0 2 1.0 unknown
+expect_candidate 274.0 1.0 1.0 1.0 0.988 1 0.0274 0.0274 0.0274
+expect_candidate 429.0 1.0 1.0 1.0 0.988 1 0.0139 0.0556 0.0139
+expect_candidate 585.0 1.0 1.0 1.0 1.0 0 0.0274 0.0137 0.0137
+expect_geometry 4 3
+expect_count 4
+expect_tuned 61.0 274.0 429.62 585.5 739.0
+expect_added 274.0
+expect_demoted 
+end
+system s01-p016o6 61.0 738.0 909.0 998.0 4 3
+raw 61.0 2 1.0 unknown
+raw 428.0 2 0.9296 thin
+raw 549.5 2 0.4729 thin
+raw 738.0 2 1.0 unknown
+anchor 268.8 165
+expect_candidate 269.0 1.0 1.0 1.0 0.9888 1 0.037 0.1852 0.037
+expect_candidate 427.0 1.0 1.0 1.0 1.0 0 0.2375 0.2125 0.2125
+expect_candidate 583.0 1.0 1.0 1.0 0.9888 1 0.3418 0.0127 0.0127
+expect_geometry 4 3
+expect_count 4
+expect_tuned 61.0 268.98 427.5 583.0 738.0
+expect_added 268.98 583.0
+expect_demoted 549.5
+end
+image stage-omr-data/data/real-datasets/schenker-beethoven/pages/sonata-01/page-17.png
+system s01-p017o0 35.0 710.0 54.0 140.0 3 3
+raw 35.0 2 1.0 unknown
+raw 402.5 2 0.9267 thin
+raw 559.0 2 0.9296 thin
+raw 710.0 2 1.0 unknown
+anchor 402.5 170
+expect_candidate 246.0 1.0 1.0 1.0 1.0 0 0.1026 0.1795 0.1026
+expect_candidate 401.0 1.0 1.0 1.0 1.0 0 0.28 0.0267 0.0267
+expect_candidate 558.0 1.0 1.0 1.0 1.0 0 0.3462 0.0513 0.0513
+expect_geometry 4 3
+expect_count 4
+expect_tuned 35.0 246.0 401.78 558.5 710.0
+expect_added 246.0
+expect_demoted 
+end
+system s01-p017o1 33.0 710.0 202.0 286.0 5 4
+raw 33.0 2 1.0 unknown
+raw 245.0 2 0.9311 thin
+raw 400.5 2 0.9279 thin
+raw 559.0 2 0.9364 thin
+raw 710.0 2 1.0 unknown
+anchor 559.0 175
+expect_candidate 105.0 1.0 1.0 0.6111 0.8571 7 0.2133 0.16 0.16
+expect_candidate 243.0 1.0 1.0 1.0 1.0 0 0.0417 0.0139 0.0139
+expect_candidate 399.0 1.0 1.0 1.0 1.0 0 0.04 0.04 0.04
+expect_candidate 557.0 1.0 1.0 1.0 1.0 0 0.2703 0.0135 0.0135
+expect_geometry 4 3
+expect_count 4
+expect_tuned 33.0 244.0 399.75 558.04 710.0
+expect_added 
+expect_demoted 
+end
+system s01-p017o2 33.0 711.0 342.0 427.0 4 3
+raw 33.0 2 1.0 unknown
+raw 407.75 2 0.9322 thin
+raw 557.0 2 0.9296 thin
+raw 711.0 2 1.0 unknown
+anchor 711.0 180
+expect_candidate 245.0 1.0 1.0 1.0 1.0 0 0.039 0.0519 0.039
+expect_candidate 406.0 1.0 1.0 1.0 1.0 0 0.0405 0.0 0.0
+expect_candidate 556.0 1.0 1.0 1.0 1.0 0 0.0132 0.0263 0.0132
+expect_geometry 4 3
+expect_count 4
+expect_tuned 33.0 245.0 406.88 556.5 711.0
+expect_added 245.0
+expect_demoted 
+end
+system s01-p017o3 30.0 712.0 478.0 557.0 4 4
+raw 30.0 2 1.0 unknown
+raw 245.0 2 0.9365 thin
+raw 399.0 2 0.9361 thin
+raw 560.0 2 0.9296 thin
+raw 712.0 2 1.0 unknown
+expect_candidate 33.0 1.0 1.0 1.0 1.0 0 0.6076 0.3418 0.3418
+expect_candidate 243.0 1.0 1.0 1.0 1.0 0 0.1972 0.0141 0.0141
+expect_candidate 397.0 1.0 1.0 1.0 1.0 0 0.2535 0.0 0.0
+expect_candidate 558.0 1.0 1.0 1.0 1.0 0 0.1127 0.0141 0.0141
+expect_geometry 4 3
+expect_count 4
+expect_tuned 30.0 244.0 398.0 559.0 712.0
+expect_added 
+expect_demoted 
+end
+system s01-p017o4 33.0 712.0 610.0 690.0 3 2
+raw 33.0 2 1.0 unknown
+raw 405.75 2 0.9202 thin
+raw 712.0 2 1.0 unknown
+anchor 246.7 185
+expect_candidate 245.0 1.0 1.0 1.0 1.0 0 0.0417 0.0278 0.0278
+expect_candidate 404.0 1.0 1.0 1.0 1.0 0 0.0694 0.0139 0.0139
+expect_candidate 553.0 1.0 1.0 1.0 1.0 0 0.0548 0.0548 0.0548
+expect_geometry 4 3
+expect_count 4
+expect_tuned 33.0 245.13 404.88 553.0 712.0
+expect_added 245.13 553.0
+expect_demoted 
+end
+system s01-p017o5 33.0 714.0 751.0 834.0 5 4
+raw 33.0 2 1.0 unknown
+raw 245.5 2 0.9272 thin
+raw 400.0 2 0.9349 thin
+raw 555.0 2 0.9296 thin
+raw 714.0 2 1.0 unknown
+anchor 400.0 190
+expect_candidate 244.0 1.0 1.0 1.0 1.0 0 0.0405 0.1622 0.0405
+expect_candidate 398.0 1.0 1.0 1.0 1.0 0 0.0 0.0 0.0
+expect_candidate 554.0 1.0 1.0 1.0 1.0 0 0.0267 0.0133 0.0133
+expect_geometry 4 3
+expect_count 4
+expect_tuned 33.0 244.75 399.04 554.5 714.0
+expect_added 
+expect_demoted 
+end
+system s01-p017o6 32.0 715.0 894.0 978.0 4 4
+raw 32.0 2 1.0 unknown
+raw 269.0 2 0.9355 thin
+raw 451.0 2 0.9259 thin
+raw 624.5 2 0.9208 thin
+raw 715.0 2 1.0 unknown
+anchor 624.5 195
+expect_candidate 267.0 1.0 1.0 1.0 1.0 0 0.0263 0.1316 0.0263
+expect_candidate 450.0 1.0 1.0 1.0 1.0 0 0.0 0.1486 0.0
+expect_candidate 623.0 1.0 1.0 1.0 1.0 0 0.027 0.0 0.0
+expect_candidate 710.0 1.0 1.0 1.0 1.0 0 0.2857 1.0 0.2857
+expect_geometry 4 3
+expect_count 4
+expect_tuned 32.0 268.0 450.5 623.78 715.0
+expect_added 
+expect_demoted 
+end

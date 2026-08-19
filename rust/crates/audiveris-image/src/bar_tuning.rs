@@ -436,6 +436,55 @@ pub fn geometry_count(
     }
 }
 
+/// The per-system count rule: with at least two direct system-height
+/// connectors, geometry is sufficiently self-checking to determine the
+/// count; otherwise the externally decoded target may only raise it.
+///
+/// Mirrors the Python `build()` arbitration
+/// (`count = visual if certain_bars >= 2 else max(decoded, visual)`).
+#[must_use]
+pub fn resolve_count(geometry: GeometryCount, decoded_count: usize) -> usize {
+    if geometry.certain_bars >= 2 {
+        geometry.intervals
+    } else {
+        geometry.intervals.max(decoded_count)
+    }
+}
+
+/// Added/demoted classification of a tuned hypothesis against the raw
+/// boundaries, both directions at the same match tolerance.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BoundaryDiff {
+    /// Interior tuned boundaries with no raw boundary within tolerance.
+    pub added: Vec<f64>,
+    /// Interior raw boundaries with no tuned boundary within tolerance.
+    pub demoted: Vec<f64>,
+}
+
+/// Mirrors the Python `build()` diff: `added` compares interior tuned
+/// positions against every raw boundary (edges included) and `demoted`
+/// compares interior raw positions against every tuned boundary.
+#[must_use]
+pub fn diff_boundaries(raw: &[f64], tuned: &[f64], tolerance: f64) -> BoundaryDiff {
+    let interior = |values: &[f64]| -> Vec<f64> {
+        if values.len() >= 2 {
+            values[1..values.len() - 1].to_vec()
+        } else {
+            Vec::new()
+        }
+    };
+    BoundaryDiff {
+        added: interior(tuned)
+            .into_iter()
+            .filter(|x| raw.iter().all(|raw_x| (x - raw_x).abs() > tolerance))
+            .collect(),
+        demoted: interior(raw)
+            .into_iter()
+            .filter(|x| tuned.iter().all(|tuned_x| (x - tuned_x).abs() > tolerance))
+            .collect(),
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SelectCandidate {
     x: f64,
@@ -891,12 +940,15 @@ pub fn projection_candidates(
         if combined(score) < best {
             continue;
         }
+        // The Python oracle stores candidate metrics rounded to four
+        // decimals, so every downstream decision (certainty, corroboration,
+        // evidence) runs on the rounded values.  Round at the same point.
         peaks.push(ProjectionCandidate {
             x: score.x as f64,
-            paired_occupancy: score.paired,
-            mean_occupancy: score.mean,
-            bridge_occupancy: score.bridge,
-            full_occupancy: score.full,
+            paired_occupancy: round4(score.paired),
+            mean_occupancy: round4(score.mean),
+            bridge_occupancy: round4(score.bridge),
+            full_occupancy: round4(score.full),
             maximum_gap: score.max_gap,
             left_flank_noise: 0.0,
             right_flank_noise: 0.0,
@@ -918,11 +970,18 @@ pub fn projection_candidates(
     for candidate in &mut clustered {
         let (left_noise, right_noise) =
             flank_noise(gray, candidate.x as usize, top, bottom, parameters);
-        candidate.left_flank_noise = left_noise;
-        candidate.right_flank_noise = right_noise;
-        candidate.flank_noise = left_noise.min(right_noise);
+        // Python: sides rounded to four decimals, the cleanest-side summary
+        // rounded from the unrounded minimum.
+        candidate.left_flank_noise = round4(left_noise);
+        candidate.right_flank_noise = round4(right_noise);
+        candidate.flank_noise = round4(left_noise.min(right_noise));
     }
     clustered
+}
+
+/// Python `round(value, 4)` equivalent for the candidate metric record.
+fn round4(value: f64) -> f64 {
+    (value * 10_000.0).round_ties_even() / 10_000.0
 }
 
 #[cfg(test)]
