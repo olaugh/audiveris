@@ -4003,6 +4003,124 @@ pub fn advance_native_stems_head_open_frontier_order68(
     Ok(continuation)
 }
 
+/// Continue the bounded open/undefined frontier at order 75.
+///
+/// x31/SIG47 reaches an already materialized StemInter 2383/glyph314.  The
+/// C-link envelope is a no-op: Java reports LEFT Both and RIGHT TopOnly,
+/// records a fifth undefined LEFT side, returns false, and advances to
+/// order 76 without changing SIG, linker, or allocator state.
+pub fn advance_native_stems_head_open_frontier_order75(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed || carrier.current_index != 75 {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier is not the authenticated order75 continuation",
+        ));
+    }
+    let carried_undefined =
+        authenticated_carried_undefined_sides(carrier, &[50, 60, 61, 68], "order75")?;
+    let head = carrier
+        .heads
+        .get(75)
+        .ok_or_else(|| stage("HEADS-open-frontier", "order75 head is missing"))?;
+    if head.reference.x_ordinal != 31 || head.reference.sig_ordinal != 47 {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier head is not x31/SIG47",
+        ));
+    }
+    for horizontal in [
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemHeadSide::Right,
+    ] {
+        let cell = head
+            .sides
+            .iter()
+            .find(|cell| cell.reference.horizontal == horizontal)
+            .ok_or_else(|| stage("HEADS-open-frontier", "order75 side cell is missing"))?;
+        if cell.linked || cell.closed {
+            return Err(stage(
+                "HEADS-open-frontier",
+                "order75 side is not the authenticated open cell",
+            ));
+        }
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2383) && stem.glyph_id == 314)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-open-frontier",
+                "order75 existing StemInter 2383/glyph314 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order75 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )?;
+    let expected_left = NativeStemsBeamHeadSLinkerRef {
+        head: head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    let mut expected_undefined = carried_undefined.clone();
+    expected_undefined.push(expected_left);
+    let mut expected_unlinked = carried_undefined
+        .iter()
+        .map(|cell| cell.head)
+        .collect::<Vec<_>>();
+    expected_unlinked.push(head.reference);
+    let expected_decisions = [
+        (crate::stems_step::NativeStemHeadSide::Left, true, true),
+        (crate::stems_step::NativeStemHeadSide::Right, true, false),
+    ];
+    if continuation.returned_linked != Some(false)
+        || continuation.processed_head.x_ordinal != 31
+        || continuation.processed_head.sig_ordinal != 47
+        || continuation.closed_value_changes != 0
+        || !continuation.closed_s_linkers.is_empty()
+        || continuation.state_after.current_index != 76
+        || continuation.state_after.undefined_sides != expected_undefined
+        || continuation.state_after.unlinked_heads != expected_unlinked
+        || continuation.side_decisions.len() != expected_decisions.len()
+        || !continuation
+            .side_decisions
+            .iter()
+            .zip(expected_decisions)
+            .all(|(decision, (side, top, bottom))| {
+                decision.side == side
+                    && !decision.linked_before
+                    && !decision.closed_before
+                    && decision.top_can_link == Some(top)
+                    && decision.bottom_can_link == Some(bottom)
+            })
+    {
+        return Err(stage(
+            "HEADS-open-frontier-result",
+            "order75 open frontier did not produce the authenticated undefined continuation",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Build the exact carried undefined-LEFT list for the given queue indexes
 /// and authenticate that the carrier holds precisely that list.
 fn authenticated_carried_undefined_sides(
