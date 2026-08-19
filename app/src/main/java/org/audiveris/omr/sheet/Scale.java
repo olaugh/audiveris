@@ -30,7 +30,6 @@ import org.audiveris.omr.util.param.ConstantBasedParam;
 import org.audiveris.omr.util.param.Param;
 
 import org.jdesktop.application.Application;
-import org.jdesktop.application.ResourceMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -152,9 +151,6 @@ public class Scale
     private static final Constants constants = new Constants();
 
     private static final Logger logger = LoggerFactory.getLogger(Scale.class);
-
-    private static final ResourceMap resources = Application.getInstance().getContext()
-            .getResourceMap(Scale.class);
 
     public static final Param<Integer> defaultInterlineSpecification = new ConstantBasedParam<>(
             constants.defaultInterlineSpecification,
@@ -1327,7 +1323,11 @@ public class Scale
         public String getDescription ()
         {
             if (description == null) {
-                description = resources.getString(name());
+                // NOTA: The resource map is retrieved on demand rather than kept in a static
+                // field, because Scale gets class-initialized in batch mode as well, with no
+                // application launched
+                description = Application.getInstance().getContext() //
+                        .getResourceMap(Scale.class).getString(name());
             }
 
             return description;
