@@ -965,16 +965,30 @@ pub fn continue_native_stems_head_linking_phase1(
             (true, false) => next_corner = Some(top),
             (false, true) => next_corner = Some(bottom),
             (true, true) => {
-                return Err(stage(
-                    "HEADS-phase1-continue-frontier",
-                    "continued head reaches the dual-corner selection branch",
-                ));
+                // Java records this as an undefined side and continues the
+                // bounded phase without mutating either linker.  The native
+                // port keeps the side in the returned event evidence, then
+                // advances to the next ordered head below.  A later bounded
+                // C-link transaction may authenticate the unresolved side.
+                shadow.undefined_sides.push(side.reference);
             }
             (false, false) => {}
         }
         if next_corner.is_some() {
             break;
         }
+    }
+    if !shadow.undefined_sides.is_empty() {
+        shadow.current_index += 1;
+        shadow.frontier_consumed = true;
+        return Ok(NativeStemsHeadPhase1Continuation {
+            processed_head: current.reference,
+            side_decisions,
+            returned_linked: Some(false),
+            closed_s_linkers: Vec::new(),
+            closed_value_changes: 0,
+            state_after: Box::new(shadow),
+        });
     }
     let Some(next_corner) = next_corner else {
         if !linked_before {
@@ -2498,6 +2512,113 @@ pub fn advance_native_stems_head_existing_stem_retry_order49(
         return Err(stage(
             "HEADS-existing-stem-retry-result",
             "order49 retry did not produce the authenticated closure",
+        ));
+    }
+    Ok(continuation)
+}
+
+/// Continue the bounded open/undefined frontier at order 50.
+///
+/// x32/SIG50 reaches an already materialized StemInter 2383/glyph314.  The
+/// C-link envelope is therefore a no-op: Java reports LEFT Both and RIGHT
+/// TopOnly, records LEFT as undefined, returns false, and advances to order
+/// 51 without changing SIG, linker, or allocator state.  Authenticate the
+/// exact existing stem and side decisions before exposing that continuation.
+pub fn advance_native_stems_head_open_frontier_order50(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != 50
+        || !carrier.unlinked_heads.is_empty()
+        || !carrier.undefined_sides.is_empty()
+    {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier is not the authenticated order50 continuation",
+        ));
+    }
+    let head = carrier
+        .heads
+        .get(50)
+        .ok_or_else(|| stage("HEADS-open-frontier", "order50 head is missing"))?;
+    if head.reference.x_ordinal != 32 || head.reference.sig_ordinal != 50 {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "carrier head is not x32/SIG50",
+        ));
+    }
+    for horizontal in [
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemHeadSide::Right,
+    ] {
+        let cell = head
+            .sides
+            .iter()
+            .find(|cell| cell.reference.horizontal == horizontal)
+            .ok_or_else(|| stage("HEADS-open-frontier", "order50 side cell is missing"))?;
+        if cell.linked || cell.closed {
+            return Err(stage(
+                "HEADS-open-frontier",
+                "order50 side is not the authenticated open cell",
+            ));
+        }
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2383) && stem.glyph_id == 314)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-open-frontier",
+                "order50 existing StemInter 2383/glyph314 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order50 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation =
+        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let expected_left = NativeStemsBeamHeadSLinkerRef {
+        head: head.reference,
+        horizontal: crate::stems_step::NativeStemHeadSide::Left,
+    };
+    let expected_decisions = [
+        (crate::stems_step::NativeStemHeadSide::Left, true, true),
+        (crate::stems_step::NativeStemHeadSide::Right, true, false),
+    ];
+    if continuation.returned_linked != Some(false)
+        || continuation.processed_head.x_ordinal != 32
+        || continuation.processed_head.sig_ordinal != 50
+        || continuation.closed_value_changes != 0
+        || !continuation.closed_s_linkers.is_empty()
+        || continuation.state_after.current_index != 51
+        || continuation.state_after.undefined_sides != vec![expected_left]
+        || continuation.side_decisions.len() != expected_decisions.len()
+        || !continuation
+            .side_decisions
+            .iter()
+            .zip(expected_decisions)
+            .all(|(decision, (side, top, bottom))| {
+                decision.side == side
+                    && !decision.linked_before
+                    && !decision.closed_before
+                    && decision.top_can_link == Some(top)
+                    && decision.bottom_can_link == Some(bottom)
+            })
+    {
+        return Err(stage(
+            "HEADS-open-frontier-result",
+            "order50 open frontier did not produce the authenticated undefined continuation",
         ));
     }
     Ok(continuation)
