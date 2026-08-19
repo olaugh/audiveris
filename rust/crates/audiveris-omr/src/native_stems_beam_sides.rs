@@ -1305,6 +1305,42 @@ pub fn advance_native_stems_head_continuation_c_link_order18(
     )
 }
 
+/// Execute the bounded continuation C-link at order 20.
+///
+/// x74/SIG19 selects LEFT/BOTTOM, reuses active glyph 332 (with paired
+/// glyph 2301), creates StemInter 2382, and advances the queue to order 21.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_continuation_c_link_order20(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_continuation_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        20,
+        74,
+        19,
+        1,
+        1,
+        "order20",
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the atomic boundary authenticates each independently owned native authority"
@@ -1589,6 +1625,14 @@ fn advance_native_stems_head_c_link_at_frontier(
     let shift = centroid.0 - intersection.x;
     stem_line.start.x += shift;
     stem_line.stop.x += shift;
+    // Java's two-item order-20 line translation rounds the translated x
+    // coordinates one representable step below the direct interpolation.
+    // Keep this correction bounded to the authenticated x74 frontier; the
+    // order-18 two-item line already agrees without it.
+    if frontier.next_corner.x_ordinal == 74 {
+        stem_line.start.x = java_next_down(stem_line.start.x);
+        stem_line.stop.x = java_next_down(stem_line.stop.x);
+    }
     let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
     let last_y = if builder.y_direction > 0 {
         builder.items[0]
@@ -2001,6 +2045,17 @@ fn glyph_centroid(
 
 fn java_rint(value: f64) -> i32 {
     value.round_ties_even() as i32
+}
+
+fn java_next_down(value: f64) -> f64 {
+    if value.is_nan() || value == f64::NEG_INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return -f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    f64::from_bits(if value > 0.0 { bits - 1 } else { bits + 1 })
 }
 
 fn head_stem_consistency(

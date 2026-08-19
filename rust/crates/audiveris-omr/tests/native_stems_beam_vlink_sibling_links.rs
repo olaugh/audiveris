@@ -44,6 +44,7 @@ use audiveris_omr::{
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
         advance_native_stems_head_continuation_c_link,
         advance_native_stems_head_continuation_c_link_order18,
+        advance_native_stems_head_continuation_c_link_order20,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -9175,6 +9176,118 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("order19 closure target");
     assert!(closed_x68.sides.iter().all(|cell| cell.closed));
 
+    // Boundary 46: consume the second open C-link at x74/SIG19.
+    let order20_frontier = continue_native_stems_head_linking_phase1(
+        &order19_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order20 C-link frontier");
+    assert_eq!(order20_frontier.processed_head.x_ordinal, 74);
+    assert_eq!(order20_frontier.processed_head.sig_ordinal, 19);
+    assert_eq!(order20_frontier.returned_linked, None);
+    let order20_frontier_before = (*order20_frontier.state_after).clone();
+    let mut order20_head_phase = order20_frontier_before.clone();
+    let order20_transaction = advance_native_stems_head_continuation_c_link_order20(
+        &mut order20_head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
+        &checker_page.stem_seeds.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+        &checker,
+        &bridge,
+    )
+    .expect("native order20 continuation C-link transaction");
+    assert_eq!(order20_transaction.corner.x_ordinal, 74);
+    assert_eq!(order20_transaction.corner.sig_ordinal, 19);
+    assert_eq!(
+        order20_transaction.corner.horizontal,
+        NativeStemHeadSide::Left
+    );
+    assert_eq!(
+        order20_transaction.corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(
+        (
+            order20_transaction.last_index,
+            order20_transaction.max_index
+        ),
+        (1, 1)
+    );
+    assert_eq!(order20_transaction.selected_glyph_id, 332);
+    assert_eq!(
+        order20_transaction.relation.grade.to_bits(),
+        0x3fef_20e4_839d_326e
+    );
+    assert_eq!(
+        order20_transaction.relation.dx.to_bits(),
+        0xbf96_01c5_ae04_b6db
+    );
+    assert_eq!(order20_transaction.relation.dy.to_bits(), 0);
+    assert_eq!(
+        order20_transaction
+            .relation
+            .extension_point
+            .expect("order20 relation extension")
+            .x
+            .to_bits(),
+        0x409b_0261_99f3_b0e2
+    );
+    let order20_stem_identity = match &order20_transaction.create.disposition {
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } => *stem_identity,
+        other => panic!("order20 created unexpected stem: {other:?}"),
+    };
+    assert_eq!(order20_stem_identity, 42);
+    assert_eq!(order20_transaction.create.registration.glyph_id, 332);
+    assert_eq!(order20_head_phase.current_index, 21);
+    assert!(order20_head_phase.frontier_consumed);
+    assert_eq!(order20_head_phase.heads[20].reference.x_ordinal, 74);
+    assert!(
+        order20_head_phase.heads[20]
+            .sides
+            .iter()
+            .any(|cell| { cell.reference.horizontal == NativeStemHeadSide::Left && cell.linked })
+    );
+    let order20_stem = order20_head_phase
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.stem_identity == order20_stem_identity)
+        .expect("order20 created system stem");
+    assert_eq!(order20_stem.inter_id, Some(2382));
+    assert_eq!(
+        order20_head_phase.beam_state.sig.vertices.len(),
+        order20_frontier_before.beam_state.sig.vertices.len() + 1
+    );
+    assert_eq!(
+        order20_head_phase.beam_state.sig.edges.len(),
+        order20_frontier_before.beam_state.sig.edges.len() + 1
+    );
+
+    let mut invalid_order20 = order20_frontier_before.clone();
+    invalid_order20.current_index = 19;
+    let invalid_order20_before = invalid_order20.clone();
+    assert!(
+        advance_native_stems_head_continuation_c_link_order20(
+            &mut invalid_order20,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_reachability.systems[0],
+            &checker_page.stem_seeds.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+            &checker,
+            &bridge,
+        )
+        .is_err()
+    );
+    assert_eq!(invalid_order20, invalid_order20_before);
+
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
     let mut invalid_order18 = order18_frontier_before.clone();
@@ -11793,6 +11906,139 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v19_summary, "javaEvidence"),
         "ReturnedBeforeTwentiethHead"
+    );
+
+    // Boundary 46 expected-only v20 rows cover the second open C-link.
+    let v20_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v20.txt"),
+    )
+    .expect("expected-only order20 head continuation fixture");
+    assert_eq!(
+        sha256_hex(v20_text.as_bytes()),
+        "be6a820b3740105e4fdddeb0e9ec475d1dd3ebc8611fd7be555cf55957dfe4a4"
+    );
+    let v20_rows = v20_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v20_rows.len(), 12);
+    let v20_body = format!("{}\n", v20_rows[..11].join("\n"));
+    assert_eq!(
+        sha256_hex(v20_body.as_bytes()),
+        "3b1f4c53462e4ff8241863e73c90043d813cf5709cd0f3c809858659d7261564"
+    );
+    let v20_frontier = v20_rows[8];
+    assert_eq!(head_field(v20_frontier, "headOrder"), "20");
+    assert_eq!(head_field(v20_frontier, "headX"), "74");
+    assert_eq!(head_field(v20_frontier, "headSig"), "19");
+    assert_eq!(head_field(v20_frontier, "headInterId"), "1323");
+    assert_eq!(head_field(v20_frontier, "cAlias"), "h:74:LEFT:BOTTOM");
+    assert_eq!(head_field(v20_frontier, "lastIndex"), "1");
+    assert_eq!(head_field(v20_frontier, "maxIndex"), "1");
+    assert_eq!(
+        head_field(v20_frontier, "selected"),
+        "[glyph:332:active:id=332:g:1727:379:3:81:3e36225d69cfad591cc3c85eb38ad1c2ead6240f867708e97d0041e5e81e416a,glyph:2301:active:id=2301:g:1727:379:3:81:fd64bac32251045b154d3d40c7ff0337029cce46ddd3828860233849d95e9791]"
+    );
+    assert_eq!(head_field(v20_frontier, "candidateIdBefore"), "0");
+    assert_eq!(
+        head_field(v20_frontier, "terminal"),
+        "ReadyForHeadCreateStem"
+    );
+    let v20_result = v20_rows[9];
+    assert_eq!(head_field(v20_result, "headOrder"), "20");
+    assert_eq!(head_field(v20_result, "allocatorBefore"), "2381");
+    assert_eq!(head_field(v20_result, "allocatorAfter"), "2382");
+    assert_eq!(
+        head_field(v20_result, "addedVertices"),
+        "[id2382:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=0x1.9276faafa2386p-1/3fe9276faafa2386:bounds=1727:379:4:81:removed=false:abnormal=false:manual=false:implicit=false:profile=0:median=0x1.b03eab3fe1a4ap10/409b03eab3fe1a4a:0x1.7bp8/4077b00000000000:0x1.b02c3f5bff608p10/409b02c3f5bff608:0x1.ccp8/407cc00000000000:width=0x1.1f9add3c0ca46p1/4001f9add3c0ca46]"
+    );
+    assert_eq!(
+        head_field(v20_result, "linkerChanges"),
+        "[h:74:LEFT:BOTTOM:false:false->true:false,h:74:LEFT:TOP:false:false->true:false,linker:SLinker:head:74:false:false->true:false]"
+    );
+    assert_eq!(
+        head_field(v20_result, "relationStateHashAfter"),
+        "3c50fb8ad029b80132262f4607e856ffcfadd6aa777d03bd3795288018faac9d"
+    );
+    assert_eq!(
+        head_field(v20_result, "linkerStateHashAfter"),
+        "e77ba4ade2dd66f504a66f8ce9c7d80c6e2136fdd68666e5bdaffaa2414ed95c"
+    );
+    assert_eq!(
+        head_field(v20_result, "terminal"),
+        "ReturnedHeadCLinkTransaction"
+    );
+    let v20_continue = v20_rows[10];
+    assert_eq!(head_field(v20_continue, "headOrder"), "20");
+    assert_eq!(head_field(v20_continue, "headX"), "74");
+    assert_eq!(head_field(v20_continue, "headSig"), "19");
+    assert_eq!(
+        head_field(v20_continue, "decisions"),
+        "[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(head_field(v20_continue, "returned"), "true");
+    assert_eq!(head_field(v20_continue, "sigVerticesAfter"), "682");
+    assert_eq!(head_field(v20_continue, "sigEdgesAfter"), "693");
+    assert_eq!(head_field(v20_continue, "systemStemsAfter"), "43");
+    assert_eq!(head_field(v20_continue, "nextHeadOrder"), "21");
+    assert_eq!(head_field(v20_continue, "nextHeadX"), "28");
+    assert_eq!(head_field(v20_continue, "nextHeadSig"), "55");
+    assert_eq!(head_field(v20_continue, "nextHeadInterId"), "1399");
+    assert_eq!(
+        head_field(v20_continue, "terminal"),
+        "ReturnedBeforeNextHead"
+    );
+    let v20_summary = v20_rows[11];
+    assert_eq!(
+        head_field(v20_summary, "schema"),
+        "stems-head-phase-prefix-v20"
+    );
+    assert_eq!(head_field(v20_summary, "rows"), "11");
+    assert_eq!(
+        head_field(v20_summary, "baseProbeSourceSha256"),
+        "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf"
+    );
+    assert_eq!(
+        head_field(v20_summary, "baseV19RunnerSourceSha256"),
+        "b79cb0c5cba1d3b1275dd943d7945722a5f025281686362d6b40a311d3ad5335"
+    );
+    assert_eq!(
+        head_field(v20_summary, "baseV19FixtureSha256"),
+        "6d415102995fd1fda8057fab27b0f2a3a6cb2367cbcce52269009f377bf672ae"
+    );
+    assert_eq!(
+        head_field(v20_summary, "fragmentSourceSha256"),
+        "5fa3ac22fe21091c313135909f13c793be575fd460f0af3349345ba8ede9ab3e"
+    );
+    assert_eq!(
+        head_field(v20_summary, "probeSourceSha256"),
+        "40ced3035bdb19298e925b499edce42365aca66586abe7f8756847f32a1abd82"
+    );
+    assert_eq!(
+        head_field(v20_summary, "runnerSourceSha256"),
+        "54468f53de6c0d1d931e391640642f55ce6c4733721df569ef6f10ef93704497"
+    );
+    assert_eq!(
+        head_field(v20_summary, "emittedBodySha256"),
+        "3b1f4c53462e4ff8241863e73c90043d813cf5709cd0f3c809858659d7261564"
+    );
+    assert_eq!(
+        head_field(v20_summary, "semanticPassSha256"),
+        "dbd1c398b3ab3565a75ab9ed6dfa276b3493c52a6dd22a9a54ad09dc5e89e4d5"
+    );
+    assert_eq!(
+        head_field(v20_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v20_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v20_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v20_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder20WithCLinkEnvelope"
+    );
+    assert_eq!(
+        head_field(v20_summary, "javaEvidence"),
+        "ReturnedBeforeTwentyFirstHead"
     );
 
     let all_siblings = std::iter::once(&actual)
