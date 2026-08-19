@@ -4925,6 +4925,22 @@ runner, transformed probe, emitted body, and semantic pass are
 Actual-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
 coverage remain open.
 
+## Boundary 35: ninth prelinked head continuation
+
+Boundary 35 reuses the unchanged head continuation at order 9 (x42 / SIG 93 / Java
+Inter 1475). LEFT is prelinked and RIGHT is `Neither`; shared Stem 2352 closes x41
+LEFT then RIGHT, with two ordered value changes and no unlinked insertion. SIG remains
+680/691 and Stem bindings remain 41; native advances to `current_index=10` before x65 /
+SIG 95 / Java Inter 1479. The v9 fixture is SHA-256
+`b0d3c67f9b76a56a528d8a962f3f2bc54710616f2e86650ac8500e750534ff2c`; runner,
+transformed probe, emitted body, and semantic pass are
+`368724efe73e194aff024d68204d758d089d81511e9bbfaa4dfb9ef9516f4c48`,
+`caf6a7f25cc36cbe7480c7cb798a8c900bbd526fa7e4071d625724045bb88af5`,
+`dbe0a891add7c613c340dfaee983a75c97b20cba4744ca19619e10cd9f7a78f5`, and
+`8e271204197c0d84afe4948a94f6723f6a419cd9611495aa8ca74fb7731bbf95`.
+Actually-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
