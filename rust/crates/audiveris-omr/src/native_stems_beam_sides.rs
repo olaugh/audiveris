@@ -754,6 +754,7 @@ fn bounded_head_can_link(
 pub fn continue_native_stems_head_linking_phase1(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: Option<&NativeStemsHeadCornerReachabilitySystem>,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
@@ -979,12 +980,49 @@ pub fn continue_native_stems_head_linking_phase1(
             (true, false) => next_corner = Some(top),
             (false, true) => next_corner = Some(bottom),
             (true, true) => {
-                // Java records this as an undefined side and continues the
-                // bounded phase without mutating either linker.  The native
-                // port keeps the side in the returned event evidence, then
-                // advances to the next ordered head below.  A later bounded
-                // C-link transaction may authenticate the unresolved side.
-                shadow.undefined_sides.push(side.reference);
+                // Java records an undefined side only when the two corner
+                // stumps are one shared non-null glyph (HeadLinker.linkSides
+                // guards the undef branch with `clTop.stump != null &&
+                // clTop.stump == clBot.stump`); differing or missing stumps
+                // take the standard-connection branch instead, which stays
+                // unported and fails closed here.
+                let reachability = head_reachability.ok_or_else(|| {
+                    stage(
+                        "HEADS-phase1-dual-corner",
+                        "dual-corner undef requires reachability stump authentication",
+                    )
+                })?;
+                if reachability.system_id != head_corners.system_id {
+                    return Err(stage(
+                        "HEADS-phase1-dual-corner",
+                        "head reachability belongs to a different system",
+                    ));
+                }
+                let stump_of = |corner: NativeStemsHeadCornerRef| {
+                    reachability
+                        .heads
+                        .iter()
+                        .flat_map(|head| &head.corners)
+                        .find(|reach| reach.reference == corner)
+                        .map(|reach| reach.stump)
+                        .ok_or_else(|| {
+                            stage(
+                                "HEADS-phase1-dual-corner",
+                                "dual-corner reachability corner is missing",
+                            )
+                        })
+                };
+                match (stump_of(top)?, stump_of(bottom)?) {
+                    (Some(top_stump), Some(bottom_stump)) if top_stump == bottom_stump => {
+                        shadow.undefined_sides.push(side.reference);
+                    }
+                    _ => {
+                        return Err(stage(
+                            "HEADS-phase1-dual-corner",
+                            "dual-corner differing-stump standard connection is unported",
+                        ));
+                    }
+                }
             }
             (false, false) => {}
         }
@@ -993,6 +1031,10 @@ pub fn continue_native_stems_head_linking_phase1(
         }
     }
     if shadow.undefined_sides.len() > undefined_sides_before {
+        // Java's caller adds every head whose linkSides returns false to
+        // the phase-2 unlinkedHeads queue (StemsRetriever heads linking
+        // phase 1) before re-running linkSides with append=true.
+        shadow.unlinked_heads.push(current.reference);
         shadow.current_index += 1;
         shadow.frontier_consumed = true;
         return Ok(NativeStemsHeadPhase1Continuation {
@@ -1542,8 +1584,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order37(
             "order37 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 14
         || continuation.processed_head.sig_ordinal != 1
@@ -1623,8 +1670,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order38(
             "order38 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 18
         || continuation.processed_head.sig_ordinal != 4
@@ -1704,8 +1756,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order39(
             "order39 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 97
         || continuation.processed_head.sig_ordinal != 34
@@ -1785,8 +1842,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order40(
             "order40 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 6
         || continuation.processed_head.sig_ordinal != 89
@@ -1866,8 +1928,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order41(
             "order41 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 30
         || continuation.processed_head.sig_ordinal != 67
@@ -1948,8 +2015,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order42(
             "order42 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 43
         || continuation.processed_head.sig_ordinal != 48
@@ -2029,8 +2101,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order43(
             "order43 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 25
         || continuation.processed_head.sig_ordinal != 91
@@ -2110,8 +2187,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order44(
             "order44 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 83
         || continuation.processed_head.sig_ordinal != 21
@@ -2191,8 +2273,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order45(
             "order45 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 57
         || continuation.processed_head.sig_ordinal != 5
@@ -2272,8 +2359,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order46(
             "order46 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 40
         || continuation.processed_head.sig_ordinal != 27
@@ -2353,8 +2445,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order47(
             "order47 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 89
         || continuation.processed_head.sig_ordinal != 22
@@ -2434,8 +2531,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order48(
             "order48 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 52
         || continuation.processed_head.sig_ordinal != 2
@@ -2515,8 +2617,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order49(
             "order49 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 35
         || continuation.processed_head.sig_ordinal != 68
@@ -2541,6 +2648,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order49(
 pub fn advance_native_stems_head_open_frontier_order50(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
@@ -2600,8 +2708,13 @@ pub fn advance_native_stems_head_open_frontier_order50(
             "order50 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )?;
     let expected_left = NativeStemsBeamHeadSLinkerRef {
         head: head.reference,
         horizontal: crate::stems_step::NativeStemHeadSide::Left,
@@ -2617,6 +2730,7 @@ pub fn advance_native_stems_head_open_frontier_order50(
         || !continuation.closed_s_linkers.is_empty()
         || continuation.state_after.current_index != 51
         || continuation.state_after.undefined_sides != vec![expected_left]
+        || continuation.state_after.unlinked_heads != vec![head.reference]
         || continuation.side_decisions.len() != expected_decisions.len()
         || !continuation
             .side_decisions
@@ -2651,10 +2765,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 51
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 51 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order51 continuation",
@@ -2674,6 +2785,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order51 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order51 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(51).ok_or_else(|| {
@@ -2719,8 +2836,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
             "order51 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 19
         || continuation.processed_head.sig_ordinal != 64
@@ -2749,10 +2871,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order52(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 52
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 52 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order52 continuation",
@@ -2772,6 +2891,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order52(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order52 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order52 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(52).ok_or_else(|| {
@@ -2817,8 +2942,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order52(
             "order52 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 15
         || continuation.processed_head.sig_ordinal != 80
@@ -2849,10 +2979,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order53(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 53
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 53 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order53 continuation",
@@ -2872,6 +2999,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order53(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order53 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order53 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(53).ok_or_else(|| {
@@ -2917,8 +3050,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order53(
             "order53 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 84
         || continuation.processed_head.sig_ordinal != 86
@@ -2948,10 +3086,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order54(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 54
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 54 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order54 continuation",
@@ -2971,6 +3106,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order54(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order54 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order54 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(54).ok_or_else(|| {
@@ -3016,8 +3157,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order54(
             "order54 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 11
         || continuation.processed_head.sig_ordinal != 62
@@ -3046,10 +3192,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order55(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 55
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 55 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order55 continuation",
@@ -3069,6 +3212,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order55(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order55 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order55 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(55).ok_or_else(|| {
@@ -3114,8 +3263,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order55(
             "order55 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 68
         || continuation.processed_head.sig_ordinal != 75
@@ -3144,10 +3298,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 56
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 56 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order56 continuation",
@@ -3167,6 +3318,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order56 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order56 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(56).ok_or_else(|| {
@@ -3212,8 +3369,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
             "order56 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 21
         || continuation.processed_head.sig_ordinal != 11
@@ -3242,10 +3404,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order58(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 58
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 58 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order58 continuation",
@@ -3265,6 +3424,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order58(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order58 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order58 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(58).ok_or_else(|| {
@@ -3310,8 +3475,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order58(
             "order58 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 92
         || continuation.processed_head.sig_ordinal != 24
@@ -3340,10 +3510,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 59
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 59 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order59 continuation",
@@ -3363,6 +3530,12 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "order59 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order59 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(59).ok_or_else(|| {
@@ -3408,8 +3581,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
             "order59 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 100
         || continuation.processed_head.sig_ordinal != 42
@@ -3436,13 +3614,11 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
 pub fn advance_native_stems_head_open_frontier_order60(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 60
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 60 {
         return Err(stage(
             "HEADS-open-frontier",
             "carrier is not the authenticated order60 continuation",
@@ -3462,6 +3638,12 @@ pub fn advance_native_stems_head_open_frontier_order60(
         return Err(stage(
             "HEADS-open-frontier",
             "order60 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order60 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier
@@ -3510,8 +3692,13 @@ pub fn advance_native_stems_head_open_frontier_order60(
             "order60 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )?;
     let expected_left = NativeStemsBeamHeadSLinkerRef {
         head: head.reference,
         horizontal: crate::stems_step::NativeStemHeadSide::Left,
@@ -3527,6 +3714,7 @@ pub fn advance_native_stems_head_open_frontier_order60(
         || !continuation.closed_s_linkers.is_empty()
         || continuation.state_after.current_index != 61
         || continuation.state_after.undefined_sides != vec![carried_undefined, expected_left]
+        || continuation.state_after.unlinked_heads != vec![order50_head.reference, head.reference]
         || continuation.side_decisions.len() != expected_decisions.len()
         || !continuation
             .side_decisions
@@ -3559,13 +3747,11 @@ pub fn advance_native_stems_head_open_frontier_order60(
 pub fn advance_native_stems_head_open_frontier_order61(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 61
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 61 {
         return Err(stage(
             "HEADS-open-frontier",
             "carrier is not the authenticated order61 continuation",
@@ -3593,6 +3779,17 @@ pub fn advance_native_stems_head_open_frontier_order61(
         return Err(stage(
             "HEADS-open-frontier",
             "order61 carrier lacks the carried order50/order60 undefined LEFT sides",
+        ));
+    }
+    if carrier.unlinked_heads
+        != carried_undefined
+            .iter()
+            .map(|cell| cell.head)
+            .collect::<Vec<_>>()
+    {
+        return Err(stage(
+            "HEADS-open-frontier",
+            "order61 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier
@@ -3641,8 +3838,13 @@ pub fn advance_native_stems_head_open_frontier_order61(
             "order61 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )?;
     let expected_left = NativeStemsBeamHeadSLinkerRef {
         head: head.reference,
         horizontal: crate::stems_step::NativeStemHeadSide::Left,
@@ -3660,6 +3862,11 @@ pub fn advance_native_stems_head_open_frontier_order61(
         || !continuation.closed_s_linkers.is_empty()
         || continuation.state_after.current_index != 62
         || continuation.state_after.undefined_sides != expected_undefined
+        || continuation.state_after.unlinked_heads
+            != expected_undefined
+                .iter()
+                .map(|cell| cell.head)
+                .collect::<Vec<_>>()
         || continuation.side_decisions.len() != expected_decisions.len()
         || !continuation
             .side_decisions
@@ -3712,6 +3919,12 @@ fn authenticated_carried_undefined_sides(
             format!("{order_label} carrier lacks the carried undefined LEFT sides"),
         ));
     }
+    if carrier.unlinked_heads != carried.iter().map(|cell| cell.head).collect::<Vec<_>>() {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            format!("{order_label} carrier lacks the carried phase-2 unlinked queue"),
+        ));
+    }
     Ok(carried)
 }
 
@@ -3728,10 +3941,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order62(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 62
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 62 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order62 continuation",
@@ -3782,8 +3992,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order62(
             "order62 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 9
         || continuation.processed_head.sig_ordinal != 8
@@ -3812,10 +4027,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order63(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 63
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 63 {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
             "carrier is not the authenticated order63 continuation",
@@ -3866,8 +4078,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order63(
             "order63 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 41
         || continuation.processed_head.sig_ordinal != 92
@@ -3906,10 +4123,7 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &NativeStemsFirstGlyphIndexBridge,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
-    if !carrier.frontier_consumed
-        || carrier.current_index != 57
-        || !carrier.unlinked_heads.is_empty()
-    {
+    if !carrier.frontier_consumed || carrier.current_index != 57 {
         return Err(stage(
             "HEADS-existing-stem-CLink-frontier",
             "carrier is not the authenticated order57 continuation",
@@ -3929,6 +4143,12 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         return Err(stage(
             "HEADS-existing-stem-CLink-frontier",
             "order57 carrier lacks the carried order50 undefined LEFT side",
+        ));
+    }
+    if carrier.unlinked_heads != vec![order50_head.reference] {
+        return Err(stage(
+            "HEADS-existing-stem-CLink-frontier",
+            "order57 carrier lacks the carried phase-2 unlinked queue",
         ));
     }
     let head = carrier.heads.get(57).ok_or_else(|| {
@@ -3970,8 +4190,13 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         ));
     }
 
-    let awaited =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let awaited = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if awaited.returned_linked.is_some()
         || awaited.state_after.frontier_consumed
         || awaited.state_after.current_index != 57
@@ -4461,8 +4686,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order21(
             "order21 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 28
         || continuation.processed_head.sig_ordinal != 55
@@ -4537,8 +4767,13 @@ pub fn advance_native_stems_head_existing_stem_retry_order22(
             "order22 existing stem is not SIG-attached",
         ));
     }
-    let continuation =
-        continue_native_stems_head_linking_phase1(carrier, head_corners, head_builders, plans)?;
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
     if continuation.returned_linked != Some(true)
         || continuation.processed_head.x_ordinal != 4
         || continuation.processed_head.sig_ordinal != 7

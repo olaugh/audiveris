@@ -8286,6 +8286,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let second_continuation = continue_native_stems_head_linking_phase1(
         &head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8330,6 +8331,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let third_continuation = continue_native_stems_head_linking_phase1(
         &second_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8360,6 +8362,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let fourth_continuation = continue_native_stems_head_linking_phase1(
         &third_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8391,6 +8394,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let fifth_continuation = continue_native_stems_head_linking_phase1(
         &fourth_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8421,6 +8425,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let sixth_continuation = continue_native_stems_head_linking_phase1(
         &fifth_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8452,6 +8457,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let seventh_continuation = continue_native_stems_head_linking_phase1(
         &sixth_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8461,6 +8467,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order7_frontier = continue_native_stems_head_linking_phase1(
         &seventh_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8574,6 +8581,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order8_continuation = continue_native_stems_head_linking_phase1(
         &seventh_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8624,6 +8632,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order9_continuation = continue_native_stems_head_linking_phase1(
         &order8_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8672,6 +8681,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order10_continuation = continue_native_stems_head_linking_phase1(
         &order9_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8720,6 +8730,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order11_continuation = continue_native_stems_head_linking_phase1(
         &order10_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8772,6 +8783,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order12_continuation = continue_native_stems_head_linking_phase1(
         &order11_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8824,6 +8836,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order13_continuation = continue_native_stems_head_linking_phase1(
         &order12_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8872,6 +8885,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order14_continuation = continue_native_stems_head_linking_phase1(
         &order13_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8920,6 +8934,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order15_continuation = continue_native_stems_head_linking_phase1(
         &order14_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -8968,6 +8983,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order16_continuation = continue_native_stems_head_linking_phase1(
         &order15_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9016,6 +9032,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order17_continuation = continue_native_stems_head_linking_phase1(
         &order16_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9064,6 +9081,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order18_frontier = continue_native_stems_head_linking_phase1(
         &order17_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9166,6 +9184,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order19_continuation = continue_native_stems_head_linking_phase1(
         &order18_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9212,6 +9231,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order20_frontier = continue_native_stems_head_linking_phase1(
         &order19_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9419,6 +9439,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order23_continuation = continue_native_stems_head_linking_phase1(
         &order22_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9459,6 +9480,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order24_continuation = continue_native_stems_head_linking_phase1(
         &order23_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9499,6 +9521,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order25_continuation = continue_native_stems_head_linking_phase1(
         &order24_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9539,6 +9562,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order26_continuation = continue_native_stems_head_linking_phase1(
         &order25_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9578,6 +9602,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order27_frontier = continue_native_stems_head_linking_phase1(
         &order26_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9657,6 +9682,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order28_continuation = continue_native_stems_head_linking_phase1(
         &order27_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9697,6 +9723,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order29_continuation = continue_native_stems_head_linking_phase1(
         &order28_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9735,6 +9762,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order30_continuation = continue_native_stems_head_linking_phase1(
         &order29_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9773,6 +9801,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order31_continuation = continue_native_stems_head_linking_phase1(
         &order30_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9811,6 +9840,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order32_continuation = continue_native_stems_head_linking_phase1(
         &order31_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9839,6 +9869,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order33_continuation = continue_native_stems_head_linking_phase1(
         &order32_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9877,6 +9908,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order34_frontier = continue_native_stems_head_linking_phase1(
         &order33_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9952,6 +9984,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order35_continuation = continue_native_stems_head_linking_phase1(
         &order34_head_phase,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -9990,6 +10023,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order36_frontier = continue_native_stems_head_linking_phase1(
         &order35_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        None,
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -10400,6 +10434,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order50_continuation = advance_native_stems_head_open_frontier_order50(
         &order49_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -10417,6 +10452,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             head: order50_continuation.processed_head,
             horizontal: NativeStemHeadSide::Left,
         }]
+    );
+    assert_eq!(
+        order50_continuation.state_after.unlinked_heads,
+        vec![order50_continuation.processed_head]
     );
     assert_eq!(
         order50_continuation
@@ -10714,6 +10753,34 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .vertices
             .len()
     );
+    let order57_edge = order57_continuation
+        .state_after
+        .beam_state
+        .sig
+        .edges
+        .last()
+        .expect("order57 appended HeadStem edge");
+    let order57_support = order57_edge
+        .support
+        .as_ref()
+        .expect("order57 HeadStem support");
+    assert_eq!(order57_support.grade.to_bits(), 0x3fe919ad999159ae);
+    let order57_payload = order57_edge
+        .head_stem
+        .as_ref()
+        .expect("order57 HeadStem payload");
+    assert_eq!(order57_payload.dx.to_bits(), 0x3fb38a22434ecf3d);
+    assert_eq!(order57_payload.dy.to_bits(), 0x0000000000000000);
+    assert_eq!(order57_payload.consistency.to_bits(), 0x3ff695c4ca037ba6);
+    assert_eq!(
+        order57_payload.extension_point.x.to_bits(),
+        0x40989d96acc1ea24
+    );
+    assert_eq!(
+        order57_payload.extension_point.y.to_bits(),
+        0x4077200000000000
+    );
+    assert_eq!(order57_payload.head_side, NativeStemHeadSide::Left);
 
     // Boundary 84: order 58 reconciles an existing stem and closes x93
     // while the undefined LEFT side carried from order 50 stays unchanged.
@@ -10790,6 +10857,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order60_continuation = advance_native_stems_head_open_frontier_order60(
         &order59_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -10801,6 +10869,13 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert!(order60_continuation.closed_s_linkers.is_empty());
     assert_eq!(order60_continuation.state_after.current_index, 61);
     assert!(order60_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order60_continuation.state_after.unlinked_heads,
+        vec![
+            order50_continuation.processed_head,
+            order60_continuation.processed_head
+        ]
+    );
     assert_eq!(
         order60_continuation.state_after.undefined_sides,
         vec![
@@ -10838,6 +10913,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let order61_continuation = advance_native_stems_head_open_frontier_order61(
         &order60_continuation.state_after,
         &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
@@ -10849,6 +10925,14 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert!(order61_continuation.closed_s_linkers.is_empty());
     assert_eq!(order61_continuation.state_after.current_index, 62);
     assert!(order61_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order61_continuation.state_after.unlinked_heads,
+        vec![
+            order50_continuation.processed_head,
+            order60_continuation.processed_head,
+            order61_continuation.processed_head
+        ]
+    );
     assert_eq!(
         order61_continuation.state_after.undefined_sides,
         vec![
@@ -10959,6 +11043,14 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         order63_continuation.state_after.undefined_sides,
         order62_continuation.state_after.undefined_sides
     );
+    assert_eq!(
+        order63_continuation.state_after.unlinked_heads,
+        vec![
+            order50_continuation.processed_head,
+            order60_continuation.processed_head,
+            order61_continuation.processed_head
+        ]
+    );
 
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
@@ -11016,6 +11108,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         continue_native_stems_head_linking_phase1(
             &corrupt_closure,
             &checker_page.head_corners.systems[0],
+            None,
             &checker_page.head_builders.systems[0],
             &hydrated.plans,
         )
@@ -11029,6 +11122,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         continue_native_stems_head_linking_phase1(
             &invalid_second_head,
             &checker_page.head_corners.systems[0],
+            None,
             &checker_page.head_builders.systems[0],
             &hydrated.plans,
         )
