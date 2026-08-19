@@ -42,6 +42,7 @@ use audiveris_omr::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
         advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
         advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
+        advance_native_stems_head_continuation_c_link,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -8411,6 +8412,144 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(sixth_head_phase.heads[6].reference.x_ordinal, 22);
     assert_eq!(sixth_head_phase.heads[6].reference.sig_ordinal, 12);
 
+    // Boundary 33: consume the first later C-link frontier. Java selects the
+    // unlinked x76/SIG97 LEFT/BOTTOM BottomOnly corner and creates Stem 2380
+    // from active glyph 319 before the queue advances to index 8.
+    let seventh_continuation = continue_native_stems_head_linking_phase1(
+        &sixth_head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order7 C-link frontier");
+    assert_eq!(seventh_continuation.processed_head.sig_ordinal, 12);
+    assert_eq!(seventh_continuation.returned_linked, Some(true));
+    let order7_frontier = continue_native_stems_head_linking_phase1(
+        &seventh_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order7 C-link frontier");
+    assert_eq!(order7_frontier.processed_head.sig_ordinal, 97);
+    assert_eq!(order7_frontier.returned_linked, None);
+    let seventh_frontier_before = (*order7_frontier.state_after).clone();
+    let mut seventh_head_phase = seventh_frontier_before.clone();
+    let seventh_transaction = advance_native_stems_head_continuation_c_link(
+        &mut seventh_head_phase,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
+        &checker_page.stem_seeds.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+        &checker,
+        &bridge,
+    )
+    .expect("native order7 continuation C-link transaction");
+    assert_eq!(seventh_transaction.corner.x_ordinal, 76);
+    assert_eq!(seventh_transaction.corner.sig_ordinal, 97);
+    assert_eq!(
+        seventh_transaction.corner.horizontal,
+        NativeStemHeadSide::Left
+    );
+    assert_eq!(
+        seventh_transaction.corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(
+        (
+            seventh_transaction.last_index,
+            seventh_transaction.max_index
+        ),
+        (0, 0)
+    );
+    assert_eq!(seventh_transaction.selected_glyph_id, 319);
+    assert_eq!(
+        seventh_transaction.relation.grade.to_bits(),
+        0x3fef_c384_9946_38a5
+    );
+    assert_eq!(
+        seventh_transaction.relation.dx.to_bits(),
+        0xbf78_1a7f_5e17_cf3d
+    );
+    assert_eq!(seventh_transaction.relation.dy.to_bits(), 0);
+    assert_eq!(
+        seventh_transaction
+            .relation
+            .extension_point
+            .expect("order7 relation extension")
+            .x
+            .to_bits(),
+        0x409b_0511_ffd9_187c
+    );
+    let seventh_stem_identity = match seventh_transaction.create.disposition {
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } => stem_identity,
+        ref other => panic!("order7 created unexpected stem: {other:?}"),
+    };
+    assert_eq!(seventh_stem_identity, 40);
+    assert_eq!(seventh_transaction.create.registration.glyph_id, 319);
+    assert_eq!(
+        seventh_transaction.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false
+        }
+    );
+    let seventh_stem = seventh_head_phase
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.stem_identity == seventh_stem_identity)
+        .expect("order7 created system stem");
+    assert_eq!(seventh_stem.inter_id, Some(2380));
+    assert_eq!(seventh_transaction.stem_vertex.0, 261);
+    assert_eq!(seventh_transaction.head_stem_edge.0, 354);
+    assert_eq!(seventh_transaction.s_linker.head.x_ordinal, 76);
+    assert_eq!(
+        seventh_transaction.s_linker.horizontal,
+        NativeStemHeadSide::Left
+    );
+    assert!(!seventh_transaction.s_linked_before);
+    assert!(seventh_transaction.s_linked_after);
+    assert_eq!(seventh_transaction.closed_cell_changes, 0);
+    assert_eq!(seventh_head_phase.current_index, 8);
+    assert!(seventh_head_phase.frontier_consumed);
+    assert!(seventh_head_phase.unlinked_heads.is_empty());
+    assert_eq!(seventh_head_phase.heads[7].reference.x_ordinal, 76);
+    assert!(
+        seventh_head_phase.heads[7]
+            .sides
+            .iter()
+            .any(|cell| { cell.reference.horizontal == NativeStemHeadSide::Left && cell.linked })
+    );
+    assert_eq!(
+        seventh_head_phase.beam_state.sig.vertices.len(),
+        seventh_frontier_before.beam_state.sig.vertices.len() + 1
+    );
+    assert_eq!(
+        seventh_head_phase.beam_state.sig.edges.len(),
+        seventh_frontier_before.beam_state.sig.edges.len() + 1
+    );
+    let mut invalid_order7 = seventh_frontier_before.clone();
+    invalid_order7.current_index = 6;
+    let invalid_order7_before = invalid_order7.clone();
+    assert!(
+        advance_native_stems_head_continuation_c_link(
+            &mut invalid_order7,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_reachability.systems[0],
+            &checker_page.stem_seeds.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+            &checker,
+            &bridge,
+        )
+        .is_err()
+    );
+    assert_eq!(invalid_order7, invalid_order7_before);
+
     let mut corrupt_closure = head_phase.clone();
     let x89_ref = corrupt_closure
         .heads
@@ -9376,6 +9515,134 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert_eq!(
         head_field(head_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+
+    // Boundary 33 expected-only v7 envelope/result rows are opened only after
+    // the authenticated order7 native C-link has committed.
+    let v7_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v7.txt"),
+    )
+    .expect("expected-only order7 head C-link fixture");
+    assert_eq!(
+        sha256_hex(v7_text.as_bytes()),
+        "8df7d36e780e90e569fcc37144bd48ff43e5b647f9cdc240d899ee10386b153d"
+    );
+    let v7_rows = v7_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v7_rows.len(), 16);
+    let v7_body = format!("{}\n", v7_rows[..15].join("\n"));
+    assert_eq!(
+        sha256_hex(v7_body.as_bytes()),
+        "06285da43ff0b5a1f3644c4468570a10f24c0c8f2b8173e9e7d1e268284704d6"
+    );
+    let v7_frontier = v7_rows[12];
+    assert_eq!(head_field(v7_frontier, "headOrder"), "7");
+    assert_eq!(head_field(v7_frontier, "headX"), "76");
+    assert_eq!(head_field(v7_frontier, "headSig"), "97");
+    assert_eq!(head_field(v7_frontier, "cAlias"), "h:76:LEFT:BOTTOM");
+    assert_eq!(head_field(v7_frontier, "lastIndex"), "0");
+    assert_eq!(head_field(v7_frontier, "maxIndex"), "0");
+    assert_eq!(head_field(v7_frontier, "relations"), "1");
+    assert_eq!(head_field(v7_frontier, "glyphs"), "1");
+    assert_eq!(head_field(v7_frontier, "candidateIdBefore"), "319");
+    assert_eq!(head_field(v7_frontier, "existingGlyph"), "glyph:319");
+    assert_eq!(head_field(v7_frontier, "existingActive"), "true");
+    assert_eq!(head_field(v7_frontier, "existingStem"), "-");
+    assert_eq!(
+        head_field(v7_frontier, "terminal"),
+        "ReadyForHeadCreateStem"
+    );
+    assert_eq!(
+        head_field(v7_frontier, "relationRows"),
+        "[h:76:LEFT:BOTTOM:org.audiveris.omr.sig.relation.HeadStemRelation:manual=false:grade=0x1.fc384994638a5p-1/3fefc384994638a5:impacts=[xInGap:0x1.f877b832988f4p-1/3fef877b832988f4:w=0x1.0p0/3ff0000000000000,yGap:0x1.0p0/3ff0000000000000:w=0x1.0p0/3ff0000000000000]:dx=-0x1.81a7f5e17cf3dp-8/bf781a7f5e17cf3d:dy=0x0.0p0/0000000000000000:extension=0x1.b0511ffd9187cp10/409b0511ffd9187c:0x1.188p9/4081880000000000:headSide=LEFT:consistency=0x1.0p0/3ff0000000000000]"
+    );
+    let v7_result = v7_rows[13];
+    assert_eq!(head_field(v7_result, "headOrder"), "7");
+    assert_eq!(head_field(v7_result, "allocatorBefore"), "2379");
+    assert_eq!(head_field(v7_result, "allocatorAfter"), "2380");
+    assert_eq!(head_field(v7_result, "registeredGlyphs"), "-");
+    assert!(head_field(v7_result, "addedVertices").starts_with("[id2380:"));
+    assert!(head_field(v7_result, "addedEdges").starts_with("[system1:sourceId1483:targetId2380:"));
+    assert!(head_field(v7_result, "addedSystemStems").ends_with(":stemId2380]"));
+    assert_eq!(
+        head_field(v7_result, "linkerChanges"),
+        "[h:76:LEFT:BOTTOM:false:false->true:false,h:76:LEFT:TOP:false:false->true:false,linker:SLinker:head:76:false:false->true:false]"
+    );
+    assert_eq!(
+        head_field(v7_result, "relationStateHashAfter"),
+        "5418e578e4046d8d162f5f584d8969c2b4a7d447f73009b5bed39fd0ea739e44"
+    );
+    assert_eq!(
+        head_field(v7_result, "linkerStateHashAfter"),
+        "51b890b4d928b5d5615c324986ecdb4f0155f22f4be5e4381c393744fe3335e7"
+    );
+    assert_eq!(
+        head_field(v7_result, "terminal"),
+        "ReturnedHeadCLinkTransaction"
+    );
+    let v7_java = v7_rows[14];
+    assert_eq!(head_field(v7_java, "headOrder"), "7");
+    assert_eq!(head_field(v7_java, "headX"), "76");
+    assert_eq!(head_field(v7_java, "headSig"), "97");
+    assert_eq!(head_field(v7_java, "headInterId"), "1483");
+    assert_eq!(
+        head_field(v7_java, "grade"),
+        "0x1.88a60dd67c8a7p-1/3fe88a60dd67c8a7"
+    );
+    assert_eq!(
+        head_field(v7_java, "decisions"),
+        "[LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(head_field(v7_java, "incident"), "-");
+    assert_eq!(head_field(v7_java, "returned"), "true");
+    assert_eq!(head_field(v7_java, "closureWrites"), "-");
+    assert_eq!(head_field(v7_java, "closedValueChanges"), "0");
+    assert_eq!(head_field(v7_java, "unlinkedCount"), "0");
+    assert_eq!(head_field(v7_java, "sigVerticesBefore"), "679");
+    assert_eq!(head_field(v7_java, "sigVerticesAfter"), "680");
+    assert_eq!(head_field(v7_java, "sigEdgesBefore"), "690");
+    assert_eq!(head_field(v7_java, "sigEdgesAfter"), "691");
+    assert_eq!(head_field(v7_java, "systemStemsBefore"), "40");
+    assert_eq!(head_field(v7_java, "systemStemsAfter"), "41");
+    assert_eq!(head_field(v7_java, "nextHeadOrder"), "8");
+    assert_eq!(head_field(v7_java, "nextHeadX"), "95");
+    assert_eq!(head_field(v7_java, "nextHeadSig"), "100");
+    assert_eq!(head_field(v7_java, "nextHeadInterId"), "1489");
+    assert_eq!(head_field(v7_java, "terminal"), "ReturnedBeforeNextHead");
+    let v7_summary = v7_rows[15];
+    assert_eq!(
+        head_field(v7_summary, "schema"),
+        "stems-head-phase-prefix-v7"
+    );
+    assert_eq!(head_field(v7_summary, "rows"), "15");
+    assert_eq!(
+        head_field(v7_summary, "baseProbeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active shared base head-phase probe")
+        )
+    );
+    assert_eq!(
+        head_field(v7_summary, "probeSourceSha256"),
+        "93c6771d55b814cff4155d4065d94a322767df9a668033bc7f2e5ea1ea7f6edd"
+    );
+    assert_eq!(
+        head_field(v7_summary, "runnerSourceSha256"),
+        "87a12b97b6d9c79e6c0d346f8187b426505ab5e0e7785bd07a5984a03a18c197"
+    );
+    assert_eq!(
+        head_field(v7_summary, "emittedBodySha256"),
+        "06285da43ff0b5a1f3644c4468570a10f24c0c8f2b8173e9e7d1e268284704d6"
+    );
+    assert_eq!(
+        head_field(v7_summary, "semanticPassSha256"),
+        "68d581d84f21a79c41df3d4ebf6a856cc0dee266288512e4cd1e44bb3260fa0c"
+    );
+    assert_eq!(
+        head_field(v7_summary, "completeStumpsFixtureSha256"),
         sha256_hex(complete_stumps_text.as_bytes())
     );
 

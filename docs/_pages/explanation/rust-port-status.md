@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first thirty-two semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, and the thirtieth through thirty-second carry three further prelinked-success heads to index 6).
+The first thirty-three semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, the thirtieth through thirty-second carry three further prelinked-success heads to index 6, and the thirty-third consumes the first later BottomOnly head C-link to index 8).
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1144,6 +1144,19 @@ queue changes. Claims here stay deliberately short and must point back to exact
 tests or oracle counts in [`rust/PORTING.md`][porting] and
 [`rust/HANDOFF.md`][handoff]. A stage moves to **Native and graded** only when it
 consumes native upstream state and the oracle is a grader rather than an input.
+
+[Boundary 33] is a bounded continuation-specific head C-link. From the carried order-7
+frontier (x76 / SIG 97 / Inter 1483), Java selects LEFT/BOTTOM `BottomOnly`, reuses
+active glyph 319, and creates checked Stem Inter 2380 with one HeadStem relation. Native
+atomically advances the dense graph 679/690 to 680/691, adds Stem binding 41, links the
+LEFT S cell, and reaches `current_index=8` before x95 / SIG 100 / Inter 1489. The v7
+fixture is 20 lines / 18,778 bytes, SHA-256 `8df7d36e780e90e569fcc37144bd48ff43e5b647f9cdc240d899ee10386b153d`,
+with runner `87a12b97b6d9c79e6c0d346f8187b426505ab5e0e7785bd07a5984a03a18c197` and
+transformed-probe/body/semantic pins `93c6771d55b814cff4155d4065d94a322767df9a668033bc7f2e5ea1ea7f6edd`,
+`06285da43ff0b5a1f3644c4468570a10f24c0c8f2b8173e9e7d1e268284704d6`, and
+`68d581d84f21a79c41df3d4ebf6a856cc0dee266288512e4cd1e44bb3260fa0c`. Later queue,
+actual-unlinked/retry, phase-2 append, recursive/multi-item C-linking, wider corpus,
+and full STEMS remain open.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

@@ -1192,7 +1192,7 @@ pub fn advance_native_stems_head_single_item_c_link(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &NativeStemsFirstGlyphIndexBridge,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
-    let mut shadow = carrier.clone();
+    let shadow = carrier.clone();
     let reconstructed = begin_native_stems_head_linking_phase1(
         &shadow.beam_state,
         head_corners,
@@ -1203,6 +1203,129 @@ pub fn advance_native_stems_head_single_item_c_link(
         || shadow.current_index != 0
         || shadow.heads != reconstructed.heads
         || shadow.frontier != reconstructed.frontier
+        || !shadow.unlinked_heads.is_empty()
+        || !shadow.undefined_sides.is_empty()
+    {
+        return Err(stage(
+            "HEADS-CLink-frontier",
+            "head carrier is not the authenticated phase-1 entry",
+        ));
+    }
+    advance_native_stems_head_c_link_at_frontier(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        0,
+        0,
+        0,
+        &reconstructed.frontier,
+    )
+}
+
+/// Execute the first bounded continuation C-link after the prelinked head queue.
+///
+/// Boundary 33 authenticates Java's measured x76/SIG97/Inter1483 frontier:
+/// LEFT/BOTTOM is the sole `BottomOnly` choice, and the one-item active glyph
+/// 319 C-link creates Stem Inter 2380 before advancing to queue index 8.  The
+/// initial frontier API above remains strict and cannot consume this state.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_continuation_c_link(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    let queue_index = 7;
+    let shadow = carrier.clone();
+    let head = shadow.heads.get(queue_index).ok_or_else(|| {
+        stage(
+            "HEADS-CLink-continuation-frontier",
+            "order7 head is missing",
+        )
+    })?;
+    let frontier = &shadow.frontier;
+    let left = frontier.side_decisions.first().ok_or_else(|| {
+        stage(
+            "HEADS-CLink-continuation-frontier",
+            "order7 side decisions are missing",
+        )
+    })?;
+    let expected_corner = frontier.next_corner;
+    if shadow.frontier_consumed
+        || shadow.current_index != queue_index
+        || !shadow.unlinked_heads.is_empty()
+        || !shadow.undefined_sides.is_empty()
+        || frontier.head != head.reference
+        || head.reference.sig_ordinal != 97
+        || head.reference.x_ordinal != 76
+        || frontier.stem_profile != 0
+        || frontier.link_profile != plans.link_profile
+        || frontier.append
+        || left.side != crate::stems_step::NativeStemHeadSide::Left
+        || left.linked_before
+        || left.closed_before
+        || left.top_can_link != Some(false)
+        || left.bottom_can_link != Some(true)
+        || frontier.side_decisions.len() != 1
+        || expected_corner.head != head.reference.reference
+        || expected_corner.horizontal != crate::stems_step::NativeStemHeadSide::Left
+        || expected_corner.vertical != crate::stems_step::NativeStemVerticalSide::Bottom
+    {
+        return Err(stage(
+            "HEADS-CLink-continuation-frontier",
+            "carrier is not the authenticated order7 BottomOnly frontier",
+        ));
+    }
+    advance_native_stems_head_c_link_at_frontier(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        queue_index,
+        0,
+        0,
+        frontier,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+fn advance_native_stems_head_c_link_at_frontier(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+    expected_current_index: usize,
+    expected_last_index: usize,
+    expected_max_index: usize,
+    expected_frontier: &NativeStemsHeadPhase1Frontier,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    let mut shadow = carrier.clone();
+    if shadow.frontier_consumed
+        || shadow.current_index != expected_current_index
+        || shadow.frontier != *expected_frontier
         || !shadow.unlinked_heads.is_empty()
         || !shadow.undefined_sides.is_empty()
     {
@@ -1607,7 +1730,7 @@ pub fn advance_native_stems_head_single_item_c_link(
     cell.linked = true;
     let queued_cell = shadow
         .heads
-        .get_mut(0)
+        .get_mut(expected_current_index)
         .and_then(|head| head.sides.iter_mut().find(|cell| cell.reference == s_ref))
         .ok_or_else(|| stage("HEADS-CLink-S-cell", "queued S-cell view is missing"))?;
     if queued_cell.linked != s_linked_before || queued_cell.closed != cell.closed {
@@ -1617,7 +1740,7 @@ pub fn advance_native_stems_head_single_item_c_link(
         ));
     }
     queued_cell.linked = true;
-    shadow.current_index = 1;
+    shadow.current_index = expected_current_index + 1;
     shadow.frontier_consumed = true;
     shadow
         .beam_state
@@ -1633,8 +1756,8 @@ pub fn advance_native_stems_head_single_item_c_link(
     let transaction = NativeStemsHeadCLinkTransaction {
         system_id: head_corners.system_id,
         corner: frontier.next_corner,
-        last_index: 0,
-        max_index: 0,
+        last_index: expected_last_index,
+        max_index: expected_max_index,
         selected_glyph_id: promoted.glyph_id,
         relation,
         create,
