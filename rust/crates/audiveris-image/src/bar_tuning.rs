@@ -984,6 +984,292 @@ fn round4(value: f64) -> f64 {
     (value * 10_000.0).round_ties_even() / 10_000.0
 }
 
+/// Engraved form of a barline, decided from its strokes and repeat dots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarlineForm {
+    /// No full-height stroke found near the position.
+    Unknown,
+    Single,
+    Double,
+    /// Thin + thick pair without repeat dots (final or section end).
+    Final,
+    /// Repeat dots open to the right.
+    RepeatStart,
+    /// Repeat dots close from the left.
+    RepeatEnd,
+    /// Back-to-back repeat (dots on both sides).
+    RepeatBoth,
+}
+
+/// One full-height vertical stroke of a barline complex.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BarStroke {
+    pub x: f64,
+    pub width: usize,
+    pub thick: bool,
+}
+
+/// A classified boundary with its measured evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifiedBoundary {
+    pub x: f64,
+    pub form: BarlineForm,
+    pub strokes: Vec<BarStroke>,
+    /// Worst repeat-dot probe density on each side (diagnostic record).
+    pub left_dot_density: f64,
+    pub right_dot_density: f64,
+}
+
+/// Thresholds for barline-form classification, derived from the interline.
+///
+/// This layer has no Python oracle: it is validated against Verovio-engraved
+/// ground truth (`verovio-synthetic.txt`) and hand-verified scan boundaries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarClassificationParameters {
+    pub interline: f64,
+    /// Ink luminance cut, matching the tuning engine.
+    pub ink_threshold: u8,
+    /// Strokes are searched within this distance of the boundary.
+    pub search_radius: f64,
+    /// A column belongs to a stroke at this full-height occupancy.
+    pub stroke_occupancy: f64,
+    /// A stroke column may have inkless runs up to this length.
+    pub stroke_max_gap: usize,
+    /// Strokes at least this wide are thick.
+    pub thick_width: f64,
+    /// Repeat dots sit between these offsets from the outermost stroke.
+    pub dot_offset_min: f64,
+    pub dot_offset_max: f64,
+    /// Half-height of each dot probe box (centered on a staff space).
+    pub dot_box_half_height: f64,
+    /// Minimum ink fraction for a probe box to count as a dot.
+    pub dot_density: f64,
+    /// Probe boxes (2 spaces x 2 staves = 4) that must fire on a side.
+    pub dot_boxes_required: usize,
+    /// Repeat dots are short marks isolated between staff lines; noteheads
+    /// beside a barline bridge the adjacent lines.  A side whose probe strip
+    /// contains a vertical ink run taller than this cannot be dots.
+    pub dot_max_run: f64,
+}
+
+impl BarClassificationParameters {
+    #[must_use]
+    pub fn from_scale(interline: f64) -> Self {
+        Self {
+            interline,
+            ink_threshold: 82,
+            search_radius: 1.5 * interline,
+            stroke_occupancy: 0.70,
+            // Scan speckle interrupts even solid strokes; match the tuning
+            // engine's corroboration gap tolerance.
+            stroke_max_gap: rint_usize(1.33 * interline).max(2),
+            // Engraved thin barlines run ~0.15-0.33 interlines, thick final
+            // and repeat strokes ~0.5 interlines and up.
+            thick_width: 0.45 * interline,
+            dot_offset_min: 0.2 * interline,
+            dot_offset_max: 1.4 * interline,
+            dot_box_half_height: 0.3 * interline,
+            dot_density: 0.25,
+            dot_boxes_required: 3,
+            dot_max_run: 0.85 * interline,
+        }
+    }
+}
+
+/// Classifies the barline at `x` from its ink alone.
+///
+/// Strokes: full-height columns near `x`, clustered into runs, thin/thick by
+/// width.  Repeat dots: probe boxes on the two middle staff spaces of both
+/// staves, offset outward from the outermost stroke on each side.  Dots
+/// decide repeats; otherwise stroke count and thickness decide
+/// single/double/final.
+#[must_use]
+pub fn classify_boundary(
+    gray: &GrayRaster,
+    band: &SystemBand,
+    x: f64,
+    parameters: &BarClassificationParameters,
+) -> ClassifiedBoundary {
+    let width = gray.width();
+    let pixels = gray.pixels();
+    let top = (band.top as i64).max(0) as usize;
+    let bottom = ((band.bottom as i64).max(0) as usize)
+        .min(gray.height())
+        .max(top);
+    let rows = (bottom - top).max(1);
+    let ink = |column: usize, row: usize| -> bool {
+        255 - pixels[row * width + column] > parameters.ink_threshold
+    };
+    let scan_lo = ((x - parameters.search_radius) as i64).max(0) as usize;
+    let scan_hi = (((x + parameters.search_radius) as i64).max(0) as usize + 1).min(width);
+
+    // Warped pages draw barlines at a slight local slope, smearing the
+    // stroke across columns.  Scan a small shear range (horizontal
+    // displacement across the band height), score each shear by the total
+    // occupancy of its qualifying stroke columns, and classify on the
+    // best-aligned profile.  Stroke positions are reported at band middle.
+    let column_profile = |column: usize, shear: f64| -> (f64, usize) {
+        let mut inked = 0usize;
+        let mut gap = 0usize;
+        let mut worst_gap = 0usize;
+        for row in top..bottom {
+            let offset = shear * ((row - top) as f64 / rows as f64 - 0.5);
+            let effective = column as i64 + offset.round_ties_even() as i64;
+            let hit =
+                effective >= 0 && (effective as usize) < width && ink(effective as usize, row);
+            if hit {
+                inked += 1;
+                gap = 0;
+            } else {
+                gap += 1;
+                worst_gap = worst_gap.max(gap);
+            }
+        }
+        (inked as f64 / rows as f64, worst_gap)
+    };
+    let shear_limit = (0.5 * parameters.interline).round_ties_even() as i64;
+    let mut best_shear = 0.0_f64;
+    let mut best_score = -1.0_f64;
+    for step in -shear_limit..=shear_limit {
+        let shear = step as f64;
+        let mut score = 0.0;
+        for column in scan_lo..scan_hi {
+            let (occupancy, worst_gap) = column_profile(column, shear);
+            if occupancy >= parameters.stroke_occupancy && worst_gap <= parameters.stroke_max_gap {
+                score += occupancy;
+            }
+        }
+        if score > best_score {
+            best_score = score;
+            best_shear = shear;
+        }
+    }
+    let mut strokes: Vec<BarStroke> = Vec::new();
+    let mut run_start: Option<usize> = None;
+    for column in scan_lo..=scan_hi {
+        let is_stroke = column < scan_hi && {
+            let (occupancy, worst_gap) = column_profile(column, best_shear);
+            occupancy >= parameters.stroke_occupancy && worst_gap <= parameters.stroke_max_gap
+        };
+        match (is_stroke, run_start) {
+            (true, None) => run_start = Some(column),
+            (false, Some(start)) => {
+                let run_width = column - start;
+                strokes.push(BarStroke {
+                    x: (start + column - 1) as f64 / 2.0,
+                    width: run_width,
+                    thick: run_width as f64 >= parameters.thick_width,
+                });
+                run_start = None;
+            }
+            _ => {}
+        }
+    }
+
+    // Repeat-dot probes: the two middle staff spaces of each staff.
+    let interline = parameters.interline;
+    let space_centers = [
+        band.top + 1.5 * interline,
+        band.top + 2.5 * interline,
+        band.bottom - 2.5 * interline,
+        band.bottom - 1.5 * interline,
+    ];
+    // A dot is small; a fixed probe box spanning the whole offset range
+    // dilutes it below threshold at small interlines.  Slide a dot-sized
+    // box across the range, keep the densest position, and measure the
+    // tallest vertical ink run inside that winning box: repeat dots are
+    // isolated between staff lines, while a notehead beside the barline
+    // bridges the adjacent lines and vetoes its own box.
+    let box_density = |x0: f64, x1: f64, yc: f64| -> (f64, usize) {
+        let range_lo = (x0 as i64).max(0) as usize;
+        let range_hi = ((x1 as i64).max(0) as usize + 1).min(width);
+        let box_width = ((0.6 * parameters.interline) as usize).max(2);
+        let row_lo = ((yc - parameters.dot_box_half_height) as i64).max(0) as usize;
+        let row_hi =
+            (((yc + parameters.dot_box_half_height) as i64).max(0) as usize + 1).min(gray.height());
+        if range_hi <= range_lo || row_hi <= row_lo {
+            return (0.0, 0);
+        }
+        let mut best = 0.0_f64;
+        let mut best_columns = (range_lo, range_lo);
+        let mut start = range_lo;
+        loop {
+            let stop = (start + box_width).min(range_hi);
+            let mut inked = 0usize;
+            for row in row_lo..row_hi {
+                for column in start..stop {
+                    inked += usize::from(ink(column, row));
+                }
+            }
+            let density = inked as f64 / ((stop - start) * (row_hi - row_lo)) as f64;
+            if density > best {
+                best = density;
+                best_columns = (start, stop);
+            }
+            if stop == range_hi {
+                break;
+            }
+            start += 1;
+        }
+        let mut tallest = 0usize;
+        let mut run = 0usize;
+        for row in top..bottom {
+            let inked = (best_columns.0..best_columns.1).any(|column| ink(column, row));
+            run = if inked { run + 1 } else { 0 };
+            tallest = tallest.max(run);
+        }
+        (best, tallest)
+    };
+    let side_dots = |outer: f64, sign: f64| -> (bool, f64) {
+        let near = outer + sign * parameters.dot_offset_min;
+        let far = outer + sign * parameters.dot_offset_max;
+        let (x0, x1) = if sign < 0.0 { (far, near) } else { (near, far) };
+        let mut firing = 0usize;
+        let mut worst = 0.0_f64;
+        for yc in space_centers {
+            let (density, tallest) = box_density(x0, x1, yc);
+            worst = worst.max(density);
+            if density >= parameters.dot_density && (tallest as f64) <= parameters.dot_max_run {
+                firing += 1;
+            }
+        }
+        (firing >= parameters.dot_boxes_required, worst)
+    };
+
+    let (form, left_density, right_density) = if strokes.is_empty() {
+        (BarlineForm::Unknown, 0.0, 0.0)
+    } else {
+        let leftmost = strokes[0].x - strokes[0].width as f64 / 2.0;
+        let last = strokes[strokes.len() - 1];
+        let rightmost = last.x + last.width as f64 / 2.0;
+        let (dots_left, left_density) = side_dots(leftmost, -1.0);
+        let (dots_right, right_density) = side_dots(rightmost, 1.0);
+        let any_thick = strokes.iter().any(|stroke| stroke.thick);
+        // Engraved back-to-back repeats carry symmetric dots; a lopsided
+        // pair of firings is one true side plus speckle near the threshold,
+        // and the stronger side wins.
+        let symmetric = left_density >= 0.6 * right_density && right_density >= 0.6 * left_density;
+        let form = match (dots_left, dots_right) {
+            (true, true) if symmetric => BarlineForm::RepeatBoth,
+            (true, true) if right_density > left_density => BarlineForm::RepeatStart,
+            (true, true) => BarlineForm::RepeatEnd,
+            (false, true) => BarlineForm::RepeatStart,
+            (true, false) => BarlineForm::RepeatEnd,
+            (false, false) if strokes.len() >= 2 && any_thick => BarlineForm::Final,
+            (false, false) if strokes.len() >= 2 => BarlineForm::Double,
+            (false, false) => BarlineForm::Single,
+        };
+        (form, left_density, right_density)
+    };
+    ClassifiedBoundary {
+        x,
+        form,
+        strokes,
+        left_dot_density: left_density,
+        right_dot_density: right_density,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
