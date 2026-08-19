@@ -196,7 +196,7 @@ Against a live Java 5.11 oracle across all nine `data/examples` pages:
 | STEMS scheduler SIDES resume (fast evidence) | `resume_native_stems_beam_scheduler_after_transaction` is the nineteenth exact boundary: after Boundary 18, the SIDES worklist resumes from the suspended position with exact Java loop semantics - remaining V linkers of the completed B, the side result the outer assignment determined (`SideBLinkerResult` with `linked_flag_after` true), remaining sides and beams - and stops at the second `ReadyForCreateStem` frontier as a typed `AwaitingVLinkTransaction`, or reports SIDES exhaustion. Scope is SIDES only; the STUMPS continuation is a later boundary. On chula and BachInvention5 all nine systems reach a RIGHT-side second frontier on the same beam, and every resumed expand outcome equals the frozen Boundary-10 matrix even though Java ran it against the post-transaction SIG - an equivalence the gate checks per row, so a page where the mutation changes an outcome fails loudly. The probe re-emits Boundary-17 and Boundary-18 rows and the runner requires byte-identity with their frozen fixtures. The checkpoint has since raised it to full evidence: all eight sheets under two byte-identical passes, with the gate asserting it grades every installed sheet. The scheduler-only all-success chain reaches SIDES exhaustion on most systems and typed competing-hook frontiers on allegretto 1 and 3; Boundary 26 separately gates the first real Allegretto-system-1 removal from a reconstructed predecessor. The multi-V continuation occurs three times across two systems (batuque 1, BachInvention5 6) - multi-V B linkers are common but are almost never the frontier's own side linker, so that assertion is a deliberate floor of one and a failure there means the corpus stopped covering it. A failed link and an already-linked B linker are driven by re-running a real frontier with the one bit flipped, which shortens chula system 1 from 53 chained transactions to 36 |
 | STEMS SIDES-pass chain (historical diagnosis, now closed natively) | The early synthetic chain ran 53 transactions against Java's 32 because it carried no B16 sibling writes; the 21-transaction excess exactly matched Java's 21 `AlreadyLinked` skips. The production carrier now computes and carries all 29 sibling-write lists itself, executes Java's exact 32 plan/B-linker tuples, and reaches SIDES exhaustion. `scheduler_resume_chain_composes_without_repeating_a_v_linker` remains the narrow composition proof; `native_carrier_drives_full_sides_pass_before_oracle_read` is the current owned-state closure |
 | STEMS self-driving chain: original blocker survey (partly superseded) | This dated survey established that registry completeness, rather than per-transaction algebra, was the core problem. The SIG-bootstrap portion is now resolved by production `NativeSigSystem` assembly and native B14-B17 carriage. A validated first-STEMS bridge now joins the system-1-visible 1,058 native modeled objects to the disclosed 1,650-entry persistent snapshot and retains the other 592 entries as opaque fingerprints; transactions 3-32 therefore need no per-frontier glyph rows or exhaustive scan. The persistent IDs/allocator/union baseline remains fixture-backed, opaque fingerprints never answer `Glyph.equals`, and weak-index lifetime still needs resolution before claiming native-products-only execution |
-| STEMS chain self-drive: full chula beam passes carried | `advance_native_stems_beam_sides_transaction` owns each already-awaited B12-B19 transaction as an atomic shadow/swap over scheduler, latest B14/transaction state, SIG/bindings, and persistent B/S cells. Repeated calls execute all 32 chula-system-1 SIDES transactions, carry all 29 B16 sibling-write lists, and reach the explicit `SidesExhausted` state at the native 253-vertex / 331-edge terminal with 61 linked B and 68 linked S cells. Exact plan/B order and sibling aliases match Java only after return. `advance_native_stems_beam_sides_transaction_from_first_stems_bridge` drives transactions 3-32 from one validated page snapshot without candidate-specific Java evidence; transactions 1-2 and the snapshot itself remain fixture-backed. B14 consumes a sparse 16-entry identity bridge for the distinct selected base beams rather than all 48 live beams; those entries still disclose Java Inter ID, sorted InterIndex ordinal, and VIP, while native stump/SIG products own every graph fact. The graph-derived B13 projector is additionally gated on one measured later linked-S reconstruction at Allegretto system 1 transaction 28; native carriage of its predecessor transactions remains open. The bounded atomic STUMPS driver carries all seven chula-system-1 stump transactions through the typed post-STUMPS terminal; Boundaries 27-79 then carry the typed head phase through seven bounded C-link mutations, eighteen bounded existing-stem reconciliations, and the intervening prelinked-success continuations plus Boundary 76's returned-false LEFT undef to `current_index=54`, with no unlinked head. Boundaries 38-79 use separate snapshot-minimized order-specific Java derivatives, not full predecessor-snapshot oracles. Boundaries 44, 46, 53, and 60 consume two-item LEFT/BOTTOM C-link frontiers; Boundary 62 consumes a bounded single-item LEFT/BOTTOM C-link. Boundaries 46 and 60 preserve the x74-specific one-ulp downward and x2-specific one-ulp upward line translations, while Boundaries 47-48 reconcile x28 and x4 against existing Stems 2378 and 2354 and Boundaries 63-75 reconcile x14, x18, x97, x6, x30, x43, x25, x83, x57, x40, x89, x52, and x35 against existing Stems 2340, 2372, 2373, 2348, 2357, 2350, 2356, 2358, 2374, 2350, 2359, 2344, and 2369, and Boundaries 77-79 reconcile x19, x15, and x84 against existing Stems 2361, 2360, and 2366 while carrying the order-50 undefined LEFT side, all without graph allocation; Boundary 79's three-head shared stem re-writes x86's already-closed cells without a value change. Boundaries 49-52, 54-59, and 61 add no production operation: the generic continuation carries prelinked closures, with v28-v53 using the reduced heap-safe oracle shape and Boundary 58 adding the first zero-write closure in that suffix. Broader geometry, actually-unlinked/no-link, and generic retry remain open. Boundary 26 additionally removes and resumes past the first real Allegretto competing hook from an explicitly reconstructed post-transaction-28 checkpoint; it does not natively carry transactions 1-27. Early registry corruption, missing identities/cells, malformed hook topology, or incoherent head products fail closed. Replacing the Allegretto reconstruction with native-carried state, remaining ordered head iteration/retry and wider C-link shapes, linked-S/hook-removal/STUMPS corpus coverage, and removal of the remaining fixture-backed authorities remain |
+| STEMS chain self-drive: full chula beam passes carried | `advance_native_stems_beam_sides_transaction` owns each already-awaited B12-B19 transaction as an atomic shadow/swap over scheduler, latest B14/transaction state, SIG/bindings, and persistent B/S cells. Repeated calls execute all 32 chula-system-1 SIDES transactions, carry all 29 B16 sibling-write lists, and reach the explicit `SidesExhausted` state at the native 253-vertex / 331-edge terminal with 61 linked B and 68 linked S cells. Exact plan/B order and sibling aliases match Java only after return. `advance_native_stems_beam_sides_transaction_from_first_stems_bridge` drives transactions 3-32 from one validated page snapshot without candidate-specific Java evidence; transactions 1-2 and the snapshot itself remain fixture-backed. B14 consumes a sparse 16-entry identity bridge for the distinct selected base beams rather than all 48 live beams; those entries still disclose Java Inter ID, sorted InterIndex ordinal, and VIP, while native stump/SIG products own every graph fact. The graph-derived B13 projector is additionally gated on one measured later linked-S reconstruction at Allegretto system 1 transaction 28; native carriage of its predecessor transactions remains open. The bounded atomic STUMPS driver carries all seven chula-system-1 stump transactions through the typed post-STUMPS terminal; Boundaries 27-92 then carry the typed head phase through eight bounded C-link mutations, twenty-eight bounded existing-stem reconciliations, and the intervening prelinked-success continuations plus Boundaries 76, 86, and 87's returned-false LEFT undefs to `current_index=67`; the three returned-false heads (x32, x71, x70) are queued for Java's phase-2 append retry per StemsRetriever's caller loop, and the probe's `unlinkedCount` field is a hard-coded zero that does not attest that queue; the dual-corner undef branch authenticates Java's shared-stump guard and fails closed on the unported differing-stump standard connection; Boundary 83's eighth C-link is the first that reuses an existing stem (2381) through one appended HeadStem relation and closes sibling x63 without vertex or allocator mutation. Boundaries 38-92 use separate snapshot-minimized order-specific Java derivatives, not full predecessor-snapshot oracles. Boundaries 44, 46, 53, and 60 consume two-item LEFT/BOTTOM C-link frontiers; Boundary 62 consumes a bounded single-item LEFT/BOTTOM C-link. Boundaries 46 and 60 preserve the x74-specific one-ulp downward and x2-specific one-ulp upward line translations, while Boundaries 47-48 reconcile x28 and x4 against existing Stems 2378 and 2354 and Boundaries 63-75 reconcile x14, x18, x97, x6, x30, x43, x25, x83, x57, x40, x89, x52, and x35 against existing Stems 2340, 2372, 2373, 2348, 2357, 2350, 2356, 2358, 2374, 2350, 2359, 2344, and 2369, and Boundaries 77-82, 84, 85, and 88-92 reconcile x19, x15, x84, x11, x68, x21, x92, x100, x9, x41, x3, x58, and x13 against existing Stems 2361, 2360, 2366, 2349, 2347, 2341, 2342, 2343, 2355, 2352, 2354, 2363, and 2340 while carrying the carried undefined LEFT sides, all without graph allocation; Boundary 79's three-head shared stem re-writes x86's already-closed cells without a value change. Boundaries 49-52, 54-59, and 61 add no production operation: the generic continuation carries prelinked closures, with v28-v66 using the reduced heap-safe oracle shape and Boundary 58 adding the first zero-write closure in that suffix. Broader geometry, actually-unlinked/no-link, and generic retry remain open. Boundary 26 additionally removes and resumes past the first real Allegretto competing hook from an explicitly reconstructed post-transaction-28 checkpoint; it does not natively carry transactions 1-27. Early registry corruption, missing identities/cells, malformed hook topology, or incoherent head products fail closed. Replacing the Allegretto reconstruction with native-carried state, remaining ordered head iteration/retry and wider C-link shapes, linked-S/hook-removal/STUMPS corpus coverage, and removal of the remaining fixture-backed authorities remain |
 | What finishing STEMS needed, measured 2026-08-12 (diagnosis now implemented) | This dated diagnosis correctly identified the absence of a production SIG as the cross-stage blocker. `NativeSigSystem` now assembles the exact GRID-through-HEADS graph with native identities and the production carrier runs chula system 1's full SIDES and STUMPS beam passes, so “the port owns no SIG,” “transaction 2 remains,” and “an iterative driver remains” are no longer current. There is still no `recognize_native_stems`: native carriage of the reconstructed Allegretto predecessor and wider linked-S/hook-removal coverage, replacement of the disclosed GlyphIndex/beam-identity bootstraps, wider-corpus STUMPS authority and branch coverage, general dirty state, and wider BEAMS-group coverage remain |
 | STEMS SIDES-to-STUMPS entry | `continue_native_stems_beam_sides_carrier_into_stumps` is the twenty-first exact production boundary. It accepts only the explicit `SidesExhausted` terminal and walks chula system 1's 34 retained beams in Java STUMPS order. Beam SIG 12 starts Java event 0. Its stump 0 is both a structural side stump and already linked; Java's structural test wins at event 1. Stump 1 is unlinked, and plan 147 at `BEAM_SEED` profile 3 / link profile 1 reaches `AwaitingVLinkTransaction` at Java event 2 with two relations, one glyph, and no line change. Native returns two scheduler event records plus that typed frontier and stops before `createStem`; graph, B/S cells, and registries are unchanged. This real prefix contains no pure already-linked skip or known-false plan; a focused synthetic unit covers the linked-only guard without claiming production equivalence. The refreshed 10-line fixture retains the same five semantic rows plus summary and now has SHA-256 `ef8f180110a409f85167ee1cc0f641c210144d6e5b5c737d5d8eb69e82d47bcb` after its probe provenance changed for Boundary 28 |
 | STEMS first STUMPS transaction and resume | `advance_native_stems_beam_stumps_transaction_from_first_stems_bridge` is the twenty-second exact production boundary. It atomically executes chula system 1's first stump frontier, beam SIG 12 / `beam:12:b:1` / plan 147, through B12-B17 and resumes the retained STUMPS worklist without Java's SIDES-only outer B18 assignment. Java reports glyph 310 `ReuseActive`, `CreatedChecked`, two `AllUnlinked` reads, final Stem Inter ID 2372, zero siblings, two heads, and `outerAssignment=false`. Native adds dense stem identity 32 and relation identity 331, reaches 254 vertices / 334 edges with 33 Stem bindings, 62 linked B cells, and 70 linked S cells, then skips two structural-and-linked side stumps and stops at worklist index 1, beam SIG 22 / `beam:22:b:1` / plan 622. The refreshed 11-line / 2,619-byte fixture retains six semantic rows plus summary and has SHA-256 `b1a312ddc690911b916971081ce21ea1c2211283df174a2175094ace7c144d5e`; its probe SHA-256 is `d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf` |
@@ -6214,7 +6214,7 @@ Boundary 76 carries order 50 (x32 / SIG 50 / Java Inter 1389, grade bits
 `0x3fd520322f6aeb9d`). Its LEFT/BOTTOM frontier has one HeadStem relation and two
 glyph rows (314 + 2219), resolving active glyph 314 to existing Stem 2383. LEFT is
 `Both` and RIGHT is `TopOnly`; Java returns false with `undefs=[LEFT]`, zero
-closure writes, zero unlinked additions, and no graph, registry, or linker mutation.
+closure writes, a caller-queued phase-2 retry head, and no graph, registry, or linker mutation.
 Native reaches `current_index=51` before x19 / SIG 64 / Java Inter 1417 (grade bits
 `0x3fd51434ea56eeb4`). This is the first measured returned-false undef in the carried
 queue, not generic no-link/retry coverage.
@@ -6298,6 +6298,309 @@ and `ff3bbe3fdf9ba0e6140b8105ab46e4c65972d4f4f013d39f90eade2270b64224`.
 This is bounded order-53 existing-stem evidence, not order 54 behavior,
 no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
 
+## Boundary 80: nineteenth existing-stem reconciliation
+
+Boundary 80 carries order 54 (x11 / SIG 62 / Java Inter 1413, grade bits
+`0x3fd474edcf4c89da`). Its linked-and-closed LEFT frontier carries four
+relations and resolves glyph 312 to existing Stem 2349; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x12 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the order-50 undefined LEFT side stays carried
+and unchanged. Native makes no graph mutation and reaches `current_index=55`
+before x68 / SIG 75 / Java Inter 1439 (grade bits `0x3fd454aaa59250ca`).
+
+The snapshot-minimized v54 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`c8b6567ddac7269d126846e036fc7e4fbb8a9c430a7b110006ff8e980ad85305`,
+`1fec8bbf7c5561150d9d69079275fccc1879f5d61756f8c525957c0ef90b16ca`,
+`e3eb0126cd446a3c67e808c08004775e32aa7e5bd4e78d5d262ad9fafff89abd`,
+`4c8613b927af254cbaa6afdcf4e99dc99a2f149381985fd74b8f15f2b20d0286`, and
+`e77cc8596f1540ab17b7894abcbf017cd2e3c79cffc4ae974011910e2081ec96`;
+base v53 runner/fixture remain `cdf67c2e57e5afcbb7e7030d0cf80a2ce50302778032154b5ced066f234a2611`
+and `58671e0a19695e626a633a8963683d310083e3bb18ee9d419a69d1db0267be76`.
+This is bounded order-54 existing-stem evidence, not order 55 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 81: twentieth existing-stem reconciliation
+
+Boundary 81 carries order 55 (x68 / SIG 75 / Java Inter 1439, grade bits
+`0x3fd454aaa59250ca`). Its linked-and-closed LEFT one-relation HeadStem candidate
+resolves glyph 331 to existing Stem 2347; RIGHT is closed. Java takes
+`SkipAlreadyLinked` plus `SkipClosed`, closes x69 LEFT then RIGHT, and reports
+`closedValueChanges=2`; the order-50 undefined LEFT side stays carried and
+unchanged. Native makes no graph mutation and reaches `current_index=56` before
+x21 / SIG 11 / Java Inter 1307 (grade bits `0x3fd438cb1438cb15`).
+
+The snapshot-minimized v55 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`8ed542577f68000705cd7d166c8d848e48c138ae9f6e8fad0de10a499e46c0ff`,
+`8dfffd31e6db65348598433cc0e19683d80be55705e9d843bd88e564deb5ca67`,
+`6557794a5daf7335e05a6de21f7a9479aa2a601d151163086a224d3b64cfea9d`,
+`fceb2bca866912731d6ab81165fd03254f2c602d3937af196ddfff002d8beb60`, and
+`354f56967e0b75c4948321dc0153e041851c47c3cbe1507843abca8de249992a`;
+base v54 runner/fixture remain `1fec8bbf7c5561150d9d69079275fccc1879f5d61756f8c525957c0ef90b16ca`
+and `c8b6567ddac7269d126846e036fc7e4fbb8a9c430a7b110006ff8e980ad85305`.
+This is bounded order-55 existing-stem evidence, not order 56 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 82: twenty-first existing-stem reconciliation
+
+Boundary 82 carries order 56 (x21 / SIG 11 / Java Inter 1307, grade bits
+`0x3fd438cb1438cb15`). Its linked-and-closed LEFT frontier carries four
+relations and resolves glyph 323 (candidateIdBefore 323) to existing Stem 2341;
+RIGHT is closed. Java takes `SkipAlreadyLinked` plus `SkipClosed`, closes x22
+LEFT then RIGHT, and reports `closedValueChanges=2`; the order-50 undefined
+LEFT side stays carried and unchanged. Native makes no graph mutation and
+reaches `current_index=57` before x62 / SIG 16 / Java Inter 1317 (grade bits
+`0x3fd4131337c4d540`), whose two sides are both open/unlinked.
+
+The snapshot-minimized v56 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`e463b46a707b8c534a1896bf47d7668c580f38c27b2947ccdfb12fb7984e2cc5`,
+`b6a0b6cd9a618052e02da16022a44fe3b218626100852bb6f702ceedc09f3387`,
+`24e6dd4f7975c419cc473be22f351f1d4687c76b2fcb0100eeb52080b0fb924f`,
+`6ca99c74758506f6173cc8e9b21d323002c98ebcaa1bb34732091fcd10b4a43a`, and
+`3ed440230114439aa352bfe883e6befb404e26b26235b98e060860b6841422e8`;
+base v55 runner/fixture remain `8dfffd31e6db65348598433cc0e19683d80be55705e9d843bd88e564deb5ca67`
+and `8ed542577f68000705cd7d166c8d848e48c138ae9f6e8fad0de10a499e46c0ff`.
+This is bounded order-56 existing-stem evidence, not order 57's both-open
+C-link behavior, no-link/retry, phase 2, broader geometry, or wider-corpus
+coverage.
+
+## Boundary 83: first existing-stem C-link reuse
+
+Boundary 83 carries order 57 (x62 / SIG 16 / Java Inter 1317, grade bits
+`0x3fd4131337c4d540`). Both sides start open: LEFT evaluates BottomOnly and
+RIGHT Neither, so the LEFT/BOTTOM C-link expands one seed-plus-chunk builder
+whose candidate resolves to active glyph 328, already materialized as Stem
+2381. Java's `createStem` reuses that stem instead of allocating: exactly one
+HeadStem relation is appended (SIG edges 696 to 697), x62's LEFT cells link,
+and sibling x63's cells close inside the C-link transaction with phase-level
+`closedValueChanges=0`. No vertex, allocator, ID, registry, or system-stem
+mutation occurs, and the order-50 undefined LEFT side stays carried. Native
+reaches `current_index=58` before x92 / SIG 24 / Java Inter 1333 (grade bits
+`0x3fd3e2be2be2be2c`).
+
+The snapshot-minimized v57 gate is focused/full/Clippy/fmt/diff green and is
+not independent predecessor evidence. Fixture/runner/probe/body/semantic pins
+are
+`c8b44bab7c0e75e74755e3ca2d29f46b72b90cde0e406524fb395214a6fe25d5`,
+`a108389f5e9465fb4483ecec852e38dc7985676a1d9f1feb8dcb392b32559fbc`,
+`ef9f4a596d53db3ab7007d382f16319f44985be90c60f788aa854fb8f7379d5d`,
+`b9e3309cdeea3f2bc59abe296a3d33738e09ab79021fb710259d5b608e8557ac`, and
+`790274c39fb5e7b4637d2f7d26a62559c89264c265a19710f36a8351d9f454fe`;
+base v56 runner/fixture remain `b6a0b6cd9a618052e02da16022a44fe3b218626100852bb6f702ceedc09f3387`
+and `e463b46a707b8c534a1896bf47d7668c580f38c27b2947ccdfb12fb7984e2cc5`.
+This is bounded order-57 existing-stem C-link evidence, not order 58 behavior,
+generic reuse geometry, no-link/retry, phase 2, or wider-corpus coverage.
+
+## Boundary 84: twenty-second existing-stem reconciliation
+
+Boundary 84 carries order 58 (x92 / SIG 24 / Java Inter 1333, grade bits
+`0x3fd3e2be2be2be2c`). Its linked-and-closed LEFT frontier carries three
+relations and resolves glyph 298 to existing Stem 2342; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x93 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the order-50 undefined LEFT side stays carried
+and unchanged. Native makes no graph mutation and reaches `current_index=59`
+before x100 / SIG 42 / Java Inter 1369 (grade bits `0x3fd3a0aec9cc7ff8`).
+
+The snapshot-minimized v58 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`a262c7a657a028a7c2e273283176749bc364717837735a391540cb2783a2ed06`,
+`9964348b54b3500efda3f1e98b1fcf4e54d9e518de4d416b170a2b1fbe8ea757`,
+`23f2d7a80c31898306ce8adcf61be15280aa0457e42988c424a8b2ceee9886d9`,
+`6c0e5202b0e2a891c53a4635ec2729d636e0e7758141174c96462e834602d83b`, and
+`12d06cc6c5d25d3acf2189827d8bb35fa68d1e6350b7a73777f23d407345a810`;
+base v57 runner/fixture remain `a108389f5e9465fb4483ecec852e38dc7985676a1d9f1feb8dcb392b32559fbc`
+and `c8b44bab7c0e75e74755e3ca2d29f46b72b90cde0e406524fb395214a6fe25d5`.
+This is bounded order-58 existing-stem evidence, not order 59 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 85: twenty-third existing-stem reconciliation
+
+Boundary 85 carries order 59 (x100 / SIG 42 / Java Inter 1369, grade bits
+`0x3fd3a0aec9cc7ff8`). Its linked-and-closed LEFT frontier carries four
+relations and resolves glyph 333 to existing Stem 2343; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x101 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the order-50 undefined LEFT side stays carried
+and unchanged. Native makes no graph mutation and reaches `current_index=60`
+before x71 / SIG 49 / Java Inter 1387 (grade bits `0x3fd38c9138c9138d`), whose
+two sides are both open/unlinked.
+
+The snapshot-minimized v59 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`53bb43246e40ee07c40ffdbf091c1b8521a114f4ef77f4b16a762ebfc7f5c3be`,
+`c723a76e61c170f302575b609c5f6a81dbc99ed1b464d8f2558773f846070dcc`,
+`ccab9109b73c6abda9b7093fa7a5c4df32f41a9e870e1daaae14b93ba2dd32f3`,
+`73ad47a44638b2387f8ccb175f177b5dd4b85b1621622f70f0693c68efcdcc26`, and
+`b1235d8df4ce3bdf79fca3837bc34b99937873e79f6529908d564f881cd38897`;
+base v58 runner/fixture remain `9964348b54b3500efda3f1e98b1fcf4e54d9e518de4d416b170a2b1fbe8ea757`
+and `a262c7a657a028a7c2e273283176749bc364717837735a391540cb2783a2ed06`.
+This is bounded order-59 existing-stem evidence, not order 60's both-open
+C-link behavior, no-link/retry, phase 2, broader geometry, or wider-corpus
+coverage.
+
+## Boundary 86: second carried returned-false undef
+
+Boundary 86 carries order 60 (x71 / SIG 49 / Java Inter 1387, grade bits
+`0x3fd38c9138c9138d`). Its LEFT/BOTTOM frontier has one HeadStem relation and
+two glyph rows, resolving active glyph 332 to existing Stem 2382. LEFT is
+`Both` and RIGHT is `TopOnly`; Java returns false with `undefs=[LEFT]`, zero
+closure writes, a caller-queued phase-2 retry head, and no graph, registry, or linker
+mutation. Native now carries two undefined LEFT sides (x32 and x71) and
+reaches `current_index=61` before x70 / SIG 46 / Java Inter 1377 (grade bits
+`0x3fd32b820b0ea9b5`), whose two sides are both open/unlinked.
+
+The snapshot-minimized v60 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`5e031afa32387b6b8a3f097d98b504b32c4216b62b1d67545fe76d3e05b39a28`,
+`89c0d77c4e5829e6faf91179f801812bf97e27df06f0d50d9afcf4aaba63282b`,
+`effb5c2ad82f72d354997c647176d7def416acd0a00bda55b75599037327f7a9`,
+`a0c80c155049fe309e7cbe23f314a6adf247cab176d81360b055317cc1c2f8fb`, and
+`f3e6e10d179806a4d47574aa519e9f565cd07f9c4d903e42084f842dcbfed7f2`;
+base v59 runner/fixture remain `c723a76e61c170f302575b609c5f6a81dbc99ed1b464d8f2558773f846070dcc`
+and `53bb43246e40ee07c40ffdbf091c1b8521a114f4ef77f4b16a762ebfc7f5c3be`.
+This is bounded order-60 open-frontier evidence, not order 61 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 87: third carried returned-false undef
+
+Boundary 87 carries order 61 (x70 / SIG 46 / Java Inter 1377, grade bits
+`0x3fd32b820b0ea9b5`). Its LEFT/BOTTOM frontier has one HeadStem relation and
+two glyph rows, resolving the same active glyph 332 / existing Stem 2382 as
+order 60. LEFT is `Both` and RIGHT is `TopOnly`; Java returns false with
+`undefs=[LEFT]`, zero closure writes, a caller-queued phase-2 retry head, and no graph,
+registry, or linker mutation. Native now carries three undefined LEFT sides
+(x32, x71, and x70) and reaches `current_index=62` before x9 / SIG 8 / Java
+Inter 1301 (grade bits `0x3fd2c2ce3a4f70ff`).
+
+The snapshot-minimized v61 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`205b8875f6846384245629122645b6ac8cbef4bf18573c2ec539552d7799416d`,
+`092987d133085a52c2782db96521258df39f05caefff69ec1a143c560ab3beed`,
+`51bfd41f3ece71a1a50ac1425d554e87c956819309c462dcf3444d5b2ecc5f41`,
+`9bd32daee863bed31b87f7d311d9fd1771cead3cd406b38990bfb3a09dd8d59b`, and
+`0e2fe82a1093a61158da4854446070e3cd903f247d7b37b2bf87975db03f864b`;
+base v60 runner/fixture remain `89c0d77c4e5829e6faf91179f801812bf97e27df06f0d50d9afcf4aaba63282b`
+and `5e031afa32387b6b8a3f097d98b504b32c4216b62b1d67545fe76d3e05b39a28`.
+This is bounded order-61 open-frontier evidence, not order 62 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 88: twenty-fourth existing-stem reconciliation
+
+Boundary 88 carries order 62 (x9 / SIG 8 / Java Inter 1301, grade bits
+`0x3fd2c2ce3a4f70ff`). Its linked-and-closed LEFT frontier carries four
+relations and resolves glyph 318 (candidateIdBefore 318) to existing Stem 2355;
+RIGHT is closed. Java takes `SkipAlreadyLinked` plus `SkipClosed`, closes x10
+LEFT then RIGHT, and reports `closedValueChanges=2`; the three carried
+undefined LEFT sides (x32, x71, x70) stay recorded and unchanged. Native makes
+no graph mutation and reaches `current_index=63` before x41 / SIG 92 / Java
+Inter 1473 (grade bits `0x3fd2becf990a5a17`).
+
+The snapshot-minimized v62 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`fa45b09cf2503942f7510482a4489ecaf7b3bb82b6d6efb76eb043c28b87889e`,
+`8a5762e8b8d569095af4d218211be7ad476ba6b9fb0105f757dd022bc0db4ad5`,
+`88dc85c80fd04907171e86d24360e7db17b289c71bd57f9419a3e4d0db5d238c`,
+`95aab2234fb74d51b4014e5d13387746a13cbf4d32d85d380289b9c053a4958b`, and
+`769906a2f379937bc420142d97d003a7c5199aa19cd10ad55a5c468afa607b50`;
+base v61 runner/fixture remain `092987d133085a52c2782db96521258df39f05caefff69ec1a143c560ab3beed`
+and `205b8875f6846384245629122645b6ac8cbef4bf18573c2ec539552d7799416d`.
+This is bounded order-62 existing-stem evidence, not order 63 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 89: twenty-fifth existing-stem reconciliation
+
+Boundary 89 carries order 63 (x41 / SIG 92 / Java Inter 1473, grade bits
+`0x3fd2becf990a5a17`). Its linked-and-closed LEFT frontier carries three
+relations and resolves glyph 293 to existing Stem 2352; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x42 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the three carried undefined LEFT sides (x32,
+x71, x70) stay recorded and unchanged. Native makes no graph mutation and
+reaches `current_index=64` before x3 / SIG 6 / Java Inter 1297 (grade bits
+`0x3fd24cd7e6ca5050`).
+
+The snapshot-minimized v63 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`6f57b1db06a5319133c90cbcb88ddd316c6d6741cde0fb23025aab0ac31c7fcf`,
+`d535607b178a298755a554bcc878cfd2bff32845960c5d39660a8ddc62992ece`,
+`7fb7dc32d3be1bcce663116c8150dd436ec9860d831d825ccc8091fd2836c1c6`,
+`63f2533e11886b1747e2a1543f35162e84628750b6ae783f045d1bb2e96fb56c`, and
+`8cbf6614171048e920799629c16bcab2224b5bcf1fc25f8ab698f409c9b66109`;
+base v62 runner/fixture remain `8a5762e8b8d569095af4d218211be7ad476ba6b9fb0105f757dd022bc0db4ad5`
+and `fa45b09cf2503942f7510482a4489ecaf7b3bb82b6d6efb76eb043c28b87889e`.
+This is bounded order-63 existing-stem evidence, not order 64 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 90: twenty-sixth existing-stem reconciliation
+
+Boundary 90 carries order 64 (x3 / SIG 6 / Java Inter 1297, grade bits
+`0x3fd24cd7e6ca5050`). Its linked-and-closed LEFT frontier carries two
+relations and resolves glyph 315 to existing Stem 2354; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x4 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the three carried undefined LEFT sides and the
+phase-2 queue stay recorded and unchanged. Native makes no graph mutation and
+reaches `current_index=65` before x58 / SIG 73 / Java Inter 1435 (grade bits
+`0x3fd20f7afbb32bdd`).
+
+The snapshot-minimized v64 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`2ef4ffd1e739b21998ee8a45652604557b42f41abe185407a9fd254d1e02ed5c`,
+`b9f580dbe3fdb53503ee6699a4ab314996bb0e1b176f19487fb08f810f11cd05`,
+`b00390eb82d61ed27dc4138e5286c63f2f3db7cf7a9767b729e5037b27070d53`,
+`7ce03e841a8f7b15f6af8e24b6db136e987f7ae902ca331a74cb1f5279380815`, and
+`6530c83d73fd70ad822e709561487eac3d1c8a565bde6300468e6a663396d27b`;
+base v63 runner/fixture remain `d535607b178a298755a554bcc878cfd2bff32845960c5d39660a8ddc62992ece`
+and `6f57b1db06a5319133c90cbcb88ddd316c6d6741cde0fb23025aab0ac31c7fcf`.
+This is bounded order-64 existing-stem evidence, not order 65 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 91: twenty-seventh existing-stem reconciliation
+
+Boundary 91 carries order 65 (x58 / SIG 73 / Java Inter 1435, grade bits
+`0x3fd20f7afbb32bdd`). Its linked-and-closed LEFT one-relation HeadStem candidate
+resolves glyph 311 (candidateIdBefore 311) to existing Stem 2363; RIGHT is
+closed. Java takes `SkipAlreadyLinked` plus `SkipClosed`, closes x59 LEFT then
+RIGHT, and reports `closedValueChanges=2`; the three carried undefined LEFT
+sides and the phase-2 queue stay recorded and unchanged. Native makes no graph
+mutation and reaches `current_index=66` before x13 / SIG 0 / Java Inter 1285
+(grade bits `0x3fd205ac04c1d272`).
+
+The snapshot-minimized v65 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`fff9e008f3caf1bce93f124bd649a33cc08572cc55371324f600691a6f866db5`,
+`427bf9b0703059e8e31df582cf8c11b512c328717a4ef60bd6fcad5775855f3a`,
+`6e24c3b1967f73d453ca4303ff7bc19594a4cccc102776519fd10e37ca728593`,
+`2d736c86cf6d5bd65a26ff4ec5455a78ada3bf535010fbe69e9b346228b7733a`, and
+`bc76c0ab51b6b65ca0bfaa13a290a67c50b406934ee8d0eed678b74354bfd13b`;
+base v64 runner/fixture remain `b9f580dbe3fdb53503ee6699a4ab314996bb0e1b176f19487fb08f810f11cd05`
+and `2ef4ffd1e739b21998ee8a45652604557b42f41abe185407a9fd254d1e02ed5c`.
+This is bounded order-65 existing-stem evidence, not order 66 behavior,
+no-link/retry, phase 2, broader geometry, or wider-corpus coverage.
+
+## Boundary 92: twenty-eighth existing-stem reconciliation
+
+Boundary 92 carries order 66 (x13 / SIG 0 / Java Inter 1285, grade bits
+`0x3fd205ac04c1d272`). Its linked-and-closed LEFT frontier carries four
+relations and resolves glyph 294 to existing Stem 2340; RIGHT is closed. Java
+takes `SkipAlreadyLinked` plus `SkipClosed`, closes x14 LEFT then RIGHT, and
+reports `closedValueChanges=2`; the three carried undefined LEFT sides and the
+phase-2 queue stay recorded and unchanged. Native makes no graph mutation and
+reaches `current_index=67` before x73 / SIG 18 / Java Inter 1321 (grade bits
+`0x3fd1ecfc72ffe2ad`), whose two sides are both open/unlinked.
+
+The snapshot-minimized v66 gate is focused/full/Clippy/fmt/diff green and is not
+independent predecessor evidence. Fixture/runner/probe/body/semantic pins are
+`2f1778c60a1beb687eddc90b6d5cc340f9d863ff4610d4664a1f7d6211079eb5`,
+`a72d2a1657bdb32f4e179d9bc633a2830e98b2c4e672a7f0faed4562f9955e04`,
+`afecc8507ba75b9437767c1f24d5d51d1e2db4c777a27cb579f164c5290dd04f`,
+`474ea958d9d27bdb9183a2357273137a4562ed3c97d2ab968b196e4728f5701f`, and
+`54f1644573ea67bc14ad80ad008e46374570b5e7764f914b46d9d2c1a1cbe66a`;
+base v65 runner/fixture remain `427bf9b0703059e8e31df582cf8c11b512c328717a4ef60bd6fcad5775855f3a`
+and `fff9e008f3caf1bce93f124bd649a33cc08572cc55371324f600691a6f866db5`.
+This is bounded order-66 existing-stem evidence, not order 67's both-open
+C-link behavior, no-link/retry, phase 2, broader geometry, or wider-corpus
+coverage.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
@@ -6309,7 +6612,7 @@ Commit each slice separately after the full verification block above.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with
    native-carried state and widen the graph-derived B13 linked-S and hook-removal paths;
    chula system 1's 68 executed head-side references are unique.
-3. Continue from Boundary 79 at head index 54, beginning with x11 / SIG 62:
+3. Continue from Boundary 92 at head index 67, beginning with the both-open x73 / SIG 18 frontier:
    carry the
    remaining ordered phase-1 queue and
    rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive
