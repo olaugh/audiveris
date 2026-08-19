@@ -240,3 +240,15 @@ transformed probe, emitted body, and semantic pass are
 `68d581d84f21a79c41df3d4ebf6a856cc0dee266288512e4cd1e44bb3260fa0c`.
 Remaining queue entries, actual-unlinked/retry and phase-2 append, multi-item or
 recursive C-linking, wider systems/corpus, and full STEMS remain open.
+
+Boundary 34 reuses the same continuation for head order 8 (x95 / SIG 100 / Java Inter
+1489). LEFT is prelinked, RIGHT STRICT is `Neither`, and shared Stem 2364 closes x91
+LEFT/RIGHT followed by x94 LEFT/RIGHT (four ordered value changes, no unlinked head).
+Native reaches `current_index=9` before x42 / SIG 93 / Java Inter 1475 with no graph,
+registry, stem, allocator, or relation changes beyond those S cells. The v8 fixture
+SHA-256 is `82eca291e69ec27e49903d31b1da408f68962469780a1f706f3f979564e8aebb`; runner,
+transformed probe, emitted body, and semantic pass are
+`4d3be4619b7fbe5f5ca39e4065914fe7bb2a56dcbbfb6ae67c95cf444140edfc`,
+`fe2bd835c8359810099881288608bc0055336f1ebb77e6715aa2946570181867`,
+`a5460ce6a40756092d2e2dc91975ac5c2665c480370249084faa141d7b45eca8`, and
+`062721eabd59d1d4b4bc5d4c18b3d6ee8e510c68d76473278e6cb60c5e2f7597`.

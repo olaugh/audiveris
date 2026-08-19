@@ -4908,6 +4908,23 @@ open.
 
 `advance_native_stems_head_continuation_c_link` is the next bounded production boundary. From the carried chula-system-1 phase-1 frontier at head order 7 (x76 / SIG 97 / Java Inter 1483), it authenticates the LEFT/BOTTOM `BottomOnly` choice, reuses active glyph 319, and atomically applies the one-item, nonrecursive head-origin C-link. Java creates checked Stem Inter 2380 with one HeadStem relation; native advances the dense graph from 679/690 to 680/691, Stem bindings from 40 to 41, links the LEFT S cell, and advances `current_index=7` to 8 before x95 / SIG 100 / Java Inter 1489. The registry is unchanged and rollback rejects a mismatched continuation frontier. The v7 derivative fixture is 20 lines / 18,778 bytes, SHA-256 `8df7d36e780e90e569fcc37144bd48ff43e5b647f9cdc240d899ee10386b153d`; runner `87a12b97b6d9c79e6c0d346f8187b426505ab5e0e7785bd07a5984a03a18c197`, transformed probe `93c6771d55b814cff4155d4065d94a322767df9a668033bc7f2e5ea1ea7f6edd`, emitted body `06285da43ff0b5a1f3644c4468570a10f24c0c8f2b8173e9e7d1e268284704d6`, and semantic pass `68d581d84f21a79c41df3d4ebf6a856cc0dee266288512e4cd1e44bb3260fa0c`. Remaining head queue, actually-unlinked/retry, phase-2 append, multi-item/recursive C-linking, broader systems/corpus, and full STEMS remain open.
 
+## Boundary 34: eighth prelinked head continuation
+
+Boundary 34 reuses `continue_native_stems_head_linking_phase1` from Boundary 33's
+`current_index=8` state. Head order 8 (x95 / SIG 100 / Java Inter 1489) is prelinked on
+LEFT; both RIGHT STRICT corners are false, and shared Stem 2364 closes x91 LEFT/RIGHT
+then x94 LEFT/RIGHT in Java order. Native records four value changes, no unlinked head,
+and reaches `current_index=9` before x42 / SIG 93 / Java Inter 1475 without graph,
+registry, stem, allocator, or relation mutation beyond those S-cell closures. The v8
+fixture is SHA-256 `82eca291e69ec27e49903d31b1da408f68962469780a1f706f3f979564e8aebb`;
+runner, transformed probe, emitted body, and semantic pass are
+`4d3be4619b7fbe5f5ca39e4065914fe7bb2a56dcbbfb6ae67c95cf444140edfc`,
+`fe2bd835c8359810099881288608bc0055336f1ebb77e6715aa2946570181867`,
+`a5460ce6a40756092d2e2dc91975ac5c2665c480370249084faa141d7b45eca8`, and
+`062721eabd59d1d4b4bc5d4c18b3d6ee8e510c68d76473278e6cb60c5e2f7597`.
+Actual-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
