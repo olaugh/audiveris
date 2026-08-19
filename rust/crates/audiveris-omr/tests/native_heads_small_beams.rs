@@ -206,6 +206,7 @@ fn adapts_all_beam_shapes_in_sig_order_without_acceptance_filtering() {
         &system,
         &[],
         &explicit_context(&system),
+        None,
     )
     .unwrap();
 
@@ -252,6 +253,7 @@ fn best_grade_is_the_contextual_grade_used_for_arbitration() {
         &system,
         &heads,
         &[(NativeHeadsCompetitorSource::RawBeam(0), 0.8)],
+        None,
     )
     .unwrap();
 
@@ -291,6 +293,7 @@ fn malformed_beam_geometry_is_rejected_instead_of_silently_skipped() {
             &system,
             &[],
             &explicit_context(&system),
+            None,
         ),
         Err(NativeHeadsSmallBeamError::NonHorizontalBeam {
             system_id: 2,
@@ -327,7 +330,7 @@ fn pool_adapter_preserves_pool_order_and_head_provenance() {
     ];
 
     let recognition = recognition_with_empty_groups(&[4, 2]);
-    let result = purge_native_heads_small_beams(&pool, &recognition, &heads).unwrap();
+    let result = purge_native_heads_small_beams(&pool, &recognition, &heads, None).unwrap();
 
     assert_eq!(
         result
@@ -352,11 +355,11 @@ fn pool_adapter_rejects_missing_duplicate_and_unknown_head_systems() {
     };
 
     assert_eq!(
-        purge_native_heads_small_beams::<()>(&pool, &recognition, &[]),
+        purge_native_heads_small_beams::<()>(&pool, &recognition, &[], None),
         Err(NativeHeadsSmallBeamError::MissingHeadSystem(1)),
     );
     assert_eq!(
-        purge_native_heads_small_beams(&pool, &recognition, &[empty.clone(), empty]),
+        purge_native_heads_small_beams(&pool, &recognition, &[empty.clone(), empty], None),
         Err(NativeHeadsSmallBeamError::DuplicateHeadSystem(1)),
     );
     assert_eq!(
@@ -367,6 +370,7 @@ fn pool_adapter_rejects_missing_duplicate_and_unknown_head_systems() {
                 system_id: 99,
                 heads_in_sig_order: vec![],
             }],
+            None,
         ),
         Err(NativeHeadsSmallBeamError::UnexpectedHeadSystem(99)),
     );
@@ -418,7 +422,7 @@ fn production_context_drops_support_from_a_beam_removed_earlier() {
         },
     ];
 
-    let result = purge_native_heads_small_beams_system(&system, &recognition, &heads).unwrap();
+    let result = purge_native_heads_small_beams_system(&system, &recognition, &heads, None).unwrap();
 
     let supported = audiveris_core::grade::contextual(0.4, 0.4 * 3.0);
     assert!(supported > 0.5);

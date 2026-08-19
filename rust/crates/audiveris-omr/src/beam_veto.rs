@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Credible-beam veto gate (enhancement pass, default OFF).
+//!
+//! Java consumes BEAMS output as hard vetoes at three points that run before
+//! stems exist: `LedgersFilter` drops any horizontal section intersecting any
+//! beam, the ledger candidate factory purges sticks centered in a good full
+//! beam, and `NoteHeadsBuilder.purgeSmallBeams` deletes heads that lose a
+//! local arbitration. A hallucinated beam is therefore irreversible: on the
+//! Schenker corpus, 38% of beam inters are thinner than the sheet's measured
+//! beam thickness or shorter than two interlines, and beam grade does not
+//! separate them from real beams (means 0.458 vs 0.422).
+//!
+//! Under `AUDIVERIS_CREDIBLE_BEAM_VETOES` a beam may veto only when its
+//! geometry is consistent with the sheet's own beam scale: at least the main
+//! beam thickness tall and at least two interlines wide. Sub-scale beams stay
+//! in the SIG as hypotheses for later joint resolution; nothing they touched
+//! is deleted. With the flag unset every call site behaves byte-exactly as
+//! Java does.
+
+/// `AUDIVERIS_CREDIBLE_BEAM_VETOES` gate, mirroring the
+/// `AUDIVERIS_TUNE_PIANO_BARLINES` convention.
+#[must_use]
+pub fn credible_beam_vetoes_enabled() -> bool {
+    std::env::var("AUDIVERIS_CREDIBLE_BEAM_VETOES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+/// The sheet-scale context a veto site needs to judge one beam.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeamVetoScale {
+    pub interline: f64,
+    pub beam_thickness: f64,
+}
+
+impl BeamVetoScale {
+    /// `Some` when the enhancement gate is set, ready to pass down a
+    /// recognition pipeline; `None` reproduces Java behavior exactly.
+    #[must_use]
+    pub fn from_env(interline: f64, beam_thickness: f64) -> Option<Self> {
+        credible_beam_vetoes_enabled().then_some(Self {
+            interline,
+            beam_thickness,
+        })
+    }
+
+    /// Whether a beam of this bounding size has earned veto power.
+    #[must_use]
+    pub fn credible(self, width: f64, height: f64) -> bool {
+        height >= self.beam_thickness && width >= 2.0 * self.interline
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SCALE: BeamVetoScale = BeamVetoScale {
+        interline: 6.0,
+        beam_thickness: 4.0,
+    };
+
+    #[test]
+    fn sub_scale_beams_are_not_credible() {
+        // The two Schenker page-1 killers: a 10x3 hook and a 10x4 beam.
+        assert!(!SCALE.credible(10.0, 3.0));
+        assert!(!SCALE.credible(10.0, 4.0));
+        // A real beam at this scale.
+        assert!(SCALE.credible(32.0, 4.0));
+        // Exact thresholds are inclusive.
+        assert!(SCALE.credible(12.0, 4.0));
+        assert!(!SCALE.credible(11.9, 4.0));
+        assert!(!SCALE.credible(12.0, 3.9));
+    }
+}

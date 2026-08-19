@@ -225,6 +225,10 @@ pub fn recognize_native_heads(
         range_glyphs: &range_glyphs,
         competitors: &competitors,
         beams,
+        beam_veto_scale: crate::beam_veto::BeamVetoScale::from_env(
+            f64::from(grid.scale.scale.interline.main),
+            f64::from(grid.scale.scale.beam.main),
+        ),
     })
     .map_err(NativeHeadsRecognitionError::Epilog)?;
 

@@ -16,6 +16,7 @@ use audiveris_image::{
 
 use crate::{
     beam_inters::{BeamKind, beam_bounds},
+    beam_veto::BeamVetoScale,
     raw_ledger_filter::{
         LedgerCandidateGrade, LedgerGlyphRasterError, LedgerLineRejection,
         LedgerMaterializationError, LedgerMaterializer, LedgerPreviousReference,
@@ -220,6 +221,22 @@ pub fn recognize_native_ledgers(
     grid: &GridLinesRecognition,
     beams: &NativeBeamRecognition,
 ) -> Result<NativeLedgerRecognition, NativeLedgerRecognitionError> {
+    let beam_veto_scale = BeamVetoScale::from_env(
+        f64::from(grid.scale.scale.interline.main),
+        f64::from(grid.scale.scale.beam.main),
+    );
+    recognize_native_ledgers_with_options(grid, beams, beam_veto_scale)
+}
+
+/// [`recognize_native_ledgers`] with the enhancement gates passed as data.
+///
+/// `beam_veto_scale: None` is byte-exact Java; `Some` restricts the beam
+/// vetoes in `LedgersFilter` and the candidate factory to credible beams.
+pub fn recognize_native_ledgers_with_options(
+    grid: &GridLinesRecognition,
+    beams: &NativeBeamRecognition,
+    beam_veto_scale: Option<BeamVetoScale>,
+) -> Result<NativeLedgerRecognition, NativeLedgerRecognitionError> {
     let large_interline = grid.scale.scale.interline.main;
     let mean_line_thickness = f64::from(grid.scale.scale.line.main);
     if large_interline <= 0 || mean_line_thickness <= 0.0 {
@@ -231,7 +248,7 @@ pub fn recognize_native_ledgers(
     };
     let parameters = RawLedgerCandidateParameters::default();
     let staves = build_staff_zones(grid)?;
-    let systems = build_system_zones(grid, beams)?;
+    let systems = build_system_zones(grid, beams, beam_veto_scale)?;
     let filtered = filter_raw_ledger_sections(
         &grid.no_staff,
         &staves,
@@ -755,7 +772,15 @@ fn build_staff_zones(
 fn build_system_zones(
     grid: &GridLinesRecognition,
     beams: &NativeBeamRecognition,
+    beam_veto_scale: Option<BeamVetoScale>,
 ) -> Result<Vec<RawLedgerSystemZone>, NativeLedgerRecognitionError> {
+    // With the credible-beam gate set, sub-scale beams never enter the veto
+    // lists at all; the parity filter and candidate factory stay untouched.
+    let may_veto = |area: &RawLedgerBeamArea| {
+        beam_veto_scale.is_none_or(|scale| {
+            scale.credible(area.bounds.width as f64, area.bounds.height as f64)
+        })
+    };
     grid.peak_graph
         .systems
         .iter()
@@ -777,6 +802,7 @@ fn build_system_zones(
                 .iter()
                 .filter(|(system_id, _)| *system_id == id)
                 .map(|(_, beam)| raw_beam_area(beam.item))
+                .filter(&may_veto)
                 .collect::<Vec<_>>();
             let mut all_beams = raw.clone();
             all_beams.extend(
@@ -784,7 +810,8 @@ fn build_system_zones(
                     .hooks
                     .iter()
                     .filter(|(system_id, _)| *system_id == id)
-                    .map(|(_, beam)| raw_beam_area(beam.item)),
+                    .map(|(_, beam)| raw_beam_area(beam.item))
+                    .filter(&may_veto),
             );
             let good_full_beams = beams
                 .beams_after_multiple_rests
@@ -793,6 +820,7 @@ fn build_system_zones(
                     *system_id == id && beam.kind == BeamKind::Beam && beam.grade >= 0.4
                 })
                 .map(|(_, beam)| raw_beam_area(beam.item))
+                .filter(&may_veto)
                 .collect();
             Ok(RawLedgerSystemZone {
                 id,
@@ -1001,7 +1029,17 @@ mod tests {
             mean_line_thickness: f64::from(grid.scale.scale.line.main),
         };
         let staves = build_staff_zones(&grid).expect("staff zones");
-        let systems = build_system_zones(&grid, &beams).expect("system zones");
+        // The probe honors the same env gates as production, so a flag-on
+        // invocation shows the flag-on lattice.
+        let systems = build_system_zones(
+            &grid,
+            &beams,
+            BeamVetoScale::from_env(
+                f64::from(grid.scale.scale.interline.main),
+                f64::from(grid.scale.scale.beam.main),
+            ),
+        )
+        .expect("system zones");
         let filtered = filter_raw_ledger_sections(
             &grid.no_staff,
             &staves,

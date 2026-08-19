@@ -22,6 +22,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 pub mod beam_inters;
 pub mod beam_parameters;
 pub mod beam_recognizer;
+pub mod beam_veto;
 pub mod beams_step;
 pub mod black_head_sizer;
 pub mod brace_filament;

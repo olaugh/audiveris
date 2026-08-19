@@ -37,6 +37,8 @@ pub struct NativeHeadsEpilogInput<'a> {
     pub range_glyphs: &'a NativeHeadsRangeGlyphRecognition,
     pub competitors: &'a NativeHeadsCompetitorPool,
     pub beams: &'a NativeBeamRecognition,
+    /// Credible-beam veto gate; `None` is byte-exact Java arbitration.
+    pub beam_veto_scale: Option<crate::beam_veto::BeamVetoScale>,
 }
 
 /// Java `Shape` declaration order for the four native template head shapes.
@@ -167,13 +169,19 @@ pub fn compose_native_heads_epilog(
         seed_glyphs: input.seed_glyphs,
         range_glyphs: input.range_glyphs,
     })?;
-    compose_from_staff_epilog(staff_epilog, input.competitors, input.beams)
+    compose_from_staff_epilog(
+        staff_epilog,
+        input.competitors,
+        input.beams,
+        input.beam_veto_scale,
+    )
 }
 
 fn compose_from_staff_epilog(
     staff_epilog: NativeHeadsStaffEpilogRecognition,
     competitors: &NativeHeadsCompetitorPool,
     beams: &NativeBeamRecognition,
+    beam_veto_scale: Option<crate::beam_veto::BeamVetoScale>,
 ) -> Result<NativeHeadsEpilogRecognition, NativeHeadsEpilogError> {
     let staff_system_ids = staff_epilog
         .systems
@@ -212,7 +220,8 @@ fn compose_from_staff_epilog(
                 .collect(),
         })
         .collect::<Vec<_>>();
-    let beam_results = purge_native_heads_small_beams(competitors, beams, &head_systems)?;
+    let beam_results =
+        purge_native_heads_small_beams(competitors, beams, &head_systems, beam_veto_scale)?;
 
     let mut systems = Vec::with_capacity(staff_epilog.systems.len());
     let mut tally_samples = Vec::new();

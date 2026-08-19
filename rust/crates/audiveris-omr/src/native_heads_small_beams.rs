@@ -16,6 +16,7 @@ use audiveris_core::grade::contextual;
 
 use crate::{
     beam_inters::BeamKind,
+    beam_veto::BeamVetoScale,
     head_scanner_slices::JavaRectangle,
     head_small_beam_purge::{
         HeadBeamShape, SmallBeamPurgeBeam, SmallBeamPurgeHead, SmallBeamPurgeResult,
@@ -150,12 +151,14 @@ pub fn purge_native_heads_small_beams_system<Provenance: Clone>(
     system: &NativeHeadsCompetitorSystem,
     recognition: &NativeBeamRecognition,
     heads_in_sig_order: &[NativeHeadsSmallBeamHead<Provenance>],
+    beam_veto_scale: Option<BeamVetoScale>,
 ) -> Result<NativeHeadsSmallBeamSystemResult<Provenance>, NativeHeadsSmallBeamError> {
     let contextual_grades = beam_contextual_grades(recognition, system.system_id, &[])?;
     let mut result = purge_native_heads_small_beams_system_with_contextual_grades(
         system,
         heads_in_sig_order,
         &contextual_grades,
+        beam_veto_scale,
     )?;
     let provenance = result.beam_provenance.clone();
     let arbitration = purge_small_beams_with_contextual_grades(
@@ -199,6 +202,7 @@ pub fn purge_native_heads_small_beams_system_with_contextual_grades<Provenance: 
     system: &NativeHeadsCompetitorSystem,
     heads_in_sig_order: &[NativeHeadsSmallBeamHead<Provenance>],
     contextual_grades: &[(NativeHeadsCompetitorSource, f64)],
+    beam_veto_scale: Option<BeamVetoScale>,
 ) -> Result<NativeHeadsSmallBeamSystemResult<Provenance>, NativeHeadsSmallBeamError> {
     let heads = heads_in_sig_order
         .iter()
@@ -226,6 +230,17 @@ pub fn purge_native_heads_small_beams_system_with_contextual_grades<Provenance: 
                 shape: candidate.shape,
             });
         };
+        // Credible-beam gate (enhancement, None = Java): a sub-scale beam is
+        // withheld from arbitration entirely, so it can neither delete a head
+        // nor be deleted itself; both hypotheses stay for later resolution.
+        if beam_veto_scale.is_some_and(|scale| {
+            !scale.credible(
+                f64::from(candidate.bounds.width),
+                f64::from(candidate.bounds.height),
+            )
+        }) {
+            continue;
+        }
 
         beams.push(SmallBeamPurgeBeam {
             shape,
@@ -271,6 +286,7 @@ pub fn purge_native_heads_small_beams<Provenance: Clone>(
     pool: &NativeHeadsCompetitorPool,
     recognition: &NativeBeamRecognition,
     head_systems: &[NativeHeadsSmallBeamHeadSystem<Provenance>],
+    beam_veto_scale: Option<BeamVetoScale>,
 ) -> Result<Vec<NativeHeadsSmallBeamSystemResult<Provenance>>, NativeHeadsSmallBeamError> {
     let mut heads_by_system = BTreeMap::new();
     for heads in head_systems {
@@ -300,7 +316,7 @@ pub fn purge_native_heads_small_beams<Provenance: Clone>(
             let heads = heads_by_system.get(&system.system_id).copied().ok_or(
                 NativeHeadsSmallBeamError::MissingHeadSystem(system.system_id),
             )?;
-            purge_native_heads_small_beams_system(system, recognition, heads)
+            purge_native_heads_small_beams_system(system, recognition, heads, beam_veto_scale)
         })
         .collect()
 }
