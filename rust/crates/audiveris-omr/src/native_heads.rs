@@ -918,12 +918,12 @@ mod tests {
                 .iter()
                 .map(HeadTemplateCatalog::point_size)
                 .collect::<Vec<_>>(),
-            [78, 83, 84, 85, 87]
+            [24, 25, 26, 27, 28, 29, 30, 78, 83, 84, 85, 87]
         );
         assert_eq!(heads.staff_template_catalogs.len(), 6);
         assert!(heads.staff_template_catalogs.iter().all(|selection| {
             selection.point_size == 84
-                && selection.catalog_ordinal == 2
+                && selection.catalog_ordinal == 9
                 && heads.template_catalogs[selection.catalog_ordinal].point_size()
                     == selection.point_size
         }));

@@ -14,16 +14,20 @@ use crate::head_template::{
 const ASSET: &[u8] = include_bytes!("data/bravura-head-templates.bin");
 const MAGIC: &[u8; 8] = b"AVHTPL01";
 const ORACLE_DIGEST: [u8; 32] = [
-    0x84, 0xc3, 0x92, 0x08, 0x89, 0x15, 0x30, 0x96, 0x5f, 0x5d, 0x9c, 0xe7, 0x1f, 0xf9, 0xb7, 0x9c,
-    0xf3, 0x73, 0xc1, 0x01, 0xf4, 0xda, 0x80, 0x36, 0x05, 0x9c, 0xdb, 0xf2, 0x5e, 0x2a, 0x2e, 0xa6,
+    0xe6, 0x71, 0x4a, 0x31, 0xf3, 0xa1, 0x29, 0xa4, 0x04, 0xb5, 0x60, 0xc5, 0xf7, 0x43, 0x86, 0x38,
+    0x7c, 0x04, 0xff, 0xe0, 0x67, 0xc2, 0xcd, 0x78, 0x16, 0x63, 0xa0, 0xac, 0x2f, 0xee, 0xa1, 0xdf,
 ];
 
 /// SHA-256 of the complete fresh-JVM Java catalog oracle encoded by this asset.
 pub const BRAVURA_HEAD_TEMPLATE_ORACLE_SHA256: &str =
-    "84c39208891530965f5d9ce71ff9b79cf373c101f4da8036059cdbf25e2a2ea6";
+    "e6714a31f3a129a404b560c5f74386387c04ffe067c2cd781663a0ac2feea1df";
 
 /// The exact point sizes selected by the measured normal-staff corpus.
-pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 5] = [78, 83, 84, 85, 87];
+/// Page-corpus sizes (78..87, ~300 DPI examples) plus the explicit small
+/// sizes (24..30) baked for low-resolution scans such as the Schenker
+/// Universal Edition pages; see `oracle/head-template-catalog-small.txt`.
+pub const BRAVURA_HEAD_TEMPLATE_POINT_SIZES: [i32; 12] =
+    [24, 25, 26, 27, 28, 29, 30, 78, 83, 84, 85, 87];
 
 /// Decode the versioned checked-in catalog asset.
 ///
@@ -318,7 +322,7 @@ mod tests {
     #[test]
     fn checked_in_asset_has_the_complete_active_catalog_set() {
         let catalogs = load_bravura_head_template_catalogs().unwrap();
-        assert_eq!(catalogs.len(), 5);
+        assert_eq!(catalogs.len(), 12);
         assert_eq!(
             catalogs
                 .iter()
@@ -331,7 +335,7 @@ mod tests {
                 .iter()
                 .flat_map(HeadTemplateCatalog::templates)
                 .count(),
-            20
+            48
         );
         assert_eq!(
             catalogs
@@ -339,7 +343,7 @@ mod tests {
                 .flat_map(HeadTemplateCatalog::templates)
                 .flat_map(HeadTemplate::key_points)
                 .count(),
-            17_094
+            19_589
         );
     }
 

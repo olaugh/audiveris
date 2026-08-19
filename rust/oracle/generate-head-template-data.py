@@ -121,7 +121,9 @@ def rounded_anchor(kind: int, dx: float, dy: float) -> tuple[int, int]:
     return x, java_round(dy - 0.5)
 
 
-def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, ...]], int]:
+def parse_oracle(
+    path: pathlib.Path, expected_shape: tuple[int, int] = (32, 8)
+) -> tuple[bytes, dict[int, tuple[Template, ...]], int]:
     raw = path.read_bytes()
     page_catalogs: dict[tuple[str, int], list[Template]] = {}
     current_key: tuple[str, int] | None = None
@@ -217,9 +219,10 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
             raise ValueError(f"{path}:{line_number}: {error}") from error
 
     finish_template()
-    if template_rows != 32 or len(page_catalogs) != 8:
+    if (template_rows, len(page_catalogs)) != expected_shape:
         raise ValueError(
-            f"expected 32 templates in 8 page catalogs, got {template_rows} in {len(page_catalogs)}"
+            f"expected {expected_shape[0]} templates in {expected_shape[1]} page catalogs, "
+            f"got {template_rows} in {len(page_catalogs)}"
         )
 
     unique: dict[int, tuple[Template, ...]] = {}
@@ -237,10 +240,6 @@ def parse_oracle(path: pathlib.Path) -> tuple[bytes, dict[int, tuple[Template, .
         unique.setdefault(point_size, tuple(templates))
         page_pixels += sum(len(template.pixels) for template in templates)
 
-    if sorted(unique) != [78, 83, 84, 85, 87] or page_pixels != 27207:
-        raise ValueError(
-            f"unexpected corpus coverage: point sizes {sorted(unique)}, pixels {page_pixels}"
-        )
     return raw, unique, page_pixels
 
 
@@ -280,6 +279,12 @@ def main() -> int:
     parser.add_argument("oracle", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
     parser.add_argument(
+        "--small",
+        type=pathlib.Path,
+        default=None,
+        help="explicit small point-size oracle (HeadTemplatePointSizeProbe output)",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="verify that OUTPUT already contains the deterministic encoding",
@@ -287,6 +292,26 @@ def main() -> int:
     args = parser.parse_args()
 
     raw, catalogs, page_pixels = parse_oracle(args.oracle)
+    if sorted(catalogs) != [78, 83, 84, 85, 87] or page_pixels != 27207:
+        raise ValueError(
+            f"unexpected corpus coverage: point sizes {sorted(catalogs)}, pixels {page_pixels}"
+        )
+    if args.small is not None:
+        # The page corpus cannot reach low-resolution point sizes (Java does
+        # not always survive such scans end to end), so these catalogs come
+        # from HeadTemplatePointSizeProbe: same TemplateFactory, explicit
+        # sizes, one fresh JVM. Pinned exactly like the page corpus.
+        small_raw, small_catalogs, small_pixels = parse_oracle(args.small, (28, 7))
+        if sorted(small_catalogs) != [24, 25, 26, 27, 28, 29, 30] or small_pixels != 2495:
+            raise ValueError(
+                f"unexpected small coverage: point sizes {sorted(small_catalogs)}, "
+                f"pixels {small_pixels}"
+            )
+        overlap = set(catalogs) & set(small_catalogs)
+        if overlap:
+            raise ValueError(f"small oracle repeats page-corpus sizes: {sorted(overlap)}")
+        catalogs.update(small_catalogs)
+        raw = raw + small_raw
     encoded = encode(raw, catalogs)
     if args.check:
         if not args.output.is_file() or args.output.read_bytes() != encoded:
