@@ -1,0 +1,102 @@
+# Verovio synthetic barline corpus: ground truth parsed from the SVG,
+# not from any recognizer.  truth lines: x form (viewBox units mapped to px).
+# Regenerate: stage-omr-data$ .venv/bin/python scripts/generate_verovio_barline_corpus.py --output data/verovio-barline-corpus --fixture <this file>
+image stage-omr-data/data/verovio-barline-corpus/plain-i06.png
+system plain-i06s0 16.666666666666668 683.4 34.666666666666664 118.66666666666667 6
+truth 262.26666666666665 single
+truth 383.4 single
+truth 561.8333333333334 single
+truth 682.9666666666667 single
+end
+system plain-i06s1 16.666666666666668 368.1333333333333 166.66666666666666 250.66666666666666 6
+truth 156.0 single
+truth 215.43333333333334 single
+truth 302.8666666666667 single
+truth 364.46666666666664 final
+end
+image stage-omr-data/data/verovio-barline-corpus/plain-i12.png
+system plain-i12s0 33.333333333333336 1366.8 69.33333333333333 237.33333333333334 12
+truth 524.5333333333333 single
+truth 766.8 single
+truth 1123.6666666666667 single
+truth 1365.9333333333334 single
+end
+system plain-i12s1 33.333333333333336 736.2666666666667 333.3333333333333 501.3333333333333 12
+truth 312.0 single
+truth 430.8666666666667 single
+truth 605.7333333333333 single
+truth 728.9333333333333 final
+end
+image stage-omr-data/data/verovio-barline-corpus/plain-i18.png
+system plain-i18s0 50.0 2050.2000000000003 104.0 356.0 18
+truth 786.8000000000001 single
+truth 1150.2 single
+truth 1685.5 single
+truth 2048.9 single
+end
+system plain-i18s1 50.0 1104.4 500.0 752.0 18
+truth 468.0 single
+truth 646.3000000000001 single
+truth 908.6 single
+truth 1093.4 final
+end
+image stage-omr-data/data/verovio-barline-corpus/stems-i06.png
+system stems-i06s0 16.666666666666668 465.4 34.666666666666664 121.16666666666667 6
+truth 164.26666666666665 single
+truth 262.7 single
+truth 361.1333333333333 single
+truth 461.73333333333335 final
+end
+image stage-omr-data/data/verovio-barline-corpus/stems-i12.png
+system stems-i12s0 33.333333333333336 930.8 69.33333333333333 242.33333333333334 12
+truth 328.5333333333333 single
+truth 525.4 single
+truth 722.2666666666667 single
+truth 923.4666666666667 final
+end
+image stage-omr-data/data/verovio-barline-corpus/stems-i18.png
+system stems-i18s0 50.0 1396.2 104.0 363.5 18
+truth 492.8 single
+truth 788.1 single
+truth 1083.4 single
+truth 1385.2 final
+end
+image stage-omr-data/data/verovio-barline-corpus/types-i06.png
+system types-i06s0 16.666666666666668 683.4333333333333 38.53333333333333 122.53333333333333 6
+truth 197.16666666666666 single
+truth 295.31666666666666 double
+truth 439.0333333333333 single
+truth 537.7 rptend
+truth 683.0 single
+end
+system types-i06s1 16.666666666666668 269.7 170.53333333333333 254.53333333333333 6
+truth 105.93333333333334 rptstart
+truth 201.2 rptend
+truth 266.0333333333333 final
+end
+image stage-omr-data/data/verovio-barline-corpus/types-i12.png
+system types-i12s0 33.333333333333336 1366.8666666666666 77.06666666666666 245.06666666666666 12
+truth 394.3333333333333 single
+truth 590.6333333333333 double
+truth 878.0666666666666 single
+truth 1075.4 rptend
+truth 1366.0 single
+end
+system types-i12s1 33.333333333333336 539.4 341.06666666666666 509.06666666666666 12
+truth 211.86666666666667 rptstart
+truth 402.4 rptend
+truth 532.0666666666666 final
+end
+image stage-omr-data/data/verovio-barline-corpus/types-i18.png
+system types-i18s0 50.0 2050.3 115.60000000000001 367.6 18
+truth 591.5 single
+truth 885.95 double
+truth 1317.1000000000001 single
+truth 1613.1000000000001 rptend
+truth 2049.0 single
+end
+system types-i18s1 50.0 809.1 511.6 763.6 18
+truth 317.8 rptstart
+truth 603.6 rptend
+truth 798.1 final
+end
