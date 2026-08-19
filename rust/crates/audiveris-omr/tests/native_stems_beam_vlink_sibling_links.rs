@@ -46,6 +46,7 @@ use audiveris_omr::{
         advance_native_stems_head_continuation_c_link_order18,
         advance_native_stems_head_continuation_c_link_order20,
         advance_native_stems_head_existing_stem_retry_order21,
+        advance_native_stems_head_existing_stem_retry_order22,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -9343,6 +9344,46 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert_eq!(invalid_order21, invalid_order21_before);
 
+    // Boundary 48: existing-stem retry/reconciliation at x4/SIG7.
+    let order22_before = order21_continuation.state_after.clone();
+    let order22_continuation = advance_native_stems_head_existing_stem_retry_order22(
+        &order21_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order22 existing-stem retry");
+    assert_eq!(*order21_continuation.state_after, *order22_before);
+    assert_eq!(order22_continuation.processed_head.x_ordinal, 4);
+    assert_eq!(order22_continuation.processed_head.sig_ordinal, 7);
+    assert_eq!(order22_continuation.returned_linked, Some(true));
+    assert_eq!(order22_continuation.closed_value_changes, 2);
+    assert_eq!(order22_continuation.state_after.current_index, 23);
+    assert!(order22_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order22_continuation.state_after.heads[23]
+            .reference
+            .x_ordinal,
+        78
+    );
+    assert_eq!(
+        order22_continuation.state_after.heads[23]
+            .reference
+            .sig_ordinal,
+        39
+    );
+    assert_eq!(
+        order22_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (3, NativeStemHeadSide::Left),
+            (3, NativeStemHeadSide::Right)
+        ]
+    );
+
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
     let mut invalid_order18 = order18_frontier_before.clone();
@@ -12225,6 +12266,129 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v21_summary, "javaEvidence"),
         "ReturnedBeforeTwentySecondHead"
+    );
+
+    // Boundary 48 expected-only v22 rows cover existing-stem retry/reconciliation.
+    let v22_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v22.txt"),
+    )
+    .expect("expected-only order22 existing-stem retry fixture");
+    assert_eq!(
+        sha256_hex(v22_text.as_bytes()),
+        "e7bd66417228bf8fed7fe0c04d904e81ade4026fb00b4c17270b73947f85a1a4"
+    );
+    let v22_rows = v22_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v22_rows.len(), 14);
+    let v22_body = format!("{}\n", v22_rows[..13].join("\n"));
+    assert_eq!(
+        sha256_hex(v22_body.as_bytes()),
+        "23d5da366efe5ce9d1bee9e7c5e3201677faef273075e23af68332a5e1f7e4bb"
+    );
+    let v22_frontier = v22_rows[10];
+    assert_eq!(head_field(v22_frontier, "headOrder"), "22");
+    assert_eq!(head_field(v22_frontier, "headX"), "4");
+    assert_eq!(head_field(v22_frontier, "headSig"), "7");
+    assert_eq!(head_field(v22_frontier, "headInterId"), "1299");
+    assert_eq!(head_field(v22_frontier, "cAlias"), "h:4:LEFT:BOTTOM");
+    assert_eq!(head_field(v22_frontier, "lastIndex"), "2");
+    assert_eq!(head_field(v22_frontier, "maxIndex"), "2");
+    assert_eq!(head_field(v22_frontier, "candidateIdBefore"), "0");
+    assert_eq!(head_field(v22_frontier, "existingGlyph"), "glyph:315");
+    assert_eq!(head_field(v22_frontier, "existingStem"), "2354");
+    assert_eq!(
+        head_field(v22_frontier, "terminal"),
+        "ReadyForHeadCreateStem"
+    );
+    let v22_result = v22_rows[11];
+    assert_eq!(head_field(v22_result, "headOrder"), "22");
+    assert_eq!(head_field(v22_result, "allocatorBefore"), "2382");
+    assert_eq!(head_field(v22_result, "allocatorAfter"), "2382");
+    assert_eq!(head_field(v22_result, "addedVertices"), "-");
+    assert_eq!(head_field(v22_result, "addedEdges"), "-");
+    assert_eq!(head_field(v22_result, "addedSystemStems"), "-");
+    assert_eq!(
+        head_field(v22_result, "linkerStateHashAfter"),
+        "460cbb523fd626563afba13b2754d7fee08677dc2f3701f04a06e2df74833ff6"
+    );
+    assert_eq!(
+        head_field(v22_result, "relationStateHashAfter"),
+        "3c50fb8ad029b80132262f4607e856ffcfadd6aa777d03bd3795288018faac9d"
+    );
+    assert_eq!(
+        head_field(v22_result, "terminal"),
+        "ReturnedHeadCLinkTransaction"
+    );
+    let v22_continue = v22_rows[12];
+    assert_eq!(head_field(v22_continue, "headOrder"), "22");
+    assert_eq!(head_field(v22_continue, "headX"), "4");
+    assert_eq!(head_field(v22_continue, "headSig"), "7");
+    assert_eq!(
+        head_field(v22_continue, "closureWrites"),
+        "[x3:sig6:LEFT:false->true,x3:sig6:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(v22_continue, "closedValueChanges"), "2");
+    assert_eq!(head_field(v22_continue, "nextHeadOrder"), "23");
+    assert_eq!(head_field(v22_continue, "nextHeadX"), "78");
+    assert_eq!(head_field(v22_continue, "nextHeadSig"), "39");
+    assert_eq!(head_field(v22_continue, "nextHeadInterId"), "1363");
+    assert_eq!(
+        head_field(v22_continue, "terminal"),
+        "ReturnedBeforeNextHead"
+    );
+    let v22_summary = v22_rows[13];
+    assert_eq!(
+        head_field(v22_summary, "schema"),
+        "stems-head-phase-prefix-v22"
+    );
+    assert_eq!(head_field(v22_summary, "rows"), "13");
+    assert_eq!(
+        head_field(v22_summary, "baseProbeSourceSha256"),
+        "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf"
+    );
+    assert_eq!(
+        head_field(v22_summary, "baseV21RunnerSourceSha256"),
+        "8cbd5d1de2e6e6b2b77d4ba94d99eb9f5813503a4afb960bb7511d0b92999ccd"
+    );
+    assert_eq!(
+        head_field(v22_summary, "baseV21FixtureSha256"),
+        "9505955ce7e3322cbfaea818d0d42b5873fa78b1f5e1941756bcc44efcb04f55"
+    );
+    assert_eq!(
+        head_field(v22_summary, "fragmentSourceSha256"),
+        "576406fb3bd8bf9503ca883480bc55b217b3c6bc99ca440ef702774d3a2ca950"
+    );
+    assert_eq!(
+        head_field(v22_summary, "probeSourceSha256"),
+        "fc6ada7afdc64f1e42f9fbf0c1f9353138a02ec285d24697fc68a90d49c3dfc7"
+    );
+    assert_eq!(
+        head_field(v22_summary, "runnerSourceSha256"),
+        "be1091ab266ea190a507291351f50bec4842f50003c75fb048f6bb96537ceebc"
+    );
+    assert_eq!(
+        head_field(v22_summary, "emittedBodySha256"),
+        "23d5da366efe5ce9d1bee9e7c5e3201677faef273075e23af68332a5e1f7e4bb"
+    );
+    assert_eq!(
+        head_field(v22_summary, "semanticPassSha256"),
+        "62c5ac9c30ea6bf3666cdb567bfa52d6d0a857578a5146ac91927f08adfa8c6a"
+    );
+    assert_eq!(
+        head_field(v22_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v22_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v22_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v22_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder22ExistingStemRetry"
+    );
+    assert_eq!(
+        head_field(v22_summary, "javaEvidence"),
+        "ReturnedBeforeTwentyThirdHead"
     );
 
     let all_siblings = std::iter::once(&actual)
