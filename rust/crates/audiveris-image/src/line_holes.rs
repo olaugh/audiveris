@@ -341,6 +341,7 @@ mod tests {
                 interline: 10,
                 small: false,
                 short: false,
+                tentative: false,
                 lines,
             }],
             global_slope: None,
@@ -497,6 +498,7 @@ mod tests {
             interline: 10,
             small: false,
             short: false,
+            tentative: false,
             lines: vec![invalid],
         });
 

@@ -3,13 +3,14 @@
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
+use audiveris_image::scale_estimate::ScaleOptions;
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{
-    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
-    recognize_scale_raster, scale_report,
+    grid_lines_report, recognize_grid_lines_raster, recognize_grid_lines_raster_with_scale_options,
+    recognize_native_beams_with_stem_seeds, recognize_scale_raster_with_options, scale_report,
 };
 use audiveris_omr::report::{
     beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json,
@@ -37,6 +38,8 @@ fn usage() {
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
+         A work-level staff spacing prior can be supplied in raster pixels, e.g.:\n\
+         \x20 audiveris-cli -batch -step GRID -interline 20 page.png\n\n\
          Independent pages run concurrently by default. Set\n\
          AUDIVERIS_PAGE_THREADS=1 to force serial execution.\n\n\
          HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS currently require -json.\n\
@@ -119,7 +122,7 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                 .map(|sheet| NativeTask::Sheet { book_index, sheet }),
         );
     }
-    run_native_tasks(&books, &tasks, step, json)?;
+    run_native_tasks(&books, &tasks, step, json, parameters.interline)?;
     Ok(true)
 }
 
@@ -139,6 +142,7 @@ fn recognize_native_sheet(
     sheet: usize,
     step: OmrStep,
     json: bool,
+    specified_interline: Option<i32>,
 ) -> Result<String, String> {
     let raster = book
         .loader
@@ -150,13 +154,25 @@ fn recognize_native_sheet(
         format!("input={}\n", book.input_name)
     };
     if step < OmrStep::Grid {
-        let recognition = recognize_scale_raster(&raster)
-            .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
+        let recognition = recognize_scale_raster_with_options(
+            &raster,
+            ScaleOptions {
+                specified_interline,
+                ..ScaleOptions::default()
+            },
+        )
+        .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
         return Ok(format!("{header}{}", scale_report(&recognition)));
     }
 
-    let recognition = recognize_grid_lines_raster(&raster)
-        .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
+    let recognition = recognize_grid_lines_raster_with_scale_options(
+        &raster,
+        ScaleOptions {
+            specified_interline,
+            ..ScaleOptions::default()
+        },
+    )
+    .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
     if step == OmrStep::Grid {
         return if json {
             Ok(grid_json(&recognition, &book.input_name, sheet))
@@ -290,6 +306,7 @@ fn run_native_tasks(
     tasks: &[NativeTask],
     step: OmrStep,
     json: bool,
+    specified_interline: Option<i32>,
 ) -> Result<(), String> {
     if tasks.is_empty() {
         return Ok(());
@@ -309,9 +326,13 @@ fn run_native_tasks(
                         break;
                     };
                     let result = match task {
-                        NativeTask::Sheet { book_index, sheet } => {
-                            recognize_native_sheet(&books[*book_index], *sheet, step, json)
-                        }
+                        NativeTask::Sheet { book_index, sheet } => recognize_native_sheet(
+                            &books[*book_index],
+                            *sheet,
+                            step,
+                            json,
+                            specified_interline,
+                        ),
                         NativeTask::Error(error) => Err(error.clone()),
                     };
                     if sender.send((index, result)).is_err() {

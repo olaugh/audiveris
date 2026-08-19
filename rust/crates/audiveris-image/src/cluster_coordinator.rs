@@ -211,17 +211,15 @@ fn connect_filament_ancestors(
         (two, one)
     };
 
-    let swallowed_value = filaments
+    let swallowed_sections = filaments
         .get(&swallowed)
-        .cloned()
-        .ok_or(FollowCombsNetworkError::MissingFilamentValue(swallowed))?;
-    let mut winner_value = filaments
-        .get(&winner)
-        .cloned()
-        .ok_or(FollowCombsNetworkError::MissingFilamentValue(winner))?;
-    for section in swallowed_value.sections().iter().cloned() {
-        winner_value.add_section(section)?;
-    }
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(swallowed))?
+        .sections()
+        .to_vec();
+    filaments
+        .get_mut(&winner)
+        .ok_or(FollowCombsNetworkError::MissingFilamentValue(winner))?
+        .add_sections(swallowed_sections)?;
 
     let swallowed_combs = direct_combs
         .get(&swallowed)
@@ -232,7 +230,6 @@ fn connect_filament_ancestors(
         .ok_or(FollowCombsNetworkError::MissingFilamentInput(winner))?
         .extend(swallowed_combs);
     ownership.merge_filaments(winner, swallowed)?;
-    filaments.insert(winner, winner_value);
     Ok(())
 }
 

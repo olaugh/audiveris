@@ -48,6 +48,9 @@ pub struct PreparedStaff {
     pub interline: usize,
     pub small: bool,
     pub short: bool,
+    /// Late five-line ridge hypothesis. Completion may add ink evidence, but
+    /// its final geometry must remain a jointly constrained staff model.
+    pub tentative: bool,
     pub lines: Vec<PreparedStaffLine>,
 }
 
@@ -662,6 +665,7 @@ fn materialize_staffs<DownstreamError>(
                 interline: candidate.interline(),
                 small: candidate.is_small(),
                 short: candidate.is_short(),
+                tentative: candidate.is_tentative(),
                 lines,
             });
             continue;
@@ -732,6 +736,7 @@ fn materialize_staffs<DownstreamError>(
             interline: candidate.interline(),
             small: candidate.is_small(),
             short: candidate.is_short(),
+            tentative: candidate.is_tentative(),
             lines,
         });
     }

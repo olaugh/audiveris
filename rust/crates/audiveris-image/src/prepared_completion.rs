@@ -22,6 +22,7 @@ use crate::{
         IncludeDiscardedFilamentsCompletion, IncludeDiscardedFilamentsParameters,
         PreparedCompletionSystem, PreparedDiscardedFilamentSteal, PreparedFilamentRecomputation,
     },
+    filament::regularize_five_line_staff,
     grid_lifecycle::{GridBuildStage, GridStageFailure},
     line_completion::{
         LineCompletionExecutor, LineCompletionStage, complete_lines as run_line_completion,
@@ -233,6 +234,7 @@ pub enum ProductionCompleteLinesError<UpstreamError, CompletionError> {
     BinaryBufferUnavailable,
     BinaryBufferProvenanceMismatch,
     CompletionOwnership(PreparedCompletionOwnershipError),
+    TentativeGeometry(crate::filament::FilamentError),
     Upstream(UpstreamError),
     Completion(CompletionError),
 }
@@ -595,7 +597,25 @@ where
             maximum_thin_weight: self.maximum_thin_weight,
         };
         run_line_completion(&mut executor, self.inspect_crossing_chunks)
-            .map_err(map_completion_failure)
+            .map_err(map_completion_failure)?;
+        // Completion intentionally mutates individual filaments (endpoints,
+        // holes, sections, stickers and curvature). For tentative ridge
+        // staffs that invalidates the shared spline installed at retrieval and
+        // can reintroduce beam/stem contamination. Reapply the five-line
+        // constraint once, after every evidence-gathering stage and before the
+        // staff-line cleaner persists the geometry.
+        for staff in &mut self.state.as_mut().expect("completion state").staffs {
+            if staff.tentative && staff.lines.len() == 5 {
+                regularize_five_line_staff(
+                    staff.lines.iter_mut().map(|line| &mut line.filament),
+                    staff.interline,
+                )
+                .map_err(|error| {
+                    GridStageFailure::Other(ProductionCompleteLinesError::TentativeGeometry(error))
+                })?;
+            }
+        }
+        Ok(())
     }
 
     fn log_swallowed_error(&mut self, stage: GridBuildStage, error: &Self::OtherError) {
@@ -743,6 +763,9 @@ fn map_completion_failure<StepError, UpstreamError, CompletionError>(
             }
             ProductionCompleteLinesError::CompletionOwnership(error) => {
                 ProductionCompleteLinesError::CompletionOwnership(error)
+            }
+            ProductionCompleteLinesError::TentativeGeometry(error) => {
+                ProductionCompleteLinesError::TentativeGeometry(error)
             }
             ProductionCompleteLinesError::Completion(error) => {
                 ProductionCompleteLinesError::Completion(error)
@@ -1019,6 +1042,7 @@ mod tests {
                 interline: 10,
                 small: false,
                 short: false,
+                tentative: false,
                 lines: vec![PreparedStaffLine {
                     id: 7,
                     cluster_position: 0,

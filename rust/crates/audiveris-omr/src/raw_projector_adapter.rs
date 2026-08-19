@@ -2753,6 +2753,7 @@ mod tests {
                     interline: 5,
                     small: false,
                     short: false,
+                    tentative: false,
                     lines,
                 }],
             },
@@ -2804,6 +2805,7 @@ mod tests {
                         interline: 5,
                         small: false,
                         short: false,
+                        tentative: false,
                         lines: line_pair(0, 5),
                     },
                     PreparedStaff {
@@ -2814,6 +2816,7 @@ mod tests {
                         interline: 5,
                         small: false,
                         short: false,
+                        tentative: false,
                         lines: line_pair(6, 11),
                     },
                 ],

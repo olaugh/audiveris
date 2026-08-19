@@ -731,6 +731,7 @@ mod tests {
             interline: 10,
             small: false,
             short: false,
+            tentative: false,
             lines,
         }
     }
@@ -829,6 +830,7 @@ mod tests {
             interline: 10,
             small: false,
             short: false,
+            tentative: false,
             lines: vec![PreparedStaffLine {
                 id: 99,
                 cluster_position: 0,

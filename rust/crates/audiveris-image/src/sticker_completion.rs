@@ -310,6 +310,7 @@ mod tests {
                 interline: 2,
                 small: false,
                 short: false,
+                tentative: false,
                 lines,
             }],
             global_slope: None,

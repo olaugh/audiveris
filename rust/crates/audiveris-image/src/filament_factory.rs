@@ -529,6 +529,23 @@ impl FilamentFactory {
         });
 
         let mut live = filaments.drain(..).map(Some).collect::<Vec<_>>();
+        let mut live_bounds = live
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_ref()
+                    .map(|entry| entry.filament.bounds())
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // At high scan resolutions, testing every earlier filament makes this
+        // stage quadratic in thousands of short horizontal sections. Index
+        // live heads by vertical band, then retain the original ascending head
+        // order within the small set whose bounds can actually intersect.
+        // Stale bucket entries after a merge are harmless: current bounds and
+        // liveness are still checked before compatibility.
+        let bucket_height = self.params.max_pos_gap.ceil().max(1.0) as usize;
+        let mut heads_by_y = Vec::<Vec<usize>>::new();
         for current in 0..live.len() {
             if live[current].is_none() {
                 continue;
@@ -536,16 +553,23 @@ impl FilamentFactory {
             let mut candidate = current;
             loop {
                 let mut merged_into = None;
-                for head in 0..current {
+                let candidate_bounds = live_bounds[candidate].expect("live candidate bounds");
+                let mut possible_heads = indexed_vertical_candidates(
+                    &heads_by_y,
+                    candidate_bounds,
+                    self.params.max_pos_gap,
+                    bucket_height,
+                );
+                possible_heads.sort_unstable();
+                possible_heads.dedup();
+                for head in possible_heads {
+                    if head >= current {
+                        continue;
+                    }
                     if head == candidate || live[head].is_none() {
                         continue;
                     }
-                    let head_bounds = live[head].as_ref().expect("live head").filament.bounds()?;
-                    let candidate_bounds = live[candidate]
-                        .as_ref()
-                        .expect("live candidate")
-                        .filament
-                        .bounds()?;
+                    let head_bounds = live_bounds[head].expect("live head bounds");
                     if !grown_bounds_intersect(
                         candidate_bounds,
                         head_bounds,
@@ -577,12 +601,28 @@ impl FilamentFactory {
                                 .add_section(section)?;
                         }
                         live[candidate] = None;
+                        live_bounds[candidate] = None;
+                        let updated = live[head]
+                            .as_ref()
+                            .expect("merged live head")
+                            .filament
+                            .bounds()?;
+                        live_bounds[head] = Some(updated);
+                        index_vertical_head(&mut heads_by_y, head, updated, bucket_height);
                         merged_into = Some(head);
                         break;
                     }
                 }
                 let Some(head) = merged_into else { break };
                 candidate = head;
+            }
+            if live[current].is_some() {
+                index_vertical_head(
+                    &mut heads_by_y,
+                    current,
+                    live_bounds[current].expect("surviving filament bounds"),
+                    bucket_height,
+                );
             }
         }
         filaments.extend(live.into_iter().flatten());
@@ -876,6 +916,52 @@ fn grown_bounds_intersect(
     let other_right = (other.x + other.width) as f64;
     let other_bottom = (other.y + other.height) as f64;
     right > other.x as f64 && other_right > left && bottom > other.y as f64 && other_bottom > top
+}
+
+fn vertical_bucket_span(bounds: Bounds, margin: f64, bucket_height: usize) -> (usize, usize) {
+    let start = ((bounds.y as f64 - margin).floor().max(0.0) as usize) / bucket_height;
+    // Deliberately over-include the half-open lower edge. Exact intersection
+    // is still decided by `grown_bounds_intersect`; the index must only avoid
+    // false negatives.
+    let stop = (((bounds.y + bounds.height) as f64 + margin).ceil() as usize) / bucket_height;
+    (start, stop)
+}
+
+fn index_vertical_head(
+    heads_by_y: &mut Vec<Vec<usize>>,
+    head: usize,
+    bounds: Bounds,
+    bucket_height: usize,
+) {
+    let (start, stop) = vertical_bucket_span(bounds, 0.0, bucket_height);
+    if heads_by_y.len() <= stop {
+        heads_by_y.resize_with(stop + 1, Vec::new);
+    }
+    for bucket in &mut heads_by_y[start..=stop] {
+        if let Err(position) = bucket.binary_search(&head) {
+            bucket.insert(position, head);
+        }
+    }
+}
+
+fn indexed_vertical_candidates(
+    heads_by_y: &[Vec<usize>],
+    bounds: Bounds,
+    margin: f64,
+    bucket_height: usize,
+) -> Vec<usize> {
+    if heads_by_y.is_empty() {
+        return Vec::new();
+    }
+    let (start, stop) = vertical_bucket_span(bounds, margin, bucket_height);
+    if start >= heads_by_y.len() {
+        return Vec::new();
+    }
+    heads_by_y[start..=stop.min(heads_by_y.len() - 1)]
+        .iter()
+        .flatten()
+        .copied()
+        .collect()
 }
 
 /// Java `Compounds.getThicknessAt` for horizontal staff filaments.

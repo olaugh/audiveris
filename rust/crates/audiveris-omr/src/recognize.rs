@@ -177,16 +177,46 @@ pub fn recognize_scale_sheet(
 pub fn recognize_scale_raster(
     loaded: &ingest::GrayRaster,
 ) -> Result<ScaleRecognition, ScaleRecognitionError> {
+    recognize_scale_raster_with_options(loaded, ScaleOptions::default())
+}
+
+/// Runs `BINARY -> SCALE` with an explicit scale prior.  Dataset pipelines can
+/// use this to apply one work-level interline estimate consistently across
+/// every page instead of letting a dense high-resolution page select a tiny
+/// text/noise periodicity.
+pub fn recognize_scale_raster_with_options(
+    loaded: &ingest::GrayRaster,
+    options: ScaleOptions,
+) -> Result<ScaleRecognition, ScaleRecognitionError> {
     let (width, height) = (loaded.width(), loaded.height());
     let gray_digest = loaded.fnv1a64();
-    let binary = adaptive::default_adaptive_filter(width, height, loaded.pixels());
+    // Java's 18-pixel adaptive window is calibrated around ordinary scan
+    // resolutions.  Once a work-level interline is supplied, keep at least
+    // roughly three staff spaces in the full local window.  Otherwise a 300
+    // DPI staff can fill the window and the scale histogram locks onto tiny
+    // text/noise periodicities instead of the staff lattice.
+    let half_window = options
+        .specified_interline
+        .filter(|value| *value > 0)
+        .map_or(adaptive::DEFAULT_HALF_WINDOW, |interline| {
+            adaptive::DEFAULT_HALF_WINDOW
+                .max((f64::from(interline) * 1.5).round_ties_even() as usize)
+        });
+    let binary = adaptive::adaptive_filter(
+        width,
+        height,
+        loaded.pixels(),
+        half_window,
+        adaptive::DEFAULT_MEAN_COEFF,
+        adaptive::DEFAULT_STD_DEV_COEFF,
+    );
     let vertical_runs = RunTable::from_pixels(Orientation::Vertical, width, height, &binary)?;
     let histograms = vertical_run_histograms(&vertical_runs);
     let scale = estimate_scale(
         &histograms,
         ScaleOptions {
             image_size: Some((width, height)),
-            ..ScaleOptions::default()
+            ..options
         },
     )?;
     Ok(ScaleRecognition {
@@ -3320,7 +3350,15 @@ pub fn recognize_grid_lines_sheet(
 pub fn recognize_grid_lines_raster(
     loaded: &ingest::GrayRaster,
 ) -> Result<GridLinesRecognition, GridRecognitionError> {
-    let scale_recognition = recognize_scale_raster(loaded)?;
+    recognize_grid_lines_raster_with_scale_options(loaded, ScaleOptions::default())
+}
+
+/// GRID recognition with an explicit scale prior.
+pub fn recognize_grid_lines_raster_with_scale_options(
+    loaded: &ingest::GrayRaster,
+    scale_options: ScaleOptions,
+) -> Result<GridLinesRecognition, GridRecognitionError> {
+    let scale_recognition = recognize_scale_raster_with_options(loaded, scale_options)?;
 
     let projective_staff_slope = std::env::var("AUDIVERIS_PROJECTIVE_STAFF_SLOPE")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"));

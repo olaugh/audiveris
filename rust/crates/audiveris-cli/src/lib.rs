@@ -20,6 +20,7 @@ pub struct Parameters {
     pub output: Option<PathBuf>,
     pub playlist: Option<PathBuf>,
     pub sheets: Vec<i32>,
+    pub interline: Option<i32>,
     pub step: Option<OmrStep>,
     pub run_class: Option<String>,
     pub constants: BTreeMap<String, String>,
@@ -78,6 +79,20 @@ pub fn parse(args: &[String]) -> Result<Parameters, CliError> {
                 "-annotate" => params.annotate = true,
                 "-output" => params.output = Some(value(args, &mut index, argument)?.into()),
                 "-playlist" => params.playlist = Some(value(args, &mut index, argument)?.into()),
+                "-interline" => {
+                    let raw = value(args, &mut index, argument)?;
+                    let interline = raw.parse::<i32>().map_err(|_| {
+                        CliError(format!(
+                            "option -interline requires a positive integer: {raw}"
+                        ))
+                    })?;
+                    if interline <= 0 {
+                        return Err(CliError(format!(
+                            "option -interline requires a positive integer: {raw}"
+                        )));
+                    }
+                    params.interline = Some(interline);
+                }
                 "-run" => params.run_class = Some(value(args, &mut index, argument)?),
                 "-constant" | "-option" => {
                     let (key, value) = property(&value(args, &mut index, argument)?);

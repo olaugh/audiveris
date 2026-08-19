@@ -15,7 +15,7 @@ use crate::{
     cluster_ownership::{ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::ClusterRetrievalParameters,
     comb_builder::{CombBuilderError, CombFilament, popular_comb_size, retrieve_combs},
-    filament::FilamentError,
+    filament::{FilamentError, StaffFilament},
     filament_comb::{FilamentComb, FilamentCombError},
     filament_factory::{
         FilamentFactory, FilamentFactoryIdentityError, FilamentFactoryParams, OverlapParams,
@@ -387,6 +387,26 @@ struct RidgeStaffPattern {
     rank: usize,
 }
 
+#[derive(Debug)]
+struct RidgeStaffMaterialization {
+    pattern: RidgeStaffPattern,
+    lines: Vec<StaffFilament>,
+    minimum_true_length: usize,
+    minimum_width: usize,
+    total_true_length: usize,
+}
+
+impl RidgeStaffMaterialization {
+    fn evidence_key(&self) -> (usize, usize, usize, usize) {
+        (
+            self.pattern.rank,
+            self.minimum_true_length,
+            self.minimum_width,
+            self.total_true_length,
+        )
+    }
+}
+
 impl RidgeStaffPattern {
     fn last(self) -> usize {
         self.first + (4 * self.gap)
@@ -438,7 +458,13 @@ fn split_staff_ridge_composite(
     let radius = (interline / 6).max(1);
     let last_y = bounds.y + bounds.height - 1;
     let mut patterns = Vec::<RidgeStaffPattern>::new();
-    for gap in minimum_gap..=maximum_gap {
+    // Standard staff spacing is a score/page invariant at this stage. Local
+    // dark combs at other periods are notation clutter, not alternative
+    // staves. Perspective and page curl belong in the shared spine/warp, not
+    // in five independently respaced lines. Small/ossia staves use the
+    // separate small-interline path rather than competing here.
+    let nominal_gap = interline.clamp(minimum_gap, maximum_gap);
+    for gap in [nominal_gap] {
         let span = (LINE_COUNT - 1) * gap;
         if span >= bounds.height {
             continue;
@@ -464,8 +490,15 @@ fn split_staff_ridge_composite(
     }
 
     patterns.sort_by(|one, two| {
-        two.rank
-            .cmp(&one.rank)
+        // The page scale is stronger evidence of staff periodicity than raw
+        // row darkness. Dense beams and noteheads can form a darker five-row
+        // comb at a smaller period (Op. 109 p.5 produced a 4 px comb inside a
+        // 6 px staff). Prefer the measured interline whenever overlapping
+        // hypotheses compete, then use raster support to break the tie.
+        one.gap
+            .abs_diff(interline)
+            .cmp(&two.gap.abs_diff(interline))
+            .then_with(|| two.rank.cmp(&one.rank))
             .then_with(|| one.first.cmp(&two.first))
             .then_with(|| one.gap.cmp(&two.gap))
     });
@@ -626,7 +659,8 @@ pub fn recover_tentative_staffs_from_ridges(
         );
     }
     let mut patterns = Vec::<RidgeStaffPattern>::new();
-    for gap in minimum_gap..=maximum_gap {
+    let nominal_gap = interline.clamp(minimum_gap, maximum_gap);
+    for gap in [nominal_gap] {
         let span = (LINE_COUNT - 1) * gap;
         if span >= table.height() {
             continue;
@@ -645,7 +679,8 @@ pub fn recover_tentative_staffs_from_ridges(
             // cluster threshold even though the later per-line geometry is
             // coherent. Keep quarter-page ridge evidence here and let the
             // five independently materialized lines decide below.
-            if minimum < table.width() / 4 {
+            let minimum_proposal_coverage = table.width() / 6;
+            if minimum < minimum_proposal_coverage {
                 continue;
             }
             patterns.push(RidgeStaffPattern {
@@ -658,8 +693,10 @@ pub fn recover_tentative_staffs_from_ridges(
         }
     }
     patterns.sort_by(|one, two| {
-        two.rank
-            .cmp(&one.rank)
+        one.gap
+            .abs_diff(interline)
+            .cmp(&two.gap.abs_diff(interline))
+            .then_with(|| two.rank.cmp(&one.rank))
             .then_with(|| one.first.cmp(&two.first))
             .then_with(|| one.gap.cmp(&two.gap))
     });
@@ -682,80 +719,89 @@ pub fn recover_tentative_staffs_from_ridges(
 
     let mut tentative = Vec::new();
     for pattern in selected {
-        let center_y = pattern.first as f64 + (2.0 * pattern.gap as f64);
-        let already_accepted = accepted.iter().any(|staff| {
-            if staff.line_filaments().len() != LINE_COUNT {
-                return false;
-            }
-            let x = (staff.left() + staff.right()) / 2.0;
-            staff.line_filaments()[2]
-                .geometry()
-                .and_then(|geometry| geometry.position_at(x))
-                // Dense noteheads can make the strongest periodic window
-                // slide by one staff space. Treat that as the same accepted
-                // staff rather than emitting a shifted duplicate hypothesis.
-                .is_ok_and(|y| (y - center_y).abs() <= 2.0 * interline as f64)
-        });
-        if already_accepted {
-            continue;
-        }
-
-        let centers =
-            std::array::from_fn::<_, LINE_COUNT, _>(|index| pattern.first + (index * pattern.gap));
-        let assignment_radius = (0.34 * interline as f64).max(1.5);
-        let maximum_section_height = ((interline as f64) * 0.5).ceil() as usize;
-        let minimum_section_width = (2 * interline).max(1);
-        let mut lines = (0..LINE_COUNT)
-            .map(|_| crate::filament::StaffFilament::new(interline))
-            .collect::<Result<Vec<_>, _>>()?;
-        for section in lag.sections() {
-            let bounds = section.bounds();
-            if bounds.height > maximum_section_height || bounds.width < minimum_section_width {
+        // Adjacent vertical phases share four of five rows. Dense beams can
+        // therefore out-rank the real staff by exactly one staff space. Keep
+        // the raw winner only as a band proposal, materialize its three
+        // plausible phases, and let the weakest physical line decide. A true
+        // staff has five long horizontal supports; the shifted hypothesis has
+        // to substitute a beam, slur, or note row for one edge line.
+        let mut phases = Vec::with_capacity(3);
+        for first in [
+            pattern.first.checked_sub(pattern.gap),
+            Some(pattern.first),
+            pattern.first.checked_add(pattern.gap),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let Some(last) = first.checked_add((LINE_COUNT - 1) * pattern.gap) else {
+                continue;
+            };
+            if last >= table.height() || last >= row_coverage.len() {
                 continue;
             }
-            let (_, y) = section.centroid_2d();
-            let (index, distance) = centers
-                .iter()
-                .enumerate()
-                .map(|(index, center)| (index, (y - *center as f64).abs()))
-                .min_by(|one, two| one.1.total_cmp(&two.1))
-                .expect("five raster ridge centers");
-            if distance <= assignment_radius {
-                lines[index].add_section(section.clone())?;
+            let exact_scores = std::array::from_fn::<_, LINE_COUNT, _>(|index| {
+                row_coverage[first + (index * pattern.gap)]
+            });
+            // The broad proposal uses a small vertical radius so faint,
+            // antialiased rows survive. Phase selection must not: summing the
+            // radius lets the four shared real rows hide a beam in the fifth
+            // slot. Exact center-row support identifies which edge of the
+            // overlapping six-row comb is the actual fifth staff line.
+            let exact_minimum = exact_scores.iter().copied().min().unwrap_or(0);
+            let phased = RidgeStaffPattern {
+                first,
+                rank: exact_minimum
+                    .saturating_mul(LINE_COUNT)
+                    .saturating_add(exact_scores.iter().sum()),
+                ..pattern
+            };
+            let center_y = phased.first as f64 + (2.0 * phased.gap as f64);
+            let already_accepted = accepted.iter().any(|staff| {
+                if staff.line_filaments().len() != LINE_COUNT {
+                    return false;
+                }
+                let x = (staff.left() + staff.right()) / 2.0;
+                staff.line_filaments()[2]
+                    .geometry()
+                    .and_then(|geometry| geometry.position_at(x))
+                    // Dense noteheads can make the strongest periodic window
+                    // slide by one staff space. Treat that as the same
+                    // accepted staff rather than emitting a duplicate.
+                    .is_ok_and(|y| (y - center_y).abs() <= 2.0 * interline as f64)
+            });
+            if already_accepted {
+                continue;
+            }
+            if let Some(materialized) = materialize_ridge_staff(lag, interline, phased)? {
+                if trace {
+                    eprintln!(
+                        "GRID ridge trace: phase {:?} evidence {:?}",
+                        phased,
+                        materialized.evidence_key()
+                    );
+                }
+                phases.push(materialized);
             }
         }
-        // Requiring every recovered line to span three fifths of the entire
-        // raster loses genuine indented or locally occluded piano staves. The
-        // path remains tentative and still requires all five lines, coherent
-        // spacing, valid geometry, and a quarter-page of actual ink each.
-        let minimum_line_width = (table.width() * 2) / 5;
-        // Dense chords, aligned stems, and clefs can fragment the physical
-        // staff ink while all five ridge spans and the raster periodicity stay
-        // unequivocal. This is a tentative path: require one quarter-page of
-        // actual line ink, not the ordinary two-fifths acceptance threshold.
-        let minimum_true_length = table.width() / 4;
-        let line_metrics = lines
-            .iter()
-            .map(|line| {
-                (
-                    line.bounds().ok().map(|bounds| bounds.width),
-                    line.true_length().ok(),
-                    line.geometry().is_ok(),
-                )
-            })
-            .collect::<Vec<_>>();
-        if line_metrics.iter().any(|(width, true_length, geometry)| {
-            width.is_none_or(|width| width < minimum_line_width)
-                || true_length.is_none_or(|length| length < minimum_true_length)
-                || !geometry
-        }) {
-            if trace {
-                eprintln!(
-                    "GRID ridge trace: rejected pattern {pattern:?} line metrics {line_metrics:?}"
-                );
-            }
+        let Some(materialized) = phases
+            .into_iter()
+            .max_by_key(RidgeStaffMaterialization::evidence_key)
+        else {
             continue;
+        };
+        if trace && materialized.pattern.first != pattern.first {
+            eprintln!(
+                "GRID ridge trace: corrected phase {} -> {} at gap {}",
+                pattern.first, materialized.pattern.first, pattern.gap
+            );
         }
+        // Keep each evidence filament independent through line completion.
+        // Endpoint, hole, section, sticker, and curvature recovery can repair
+        // a locally contaminated row. Constraining the five splines here
+        // would feed an early majority error back into those repair stages;
+        // the shared five-line coordinate system is published only after
+        // completion has gathered all available evidence.
         let line_ids = (0..LINE_COUNT)
             .map(|_| {
                 let id = FilamentId::new(*next_id);
@@ -766,10 +812,91 @@ pub fn recover_tentative_staffs_from_ridges(
             })
             .collect::<Result<Vec<_>, RawLineAdapterError>>()?;
         tentative.push(StaffCandidate::tentative_standard(
-            interline, line_ids, lines,
+            interline,
+            line_ids,
+            materialized.lines,
         )?);
     }
     Ok(tentative)
+}
+
+fn materialize_ridge_staff(
+    lag: &HorizontalSectionLag,
+    interline: usize,
+    pattern: RidgeStaffPattern,
+) -> Result<Option<RidgeStaffMaterialization>, RawLineAdapterError> {
+    const LINE_COUNT: usize = 5;
+    let table = lag.run_table();
+    let centers =
+        std::array::from_fn::<_, LINE_COUNT, _>(|index| pattern.first + (index * pattern.gap));
+    let assignment_radius = (0.34 * interline as f64).max(1.5);
+    let maximum_section_height = ((interline as f64) * 0.5).ceil() as usize;
+    let minimum_section_width = (2 * interline).max(1);
+    let mut lines = (0..LINE_COUNT)
+        .map(|_| StaffFilament::new(interline))
+        .collect::<Result<Vec<_>, _>>()?;
+    for section in lag.sections() {
+        let bounds = section.bounds();
+        if bounds.height > maximum_section_height || bounds.width < minimum_section_width {
+            continue;
+        }
+        let (_, y) = section.centroid_2d();
+        let (index, distance) = centers
+            .iter()
+            .enumerate()
+            .map(|(index, center)| (index, (y - *center as f64).abs()))
+            .min_by(|one, two| one.1.total_cmp(&two.1))
+            .expect("five raster ridge centers");
+        if distance <= assignment_radius {
+            lines[index].add_section(section.clone())?;
+        }
+    }
+
+    // The nominal-period and shared-spine constraints carry the geometric
+    // burden. A genuine line on Op. 109 p.5 has only 28% page span before
+    // dense notation fragments it, so this explicitly tentative path uses
+    // permissive support gates and ranks surviving phases comparatively.
+    let minimum_line_width = table.width() / 4;
+    // The candidate band already supplied five exact-period raster ridges.
+    // At low resolution one antialiased edge row can expose only 12--15% of
+    // the page as connected horizontal sections (Op. 109 p.5), so keep that
+    // edge as weak evidence instead of forcing the window onto a nearby beam.
+    let minimum_true_length = table.width() / 8;
+    let line_metrics = lines
+        .iter()
+        .map(|line| {
+            (
+                line.bounds().ok().map(|bounds| bounds.width),
+                line.true_length().ok(),
+                line.geometry().is_ok(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if line_metrics.iter().any(|(width, true_length, geometry)| {
+        width.is_none_or(|width| width < minimum_line_width)
+            || true_length.is_none_or(|length| length < minimum_true_length)
+            || !geometry
+    }) {
+        return Ok(None);
+    }
+    Ok(Some(RidgeStaffMaterialization {
+        pattern,
+        minimum_true_length: line_metrics
+            .iter()
+            .filter_map(|(_, true_length, _)| *true_length)
+            .min()
+            .expect("five ridge lines"),
+        minimum_width: line_metrics
+            .iter()
+            .filter_map(|(width, _, _)| *width)
+            .min()
+            .expect("five ridge lines"),
+        total_true_length: line_metrics
+            .iter()
+            .filter_map(|(_, true_length, _)| *true_length)
+            .sum(),
+        lines,
+    }))
 }
 
 /// Lazily construct Java's secondary/small-interline clustering state.
@@ -858,7 +985,7 @@ fn filter_raw_filaments(
 ) -> Result<FilteredRawFilaments, RawLineAdapterError> {
     let mut all = BTreeMap::new();
     let mut candidates = Vec::with_capacity(values.len());
-    for (factory_id, filament) in values {
+    for (factory_id, mut filament) in values {
         let raw_id =
             usize::try_from(factory_id).map_err(|_| RawLineAdapterError::IdentityOverflow)?;
         let id = FilamentId::new(factory_id);
@@ -866,13 +993,45 @@ fn filter_raw_filaments(
         let start = geometry.start();
         let stop = geometry.stop();
         let x_mid = (start.0 + stop.0) / 2.0;
-        candidates.push(LineCandidate::new(
+        let candidate = LineCandidate::new(
             raw_id,
             LinePoint::new(start.0, start.1),
             LinePoint::new(stop.0, stop.1),
             geometry.position_at(x_mid)?,
             filament.bounds()?.width,
-        )?);
+        );
+        let candidate = match candidate {
+            Ok(candidate) => candidate,
+            Err(LineRejectionError::InvalidCandidate(_)) => {
+                // A dense high-resolution merge can retain substantial
+                // horizontal raster support while its regression collapses to
+                // a zero-x spline. The sections are still valid evidence. Seed
+                // a flat bounds chord so comb formation can reconsider them;
+                // later line completion remains free to replace this geometry.
+                let bounds = filament.bounds()?;
+                if bounds.width < 2 {
+                    // A one-column remnant cannot contribute horizontal staff
+                    // evidence.  Treat it like Java's discarded short debris
+                    // instead of aborting the entire sheet at high resolution.
+                    // Its factory identity remains intentionally unused.
+                    continue;
+                }
+                let left = bounds.x as f64;
+                let right = (bounds.x + bounds.width - 1) as f64;
+                let y = bounds.y as f64 + ((bounds.height.saturating_sub(1)) as f64 / 2.0);
+                filament.set_ending_points((left, y), (right, y))?;
+                filament.replace_defining_points(vec![(left, y), (right, y)])?;
+                LineCandidate::new(
+                    raw_id,
+                    LinePoint::new(left, y),
+                    LinePoint::new(right, y),
+                    y,
+                    bounds.width,
+                )?
+            }
+            Err(error) => return Err(error.into()),
+        };
+        candidates.push(candidate);
         all.insert(id, filament);
     }
 

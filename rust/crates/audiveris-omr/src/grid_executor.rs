@@ -2966,6 +2966,7 @@ mod tests {
                 interline: 10,
                 small: false,
                 short: false,
+                tentative: false,
                 lines: Vec::new(),
             }],
         };
