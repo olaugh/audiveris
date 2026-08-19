@@ -57,8 +57,8 @@ fn payload_for_stage(stream: &str, stage: &str) -> String {
 }
 
 #[test]
-fn stream_keeps_grid_and_heads_payloads_byte_identical_to_ordinary_json() {
-    for stage in ["GRID", "HEADS"] {
+fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
+    for stage in ["GRID", "LEDGERS", "HEADS"] {
         let ordinary = invoke(stage, false);
         let stream = invoke(stage, true);
         let payload = payload_for_stage(&stream, stage);
@@ -69,10 +69,10 @@ fn stream_keeps_grid_and_heads_payloads_byte_identical_to_ordinary_json() {
         );
 
         assert!(stream.starts_with("@omrscope {\"stream_schema\":1"));
-        let expected_stages: &[&str] = if stage == "GRID" {
-            &["GRID"]
-        } else {
-            &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS", "HEADS"]
+        let expected_stages: &[&str] = match stage {
+            "GRID" => &["GRID"],
+            "LEDGERS" => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS"],
+            _ => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS", "HEADS"],
         };
         let marker_lines: Vec<&str> = stream
             .lines()
@@ -105,5 +105,24 @@ fn stream_keeps_grid_and_heads_payloads_byte_identical_to_ordinary_json() {
                 && finished.contains("\"success\":true"),
             "every stream ends with a successful terminal marker"
         );
+
+        if stage == "LEDGERS" {
+            assert!(
+                payload.contains("\"stage\":\"LEDGERS\"")
+                    && payload.contains("\"inters\":")
+                    && payload.contains("\"relations\":"),
+                "LEDGERS publication retains its ledger and relation payload"
+            );
+            assert_eq!(
+                payload.matches("\"kind\":\"LEDGER\"").count(),
+                18,
+                "Chula publishes all 18 final ledger inters"
+            );
+            assert_eq!(
+                payload.matches("\"ledger_lines\":").count(),
+                1,
+                "LEDGERS publication includes the inferred ledger-line collection"
+            );
+        }
     }
 }
