@@ -99,17 +99,35 @@ impl StaffFilament {
     }
 
     pub fn add_section(&mut self, section: Section) -> Result<(), FilamentError> {
-        if section.orientation() != Orientation::Horizontal {
-            return Err(FilamentError::UnsupportedOrientation);
+        self.add_sections(std::iter::once(section))
+    }
+
+    /// Add a batch of sections with one stable sort and one cache
+    /// invalidation.  This is equivalent to repeated Java `addSection` calls,
+    /// but avoids re-sorting an increasingly large member set while comb
+    /// following joins high-resolution fragments.
+    pub fn add_sections(
+        &mut self,
+        sections: impl IntoIterator<Item = Section>,
+    ) -> Result<(), FilamentError> {
+        let mut changed = false;
+        for section in sections {
+            if section.orientation() != Orientation::Horizontal {
+                return Err(FilamentError::UnsupportedOrientation);
+            }
+            let bounds = section.bounds();
+            if !self.sections.iter().any(|member| {
+                let member_bounds = member.bounds();
+                member_bounds.x == bounds.x
+                    && member_bounds.y == bounds.y
+                    && member.id() == section.id()
+            }) {
+                self.sections.push(section);
+                changed = true;
+            }
         }
-        let bounds = section.bounds();
-        if !self.sections.iter().any(|member| {
-            let member_bounds = member.bounds();
-            member_bounds.x == bounds.x
-                && member_bounds.y == bounds.y
-                && member.id() == section.id()
-        }) {
-            self.sections.push(section);
+        if !changed {
+            return Ok(());
         }
         // Java's TreeSet uses Section.byFullAbscissa. The stable ID is the
         // final tie-breaker when geometry is otherwise identical.
@@ -439,6 +457,112 @@ impl StaffFilament {
     }
 }
 
+/// Constrain five independently traced filaments to one shared curved staff
+/// coordinate system at the requested local spacing.
+///
+/// The retained sections remain attached to their original filaments as ink
+/// evidence. Only the published geometry is regularized. At each common x,
+/// the median of the five offset-normalized ordinates rejects up to two local
+/// beam/stem/note contaminants while retaining the page warp shared by the
+/// actual staff lines.
+pub fn regularize_five_line_staff<'a>(
+    lines: impl IntoIterator<Item = &'a mut StaffFilament>,
+    spacing: usize,
+) -> Result<(), FilamentError> {
+    const LINE_COUNT: usize = 5;
+    let mut lines = lines.into_iter().collect::<Vec<_>>();
+    if lines.len() != LINE_COUNT || spacing == 0 {
+        return Err(FilamentError::DegenerateGeometry);
+    }
+
+    let geometries = lines
+        .iter()
+        .map(|line| line.geometry())
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut starts = geometries
+        .iter()
+        .map(|geometry| geometry.start().0)
+        .collect::<Vec<_>>();
+    let mut stops = geometries
+        .iter()
+        .map(|geometry| geometry.stop().0)
+        .collect::<Vec<_>>();
+    starts.sort_by(f64::total_cmp);
+    stops.sort_by(f64::total_cmp);
+    let shared_left = starts[LINE_COUNT / 2];
+    let shared_right = stops[LINE_COUNT / 2];
+    if !shared_left.is_finite() || !shared_right.is_finite() || shared_right <= shared_left {
+        return Err(FilamentError::DegenerateGeometry);
+    }
+
+    let interline = lines[0].interline().max(1);
+    let target_sample_width = (8 * interline).max(24) as f64;
+    let segment_count =
+        (((shared_right - shared_left) / target_sample_width).ceil() as usize).clamp(2, 20);
+    let xs = (0..=segment_count)
+        .map(|index| {
+            shared_left + ((shared_right - shared_left) * index as f64 / segment_count as f64)
+        })
+        .collect::<Vec<_>>();
+
+    let raw_spine = xs
+        .iter()
+        .map(|&x| {
+            let mut normalized = geometries
+                .iter()
+                .enumerate()
+                .map(|(index, geometry)| {
+                    geometry
+                        .position_at(x)
+                        .map(|y| y - (index * spacing) as f64)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            normalized.sort_by(f64::total_cmp);
+            Ok(normalized[LINE_COUNT / 2])
+        })
+        .collect::<Result<Vec<_>, FilamentError>>()?;
+    if std::env::var("AUDIVERIS_TRACE_TENTATIVE_STAVES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        for &sample_x in [xs[0], xs[xs.len() / 2], xs[xs.len() - 1]].iter() {
+            let evidence = geometries
+                .iter()
+                .enumerate()
+                .map(|(index, geometry)| {
+                    (
+                        index,
+                        lines[index].true_length().ok(),
+                        geometry
+                            .position_at(sample_x)
+                            .ok()
+                            .map(|y| y - (index * spacing) as f64),
+                    )
+                })
+                .collect::<Vec<_>>();
+            eprintln!(
+                "GRID shared-spine trace: x={sample_x:.1} spacing={spacing} evidence={evidence:?}"
+            );
+        }
+    }
+    let mut spine = raw_spine.clone();
+    for index in 1..raw_spine.len() - 1 {
+        spine[index] =
+            (raw_spine[index - 1] + (2.0 * raw_spine[index]) + raw_spine[index + 1]) / 4.0;
+    }
+
+    for (line_index, line) in lines.iter_mut().enumerate() {
+        let offset = (line_index * spacing) as f64;
+        let points = xs
+            .iter()
+            .zip(&spine)
+            .map(|(&x, &y)| (x, y + offset))
+            .collect::<Vec<_>>();
+        line.set_ending_points(points[0], *points.last().expect("regularized staff points"))?;
+        line.replace_defining_points(points)?;
+    }
+    Ok(())
+}
+
 fn expand_bounds(
     bounds: Bounds,
     start: (f64, f64),
@@ -688,6 +812,44 @@ mod tests {
             filament.add_section(section).unwrap();
         }
         filament
+    }
+
+    fn flat_filament(interline: usize, y: usize) -> StaffFilament {
+        let mut table = RunTable::new(Orientation::Horizontal, 101, y + 2).unwrap();
+        table.add_run(y, Run::new(0, 101)).unwrap();
+        let mut filament = StaffFilament::new(interline).unwrap();
+        for section in build_sections(&table, JunctionPolicy::All) {
+            filament.add_section(section).unwrap();
+        }
+        filament
+    }
+
+    #[test]
+    fn five_line_regularization_rejects_individual_beam_like_deflections() {
+        let mut lines = (0..5)
+            .map(|index| flat_filament(6, 20 + (index * 6)))
+            .collect::<Vec<_>>();
+        // Two outer splines are pulled inward by unrelated dense ink. Three
+        // genuine rows remain, which is enough for the shared median spine.
+        lines[0]
+            .replace_defining_points(vec![(0.0, 20.0), (50.0, 25.0), (100.0, 20.0)])
+            .unwrap();
+        lines[4]
+            .replace_defining_points(vec![(0.0, 44.0), (50.0, 39.0), (100.0, 44.0)])
+            .unwrap();
+
+        regularize_five_line_staff(lines.iter_mut(), 6).unwrap();
+
+        for x in [0.0, 25.0, 50.0, 75.0, 100.0] {
+            let ordinates = lines
+                .iter()
+                .map(|line| line.geometry().unwrap().position_at(x).unwrap())
+                .collect::<Vec<_>>();
+            for pair in ordinates.windows(2) {
+                assert!(((pair[1] - pair[0]) - 6.0).abs() < 1e-9);
+            }
+            assert!((ordinates[0] - 20.0).abs() < 1e-9);
+        }
     }
 
     fn inclusion_evidence() -> FilamentInclusionEvidence {

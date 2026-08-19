@@ -8,7 +8,7 @@
 //! contracts and explicit insertion order without owning sheet/projector/UI
 //! state. The generic relation payload can later be the neutral bar alignment.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::{error::Error, fmt};
 
 use crate::bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide};
@@ -398,6 +398,149 @@ impl PeakGraph<BarAlignment> {
                 self.remove_edge(id)
                     .expect("marked peak edge remains until purge removal")
             })
+            .collect()
+    }
+
+    /// Experimental order-preserving maximum-weight matching for each adjacent
+    /// staff pair. Unlike Java's independent per-vertex conflict votes, this
+    /// cannot delete both diagonals of a locally ambiguous 2x2 relation set.
+    /// Concrete connections receive absolute priority over plain alignments.
+    pub fn purge_alignments_globally(&mut self) -> Vec<PeakGraphEdge<BarAlignment>> {
+        let mut local = self.clone();
+        local.purge_alignments();
+        let locally_retained = local
+            .edges
+            .iter()
+            .map(|edge| edge.id)
+            .collect::<HashSet<_>>();
+        let mut groups: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+        for (index, edge) in self.edges.iter().enumerate() {
+            groups
+                .entry((
+                    edge.source.staff_id().value(),
+                    edge.target.staff_id().value(),
+                ))
+                .or_default()
+                .push(index);
+        }
+        let mut retained = HashSet::new();
+        for indices in groups.values() {
+            // Supplemental sheared projection deliberately generates several
+            // close hypotheses around difficult ink. Freeze only the locally
+            // selected recovered edges, then globally match the unblocked
+            // ordinary projector edges around them.
+            let is_slope_recovered_edge = |index: usize| {
+                let edge = &self.edges[index];
+                [edge.source, edge.target].into_iter().any(|key| {
+                    self.vertex(key).is_some_and(|peak| {
+                        peak.is_set(crate::staff_peak::StaffPeakAttribute::SlopeRecovered)
+                    })
+                })
+            };
+            let fixed = indices
+                .iter()
+                .copied()
+                .filter(|&index| {
+                    is_slope_recovered_edge(index)
+                        && locally_retained.contains(&self.edges[index].id)
+                })
+                .collect::<Vec<_>>();
+            retained.extend(fixed.iter().map(|&index| self.edges[index].id));
+            let blocked_sources = fixed
+                .iter()
+                .map(|&index| self.edges[index].source)
+                .collect::<HashSet<_>>();
+            let blocked_targets = fixed
+                .iter()
+                .map(|&index| self.edges[index].target)
+                .collect::<HashSet<_>>();
+            let eligible = indices
+                .iter()
+                .copied()
+                .filter(|&index| {
+                    let edge = &self.edges[index];
+                    !is_slope_recovered_edge(index)
+                        && !blocked_sources.contains(&edge.source)
+                        && !blocked_targets.contains(&edge.target)
+                })
+                .collect::<Vec<_>>();
+            let mut sources = eligible
+                .iter()
+                .map(|&index| self.edges[index].source)
+                .collect::<Vec<_>>();
+            let mut targets = eligible
+                .iter()
+                .map(|&index| self.edges[index].target)
+                .collect::<Vec<_>>();
+            sources.sort_unstable();
+            sources.dedup();
+            targets.sort_unstable();
+            targets.dedup();
+            let mut edge_at = BTreeMap::new();
+            for &index in &eligible {
+                edge_at.insert((self.edges[index].source, self.edges[index].target), index);
+            }
+            let mut scores = vec![vec![(0_usize, 0.0_f64); targets.len() + 1]; sources.len() + 1];
+            let mut choices = vec![vec![0_u8; targets.len() + 1]; sources.len() + 1];
+            let better = |left: (usize, f64), right: (usize, f64)| {
+                left.0 > right.0 || (left.0 == right.0 && left.1 > right.1)
+            };
+            for i in 1..=sources.len() {
+                for j in 1..=targets.len() {
+                    let mut best = scores[i - 1][j];
+                    let mut choice = 1;
+                    if better(scores[i][j - 1], best) {
+                        best = scores[i][j - 1];
+                        choice = 2;
+                    }
+                    if let Some(&edge_index) = edge_at.get(&(sources[i - 1], targets[j - 1])) {
+                        let relation = &self.edges[edge_index].relation;
+                        let connection = if relation.kind() == BarAlignmentKind::Connection {
+                            1
+                        } else {
+                            0
+                        };
+                        let symmetric_context =
+                            (relation.top().grade() * relation.bottom().grade()).sqrt();
+                        let prior = scores[i - 1][j - 1];
+                        let matched = (
+                            prior.0 + connection,
+                            prior.1 + relation.grade() * symmetric_context,
+                        );
+                        if better(matched, best) {
+                            best = matched;
+                            choice = 3;
+                        }
+                    }
+                    scores[i][j] = best;
+                    choices[i][j] = choice;
+                }
+            }
+            let (mut i, mut j) = (sources.len(), targets.len());
+            while i > 0 && j > 0 {
+                match choices[i][j] {
+                    1 => i -= 1,
+                    2 => j -= 1,
+                    3 => {
+                        if let Some(&index) = edge_at.get(&(sources[i - 1], targets[j - 1])) {
+                            retained.insert(self.edges[index].id);
+                        }
+                        i -= 1;
+                        j -= 1;
+                    }
+                    _ => break,
+                }
+            }
+        }
+        let removed_ids = self
+            .edges
+            .iter()
+            .filter(|edge| !retained.contains(&edge.id))
+            .map(|edge| edge.id)
+            .collect::<Vec<_>>();
+        removed_ids
+            .into_iter()
+            .filter_map(|id| self.remove_edge(id))
             .collect()
     }
 
@@ -1047,5 +1190,194 @@ mod tests {
         );
         assert!(graph.edge(first).is_some());
         assert!(graph.purge_alignments().is_empty());
+    }
+
+    #[test]
+    fn global_purge_keeps_the_best_order_preserving_two_by_two_matching() {
+        let mut graph = PeakGraph::new();
+        let top_left = peak(1, 10, 11);
+        let top_right = peak(1, 20, 21);
+        let bottom_left = peak(2, 10, 11);
+        let bottom_right = peak(2, 20, 21);
+        let keys = [
+            top_left.key(),
+            top_right.key(),
+            bottom_left.key(),
+            bottom_right.key(),
+        ];
+        for vertex in [top_left, top_right, bottom_left, bottom_right] {
+            graph.add_vertex(vertex);
+        }
+        let diagonal_left = graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                graded_relation(
+                    1,
+                    keys[0],
+                    keys[2],
+                    BarAlignmentKind::Alignment,
+                    1.0,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let crossing_high = graph
+            .add_edge(
+                keys[0],
+                keys[3],
+                graded_relation(
+                    2,
+                    keys[0],
+                    keys[3],
+                    BarAlignmentKind::Alignment,
+                    0.9,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let crossing_low = graph
+            .add_edge(
+                keys[1],
+                keys[2],
+                graded_relation(
+                    3,
+                    keys[1],
+                    keys[2],
+                    BarAlignmentKind::Alignment,
+                    0.8,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let diagonal_right = graph
+            .add_edge(
+                keys[1],
+                keys[3],
+                graded_relation(
+                    4,
+                    keys[1],
+                    keys[3],
+                    BarAlignmentKind::Alignment,
+                    0.2,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+
+        let removed = graph.purge_alignments_globally();
+        let removed_ids = removed
+            .iter()
+            .map(PeakGraphEdge::id)
+            .collect::<HashSet<_>>();
+        assert_eq!(removed_ids, HashSet::from([crossing_high, crossing_low]));
+        assert!(graph.edge(diagonal_left).is_some());
+        assert!(graph.edge(diagonal_right).is_some());
+    }
+
+    #[test]
+    fn global_purge_freezes_local_choice_for_slope_recovered_hypotheses() {
+        let mut graph = PeakGraph::new();
+        let mut recovered = peak(1, 10, 11);
+        recovered.set(StaffPeakAttribute::SlopeRecovered);
+        let preferred = peak(2, 10, 11);
+        let alternate = peak(2, 20, 21);
+        let keys = [recovered.key(), preferred.key(), alternate.key()];
+        for vertex in [recovered, preferred, alternate] {
+            graph.add_vertex(vertex);
+        }
+        let local_choice = graph
+            .add_edge(
+                keys[0],
+                keys[1],
+                graded_relation(
+                    1,
+                    keys[0],
+                    keys[1],
+                    BarAlignmentKind::Alignment,
+                    1.0,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+        let rejected_hypothesis = graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                graded_relation(
+                    2,
+                    keys[0],
+                    keys[2],
+                    BarAlignmentKind::Alignment,
+                    0.9,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+
+        let removed = graph.purge_alignments_globally();
+        assert_eq!(
+            removed.iter().map(PeakGraphEdge::id).collect::<Vec<_>>(),
+            [rejected_hypothesis]
+        );
+        assert!(graph.edge(local_choice).is_some());
+    }
+
+    #[test]
+    fn global_purge_prioritizes_a_connection_over_plain_alignment_count() {
+        let mut graph = PeakGraph::new();
+        let vertices = [
+            peak(1, 10, 11),
+            peak(1, 20, 21),
+            peak(2, 10, 11),
+            peak(2, 20, 21),
+        ];
+        let keys = vertices.clone().map(|peak| peak.key());
+        for vertex in vertices {
+            graph.add_vertex(vertex);
+        }
+        let left = graph
+            .add_edge(
+                keys[0],
+                keys[2],
+                relation(1, keys[0], keys[2], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+        let right = graph
+            .add_edge(
+                keys[1],
+                keys[3],
+                relation(2, keys[1], keys[3], BarAlignmentKind::Alignment),
+            )
+            .unwrap();
+        let connection = graph
+            .add_edge(
+                keys[0],
+                keys[3],
+                graded_relation(
+                    3,
+                    keys[0],
+                    keys[3],
+                    BarAlignmentKind::Connection,
+                    0.2,
+                    1.0,
+                    1.0,
+                ),
+            )
+            .unwrap();
+
+        let removed = graph.purge_alignments_globally();
+        let removed_ids = removed
+            .iter()
+            .map(PeakGraphEdge::id)
+            .collect::<HashSet<_>>();
+        assert_eq!(removed_ids, HashSet::from([left, right]));
+        assert!(graph.edge(connection).is_some());
     }
 }

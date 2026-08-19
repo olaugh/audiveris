@@ -10,7 +10,7 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{
-    bar_alignment::{BarAlignment, BarAlignmentKind, VerticalSide},
+    bar_alignment::{AlignmentPeak, BarAlignment, BarAlignmentKind, BarImpacts, VerticalSide},
     bar_column::{BarColumn, PeakId, PeakRelation, StaffId},
     bars_logic::{
         BarsLogicError, CClefDetection, ConnectionInterPlan, PeakWidthAssignment, PeakWidthClass,
@@ -280,6 +280,8 @@ pub struct BarsCoordinatorParameters {
     interline: i32,
     minimum_normalized_width_delta: f64,
     c_clef: Option<CClefParameters>,
+    strong_wide_partial_recovery: bool,
+    defer_partial_column_rejection: bool,
 }
 
 impl BarsCoordinatorParameters {
@@ -320,7 +322,26 @@ impl BarsCoordinatorParameters {
             interline,
             minimum_normalized_width_delta,
             c_clef,
+            strong_wide_partial_recovery: false,
+            defer_partial_column_rejection: false,
         })
+    }
+
+    /// Keep exceptionally wide, high-core partial columns for later semantic
+    /// validation. This is a conservative fork-only recovery experiment.
+    #[must_use]
+    pub const fn with_strong_wide_partial_recovery(mut self) -> Self {
+        self.strong_wide_partial_recovery = true;
+        self
+    }
+
+    /// Keep incomplete columns while the caller's staff-to-system hypothesis
+    /// is still provisional. Partial-column deletion cannot be undone after a
+    /// later geometric pairing joins the missing peer staff.
+    #[must_use]
+    pub const fn with_deferred_partial_column_rejection(mut self) -> Self {
+        self.defer_partial_column_rejection = true;
+        self
     }
 
     #[must_use]
@@ -359,6 +380,12 @@ pub enum PeakRemovalStage {
     ExtendingTop,
     ExtendingBottom,
     CClef,
+    /// Optional fork extension: replace a brace-like false left boundary with
+    /// a stronger coherent pair immediately to its right.
+    BoundaryReassignment,
+    /// Optional fork extension: reject a weak interior vertical whose only
+    /// cross-staff evidence is geometric alignment, not connecting ink.
+    WeakUnconnected,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -366,11 +393,15 @@ pub struct BarsPurgeParameters {
     pub large_system_staff_count: usize,
     pub maximum_foreground_thickness: i32,
     pub maximum_bar_extension: f64,
+    /// False while staff-to-system membership is provisional. Extension past
+    /// a singleton boundary may actually be ink reaching its missing peer.
+    pub system_hypothesis_stable: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BarsPurgeResult {
     removed_peaks: Vec<RemovedPeak>,
+    retained_without_filament_bounds: Vec<StaffPeakKey>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -522,6 +553,17 @@ impl BarsPurgeResult {
     #[must_use]
     pub fn removed_peaks(&self) -> &[RemovedPeak] {
         &self.removed_peaks
+    }
+
+    /// Candidates that could not be judged by `purgeExtendingPeaks` because
+    /// their projector peak survived without a registered bar stick.
+    ///
+    /// Missing extension evidence is not evidence that the candidate extends
+    /// beyond the staff. Keep it for later stages rather than making the whole
+    /// GRID page fail or irreversibly deleting it.
+    #[must_use]
+    pub fn retained_without_filament_bounds(&self) -> &[StaffPeakKey] {
+        &self.retained_without_filament_bounds
     }
 }
 
@@ -902,7 +944,10 @@ pub fn process_bars_peak_purges(
         }
     }
 
-    if state.staffs.len() < parameters.large_system_staff_count && !state.staffs.is_empty() {
+    if parameters.system_hypothesis_stable
+        && state.staffs.len() < parameters.large_system_staff_count
+        && !state.staffs.is_empty()
+    {
         for (side, staff_index, stage) in [
             (VerticalSide::Top, 0, PeakRemovalStage::ExtendingTop),
             (
@@ -920,11 +965,25 @@ pub fn process_bars_peak_purges(
             for (index, peak) in state.staffs[staff_index].peaks.iter().enumerate() {
                 let bounds = if index < first_eligible {
                     peak.bounds()
+                } else if let Some(bounds) = filament_bounds
+                    .iter()
+                    .find_map(|(key, bounds)| (*key == peak.key()).then_some(*bounds))
+                {
+                    bounds
                 } else {
-                    filament_bounds
-                        .iter()
-                        .find_map(|(key, bounds)| (*key == peak.key()).then_some(*bounds))
-                        .ok_or(BarsCoordinatorError::MissingFilamentBounds(peak.key()))?
+                    // A projector peak can legitimately survive without a
+                    // bar stick.  Its exact vertical extension is unknown, so
+                    // extension pruning cannot prove it false.  Using its own
+                    // bounds makes the measured extension zero and therefore
+                    // preserves the candidate for the later column/semantic
+                    // stages; the result records that fail-soft decision.
+                    if !result
+                        .retained_without_filament_bounds
+                        .contains(&peak.key())
+                    {
+                        result.retained_without_filament_bounds.push(peak.key());
+                    }
+                    peak.bounds()
                 };
                 facts.push((peak.clone(), bounds));
             }
@@ -1067,6 +1126,325 @@ pub fn process_bars_right_ends_and_c_clefs(
         );
     }
     Ok(result)
+}
+
+/// Optional post-parity mitigation for aligned note stems promoted as bars.
+///
+/// Java's `purgeUnalignedBars` retains a peak when it has *either* an
+/// alignment edge or a concrete connection edge. Two piano stems that happen
+/// to share an x coordinate therefore protect one another across the grand
+/// staff. This conservative extension removes an interior candidate only when
+/// all of the following hold:
+///
+/// - its intrinsic vertical grade is below `minimum_grade`;
+/// - it is not a left or right staff boundary;
+/// - it has no concrete cross-staff connection;
+/// - it is not adjacent to another physical stroke of a double/final bar.
+///
+/// The caller runs this after `refineRightEnds`, so legitimate right boundary
+/// bars have already been marked.
+pub fn process_bars_weak_unconnected_purge(
+    state: &mut BarsSystemState,
+    minimum_grade: f64,
+    maximum_group_gap: i32,
+    interline: i32,
+) -> Result<Vec<RemovedPeak>, BarsCoordinatorError> {
+    if !minimum_grade.is_finite()
+        || !(0.0..=1.0).contains(&minimum_grade)
+        || maximum_group_gap < 0
+        || interline <= 0
+    {
+        return Err(BarsCoordinatorError::InvalidWeakUnconnectedParameters);
+    }
+
+    let mut keys = Vec::new();
+    for staff in &state.staffs {
+        for (index, peak) in staff.peaks.iter().enumerate() {
+            let impacts = peak.impacts();
+            // At very small raster scales anti-aliasing can destroy horizontal
+            // chunk scores while a genuine bar's full-height core and gap
+            // remain intact. At larger scales this signature is not unique to
+            // bars, so only the opt-in slope-recovery pass may claim it.
+            let full_height = impacts
+                .is_some_and(|value| value.core() >= 0.9 && value.gap() >= 0.8)
+                && (interline <= 11 || peak.is_set(StaffPeakAttribute::SlopeRecovered));
+            if peak.is_brace()
+                || peak.is_bracket()
+                || peak.is_staff_end(HorizontalSide::Left)
+                || peak.is_staff_end(HorizontalSide::Right)
+                || impacts.is_none_or(|value| value.grade() >= minimum_grade)
+                || full_height
+            {
+                continue;
+            }
+            let concretely_connected = state
+                .graph
+                .edges_of(peak.key())?
+                .any(|edge| edge.relation().kind() == BarAlignmentKind::Connection);
+            if concretely_connected {
+                continue;
+            }
+            let grouped_sibling = [index.checked_sub(1), index.checked_add(1)]
+                .into_iter()
+                .flatten()
+                .filter_map(|other| staff.peaks.get(other))
+                .filter(|other| !other.is_brace() && !other.is_bracket())
+                // A supplemental slope-recovered peak must not make a nearby
+                // weak ordinary peak masquerade as a double bar.
+                .filter(|other| !other.is_set(StaffPeakAttribute::SlopeRecovered))
+                .any(|other| {
+                    let gap = if other.start() > peak.stop() {
+                        other.start().wrapping_sub(peak.stop()).wrapping_sub(1)
+                    } else if peak.start() > other.stop() {
+                        peak.start().wrapping_sub(other.stop()).wrapping_sub(1)
+                    } else {
+                        0
+                    };
+                    gap <= maximum_group_gap
+                });
+            if !grouped_sibling {
+                keys.push(peak.key());
+            }
+        }
+    }
+
+    // Removing one half of an aligned stem pair can leave the slightly
+    // stronger half as a newly isolated bar. Admit only a narrow 0.02 grade
+    // shoulder, and only when every incident relation is a non-concrete
+    // alignment to a peak already selected above. This is component cleanup,
+    // not a second independent grade cutoff.
+    let initially_weak = keys
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let cascade_ceiling = (minimum_grade + 0.02).min(1.0);
+    for staff in &state.staffs {
+        for (index, peak) in staff.peaks.iter().enumerate() {
+            let impacts = peak.impacts();
+            let full_height = impacts
+                .is_some_and(|value| value.core() >= 0.9 && value.gap() >= 0.8)
+                && (interline <= 11 || peak.is_set(StaffPeakAttribute::SlopeRecovered));
+            if initially_weak.contains(&peak.key())
+                || peak.is_brace()
+                || peak.is_bracket()
+                || peak.is_staff_end(HorizontalSide::Left)
+                || peak.is_staff_end(HorizontalSide::Right)
+                || impacts.is_none_or(|value| value.grade() >= cascade_ceiling)
+                || full_height
+            {
+                continue;
+            }
+            let grouped_sibling = [index.checked_sub(1), index.checked_add(1)]
+                .into_iter()
+                .flatten()
+                .filter_map(|other| staff.peaks.get(other))
+                .filter(|other| !other.is_brace() && !other.is_bracket())
+                .filter(|other| !other.is_set(StaffPeakAttribute::SlopeRecovered))
+                .any(|other| {
+                    let gap = if other.start() > peak.stop() {
+                        other.start().wrapping_sub(peak.stop()).wrapping_sub(1)
+                    } else if peak.start() > other.stop() {
+                        peak.start().wrapping_sub(other.stop()).wrapping_sub(1)
+                    } else {
+                        0
+                    };
+                    gap <= maximum_group_gap
+                });
+            if grouped_sibling {
+                continue;
+            }
+            let mut incident = state.graph.edges_of(peak.key())?.peekable();
+            if incident.peek().is_some()
+                && incident.all(|edge| {
+                    let peer = if edge.source() == peak.key() {
+                        edge.target()
+                    } else {
+                        edge.source()
+                    };
+                    edge.relation().kind() == BarAlignmentKind::Alignment
+                        && initially_weak.contains(&peer)
+                        && state.graph.vertex(peer).is_some_and(|peer| {
+                            peer.impacts()
+                                .is_some_and(|value| value.core() < 0.9 || value.gap() < 0.8)
+                        })
+                })
+            {
+                keys.push(peak.key());
+            }
+        }
+    }
+
+    let mut removed = Vec::new();
+    remove_keys_without_columns(
+        state,
+        &keys,
+        PeakRemovalStage::WeakUnconnected,
+        &mut removed,
+    );
+    Ok(removed)
+}
+
+/// Reassign a dubious piano-system left boundary to a stronger two-staff pair.
+///
+/// Under projective capture warp, a brace can become the first connected
+/// vertical component on both staves. The genuine system-start bar then sits
+/// roughly one interline to the right and is purged as unaligned. This probe is
+/// intentionally narrow: it requires exactly two staves, a candidate on both,
+/// similar normalized offsets, adequate core evidence on each candidate, and
+/// a substantial combined-core improvement. A one-staff alternative never
+/// changes the boundary.
+pub fn process_bars_left_boundary_reassignment(
+    state: &mut BarsSystemState,
+    interline: i32,
+) -> Result<Vec<RemovedPeak>, BarsCoordinatorError> {
+    const MINIMUM_OFFSET: f64 = 0.25;
+    const MAXIMUM_OFFSET: f64 = 2.0;
+    const MAXIMUM_OFFSET_DELTA: f64 = 0.45;
+    const MINIMUM_CORE: f64 = 0.5;
+    const MINIMUM_CORE_IMPROVEMENT: f64 = 0.4;
+
+    if interline <= 0 {
+        return Err(BarsCoordinatorError::InvalidBoundaryReassignmentParameters);
+    }
+    if state.staffs.len() != 2 {
+        return Ok(Vec::new());
+    }
+
+    let mut boundaries = Vec::with_capacity(2);
+    let mut alternatives = Vec::with_capacity(2);
+    for staff in &state.staffs {
+        let Some(boundary) = staff
+            .peaks
+            .iter()
+            .find(|peak| peak.is_staff_end(HorizontalSide::Left))
+        else {
+            return Ok(Vec::new());
+        };
+        let boundary_x = f64::from(boundary.start().wrapping_add(boundary.stop())) / 2.0;
+        let mut candidates = staff
+            .peaks
+            .iter()
+            .filter(|peak| {
+                peak.key() != boundary.key()
+                    && !peak.is_brace()
+                    && !peak.is_bracket()
+                    && !peak.is_staff_end(HorizontalSide::Right)
+                    && peak
+                        .impacts()
+                        .is_some_and(|impacts| impacts.core() >= MINIMUM_CORE)
+            })
+            .filter_map(|peak| {
+                let x = f64::from(peak.start().wrapping_add(peak.stop())) / 2.0;
+                let offset = (x - boundary_x) / f64::from(interline);
+                (MINIMUM_OFFSET..=MAXIMUM_OFFSET)
+                    .contains(&offset)
+                    .then_some((peak, offset))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|(left_peak, left_offset), (right_peak, right_offset)| {
+            right_peak
+                .impacts()
+                .expect("filtered candidate has impacts")
+                .core()
+                .total_cmp(
+                    &left_peak
+                        .impacts()
+                        .expect("filtered candidate has impacts")
+                        .core(),
+                )
+                .then_with(|| left_offset.total_cmp(right_offset))
+        });
+        boundaries.push(boundary);
+        alternatives.push(candidates);
+    }
+
+    let mut best = None;
+    for &(top, top_offset) in &alternatives[0] {
+        for &(bottom, bottom_offset) in &alternatives[1] {
+            let offset_delta = (top_offset - bottom_offset).abs();
+            if offset_delta > MAXIMUM_OFFSET_DELTA {
+                continue;
+            }
+            let core = top.impacts().expect("candidate has impacts").core()
+                + bottom.impacts().expect("candidate has impacts").core();
+            let rank = (core, -offset_delta);
+            if best.is_none_or(|(_, _, previous_rank)| rank > previous_rank) {
+                best = Some((top.key(), bottom.key(), rank));
+            }
+        }
+    }
+    let Some((top_key, bottom_key, (alternative_core, _))) = best else {
+        return Ok(Vec::new());
+    };
+    let boundary_core = boundaries
+        .iter()
+        .filter_map(|peak| peak.impacts())
+        .map(|impacts| impacts.core())
+        .sum::<f64>();
+    if alternative_core < boundary_core + MINIMUM_CORE_IMPROVEMENT {
+        return Ok(Vec::new());
+    }
+
+    let old_keys = boundaries.iter().map(|peak| peak.key()).collect::<Vec<_>>();
+    let mut removed = Vec::new();
+    // The false brace peak and the true start peak can occupy interleaved
+    // mixed columns under perspective. Java's related-column deletion would
+    // expand removal to the replacement itself, so keep the immutable column
+    // snapshot and remove only the explicitly superseded vertices.
+    remove_keys_without_columns(
+        state,
+        &old_keys,
+        PeakRemovalStage::BoundaryReassignment,
+        &mut removed,
+    );
+    for (staff_index, key) in [top_key, bottom_key].into_iter().enumerate() {
+        let peak = state.staffs[staff_index]
+            .peaks
+            .iter_mut()
+            .find(|peak| peak.key() == key)
+            .expect("selected alternative remains in its staff");
+        peak.set_staff_end(HorizontalSide::Left);
+        state.staffs[staff_index].left = peak.start();
+        state
+            .graph
+            .vertex_mut(key)
+            .expect("selected alternative remains in graph")
+            .set_staff_end(HorizontalSide::Left);
+    }
+    if state.graph.edge_between(top_key, bottom_key).is_none()
+        && state.graph.edge_between(bottom_key, top_key).is_none()
+    {
+        let alignment_peak = |key: StaffPeakKey| {
+            let peak = state
+                .graph
+                .vertex(key)
+                .expect("selected boundary alternative remains in graph");
+            let id = state
+                .peak_ids
+                .iter()
+                .find_map(|(id, candidate)| (*candidate == key).then_some(*id))
+                .expect("selected boundary alternative retains a peak id");
+            AlignmentPeak::new(
+                id,
+                key.staff_id(),
+                key.start(),
+                peak.impacts()
+                    .expect("selected alternative has impacts")
+                    .grade(),
+            )
+            .expect("selected boundary alternative has valid alignment facts")
+        };
+        let relation = BarAlignment::new(
+            alignment_peak(top_key),
+            alignment_peak(bottom_key),
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0).expect("unit alignment impacts are valid"),
+        )
+        .expect("distinct-staff alternatives form a valid alignment");
+        state.graph.add_edge(top_key, bottom_key, relation)?;
+    }
+    Ok(removed)
 }
 
 /// Continue Java `BarsRetriever.process` through `partitionWidths` and
@@ -1253,12 +1631,16 @@ fn process_prefix(
     };
 
     let mut removed_peaks = Vec::new();
-    purge_partial_columns(
-        &mut *next,
-        start_column_index,
-        &id_to_key,
-        &mut removed_peaks,
-    )?;
+    if !parameters.defer_partial_column_rejection {
+        purge_partial_columns(
+            &mut *next,
+            start_column_index,
+            &id_to_key,
+            parameters.strong_wide_partial_recovery,
+            parameters.interline,
+            &mut removed_peaks,
+        )?;
+    }
     for staff_index in 0..next.staffs.len() {
         let start = next.staffs[staff_index]
             .peaks
@@ -1388,6 +1770,8 @@ fn purge_partial_columns(
     state: &mut BarsSystemState,
     start: Option<usize>,
     id_to_key: &[(PeakId, StaffPeakKey)],
+    recover_strong_wide: bool,
+    interline: i32,
     removed: &mut Vec<RemovedPeak>,
 ) -> Result<(), BarsCoordinatorError> {
     let first = start.map_or(0, |index| index + 1);
@@ -1408,10 +1792,60 @@ fn purge_partial_columns(
                     .ok_or(BarsCoordinatorError::MissingColumnPeak(peak.id()))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if recover_strong_wide
+            && keys.iter().all(|&key| {
+                state
+                    .graph
+                    .vertex(key)
+                    .is_some_and(|peak| is_recoverable_partial_peak(peak, interline))
+            })
+        {
+            for &key in &keys {
+                state
+                    .graph
+                    .vertex_mut(key)
+                    .expect("qualified partial remains in graph")
+                    .set(StaffPeakAttribute::PartialRecovered);
+                if let Some(peak) = state
+                    .staffs
+                    .iter_mut()
+                    .flat_map(|staff| &mut staff.peaks)
+                    .find(|peak| peak.key() == key)
+                {
+                    peak.set(StaffPeakAttribute::PartialRecovered);
+                }
+            }
+            index += 1;
+            continue;
+        }
         state.columns.remove(index);
         remove_keys_without_columns(state, &keys, PeakRemovalStage::PartialColumn, removed);
     }
     Ok(())
+}
+
+fn is_recoverable_partial_peak(peak: &StaffPeak, interline: i32) -> bool {
+    peak.impacts().is_some_and(|impacts| {
+        // Dense chord columns can satisfy every vertical impact while spanning
+        // more than a full interline horizontally. Across the held-out piano
+        // cohorts all recovered true bars are at most 0.591 interline wide,
+        // whereas the newly exposed chord impostors are 1.2--1.43. Keep a
+        // generous scale-relative ceiling rather than a raster-pixel cutoff.
+        let width_is_bar_like = peak.width().saturating_mul(4) <= interline.saturating_mul(3);
+        let strong_wide =
+            peak.width() >= 7 && width_is_bar_like && impacts.core() >= 0.878_787_878_787_878_8;
+        // A warped/thinned bar can be only five pixels wide while retaining
+        // unambiguous full-height ink on both sides. Requiring balanced,
+        // nearly perfect chunks prevents this narrow path from admitting the
+        // one-sided attachment signature of an ordinary note stem.
+        let balanced_narrow = peak.width() >= 5
+            && width_is_bar_like
+            && impacts.core() >= 0.60
+            && impacts.gap() >= 0.9
+            && impacts.left() >= 0.9
+            && impacts.right() >= 0.9;
+        strong_wide || balanced_narrow
+    })
 }
 
 fn remove_keys(
@@ -1563,6 +1997,8 @@ pub enum BarsCoordinatorError {
     InvalidRightCClefParameters,
     MissingRightEvidence(StaffId),
     InvalidRightEvidence(StaffId),
+    InvalidWeakUnconnectedParameters,
+    InvalidBoundaryReassignmentParameters,
     InvalidWidthInterParameters,
     InvalidConnectionGroupParameters,
     InvalidColumnIndex(usize),
@@ -1666,6 +2102,12 @@ impl fmt::Display for BarsCoordinatorError {
                     staff.value()
                 )
             }
+            Self::InvalidWeakUnconnectedParameters => {
+                formatter.write_str("invalid weak-unconnected bar parameters")
+            }
+            Self::InvalidBoundaryReassignmentParameters => {
+                formatter.write_str("invalid left-boundary reassignment parameters")
+            }
             Self::InvalidWidthInterParameters => {
                 formatter.write_str("invalid width-partition/inter parameters")
             }
@@ -1707,6 +2149,62 @@ mod tests {
         )
         .unwrap();
         BarAlignment::connection(&alignment, 1.0, 1.0).unwrap()
+    }
+
+    fn alignment(top: StaffPeakKey, bottom: StaffPeakKey) -> BarAlignment {
+        BarAlignment::new(
+            AlignmentPeak::new(PeakId::new(1), top.staff_id(), top.start(), 1.0).unwrap(),
+            AlignmentPeak::new(PeakId::new(2), bottom.staff_id(), bottom.start(), 1.0).unwrap(),
+            0.0,
+            0.0,
+            BarImpacts::alignment(1.0, 1.0).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn graded_peak(staff: usize, start: i32, impact: f64) -> StaffPeak {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(
+            impact, impact, impact, impact, impact, impact,
+        );
+        let mut peak =
+            StaffPeak::with_impacts(StaffId::new(staff), 10, 20, start, start, impacts).unwrap();
+        peak.compute_deskewed_center(|point| point).unwrap();
+        peak
+    }
+
+    #[test]
+    fn narrow_partial_recovery_requires_balanced_lateral_chunks() {
+        let balanced = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.61, 1.0, 0.5, 0.5, 1.0, 1.0),
+        )
+        .unwrap();
+        let stem_like = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.61, 1.0, 0.5, 0.5, 1.0, 0.5),
+        )
+        .unwrap();
+        let weak_core = StaffPeak::with_impacts(
+            StaffId::new(1),
+            10,
+            20,
+            40,
+            44,
+            crate::staff_peak::StaffVerticalImpacts::new(0.59, 1.0, 0.5, 0.5, 1.0, 1.0),
+        )
+        .unwrap();
+
+        assert!(is_recoverable_partial_peak(&balanced, 10));
+        assert!(!is_recoverable_partial_peak(&stem_like, 10));
+        assert!(!is_recoverable_partial_peak(&weak_core, 10));
     }
 
     fn parameters() -> BarsCoordinatorParameters {
@@ -1770,6 +2268,447 @@ mod tests {
         assert_eq!(result.vertical_inters().len(), 2);
         assert_eq!(result.connection_inters().len(), 1);
         assert!(result.connection_inters()[0].endpoints_complete);
+    }
+
+    #[test]
+    fn provisional_system_defers_partial_column_rejection() {
+        let mut state = system(true);
+        let result = process_bars_through_too_far_left(
+            &mut state,
+            parameters().with_deferred_partial_column_rejection(),
+        )
+        .unwrap();
+
+        assert_eq!(result.start_column_index(), Some(0));
+        assert!(result.removed_peaks().is_empty());
+        assert_eq!(state.columns().len(), 2);
+        assert_eq!(state.graph().vertices().len(), 3);
+    }
+
+    #[test]
+    fn strong_wide_partial_recovery_survives_the_unaligned_purge() {
+        let top = peak(1, 10, 11);
+        let bottom = peak(2, 10, 11);
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let mut partial =
+            StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 46, impacts).unwrap();
+        partial.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        for peak in [&top, &bottom, &partial] {
+            graph.add_vertex(peak.clone());
+        }
+        graph
+            .add_edge(top.key(), bottom.key(), connection(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![top, partial.clone()],
+                    BTreeMap::from([(
+                        StaffPeak::new(StaffId::new(1), 10, 20, 10, 11)
+                            .unwrap()
+                            .key(),
+                        false,
+                    )]),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    0,
+                    false,
+                    vec![bottom],
+                    BTreeMap::from([(
+                        StaffPeak::new(StaffId::new(2), 10, 20, 10, 11)
+                            .unwrap()
+                            .key(),
+                        false,
+                    )]),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+        let result =
+            process_bars_system(&mut state, parameters().with_strong_wide_partial_recovery())
+                .unwrap();
+
+        assert_eq!(state.columns().len(), 2);
+        assert!(state.graph().contains_vertex(partial.key()));
+        assert!(state.staffs()[0].peaks()[1].is_set(StaffPeakAttribute::PartialRecovered));
+        assert!(
+            result
+                .removed_peaks()
+                .iter()
+                .all(|removed| removed.peak != partial.key())
+        );
+        assert_eq!(result.vertical_inters().len(), 3);
+    }
+
+    #[test]
+    fn strong_wide_partial_recovery_rejects_a_chord_width_column() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+        let bar = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 46, impacts).unwrap();
+        let chord = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 40, 50, impacts).unwrap();
+        assert!(is_recoverable_partial_peak(&bar, 10));
+        assert!(!is_recoverable_partial_peak(&chord, 10));
+    }
+
+    #[test]
+    fn weak_unconnected_purge_rejects_only_weak_alignment_without_structural_support() {
+        let top = graded_peak(1, 30, 0.6);
+        let bottom = graded_peak(2, 30, 0.6);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top.clone());
+        graph.add_vertex(bottom.clone());
+        graph
+            .add_edge(top.key(), bottom.key(), alignment(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![top.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    0,
+                    false,
+                    vec![bottom.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 12).unwrap();
+
+        assert_eq!(removed.len(), 2);
+        assert!(
+            removed
+                .iter()
+                .all(|item| item.stage == PeakRemovalStage::WeakUnconnected)
+        );
+        assert!(state.staffs().iter().all(|staff| staff.peaks().is_empty()));
+        assert!(state.graph().vertices().is_empty());
+    }
+
+    #[test]
+    fn weak_unconnected_purge_preserves_full_height_low_resolution_bar() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 0.2, 0.3);
+        assert!(impacts.grade() < 0.71);
+        let mut top = StaffPeak::with_impacts(StaffId::new(1), 10, 20, 30, 30, impacts).unwrap();
+        let mut bottom = StaffPeak::with_impacts(StaffId::new(2), 10, 20, 30, 30, impacts).unwrap();
+        top.compute_deskewed_center(|point| point).unwrap();
+        bottom.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top.clone());
+        graph.add_vertex(bottom.clone());
+        graph
+            .add_edge(top.key(), bottom.key(), alignment(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(StaffId::new(1), 0, false, vec![top], BTreeMap::new()).unwrap(),
+                BarsStaffState::new(StaffId::new(2), 0, false, vec![bottom], BTreeMap::new())
+                    .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 9).unwrap();
+
+        assert!(removed.is_empty());
+        assert_eq!(state.graph().vertices().len(), 2);
+    }
+
+    #[test]
+    fn weak_unconnected_purge_preserves_marked_slope_recovery_at_high_resolution() {
+        let impacts = crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 1.0, 1.0, 0.2, 0.3);
+        let mut top = StaffPeak::with_impacts(StaffId::new(1), 10, 30, 30, 30, impacts).unwrap();
+        let mut bottom = StaffPeak::with_impacts(StaffId::new(2), 40, 60, 30, 30, impacts).unwrap();
+        top.set(StaffPeakAttribute::SlopeRecovered);
+        bottom.set(StaffPeakAttribute::SlopeRecovered);
+        top.compute_deskewed_center(|point| point).unwrap();
+        bottom.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top.clone());
+        graph.add_vertex(bottom.clone());
+        graph
+            .add_edge(top.key(), bottom.key(), alignment(top.key(), bottom.key()))
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(StaffId::new(1), 0, false, vec![top], BTreeMap::new()).unwrap(),
+                BarsStaffState::new(StaffId::new(2), 0, false, vec![bottom], BTreeMap::new())
+                    .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 20).unwrap();
+
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn weak_unconnected_purge_cleans_only_a_narrow_newly_orphaned_peer() {
+        let run = |right_chunk| {
+            let top = graded_peak(1, 30, 0.6);
+            let peer_impacts = crate::staff_peak::StaffVerticalImpacts::new(
+                0.954_545,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                right_chunk,
+            );
+            let mut bottom =
+                StaffPeak::with_impacts(StaffId::new(2), 10, 20, 30, 30, peer_impacts).unwrap();
+            bottom.compute_deskewed_center(|point| point).unwrap();
+            let mut graph = PeakGraph::new();
+            graph.add_vertex(top.clone());
+            graph.add_vertex(bottom.clone());
+            graph
+                .add_edge(top.key(), bottom.key(), alignment(top.key(), bottom.key()))
+                .unwrap();
+            let mut state = BarsSystemState::new(
+                1,
+                vec![
+                    BarsStaffState::new(StaffId::new(1), 0, false, vec![top], BTreeMap::new())
+                        .unwrap(),
+                    BarsStaffState::new(StaffId::new(2), 0, false, vec![bottom], BTreeMap::new())
+                        .unwrap(),
+                ],
+                graph,
+            )
+            .unwrap();
+            let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 20).unwrap();
+            (state, removed)
+        };
+
+        let (cascaded, removed) = run(0.375);
+        assert_eq!(removed.len(), 2);
+        assert!(cascaded.graph().vertices().is_empty());
+
+        let (outside_shoulder, removed) = run(0.6);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(outside_shoulder.graph().vertices().len(), 1);
+
+        let full_height_impacts =
+            crate::staff_peak::StaffVerticalImpacts::new(1.0, 1.0, 0.826, 0.739, 1.0, 0.571);
+        let mut full_height =
+            StaffPeak::with_impacts(StaffId::new(1), 10, 20, 30, 30, full_height_impacts).unwrap();
+        full_height.compute_deskewed_center(|point| point).unwrap();
+        let shoulder_impacts =
+            crate::staff_peak::StaffVerticalImpacts::new(0.954_545, 1.0, 1.0, 1.0, 1.0, 0.375);
+        let mut shoulder =
+            StaffPeak::with_impacts(StaffId::new(2), 10, 20, 30, 30, shoulder_impacts).unwrap();
+        shoulder.compute_deskewed_center(|point| point).unwrap();
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(full_height.clone());
+        graph.add_vertex(shoulder.clone());
+        graph
+            .add_edge(
+                full_height.key(),
+                shoulder.key(),
+                alignment(full_height.key(), shoulder.key()),
+            )
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![full_height],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(StaffId::new(2), 0, false, vec![shoulder], BTreeMap::new())
+                    .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 20).unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(state.graph().vertices().len(), 1);
+    }
+
+    #[test]
+    fn weak_unconnected_purge_preserves_connection_boundary_group_and_strong_peak() {
+        let connected_top = graded_peak(1, 20, 0.6);
+        let connected_bottom = graded_peak(2, 20, 0.6);
+        let mut boundary = graded_peak(1, 40, 0.6);
+        boundary.set_staff_end(HorizontalSide::Right);
+        let grouped_left = graded_peak(1, 60, 0.6);
+        let grouped_right = graded_peak(1, 62, 0.6);
+        let strong = graded_peak(1, 80, 0.9);
+        let mut graph = PeakGraph::new();
+        for peak in [
+            &connected_top,
+            &connected_bottom,
+            &boundary,
+            &grouped_left,
+            &grouped_right,
+            &strong,
+        ] {
+            graph.add_vertex(peak.clone());
+        }
+        graph
+            .add_edge(
+                connected_top.key(),
+                connected_bottom.key(),
+                connection(connected_top.key(), connected_bottom.key()),
+            )
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    0,
+                    false,
+                    vec![connected_top, boundary, grouped_left, grouped_right, strong],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    0,
+                    false,
+                    vec![connected_bottom],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_weak_unconnected_purge(&mut state, 0.71, 2, 12).unwrap();
+
+        assert!(removed.is_empty(), "{removed:?}");
+        assert_eq!(state.graph().vertices().len(), 6);
+    }
+
+    #[test]
+    fn left_boundary_reassignment_requires_and_transfers_a_stronger_pair() {
+        let mut old_top = graded_peak(1, 10, 0.2);
+        let mut old_bottom = graded_peak(2, 11, 0.3);
+        old_top.set_staff_end(HorizontalSide::Left);
+        old_bottom.set_staff_end(HorizontalSide::Left);
+        let new_top = graded_peak(1, 20, 0.8);
+        let new_bottom = graded_peak(2, 22, 0.8);
+        let mut graph = PeakGraph::new();
+        for peak in [&old_top, &old_bottom, &new_top, &new_bottom] {
+            graph.add_vertex(peak.clone());
+        }
+        graph
+            .add_edge(
+                old_top.key(),
+                old_bottom.key(),
+                connection(old_top.key(), old_bottom.key()),
+            )
+            .unwrap();
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    10,
+                    false,
+                    vec![old_top.clone(), new_top.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    11,
+                    false,
+                    vec![old_bottom.clone(), new_bottom.clone()],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_left_boundary_reassignment(&mut state, 10).unwrap();
+
+        assert_eq!(removed.len(), 2);
+        assert!(
+            removed
+                .iter()
+                .all(|item| item.stage == PeakRemovalStage::BoundaryReassignment)
+        );
+        assert_eq!(state.staffs()[0].left(), 20);
+        assert_eq!(state.staffs()[1].left(), 22);
+        assert!(state.staffs()[0].peaks()[0].is_staff_end(HorizontalSide::Left));
+        assert!(state.staffs()[1].peaks()[0].is_staff_end(HorizontalSide::Left));
+        assert!(state.graph().vertex(old_top.key()).is_none());
+        assert!(state.graph().vertex(old_bottom.key()).is_none());
+    }
+
+    #[test]
+    fn left_boundary_reassignment_keeps_strong_existing_boundary() {
+        let mut old_top = graded_peak(1, 10, 0.8);
+        let mut old_bottom = graded_peak(2, 11, 0.8);
+        old_top.set_staff_end(HorizontalSide::Left);
+        old_bottom.set_staff_end(HorizontalSide::Left);
+        let new_top = graded_peak(1, 20, 0.8);
+        let new_bottom = graded_peak(2, 22, 0.8);
+        let mut graph = PeakGraph::new();
+        for peak in [&old_top, &old_bottom, &new_top, &new_bottom] {
+            graph.add_vertex(peak.clone());
+        }
+        let mut state = BarsSystemState::new(
+            1,
+            vec![
+                BarsStaffState::new(
+                    StaffId::new(1),
+                    10,
+                    false,
+                    vec![old_top, new_top],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+                BarsStaffState::new(
+                    StaffId::new(2),
+                    11,
+                    false,
+                    vec![old_bottom, new_bottom],
+                    BTreeMap::new(),
+                )
+                .unwrap(),
+            ],
+            graph,
+        )
+        .unwrap();
+
+        let removed = process_bars_left_boundary_reassignment(&mut state, 10).unwrap();
+
+        assert!(removed.is_empty());
+        assert_eq!(state.staffs()[0].left(), 10);
+        assert_eq!(state.staffs()[1].left(), 11);
     }
 
     #[test]
@@ -2046,6 +2985,30 @@ mod tests {
             ),
         ];
 
+        let mut provisional = state.clone();
+        let provisional_result = process_bars_peak_purges(
+            &mut provisional,
+            &bounds,
+            BarsPurgeParameters {
+                large_system_staff_count: 10,
+                maximum_foreground_thickness: 2,
+                maximum_bar_extension: 5.0,
+                system_hypothesis_stable: false,
+            },
+        )
+        .unwrap();
+        assert!(
+            provisional_result
+                .removed_peaks()
+                .iter()
+                .all(|removed| !matches!(
+                    removed.stage,
+                    PeakRemovalStage::ExtendingTop | PeakRemovalStage::ExtendingBottom
+                ))
+        );
+        assert!(provisional.graph().contains_vertex(top_long.key()));
+        assert!(provisional.graph().contains_vertex(bottom_long.key()));
+
         let result = process_bars_peak_purges(
             &mut state,
             &bounds,
@@ -2053,6 +3016,7 @@ mod tests {
                 large_system_staff_count: 10,
                 maximum_foreground_thickness: 2,
                 maximum_bar_extension: 5.0,
+                system_hypothesis_stable: true,
             },
         )
         .unwrap();
@@ -2084,7 +3048,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_extension_evidence_retains_earlier_left_purge() {
+    fn missing_extension_evidence_retains_peak_and_earlier_left_purge() {
         let left = peak(1, 0, 1);
         let mut start = peak(1, 5, 6);
         start.set_staff_end(HorizontalSide::Left);
@@ -2109,21 +3073,21 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            process_bars_peak_purges(
-                &mut state,
-                &[],
-                BarsPurgeParameters {
-                    large_system_staff_count: 10,
-                    maximum_foreground_thickness: 2,
-                    maximum_bar_extension: 5.0,
-                },
-            ),
-            Err(BarsCoordinatorError::MissingFilamentBounds(bar.key()))
-        );
+        let result = process_bars_peak_purges(
+            &mut state,
+            &[],
+            BarsPurgeParameters {
+                large_system_staff_count: 10,
+                maximum_foreground_thickness: 2,
+                maximum_bar_extension: 5.0,
+                system_hypothesis_stable: true,
+            },
+        )
+        .unwrap();
         assert!(!state.graph().contains_vertex(left.key()));
         assert_eq!(state.staffs()[0].peaks().len(), 2);
         assert!(state.graph().contains_vertex(bar.key()));
+        assert_eq!(result.retained_without_filament_bounds(), &[bar.key()]);
     }
 
     #[test]

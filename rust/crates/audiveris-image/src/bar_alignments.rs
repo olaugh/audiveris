@@ -37,6 +37,10 @@ pub struct AlignmentParameters {
     pub sheet_slope: f64,
     pub maximum_alignment_slope: f64,
     pub maximum_alignment_delta_width: i32,
+    /// Optional linear local vertical field: expected `dx/dy` changes by this
+    /// amount per image x pixel. Zero retains Java's global-skew behavior.
+    pub vertical_slope_gradient: f64,
+    pub vertical_slope_reference_x: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -174,6 +178,8 @@ pub fn alignment_for_pair(
         || !parameters.maximum_alignment_slope.is_finite()
         || parameters.maximum_alignment_slope <= 0.0
         || parameters.maximum_alignment_delta_width <= 0
+        || !parameters.vertical_slope_gradient.is_finite()
+        || !parameters.vertical_slope_reference_x.is_finite()
     {
         return Err(AlignmentBuildError::InvalidParameters);
     }
@@ -252,6 +258,8 @@ fn validate_inputs(
         || !parameters.maximum_alignment_slope.is_finite()
         || parameters.maximum_alignment_slope <= 0.0
         || parameters.maximum_alignment_delta_width <= 0
+        || !parameters.vertical_slope_gradient.is_finite()
+        || !parameters.vertical_slope_reference_x.is_finite()
     {
         return Err(AlignmentBuildError::InvalidParameters);
     }
@@ -369,7 +377,14 @@ fn check_alignment(
     peak_ids: &[(StaffPeakKey, PeakId)],
     parameters: AlignmentParameters,
 ) -> Result<Option<BarAlignment>, AlignmentBuildError> {
-    let sheet_vertical_slope = -parameters.sheet_slope;
+    let pair_x = f64::from(
+        top.start()
+            .wrapping_add(top.stop())
+            .wrapping_add(bottom.start())
+            .wrapping_add(bottom.stop()),
+    ) / 4.0;
+    let sheet_vertical_slope = -parameters.sheet_slope
+        + parameters.vertical_slope_gradient * (pair_x - parameters.vertical_slope_reference_x);
     let top_y = f64::from(top.bottom());
     let bottom_y = f64::from(bottom.top());
     let left_slope = (f64::from(bottom.start()) - f64::from(top.start())) / (bottom_y - top_y);
@@ -469,7 +484,37 @@ mod tests {
             sheet_slope: 0.02,
             maximum_alignment_slope: 0.06,
             maximum_alignment_delta_width: 2,
+            vertical_slope_gradient: 0.0,
+            vertical_slope_reference_x: 0.0,
         }
+    }
+
+    #[test]
+    fn local_vertical_gradient_recovers_a_converging_bar_pair() {
+        let top = peak(1, 0, 10, 200, 201);
+        let bottom = peak(2, 110, 120, 220, 221);
+        let mut graph = PeakGraph::new();
+        graph.add_vertex(top.clone());
+        graph.add_vertex(bottom.clone());
+        let plain = AlignmentParameters {
+            sheet_slope: 0.0,
+            ..parameters()
+        };
+        assert!(
+            alignment_for_pair(&graph, top.key(), bottom.key(), plain)
+                .unwrap()
+                .is_none()
+        );
+
+        let local = AlignmentParameters {
+            vertical_slope_gradient: 0.2 / 210.5,
+            ..plain
+        };
+        assert!(
+            alignment_for_pair(&graph, top.key(), bottom.key(), local)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]

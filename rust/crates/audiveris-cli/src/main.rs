@@ -3,20 +3,27 @@
 use audiveris_cli::{Parameters, parse};
 use audiveris_core::step::OmrStep;
 use audiveris_image::ingest::Loader;
+use audiveris_image::scale_estimate::ScaleOptions;
 use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
 use audiveris_omr::recognize::{
-    grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
-    recognize_scale_raster, scale_report,
+    grid_lines_report, recognize_grid_lines_raster, recognize_grid_lines_raster_with_scale_options,
+    recognize_native_beams_with_stem_seeds, recognize_scale_raster_with_options, scale_report,
 };
 use audiveris_omr::report::{
     beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json,
 };
 use std::{
+    collections::BTreeMap,
     fmt::Write as _,
     io::Write as _,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -31,6 +38,10 @@ fn usage() {
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
+         A work-level staff spacing prior can be supplied in raster pixels, e.g.:\n\
+         \x20 audiveris-cli -batch -step GRID -interline 20 page.png\n\n\
+         Independent pages run concurrently by default. Set\n\
+         AUDIVERIS_PAGE_THREADS=1 to force serial execution.\n\n\
          HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS currently require -json.\n\
          Small-beam pages are refused explicitly; later stages use the\n\
          compatibility handoff."
@@ -75,144 +86,282 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
     if parameters.arguments.is_empty() {
         return Err(format!("-step {step:?} requires at least one input image"));
     }
-    for input in &parameters.arguments {
-        // An input is a book of sheets, not an image. Only a PDF supplies more
-        // than one, and it is opened once here so a multi-page file is parsed
-        // once rather than per sheet.
-        let loader =
-            Loader::open(input).map_err(|error| format!("{}: {error}", input.display()))?;
+    let opened_books = parallel_collect_ordered(
+        parameters.arguments.len(),
+        page_worker_count(parameters.arguments.len()),
+        |index| {
+            let input = &parameters.arguments[index];
+            Loader::open(input).map_err(|error| format!("{}: {error}", input.display()))
+        },
+    );
+
+    let mut books = Vec::new();
+    let mut tasks = Vec::new();
+    for (input, opened) in parameters.arguments.iter().zip(opened_books) {
+        // Share one immutable loader across every selected page in a book. In
+        // particular, this parses a PDF once even when its pages run in parallel.
+        // Opening and raster decoding happened concurrently above; iteration here
+        // restores argument order and preserves the first-error boundary.
+        let loader = match opened {
+            Ok(loader) => loader,
+            Err(error) => {
+                tasks.push(NativeTask::Error(error));
+                break;
+            }
+        };
         let count = loader.image_count();
-        for sheet in sheets_to_process(&parameters.sheets, count) {
-            let raster = loader
-                .image(sheet)
-                .map_err(|error| format!("{}: {error}", input.display()))?;
-            // Single-sheet inputs keep their original one-line header, so the
-            // existing reports and their fixtures are unchanged.
-            let header = if count > 1 {
-                format!("input={} sheet={sheet}\n", input.display())
-            } else {
-                format!("input={}\n", input.display())
-            };
-            let input_name = input.display().to_string();
-            let report = if step >= OmrStep::Grid {
-                let recognition = recognize_grid_lines_raster(&raster)
-                    .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
-                if step == OmrStep::Grid && json {
-                    // One JSON document per sheet, one per line: a consensus
-                    // front end reading several producers wants a stream it can
-                    // consume incrementally, not one array it must buffer.
-                    print!("{}", grid_json(&recognition, &input_name, sheet));
-                    continue;
-                }
-                if step == OmrStep::Grid {
-                    grid_lines_report(&recognition)
-                } else {
-                    // Each published stage consumes its real native upstream
-                    // products, in Java stage order.
-                    let headers = recognize_native_headers(&recognition)
-                        .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
-                    if step == OmrStep::Headers {
-                        print!(
-                            "{}",
-                            headers_json(&recognition, &headers, &input_name, sheet)
-                        );
-                        continue;
-                    }
-                    let stem_seeds =
-                        recognize_native_stem_seeds(&recognition, &headers).map_err(|error| {
-                            format!(
-                                "{} sheet {sheet}: STEM_SEEDS failed: {error}",
-                                input.display()
-                            )
-                        })?;
-                    if step == OmrStep::StemSeeds {
-                        print!(
-                            "{}",
-                            stem_seeds_json(
-                                &recognition,
-                                &headers,
-                                &stem_seeds,
-                                &input_name,
-                                sheet,
-                            )
-                        );
-                        continue;
-                    }
-                    let beams = recognize_native_beams_with_stem_seeds(
-                        &recognition,
-                        headers.beam_erases(),
-                        &stem_seeds,
-                    )
-                    .map_err(|error| {
-                        format!("{} sheet {sheet}: BEAMS failed: {error}", input.display())
-                    })?;
-                    if step == OmrStep::Beams {
-                        print!(
-                            "{}",
-                            beams_json(
-                                &recognition,
-                                &headers,
-                                &stem_seeds,
-                                &beams,
-                                &input_name,
-                                sheet,
-                            )
-                        );
-                        continue;
-                    }
-                    let ledgers =
-                        recognize_native_ledgers(&recognition, &beams).map_err(|error| {
-                            format!("{} sheet {sheet}: LEDGERS failed: {error}", input.display())
-                        })?;
-                    if step == OmrStep::Ledgers {
-                        print!(
-                            "{}",
-                            ledgers_json(
-                                &recognition,
-                                &headers,
-                                &stem_seeds,
-                                &beams,
-                                &ledgers,
-                                &input_name,
-                                sheet,
-                            )
-                        );
-                        continue;
-                    }
-                    let heads = recognize_native_heads(
-                        &recognition,
-                        &headers,
-                        &stem_seeds,
-                        &beams,
-                        &ledgers,
-                    )
-                    .map_err(|error| {
-                        format!("{} sheet {sheet}: HEADS failed: {error}", input.display())
-                    })?;
-                    print!(
-                        "{}",
-                        heads_json(
-                            &recognition,
-                            &headers,
-                            &stem_seeds,
-                            &beams,
-                            &ledgers,
-                            &heads.epilog,
-                            &input_name,
-                            sheet,
-                        )
-                    );
-                    continue;
-                }
-            } else {
-                let recognition = recognize_scale_raster(&raster)
-                    .map_err(|error| format!("{} sheet {sheet}: {error}", input.display()))?;
-                scale_report(&recognition)
-            };
-            print!("{header}{report}");
-        }
+        let book_index = books.len();
+        books.push(NativeBook {
+            input_name: input.display().to_string(),
+            count,
+            loader,
+        });
+        tasks.extend(
+            sheets_to_process(&parameters.sheets, count)
+                .into_iter()
+                .map(|sheet| NativeTask::Sheet { book_index, sheet }),
+        );
     }
+    run_native_tasks(&books, &tasks, step, json, parameters.interline)?;
     Ok(true)
+}
+
+struct NativeBook {
+    input_name: String,
+    count: usize,
+    loader: Loader,
+}
+
+enum NativeTask {
+    Sheet { book_index: usize, sheet: usize },
+    Error(String),
+}
+
+fn recognize_native_sheet(
+    book: &NativeBook,
+    sheet: usize,
+    step: OmrStep,
+    json: bool,
+    specified_interline: Option<i32>,
+) -> Result<String, String> {
+    let raster = book
+        .loader
+        .image(sheet)
+        .map_err(|error| format!("{}: {error}", book.input_name))?;
+    let header = if book.count > 1 {
+        format!("input={} sheet={sheet}\n", book.input_name)
+    } else {
+        format!("input={}\n", book.input_name)
+    };
+    if step < OmrStep::Grid {
+        let recognition = recognize_scale_raster_with_options(
+            &raster,
+            ScaleOptions {
+                specified_interline,
+                ..ScaleOptions::default()
+            },
+        )
+        .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
+        return Ok(format!("{header}{}", scale_report(&recognition)));
+    }
+
+    let recognition = recognize_grid_lines_raster_with_scale_options(
+        &raster,
+        ScaleOptions {
+            specified_interline,
+            ..ScaleOptions::default()
+        },
+    )
+    .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
+    if step == OmrStep::Grid {
+        return if json {
+            Ok(grid_json(&recognition, &book.input_name, sheet))
+        } else {
+            Ok(format!("{header}{}", grid_lines_report(&recognition)))
+        };
+    }
+
+    // Stage order within a page remains identical to the serial implementation.
+    let headers = recognize_native_headers(&recognition)
+        .map_err(|error| format!("{} sheet {sheet}: {error}", book.input_name))?;
+    if step == OmrStep::Headers {
+        return Ok(headers_json(
+            &recognition,
+            &headers,
+            &book.input_name,
+            sheet,
+        ));
+    }
+    let stem_seeds = recognize_native_stem_seeds(&recognition, &headers).map_err(|error| {
+        format!(
+            "{} sheet {sheet}: STEM_SEEDS failed: {error}",
+            book.input_name
+        )
+    })?;
+    if step == OmrStep::StemSeeds {
+        return Ok(stem_seeds_json(
+            &recognition,
+            &headers,
+            &stem_seeds,
+            &book.input_name,
+            sheet,
+        ));
+    }
+    let beams =
+        recognize_native_beams_with_stem_seeds(&recognition, headers.beam_erases(), &stem_seeds)
+            .map_err(|error| format!("{} sheet {sheet}: BEAMS failed: {error}", book.input_name))?;
+    if step == OmrStep::Beams {
+        return Ok(beams_json(
+            &recognition,
+            &headers,
+            &stem_seeds,
+            &beams,
+            &book.input_name,
+            sheet,
+        ));
+    }
+    let ledgers = recognize_native_ledgers(&recognition, &beams)
+        .map_err(|error| format!("{} sheet {sheet}: LEDGERS failed: {error}", book.input_name))?;
+    if step == OmrStep::Ledgers {
+        return Ok(ledgers_json(
+            &recognition,
+            &headers,
+            &stem_seeds,
+            &beams,
+            &ledgers,
+            &book.input_name,
+            sheet,
+        ));
+    }
+    let heads = recognize_native_heads(&recognition, &headers, &stem_seeds, &beams, &ledgers)
+        .map_err(|error| format!("{} sheet {sheet}: HEADS failed: {error}", book.input_name))?;
+    Ok(heads_json(
+        &recognition,
+        &headers,
+        &stem_seeds,
+        &beams,
+        &ledgers,
+        &heads.epilog,
+        &book.input_name,
+        sheet,
+    ))
+}
+
+fn page_worker_count(task_count: usize) -> usize {
+    let configured = std::env::var("AUDIVERIS_PAGE_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|count| *count > 0);
+    configured
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+        })
+        .min(task_count.max(1))
+}
+
+fn parallel_collect_ordered<T, F>(task_count: usize, worker_count: usize, work: F) -> Vec<T>
+where
+    T: Send,
+    F: Fn(usize) -> T + Sync,
+{
+    if task_count == 0 {
+        return Vec::new();
+    }
+
+    let next_task = Arc::new(AtomicUsize::new(0));
+    let (sender, receiver) = mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count.min(task_count) {
+            let next_task = Arc::clone(&next_task);
+            let sender = sender.clone();
+            let work = &work;
+            scope.spawn(move || {
+                loop {
+                    let index = next_task.fetch_add(1, Ordering::Relaxed);
+                    if index >= task_count {
+                        break;
+                    }
+                    if sender.send((index, work(index))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+
+        let mut results: Vec<Option<T>> =
+            std::iter::repeat_with(|| None).take(task_count).collect();
+        for (index, result) in receiver {
+            results[index] = Some(result);
+        }
+        results
+            .into_iter()
+            .map(|result| result.expect("every parallel input task returns one result"))
+            .collect()
+    })
+}
+
+fn run_native_tasks(
+    books: &[NativeBook],
+    tasks: &[NativeTask],
+    step: OmrStep,
+    json: bool,
+    specified_interline: Option<i32>,
+) -> Result<(), String> {
+    if tasks.is_empty() {
+        return Ok(());
+    }
+
+    let worker_count = page_worker_count(tasks.len());
+    let next_task = Arc::new(AtomicUsize::new(0));
+    let (sender, receiver) = mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let next_task = Arc::clone(&next_task);
+            let sender = sender.clone();
+            scope.spawn(move || {
+                loop {
+                    let index = next_task.fetch_add(1, Ordering::Relaxed);
+                    let Some(task) = tasks.get(index) else {
+                        break;
+                    };
+                    let result = match task {
+                        NativeTask::Sheet { book_index, sheet } => recognize_native_sheet(
+                            &books[*book_index],
+                            *sheet,
+                            step,
+                            json,
+                            specified_interline,
+                        ),
+                        NativeTask::Error(error) => Err(error.clone()),
+                    };
+                    if sender.send((index, result)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+
+        // Workers may finish out of order, but the public stream remains in
+        // argument and sheet order. Only the gap before the next page is held.
+        let mut pending = BTreeMap::new();
+        let mut next_output = 0;
+        let mut first_error = None;
+        for (index, result) in receiver {
+            pending.insert(index, result);
+            while let Some(result) = pending.remove(&next_output) {
+                if first_error.is_none() {
+                    match result {
+                        Ok(output) => print!("{output}"),
+                        Err(error) => first_error = Some(error),
+                    }
+                }
+                next_output += 1;
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    })
 }
 
 /// The additive, line-oriented control channel used by `omrscope`.
@@ -692,11 +841,31 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_native_step, json_string, omrscope_marker_line, run_native, run_native_stream,
-        sheets_to_process, stream_stages_through, take_stream_json_flag,
+        is_native_step, json_string, omrscope_marker_line, parallel_collect_ordered, run_native,
+        run_native_stream, sheets_to_process, stream_stages_through, take_stream_json_flag,
     };
     use audiveris_cli::Parameters;
     use audiveris_core::step::OmrStep;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+
+    #[test]
+    fn parallel_collection_executes_concurrently_and_restores_input_order() {
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let results = parallel_collect_ordered(8, 4, |index| {
+            let now_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now_active, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(10));
+            active.fetch_sub(1, Ordering::SeqCst);
+            index
+        });
+
+        assert_eq!(results, (0..8).collect::<Vec<_>>());
+        assert!(peak.load(Ordering::SeqCst) > 1);
+    }
 
     #[test]
     fn no_selection_means_every_sheet() {

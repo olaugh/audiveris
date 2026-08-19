@@ -172,8 +172,8 @@ impl StaffPeakKey {
     }
 }
 
-/// Declaration order matches Java `StaffPeak.Attribute` and therefore
-/// `EnumSet` iteration order.
+/// The first fourteen values match Java `StaffPeak.Attribute` and therefore
+/// `EnumSet` iteration order. The final two values are Rust-only provenance bits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum StaffPeakAttribute {
@@ -191,10 +191,12 @@ pub enum StaffPeakAttribute {
     BraceTop,
     BraceMiddle,
     BraceBottom,
+    SlopeRecovered,
+    PartialRecovered,
 }
 
 impl StaffPeakAttribute {
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 16] = [
         Self::Thin,
         Self::Thick,
         Self::StaffLeftEnd,
@@ -209,6 +211,8 @@ impl StaffPeakAttribute {
         Self::BraceTop,
         Self::BraceMiddle,
         Self::BraceBottom,
+        Self::SlopeRecovered,
+        Self::PartialRecovered,
     ];
 
     const fn bit(self) -> u16 {

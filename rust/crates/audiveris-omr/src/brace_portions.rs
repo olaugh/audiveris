@@ -13,7 +13,7 @@ use audiveris_image::{
     bar_alignment::{BarAlignment, VerticalSide},
     bar_column::{BarColumn, BarColumnError, BarPeak, PeakId, StaffId},
     peak_graph::{PeakGraph, PeakGraphError},
-    staff_peak::{StaffPeak, StaffPeakAttribute, StaffPeakKey},
+    staff_peak::{HorizontalSide, StaffPeak, StaffPeakAttribute, StaffPeakKey},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,6 +24,8 @@ pub struct BracePortionParameters {
     pub minimum_portion_height: f64,
     pub maximum_curvature: f64,
     pub lookup_extension: f64,
+    /// Fork-only recovery for a brace edge already mistaken for peak zero.
+    pub self_inclusive_fallback: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -63,8 +65,33 @@ pub struct BraceReplacement {
     pub new_peak: StaffPeakKey,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BraceProbeOutcome {
+    NoCandidate,
+    TooWide,
+    NoFilament,
+    TooShort,
+    TooCurved,
+    NotLeftOfBoundary,
+    Accepted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BraceProbeDecision {
+    pub staff_id: StaffId,
+    pub minimum_x: i32,
+    pub maximum_x: i32,
+    pub peak: Option<StaffPeakKey>,
+    pub peak_width: Option<i32>,
+    pub filament: Option<BraceFilamentEvidence>,
+    pub outcome: BraceProbeOutcome,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BracePortionReport {
+    /// Every lookup attempt, including candidates rejected before a brace
+    /// portion exists.
+    pub decisions: Vec<BraceProbeDecision>,
     /// Successful mistaken-first-bar replacements in traversal order.
     pub replacements: Vec<BraceReplacement>,
 }
@@ -296,15 +323,62 @@ pub fn detect_brace_portions(
             };
             let first = staff.peaks[0];
             let (minimum, maximum) = lookup_window(first.start(), parameters);
-            let mut brace = gated_probe(staff.staff_id, minimum, maximum, parameters, &mut probe)?;
+            let mut brace = gated_probe(
+                staff.staff_id,
+                minimum,
+                maximum,
+                parameters,
+                &mut probe,
+                report,
+            )?;
             let mut replacement = false;
+            let mut replacement_is_staff_boundary = false;
             if brace.is_none() && start_index >= 1 {
                 let second = staff.peaks[1];
                 let (minimum, maximum) = lookup_window(second.start(), parameters);
-                brace = gated_probe(staff.staff_id, minimum, maximum, parameters, &mut probe)?;
+                brace = gated_probe(
+                    staff.staff_id,
+                    minimum,
+                    maximum,
+                    parameters,
+                    &mut probe,
+                    report,
+                )?;
                 replacement = brace.is_some();
             }
+            if brace.is_none() && start_index == 0 && parameters.self_inclusive_fallback {
+                // Java only looks strictly left of peak zero. Under projective
+                // warp, the inner brace edge itself can become peak zero, so
+                // re-probe through that peak's right edge. The normal brace
+                // width, height, and curvature gates still apply.
+                brace = gated_probe_with_retries(
+                    staff.staff_id,
+                    minimum,
+                    first.stop().saturating_add(parameters.maximum_peak_width),
+                    parameters,
+                    &mut probe,
+                    report,
+                    3,
+                )?;
+                if brace
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.peak.start() >= first.start())
+                {
+                    if let Some(decision) = report.decisions.last_mut() {
+                        decision.outcome = BraceProbeOutcome::NotLeftOfBoundary;
+                    }
+                    brace = None;
+                }
+                replacement = brace.is_some();
+                replacement_is_staff_boundary = brace.is_some();
+            }
             let Some(mut brace) = brace else { continue };
+            if replacement_is_staff_boundary {
+                // Peak zero also owns the staff's left limit. Preserve that
+                // structural role while the Brace attribute prevents it from
+                // being published as a BarlineInter.
+                brace.peak.set_staff_end(HorizontalSide::Left);
+            }
             classify(
                 &mut brace.peak,
                 brace.filament.expect("gated probe has filament"),
@@ -386,22 +460,87 @@ fn gated_probe(
     maximum: i32,
     parameters: BracePortionParameters,
     probe: &mut impl FnMut(StaffId, i32, i32) -> Result<Option<BraceProbe>, String>,
+    report: &mut BracePortionReport,
 ) -> Result<Option<BraceProbe>, BracePortionError> {
     let Some(candidate) = probe(staff, minimum, maximum).map_err(BracePortionError::Probe)? else {
+        report.decisions.push(BraceProbeDecision {
+            staff_id: staff,
+            minimum_x: minimum,
+            maximum_x: maximum,
+            peak: None,
+            peak_width: None,
+            filament: None,
+            outcome: BraceProbeOutcome::NoCandidate,
+        });
         return Ok(None);
     };
+    let base = BraceProbeDecision {
+        staff_id: staff,
+        minimum_x: minimum,
+        maximum_x: maximum,
+        peak: Some(candidate.peak.key()),
+        peak_width: Some(candidate.peak.width()),
+        filament: candidate.filament,
+        outcome: BraceProbeOutcome::Accepted,
+    };
     if candidate.peak.width() > parameters.maximum_peak_width {
+        report.decisions.push(BraceProbeDecision {
+            outcome: BraceProbeOutcome::TooWide,
+            ..base
+        });
         return Ok(None);
     }
     let Some(filament) = candidate.filament else {
+        report.decisions.push(BraceProbeDecision {
+            outcome: BraceProbeOutcome::NoFilament,
+            ..base
+        });
         return Ok(None);
     };
-    if filament.vertical_length < parameters.minimum_portion_height
-        || filament.mean_curvature >= parameters.maximum_curvature
-    {
+    if filament.vertical_length < parameters.minimum_portion_height {
+        report.decisions.push(BraceProbeDecision {
+            outcome: BraceProbeOutcome::TooShort,
+            ..base
+        });
         return Ok(None);
     }
+    if filament.mean_curvature >= parameters.maximum_curvature {
+        report.decisions.push(BraceProbeDecision {
+            outcome: BraceProbeOutcome::TooCurved,
+            ..base
+        });
+        return Ok(None);
+    }
+    report.decisions.push(base);
     Ok(Some(candidate))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn gated_probe_with_retries(
+    staff: StaffId,
+    minimum: i32,
+    mut maximum: i32,
+    parameters: BracePortionParameters,
+    probe: &mut impl FnMut(StaffId, i32, i32) -> Result<Option<BraceProbe>, String>,
+    report: &mut BracePortionReport,
+    maximum_attempts: usize,
+) -> Result<Option<BraceProbe>, BracePortionError> {
+    for _ in 0..maximum_attempts {
+        let decision_index = report.decisions.len();
+        if let Some(candidate) = gated_probe(staff, minimum, maximum, parameters, probe, report)? {
+            return Ok(Some(candidate));
+        }
+        let Some(decision) = report.decisions.get(decision_index) else {
+            break;
+        };
+        let Some(peak) = decision.peak else { break };
+        let next_maximum = peak.start().saturating_sub(1);
+        if next_maximum < minimum || next_maximum >= maximum {
+            break;
+        }
+        maximum = next_maximum;
+    }
+    Ok(None)
 }
 
 fn classify(
@@ -490,6 +629,7 @@ mod tests {
             minimum_portion_height: 9.0,
             maximum_curvature: 20.0,
             lookup_extension: 2.0,
+            self_inclusive_fallback: false,
         }
     }
 
@@ -596,6 +736,75 @@ mod tests {
                 .is_set(StaffPeakAttribute::BraceBottom)
         );
         assert!(systems[0].staffs[2].brace_peak.is_none());
+    }
+
+    #[test]
+    fn self_inclusive_retry_skips_a_straight_peak_then_preserves_brace_boundary() {
+        let top = peak(1, 20, 21);
+        let bottom = peak(2, 20, 21);
+        let mut systems = [BracePortionSystem {
+            system_id: 1,
+            staffs: [top, bottom]
+                .iter()
+                .enumerate()
+                .map(|(index, peak)| BracePortionStaff {
+                    staff_id: StaffId::new(index + 1),
+                    peaks: vec![peak.key()],
+                    start_peak_index: Some(0),
+                    brace_peak: None,
+                })
+                .collect(),
+        }];
+        let mut parameters = parameters();
+        parameters.self_inclusive_fallback = true;
+        let mut report = BracePortionReport::default();
+        detect_brace_portions(
+            &mut systems,
+            parameters,
+            |staff, _, maximum| {
+                if maximum < 23 {
+                    return Ok(None);
+                }
+                let (candidate, curvature) = if maximum >= 27 {
+                    (peak(staff.value(), 24, 25), 20.0)
+                } else {
+                    (peak(staff.value(), 18, 22), 19.0)
+                };
+                Ok(Some(BraceProbe {
+                    peak: candidate,
+                    filament: Some(BraceFilamentEvidence {
+                        vertical_length: 10.0,
+                        mean_curvature: curvature,
+                        extension_top: 0.0,
+                        extension_bottom: 3.0,
+                    }),
+                }))
+            },
+            &mut report,
+        )
+        .unwrap();
+
+        assert_eq!(report.replacements.len(), 2);
+        assert_eq!(
+            report
+                .decisions
+                .iter()
+                .map(|decision| decision.outcome)
+                .collect::<Vec<_>>(),
+            [
+                BraceProbeOutcome::NoCandidate,
+                BraceProbeOutcome::TooCurved,
+                BraceProbeOutcome::Accepted,
+                BraceProbeOutcome::NoCandidate,
+                BraceProbeOutcome::TooCurved,
+                BraceProbeOutcome::Accepted,
+            ]
+        );
+        for staff in &systems[0].staffs {
+            let brace = staff.brace_peak.as_ref().unwrap();
+            assert!(brace.is_brace());
+            assert!(brace.is_staff_end(HorizontalSide::Left));
+        }
     }
 
     #[test]

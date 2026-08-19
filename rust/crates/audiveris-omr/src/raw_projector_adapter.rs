@@ -946,6 +946,8 @@ pub fn bridge_raw_projectors_through_alignments(
             sheet_slope: skew.slope,
             maximum_alignment_slope: parameters.maximum_alignment_slope,
             maximum_alignment_delta_width: parameters.maximum_alignment_delta_width,
+            vertical_slope_gradient: 0.0,
+            vertical_slope_reference_x: 0.0,
         },
         &mut alignments,
     )
@@ -1045,6 +1047,8 @@ pub fn bridge_raw_projectors_through_splits(
             .connections
             .alignments
             .maximum_alignment_delta_width,
+        vertical_slope_gradient: 0.0,
+        vertical_slope_reference_x: 0.0,
     };
     let connection_parameters = ConnectionParameters {
         maximum_gap: parameters.connections.maximum_connection_gap,
@@ -2758,6 +2762,7 @@ mod tests {
                     interline: 5,
                     small: false,
                     short: false,
+                    tentative: false,
                     lines,
                 }],
             },
@@ -2809,6 +2814,7 @@ mod tests {
                         interline: 5,
                         small: false,
                         short: false,
+                        tentative: false,
                         lines: line_pair(0, 5),
                     },
                     PreparedStaff {
@@ -2819,6 +2825,7 @@ mod tests {
                         interline: 5,
                         small: false,
                         short: false,
+                        tentative: false,
                         lines: line_pair(6, 11),
                     },
                 ],
@@ -3411,6 +3418,7 @@ mod tests {
                     minimum_portion_height: 5.0,
                     maximum_curvature: 10.0,
                     lookup_extension: 2.0,
+                    self_inclusive_fallback: false,
                 },
                 filament: BraceFilamentParameters {
                     interline: 5,
@@ -3532,6 +3540,7 @@ mod tests {
                     large_system_staff_count: 10,
                     maximum_foreground_thickness: 1,
                     maximum_bar_extension: 5.0,
+                    system_hypothesis_stable: true,
                 },
             },
         )

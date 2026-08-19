@@ -18,7 +18,7 @@ use crate::{
     prepared_lines::PreparedStaff,
     staff_pattern::{
         EndpointRetrieval, EndpointRetrievalError, EndpointRetrievalParams, LineEnding,
-        StaffPattern, retrieve_line_endpoints,
+        StaffPattern, ending_pattern_offsets, retrieve_line_endpoints,
     },
     staff_peak::HorizontalSide,
 };
@@ -32,6 +32,9 @@ pub struct DefineEndPointsParameters {
     pub maximum_ending_dx: i32,
     pub pattern_width: i32,
     pub pattern_jitter: i32,
+    /// Optional downstream extension, beyond Java parity, that follows the
+    /// five-line raster pattern to a strong terminal bar. Zero disables it.
+    pub maximum_terminal_extension_dx: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -207,6 +210,7 @@ pub fn define_end_points(
         || parameters.maximum_ending_dx < 0
         || parameters.pattern_width < 0
         || parameters.pattern_jitter < 0
+        || parameters.maximum_terminal_extension_dx < 0
     {
         return Err(DefineEndPointsError::InvalidParameters(parameters));
     }
@@ -220,8 +224,41 @@ pub fn define_end_points(
     state.defined_endpoints.clear();
 
     for staff in &mut state.staffs {
-        let resolved =
-            resolve_staff_endpoints(staff, parameters, raster_width, raster_height, &pixels)?;
+        let geometries = staff
+            .lines
+            .iter()
+            .map(|line| {
+                line.filament
+                    .geometry()
+                    .map_err(|source| DefineEndPointsError::Filament {
+                        staff_id: staff.id,
+                        line_id: line.id,
+                        source,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mean_interline = staff_mean_interline(staff, &geometries, parameters.scale_interline)?;
+        let terminal = trace_right_terminal_bar(
+            staff,
+            &geometries,
+            mean_interline,
+            parameters,
+            raster_width,
+            raster_height,
+            &pixels,
+        );
+        if let Some(terminal) = terminal {
+            staff.right = terminal.x;
+        }
+        let resolved = resolve_staff_endpoints(
+            staff,
+            parameters,
+            raster_width,
+            raster_height,
+            &pixels,
+            Some((&geometries, mean_interline)),
+            terminal,
+        )?;
         for (line, endpoints) in staff.lines.iter_mut().zip(&resolved.lines) {
             line.filament
                 .set_ending_points(
@@ -245,29 +282,37 @@ fn resolve_staff_endpoints(
     raster_width: usize,
     raster_height: usize,
     pixels: &[u8],
+    prepared_geometry: Option<(&[FilamentGeometry], f64)>,
+    terminal: Option<TracedTerminal>,
 ) -> Result<PreparedStaffEndPoints, DefineEndPointsError> {
     if staff.lines.is_empty() {
         return Err(DefineEndPointsError::EmptyStaff(staff.id));
     }
-    let geometries = staff
-        .lines
-        .iter()
-        .map(|line| {
-            line.filament
-                .geometry()
-                .map_err(|source| DefineEndPointsError::Filament {
-                    staff_id: staff.id,
-                    line_id: line.id,
-                    source,
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mean_interline = staff_mean_interline(staff, &geometries, parameters.scale_interline)?;
-    let left_ending_slope = ending_slope(staff, &geometries, HorizontalSide::Left)?;
-    let right_ending_slope = ending_slope(staff, &geometries, HorizontalSide::Right)?;
+    let owned_geometries;
+    let (geometries, mean_interline) = if let Some(prepared) = prepared_geometry {
+        prepared
+    } else {
+        owned_geometries = staff
+            .lines
+            .iter()
+            .map(|line| {
+                line.filament
+                    .geometry()
+                    .map_err(|source| DefineEndPointsError::Filament {
+                        staff_id: staff.id,
+                        line_id: line.id,
+                        source,
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mean = staff_mean_interline(staff, &owned_geometries, parameters.scale_interline)?;
+        (&owned_geometries[..], mean)
+    };
+    let left_ending_slope = ending_slope(staff, geometries, HorizontalSide::Left)?;
+    let right_ending_slope = ending_slope(staff, geometries, HorizontalSide::Right)?;
     let left = retrieve_side(
         staff,
-        &geometries,
+        geometries,
         parameters,
         mean_interline,
         left_ending_slope,
@@ -276,17 +321,34 @@ fn resolve_staff_endpoints(
         raster_height,
         pixels,
     )?;
-    let right = retrieve_side(
-        staff,
-        &geometries,
-        parameters,
-        mean_interline,
-        right_ending_slope,
-        HorizontalSide::Right,
-        raster_width,
-        raster_height,
-        pixels,
-    )?;
+    let right = if let Some(terminal) = terminal {
+        EndpointRetrieval {
+            endings: (0..geometries.len())
+                .map(|index| LineEnding {
+                    x: terminal.x,
+                    y: terminal.upper_y + (index as f64 * mean_interline),
+                })
+                .collect(),
+            pattern_fit: Some((
+                terminal.x.round_ties_even() as i32,
+                terminal.upper_y,
+                0,
+                terminal.pattern_ratio,
+            )),
+        }
+    } else {
+        retrieve_side(
+            staff,
+            geometries,
+            parameters,
+            mean_interline,
+            right_ending_slope,
+            HorizontalSide::Right,
+            raster_width,
+            raster_height,
+            pixels,
+        )?
+    };
     let lines = staff
         .lines
         .iter()
@@ -308,6 +370,171 @@ fn resolve_staff_endpoints(
         right_pattern_fit: right.pattern_fit,
         lines,
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TracedTerminal {
+    x: f64,
+    upper_y: f64,
+    pattern_ratio: f64,
+}
+
+/// Follow the parallel five-line pattern beyond the median filament stop and
+/// accept an extension only when that continuous trace reaches a near-solid
+/// vertical terminal bar. This deliberately does not treat an isolated stem
+/// or a page border as a staff endpoint.
+#[allow(clippy::too_many_arguments)]
+fn trace_right_terminal_bar(
+    staff: &PreparedStaff,
+    geometries: &[FilamentGeometry],
+    mean_interline: f64,
+    parameters: DefineEndPointsParameters,
+    raster_width: usize,
+    raster_height: usize,
+    pixels: &[u8],
+) -> Option<TracedTerminal> {
+    if parameters.maximum_terminal_extension_dx == 0
+        || geometries.len() != 5
+        || mean_interline <= 0.0
+        || raster_width == 0
+        || raster_height == 0
+    {
+        return None;
+    }
+
+    let current_right = staff.right.round_ties_even() as i32;
+    let maximum_right = current_right
+        .saturating_add(parameters.maximum_terminal_extension_dx)
+        .min(i32::try_from(raster_width.saturating_sub(1)).ok()?);
+    if maximum_right <= current_right {
+        return None;
+    }
+
+    let first = geometries.first()?;
+    let stop = first.stop();
+    let slope = first.slope_at(stop.0).ok()?;
+    let mut upper_y = stop.1 + ((f64::from(current_right) - stop.0) * slope);
+    let probe_width = parameters
+        .pattern_width
+        .max(2)
+        .min((parameters.scale_interline / 2).max(2));
+    let step = (parameters.scale_interline / 4).max(2);
+    let search_radius = (parameters.scale_interline / 2).max(2);
+    let allowed_misses = ((2 * parameters.scale_interline) / step).max(2);
+    let pattern = StaffPattern::new(
+        5,
+        probe_width as usize,
+        parameters.foreground_thickness.max(1) as usize,
+        mean_interline,
+    );
+    let mut samples = Vec::<(i32, f64, f64)>::new();
+    let mut misses = 0;
+    let mut x = current_right;
+
+    while x <= maximum_right {
+        let predicted = if let Some((previous_x, previous_y, _)) = samples.last().copied() {
+            let local_slope = if samples.len() >= 2 {
+                let (prior_x, prior_y, _) = samples[samples.len() - 2];
+                (previous_y - prior_y) / f64::from(previous_x - prior_x)
+            } else {
+                slope
+            };
+            previous_y + (f64::from(x - previous_x) * local_slope)
+        } else {
+            upper_y
+        };
+        let mut best_y = predicted;
+        let mut best_ratio = 0.0;
+        // Keep the prediction on a score tie. A terminal bar is solid over a
+        // large y range, so scanning from -radius would otherwise pull the
+        // traced staff upward by one interline exactly where accuracy matters.
+        for dy in ending_pattern_offsets(2 * search_radius) {
+            let candidate_y = predicted + f64::from(dy);
+            let ratio = pattern.evaluate(
+                (f64::from(x), candidate_y),
+                raster_width,
+                raster_height,
+                pixels,
+            );
+            if ratio > best_ratio {
+                best_ratio = ratio;
+                best_y = candidate_y;
+            }
+        }
+        if best_ratio >= 0.32 {
+            // Once the probe reaches a solid bar, y becomes ambiguous: every
+            // vertical placement scores well. Preserve the incoming curve
+            // tangent rather than snapping up or down by one staff space.
+            let bar_like = (x..x.saturating_add(probe_width)).any(|column| {
+                if column < 0 || column as usize >= raster_width {
+                    return false;
+                }
+                let top = (best_y - f64::from(parameters.foreground_thickness.max(1)))
+                    .floor()
+                    .max(0.0) as usize;
+                let bottom = (best_y
+                    + (4.0 * mean_interline)
+                    + f64::from(parameters.foreground_thickness.max(1)))
+                .ceil()
+                .min((raster_height - 1) as f64) as usize;
+                bottom > top
+                    && (top..=bottom)
+                        .filter(|&row| pixels[row * raster_width + column as usize] == 0)
+                        .count() as f64
+                        / (bottom - top + 1) as f64
+                        >= 0.60
+            });
+            if bar_like {
+                best_y = predicted;
+            }
+            upper_y = best_y;
+            samples.push((x, best_y, best_ratio));
+            misses = 0;
+        } else {
+            misses += 1;
+            upper_y = predicted;
+            if misses > allowed_misses {
+                break;
+            }
+        }
+        x = x.saturating_add(step);
+        if x == i32::MAX {
+            break;
+        }
+    }
+
+    let minimum_extension = (parameters.scale_interline / 2).max(2);
+    let foreground = parameters.foreground_thickness.max(1);
+    let mut terminal = None;
+    for &(sample_x, sample_y, ratio) in &samples {
+        for column in sample_x..sample_x.saturating_add(probe_width) {
+            if column <= current_right + minimum_extension
+                || column < 0
+                || column as usize >= raster_width
+            {
+                continue;
+            }
+            let top = (sample_y - f64::from(foreground)).floor().max(0.0) as usize;
+            let bottom = (sample_y + (4.0 * mean_interline) + f64::from(foreground))
+                .ceil()
+                .min((raster_height - 1) as f64) as usize;
+            if bottom <= top {
+                continue;
+            }
+            let black = (top..=bottom)
+                .filter(|&row| pixels[row * raster_width + column as usize] == 0)
+                .count();
+            let coverage = black as f64 / (bottom - top + 1) as f64;
+            if coverage >= 0.60 {
+                terminal = Some(TracedTerminal {
+                    x: f64::from(column),
+                    upper_y: sample_y,
+                    pattern_ratio: ratio,
+                });
+            }
+        }
+    }
+    terminal
 }
 
 fn staff_mean_interline(
@@ -504,6 +731,7 @@ mod tests {
             interline: 10,
             small: false,
             short: false,
+            tentative: false,
             lines,
         }
     }
@@ -547,6 +775,7 @@ mod tests {
             maximum_ending_dx: 1,
             pattern_width: 4,
             pattern_jitter: 2,
+            maximum_terminal_extension_dx: 0,
         }
     }
 
@@ -601,6 +830,7 @@ mod tests {
             interline: 10,
             small: false,
             short: false,
+            tentative: false,
             lines: vec![PreparedStaffLine {
                 id: 99,
                 cluster_position: 0,

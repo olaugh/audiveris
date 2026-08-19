@@ -18,6 +18,34 @@ Java implementation are kept separately in the
 [upstream findings catalog](https://github.com/olaugh/audiveris/blob/master/rust/AUDIVERIS_UPSTREAM_FINDINGS.md),
 including the evidence and the Rust parity policy for each finding.
 
+**Hard-scan GRID checkpoint:** bar-tail ownership is now explicit even when a
+staff has no surviving bar peak, and swallowed `ProcessBars` failures preserve
+their original typed cause in the CLI error. Piano system formation combines
+connector evidence with conservative five-line geometry; destructive
+partial-column and extension purges are deferred while a geometry-only system
+hypothesis is provisional. A separate late five-line guard rejects clusters
+whose sampled line gaps reveal a cross-staff mixture. The 17 Schenker pages that
+previously failed at the bar tail now complete, and a release sweep completes
+all 613 local Schenker pages without a GRID fatal error. These are lifecycle and
+robustness gates, not claims that all detected systems or barlines are correct.
+Dense-page recovery also handles the inverse clustering failure, where early
+comb following collapses five or ten real staff ridges and bridging notation
+into one tall root. It can extract multiple non-overlapping periodic five-line
+fields, keeps only thin near-ridge sections, validates seven shared-span gap
+samples, and sends each provisional staff through the ordinary late cluster
+checks. A final additive pass covers the harder case where page-wide periodic
+ridges remain in the horizontal raster but no comb cluster survives: five
+ridges with 40% row coverage, 60% span, and 25% assigned ink become an explicitly
+tentative staff only when no accepted staff lies within two interlines.
+Tentative geometry participates in system and bar-tail construction, while JSON
+marks staff provenance and every affected system's tentative staff IDs. On the
+613-page Schenker sweep all pages still complete, with 7,309 staves and 3,673
+systems; 172 staves and 156 systems on 126 pages are tentative. Against the
+previous 3,652-system cache, 23 pages gain one system and two lose an old
+spurious split. The motivating Schenker Sonata 4 page 3 moves from 10 staves / 5
+systems to 12 / 6 at native resolution. These are retained hypotheses, not
+accuracy labels.
+
 **Current checkpoint:** schema-1 JSON recognition publishes every native stage
 through `HEADS`, including accepted STEM_SEEDS and identity-free final heads.
 `omrscope` now runs Java and Rust concurrently and retains selectable immutable
@@ -1043,7 +1071,7 @@ is present but the musical interpretation is not.
 | Music fonts and header classification | **Ported for current corpus** | 1,624/1,624 header outline-bound sweep values match; clef, key, and time classification is exact on all 65 example staves. Bravura black-notehead widths at arbitrary point sizes and Java's head-width-to-point-size secant are exact and production-wired through every graded staff. |
 | Visual classifier core | **Components graded** | Frozen model parsing/inference, features, stable ranking, and glyph construction are native. The ART lookup-table math reproduces the measured OpenJDK/HotSpot paths: all 12 frozen key-alter vectors match Java at all 110 inputs, including all 99 ART moments. Remaining size/noise gates, `ShapeChecker`, user overrides, and later-stage integration are not complete. |
 | `.omr` persistence | **Components graded** | Opaque round-trip and typed views cover the measured book/sheet metadata and ownership structures. Full native recognition output is not yet an end-user replacement for Java. |
-| CLI, JSON, and live comparison | **JSON published through `HEADS`; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in native Java order for the applicable JSON target; GRID keeps its text report. Ordinary `-json` remains the schema-1 JSONL interface. The opt-in `-stream-json` protocol adds flushed boundary markers around unchanged completed-stage documents for `omrscope`, which starts Java and Rust independently, retains every completed snapshot, and lets the user select it. It deliberately provides no intra-stage or per-item stream. The Page/Inters UI graphically highlights an inspected table row without native table selection, offers opt-in filtered-row highlighting, and shows only engine-local relation edges whose endpoints resolve in the selected snapshot. HEADS documents retain all upstream products and add identity-free final heads, complete seed/range provenance, exact head glyphs, source-resolved beam decisions, counts, and tally-scale rows. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
+| CLI, JSON, and live comparison | **JSON published through `HEADS`; input/page-parallel batch; completed-stage viewer live** | Real images and PDFs compose GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS in native Java order for the applicable JSON target; GRID keeps its text report. Input opening, single-image decoding, and independent ordinary batch pages use a bounded hardware-parallel worker set. Ordered collection preserves the first-error boundary and deterministic argument/sheet publication order, while PDF loaders remain parsed once and shared immutably; `AUDIVERIS_PAGE_THREADS=1` forces serial execution. Ordinary `-json` remains the schema-1 JSONL interface. The opt-in `-stream-json` protocol stays serial and adds flushed boundary markers around unchanged completed-stage documents for `omrscope`, which starts Java and Rust independently, retains every completed snapshot, and lets the user select it. It deliberately provides no intra-stage or per-item stream. The Page/Inters UI graphically highlights an inspected table row without native table selection, offers opt-in filtered-row highlighting, and shows only engine-local relation edges whose endpoints resolve in the selected snapshot. HEADS documents retain all upstream products and add identity-free final heads, complete seed/range provenance, exact head glyphs, source-resolved beam decisions, counts, and tally-scale rows. `omrscope` consumes bounds-only headers, both median forms, and accepted top-level stem seeds; it refuses rejected or incomplete seed geometry rather than inventing coordinates. |
 | Manual Java score preview | **Inspection only; not a parity gate** | A separate Score tab explicitly runs one selected Java sheet through PAGE, validates its single local MusicXML/MXL artifact, and renders it with locally installed Verovio to SVG. Sheets requiring sibling multi-page artifacts are rejected rather than guessed. It is not part of recognition streaming, which still stops at HEADS, and it makes no Java/Rust visual or semantic comparison claim. Future Rust MusicXML will use the same renderer path. |
 | MusicXML output | **Rust not ported end to end** | The manual Java preview does not imply Rust PAGE, score assembly, or MusicXML export. The differential export suite remains queued behind semantic page completion. |
 | Desktop UI | **Not ported** | Java Swing remains outside the initial headless milestone. |

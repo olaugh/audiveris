@@ -31,10 +31,13 @@
 
 use std::{collections::BTreeMap, fmt::Write as _};
 
+use audiveris_image::bar_tuning::BarlineForm;
 use audiveris_image::bars_logic::{PeakWidthClass, VerticalInterKind};
 use audiveris_image::beam_structure::BeamImpacts;
 use audiveris_image::grid_sig::{GridSigNode, GridSigRelation};
 use audiveris_image::lines_coordinator::StaffCandidateKind;
+use audiveris_image::projection::ProjectionPeakRejectionStage;
+use audiveris_image::staff_peak::StaffPeakAttribute;
 use audiveris_image::system_population::BoundarySegment;
 
 use crate::beam_inters::{RawBeam, beam_bounds};
@@ -366,15 +369,69 @@ fn recognition_json(
     scale(&mut json, &recognition.scale);
 
     json.field_number("slope", recognition.global_slope);
+    json.key("bar_projection_staff_edge_slope");
+    match recognition.bar_projection_staff_edge_slope {
+        Some(slope) => json.number(slope),
+        None => json.null(),
+    }
+    json.field_number(
+        "bar_alignment_vertical_slope",
+        recognition.peak_graph.alignment_vertical_slope,
+    );
+    json.field_number(
+        "bar_alignment_vertical_slope_gradient",
+        recognition.peak_graph.alignment_vertical_slope_gradient,
+    );
+    json.field_number(
+        "bar_alignment_maximum_slope",
+        recognition.peak_graph.alignment_maximum_slope,
+    );
+    json.field_integer(
+        "bar_alignment_seed_connections",
+        recognition.peak_graph.alignment_seed_connection_count as i64,
+    );
+    json.field_integer(
+        "bar_alignment_invalid_connection_probes",
+        recognition.peak_graph.invalid_connection_probe_count as i64,
+    );
+    json.field_boolean(
+        "bar_alignment_connected_second_pass",
+        recognition.peak_graph.connected_alignment_second_pass,
+    );
+    json.field_boolean(
+        "piano_system_pair_recovery_applied",
+        recognition.peak_graph.piano_system_pair_recovery_applied,
+    );
+    json.key("deferred_geometry_system_ids");
+    json.open('[');
+    for system_id in &recognition.peak_graph.deferred_geometry_systems {
+        json.integer(*system_id as i64);
+    }
+    json.close(']');
+    json.field_integer(
+        "piano_system_bounds_recovery_count",
+        recognition.piano_system_bounds_recovered.len() as i64,
+    );
+    json.key("piano_system_bounds_recovered_ids");
+    json.open('[');
+    for system_id in &recognition.piano_system_bounds_recovered {
+        json.integer(*system_id as i64);
+    }
+    json.close(']');
 
     systems(&mut json, recognition);
     staves(&mut json, recognition);
+    rejected_staff_hypotheses(&mut json, recognition);
+    geometry_model(&mut json, recognition);
     if let Some(headers) = headers {
         staff_headers(&mut json, headers);
         header_erases(&mut json, headers);
     }
     let publication = inters(&mut json, recognition, headers, beams, ledgers);
     candidates(&mut json, recognition);
+    tuned_barlines_section(&mut json, recognition);
+    projection_ranges(&mut json, recognition);
+    brace_probes(&mut json, recognition);
     relations(&mut json, recognition, ledgers, &publication.ledger_ids);
     if let Some(stem_seeds) = stem_seeds {
         stem_scale(&mut json, stem_seeds);
@@ -393,6 +450,122 @@ fn recognition_json(
     json.close('}');
     json.out.push('\n');
     json.out
+}
+
+fn geometry_model(json: &mut Json, recognition: &GridLinesRecognition) {
+    let Some(model) = &recognition.page_geometry else {
+        return;
+    };
+    json.key("geometry_model");
+    json.open('{');
+    json.field_integer("schema", 1);
+    json.key("coordinate_spaces");
+    json.open('{');
+    json.key("scan");
+    json.open('{');
+    json.field_string("origin", "page-top-left");
+    json.field_string("units", "pixels");
+    json.field_string("x_axis", "right");
+    json.field_string("y_axis", "down");
+    json.close('}');
+    json.key("canonical");
+    json.open('{');
+    json.field_string("origin", "system-left-first-staff-line");
+    json.field_string("units", "staff-spaces");
+    json.field_string("u_axis", "system-centerline-arc-length");
+    json.field_string("v_axis", "down");
+    json.field_string(
+        "mapping",
+        "piecewise-linear mesh; interpolate anchors within columns and columns in u",
+    );
+    json.close('}');
+    json.close('}');
+
+    json.key("staves");
+    json.open('[');
+    for staff in &model.staves {
+        json.open('{');
+        json.field_integer("id", staff.staff_id as i64);
+        json.key("seed_extent");
+        json.open('{');
+        json.field_integer("left", i64::from(staff.seed_left));
+        json.field_integer("right", i64::from(staff.seed_right));
+        json.close('}');
+        json.key("scan_extent");
+        json.open('{');
+        json.field_integer("left", i64::from(staff.left));
+        json.field_integer("right", i64::from(staff.right));
+        json.close('}');
+        json.field_number("mean_confidence", staff.mean_confidence);
+        json.key("terminal_bar_x");
+        match staff.terminal_bar_x {
+            Some(x) => json.integer(i64::from(x)),
+            None => json.null(),
+        }
+        json.key("columns");
+        json.open('[');
+        for column in &staff.columns {
+            json.open('{');
+            json.field_number("scan_x", column.x);
+            json.field_number("upper_y", column.upper_y);
+            json.field_number("interline", column.interline);
+            json.field_number("confidence", column.confidence);
+            json.field_number("terminal_coverage", column.terminal_coverage);
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+
+    json.key("systems");
+    json.open('[');
+    for system in &model.systems {
+        json.open('{');
+        json.field_integer("id", system.system_id as i64);
+        json.key("staff_ids");
+        json.open('[');
+        for id in &system.staff_ids {
+            json.integer(*id as i64);
+        }
+        json.close(']');
+        json.key("scan_bounds");
+        json.open('{');
+        json.field_integer("left", i64::from(system.scan_left));
+        json.field_integer("right", i64::from(system.scan_right));
+        json.field_number("top", system.scan_top);
+        json.field_number("bottom", system.scan_bottom);
+        json.close('}');
+        json.key("canonical_size");
+        json.open('{');
+        json.field_number("width", system.canonical_width);
+        json.field_number("height", system.canonical_height);
+        json.field_number("interline_pixels", system.canonical_interline_pixels);
+        json.close('}');
+        json.key("mesh_columns");
+        json.open('[');
+        for column in &system.columns {
+            json.open('{');
+            json.field_number("scan_x", column.scan_x);
+            json.field_number("canonical_u", column.canonical_u);
+            json.key("anchors");
+            json.open('[');
+            for anchor in &column.anchors {
+                json.open('{');
+                json.field_integer("staff_id", anchor.staff_id as i64);
+                json.field_integer("line_index", anchor.line_index as i64);
+                json.field_number("scan_y", anchor.scan_y);
+                json.field_number("canonical_v", anchor.canonical_v);
+                json.close('}');
+            }
+            json.close(']');
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
 }
 
 fn image(json: &mut Json, scale: &ScaleRecognition) {
@@ -465,6 +638,65 @@ fn systems(json: &mut Json, recognition: &GridLinesRecognition) {
             json.integer(*id as i64);
         }
         json.close(']');
+        let tentative_staff_ids = staff_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                recognition
+                    .staves
+                    .iter()
+                    .any(|staff| staff.id == *id && staff.tentative)
+            })
+            .collect::<Vec<_>>();
+        json.field_boolean("tentative", !tentative_staff_ids.is_empty());
+        json.key("tentative_staff_ids");
+        json.open('[');
+        for id in tentative_staff_ids {
+            json.integer(id as i64);
+        }
+        json.close(']');
+        if let Some(bounds) = recognition
+            .system_bounds
+            .iter()
+            .find(|bounds| bounds.system_id == index + 1)
+        {
+            json.key("bounds");
+            json.open('{');
+            json.field_integer("left", i64::from(bounds.left));
+            json.field_integer("right", i64::from(bounds.right));
+            json.field_integer("top", i64::from(bounds.top));
+            json.field_integer("bottom", i64::from(bounds.bottom));
+            json.close('}');
+            json.field_boolean(
+                "bounds_recovered",
+                recognition
+                    .piano_system_bounds_recovered
+                    .contains(&(index + 1)),
+            );
+        }
+        if let Some(area) = recognition
+            .system_areas
+            .iter()
+            .find(|area| area.system_id == index + 1)
+        {
+            json.key("area");
+            json.open('{');
+            json.field_integer("left", i64::from(area.left));
+            json.field_integer("right", i64::from(area.right));
+            json.key("north");
+            json.open('[');
+            for segment in &area.north().segments {
+                boundary_segment(json, *segment);
+            }
+            json.close(']');
+            json.key("south");
+            json.open('[');
+            for segment in &area.south().segments {
+                boundary_segment(json, *segment);
+            }
+            json.close(']');
+            json.close('}');
+        }
         json.close('}');
     }
     json.close(']');
@@ -484,6 +716,10 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
                 StaffCandidateKind::Tablature => "tablature",
             },
         );
+        if let Some(candidate) = recognition.staves.iter().find(|item| item.id == staff.id) {
+            json.field_boolean("tentative", candidate.tentative);
+            json.field_string("hypothesis_source", &candidate.hypothesis_source);
+        }
         json.field_number("left", staff.left);
         json.field_number("right", staff.right);
         json.field_integer("interline", staff.interline as i64);
@@ -522,6 +758,25 @@ fn staves(json: &mut Json, recognition: &GridLinesRecognition) {
             json.close('}');
         }
         json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+}
+
+fn rejected_staff_hypotheses(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("rejected_staff_hypotheses");
+    json.open('[');
+    for staff in &recognition.rejected_staff_hypotheses {
+        json.open('{');
+        json.field_integer("original_id", staff.original_id as i64);
+        json.field_boolean("tentative", staff.tentative);
+        json.field_number("left", staff.left);
+        json.field_number("right", staff.right);
+        json.field_integer("top", staff.top as i64);
+        json.field_integer("bottom", staff.bottom as i64);
+        json.field_integer("local_max_luminance", i64::from(staff.local_max_luminance));
+        json.field_integer("page_max_luminance", i64::from(staff.page_max_luminance));
+        json.field_string("reason", &staff.reason);
         json.close('}');
     }
     json.close(']');
@@ -619,6 +874,108 @@ fn header_erases(json: &mut Json, headers: &NativeHeaderRecognition) {
     json.close(']');
 }
 
+/// The barline tuning enhancement's hypothesis layer, when enabled.
+///
+/// Emitted alongside — never instead of — the raw `inters`/`candidates`
+/// parity record.  Section is absent when `AUDIVERIS_TUNE_PIANO_BARLINES`
+/// is off, so default output is byte-identical to before the enhancement.
+fn tuned_barlines_section(json: &mut Json, recognition: &GridLinesRecognition) {
+    let Some(report) = &recognition.tuned_barlines else {
+        return;
+    };
+    json.key("tuned_barlines");
+    json.open('{');
+    json.field_integer("schema", 1);
+    json.field_number("interline", report.interline);
+    json.key("systems");
+    json.open('[');
+    for system in &report.systems {
+        json.open('{');
+        json.field_integer("system", system.system_id as i64);
+        if let Some(reason) = system.skipped {
+            json.field_string("skipped", reason);
+            json.close('}');
+            continue;
+        }
+        json.field_integer("raw_count", system.raw_count as i64);
+        json.field_integer("tuned_count", system.tuned_count as i64);
+        json.field_integer("geometry_count", system.geometry.intervals as i64);
+        json.field_integer("certain_bars", system.geometry.certain_bars as i64);
+        json.field_boolean("count_changed", system.tuned_count != system.raw_count);
+        json.key("raw_boundaries");
+        json.open('[');
+        for x in &system.raw_boundaries {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("tuned_boundaries");
+        json.open('[');
+        for (boundary, form) in system.tuned_boundaries.iter().zip(&system.forms) {
+            json.open('{');
+            json.field_number("x", boundary.x);
+            json.field_number("evidence", boundary.evidence);
+            json.key("sources");
+            json.open('[');
+            for source in &boundary.sources {
+                json.string(source.label());
+            }
+            json.close(']');
+            json.field_string(
+                "form",
+                match form.form {
+                    BarlineForm::Unknown => "unknown",
+                    BarlineForm::Single => "single",
+                    BarlineForm::Double => "double",
+                    BarlineForm::Final => "final",
+                    BarlineForm::RepeatStart => "rptstart",
+                    BarlineForm::RepeatEnd => "rptend",
+                    BarlineForm::RepeatBoth => "rptboth",
+                },
+            );
+            json.field_boolean(
+                "volta",
+                system
+                    .volta_hooks
+                    .iter()
+                    .any(|hook| (hook - boundary.x).abs() <= report.interline),
+            );
+            json.close('}');
+        }
+        json.close(']');
+        json.key("added_boundaries");
+        json.open('[');
+        for x in &system.diff.added {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("demoted_boundaries");
+        json.open('[');
+        for x in &system.diff.demoted {
+            json.number(*x);
+        }
+        json.close(']');
+        json.key("projection_candidates");
+        json.open('[');
+        for candidate in &system.candidates {
+            json.open('{');
+            json.field_number("x", candidate.x);
+            json.field_number("paired_occupancy", candidate.paired_occupancy);
+            json.field_number("mean_occupancy", candidate.mean_occupancy);
+            json.field_number("bridge_occupancy", candidate.bridge_occupancy);
+            json.field_number("full_occupancy", candidate.full_occupancy);
+            json.field_integer("maximum_gap", candidate.maximum_gap as i64);
+            json.field_number("left_flank_noise", candidate.left_flank_noise);
+            json.field_number("right_flank_noise", candidate.right_flank_noise);
+            json.field_number("flank_noise", candidate.flank_noise);
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
+}
+
 /// The promoted inters, each with the evidence it was graded from.
 #[derive(Default)]
 struct PublicationIds {
@@ -632,6 +989,7 @@ fn inters(
     beams: Option<&NativeBeamRecognition>,
     ledgers: Option<&NativeLedgerRecognition>,
 ) -> PublicationIds {
+    let no_staff_pixels = recognition.no_staff.to_pixels();
     json.key("inters");
     json.open('[');
     let mut next_ids = BTreeMap::<usize, usize>::new();
@@ -695,6 +1053,72 @@ fn inters(
                     json.key("evidence");
                     json.open('{');
                     json.field_boolean("frozen", *frozen);
+                    let source_peak = system
+                        .staff_peaks
+                        .iter()
+                        .flatten()
+                        .find(|peak| peak.key() == plan.peak);
+                    json.field_boolean(
+                        "slope_recovered",
+                        source_peak
+                            .is_some_and(|peak| peak.is_set(StaffPeakAttribute::SlopeRecovered)),
+                    );
+                    let lateral = lateral_ink_evidence(
+                        &no_staff_pixels,
+                        recognition.scale.width,
+                        recognition.scale.height,
+                        plan.median.x,
+                        plan.median.top,
+                        plan.median.bottom,
+                        plan.width,
+                        recognition.scale.scale.interline.main,
+                    );
+                    json.field_number("lateral_ink_ratio", lateral.ratio);
+                    json.field_integer("lateral_ink_rows", lateral.wide_rows as i64);
+                    json.field_integer(
+                        "maximum_lateral_extension",
+                        lateral.maximum_extension as i64,
+                    );
+                    json.field_integer("centerline_rows", lateral.centerline_rows as i64);
+                    json.field_number("centerline_residual_rms", lateral.centerline_residual_rms);
+                    json.field_number(
+                        "core_ink_width_residual_rms",
+                        lateral.core_ink_width_residual_rms,
+                    );
+                    json.field_number("top_terminal_lateral_ratio", lateral.top_terminal_ratio);
+                    json.field_number(
+                        "bottom_terminal_lateral_ratio",
+                        lateral.bottom_terminal_ratio,
+                    );
+                    json.field_integer(
+                        "top_terminal_maximum_extension",
+                        lateral.top_terminal_maximum_extension as i64,
+                    );
+                    json.field_integer(
+                        "bottom_terminal_maximum_extension",
+                        lateral.bottom_terminal_maximum_extension as i64,
+                    );
+                    let binary_lateral = lateral_ink_evidence(
+                        &recognition.scale.binary,
+                        recognition.scale.width,
+                        recognition.scale.height,
+                        plan.median.x,
+                        plan.median.top,
+                        plan.median.bottom,
+                        plan.width,
+                        recognition.scale.scale.interline.main,
+                    );
+                    json.field_number("binary_lateral_ink_ratio", binary_lateral.ratio);
+                    json.field_integer("binary_lateral_ink_rows", binary_lateral.wide_rows as i64);
+                    json.field_integer(
+                        "binary_maximum_lateral_extension",
+                        binary_lateral.maximum_extension as i64,
+                    );
+                    json.field_boolean(
+                        "partial_recovered",
+                        source_peak
+                            .is_some_and(|peak| peak.is_set(StaffPeakAttribute::PartialRecovered)),
+                    );
                     json.key("impacts");
                     match plan.impacts {
                         Some(impacts) => {
@@ -753,6 +1177,140 @@ fn inters(
     }
     json.close(']');
     publication
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct LateralInkEvidence {
+    ratio: f64,
+    wide_rows: usize,
+    maximum_extension: usize,
+    centerline_rows: usize,
+    centerline_residual_rms: f64,
+    core_ink_width_residual_rms: f64,
+    top_terminal_ratio: f64,
+    bottom_terminal_ratio: f64,
+    top_terminal_maximum_extension: usize,
+    bottom_terminal_maximum_extension: usize,
+}
+
+/// Measure ink horizontally attached to a vertical candidate after staff-line
+/// removal. Noteheads and beams create several rows of lateral attachment to a
+/// stem; an isolated barline normally does not. This is diagnostic evidence,
+/// not yet a recognition gate.
+#[allow(clippy::too_many_arguments)]
+fn lateral_ink_evidence(
+    pixels: &[u8],
+    raster_width: usize,
+    raster_height: usize,
+    x: f64,
+    top: f64,
+    bottom: f64,
+    candidate_width: f64,
+    interline: i32,
+) -> LateralInkEvidence {
+    if pixels.len() != raster_width.saturating_mul(raster_height)
+        || raster_width == 0
+        || raster_height == 0
+    {
+        return LateralInkEvidence::default();
+    }
+    let center = (x.round_ties_even() as i64).clamp(0, raster_width as i64 - 1) as usize;
+    let half_core = ((candidate_width / 2.0).ceil() as usize).max(1);
+    let x0 = center.saturating_sub(half_core);
+    let x1 = center.saturating_add(half_core).min(raster_width - 1);
+    let y0 = (top.floor() as i64).clamp(0, raster_height as i64 - 1) as usize;
+    let y1 = (bottom.ceil() as i64).clamp(0, raster_height as i64 - 1) as usize;
+    let reach = usize::try_from(interline.max(1)).unwrap_or(1);
+    let wide_threshold = ((reach as f64) * 0.25).ceil() as usize;
+    let mut lateral_pixels = 0usize;
+    let mut wide_rows = 0usize;
+    let mut maximum_extension = 0usize;
+    let mut centerline_samples = Vec::new();
+    let mut core_width_samples = Vec::new();
+    let terminal_rows = reach.min(y1.saturating_sub(y0) + 1);
+    let mut top_terminal_pixels = 0usize;
+    let mut bottom_terminal_pixels = 0usize;
+    let mut top_terminal_maximum_extension = 0usize;
+    let mut bottom_terminal_maximum_extension = 0usize;
+    for y in y0..=y1 {
+        let row = &pixels[y * raster_width..(y + 1) * raster_width];
+        if !row[x0..=x1].contains(&0) {
+            continue;
+        }
+        let first = row[x0..=x1].iter().position(|pixel| *pixel == 0).unwrap() + x0;
+        let last = row[x0..=x1].iter().rposition(|pixel| *pixel == 0).unwrap() + x0;
+        centerline_samples.push((y as f64, (first + last) as f64 / 2.0));
+        core_width_samples.push((
+            y as f64,
+            row[x0..=x1].iter().filter(|pixel| **pixel == 0).count() as f64,
+        ));
+        let mut left = 0usize;
+        while left < reach && x0 > left && row[x0 - left - 1] == 0 {
+            left += 1;
+        }
+        let mut right = 0usize;
+        while right < reach && x1 + right + 1 < raster_width && row[x1 + right + 1] == 0 {
+            right += 1;
+        }
+        let extension = left + right;
+        lateral_pixels += extension;
+        maximum_extension = maximum_extension.max(left.max(right));
+        wide_rows += usize::from(extension >= wide_threshold);
+        if y < y0.saturating_add(terminal_rows) {
+            top_terminal_pixels += extension;
+            top_terminal_maximum_extension = top_terminal_maximum_extension.max(left.max(right));
+        }
+        if y > y1.saturating_sub(terminal_rows) {
+            bottom_terminal_pixels += extension;
+            bottom_terminal_maximum_extension =
+                bottom_terminal_maximum_extension.max(left.max(right));
+        }
+    }
+    let height = y1.saturating_sub(y0) + 1;
+    let centerline_residual_rms = linear_residual_rms(&centerline_samples);
+    let core_ink_width_residual_rms = linear_residual_rms(&core_width_samples);
+    LateralInkEvidence {
+        ratio: lateral_pixels as f64 / (height * reach) as f64,
+        wide_rows,
+        maximum_extension,
+        centerline_rows: centerline_samples.len(),
+        centerline_residual_rms,
+        core_ink_width_residual_rms,
+        top_terminal_ratio: top_terminal_pixels as f64 / (terminal_rows * reach) as f64,
+        bottom_terminal_ratio: bottom_terminal_pixels as f64 / (terminal_rows * reach) as f64,
+        top_terminal_maximum_extension,
+        bottom_terminal_maximum_extension,
+    }
+}
+
+fn linear_residual_rms(samples: &[(f64, f64)]) -> f64 {
+    if samples.len() < 3 {
+        return 0.0;
+    }
+    let count = samples.len() as f64;
+    let mean_y = samples.iter().map(|sample| sample.0).sum::<f64>() / count;
+    let mean_x = samples.iter().map(|sample| sample.1).sum::<f64>() / count;
+    let denominator = samples
+        .iter()
+        .map(|sample| (sample.0 - mean_y).powi(2))
+        .sum::<f64>();
+    let slope = if denominator > 0.0 {
+        samples
+            .iter()
+            .map(|sample| (sample.0 - mean_y) * (sample.1 - mean_x))
+            .sum::<f64>()
+            / denominator
+    } else {
+        0.0
+    };
+    let squared = samples
+        .iter()
+        .map(|sample| {
+            let predicted = mean_x + slope * (sample.0 - mean_y);
+            (sample.1 - predicted).powi(2)
+        })
+        .sum::<f64>();
+    (squared / count).sqrt()
 }
 
 fn header_inters(
@@ -1146,14 +1704,54 @@ fn ledger_inter(json: &mut Json, id: usize, ledger: &MaterializedLedgerInter) {
 /// it was dropped -- `Unaligned` and `CClef` are very different claims about
 /// the same missing barline.
 ///
-/// These are rejections from the `BarsRetriever` purges specifically. They are
-/// not a complete n-best list: a peak that never reached the purges, because it
-/// failed core validation or graded below `Grades.minInterGrade`, is not here.
-/// That is a real limit of this schema version, not an assertion that no other
-/// candidates existed.
+/// Includes both projection-stage rejections and later `BarsRetriever` purges,
+/// so a consumer can distinguish an absent scan peak from a rejected one.
 fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
     json.key("candidates");
     json.open('[');
+    for staff in &recognition.staves {
+        for rejection in &staff.projection_rejections {
+            json.open('{');
+            json.field_string("kind", "BARLINE");
+            json.field_string("status", "rejected");
+            json.field_integer("system", 0);
+            json.field_integer("staff", staff.id as i64);
+            json.key("span");
+            json.open('{');
+            json.field_integer("start", i64::from(rejection.start));
+            json.field_integer("stop", i64::from(rejection.stop));
+            json.close('}');
+            json.key("evidence");
+            json.open('{');
+            json.field_string(
+                "rejected_by",
+                match rejection.stage {
+                    ProjectionPeakRejectionStage::CoreGapTooLarge => "ProjectionCoreGapTooLarge",
+                    ProjectionPeakRejectionStage::CoreInsufficientWhiteBeyondSerif => {
+                        "ProjectionCoreInsufficientWhiteBeyondSerif"
+                    }
+                    ProjectionPeakRejectionStage::BelowMinimumGrade => {
+                        "ProjectionBelowMinimumGrade"
+                    }
+                },
+            );
+            json.field_integer("projection_maximum", i64::from(rejection.maximum_value));
+            if let Some(impacts) = rejection.impacts {
+                json.key("impacts");
+                json.open('{');
+                json.field_number("core", impacts.core());
+                json.field_number("gap", impacts.gap());
+                json.field_number("start_derivative", impacts.start());
+                json.field_number("stop_derivative", impacts.stop());
+                json.field_number("left_chunk", impacts.left());
+                json.field_number("right_chunk", impacts.right());
+                json.field_number("grade", impacts.grade());
+                json.close('}');
+            }
+            json.close('}');
+            json.close('}');
+        }
+    }
     for rejection in &recognition.peak_graph.rejections {
         json.open('{');
         json.field_string("kind", "BARLINE");
@@ -1168,8 +1766,94 @@ fn candidates(json: &mut Json, recognition: &GridLinesRecognition) {
         json.key("evidence");
         json.open('{');
         json.field_string("rejected_by", &format!("{:?}", rejection.stage));
+        json.field_boolean("slope_recovered", rejection.slope_recovered);
+        json.key("impacts");
+        match rejection.impacts {
+            Some(impacts) => {
+                json.open('{');
+                json.field_number("core", impacts.core());
+                json.field_number("gap", impacts.gap());
+                json.field_number("start_derivative", impacts.start());
+                json.field_number("stop_derivative", impacts.stop());
+                json.field_number("left_chunk", impacts.left());
+                json.field_number("right_chunk", impacts.right());
+                json.close('}');
+            }
+            None => json.null(),
+        }
         json.close('}');
         json.close('}');
+    }
+    json.close(']');
+}
+
+fn projection_ranges(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("projection_ranges");
+    json.open('[');
+    for staff in &recognition.staves {
+        for (start, stop, maximum) in &staff.raw_projection_ranges {
+            json.open('{');
+            json.field_integer("staff", staff.id as i64);
+            json.field_integer("start", i64::from(*start));
+            json.field_integer("stop", i64::from(*stop));
+            json.field_integer("maximum", i64::from(*maximum));
+            json.close('}');
+        }
+    }
+    json.close(']');
+    json.key("projection_subthreshold_ranges");
+    json.open('[');
+    for staff in &recognition.staves {
+        for (start, stop, maximum) in &staff.subthreshold_projection_ranges {
+            json.open('{');
+            json.field_integer("staff", staff.id as i64);
+            json.field_integer("start", i64::from(*start));
+            json.field_integer("stop", i64::from(*stop));
+            json.field_integer("maximum", i64::from(*maximum));
+            json.field_integer("bar_threshold", i64::from(staff.projection_bar_threshold));
+            json.close('}');
+        }
+    }
+    json.close(']');
+}
+
+/// Brace lookup attempts, including the negative evidence hidden by the
+/// original accepted-filament-only report.
+fn brace_probes(json: &mut Json, recognition: &GridLinesRecognition) {
+    json.key("brace_probes");
+    json.open('[');
+    for (system, report) in &recognition.peak_graph.brace_portions {
+        for decision in &report.decisions {
+            json.open('{');
+            json.field_integer("system", *system as i64);
+            json.field_integer("staff", decision.staff_id.value() as i64);
+            json.field_string("outcome", &format!("{:?}", decision.outcome));
+            json.key("window");
+            json.open('{');
+            json.field_integer("minimum_x", i64::from(decision.minimum_x));
+            json.field_integer("maximum_x", i64::from(decision.maximum_x));
+            json.close('}');
+            if let Some(peak) = decision.peak {
+                json.key("peak");
+                json.open('{');
+                json.field_integer("start", i64::from(peak.start()));
+                json.field_integer("stop", i64::from(peak.stop()));
+                if let Some(width) = decision.peak_width {
+                    json.field_integer("width", i64::from(width));
+                }
+                json.close('}');
+            }
+            if let Some(filament) = decision.filament {
+                json.key("filament");
+                json.open('{');
+                json.field_number("vertical_length", filament.vertical_length);
+                json.field_number("mean_curvature", filament.mean_curvature);
+                json.field_number("extension_top", filament.extension_top);
+                json.field_number("extension_bottom", filament.extension_bottom);
+                json.close('}');
+            }
+            json.close('}');
+        }
     }
     json.close(']');
 }
@@ -2504,6 +3188,37 @@ pub(crate) mod tests {
         assert!(!structural_faults(r#"{"a":1}}"#).is_empty());
         // A comma inside a string is not a fault.
         assert!(structural_faults(r#"{"a":"x,:y"}"#).is_empty());
+    }
+
+    #[test]
+    fn lateral_ink_distinguishes_an_attached_head_from_a_bare_vertical() {
+        let mut bare = vec![255; 20 * 20];
+        for y in 2..=17 {
+            bare[y * 20 + 10] = 0;
+        }
+        let bare_evidence = lateral_ink_evidence(&bare, 20, 20, 10.0, 2.0, 17.0, 1.0, 8);
+        assert_eq!(bare_evidence.ratio, 0.0);
+        assert_eq!(bare_evidence.centerline_rows, 16);
+        assert_eq!(bare_evidence.centerline_residual_rms, 0.0);
+
+        let mut attached = bare;
+        for x in 4..=10 {
+            attached[8 * 20 + x] = 0;
+        }
+        let attached_evidence = lateral_ink_evidence(&attached, 20, 20, 10.0, 2.0, 17.0, 1.0, 8);
+        assert!(attached_evidence.ratio > 0.0);
+        assert_eq!(attached_evidence.wide_rows, 1);
+        assert_eq!(attached_evidence.maximum_extension, 5);
+        assert!(attached_evidence.top_terminal_ratio > 0.0);
+        assert_eq!(attached_evidence.bottom_terminal_ratio, 0.0);
+    }
+
+    #[test]
+    fn centerline_residual_removes_linear_skew_but_retains_oscillation() {
+        let straight = [(0.0, 4.0), (1.0, 5.0), (2.0, 6.0), (3.0, 7.0)];
+        assert!(linear_residual_rms(&straight) < 1e-12);
+        let wavy = [(0.0, 4.0), (1.0, 7.0), (2.0, 4.0), (3.0, 7.0)];
+        assert!(linear_residual_rms(&wavy) > 1.0);
     }
 
     #[test]

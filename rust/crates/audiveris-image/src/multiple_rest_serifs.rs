@@ -416,6 +416,7 @@ mod tests {
                 x_max: 15,
             },
             peaks: Vec::new(),
+            peak_rejections: Vec::new(),
             brace_candidate: None,
         };
         let refinement = PeakRefinementParams::new(6, 2, 4, 2, 1).unwrap();

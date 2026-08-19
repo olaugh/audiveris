@@ -474,6 +474,7 @@ fn grid_raw_lines_vector() -> Result<String, Box<dyn Error>> {
             minimum_delta_y: 10,
             maximum_delta_y: 10,
             retrieval,
+            projective_slope: false,
         },
     )?;
     let slope = built.global_slope();
@@ -569,6 +570,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
             interline: INTERLINE,
             small: false,
             short: false,
+            tentative: false,
             lines,
         }],
         global_slope: None,
@@ -598,6 +600,7 @@ fn grid_line_endpoints_vector() -> Result<String, Box<dyn Error>> {
             maximum_ending_dx: 10,
             pattern_width: 10,
             pattern_jitter: 2,
+            maximum_terminal_extension_dx: 0,
         },
     )?;
 
@@ -694,6 +697,7 @@ fn grid_line_holes_vector() -> Result<String, Box<dyn Error>> {
             interline: 2,
             small: false,
             short: false,
+            tentative: false,
             lines,
         }],
         global_slope: None,
@@ -804,6 +808,8 @@ fn grid_bar_alignments_vector() -> Result<String, Box<dyn Error>> {
     ];
     let parameters = AlignmentParameters {
         sheet_slope: SHEET_SLOPE,
+        vertical_slope_gradient: 0.0,
+        vertical_slope_reference_x: 0.0,
         maximum_alignment_slope: MAXIMUM_SLOPE,
         maximum_alignment_delta_width: MAXIMUM_DELTA_WIDTH,
     };
@@ -2411,6 +2417,7 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             is_one_line_staff: false,
             bar_threshold: 4,
             total_height: 10,
+            minimum_peak_grade: 0.08,
             peak_construction: PeakConstructionParams::new(
                 PeakRefinementParams::new(4, 2, 4, 2, 1)?,
                 4,
@@ -2532,6 +2539,7 @@ fn rust_vectors(root: Option<&Path>) -> Result<String, Box<dyn Error>> {
             x_max: 99,
         },
         peaks: vec![result_first, result_last],
+        peak_rejections: Vec::new(),
         brace_candidate: None,
     };
     let initial_start = result_operations

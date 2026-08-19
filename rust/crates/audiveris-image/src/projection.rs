@@ -144,6 +144,10 @@ pub struct NeutralStaffProjectorRequest {
     pub is_one_line_staff: bool,
     pub bar_threshold: i32,
     pub total_height: i32,
+    /// Minimum contextual grade retained as a neutral peak. Java parity is
+    /// [`MINIMUM_STAFF_PEAK_GRADE`]; evaluation profiles may lower this to
+    /// audit evidence that Java's early irreversible filter would discard.
+    pub minimum_peak_grade: f64,
     pub peak_construction: PeakConstructionParams,
     pub peak_core: PeakCoreParams,
     pub brace_search: Option<BraceSearchRequest>,
@@ -158,7 +162,29 @@ pub struct NeutralStaffProjectorResult {
     pub all_blanks: Vec<ProjectionBlank>,
     pub peak_search_bounds: PeakSearchBounds,
     pub peaks: Vec<StaffPeak>,
+    /// Constructed projection peaks rejected before they could enter the
+    /// peak graph.  Keeping these decisions makes an absent barline
+    /// distinguishable from a peak that was never scanned at all.
+    pub peak_rejections: Vec<ProjectionPeakRejection>,
     pub brace_candidate: Option<ProjectionBraceCandidate>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionPeakRejectionStage {
+    CoreGapTooLarge,
+    CoreInsufficientWhiteBeyondSerif,
+    BelowMinimumGrade,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectionPeakRejection {
+    pub start: i32,
+    pub stop: i32,
+    pub maximum_value: i32,
+    pub stage: ProjectionPeakRejectionStage,
+    /// The exact six StaffVerticalImpacts when grading was reached. Core
+    /// rejections occur before these impacts are meaningful and retain None.
+    pub impacts: Option<StaffVerticalImpacts>,
 }
 
 /// Mutation-free decision produced by Java `StaffProjector.checkLinesRoot`.
@@ -757,6 +783,36 @@ impl PeakCoreValidation {
 }
 
 impl ProjectionPeakCandidate {
+    fn staff_vertical_impacts(
+        self,
+        validation: PeakCoreValidation,
+        params: PeakGradeParams,
+    ) -> StaffVerticalImpacts {
+        let minimum_value = if params.half_mode {
+            params.bar_threshold / 2
+        } else {
+            params.bar_threshold
+        };
+        let effective_height = if params.half_mode {
+            params.total_height / 2
+        } else {
+            params.total_height
+        };
+        let value_range = effective_height.wrapping_sub(minimum_value);
+        let core_impact =
+            f64::from(self.maximum_value.wrapping_sub(minimum_value)) / f64::from(value_range);
+        let gap_impact =
+            1.0 - (f64::from(validation.core.gap) / f64::from(validation.gap_threshold));
+        StaffVerticalImpacts::new(
+            core_impact,
+            gap_impact,
+            self.left.derivative_grade,
+            self.right.derivative_grade,
+            self.left.chunk_grade,
+            self.right.chunk_grade,
+        )
+    }
+
     /// Pixel/core validation from the middle of Java
     /// `StaffProjector.createPeak`.
     ///
@@ -800,8 +856,25 @@ impl ProjectionPeakCandidate {
 
         let width = self.stop.wrapping_sub(self.start).wrapping_add(1);
         let dx = i32::from(width <= 2);
-        let x_min = self.start.wrapping_sub(dx);
-        let x_max = self.stop.wrapping_add(dx);
+        let raster_x_max = i32::try_from(raster_width - 1).map_err(|_| {
+            ProjectionError::InvalidRasterDimensions {
+                width: raster_width,
+                height: raster_height,
+            }
+        })?;
+        if self.stop < 0 || self.start > raster_x_max {
+            return Err(ProjectionError::CoreProbeOutOfBounds {
+                x_min: self.start,
+                x_max: self.stop,
+                y_min: geometry.y_top,
+                y_max: geometry.y_bottom,
+            });
+        }
+        // Java's image-area probe is effectively clipped at the raster edge.
+        // A narrow peak on the first or final column still carries useful
+        // evidence; expanding its serif probe must not abort the whole sheet.
+        let x_min = self.start.wrapping_sub(dx).max(0);
+        let x_max = self.stop.wrapping_add(dx).min(raster_x_max);
 
         let full_height_core = if added_chunk != 0 {
             Some(vertical_core_data(
@@ -874,6 +947,23 @@ impl ProjectionPeakCandidate {
         staff_id: StaffId,
         params: PeakGradeParams,
     ) -> Result<Option<StaffPeak>, ProjectionError> {
+        self.into_staff_peak_with_minimum_grade(
+            validation,
+            staff_id,
+            params,
+            MINIMUM_STAFF_PEAK_GRADE,
+        )
+    }
+
+    /// Variant used by diagnostic/evaluation profiles that retain weaker
+    /// candidates for later contextual grading instead of pruning them here.
+    pub fn into_staff_peak_with_minimum_grade(
+        self,
+        validation: PeakCoreValidation,
+        staff_id: StaffId,
+        params: PeakGradeParams,
+        minimum_grade: f64,
+    ) -> Result<Option<StaffPeak>, ProjectionError> {
         if self.start != validation.start || self.stop != validation.stop {
             return Err(ProjectionError::MismatchedCoreValidation);
         }
@@ -881,30 +971,8 @@ impl ProjectionPeakCandidate {
             return Ok(None);
         }
 
-        let minimum_value = if params.half_mode {
-            params.bar_threshold / 2
-        } else {
-            params.bar_threshold
-        };
-        let effective_height = if params.half_mode {
-            params.total_height / 2
-        } else {
-            params.total_height
-        };
-        let value_range = effective_height.wrapping_sub(minimum_value);
-        let core_impact =
-            f64::from(self.maximum_value.wrapping_sub(minimum_value)) / f64::from(value_range);
-        let gap_impact =
-            1.0 - (f64::from(validation.core.gap) / f64::from(validation.gap_threshold));
-        let impacts = StaffVerticalImpacts::new(
-            core_impact,
-            gap_impact,
-            self.left.derivative_grade,
-            self.right.derivative_grade,
-            self.left.chunk_grade,
-            self.right.chunk_grade,
-        );
-        if impacts.grade() < MINIMUM_STAFF_PEAK_GRADE || impacts.grade().is_nan() {
+        let impacts = self.staff_vertical_impacts(validation, params);
+        if impacts.grade() < minimum_grade || impacts.grade().is_nan() {
             return Ok(None);
         }
 
@@ -1694,6 +1762,13 @@ impl ShortProjection {
         }
 
         let mut candidates = Vec::new();
+        // `browse_peak_range` materializes all derivative-delimited
+        // candidates for one count range before this caller can mutate `x`.
+        // Refinement can make two of those candidates collapse onto the same
+        // (or an overlapping) final interval. Java's mutable scan cursor skips
+        // the later candidate after the first is accepted; retain that
+        // invariant explicitly here.
+        let mut accepted_stop: Option<i32> = None;
         let half_mode = request.mode.is_half();
         let mut start = None;
         let mut stop = None;
@@ -1713,8 +1788,12 @@ impl ShortProjection {
                     request.added_chunk,
                 );
                 for candidate in self.browse_peak_range(range, params)? {
+                    if accepted_stop.is_some_and(|stop| candidate.start <= stop) {
+                        continue;
+                    }
                     if let Some(accepted) = accept(candidate)? {
                         x = x.max(candidate.stop);
+                        accepted_stop = Some(candidate.stop);
                         candidates.push(accepted);
                     }
                 }
@@ -1734,6 +1813,7 @@ impl ShortProjection {
                 request.added_chunk,
             );
             if let Some(candidate) = self.construct_peak_candidate(construction, params)?
+                && accepted_stop.is_none_or(|stop| candidate.start > stop)
                 && let Some(accepted) = accept(candidate)?
             {
                 candidates.push(accepted);
@@ -1830,6 +1910,7 @@ impl StaffProjectionAccumulation {
             minimum_derivative,
             0,
         );
+        let mut peak_rejections = Vec::new();
         let peaks =
             self.projection
                 .find_peaks_in_range(scan, request.peak_construction, |candidate| {
@@ -1842,15 +1923,45 @@ impl StaffProjectionAccumulation {
                         0,
                         request.peak_core,
                     )?;
-                    candidate.into_staff_peak(
+                    if let Some(rejection) = validation.rejection {
+                        peak_rejections.push(ProjectionPeakRejection {
+                            start: candidate.start,
+                            stop: candidate.stop,
+                            maximum_value: candidate.maximum_value,
+                            stage: match rejection {
+                                PeakCoreRejection::GapTooLarge => {
+                                    ProjectionPeakRejectionStage::CoreGapTooLarge
+                                }
+                                PeakCoreRejection::InsufficientWhiteBeyondSerif => {
+                                    ProjectionPeakRejectionStage::CoreInsufficientWhiteBeyondSerif
+                                }
+                            },
+                            impacts: None,
+                        });
+                        return Ok(None);
+                    }
+                    let grade_params = PeakGradeParams::new(
+                        request.bar_threshold,
+                        request.total_height,
+                        half_mode,
+                    );
+                    let impacts = candidate.staff_vertical_impacts(validation, grade_params);
+                    let peak = candidate.into_staff_peak_with_minimum_grade(
                         validation,
                         request.staff_id,
-                        PeakGradeParams::new(
-                            request.bar_threshold,
-                            request.total_height,
-                            half_mode,
-                        ),
-                    )
+                        grade_params,
+                        request.minimum_peak_grade,
+                    )?;
+                    if peak.is_none() {
+                        peak_rejections.push(ProjectionPeakRejection {
+                            start: candidate.start,
+                            stop: candidate.stop,
+                            maximum_value: candidate.maximum_value,
+                            stage: ProjectionPeakRejectionStage::BelowMinimumGrade,
+                            impacts: Some(impacts),
+                        });
+                    }
+                    Ok(peak)
                 })?;
         let brace_candidate = request
             .brace_search
@@ -1864,6 +1975,7 @@ impl StaffProjectionAccumulation {
             all_blanks,
             peak_search_bounds,
             peaks,
+            peak_rejections,
             brace_candidate,
         })
     }
@@ -2157,6 +2269,7 @@ where
             is_one_line_staff: request.scale.is_one_line_staff,
             bar_threshold: scale_parameters.bar_threshold,
             total_height,
+            minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
             peak_construction: construction,
             peak_core: core,
             brace_search: None,
@@ -2678,6 +2791,7 @@ mod tests {
                     is_one_line_staff: false,
                     bar_threshold: 4,
                     total_height: 5,
+                    minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
                     peak_construction: PeakConstructionParams::new(peak_refinement, 4).unwrap(),
                     peak_core: PeakCoreParams::new(1, 0.3).unwrap(),
                     brace_search: Some(BraceSearchRequest::new(5, 0, 7, 2, 4)),
@@ -2702,6 +2816,7 @@ mod tests {
             PeakSearchBounds { x_min: 4, x_max: 7 }
         );
         assert_eq!(result.peaks.len(), 1);
+        assert!(result.peak_rejections.is_empty());
         let peak = &result.peaks[0];
         assert_eq!(
             (peak.staff_id().value(), peak.start(), peak.stop()),
@@ -2719,6 +2834,72 @@ mod tests {
             })
         );
         assert_eq!(result.projection.value(5), 5);
+    }
+
+    #[test]
+    fn neutral_projector_preserves_impacts_for_a_below_grade_peak() {
+        let width = 12;
+        let height = 10;
+        let mut pixels = vec![255; width * height];
+        for y in 0..height {
+            pixels[y * width + 5] = FOREGROUND;
+        }
+        for y in 0..5 {
+            pixels[y * width + 6] = FOREGROUND;
+        }
+        let mut projection = ShortProjection::new(0, width as i32 - 1).unwrap();
+        projection.increment(5, 10);
+        projection.increment(6, 5);
+        let accumulation = StaffProjectionAccumulation {
+            projection,
+            bounds: PeakSearchBounds {
+                x_min: 0,
+                x_max: width as i32 - 1,
+            },
+        };
+        let result = accumulation
+            .finish_neutral(
+                width,
+                height,
+                &pixels,
+                NeutralStaffProjectorRequest {
+                    staff_id: StaffId::new(1),
+                    staff_left: 5,
+                    staff_right: 5,
+                    blank_threshold: 2,
+                    minimum_wide_blank_width: 2,
+                    top_derivative_count: 2,
+                    minimum_derivative_ratio: 0.5,
+                    use_one_line_half_mode: false,
+                    is_one_line_staff: false,
+                    bar_threshold: 8,
+                    total_height: 10,
+                    minimum_peak_grade: MINIMUM_STAFF_PEAK_GRADE,
+                    peak_construction: PeakConstructionParams::new(
+                        PeakRefinementParams::new(8, 2, 4, 2, 1).unwrap(),
+                        4,
+                    )
+                    .unwrap(),
+                    peak_core: PeakCoreParams::new(2, 0.3).unwrap(),
+                    brace_search: None,
+                },
+                |_| PeakCoreGeometry::new(0, 9, 4),
+            )
+            .unwrap();
+
+        assert!(result.peaks.is_empty());
+        let rejection = result
+            .peak_rejections
+            .first()
+            .unwrap_or_else(|| panic!("missing rejection: {result:?}"));
+        assert_eq!(
+            rejection.stage,
+            ProjectionPeakRejectionStage::BelowMinimumGrade
+        );
+        let impacts = rejection.impacts.unwrap();
+        assert_eq!(impacts.right(), 0.0);
+        assert_eq!(impacts.grade(), 0.0);
+        assert!(impacts.core() > 0.0);
     }
 
     #[test]
@@ -2786,6 +2967,7 @@ mod tests {
                 x_max: 30,
             },
             peaks: vec![first, last],
+            peak_rejections: Vec::new(),
             brace_candidate: None,
         };
 
@@ -2870,6 +3052,7 @@ mod tests {
                 x_max: 11,
             },
             peaks: Vec::new(),
+            peak_rejections: Vec::new(),
             brace_candidate: None,
         };
         let refinement = PeakRefinementParams::new(6, 2, 4, 2, 1).unwrap();
@@ -3143,6 +3326,7 @@ mod tests {
                     x_max: 30,
                 },
                 peaks,
+                peak_rejections: Vec::new(),
                 brace_candidate: None,
             },
             scale_parameters: staff_projector_scale_parameters(StaffProjectorScaleRequest {
@@ -3776,6 +3960,46 @@ mod tests {
     }
 
     #[test]
+    fn accepted_refined_peaks_never_overlap_within_one_count_range() {
+        let refinement = PeakRefinementParams::new(10, 2, 5, 8, 3).unwrap();
+        let params = PeakConstructionParams::new(refinement, 12).unwrap();
+        let mut seed = 0x5eed_u32;
+        let mut witnessed_collapsed_candidates = false;
+
+        for _ in 0..2_000 {
+            let mut projection = ShortProjection::new(0, 20).unwrap();
+            for position in 0..20 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                projection.increment(position, 1 + i32::try_from(seed % 20).unwrap());
+            }
+            let browsed = projection
+                .browse_peak_range(PeakRangeRequest::new(0, 19, false, 2, 2, 0), params)
+                .unwrap();
+            if !browsed.windows(2).any(|pair| pair[1].start <= pair[0].stop) {
+                continue;
+            }
+            witnessed_collapsed_candidates = true;
+            let accepted = projection
+                .find_peaks_in_range(
+                    PeakScanRequest::new(0, 20, ProjectionPeakMode::Full, 1, 2, 2, 0),
+                    params,
+                    |candidate| Ok(Some(candidate)),
+                )
+                .unwrap();
+            assert!(
+                accepted.windows(2).all(|pair| pair[1].start > pair[0].stop),
+                "accepted refined intervals must be disjoint: {accepted:?}"
+            );
+            break;
+        }
+
+        assert!(
+            witnessed_collapsed_candidates,
+            "deterministic stress sequence must exercise refinement collapse"
+        );
+    }
+
+    #[test]
     fn rejected_overwide_range_leaves_cursor_for_following_oracle_peak() {
         let mut projection = ShortProjection::new(0, 22).unwrap();
         for position in 2..=18 {
@@ -4031,12 +4255,17 @@ mod tests {
 
         let pixels = vec![255; 8 * 9];
         let params = PeakCoreParams::new(1, 0.3).unwrap();
-        assert_eq!(
+        assert!(
             candidate(0, 0)
+                .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params,)
+                .is_ok()
+        );
+        assert_eq!(
+            candidate(8, 8)
                 .validate_core(8, 9, &pixels, PeakCoreGeometry::new(0, 8, 4), 0, params,),
             Err(ProjectionError::CoreProbeOutOfBounds {
-                x_min: -1,
-                x_max: 1,
+                x_min: 8,
+                x_max: 8,
                 y_min: 0,
                 y_max: 8,
             })
@@ -4122,6 +4351,16 @@ mod tests {
             )
             .unwrap(),
             None
+        );
+        assert!(
+            weak.into_staff_peak_with_minimum_grade(
+                validation,
+                StaffId::new(2),
+                PeakGradeParams::new(4, 12, false),
+                0.0,
+            )
+            .unwrap()
+            .is_some()
         );
         assert!(matches!(
             candidate(4, 4).into_staff_peak(

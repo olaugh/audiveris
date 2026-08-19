@@ -794,7 +794,8 @@ pub fn unaligned_peak_keys<R>(
     peaks
         .iter()
         .filter(|peak| {
-            graph.contains_vertex(peak.key())
+            !peak.is_set(StaffPeakAttribute::PartialRecovered)
+                && graph.contains_vertex(peak.key())
                 && graph
                     .edges_of(peak.key())
                     .expect("contains-vertex check makes edges_of valid")

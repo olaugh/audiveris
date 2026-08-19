@@ -11,7 +11,7 @@ use std::{cmp::Ordering, collections::BTreeMap, error::Error, fmt};
 use crate::{
     cluster_coordinator::RecursiveCombSnapshot,
     cluster_merge::{ClusterMergeError, cluster_deskewed_ordinate},
-    cluster_ownership::{ClusterId, ClusterOwnership, CombId},
+    cluster_ownership::{ClusterId, ClusterOwnership, ClusterOwnershipError, CombId},
     cluster_pipeline::{
         ClusterPipelineError, ClusterRetrievalParameters, ClusterRetrievalResult, retrieve_clusters,
     },
@@ -78,6 +78,55 @@ impl ClusterPassState {
     pub const fn parameters(&self) -> &ClusterRetrievalParameters {
         &self.parameters
     }
+
+    /// Seed one independently verified five-line staff hypothesis before the
+    /// ordinary comb traversal.
+    ///
+    /// This is used only after a tall, overgrown filament has been split into
+    /// five strong periodic ridges. The provisional cluster still goes through
+    /// the normal expansion, merge, trim, desired-size, consistency, and staff
+    /// rejection passes; seeding merely prevents the generic comb graph from
+    /// losing all five lines a second time.
+    pub fn seed_recovered_cluster(
+        &mut self,
+        line_ids: &[FilamentId],
+    ) -> Result<ClusterId, LinesCoordinatorError> {
+        if line_ids.len() != 5 {
+            return Err(LinesCoordinatorError::InvalidRecoveredCluster);
+        }
+        let distinct = line_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        if distinct.len() != line_ids.len() {
+            return Err(LinesCoordinatorError::InvalidRecoveredCluster);
+        }
+
+        let mut next = self.clone();
+        let seed = line_ids[0];
+        let seed_value = next
+            .filaments
+            .get(&seed)
+            .cloned()
+            .ok_or(LinesCoordinatorError::MissingRecoveredFilament(seed))?;
+        let cluster_id = next.ownership.register_cluster(seed)?;
+        let mut cluster = LineCluster::new(next.parameters.interline(), seed, seed_value)?;
+        for (position, &id) in line_ids.iter().enumerate().skip(1) {
+            let value = next
+                .filaments
+                .get(&id)
+                .cloned()
+                .ok_or(LinesCoordinatorError::MissingRecoveredFilament(id))?;
+            cluster.include_line(position as i32, id, value)?;
+            next.ownership
+                .assign_filament(id, cluster_id, position as i32)?;
+        }
+        if next.clusters.insert(cluster_id, cluster).is_some() {
+            return Err(LinesCoordinatorError::DuplicateClusterValue(cluster_id));
+        }
+        *self = next;
+        Ok(cluster_id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,7 +164,7 @@ pub enum StaffCandidateKind {
 #[derive(Clone, Debug)]
 pub struct StaffCandidate {
     id: usize,
-    source: LocatedClusterId,
+    source: Option<LocatedClusterId>,
     kind: StaffCandidateKind,
     left: f64,
     right: f64,
@@ -133,6 +182,7 @@ pub struct StaffCandidate {
     line_filaments: Vec<StaffFilament>,
     small: bool,
     short: bool,
+    tentative: bool,
 }
 
 /// Equality ignores [`Self::line_filaments`], which is derived rather than
@@ -150,6 +200,7 @@ impl PartialEq for StaffCandidate {
             && self.line_ids == other.line_ids
             && self.small == other.small
             && self.short == other.short
+            && self.tentative == other.tentative
     }
 }
 
@@ -160,7 +211,7 @@ impl StaffCandidate {
     }
 
     #[must_use]
-    pub const fn source(&self) -> LocatedClusterId {
+    pub const fn source(&self) -> Option<LocatedClusterId> {
         self.source
     }
 
@@ -207,11 +258,57 @@ impl StaffCandidate {
     pub const fn is_short(&self) -> bool {
         self.short
     }
+
+    /// Whether this staff was recovered from strong five-line raster evidence
+    /// after ordinary comb clustering failed to assemble it.
+    #[must_use]
+    pub const fn is_tentative(&self) -> bool {
+        self.tentative
+    }
+
+    /// Build a recoverable staff hypothesis directly from five traced line
+    /// filaments. It deliberately has no cluster source: callers must keep the
+    /// tentative bit visible rather than pretending that ordinary clustering
+    /// accepted it.
+    pub fn tentative_standard(
+        interline: usize,
+        line_ids: Vec<FilamentId>,
+        line_filaments: Vec<StaffFilament>,
+    ) -> Result<Self, LinesCoordinatorError> {
+        if line_ids.len() != 5 || line_filaments.len() != 5 {
+            return Err(LinesCoordinatorError::InvalidRecoveredCluster);
+        }
+        let mut starts = Vec::with_capacity(5);
+        let mut stops = Vec::with_capacity(5);
+        for line in &line_filaments {
+            let geometry = line.geometry()?;
+            starts.push(geometry.start().0);
+            stops.push(geometry.stop().0);
+        }
+        starts.sort_by(|one, two| one.total_cmp(two));
+        stops.sort_by(|one, two| one.total_cmp(two));
+        Ok(Self {
+            id: 0,
+            source: None,
+            kind: StaffCandidateKind::Standard,
+            left: starts[2],
+            right: stops[2],
+            interline,
+            line_ids,
+            line_filaments,
+            small: false,
+            short: false,
+            tentative: true,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClusterRejectionReason {
     TooShort,
+    /// Five ordered filaments span implausibly different adjacent gaps and
+    /// therefore mix ink from separate staves (or non-staff text rows).
+    CrossStaffMixture,
     OneLineSlope,
     OneLineTrueLength,
     OneLineRightIndentation,
@@ -284,9 +381,31 @@ impl LinesCoordinatorParameters {
         Ok(self)
     }
 
+    /// Override Java's minimum accepted five-line cluster width.
+    ///
+    /// Production parity uses 30 interlines.  Difficult piano pages can carry
+    /// legitimate very short final systems, so an opt-in caller may retain a
+    /// smaller cluster for late staff pairing and bar evidence instead of
+    /// irreversibly discarding it here.
+    pub fn with_minimum_staff_width(
+        mut self,
+        minimum_staff_width: usize,
+    ) -> Result<Self, LinesCoordinatorError> {
+        if minimum_staff_width == 0 {
+            return Err(LinesCoordinatorError::InvalidParameters);
+        }
+        self.minimum_staff_width = minimum_staff_width;
+        Ok(self)
+    }
+
     #[must_use]
     pub const fn global_slope(self) -> f64 {
         self.global_slope
+    }
+
+    #[must_use]
+    pub const fn minimum_staff_width(self) -> usize {
+        self.minimum_staff_width
     }
 }
 
@@ -317,6 +436,65 @@ impl LinesRetrievalResult {
     #[must_use]
     pub fn rejected_clusters(&self) -> &[RejectedCluster] {
         &self.rejected_clusters
+    }
+
+    /// Preserve late five-line hypotheses that ordinary clustering could not
+    /// assemble, then restore deterministic page order and staff identities.
+    pub fn retain_tentative_staffs(
+        &mut self,
+        tentative: impl IntoIterator<Item = StaffCandidate>,
+        global_slope: f64,
+    ) -> Result<(), LinesCoordinatorError> {
+        self.staffs.extend(tentative);
+        let mut ordinates = BTreeMap::new();
+        for (index, staff) in self.staffs.iter().enumerate() {
+            let line = staff
+                .line_filaments()
+                .first()
+                .ok_or(LinesCoordinatorError::InvalidRecoveredCluster)?;
+            let geometry = line.geometry()?;
+            let x = (staff.left() + staff.right()) / 2.0;
+            ordinates.insert(index, geometry.position_at(x)? - (global_slope * x));
+        }
+        let mut indexed = self.staffs.drain(..).enumerate().collect::<Vec<_>>();
+        indexed.sort_by(|(one_index, _), (two_index, _)| {
+            ordinates[one_index].total_cmp(&ordinates[two_index])
+        });
+        self.staffs = indexed
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, mut staff))| {
+                staff.id = index + 1;
+                staff
+            })
+            .collect();
+        Ok(())
+    }
+
+    /// Apply a late staff-hypothesis gate after ordinary and tentative
+    /// retrieval have both had a chance to contribute evidence.
+    ///
+    /// Rejected candidates are returned intact for diagnostics. Survivors are
+    /// renumbered in their already-established page order so every downstream
+    /// GRID structure continues to use compact one-based staff ids.
+    pub fn retain_staff_hypotheses(
+        &mut self,
+        mut predicate: impl FnMut(&StaffCandidate) -> bool,
+    ) -> Vec<StaffCandidate> {
+        let mut retained = Vec::with_capacity(self.staffs.len());
+        let mut rejected = Vec::new();
+        for staff in self.staffs.drain(..) {
+            if predicate(&staff) {
+                retained.push(staff);
+            } else {
+                rejected.push(staff);
+            }
+        }
+        for (index, staff) in retained.iter_mut().enumerate() {
+            staff.id = index + 1;
+        }
+        self.staffs = retained;
+        rejected
     }
 }
 
@@ -393,6 +571,7 @@ fn retrieve_staff_candidates_inner(
     }
 
     let mut rejected_clusters = purge_clusters(&mut located, parameters)?;
+    rejected_clusters.extend(purge_cross_staff_mixtures(&mut located)?);
     sort_by_layout(&mut located, parameters.global_slope)?;
     rejected_clusters.extend(purge_right_indented_one_lines(
         &mut located,
@@ -510,6 +689,55 @@ fn purge_clusters(
         },
     )?;
     Ok(rejected)
+}
+
+/// Reject only fully assembled five-line clusters whose physical spacing is
+/// incompatible with one staff. This runs after all cluster expansion/merge
+/// passes, rather than pruning a filament before the recognizer has had a
+/// chance to complete its hypothesis.
+fn purge_cross_staff_mixtures(
+    clusters: &mut Vec<LocatedCluster>,
+) -> Result<Vec<RejectedCluster>, LinesCoordinatorError> {
+    let mut rejected = Vec::new();
+    retain_with_reason(
+        clusters,
+        &mut rejected,
+        ClusterRejectionReason::CrossStaffMixture,
+        |cluster| five_line_cross_staff_mixture(&cluster.value),
+    )?;
+    Ok(rejected)
+}
+
+fn five_line_cross_staff_mixture(cluster: &LineCluster) -> Result<bool, LinesCoordinatorError> {
+    if cluster.size() != 5 {
+        return Ok(false);
+    }
+    let positions = cluster
+        .lines()
+        .map(|(position, _)| position)
+        .collect::<Vec<_>>();
+    if positions.windows(2).any(|pair| pair[1] != pair[0] + 1) {
+        return Ok(true);
+    }
+
+    let bounds = cluster.bounds()?;
+    let left = bounds.x as f64;
+    let span = bounds.width.saturating_sub(1) as f64;
+    let expected = cluster.interline() as f64;
+    let mut implausible_samples = 0_usize;
+    for fraction in [0.25, 0.5, 0.75] {
+        let x = left + (span * fraction);
+        let ordinates = cluster
+            .lines()
+            .map(|(_, line)| Ok(line.filament().geometry()?.position_at(x)?))
+            .collect::<Result<Vec<_>, LinesCoordinatorError>>()?;
+        let implausible = ordinates.windows(2).any(|pair| {
+            let gap = pair[1] - pair[0];
+            gap <= 0.0 || gap < 0.35 * expected || gap > 2.25 * expected
+        });
+        implausible_samples += usize::from(implausible);
+    }
+    Ok(implausible_samples >= 2)
 }
 
 fn retain_with_reason(
@@ -641,7 +869,7 @@ fn allocate_staffs(
             };
             Ok(StaffCandidate {
                 id: index + 1,
-                source: cluster.id,
+                source: Some(cluster.id),
                 kind,
                 left: starts[starts.len() / 2],
                 right: stops[stops.len() / 2],
@@ -650,6 +878,7 @@ fn allocate_staffs(
                 line_filaments,
                 small: small_interline == Some(cluster.value.interline()),
                 short: false,
+                tentative: false,
             })
         })
         .collect()
@@ -698,10 +927,14 @@ fn y_overlaps(one: (f64, f64), two: (f64, f64)) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub enum LinesCoordinatorError {
     InvalidParameters,
+    InvalidRecoveredCluster,
+    MissingRecoveredFilament(FilamentId),
     MissingSecondaryFilament(FilamentId),
     MissingClusterValue(LocatedClusterId),
+    DuplicateClusterValue(ClusterId),
     Pipeline(ClusterPipelineError),
     Merge(ClusterMergeError),
+    Ownership(ClusterOwnershipError),
     Cluster(LineClusterError),
     Filament(FilamentError),
 }
@@ -718,6 +951,7 @@ macro_rules! coordinator_from {
 
 coordinator_from!(ClusterPipelineError, Pipeline);
 coordinator_from!(ClusterMergeError, Merge);
+coordinator_from!(ClusterOwnershipError, Ownership);
 coordinator_from!(LineClusterError, Cluster);
 coordinator_from!(FilamentError, Filament);
 
@@ -727,6 +961,14 @@ impl fmt::Display for LinesCoordinatorError {
             Self::InvalidParameters => {
                 formatter.write_str("line coordinator parameters are invalid")
             }
+            Self::InvalidRecoveredCluster => {
+                formatter.write_str("recovered staff cluster must contain five distinct lines")
+            }
+            Self::MissingRecoveredFilament(id) => write!(
+                formatter,
+                "recovered staff cluster is missing filament {}",
+                id.value()
+            ),
             Self::MissingSecondaryFilament(id) => write!(
                 formatter,
                 "small-interline pass is missing discarded filament {}",
@@ -738,8 +980,16 @@ impl fmt::Display for LinesCoordinatorError {
                 id.pass,
                 id.cluster.value()
             ),
+            Self::DuplicateClusterValue(id) => {
+                write!(
+                    formatter,
+                    "duplicate recovered cluster value {}",
+                    id.value()
+                )
+            }
             Self::Pipeline(error) => write!(formatter, "cluster pass failed: {error}"),
             Self::Merge(error) => write!(formatter, "cluster layout failed: {error}"),
+            Self::Ownership(error) => write!(formatter, "cluster ownership failed: {error}"),
             Self::Cluster(error) => write!(formatter, "cluster geometry failed: {error}"),
             Self::Filament(error) => write!(formatter, "filament geometry failed: {error}"),
         }
@@ -799,6 +1049,62 @@ mod tests {
         .unwrap()
     }
 
+    fn five_line_cluster(seed: u64, ordinates: [usize; 5]) -> LineCluster {
+        let mut table = RunTable::new(Orientation::Horizontal, 42, 128).unwrap();
+        for y in ordinates {
+            table.add_run(y, Run::new(0, 40)).unwrap();
+        }
+        let source = build_sections(&table, JunctionPolicy::All);
+        let seed_id = FilamentId::new(seed);
+        let mut cluster = LineCluster::new(10, seed_id, filament(10, source[0].clone())).unwrap();
+        for (index, section) in source.into_iter().enumerate().skip(1) {
+            cluster
+                .include_line(
+                    index as i32,
+                    FilamentId::new(seed + index as u64),
+                    filament(10, section),
+                )
+                .unwrap();
+        }
+        cluster
+    }
+
+    #[test]
+    fn five_line_guard_rejects_cross_staff_gap_after_full_clustering() {
+        let good_seed = FilamentId::new(10);
+        let mixed_seed = FilamentId::new(20);
+        let mut located = vec![
+            LocatedCluster {
+                id: LocatedClusterId {
+                    pass: ClusterPass::Main,
+                    cluster: ClusterId::from_seed(good_seed),
+                },
+                value: five_line_cluster(good_seed.value(), [10, 20, 30, 40, 50]),
+            },
+            LocatedCluster {
+                id: LocatedClusterId {
+                    pass: ClusterPass::Main,
+                    cluster: ClusterId::from_seed(mixed_seed),
+                },
+                value: five_line_cluster(mixed_seed.value(), [10, 20, 30, 40, 100]),
+            },
+        ];
+
+        let rejected = purge_cross_staff_mixtures(&mut located).unwrap();
+
+        assert_eq!(located.len(), 1);
+        assert_eq!(located[0].id.cluster(), ClusterId::from_seed(good_seed));
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(
+            rejected[0].source.cluster(),
+            ClusterId::from_seed(mixed_seed)
+        );
+        assert_eq!(
+            rejected[0].reason(),
+            ClusterRejectionReason::CrossStaffMixture
+        );
+    }
+
     #[test]
     fn main_then_small_pass_builds_staffs_in_layout_order() {
         let source = sections();
@@ -847,16 +1153,35 @@ mod tests {
 
         assert!(result.secondary().is_some());
         assert_eq!(result.staffs().len(), 2);
-        assert_eq!(result.staffs()[0].source().pass(), ClusterPass::Small);
+        assert_eq!(
+            result.staffs()[0].source().unwrap().pass(),
+            ClusterPass::Small
+        );
         assert_eq!(result.staffs()[0].kind(), StaffCandidateKind::OneLine);
         assert!(result.staffs()[0].is_small());
         assert_eq!(result.staffs()[0].interline(), 5);
         assert_eq!(secondary.filaments()[&FilamentId::new(1)].interline(), 10);
-        assert_eq!(result.staffs()[1].source().pass(), ClusterPass::Main);
+        assert_eq!(
+            result.staffs()[1].source().unwrap().pass(),
+            ClusterPass::Main
+        );
         assert_eq!(result.staffs()[1].kind(), StaffCandidateKind::Tablature);
         assert!(!result.staffs()[1].is_small());
         assert_eq!(result.staffs()[0].id(), 1);
         assert_eq!(result.staffs()[1].id(), 2);
+    }
+
+    #[test]
+    fn minimum_staff_width_override_is_explicit_and_positive() {
+        let parameters = LinesCoordinatorParameters::new(0.0, 300, None, 1.0, 0.0, 100.0)
+            .unwrap()
+            .with_minimum_staff_width(150)
+            .unwrap();
+        assert_eq!(parameters.minimum_staff_width(), 150);
+        assert_eq!(
+            parameters.with_minimum_staff_width(0),
+            Err(LinesCoordinatorError::InvalidParameters)
+        );
     }
 
     #[test]

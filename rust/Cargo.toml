@@ -45,3 +45,11 @@ opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Production binaries favor throughput over compile time. `target-cpu=native`
+# remains an explicit build flag because committing it here would make release
+# artifacts non-portable across older x86-64 and AArch64 machines.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"

@@ -535,6 +535,7 @@ mod tests {
                 interline: 10,
                 small: false,
                 short: false,
+                tentative: false,
                 lines: vec![line(7, 10)],
             }],
             global_slope: None,

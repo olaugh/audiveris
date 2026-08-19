@@ -29,13 +29,89 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
+On 2026-08-17 the hard-scan GRID path permanently moved its final bar tail to
+the explicit system staff sequence for `recordBars`, `createGroups`, and
+`createParts`; empty surviving-peak sets no longer erase staff ownership.
+Swallowed `ProcessBars` errors now retain their stage and typed cause through
+the public recognition error. Piano pairing uses connector evidence plus a
+conservative geometry fallback, and provisional geometry-only systems defer
+partial-column and extending-peak rejection. Five-line clustering separately
+performs a late multi-position gap-consistency check against cross-staff
+mixtures. Focused image/OMR tests, strict Clippy, formatting, and the full
+workspace suite pass. All 17 formerly fatal Schenker pages and all 613 pages in
+the local edition complete GRID; this is a completion gate, not a recognition
+accuracy result.
+
+On 2026-08-19 the Python barline tuning layer landed as the enhancement module
+`audiveris-image/src/bar_tuning.rs` (bit-exact against its Python oracle on
+124 real-scan systems, Verovio-engraved ground truth at three scales, plus a
+first barline-form classification slice); it is engine-plus-tests only, not
+yet wired into GRID. Status, design decisions, and the remaining
+adapter/wiring milestones are in `docs/barline-tuning-port.md`.
+
+The same checkpoint now recovers dense staffs that comb following had already
+collapsed into one tall composite. It requires a root at least 20 interlines
+wide with one or more strong periodic five-ridge fields, rebuilds thin line
+filaments, checks seven shared-span gap samples, and seeds provisional clusters
+that still run through the normal late validators. Recovered ridges cannot
+re-enter generic comb recursion, and the adapter preserves every unaffected
+frozen comb rather than resampling the page. The reported Schenker Sonata 1 page
+1 regression moves from 11 staves (one bass-only system) to 12 staves / six
+piano systems and restores the system's five paired bar boundaries. The focused
+synthetic regression is
+`overgrown_five_ridge_root_is_split_and_seeded_through_late_validation`.
+
+A second, explicitly tentative path now covers periodic staff fields that
+survive in the horizontal raster but never form a comb cluster. It runs only
+after ordinary clustering, requires five wide near-equidistant ridges, and
+cannot duplicate an accepted staff within two interlines. Tentative staves are
+kept through the real `RawProductionRetrieveLines` and bar tail rather than
+being pruned, while schema-1 JSON marks each staff's `tentative` state and
+`hypothesis_source` and marks every affected system with its tentative staff
+IDs. This restores Schenker Sonata 4 page 3 from 10 staves / 5 systems to 12 / 6
+at native resolution. The 613-page release sweep remains 613/613 complete and
+reports 7,309 staves / 3,673 systems, with 172 tentative staves and 156 tentative
+systems on 126 pages. Against the previous 3,652-system cache, 23 pages gain one
+system and two lose an old spurious split. These hypotheses are downstream
+evidence, not accepted accuracy labels; score them separately until real-scan
+review validates them.
+
 The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
-human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
-and HEADS require `-json` and compose in Java stage order rather than accepting
-invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
+human-readable report remains supported and now identifies tentative staff
+hypotheses and their source; HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS
+require `-json` and compose in Java stage order rather than accepting invented
+downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
 -> LEDGERS -> HEADS, retains every upstream product, and adds identity-free
 final heads, source provenance, exact glyph evidence, beam decisions, and
 tally-scale rows without fabricating Java SIG or glyph IDs.
+
+Ordinary native batch recognition now schedules independent input/PDF pages on
+a hardware-bounded worker set. Input opening and single-image raster decoding
+use that pool as well; their results are restored to argument order before page
+scheduling so the first-error boundary is stable. Each page retains private
+recognition state, a PDF loader is shared immutably rather than reparsed per
+page, and a coordinator publishes reports in original argument/sheet order. A
+four-page GRID integration pin proves `AUDIVERIS_PAGE_THREADS=4` is
+byte-identical to serial execution; a focused scheduler unit proves concurrent
+execution plus ordered collection. `AUDIVERIS_PAGE_THREADS=1` remains the
+diagnostic escape hatch. The interactive `-stream-json` path remains serial so
+its stage timing markers keep their current meaning.
+
+The release profile now enables fat LTO, one codegen unit, and abort-on-panic;
+the documented local throughput build additionally passes
+`-C target-cpu=native` without making portable release artifacts depend on the
+builder's CPU. On the same nine-page GRID batch, two tuned serial runs were
+5.10/5.11 seconds versus the earlier 5.57 seconds, while three automatic
+page-parallel runs were 3.32/3.02/3.03 seconds versus the earlier 3.06 seconds.
+The generated-code tuning therefore helps the serial path but does not materially
+move this already-concurrent batch's wall time. No PGO is used.
+
+On a separate 50-sheet full-size GRID workload with 18 workers, page-only
+parallelism produced five runs of 4.27/4.23/4.25/4.24/4.27 seconds (4.25-second
+median). Parallel input opening/decoding produced 4.06/3.64/3.65/3.63/3.68
+seconds (3.65-second median), a further 14% wall-time reduction with total user
+CPU essentially unchanged near 30.5 seconds. The same files take 24.84 seconds
+with one worker, so the complete parallel path is 6.8x faster on this host.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,

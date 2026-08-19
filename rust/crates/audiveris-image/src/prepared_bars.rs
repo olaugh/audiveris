@@ -15,9 +15,11 @@ use crate::{
         BarsConnectionGroupParameters, BarsCoordinatorError, BarsCoordinatorParameters,
         BarsCoordinatorResult, BarsPurgeParameters, BarsRightCClefParameters, BarsRightEvidence,
         BarsRootEvidence, BarsSystemState, BarsWidthInterParameters, CClefParameters, RemovedPeak,
-        process_bars_after_braces, process_bars_connections_and_groups, process_bars_peak_purges,
+        process_bars_after_braces, process_bars_connections_and_groups,
+        process_bars_left_boundary_reassignment, process_bars_peak_purges,
         process_bars_right_ends_and_c_clefs, process_bars_system,
-        process_bars_through_too_far_left, process_bars_widths_and_inters,
+        process_bars_through_too_far_left, process_bars_weak_unconnected_purge,
+        process_bars_widths_and_inters,
     },
     bars_logic::{ConnectionInterPlan, VerticalInterPlan},
     grid_lifecycle::{GridBuildStage, GridStageFailure},
@@ -109,6 +111,16 @@ pub struct ProductionProcessBars<Upstream> {
     completed_brace_prefixes: Option<Vec<CompletedBracePrefix>>,
     handoff: Option<PreparedBarsHandoff>,
     removals: Vec<(usize, RemovedPeak)>,
+    weak_unconnected_min_grade: Option<f64>,
+    left_boundary_reassignment: bool,
+    deferred_geometry_systems: HashSet<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct StagedSystemPolicy {
+    weak_unconnected_min_grade: Option<f64>,
+    left_boundary_reassignment: bool,
+    defer_geometry_rejection: bool,
 }
 
 /// A system already advanced through `detectBracePortions`, `buildBraces`,
@@ -170,6 +182,9 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             completed_brace_prefixes: None,
             handoff: None,
             removals: Vec::new(),
+            weak_unconnected_min_grade: None,
+            left_boundary_reassignment: false,
+            deferred_geometry_systems: HashSet::new(),
         })
     }
 
@@ -243,6 +258,34 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         self
     }
 
+    /// Enable the fork's weak, unconnected interior-bar rejection. The
+    /// default remains off so the ordinary API retains exact Java parity.
+    #[must_use]
+    pub fn with_weak_unconnected_filter(mut self, minimum_grade: f64) -> Self {
+        self.weak_unconnected_min_grade = Some(minimum_grade);
+        self
+    }
+
+    /// Enable the fork's conservative two-staff left-boundary reassignment.
+    /// The default remains off to preserve Java parity.
+    #[must_use]
+    pub const fn with_left_boundary_reassignment(mut self) -> Self {
+        self.left_boundary_reassignment = true;
+        self
+    }
+
+    /// Delay irreversible partial-column and extension rejection for systems
+    /// whose staff membership remains a provisional geometric hypothesis.
+    /// The candidates remain available to later semantic validation.
+    #[must_use]
+    pub fn with_deferred_geometry_rejection_for_systems(
+        mut self,
+        system_ids: impl IntoIterator<Item = usize>,
+    ) -> Self {
+        self.deferred_geometry_systems.extend(system_ids);
+        self
+    }
+
     #[must_use]
     pub const fn upstream(&self) -> &Upstream {
         &self.upstream
@@ -287,7 +330,13 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         extending: Option<&ExtendingPurge>,
         limits: Option<&StaffLimitRefinement>,
         completed_brace_prefix: Option<&CompletedBracePrefix>,
+        policy: StagedSystemPolicy,
     ) -> Result<BarsCoordinatorResult, BarsCoordinatorError> {
+        let parameters = if policy.defer_geometry_rejection {
+            parameters.with_deferred_partial_column_rejection()
+        } else {
+            parameters
+        };
         let (Some(extending), Some(limits)) = (extending, limits) else {
             return process_bars_system(system, parameters);
         };
@@ -305,8 +354,17 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             (prefix.start_column_index(), removed)
         };
 
+        if policy.left_boundary_reassignment {
+            removed.extend(process_bars_left_boundary_reassignment(
+                system,
+                parameters.interline(),
+            )?);
+        }
+
+        let mut purge_parameters = extending.parameters;
+        purge_parameters.system_hypothesis_stable = !policy.defer_geometry_rejection;
         let purges =
-            process_bars_peak_purges(system, &extending.filament_bounds, extending.parameters)?;
+            process_bars_peak_purges(system, &extending.filament_bounds, purge_parameters)?;
         removed.extend_from_slice(purges.removed_peaks());
 
         let c_clef = parameters.c_clef().unwrap_or(CClefParameters {
@@ -324,6 +382,15 @@ impl<Upstream> ProductionProcessBars<Upstream> {
             },
         )?;
         removed.extend_from_slice(right.removed_peaks());
+
+        if let Some(minimum_grade) = policy.weak_unconnected_min_grade {
+            removed.extend(process_bars_weak_unconnected_purge(
+                system,
+                minimum_grade,
+                parameters.maximum_double_bar_gap(),
+                parameters.interline(),
+            )?);
+        }
 
         // `partitionWidths` and `createInters` need a SIG to register glyphs and
         // inters into. The sheet builds its own from the published plans, so
@@ -387,6 +454,9 @@ impl<Upstream> ProductionProcessBars<Upstream> {
         let limits = self.limits.clone();
         let completed_brace_prefixes = self.completed_brace_prefixes.clone();
         let parameters = self.parameters;
+        let weak_unconnected_min_grade = self.weak_unconnected_min_grade;
+        let left_boundary_reassignment = self.left_boundary_reassignment;
+        let deferred_geometry_systems = self.deferred_geometry_systems.clone();
         for (system_index, system) in self.systems.iter_mut().enumerate() {
             let system_id = system.system_id();
             let result = match Self::staged_system(
@@ -397,6 +467,11 @@ impl<Upstream> ProductionProcessBars<Upstream> {
                 completed_brace_prefixes
                     .as_ref()
                     .and_then(|prefixes| prefixes.get(system_index)),
+                StagedSystemPolicy {
+                    weak_unconnected_min_grade,
+                    left_boundary_reassignment,
+                    defer_geometry_rejection: deferred_geometry_systems.contains(&system_id),
+                },
             ) {
                 Ok(result) => result,
                 Err(source) => {
@@ -804,6 +879,7 @@ mod tests {
                 interline: 10,
                 small: false,
                 short: false,
+                tentative: false,
                 lines: Vec::new(),
             }],
         };
@@ -829,6 +905,7 @@ mod tests {
                     interline: 10,
                     small: false,
                     short: false,
+                    tentative: false,
                     lines: Vec::new(),
                 })
                 .collect(),

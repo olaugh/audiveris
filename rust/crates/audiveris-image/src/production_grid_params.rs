@@ -250,6 +250,7 @@ pub fn production_grid_parameters(
         minimum_delta_y: (scale.interline.min - rint(0.05 * interline)) as isize,
         maximum_delta_y: (scale.interline.max + rint(0.05 * interline)) as isize,
         retrieval,
+        projective_slope: false,
     };
 
     let lines = LinesCoordinatorParameters::new(
@@ -282,6 +283,8 @@ pub fn production_grid_parameters(
             pattern_width: rint(1.0 * interline),
             // patternJitter = rint(0.25 * I)
             pattern_jitter: rint(0.25 * interline),
+            // Downstream extension is opt-in; Java parity remains the default.
+            maximum_terminal_extension_dx: 0,
         },
         include_discarded_filaments: IncludeDiscardedFilamentsParameters {
             scale_interline: interline_px,

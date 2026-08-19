@@ -26,6 +26,7 @@ use crate::{
     raw_line_adapter::{
         RawLineAdapterError, RawPrimaryPassParameters, RawSecondaryPassParameters,
         build_primary_cluster_pass, build_secondary_cluster_pass,
+        recover_tentative_staffs_from_ridges,
     },
     section::Section,
 };
@@ -47,6 +48,9 @@ pub struct PreparedStaff {
     pub interline: usize,
     pub small: bool,
     pub short: bool,
+    /// Late five-line ridge hypothesis. Completion may add ink evidence, but
+    /// its final geometry must remain a jointly constrained staff model.
+    pub tentative: bool,
     pub lines: Vec<PreparedStaffLine>,
 }
 
@@ -148,6 +152,10 @@ pub struct RawProductionRetrieveLines<Downstream> {
     secondary: Option<ClusterPassState>,
     handoff: Option<PreparedStaffHandoff>,
     raw_metadata_handoff: Option<RawLineMetadataHandoff>,
+    /// Staff ids withheld by a late caller-side audit after the same raw line
+    /// retrieval. The lifecycle replay applies these only after ordinary and
+    /// tentative hypotheses have both been constructed.
+    excluded_staff_ids: BTreeSet<usize>,
 }
 
 impl<Downstream> RawProductionRetrieveLines<Downstream> {
@@ -166,7 +174,20 @@ impl<Downstream> RawProductionRetrieveLines<Downstream> {
             secondary: None,
             handoff: None,
             raw_metadata_handoff: None,
+            excluded_staff_ids: BTreeSet::new(),
         }
+    }
+
+    /// Mirror late staff-hypothesis exclusions into the lifecycle replay.
+    ///
+    /// `recognize_grid_lines_raster` derives bar systems before driving the
+    /// Java-compatible GRID decorator chain. The chain deliberately reruns
+    /// line retrieval; supplying the original ids here keeps its prepared
+    /// staff handoff identical to the already-audited system input.
+    #[must_use]
+    pub fn with_excluded_staff_ids(mut self, ids: impl IntoIterator<Item = usize>) -> Self {
+        self.excluded_staff_ids.extend(ids);
+        self
     }
 
     /// Enable Java's lazy small-interline pass while retaining the existing
@@ -364,15 +385,20 @@ where
         let built = build_primary_cluster_pass(lag, self.raw_parameters.clone())
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
         let global_slope = built.global_slope();
+        let mut next_tentative_line_id = built.next_filament_id().value();
         let retained_sloped = built.sloped_filaments().clone();
-        let sloped_ids = built.sloped_ids().to_vec();
+        // Only IDs actually held outside primary clustering belong in the
+        // legacy discarded-filament side channel. Native staff discovery now
+        // defers slope rejection, so this is normally empty even though
+        // `built.sloped_ids()` still reports the diagnostic classification.
+        let retained_sloped_ids = retained_sloped.keys().copied().collect::<Vec<_>>();
         let lines_parameters = self
             .lines_parameters
             .with_global_slope(global_slope)
             .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
         self.primary = Some(built.into_state());
         let primary = self.primary.as_mut().expect("raw pass was just installed");
-        let result = if let Some(parameters) = self.secondary_parameters.clone() {
+        let mut result = if let Some(parameters) = self.secondary_parameters.clone() {
             let preview = preview_cluster_pass(primary).map_err(|error| {
                 GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error))
             })?;
@@ -397,6 +423,19 @@ where
             retrieve_staff_candidates(primary, None, lines_parameters)
         }
         .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        let tentative = recover_tentative_staffs_from_ridges(
+            lag,
+            result.staffs(),
+            &self.raw_parameters,
+            &mut next_tentative_line_id,
+        )
+        .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Raw(error)))?;
+        result
+            .retain_tentative_staffs(tentative, global_slope)
+            .map_err(|error| GridStageFailure::Other(ProductionRetrieveLinesError::Lines(error)))?;
+        if !self.excluded_staff_ids.is_empty() {
+            result.retain_staff_hypotheses(|staff| !self.excluded_staff_ids.contains(&staff.id()));
+        }
         self.raw_metadata_handoff = Some(
             build_raw_metadata_handoff(
                 global_slope,
@@ -406,7 +445,7 @@ where
                     .map(crate::cluster_pipeline::ClusterRetrievalResult::discarded_filaments),
                 primary,
                 self.secondary.as_ref(),
-                &sloped_ids,
+                &retained_sloped_ids,
                 &retained_sloped,
             )
             .map_err(GridStageFailure::Other)?,
@@ -586,7 +625,53 @@ fn materialize_staffs<DownstreamError>(
                 actual: candidate.id(),
             });
         }
-        let pass = match candidate.source().pass() {
+        if candidate.source().is_none() {
+            let mut lines = Vec::with_capacity(candidate.line_ids().len());
+            for (cluster_position, (&id, filament)) in candidate
+                .line_ids()
+                .iter()
+                .zip(candidate.line_filaments())
+                .enumerate()
+            {
+                if !seen_filaments.insert(id) {
+                    return Err(ProductionRetrieveLinesError::DuplicateFilamentId(id));
+                }
+                for section in filament.sections() {
+                    let registered = lag_sections.get(&section.id()).ok_or(
+                        ProductionRetrieveLinesError::UnknownLagSection {
+                            filament: id,
+                            section: section.id(),
+                        },
+                    )?;
+                    if *registered != section {
+                        return Err(ProductionRetrieveLinesError::LagSectionMismatch {
+                            filament: id,
+                            section: section.id(),
+                        });
+                    }
+                }
+                lines.push(PreparedStaffLine {
+                    id: usize::try_from(id.value())
+                        .map_err(|_| ProductionRetrieveLinesError::FilamentIdOverflow(id))?,
+                    cluster_position: cluster_position as i32,
+                    filament: filament.clone(),
+                });
+            }
+            staffs.push(PreparedStaff {
+                id: candidate.id(),
+                kind: candidate.kind(),
+                left: candidate.left(),
+                right: candidate.right(),
+                interline: candidate.interline(),
+                small: candidate.is_small(),
+                short: candidate.is_short(),
+                tentative: candidate.is_tentative(),
+                lines,
+            });
+            continue;
+        }
+        let source = candidate.source().expect("checked tentative source");
+        let pass = match source.pass() {
             ClusterPass::Main => primary,
             ClusterPass::Small => {
                 secondary.ok_or(ProductionRetrieveLinesError::MissingCandidateCluster {
@@ -594,7 +679,7 @@ fn materialize_staffs<DownstreamError>(
                 })?
             }
         };
-        let cluster = pass.clusters().get(&candidate.source().cluster()).ok_or(
+        let cluster = pass.clusters().get(&source.cluster()).ok_or(
             ProductionRetrieveLinesError::MissingCandidateCluster {
                 candidate: candidate.id(),
             },
@@ -614,7 +699,7 @@ fn materialize_staffs<DownstreamError>(
             if !seen_filaments.insert(id) {
                 return Err(ProductionRetrieveLinesError::DuplicateFilamentId(id));
             }
-            if candidate.source().pass() == ClusterPass::Main
+            if source.pass() == ClusterPass::Main
                 && line.filament().interline() != candidate.interline()
             {
                 return Err(ProductionRetrieveLinesError::InterlineMismatch {
@@ -651,6 +736,7 @@ fn materialize_staffs<DownstreamError>(
             interline: candidate.interline(),
             small: candidate.is_small(),
             short: candidate.is_short(),
+            tentative: candidate.is_tentative(),
             lines,
         });
     }
@@ -788,6 +874,7 @@ mod tests {
             minimum_delta_y: 9,
             maximum_delta_y: 11,
             retrieval,
+            projective_slope: false,
         }
     }
 
@@ -971,6 +1058,34 @@ mod tests {
         let metadata = builder.stages().raw_metadata_handoff().unwrap();
         assert!(metadata.final_discarded_filaments.is_empty());
         assert!(metadata.sloped_filaments.is_empty());
+    }
+
+    #[test]
+    fn late_staff_exclusion_is_replayed_before_prepared_handoff() {
+        let stages = RawProductionRetrieveLines::new(
+            raw_parameters(),
+            lines_parameters(),
+            Downstream::default(),
+        )
+        .with_small_interline(small_parameters())
+        .with_excluded_staff_ids([2]);
+        let mut builder = HeadlessRasterGridBuilder::new(
+            mixed_main_and_small_source(),
+            raster_parameters(),
+            stages,
+        );
+
+        assert_eq!(
+            build_grid_info(&mut builder),
+            Ok(GridBuildOutcome::Completed)
+        );
+        let handoff = builder
+            .stages()
+            .prepared_staff_handoff()
+            .expect("filtered prepared staff handoff");
+        assert_eq!(handoff.staffs.len(), 1);
+        assert_eq!(handoff.staffs[0].id, 1);
+        assert!(!handoff.staffs[0].small);
     }
 
     #[test]
