@@ -146,7 +146,10 @@ fn extended_ledger_pitches_recover_page9_run_peaks() {
 #[ignore = "manual probe; needs AUDIVERIS_SCHENKER_PAGES and AUDIVERIS_PROBE_SPEC"]
 fn probe_range_scan_lattice() {
     let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
-    let spec = std::env::var("AUDIVERIS_PROBE_SPEC").expect("AUDIVERIS_PROBE_SPEC");
+    let Ok(spec) = std::env::var("AUDIVERIS_PROBE_SPEC") else {
+        eprintln!("skipping: AUDIVERIS_PROBE_SPEC unset (manual probe)");
+        return;
+    };
     let parts: Vec<&str> = spec.split(',').collect();
     let (page_name, staff_id, x_min, x_max) = (
         parts[0],
@@ -211,4 +214,68 @@ fn probe_range_scan_lattice() {
             }
         }
     }
+}
+
+/// Page 7 staff 3: dense 32nd-run ink broke staff-line stitching at x=468
+/// while its system siblings reach 719, blinding head lookup to the whole
+/// right half (the m25 run of 18 notes). With
+/// `AUDIVERIS_EXTEND_SHORT_STAFF_LINES` (set by the invocation env) the lines
+/// extend to the system edge and the run must resolve.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn extended_staff_lines_recover_page7_run() {
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-07.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let staff3 = grid
+        .peak_graph
+        .sheet_staffs
+        .iter()
+        .find(|staff| staff.id == 3)
+        .expect("staff 3");
+    assert!(
+        staff3.right > 700.0,
+        "staff 3 lines must extend to the system edge, got {}",
+        staff3.right
+    );
+
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid, &headers, &stem_seeds, &beams, &ledgers,
+    )
+    .expect("HEADS");
+
+    let epilog = &heads.epilog;
+    let mut strong = 0;
+    for system in &epilog.systems {
+        if system.system_id != 2 {
+            continue;
+        }
+        let staff_system = epilog
+            .staff_epilog
+            .systems
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .expect("staff epilog system 2");
+        for reference in &system.final_heads {
+            let head = &staff_system.staffs[reference.staff_index].heads[reference.head_index];
+            let bounds = head.bounds;
+            if (465..=712).contains(&bounds.x)
+                && (245..=285).contains(&bounds.y)
+                && head.grade() >= 0.6
+            {
+                strong += 1;
+            }
+        }
+    }
+    assert!(
+        strong >= 15,
+        "the m25 32nd run must resolve strongly across the recovered half, found {strong}"
+    );
 }

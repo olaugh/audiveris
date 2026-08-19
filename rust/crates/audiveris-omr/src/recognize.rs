@@ -4178,7 +4178,7 @@ pub fn recognize_grid_lines_raster_with_scale_options(
             )
         });
 
-    Ok(GridLinesRecognition {
+    let mut recognition = GridLinesRecognition {
         scale: scale_recognition,
         global_slope,
         bar_projection_staff_edge_slope: staff_edge_recovery_model.map(|model| model.at_x_zero),
@@ -4197,7 +4197,137 @@ pub fn recognize_grid_lines_raster_with_scale_options(
         page_geometry,
         staff_lines: staff_line_geometry,
         tuned_barlines,
-    })
+    };
+    if extend_short_staff_lines_enabled() {
+        extend_short_staff_lines(&mut recognition);
+    }
+    Ok(recognition)
+}
+
+/// `AUDIVERIS_EXTEND_SHORT_STAFF_LINES` gate (enhancement, default OFF).
+#[must_use]
+fn extend_short_staff_lines_enabled() -> bool {
+    std::env::var("AUDIVERIS_EXTEND_SHORT_STAFF_LINES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+/// Enhancement (gated): a staff whose lines stop well short of its system
+/// siblings' right edge is blind there for every downstream stage -- head
+/// scan ranges, ledger zones, and header asks all derive from these lines
+/// (Schenker page 7 staff 3 ends at x=468 where dense 32nd-run ink broke
+/// line stitching; its system siblings reach 719, and 18 noteheads live in
+/// the difference). Each short line is extended straight along its endpoint
+/// slope to the system's right edge. Left edges are deliberately untouched:
+/// headers anchor there.
+fn extend_short_staff_lines(recognition: &mut GridLinesRecognition) {
+    let interline = f64::from(recognition.scale.scale.interline.main);
+    let systems = recognition.peak_graph.systems.clone();
+    for system_staff_ids in &systems {
+        let target_right = system_staff_ids
+            .iter()
+            .filter_map(|id| {
+                recognition
+                    .peak_graph
+                    .sheet_staffs
+                    .iter()
+                    .find(|staff| staff.id == *id)
+                    .map(|staff| staff.right)
+            })
+            .fold(f64::MIN, f64::max);
+        if target_right == f64::MIN {
+            continue;
+        }
+        for &staff_id in system_staff_ids {
+            let Some(staff) = recognition
+                .peak_graph
+                .sheet_staffs
+                .iter_mut()
+                .find(|staff| staff.id == staff_id)
+            else {
+                continue;
+            };
+            if staff.right >= target_right - 2.0 * interline {
+                continue;
+            }
+            for line in &mut staff.lines {
+                if let crate::grid_executor::HeadlessStaffLine::Persistent { line, .. } = line {
+                    extend_points_to(&mut line.points, target_right);
+                }
+            }
+            staff.right = target_right;
+            if let Some(geometry) = recognition
+                .staff_lines
+                .iter_mut()
+                .find(|geometry| geometry.staff_id == staff_id)
+            {
+                geometry.right = target_right.round_ties_even() as i32;
+                for boundary in [&mut geometry.first_line, &mut geometry.last_line] {
+                    extend_boundary_to(boundary, target_right);
+                }
+            }
+            if let Some(candidate) = recognition
+                .staves
+                .iter_mut()
+                .find(|candidate| candidate.id == staff_id)
+            {
+                candidate.right = target_right;
+            }
+        }
+    }
+}
+
+/// Append a linearly extrapolated defining point at `target_x`, following
+/// the slope of the last two existing points.
+fn extend_points_to(points: &mut Vec<(f64, f64)>, target_x: f64) {
+    let Some(&(last_x, last_y)) = points.last() else {
+        return;
+    };
+    if target_x <= last_x {
+        return;
+    }
+    let slope = points
+        .len()
+        .checked_sub(2)
+        .map(|index| points[index])
+        .filter(|(previous_x, _)| (last_x - previous_x).abs() > f64::EPSILON)
+        .map_or(0.0, |(previous_x, previous_y)| {
+            (last_y - previous_y) / (last_x - previous_x)
+        });
+    points.push((target_x, last_y + slope * (target_x - last_x)));
+}
+
+/// Append a straight boundary segment from the spline's end to `target_x`,
+/// following the last segment's chord slope.
+fn extend_boundary_to(
+    boundary: &mut audiveris_image::system_population::StaffBoundary,
+    target_x: f64,
+) {
+    use audiveris_image::system_population::BoundarySegment;
+    let Some(last) = boundary.segments.last().copied() else {
+        return;
+    };
+    let (start_x, start_y) = match last {
+        BoundarySegment::Line { start, .. }
+        | BoundarySegment::Quadratic { start, .. }
+        | BoundarySegment::Cubic { start, .. } => start,
+    };
+    let (end_x, end_y) = match last {
+        BoundarySegment::Line { end, .. }
+        | BoundarySegment::Quadratic { end, .. }
+        | BoundarySegment::Cubic { end, .. } => end,
+    };
+    if target_x <= end_x {
+        return;
+    }
+    let slope = if (end_x - start_x).abs() > f64::EPSILON {
+        (end_y - start_y) / (end_x - start_x)
+    } else {
+        0.0
+    };
+    boundary.segments.push(BoundarySegment::Line {
+        start: (end_x, end_y),
+        end: (target_x, end_y + slope * (target_x - end_x)),
+    });
 }
 
 /// One staff's geometry at full precision, for building system areas.
