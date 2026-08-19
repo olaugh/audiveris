@@ -9806,6 +9806,44 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert!(order32_continuation.closed_s_linkers.is_empty());
 
+    // Boundary 59: order 33 is a generic prelinked closure.
+    let order33_continuation = continue_native_stems_head_linking_phase1(
+        &order32_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order33 prelinked closure");
+    assert_eq!(order33_continuation.processed_head.x_ordinal, 88);
+    assert_eq!(order33_continuation.processed_head.sig_ordinal, 84);
+    assert_eq!(order33_continuation.returned_linked, Some(true));
+    assert_eq!(order33_continuation.closed_value_changes, 2);
+    assert_eq!(order33_continuation.state_after.current_index, 34);
+    assert!(order33_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order33_continuation.state_after.heads[34]
+            .reference
+            .x_ordinal,
+        2
+    );
+    assert_eq!(
+        order33_continuation.state_after.heads[34]
+            .reference
+            .sig_ordinal,
+        36
+    );
+    assert_eq!(
+        order33_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (87, NativeStemHeadSide::Left),
+            (87, NativeStemHeadSide::Right)
+        ]
+    );
+
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
     let mut invalid_order18 = order18_frontier_before.clone();
@@ -13863,6 +13901,112 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v32_summary, "javaEvidence"),
         "ReturnedBeforeThirtyThirdHead"
+    );
+
+    // Boundary 59 expected-only v33 rows cover the next prelinked closure.
+    let v33_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v33.txt"),
+    )
+    .expect("expected-only order33 continuation fixture");
+    assert_eq!(
+        sha256_hex(v33_text.as_bytes()),
+        "a058341d3f661be4a677206c7a067f39a0785ae5adeed96be7d7073541fe2982"
+    );
+    let v33_rows = v33_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v33_rows.len(), 8);
+    let v33_body = format!("{}\n", v33_rows[..7].join("\n"));
+    assert_eq!(
+        sha256_hex(v33_body.as_bytes()),
+        "2c212c41b06dc509b217ced1e3c0bedfd6c538f3684a705eeafc3e60ff33aed4"
+    );
+    let v33_java = v33_rows[6];
+    assert_eq!(head_field(v33_java, "headOrder"), "33");
+    assert_eq!(head_field(v33_java, "headX"), "88");
+    assert_eq!(head_field(v33_java, "headSig"), "84");
+    assert_eq!(head_field(v33_java, "headInterId"), "1457");
+    assert_eq!(
+        head_field(v33_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(
+        head_field(v33_java, "incident"),
+        "[stem2367:headSideLEFT:heads[x87:sig83:id1455:sideLEFT,x88:sig84:id1457:sideLEFT]]"
+    );
+    assert_eq!(
+        head_field(v33_java, "closureWrites"),
+        "[x87:sig83:LEFT:false->true,x87:sig83:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(v33_java, "closedValueChanges"), "2");
+    assert_eq!(head_field(v33_java, "sigVerticesAfter"), "683");
+    assert_eq!(head_field(v33_java, "sigEdgesAfter"), "694");
+    assert_eq!(head_field(v33_java, "systemStemsAfter"), "44");
+    assert_eq!(
+        head_field(v33_java, "relationStateHashAfter"),
+        "c6dec8e3b73e751d8b552b377dd3fa2289d59644cda1674f4ff594247cbf60dd"
+    );
+    assert_eq!(
+        head_field(v33_java, "linkerStateHashAfter"),
+        "f9fad7a380bdd0b2796220aa59cfda4f1ecbf17fe806b0abb8cc2838e9761f61"
+    );
+    assert_eq!(head_field(v33_java, "nextHeadOrder"), "34");
+    assert_eq!(head_field(v33_java, "nextHeadX"), "2");
+    assert_eq!(head_field(v33_java, "nextHeadSig"), "36");
+    assert_eq!(head_field(v33_java, "nextHeadInterId"), "1357");
+    assert_eq!(head_field(v33_java, "terminal"), "ReturnedBeforeNextHead");
+    let v33_summary = v33_rows[7];
+    assert_eq!(
+        head_field(v33_summary, "schema"),
+        "stems-head-phase-prefix-v33"
+    );
+    assert_eq!(head_field(v33_summary, "rows"), "7");
+    assert_eq!(
+        head_field(v33_summary, "baseProbeSourceSha256"),
+        "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf"
+    );
+    assert_eq!(
+        head_field(v33_summary, "baseV32RunnerSourceSha256"),
+        "fecd661b0c9b9e03f17c9eba3482a86b7f2ae381e49ac93bbbcbfea4756c3cd8"
+    );
+    assert_eq!(
+        head_field(v33_summary, "baseV32FixtureSha256"),
+        "cceda3e1b00ccf9e4ca5f701c71a0a4da4e764488e192bf056ea645f11ad72c4"
+    );
+    assert_eq!(
+        head_field(v33_summary, "fragmentSourceSha256"),
+        "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c"
+    );
+    assert_eq!(
+        head_field(v33_summary, "probeSourceSha256"),
+        "2e4a07c2efbdf0e43bb92f9bd6213cd6faf3e2a0e39eed610f11e13e15e42d72"
+    );
+    assert_eq!(
+        head_field(v33_summary, "runnerSourceSha256"),
+        "472e88ea561df7db9280c5ec79a2ea8a5204783d3ffec8894455adcf5b342692"
+    );
+    assert_eq!(
+        head_field(v33_summary, "emittedBodySha256"),
+        "2c212c41b06dc509b217ced1e3c0bedfd6c538f3684a705eeafc3e60ff33aed4"
+    );
+    assert_eq!(
+        head_field(v33_summary, "semanticPassSha256"),
+        "8aec2db3857f6d2d8dc60bdb381ce3cfb8a16a1e441efd348854489bbcc53b43"
+    );
+    assert_eq!(
+        head_field(v33_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v33_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v33_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v33_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder33PrelinkedClosure"
+    );
+    assert_eq!(
+        head_field(v33_summary, "javaEvidence"),
+        "ReturnedBeforeThirtyFourthHead"
     );
 
     let all_siblings = std::iter::once(&actual)
