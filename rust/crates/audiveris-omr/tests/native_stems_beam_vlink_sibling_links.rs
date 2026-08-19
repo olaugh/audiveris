@@ -8632,6 +8632,54 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("order9 closure target");
     assert!(closed_x41.sides.iter().all(|cell| cell.closed));
 
+    // Boundary 36: order 10 remains prelinked-success. Stem 2346 closes x64
+    // on both sides before x46/SIG57.
+    let order10_before = (*order9_continuation.state_after).clone();
+    let order10_continuation = continue_native_stems_head_linking_phase1(
+        &order9_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order10 prelinked continuation");
+    assert_eq!(*order9_continuation.state_after, order10_before);
+    assert_eq!(order10_continuation.processed_head.x_ordinal, 65);
+    assert_eq!(order10_continuation.processed_head.sig_ordinal, 95);
+    assert_eq!(order10_continuation.returned_linked, Some(true));
+    assert_eq!(order10_continuation.closed_value_changes, 2);
+    assert_eq!(
+        order10_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (64, NativeStemHeadSide::Left),
+            (64, NativeStemHeadSide::Right)
+        ]
+    );
+    assert_eq!(order10_continuation.state_after.current_index, 11);
+    assert!(order10_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order10_continuation.state_after.heads[11]
+            .reference
+            .x_ordinal,
+        46
+    );
+    assert_eq!(
+        order10_continuation.state_after.heads[11]
+            .reference
+            .sig_ordinal,
+        57
+    );
+    let closed_x64 = order10_continuation
+        .state_after
+        .heads
+        .iter()
+        .find(|head| head.reference.x_ordinal == 64)
+        .expect("order10 closure target");
+    assert!(closed_x64.sides.iter().all(|cell| cell.closed));
+
     let mut invalid_order7 = seventh_frontier_before.clone();
     invalid_order7.current_index = 6;
     let invalid_order7_before = invalid_order7.clone();
@@ -9987,6 +10035,129 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v9_summary, "javaEvidence"),
         "ReturnedBeforeEleventhHead"
+    );
+
+    // Boundary 36 expected-only v10 rows pin order-10's unchanged
+    // prelinked continuation and its two ordered closure writes.
+    let v10_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v10.txt"),
+    )
+    .expect("expected-only order10 head continuation fixture");
+    assert_eq!(
+        sha256_hex(v10_text.as_bytes()),
+        "7b0bf32fcf75cf792eb67c2c8a52ae9702de215078a54bea7edc7cde853869d0"
+    );
+    let v10_rows = v10_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v10_rows.len(), 19);
+    let v10_body = format!("{}\n", v10_rows[..18].join("\n"));
+    assert_eq!(
+        sha256_hex(v10_body.as_bytes()),
+        "cbab4a06edd591e068007152dbb623d206a29c450aa2f9a153c75010fa184658"
+    );
+    let v10_java = v10_rows[17];
+    assert_eq!(head_field(v10_java, "headOrder"), "10");
+    assert_eq!(head_field(v10_java, "headX"), "65");
+    assert_eq!(head_field(v10_java, "headSig"), "95");
+    assert_eq!(head_field(v10_java, "headInterId"), "1479");
+    assert_eq!(
+        head_field(v10_java, "grade"),
+        "0x1.85b7d8115ac0dp-1/3fe85b7d8115ac0d"
+    );
+    assert_eq!(
+        head_field(v10_java, "sidesBefore"),
+        "[LEFT:true:false,RIGHT:false:false]"
+    );
+    assert_eq!(
+        head_field(v10_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(
+        head_field(v10_java, "incident"),
+        "[stem2346:headSideLEFT:heads[x64:sig94:id1477:sideLEFT,x65:sig95:id1479:sideLEFT]]"
+    );
+    assert_eq!(head_field(v10_java, "returned"), "true");
+    assert_eq!(
+        head_field(v10_java, "closureWrites"),
+        "[x64:sig94:LEFT:false->true,x64:sig94:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(v10_java, "closedValueChanges"), "2");
+    assert_eq!(head_field(v10_java, "unlinkedCount"), "0");
+    assert_eq!(head_field(v10_java, "sigVerticesBefore"), "680");
+    assert_eq!(head_field(v10_java, "sigVerticesAfter"), "680");
+    assert_eq!(head_field(v10_java, "sigEdgesBefore"), "691");
+    assert_eq!(head_field(v10_java, "sigEdgesAfter"), "691");
+    assert_eq!(head_field(v10_java, "systemStemsBefore"), "41");
+    assert_eq!(head_field(v10_java, "systemStemsAfter"), "41");
+    assert_eq!(
+        head_field(v10_java, "relationStateHashAfter"),
+        "5418e578e4046d8d162f5f584d8969c2b4a7d447f73009b5bed39fd0ea739e44"
+    );
+    assert_eq!(
+        head_field(v10_java, "linkerStateHashAfter"),
+        "5f019c1fbcb69e64f83a6eeef4d78d474a3092b4c6201ecae7c17c597acdd4cf"
+    );
+    assert_eq!(head_field(v10_java, "nextHeadOrder"), "11");
+    assert_eq!(head_field(v10_java, "nextHeadX"), "46");
+    assert_eq!(head_field(v10_java, "nextHeadSig"), "57");
+    assert_eq!(head_field(v10_java, "nextHeadInterId"), "1403");
+    assert_eq!(
+        head_field(v10_java, "nextGrade"),
+        "0x1.85b4639064df8p-1/3fe85b4639064df8"
+    );
+    assert_eq!(head_field(v10_java, "terminal"), "ReturnedBeforeNextHead");
+    let v10_summary = v10_rows[18];
+    assert_eq!(
+        head_field(v10_summary, "schema"),
+        "stems-head-phase-prefix-v10"
+    );
+    assert_eq!(head_field(v10_summary, "rows"), "18");
+    assert_eq!(
+        head_field(v10_summary, "baseProbeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active shared base head-phase probe")
+        )
+    );
+    assert_eq!(
+        head_field(v10_summary, "baseV9RunnerSourceSha256"),
+        "368724efe73e194aff024d68204d758d089d81511e9bbfaa4dfb9ef9516f4c48"
+    );
+    assert_eq!(
+        head_field(v10_summary, "baseV9FixtureSha256"),
+        "b0d3c67f9b76a56a528d8a962f3f2bc54710616f2e86650ac8500e750534ff2c"
+    );
+    assert_eq!(
+        head_field(v10_summary, "probeSourceSha256"),
+        "e7cf9dd3ceed19c3e387eabffb587005acb01725434776fe39501605ce4cd4af"
+    );
+    assert_eq!(
+        head_field(v10_summary, "runnerSourceSha256"),
+        "ddf5b4c3f6d726c3e7d91de33d077930ff29254f1e7e84751ee391614978c464"
+    );
+    assert_eq!(
+        head_field(v10_summary, "emittedBodySha256"),
+        "cbab4a06edd591e068007152dbb623d206a29c450aa2f9a153c75010fa184658"
+    );
+    assert_eq!(
+        head_field(v10_summary, "semanticPassSha256"),
+        "d5cd5dbed69852e48add157efd936ba8501879c30a023e730e0825c38825b712"
+    );
+    assert_eq!(
+        head_field(v10_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v10_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v10_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v10_summary, "nativeScope"),
+        "ReturnedOrder10HeadContinuation"
+    );
+    assert_eq!(
+        head_field(v10_summary, "javaEvidence"),
+        "ReturnedBeforeTwelfthHead"
     );
 
     let all_siblings = std::iter::once(&actual)

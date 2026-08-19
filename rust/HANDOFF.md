@@ -4941,6 +4941,22 @@ transformed probe, emitted body, and semantic pass are
 Actually-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
 coverage remain open.
 
+## Boundary 36: tenth prelinked head continuation
+
+Boundary 36 reuses the unchanged continuation at head order 10 (x65 / SIG 95 / Java
+Inter 1479). LEFT is prelinked and RIGHT is `Neither`; shared Stem 2346 closes x64
+LEFT then RIGHT, with two ordered value changes and no unlinked insertion. SIG remains
+680/691 and Stem bindings remain 41; native reaches `current_index=11` before x46 /
+SIG 57 / Java Inter 1403. The v10 fixture is SHA-256
+`7b0bf32fcf75cf792eb67c2c8a52ae9702de215078a54bea7edc7cde853869d0`; runner,
+transformed probe, emitted body, and semantic pass are
+`ddf5b4c3f6d726c3e7d91de33d077930ff29254f1e7e84751ee391614978c464`,
+`e7cf9dd3ceed19c3e387eabffb587005acb01725434776fe39501605ce4cd4af`,
+`cbab4a06edd591e068007152dbb623d206a29c450aa2f9a153c75010fa184658`, and
+`d5cd5dbed69852e48add157efd936ba8501879c30a023e730e0825c38825b712`.
+Actual-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.

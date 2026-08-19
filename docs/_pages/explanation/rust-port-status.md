@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first thirty-five semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, the thirtieth through thirty-second carry three further prelinked-success heads to index 6, the thirty-third consumes the first later BottomOnly head C-link to index 8, the thirty-fourth carries the next prelinked-success head to index 9, and the thirty-fifth carries the next prelinked-success head to index 10).
+The first thirty-six semantic `STEMS` boundaries are production-shaped and graded (the eighteenth through twentieth under the fast-evidence policy documented in `rust/PORTING.md`; the twenty-first through twenty-fifth use fresh post-SIDES JVM fixtures, with the twenty-third and twenty-fourth adding later-frontier evidence for unchanged production code and the twenty-fifth adding a bounded atomic STUMPS driver; the twenty-sixth removes and resumes past one real competing hook from an explicitly reconstructed Allegretto checkpoint; the twenty-seventh enters the first typed post-STUMPS head frontier, the twenty-eighth atomically applies its bounded single-item, nonrecursive `CreatedChecked` mutation, the twenty-ninth carries the next two prelinked-success heads plus their ordered shared-stem closure writes, the thirtieth through thirty-second carry three further prelinked-success heads to index 6, the thirty-third consumes the first later BottomOnly head C-link to index 8, the thirty-fourth carries the next prelinked-success head to index 9, the thirty-fifth carries the next prelinked-success head to index 10, and the thirty-sixth carries the next prelinked-success head to index 11).
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1144,6 +1144,18 @@ queue changes. Claims here stay deliberately short and must point back to exact
 tests or oracle counts in [`rust/PORTING.md`][porting] and
 [`rust/HANDOFF.md`][handoff]. A stage moves to **Native and graded** only when it
 consumes native upstream state and the oracle is a grader rather than an input.
+
+[Boundary 36] extends the same prelinked-success continuation to head order 10 (x65 / SIG
+95 / Inter 1479). Shared Stem 2346 closes x64 LEFT then RIGHT, two ordered writes,
+without adding SIG vertices, edges, or system stems; native reaches `current_index=11`
+before x46 / SIG 57 / Inter 1403. The v10 fixture SHA-256 is
+`7b0bf32fcf75cf792eb67c2c8a52ae9702de215078a54bea7edc7cde853869d0`, with
+runner/probe/body/semantic pins `ddf5b4c3f6d726c3e7d91de33d077930ff29254f1e7e84751ee391614978c464`,
+`e7cf9dd3ceed19c3e387eabffb587005acb01725434776fe39501605ce4cd4af`,
+`cbab4a06edd591e068007152dbb623d206a29c450aa2f9a153c75010fa184658`, and
+`d5cd5dbed69852e48add157efd936ba8501879c30a023e730e0825c38825b712`.
+Actually-unlinked/retry, phase-2 append, later C-link shapes, and broader corpus/system
+coverage remain open.
 
 [Boundary 35] extends the same prelinked-success continuation to head order 9 (x42 / SIG
 93 / Inter 1475). Shared Stem 2352 closes x41 LEFT then RIGHT, two ordered writes,

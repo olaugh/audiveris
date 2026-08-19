@@ -263,3 +263,14 @@ transformed probe, emitted body, and semantic pass are
 `caf6a7f25cc36cbe7480c7cb798a8c900bbd526fa7e4071d625724045bb88af5`,
 `dbe0a891add7c613c340dfaee983a75c97b20cba4744ca19619e10cd9f7a78f5`, and
 `8e271204197c0d84afe4948a94f6723f6a419cd9611495aa8ca74fb7731bbf95`.
+
+Boundary 36 reuses the continuation for head order 10 (x65 / SIG 95 / Java Inter
+1479). Shared Stem 2346 closes x64 LEFT then RIGHT, two ordered writes with no
+unlinked head; native keeps SIG 680/691 and Stem bindings 41 and reaches
+`current_index=11` before x46 / SIG 57 / Java Inter 1403. The v10 fixture SHA-256 is
+`7b0bf32fcf75cf792eb67c2c8a52ae9702de215078a54bea7edc7cde853869d0`; runner,
+transformed probe, emitted body, and semantic pass are
+`ddf5b4c3f6d726c3e7d91de33d077930ff29254f1e7e84751ee391614978c464`,
+`e7cf9dd3ceed19c3e387eabffb587005acb01725434776fe39501605ce4cd4af`,
+`cbab4a06edd591e068007152dbb623d206a29c450aa2f9a153c75010fa184658`, and
+`d5cd5dbed69852e48add157efd936ba8501879c30a023e730e0825c38825b712`.
