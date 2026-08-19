@@ -9,6 +9,7 @@ pub mod bar_column;
 pub mod bar_connections;
 pub mod bar_splits;
 pub mod bar_sticks;
+pub mod bar_tuning;
 pub mod bars_coordinator;
 pub mod bars_logic;
 pub mod beam_extension;

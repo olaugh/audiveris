@@ -30,6 +30,27 @@ impl GrayRaster {
         }
     }
 
+    /// Builds a raster directly from raw grayscale bytes.
+    ///
+    /// Intended for synthetic fixtures and parity harnesses; production
+    /// ingestion goes through [`GrayRaster::from_dynamic`].
+    ///
+    /// # Panics
+    /// Panics when `pixels.len() != width * height`.
+    #[must_use]
+    pub fn from_raw_parts(width: usize, height: usize, pixels: Vec<u8>) -> Self {
+        assert_eq!(
+            pixels.len(),
+            width * height,
+            "raster dimensions match buffer"
+        );
+        Self {
+            width,
+            height,
+            pixels,
+        }
+    }
+
     #[must_use]
     pub const fn width(&self) -> usize {
         self.width
