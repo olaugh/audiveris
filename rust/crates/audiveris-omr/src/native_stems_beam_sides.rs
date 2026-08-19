@@ -1413,6 +1413,42 @@ pub fn advance_native_stems_head_continuation_c_link_order34(
     )
 }
 
+/// Execute the bounded continuation C-link at order 36.
+///
+/// x23/SIG14 selects LEFT/BOTTOM, reuses active glyph 324, creates
+/// StemInter 2385, and advances the queue to order 37.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_continuation_c_link_order36(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_continuation_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        36,
+        23,
+        14,
+        0,
+        0,
+        "order36",
+    )
+}
+
 /// Reconcile the bounded existing-stem retry at order 21.
 ///
 /// x28/SIG55 selects LEFT/BOTTOM against existing StemInter 2378. Java does
