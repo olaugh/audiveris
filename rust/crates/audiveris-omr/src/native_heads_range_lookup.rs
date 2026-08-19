@@ -1353,6 +1353,7 @@ fn search_shape(
             });
             best_updates += 1;
         } else if y == y0
+            && !crate::beam_veto::soft_head_blocks_enabled()
             && distance.is_none_or(|distance| distance >= input.parameters.really_bad_distance)
         {
             performance.nominal_abandons += 1;

@@ -26,6 +26,23 @@ pub fn credible_beam_vetoes_enabled() -> bool {
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
+/// `AUDIVERIS_SOFT_HEAD_BLOCKS` gate (enhancement, default OFF).
+///
+/// Java's head lookups abandon an entire search when the nominal location is
+/// blocked by a competitor inter or scores hopelessly: a head whose ideal spot
+/// is grazed by its own beam is never evaluated anywhere else. Under this
+/// gate the nominal block only skips that one offset and exploration
+/// continues; every downstream grade gate still applies. Cached: the flag is
+/// consulted once per process.
+#[must_use]
+pub fn soft_head_blocks_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AUDIVERIS_SOFT_HEAD_BLOCKS")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    })
+}
+
 /// The sheet-scale context a veto site needs to judge one beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamVetoScale {

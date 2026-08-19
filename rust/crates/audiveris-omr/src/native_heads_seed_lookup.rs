@@ -984,6 +984,7 @@ fn explore_locations<E>(
             });
 
             let nominal_abandon = nominal
+                && !crate::beam_veto::soft_head_blocks_enabled()
                 && match distance {
                     None => true,
                     Some(distance) => distance >= really_bad_distance,

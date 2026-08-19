@@ -171,6 +171,49 @@ fn probe_range_scan_lattice() {
     )
     .expect("HEADS");
 
+    for system in &heads.seed_lookup.systems {
+        for staff in &system.staffs {
+            if staff.staff_id != staff_id {
+                continue;
+            }
+            for scan in &staff.scans {
+                for search in &scan.searches {
+                    let bounds = search.seed_bounds;
+                    if bounds.x + bounds.width < x_min || bounds.x > x_max {
+                        continue;
+                    }
+                    let mut evaluated = 0;
+                    let mut blocked = 0;
+                    let mut best_distance = f64::INFINITY;
+                    for attempt in &search.attempts {
+                        match attempt.outcome {
+                            audiveris_omr::native_heads_seed_lookup::NativeHeadSeedAttemptOutcome::Evaluated { distance } => {
+                                evaluated += 1;
+                                if distance < best_distance { best_distance = distance; }
+                            }
+                            _ => blocked += 1,
+                        }
+                    }
+                    println!(
+                        "SEED pitch {:3} seed@({},{},{}x{}) side {:?} shape {:?}->{:?} grade {:?} outcome {:?} attempts eval {} blocked {} bestDist {:.2}",
+                        scan.pitch,
+                        bounds.x,
+                        bounds.y,
+                        bounds.width,
+                        bounds.height,
+                        search.side,
+                        search.original_shape,
+                        search.final_shape,
+                        search.grade.map(|grade| (grade * 100.0).round() / 100.0),
+                        search.outcome,
+                        evaluated,
+                        blocked,
+                        best_distance,
+                    );
+                }
+            }
+        }
+    }
     for system in &heads.range_lookup.systems {
         for staff in &system.staffs {
             if staff.staff_id != staff_id {
@@ -277,5 +320,58 @@ fn extended_staff_lines_recover_page7_run() {
     assert!(
         strong >= 15,
         "the m25 32nd run must resolve strongly across the recovered half, found {strong}"
+    );
+}
+
+/// Page 9's lone A at pitch -6 (x~340, y~231): a 52x3 sub-scale beam laid
+/// over the fused ledger row entered the HEADS competitor pool, and every
+/// one of the seed search's six template offsets was competitor-blocked, so
+/// no location was ever evaluated. With the credible-beam gate extended to
+/// the competitor pool, the A must resolve strongly.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn credible_competitors_recover_page9_lone_a() {
+    assert!(
+        audiveris_omr::beam_veto::credible_beam_vetoes_enabled(),
+        "run with AUDIVERIS_CREDIBLE_BEAM_VETOES=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-09.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid, &headers, &stem_seeds, &beams, &ledgers,
+    )
+    .expect("HEADS");
+
+    let epilog = &heads.epilog;
+    let mut best = 0.0_f64;
+    for system in &epilog.systems {
+        if system.system_id != 2 {
+            continue;
+        }
+        let staff_system = epilog
+            .staff_epilog
+            .systems
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .expect("staff epilog system 2");
+        for reference in &system.final_heads {
+            let head = &staff_system.staffs[reference.staff_index].heads[reference.head_index];
+            let bounds = head.bounds;
+            if (336..=346).contains(&bounds.x) && (228..=236).contains(&bounds.y) {
+                best = best.max(head.grade());
+            }
+        }
+    }
+    assert!(
+        best >= 0.6,
+        "the lone A must resolve once sub-scale beams cannot block its template, best grade {best}"
     );
 }

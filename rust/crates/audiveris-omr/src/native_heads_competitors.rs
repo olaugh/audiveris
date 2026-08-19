@@ -299,6 +299,20 @@ pub fn materialize_native_heads_competitors(
 ) -> Result<NativeHeadsCompetitorPool, NativeHeadsCompetitorError> {
     let bars = materialize_native_heads_bar_obstacles(grid)?;
     let max_stem = maximum_stem_width(grid)?;
+    // Credible-beam gate (enhancement, None = Java): a sub-scale beam may not
+    // enter the competitor pool, so it can neither block template locations
+    // nor claim pixels -- its ink is usually real notation (a fused ledger
+    // row, a notehead edge) that the lookups must be free to read.
+    let beam_veto_scale = crate::beam_veto::BeamVetoScale::from_env(
+        f64::from(grid.scale.scale.interline.main),
+        f64::from(grid.scale.scale.beam.main),
+    );
+    let beam_is_credible = |beam: &RawBeam| {
+        beam_veto_scale.is_none_or(|scale| {
+            let bounds = beam_bounds(beam.item);
+            scale.credible(f64::from(bounds.width), f64::from(bounds.height))
+        })
+    };
     let min_beam_width =
         (f64::from(grid.scale.scale.interline.main) * MIN_BEAM_WIDTH).round_ties_even() as i32;
     validate_post_rest_beams(beams)?;
@@ -346,6 +360,9 @@ pub fn materialize_native_heads_competitors(
             }
 
             for (raw_ordinal, beam) in raw_beams_in_sig_order(beams, system_id, &removed) {
+                if !beam_is_credible(&beam) {
+                    continue;
+                }
                 let (_, glyph) = &beams.raw_beam_glyphs[raw_ordinal];
                 candidates.push(beam_candidate(
                     NativeHeadsCompetitorSource::RawBeam(raw_ordinal),
@@ -362,6 +379,9 @@ pub fn materialize_native_heads_competitors(
                 ));
             }
             for (hook_ordinal, hook) in hooks_in_sig_order(beams, system_id)? {
+                if !beam_is_credible(&hook) {
+                    continue;
+                }
                 let (_, glyph) = &beams.hook_glyphs[hook_ordinal];
                 candidates.push(beam_candidate(
                     NativeHeadsCompetitorSource::Hook(hook_ordinal),
