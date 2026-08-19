@@ -8928,6 +8928,54 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("order15 closure target");
     assert!(closed_x66.sides.iter().all(|cell| cell.closed));
 
+    // Boundary 42: order 16 is prelinked-success.
+    // Stem 2376 closes x7 on both sides before x48/SIG29.
+    let order16_before = (*order15_continuation.state_after).clone();
+    let order16_continuation = continue_native_stems_head_linking_phase1(
+        &order15_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native order16 prelinked continuation");
+    assert_eq!(*order15_continuation.state_after, order16_before);
+    assert_eq!(order16_continuation.processed_head.x_ordinal, 8);
+    assert_eq!(order16_continuation.processed_head.sig_ordinal, 53);
+    assert_eq!(order16_continuation.returned_linked, Some(true));
+    assert_eq!(order16_continuation.closed_value_changes, 2);
+    assert_eq!(
+        order16_continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (7, NativeStemHeadSide::Left),
+            (7, NativeStemHeadSide::Right)
+        ]
+    );
+    assert_eq!(order16_continuation.state_after.current_index, 17);
+    assert!(order16_continuation.state_after.frontier_consumed);
+    assert_eq!(
+        order16_continuation.state_after.heads[17]
+            .reference
+            .x_ordinal,
+        48
+    );
+    assert_eq!(
+        order16_continuation.state_after.heads[17]
+            .reference
+            .sig_ordinal,
+        29
+    );
+    let closed_x7 = order16_continuation
+        .state_after
+        .heads
+        .iter()
+        .find(|head| head.reference.x_ordinal == 7)
+        .expect("order16 closure target");
+    assert!(closed_x7.sides.iter().all(|cell| cell.closed));
+
     let mut invalid_order7 = seventh_frontier_before.clone();
     invalid_order7.current_index = 6;
     let invalid_order7_before = invalid_order7.clone();
@@ -11018,6 +11066,128 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v15_summary, "javaEvidence"),
         "ReturnedBeforeSixteenthHead"
+    );
+
+    // Boundary 42 expected-only v16 rows use the bounded order-16 replay.
+    let v16_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v16.txt"),
+    )
+    .expect("expected-only order16 head continuation fixture");
+    assert_eq!(
+        sha256_hex(v16_text.as_bytes()),
+        "04d35bb21c808dc38edd93c0631b3a01af9931efc8f500422646adf8f7123de4"
+    );
+    let v16_rows = v16_text
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v16_rows.len(), 8);
+    let v16_body = format!("{}\n", v16_rows[..7].join("\n"));
+    assert_eq!(
+        sha256_hex(v16_body.as_bytes()),
+        "49b97d61e08769b58a449edf2931313f91a5855000fd89e27761330f30a81077"
+    );
+    let v16_java = v16_rows[6];
+    assert_eq!(head_field(v16_java, "headOrder"), "16");
+    assert_eq!(head_field(v16_java, "headX"), "8");
+    assert_eq!(head_field(v16_java, "headSig"), "53");
+    assert_eq!(head_field(v16_java, "headInterId"), "1395");
+    assert_eq!(
+        head_field(v16_java, "grade"),
+        "0x1.81161126880f9p-1/3fe81161126880f9"
+    );
+    assert_eq!(
+        head_field(v16_java, "sidesBefore"),
+        "[LEFT:true:false,RIGHT:false:false]"
+    );
+    assert_eq!(
+        head_field(v16_java, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(
+        head_field(v16_java, "incident"),
+        "[stem2376:headSideLEFT:heads[x8:sig53:id1395:sideLEFT,x7:sig52:id1393:sideLEFT]]"
+    );
+    assert_eq!(head_field(v16_java, "returned"), "true");
+    assert_eq!(
+        head_field(v16_java, "closureWrites"),
+        "[x7:sig52:LEFT:false->true,x7:sig52:RIGHT:false->true]"
+    );
+    assert_eq!(head_field(v16_java, "closedValueChanges"), "2");
+    assert_eq!(head_field(v16_java, "unlinkedCount"), "0");
+    assert_eq!(head_field(v16_java, "sigVerticesBefore"), "680");
+    assert_eq!(head_field(v16_java, "sigVerticesAfter"), "680");
+    assert_eq!(head_field(v16_java, "sigEdgesBefore"), "691");
+    assert_eq!(head_field(v16_java, "sigEdgesAfter"), "691");
+    assert_eq!(head_field(v16_java, "systemStemsBefore"), "41");
+    assert_eq!(head_field(v16_java, "systemStemsAfter"), "41");
+    assert_eq!(
+        head_field(v16_java, "relationStateHashAfter"),
+        "5418e578e4046d8d162f5f584d8969c2b4a7d447f73009b5bed39fd0ea739e44"
+    );
+    assert_eq!(
+        head_field(v16_java, "linkerStateHashAfter"),
+        "a210aea1b2352f953c50ca0e29a559fdc8ff633b55e36e0333016e456bb2925d"
+    );
+    assert_eq!(head_field(v16_java, "nextHeadOrder"), "17");
+    assert_eq!(head_field(v16_java, "nextHeadX"), "48");
+    assert_eq!(head_field(v16_java, "nextHeadSig"), "29");
+    assert_eq!(head_field(v16_java, "nextHeadInterId"), "1343");
+    assert_eq!(
+        head_field(v16_java, "nextGrade"),
+        "0x1.80cc40bda9d4cp-1/3fe80cc40bda9d4c"
+    );
+    assert_eq!(head_field(v16_java, "terminal"), "ReturnedBeforeNextHead");
+    let v16_summary = v16_rows[7];
+    assert_eq!(
+        head_field(v16_summary, "schema"),
+        "stems-head-phase-prefix-v16"
+    );
+    assert_eq!(head_field(v16_summary, "rows"), "7");
+    assert_eq!(
+        head_field(v16_summary, "baseProbeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active shared base head-phase probe")
+        )
+    );
+    assert_eq!(
+        head_field(v16_summary, "baseV15RunnerSourceSha256"),
+        "e595eefa74453ecfe9980cb294b80d37d0ff5ad1e2f3e01d88f8801d0f23ca18"
+    );
+    assert_eq!(
+        head_field(v16_summary, "baseV15FixtureSha256"),
+        "aae5116a32e0fd77bb9f4a26dc1a8c1cd53a3f3ff35ea01d350c97012a146ca8"
+    );
+    assert_eq!(
+        head_field(v16_summary, "probeSourceSha256"),
+        "d4dcad17952d2de86de193bd87c3a96916ad7781d67f1ea469180e05e4e106fd"
+    );
+    assert_eq!(
+        head_field(v16_summary, "runnerSourceSha256"),
+        "d6edd52b746acd625c2e516f328c4b43253e23bbbe906ffcdae0b3674eae1dcf"
+    );
+    assert_eq!(
+        head_field(v16_summary, "emittedBodySha256"),
+        "49b97d61e08769b58a449edf2931313f91a5855000fd89e27761330f30a81077"
+    );
+    assert_eq!(
+        head_field(v16_summary, "semanticPassSha256"),
+        "88ea097c4a003e7493c5d28296cc6dd778486660bb6a1e3eb1bfb5aa71f40f7d"
+    );
+    assert_eq!(
+        head_field(v16_summary, "completeStumpsFixtureSha256"),
+        sha256_hex(complete_stumps_text.as_bytes())
+    );
+    assert_eq!(head_field(v16_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v16_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v16_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedOrder16"
+    );
+    assert_eq!(
+        head_field(v16_summary, "javaEvidence"),
+        "ReturnedBeforeSeventeenthHead"
     );
 
     let all_siblings = std::iter::once(&actual)
