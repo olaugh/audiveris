@@ -2289,6 +2289,53 @@ fn heads_product(json: &mut Json, heads: &NativeHeadsEpilogRecognition) {
         head_tally_scale_row(json, row);
     }
     json.close(']');
+
+    // Below-floor template evidence: the best rejected match per scan line
+    // per interline of x. "No entry here and no candidate" means the range
+    // scanner never visited the spot -- proposal-stage gating, not grading.
+    json.key("range_outcomes");
+    json.open('{');
+    json.field_integer(
+        "below_minimum_grade",
+        heads.range_outcome_counts.below_minimum_grade as i64,
+    );
+    json.field_integer(
+        "weak_stemless",
+        heads.range_outcome_counts.weak_stemless as i64,
+    );
+    json.field_integer("no_best", heads.range_outcome_counts.no_best as i64);
+    json.field_integer("abandoned", heads.range_outcome_counts.abandoned as i64);
+    json.close('}');
+    json.key("subfloor_heads");
+    json.open('[');
+    for record in &heads.subfloor_heads {
+        json.open('{');
+        json.field_integer("system", record.system_id as i64);
+        json.field_integer("staff", record.staff_id as i64);
+        json.field_string("shape", head_shape(record.shape));
+        json.field_string(
+            "reason",
+            match record.reason {
+                crate::native_heads_range_lookup::NativeHeadSubfloorReason::BelowMinimumGrade => {
+                    "below_minimum_grade"
+                }
+                crate::native_heads_range_lookup::NativeHeadSubfloorReason::WeakStemless => {
+                    "weak_stemless"
+                }
+            },
+        );
+        json.field_number("pitch", f64::from(record.pitch));
+        bounds(
+            json,
+            f64::from(record.bounds.x),
+            f64::from(record.bounds.y),
+            f64::from(record.bounds.width),
+            f64::from(record.bounds.height),
+        );
+        json.field_number("grade", record.grade);
+        json.close('}');
+    }
+    json.close(']');
     json.close('}');
 }
 
@@ -3231,6 +3278,8 @@ pub(crate) mod tests {
             removed: false,
         };
         let recognition = NativeHeadsEpilogRecognition {
+            subfloor_heads: Vec::new(),
+            range_outcome_counts: Default::default(),
             staff_epilog: NativeHeadsStaffEpilogRecognition {
                 systems: vec![staff_system],
                 input_head_count: 1,

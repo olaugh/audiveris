@@ -71,3 +71,64 @@ fn credible_beam_vetoes_recover_schenker_page1_misses() {
         "credible gate: the full m30 ledger chain must materialize"
     );
 }
+
+/// Page 9's second-system 32nd runs: heads two ledgers above the staff whose
+/// -2 ledger fused with the run and was never accepted. With
+/// `AUDIVERIS_EXTENDED_LEDGER_PITCHES` (plus the credible-beam profile and
+/// the GRID hard-scan env, set by the invocation), synthesized scan lines
+/// from the neighboring accepted ledgers must propose them, and the range
+/// scanner's rejected stemless matches must be retained.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn extended_ledger_pitches_recover_page9_run_peaks() {
+    assert!(
+        audiveris_omr::native_heads_scanner::extended_ledger_pitches_enabled(),
+        "run with AUDIVERIS_EXTENDED_LEDGER_PITCHES=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-09.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let heads =
+        audiveris_omr::native_heads::recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+            .expect("HEADS");
+
+    let epilog = &heads.epilog;
+    let mut recovered = 0;
+    for system in &epilog.systems {
+        if system.system_id != 2 {
+            continue;
+        }
+        let staff_system = epilog
+            .staff_epilog
+            .systems
+            .iter()
+            .find(|candidate| candidate.system_id == 2)
+            .expect("staff epilog system 2");
+        for reference in &system.final_heads {
+            let head = &staff_system.staffs[reference.staff_index].heads[reference.head_index];
+            let bounds = head.bounds;
+            if head.pitch() <= -8.0
+                && (435..=455).contains(&bounds.x)
+                && (218..=232).contains(&bounds.y)
+                && head.grade() >= 0.5
+            {
+                recovered += 1;
+            }
+        }
+    }
+    assert!(
+        recovered >= 2,
+        "expected the m50 run peaks proposed and strongly matched, found {recovered}"
+    );
+    assert!(
+        !epilog.subfloor_heads.is_empty(),
+        "sub-floor retention must record the range scanner's rejected matches"
+    );
+}

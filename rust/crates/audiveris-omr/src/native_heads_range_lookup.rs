@@ -90,9 +90,35 @@ pub struct NativeHeadRangeLookupScan {
     pub scan_right: i32,
     pub spots: Vec<NativeHeadRangeSpotEvidence>,
     pub candidates: Vec<NativeHeadRangeCandidate>,
+    /// Best below-floor matches, one per interline-wide x bucket.
+    pub subfloor: Vec<NativeHeadRangeSubfloor>,
     pub performance: NativeHeadRangePerformance,
     pub counts: NativeHeadRangeCounts,
     pub hashes: NativeHeadRangeKernelHashes,
+}
+
+/// The best below-floor match at one scan position: template evidence that
+/// Java silently discards. Retained (bucketed per interline of x) so a
+/// recall investigation can distinguish "never proposed" from "proposed but
+/// under the floor" without a recognition re-run. Never enters the pool.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeHeadRangeSubfloor {
+    pub shape: HeadTemplateShape,
+    pub pitch: i32,
+    pub x0: i32,
+    pub y0: i32,
+    pub bounds: HeadTemplateBounds,
+    pub grade: f64,
+    pub reason: NativeHeadSubfloorReason,
+}
+
+/// Which floor rejected the retained match.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeHeadSubfloorReason {
+    /// Intrinsic grade under `MIN_INTER_GRADE`.
+    BelowMinimumGrade,
+    /// A stemless shape (whole/breve) under its stricter distance floor.
+    WeakStemless,
 }
 
 /// One spot from Java's stable x-sorted scanner slice.
@@ -730,6 +756,7 @@ pub fn recognize_native_heads_range_lookup(
                         scan_right: geometry.range_right,
                         spots: Vec::new(),
                         candidates: Vec::new(),
+                        subfloor: Vec::new(),
                         performance: NativeHeadRangePerformance::default(),
                         counts: NativeHeadRangeCounts::default(),
                         hashes: NativeHeadRangeKernelHashes::default(),
@@ -910,6 +937,7 @@ fn lookup_scan(
         ..NativeHeadRangeCounts::default()
     };
     let mut candidates = Vec::new();
+    let mut subfloor_raw: Vec<NativeHeadRangeSubfloor> = Vec::new();
     let mut x0 = input.geometry.range_left;
 
     loop {
@@ -1040,6 +1068,9 @@ fn lookup_scan(
                 staff_hashers.add_raw_candidate(&record);
                 candidates.push(candidate);
             }
+            if let Some(record) = attempt.subfloor {
+                subfloor_raw.push(record);
+            }
         }
 
         if x0 == input.geometry.range_right {
@@ -1058,6 +1089,25 @@ fn lookup_scan(
     }
 
     counts.raw_candidates = candidates.len();
+    // Keep only the strongest below-floor match per interline of x, so the
+    // retained evidence stays a bounded shadow of the scan, not a firehose.
+    let bucket_width = input.geometry.interline.max(1);
+    let mut best_per_bucket: std::collections::BTreeMap<i32, NativeHeadRangeSubfloor> =
+        std::collections::BTreeMap::new();
+    for record in subfloor_raw {
+        let bucket = record.x0.div_euclid(bucket_width);
+        match best_per_bucket.entry(bucket) {
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                slot.insert(record);
+            }
+            std::collections::btree_map::Entry::Occupied(mut slot) => {
+                if record.grade > slot.get().grade {
+                    slot.insert(record);
+                }
+            }
+        }
+    }
+    let subfloor = best_per_bucket.into_values().collect();
     Ok(NativeHeadRangeLookupScan {
         geometry_ordinal: input.geometry_ordinal,
         source: input.geometry.source.clone(),
@@ -1066,6 +1116,7 @@ fn lookup_scan(
         scan_right: input.geometry.range_right,
         spots,
         candidates,
+        subfloor,
         performance,
         counts,
         hashes: scan_hashers.finish(),
@@ -1190,6 +1241,7 @@ struct ShapeSearch {
     weak_stemless: bool,
     outcome: AttemptOutcome,
     candidate: Option<NativeHeadRangeCandidate>,
+    subfloor: Option<NativeHeadRangeSubfloor>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1317,6 +1369,7 @@ fn search_shape(
     let mut black_to_void = None;
     let mut weak_stemless = false;
     let mut candidate = None;
+    let mut subfloor = None;
     let outcome = if let Some(outcome) = abandoned {
         outcome
     } else if let Some(best) = best {
@@ -1342,12 +1395,40 @@ fn search_shape(
         let stemless = stemless_evidence(final_shape, best.distance);
         weak_stemless = stemless.rejected;
         if weak_stemless {
+            let bounds = input
+                .catalog
+                .template(final_shape)
+                .slim_bounds_at(best.x, best.y, anchor)
+                .map_err(|source| template_error(input, source))?;
+            subfloor = Some(NativeHeadRangeSubfloor {
+                shape: final_shape,
+                pitch: input.geometry.pitch,
+                x0,
+                y0,
+                bounds,
+                grade: head_grade_of(best.distance),
+                reason: NativeHeadSubfloorReason::WeakStemless,
+            });
             AttemptOutcome::WeakStemless
         } else {
             let raw_distance_impact = impact_of(best.distance);
             let distance_impact = raw_distance_impact.clamp(0.0, 1.0);
             let grade = head_grade_of(best.distance);
             if grade < MIN_INTER_GRADE {
+                let bounds = input
+                    .catalog
+                    .template(final_shape)
+                    .slim_bounds_at(best.x, best.y, anchor)
+                    .map_err(|source| template_error(input, source))?;
+                subfloor = Some(NativeHeadRangeSubfloor {
+                    shape: final_shape,
+                    pitch: input.geometry.pitch,
+                    x0,
+                    y0,
+                    bounds,
+                    grade,
+                    reason: NativeHeadSubfloorReason::BelowMinimumGrade,
+                });
                 AttemptOutcome::BelowMinimumGrade
             } else {
                 let bounds = input
@@ -1394,6 +1475,7 @@ fn search_shape(
         weak_stemless,
         outcome,
         candidate,
+        subfloor,
     })
 }
 

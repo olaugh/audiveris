@@ -11,6 +11,7 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use audiveris_image::{
     bars_logic::{PlannedPart, StaffBoundaryLine, is_merged_two_staff_part},
+    beam_structure::Segment,
     glyph_factory::build_glyph_components,
     lines_coordinator::StaffCandidateKind,
     section::Bounds,
@@ -312,12 +313,38 @@ struct LedgerRecord {
 }
 
 /// Compose the exact production state consumed by Java scanner construction.
+/// `AUDIVERIS_EXTENDED_LEDGER_PITCHES` gate for [`augment_ledger_levels`]:
+/// enhancement, default OFF.
+#[must_use]
+pub fn extended_ledger_pitches_enabled() -> bool {
+    std::env::var("AUDIVERIS_EXTENDED_LEDGER_PITCHES")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 pub fn recognize_native_heads_scanner_context(
     grid: &GridLinesRecognition,
     headers: &NativeHeaderRecognition,
     ledgers: &NativeLedgerRecognition,
     stem_seeds: &NativeStemSeedRecognition,
     heads: &NativeHeadsPrologRecognition,
+) -> Result<NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError> {
+    recognize_native_heads_scanner_context_with_options(
+        grid, headers, ledgers, stem_seeds, heads, false,
+    )
+}
+
+/// [`recognize_native_heads_scanner_context`] with the enhancement gates as
+/// data. `extend_ledger_pitches: false` is byte-exact Java; `true` also scans
+/// beyond-staff pitches over synthesized lines interpolated from neighboring
+/// accepted ledgers, so a fused or vetoed ledger no longer silences head
+/// proposals above or below it.
+pub fn recognize_native_heads_scanner_context_with_options(
+    grid: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    ledgers: &NativeLedgerRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    heads: &NativeHeadsPrologRecognition,
+    extend_ledger_pitches: bool,
 ) -> Result<NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError> {
     let system_count = grid.peak_graph.systems.len();
     if grid.peak_graph.sig.systems.len() != system_count {
@@ -486,8 +513,11 @@ pub fn recognize_native_heads_scanner_context(
             let mut geometries = if tablature {
                 Vec::new()
             } else {
-                let staff_ledgers =
+                let mut staff_ledgers =
                     staff_ledger_records(ledgers, system_id, staff_id, &ledger_records)?;
+                if extend_ledger_pitches {
+                    augment_ledger_levels(&mut staff_ledgers, specific_interline)?;
+                }
                 build_staff_geometries(
                     system_id,
                     staff_id,
@@ -934,6 +964,136 @@ fn build_staff_geometries(
         }
     }
     Ok(geometries)
+}
+
+/// Enhancement (gated): fill beyond-staff scan coverage from neighbors.
+///
+/// For each direction, walk outward level by level up to the outermost REAL
+/// ledger index on this staff. Wherever a level's coverage leaves a gap over
+/// a parent-level record's span (at least one interline wide), synthesize a
+/// scan line there: the parent's axis clipped to the gap and translated one
+/// interline outward. Synthesized records keep the parent's inter identity as
+/// provenance and are appended after the level's real records, so flag-off
+/// ordinals are untouched. This never invents levels beyond the staff's own
+/// evidence and adds proposal geometry only -- template matching still
+/// decides every head.
+fn augment_ledger_levels(
+    levels: &mut BTreeMap<i32, Vec<LedgerRecord>>,
+    interline: i32,
+) -> Result<(), NativeHeadsScannerRecognitionError> {
+    let step = f64::from(interline);
+    for direction in [-1_i32, 1_i32] {
+        let outermost = levels
+            .keys()
+            .copied()
+            .filter(|index| index.signum() == direction)
+            .map(i32::abs)
+            .max()
+            .unwrap_or(0);
+        let mut index = direction;
+        while index.abs() < outermost {
+            let child_index = index + direction;
+            let parents = levels.get(&index).cloned().unwrap_or_default();
+            if parents.is_empty() {
+                break;
+            }
+            let child_spans: Vec<(f64, f64)> = levels
+                .get(&child_index)
+                .map(|records| {
+                    records
+                        .iter()
+                        .map(|record| {
+                            (
+                                record.bounds.x as f64,
+                                (record.bounds.x + record.bounds.width) as f64,
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut synthesized = Vec::new();
+            for parent in &parents {
+                let parent_span = (
+                    parent.bounds.x as f64,
+                    (parent.bounds.x + parent.bounds.width) as f64,
+                );
+                for (gap_left, gap_right) in subtract_spans(parent_span, &child_spans) {
+                    if gap_right - gap_left < step {
+                        continue;
+                    }
+                    synthesized.push(synthesize_ledger_record(
+                        parent,
+                        child_index,
+                        direction,
+                        step,
+                        gap_left,
+                        gap_right,
+                    )?);
+                }
+            }
+            if !synthesized.is_empty() {
+                levels.entry(child_index).or_default().extend(synthesized);
+            }
+            index = child_index;
+        }
+    }
+    Ok(())
+}
+
+/// The sub-intervals of `span` not covered by any of `covers`.
+fn subtract_spans(span: (f64, f64), covers: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let mut gaps = vec![span];
+    for &(cover_left, cover_right) in covers {
+        let mut next = Vec::new();
+        for (gap_left, gap_right) in gaps {
+            if cover_right <= gap_left || cover_left >= gap_right {
+                next.push((gap_left, gap_right));
+                continue;
+            }
+            if cover_left > gap_left {
+                next.push((gap_left, cover_left));
+            }
+            if cover_right < gap_right {
+                next.push((cover_right, gap_right));
+            }
+        }
+        gaps = next;
+    }
+    gaps
+}
+
+fn synthesize_ledger_record(
+    parent: &LedgerRecord,
+    child_index: i32,
+    direction: i32,
+    step: f64,
+    gap_left: f64,
+    gap_right: f64,
+) -> Result<LedgerRecord, NativeHeadsScannerRecognitionError> {
+    let axis = parent.adapter.axis();
+    let slope = if (axis.x2 - axis.x1).abs() < f64::EPSILON {
+        0.0
+    } else {
+        (axis.y2 - axis.y1) / (axis.x2 - axis.x1)
+    };
+    let dy = f64::from(direction) * step;
+    let segment = Segment {
+        x1: gap_left,
+        y1: axis.y1 + (gap_left - axis.x1) * slope + dy,
+        x2: gap_right,
+        y2: axis.y1 + (gap_right - axis.x1) * slope + dy,
+    };
+    let adapter = LedgerScannerAdapter::from_segment(segment)?;
+    let mut bounds = parent.bounds;
+    bounds.x = gap_left.floor() as usize;
+    bounds.width = (gap_right - gap_left).ceil() as usize;
+    bounds.y = (bounds.y as f64 + dy).max(0.0) as usize;
+    Ok(LedgerRecord {
+        ledger_index: child_index,
+        adapter,
+        bounds,
+        ..parent.clone()
+    })
 }
 
 fn ledger_source(record: &LedgerRecord, ordinal: usize) -> NativeHeadScannerSource {

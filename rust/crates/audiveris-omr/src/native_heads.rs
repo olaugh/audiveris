@@ -57,7 +57,7 @@ use crate::{
     },
     native_heads_scanner::{
         NativeHeadsScannerRecognition, NativeHeadsScannerRecognitionError,
-        recognize_native_heads_scanner_context,
+        recognize_native_heads_scanner_context_with_options,
     },
     native_heads_scanner_pools::{
         NativeHeadScannerPoolError, NativeHeadScannerPoolsRecognition,
@@ -174,7 +174,14 @@ pub fn recognize_native_heads(
     let prolog = recognize_native_heads_prolog(grid, beams, ledgers, stem_seeds)
         .map_err(NativeHeadsRecognitionError::Prolog)?;
     let scanners =
-        recognize_native_heads_scanner_context(grid, headers, ledgers, stem_seeds, &prolog)
+        recognize_native_heads_scanner_context_with_options(
+            grid,
+            headers,
+            ledgers,
+            stem_seeds,
+            &prolog,
+            crate::native_heads_scanner::extended_ledger_pitches_enabled(),
+        )
             .map_err(NativeHeadsRecognitionError::Scanners)?;
     let scanner_pools = materialize_native_head_scanner_pools(stem_seeds, &prolog, &scanners)
         .map_err(NativeHeadsRecognitionError::ScannerPools)?;
@@ -220,7 +227,7 @@ pub fn recognize_native_heads(
         seed_glyphs: &seed_glyphs,
     })
     .map_err(NativeHeadsRecognitionError::RangeGlyphs)?;
-    let epilog = compose_native_heads_epilog(NativeHeadsEpilogInput {
+    let mut epilog = compose_native_heads_epilog(NativeHeadsEpilogInput {
         seed_glyphs: &seed_glyphs,
         range_glyphs: &range_glyphs,
         competitors: &competitors,
@@ -231,6 +238,35 @@ pub fn recognize_native_heads(
         ),
     })
     .map_err(NativeHeadsRecognitionError::Epilog)?;
+    epilog.subfloor_heads = range_lookup
+        .systems
+        .iter()
+        .flat_map(|system| {
+            system.staffs.iter().flat_map(move |staff| {
+                staff.scans.iter().flat_map(move |scan| {
+                    scan.subfloor.iter().map(move |record| {
+                        crate::native_heads_epilog::NativeHeadSubfloorRecord {
+                            system_id: system.system_id,
+                            staff_id: staff.staff_id,
+                            pitch: record.pitch,
+                            shape: record.shape,
+                            bounds: record.bounds,
+                            grade: record.grade,
+                            reason: record.reason,
+                        }
+                    })
+                })
+            })
+        })
+        .collect();
+    epilog.range_outcome_counts = crate::native_heads_epilog::NativeHeadRangeOutcomeCounts {
+        below_minimum_grade: range_lookup.counts.below_minimum_grade,
+        weak_stemless: range_lookup.counts.weak_stemless,
+        no_best: range_lookup.counts.no_best,
+        abandoned: range_lookup.counts.abandoned_bar
+            + range_lookup.counts.abandoned_competitor
+            + range_lookup.counts.abandoned_nominal,
+    };
 
     Ok(NativeHeadsRecognition {
         obstacles,

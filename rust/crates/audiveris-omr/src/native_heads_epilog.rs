@@ -65,6 +65,28 @@ pub struct NativeHeadsTallyEntry {
     pub removed: bool,
 }
 
+/// Sheet totals of the range scanner's rejection outcomes, so an empty
+/// `subfloor_heads` is distinguishable from a scanner that never rejected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeHeadRangeOutcomeCounts {
+    pub below_minimum_grade: usize,
+    pub weak_stemless: usize,
+    pub no_best: usize,
+    pub abandoned: usize,
+}
+
+/// One retained below-floor range match, flattened with its owner context.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NativeHeadSubfloorRecord {
+    pub system_id: usize,
+    pub staff_id: usize,
+    pub pitch: i32,
+    pub shape: crate::head_template::HeadTemplateShape,
+    pub bounds: crate::head_template::HeadTemplateBounds,
+    pub grade: f64,
+    pub reason: crate::native_heads_range_lookup::NativeHeadSubfloorReason,
+}
+
 /// Complete output through final system heads and sheet scale analysis.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeHeadsEpilogRecognition {
@@ -75,6 +97,13 @@ pub struct NativeHeadsEpilogRecognition {
     pub scale_analysis: Vec<HeadSeedScaleEntry<JavaHeadSeedShape>>,
     pub beam_removal_count: usize,
     pub head_beam_removal_count: usize,
+    /// Best below-floor range matches (per scan, per interline of x): the
+    /// template evidence Java discards without record. Filled by
+    /// `recognize_native_heads` after composition; not part of the epilog
+    /// passes themselves.
+    pub subfloor_heads: Vec<NativeHeadSubfloorRecord>,
+    /// Sheet-wide range rejection tallies, filled with `subfloor_heads`.
+    pub range_outcome_counts: NativeHeadRangeOutcomeCounts,
     pub final_head_count: usize,
 }
 
@@ -289,6 +318,8 @@ fn compose_from_staff_epilog(
 
     let scale_analysis = analyze_head_seed_tallies(&tally_samples);
     Ok(NativeHeadsEpilogRecognition {
+        subfloor_heads: Vec::new(),
+        range_outcome_counts: NativeHeadRangeOutcomeCounts::default(),
         staff_epilog,
         systems,
         tally_samples,
