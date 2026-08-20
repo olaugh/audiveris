@@ -158,6 +158,207 @@ impl BeamStructureAnalysis {
         }
     }
 
+    /// Split a thick line along the gray seams between its beams
+    /// (enhancement).
+    ///
+    /// Binarization destroys exactly the cue a reader uses on a low-res
+    /// scan: a bridged gutter is not as DARK as the beams it joins. The
+    /// pre-closing raster is grayscale, so the mean gray along the
+    /// slope-corrected line at each vertical offset gives a profile in
+    /// which beams are dark bands and gutters are lighter seams -- even
+    /// seams well below the binarization threshold. The band count is
+    /// authoritative: it can neither overcount (arithmetic on an envelope
+    /// fattened by fused noteheads reads four where there are three) nor
+    /// undercount fused pairs whose seam survives in gray. Lines are
+    /// placed at the darkness-weighted centroid of each band. Lines where
+    /// fewer than two bands emerge are left for the run projection and the
+    /// arithmetic splits; split children have no items -- run
+    /// [`Self::populate_empty_items`] afterwards.
+    #[allow(clippy::too_many_arguments)]
+    pub fn split_lines_by_gray_seams(
+        &mut self,
+        erased: &[u8],
+        image_width: usize,
+        image_height: usize,
+        typical_height: f64,
+        max_count: usize,
+    ) {
+        /// A seam must be lighter than its darker neighboring band by this
+        /// fraction of the line's own ink-to-paper range. Nothing guarantees
+        /// a normalized scan -- the Schenker pages happen to span 20..255,
+        /// but a dim photocopy might span 80..200 -- so the thresholds are
+        /// relative to what this line's profile actually contains.
+        const SEAM_CONTRAST_RATIO: f64 = 0.07;
+        /// A valley must be at least this deep into the range to be ink.
+        const BAND_CEILING_RATIO: f64 = 0.65;
+        const STEP: f64 = 0.5;
+        let lines = std::mem::take(&mut self.lines);
+        for line in lines {
+            let parent_synthetic = self.is_synthetic_line(&line);
+            let count_by_height =
+                (line.height / typical_height).round_ties_even() as usize;
+            if count_by_height < 2 {
+                self.lines.push(line);
+                continue;
+            }
+            let x1 = (line.median.x1.max(0.0)) as usize;
+            let x2 = (line.median.x2.min(image_width as f64 - 1.0)) as usize;
+            if x2 <= x1 {
+                self.lines.push(line);
+                continue;
+            }
+            let reach = line.height / 2.0 + typical_height / 2.0;
+            let steps = (2.0 * reach / STEP) as usize + 1;
+            let mut profile = Vec::with_capacity(steps);
+            for index in 0..steps {
+                let dy = -reach + index as f64 * STEP;
+                let mut sum = 0.0;
+                let mut count = 0usize;
+                for x in x1..=x2 {
+                    let y = line.median.y_at_x(x as f64) + dy;
+                    if y < 0.0 || y >= image_height as f64 {
+                        continue;
+                    }
+                    sum += f64::from(erased[y as usize * image_width + x]);
+                    count += 1;
+                }
+                profile.push(if count == 0 { 255.0 } else { sum / count as f64 });
+            }
+            // Per-line normalization: ink is the darkest the profile gets,
+            // paper the lightest; both come from this very line.
+            // Light smoothing so single-pixel noise cannot fake a seam.
+            let smooth: Vec<f64> = (0..profile.len())
+                .map(|index| {
+                    let lo = index.saturating_sub(1);
+                    let hi = (index + 1).min(profile.len() - 1);
+                    (profile[lo] + profile[index] + profile[hi]) / 3.0
+                })
+                .collect();
+            let ink = smooth.iter().copied().fold(f64::MAX, f64::min);
+            let paper = smooth.iter().copied().fold(f64::MIN, f64::max);
+            let range = (paper - ink).max(1.0);
+            let seam_contrast = SEAM_CONTRAST_RATIO * range;
+            let band_ceiling = ink + BAND_CEILING_RATIO * range;
+            // A seam on a real scan is lighter than the beams around it but
+            // often darker than any fixed ceiling, so a threshold crossing
+            // cannot find it. Valley-and-peak analysis can: valleys are the
+            // beam centers (dark enough to be ink), and a peak between two
+            // valleys is a seam when it is lighter than the darker valley by
+            // the contrast margin; otherwise the two valleys are texture
+            // inside one beam and merge (keeping the darker).
+            let mut valleys: Vec<usize> = Vec::new();
+            for index in 1..smooth.len().saturating_sub(1) {
+                if smooth[index] <= band_ceiling
+                    && smooth[index] <= smooth[index - 1]
+                    && smooth[index] <= smooth[index + 1]
+                    && (valleys.last() != Some(&(index - 1))
+                        || smooth[index] < smooth[index - 1])
+                {
+                    valleys.push(index);
+                }
+            }
+            let mut kept: Vec<usize> = Vec::new();
+            let mut boundaries: Vec<usize> = Vec::new();
+            for valley in valleys {
+                if let Some(&last) = kept.last() {
+                    let (seam_index, seam) = smooth[last..=valley]
+                        .iter()
+                        .enumerate()
+                        .map(|(offset, &value)| (last + offset, value))
+                        .fold((last, f64::MIN), |best, candidate| {
+                            if candidate.1 > best.1 { candidate } else { best }
+                        });
+                    let darker = smooth[last].max(smooth[valley]);
+                    if seam - darker < seam_contrast {
+                        // Same beam: keep whichever valley is darker.
+                        if smooth[valley] < smooth[last] {
+                            *kept.last_mut().unwrap() = valley;
+                        }
+                        continue;
+                    }
+                    boundaries.push(seam_index);
+                }
+                kept.push(valley);
+            }
+            // Bands span boundary to boundary around each kept valley.
+            let mut merged: Vec<(usize, usize)> = Vec::new();
+            for (which, _valley) in kept.iter().enumerate() {
+                let lo = if which == 0 { 0 } else { boundaries[which - 1] };
+                let hi = if which + 1 == kept.len() {
+                    smooth.len() - 1
+                } else {
+                    boundaries[which]
+                };
+                merged.push((lo, hi));
+            }
+            // A band narrower than a third of a beam is an edge artifact.
+            merged.retain(|&(s, e)| (e - s + 1) as f64 * STEP >= 0.35 * typical_height);
+            // One THIN band is a verdict, not a decline: the gray shows a
+            // single beam's worth of ink and no seam, so the fused-head
+            // arithmetic (envelope height over typical reads two) must not
+            // manufacture a second beam. Collapse to one line at the band
+            // centroid. A thick seamless band stays undecided -- a fully
+            // saturated pair shows no seam either, and the later splitters
+            // keep their chance.
+            if merged.len() == 1 {
+                let (s, e) = merged[0];
+                if (e - s + 1) as f64 * STEP <= 1.35 * typical_height {
+                    let mut weight_sum = 0.0;
+                    let mut dy_sum = 0.0;
+                    for index in s..=e {
+                        let weight = 255.0 - smooth[index];
+                        weight_sum += weight;
+                        dy_sum += weight * (-reach + index as f64 * STEP);
+                    }
+                    let dy = if weight_sum > 0.0 { dy_sum / weight_sum } else { 0.0 };
+                    let child = BeamLine {
+                        median: Segment {
+                            y1: line.median.y1 + dy,
+                            y2: line.median.y2 + dy,
+                            ..line.median
+                        },
+                        height: typical_height,
+                        items: Vec::new(),
+                    };
+                    if parent_synthetic {
+                        self.mark_synthetic(&child);
+                    }
+                    self.lines.push(child);
+                    continue;
+                }
+            }
+            if merged.len() < 2 || merged.len() > max_count.max(2) {
+                self.lines.push(line);
+                continue;
+            }
+            for (s, e) in merged {
+                let mut weight_sum = 0.0;
+                let mut dy_sum = 0.0;
+                for index in s..=e {
+                    let weight = 255.0 - smooth[index];
+                    weight_sum += weight;
+                    dy_sum += weight * (-reach + index as f64 * STEP);
+                }
+                let dy = if weight_sum > 0.0 { dy_sum / weight_sum } else { 0.0 };
+                let child = BeamLine {
+                    median: Segment {
+                        y1: line.median.y1 + dy,
+                        y2: line.median.y2 + dy,
+                        ..line.median
+                    },
+                    height: typical_height,
+                    items: Vec::new(),
+                };
+                if parent_synthetic {
+                    self.mark_synthetic(&child);
+                }
+                self.lines.push(child);
+            }
+        }
+        self.lines
+            .sort_by(|one, two| one.median.y1.total_cmp(&two.median.y1));
+    }
+
     /// Re-derive a line's levels from the pre-closing ink (enhancement).
     ///
     /// Even spacing is arithmetic, not evidence: an envelope over a fused

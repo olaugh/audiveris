@@ -287,7 +287,7 @@ pub fn check_beam_glyph(
     raster: &RunTable,
     item: &ItemParameters,
     sheet: &SheetParameters,
-    projection_source: Option<(&[u8], usize, usize)>,
+    projection_source: Option<(&[u8], &[u8], usize, usize)>,
 ) -> BeamCheck {
     let mut check = BeamCheck {
         mean_height: None,
@@ -414,11 +414,21 @@ pub fn check_beam_glyph(
     extend_middle_lines(&mut analysis);
     check.line_heights = analysis.lines.iter().map(|line| line.height).collect();
     if crate::beam_veto::stacked_beam_split_enabled()
-        && let Some((erased, image_width, image_height)) = projection_source
+        && let Some((erased, gray, image_width, image_height)) = projection_source
     {
-        // Evidence before arithmetic: the pre-closing raster still shows
-        // each level, so the projection places the lines; lines it declines
-        // fall through to the even splits below.
+        // Evidence before arithmetic, and gray before binary: the seams
+        // between beams survive in the pre-closing grayscale even when
+        // binarization has fused the stack solid, and the seam count can
+        // neither overcount nor undercount the levels. The run projection
+        // handles what the gray profile declines, and the even splits are
+        // the last resort.
+        analysis.split_lines_by_gray_seams(
+            gray,
+            image_width,
+            image_height,
+            item.typical_height,
+            crate::beam_veto::stacked_beam_split_limit(),
+        );
         analysis.split_lines_by_projection(
             erased,
             image_width,

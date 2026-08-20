@@ -97,6 +97,12 @@ pub struct ScaleRecognition {
     pub height: usize,
     /// FNV-1a digest of the loaded grayscale raster, as in the parity vectors.
     pub gray_digest: u64,
+    /// The pre-binarization grayscale, retained because it is the only
+    /// place the seams between fused beams survive: binarization turns a
+    /// lighter-gray gutter into the same black as the beams it separates,
+    /// and every later raster (median, gaussian, erased, closed) descends
+    /// from the binary.
+    pub gray: Vec<u8>,
     /// Adaptive binary mask in Java ByteProcessor convention:
     /// `0` is ink, `255` is background, row-major.
     pub binary: Vec<u8>,
@@ -225,6 +231,7 @@ pub fn recognize_scale_raster_with_options(
         width,
         height,
         gray_digest,
+        gray: loaded.pixels().to_vec(),
         binary,
         vertical_runs,
         scale,
@@ -1241,7 +1248,7 @@ fn recognize_native_beams_impl(
                 &spot_raster,
                 item,
                 &sheet,
-                Some((projection_erased, width, height)),
+                Some((projection_erased, recognition.scale.gray.as_slice(), width, height)),
             );
             if component.width as f64 >= 2.0 * f64::from(interline) {
                 line_heights.extend(&check.line_heights);
