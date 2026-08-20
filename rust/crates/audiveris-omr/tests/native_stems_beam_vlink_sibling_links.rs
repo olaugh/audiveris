@@ -173,10 +173,12 @@ use audiveris_omr::{
     },
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamCreatedStemGeometry,
-        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistrationAction,
-        NativeStemsBeamKnownSystemStem, NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
+        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphAliasOrder,
+        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamKnownSystemStem,
+        NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
         NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamSystemStemTransactionState,
         NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
+        initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
@@ -6474,6 +6476,14 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let hydrated =
         b15_hydration::run_real("chula.png", 1, &base_text, &create_text, &reuse_text, false)
             .expect("native predecessors through B15");
+    let checker_page = b15_hydration::native_predecessor_page("chula.png");
+    let visible_modeled_count = checker_page.first_system_visible_modeled_count;
+    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
+        1,
+        &checker_page.modeled_canonical_glyphs,
+        visible_modeled_count,
+    )
+    .expect("native first-system canonical glyph registry");
     let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
         .expect("GRID recognition");
     let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
@@ -6643,15 +6653,126 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     drop(beam_index_text);
 
     let mut base_state = hydrated.state_before.base_apply_state_before.clone();
+    let (first_preparation, mut first_transaction_state) =
+        initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
+            &hydrated.scheduler,
+            &hydrated.plans,
+            &modeled_registry,
+            base_state.transaction_state.glyph_index.persistent_ids,
+        )
+        .expect("native transaction-1 B12 frontier state");
+    assert_eq!(first_preparation.plan.plan_ordinal, 143);
+    assert_eq!(first_preparation.selected_glyphs.len(), 2);
+    assert_eq!(first_preparation.known_glyphs_added, 2);
+    assert!(first_preparation.line_state_added);
+    assert_eq!(
+        first_transaction_state.glyph_index.alias_order,
+        NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+    );
+    assert_eq!(
+        first_transaction_state.glyph_index.union_size,
+        visible_modeled_count
+    );
+    assert!(
+        first_transaction_state
+            .glyph_index
+            .exhaustive_lookup
+            .is_none()
+    );
+    assert_eq!(first_transaction_state.system_stems.known_stems.len(), 0);
+    assert_eq!(
+        first_transaction_state.system_stems.authority,
+        NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline
+    );
+    let first_create = apply_native_stems_beam_vlink_create_stem_transaction(
+        &hydrated.scheduler,
+        &hydrated.builder,
+        &hydrated.plans,
+        &mut first_transaction_state,
+        &b15_hydration::checker_context_for_page(&checker_page),
+    )
+    .expect("native transaction-1 B12 createStem");
+    assert_eq!(
+        first_create.candidate,
+        hydrated.create_transaction.candidate
+    );
+    assert_eq!(
+        first_create.registration.action,
+        hydrated.create_transaction.registration.action
+    );
+    assert_eq!(first_create.registration.glyph_id, 45);
+    assert_ne!(
+        first_create.registration.glyph_id,
+        hydrated.create_transaction.registration.glyph_id
+    );
+    assert_eq!(
+        first_create.disposition,
+        hydrated.create_transaction.disposition
+    );
+    let mut expected_first_stem = hydrated.create_transaction.stem.clone();
+    expected_first_stem
+        .as_mut()
+        .expect("accepted Java B12 stem")
+        .glyph_id = first_create.registration.glyph_id;
+    assert_eq!(first_create.stem, expected_first_stem);
+    assert!(
+        first_transaction_state
+            .glyph_index
+            .exhaustive_lookup
+            .is_none()
+    );
+    assert!(
+        first_transaction_state
+            .system_stems
+            .exhaustive_lookup
+            .is_none()
+    );
+
+    let mut s_cells = initialize_native_stems_beam_s_linker_cells(&hydrated.head_corners)
+        .expect("complete native S-cell arena");
+    let first_live_state = project_native_stems_beam_vlink_reuse_live_state(
+        &sig,
+        &bindings,
+        &hydrated.scheduler,
+        &hydrated.plans,
+        &s_cells,
+        &first_transaction_state.system_stems,
+    )
+    .expect("native transaction-1 B13 live state");
+    let first_reuse = evaluate_native_stems_beam_vlink_reuse_check(
+        &hydrated.scheduler,
+        &hydrated.plans,
+        &hydrated.stumps,
+        &hydrated.vlinkers,
+        &first_create,
+        &first_transaction_state,
+        &first_live_state,
+        hydrated.relation_parameters,
+    )
+    .expect("native transaction-1 B13 reuse/check");
+    assert_eq!(first_live_state, hydrated.reuse_live_state);
+    let mut expected_first_reuse = hydrated.reuse_check.clone();
+    expected_first_reuse
+        .initial_stem
+        .as_mut()
+        .expect("accepted Java B13 initial stem")
+        .glyph_id = first_create.registration.glyph_id;
+    expected_first_reuse
+        .final_stem
+        .as_mut()
+        .expect("accepted Java B13 final stem")
+        .glyph_id = first_create.registration.glyph_id;
+    assert_eq!(first_reuse, expected_first_reuse);
+    base_state.transaction_state = first_transaction_state;
     let native_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         &hydrated.scheduler,
         &hydrated.plans,
         &hydrated.stumps,
         &hydrated.vlinkers,
-        &hydrated.create_transaction,
-        &hydrated.reuse_live_state,
+        &first_create,
+        &first_live_state,
         hydrated.relation_parameters,
-        &hydrated.reuse_check,
+        &first_reuse,
         &mut base_state,
         &mut sig,
         &mut bindings,
@@ -6662,8 +6783,12 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     // the complete mutation result in the shared semantic domain instead of
     // pretending those identity domains are interchangeable.
     assert_eq!(native_base.key, hydrated.base_apply.key);
-    assert_eq!(native_base.stem_before, hydrated.base_apply.stem_before);
-    assert_eq!(native_base.stem_after, hydrated.base_apply.stem_after);
+    let mut expected_base_stem_before = hydrated.base_apply.stem_before.clone();
+    expected_base_stem_before.glyph_id = first_create.registration.glyph_id;
+    let mut expected_base_stem_after = hydrated.base_apply.stem_after.clone();
+    expected_base_stem_after.glyph_id = first_create.registration.glyph_id;
+    assert_eq!(native_base.stem_before, expected_base_stem_before);
+    assert_eq!(native_base.stem_after, expected_base_stem_after);
     assert_eq!(
         native_base.fresh_relation,
         hydrated.base_apply.fresh_relation
@@ -6729,8 +6854,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
 
     // Carry the same owned SIG and B-cell authority through B17 before any
     // Boundary-16 or Boundary-17 oracle row is opened.
-    let mut s_cells = initialize_native_stems_beam_s_linker_cells(&hydrated.head_corners)
-        .expect("complete native S-cell arena");
     let post_b16_sig = sig.clone();
     let pre_b17_s_cells = s_cells.clone();
     let head_actual = apply_native_stems_beam_vlink_head_transaction_to_native_sig(
@@ -6861,14 +6984,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     else {
         unreachable!()
     };
-    let checker_page = b15_hydration::native_predecessor_page("chula.png");
-    let visible_modeled_count = checker_page.first_system_visible_modeled_count;
-    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
-        1,
-        &checker_page.modeled_canonical_glyphs,
-        visible_modeled_count,
-    )
-    .expect("native first-system canonical glyph registry");
     let mut second_transaction_state = native_base.state_after.transaction_state.clone();
     let authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
         &second_transaction_state.system_stems,
@@ -7282,7 +7397,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .transaction_state
             .glyph_index
             .union_size,
-        1650
+        visible_modeled_count
     );
     assert_eq!(
         carrier.latest_base_apply.inter_index.baseline_entry_count,
