@@ -199,6 +199,14 @@ mod b15_hydration;
 
 const FIXTURE_SCHEMA: &str = "# schema: stems-beam-vlink-sibling-links-v1";
 const FIXTURE_OVERRIDE_ENV: &str = "AUDIVERIS_B16_SIBLING_LINKS_FIXTURE";
+const GENERIC_FINALIZE_FIXTURE: &str =
+    include_str!("../../../oracle/stems-finalize-generic-v1.txt");
+const GENERIC_FINALIZE_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-finalize-generic.sh");
+const GENERIC_FINALIZE_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/FinalizeStemsGenericProbe.java");
+const GENERIC_FINALIZE_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-finalize-generic.init.gradle");
 const CORPUS_PAGES: [(&str, &str); 8] = [
     ("chula", "chula.png"),
     ("allegretto", "allegretto.png"),
@@ -12995,6 +13003,250 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert!(finalized.removed_head_stem_relations.is_empty());
     assert_eq!(finalized.abnormal_value_changes, 0);
     assert_eq!(*finalized.state_after, before_finalize);
+
+    // Exercise the generic mutating branches on the same fully authenticated
+    // carrier. Three mutually compatible stems force Java's >2 loop and its
+    // subsequent noncanonical same-side pair cleanup; a deliberately cleared
+    // stemless-head flag exercises checkNeededStems in the same transaction.
+    let mut mutating_finalize = phase_two_state.clone();
+    let (cleanup_head, original_edge) = mutating_finalize
+        .heads
+        .iter()
+        .find_map(|head| {
+            let head_id =
+                mutating_finalize.beam_state.bindings.head_vertices[&head.reference.reference];
+            let links = mutating_finalize
+                .beam_state
+                .sig
+                .incident_edges(head_id.0)
+                .ok()?
+                .into_iter()
+                .filter(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+                .cloned()
+                .collect::<Vec<_>>();
+            (links.len() == 1).then_some((head.reference, links[0]))
+        })
+        .expect("a singly linked head for generic finalizer coverage");
+    let excluded = |left: usize, right: usize| {
+        mutating_finalize.beam_state.sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::Exclusion
+                && ((edge.source == left && edge.target == right)
+                    || (edge.source == right && edge.target == left))
+        })
+    };
+    let mut extra_stems = Vec::new();
+    for &candidate in mutating_finalize.beam_state.bindings.stem_vertices.values() {
+        if candidate.0 != original_edge.target
+            && !excluded(original_edge.target, candidate.0)
+            && extra_stems
+                .iter()
+                .all(|other: &NativeSigVertexId| !excluded(other.0, candidate.0))
+        {
+            extra_stems.push(candidate);
+            if extra_stems.len() == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(extra_stems.len(), 2);
+    let mut added_edges = Vec::new();
+    for (candidate, grade) in extra_stems.into_iter().zip([0.001, 0.002]) {
+        let mut edge = original_edge;
+        edge.ordinal = mutating_finalize.beam_state.sig.edges.len();
+        edge.target = candidate.0;
+        edge.support = Some(NativeSigSupport {
+            grade,
+            bar_connection_impacts: None,
+        });
+        let edge_id = edge.ordinal;
+        mutating_finalize
+            .beam_state
+            .sig
+            .append_edge(edge)
+            .expect("append synthetic competing HeadStem relation");
+        added_edges.push(edge_id);
+    }
+    let stemless = finalized.no_stem_heads[0];
+    let stemless_id = mutating_finalize.beam_state.bindings.head_vertices[&stemless.reference];
+    mutating_finalize
+        .beam_state
+        .sig
+        .set_abnormal(stemless_id, false)
+        .expect("clear synthetic stemless abnormal flag");
+
+    let mutated = finalize_native_stems(&mutating_finalize).expect("generic mutating finalizer");
+    assert!(mutated.multiple_stem_heads.contains(&cleanup_head));
+    assert_eq!(
+        mutated
+            .removed_head_stem_relations
+            .iter()
+            .map(|edge| edge.0)
+            .collect::<Vec<_>>(),
+        added_edges
+    );
+    assert_eq!(mutated.abnormal_value_changes, 1);
+    assert!(mutated.state_after.beam_state.sig.vertices[stemless_id.0].abnormal);
+    assert!(
+        added_edges
+            .iter()
+            .all(|edge| !mutated.state_after.beam_state.sig.edges[*edge].active)
+    );
+
+    // Complementary LEFT/RIGHT relations whose physical medians extend on
+    // opposite vertical sides form Java's canonical shared-head exception.
+    // Both relations must survive the cleaner.
+    let mut canonical_finalize = phase_two_state.clone();
+    let canonical_head_id =
+        canonical_finalize.beam_state.bindings.head_vertices[&cleanup_head.reference];
+    let original_target = original_edge.target;
+    let canonical_target = canonical_finalize
+        .beam_state
+        .bindings
+        .stem_vertices
+        .values()
+        .copied()
+        .find(|candidate| {
+            candidate.0 != original_target
+                && !canonical_finalize.beam_state.sig.edges.iter().any(|edge| {
+                    edge.active
+                        && edge.kind == NativeSigRelationKind::Exclusion
+                        && ((edge.source == original_target && edge.target == candidate.0)
+                            || (edge.source == candidate.0 && edge.target == original_target))
+                })
+        })
+        .expect("compatible canonical partner stem");
+    let bounds = canonical_finalize.beam_state.sig.vertices[canonical_head_id.0].bounds;
+    let top = f64::from(bounds.y);
+    let bottom = f64::from(bounds.y + bounds.height - 1);
+    let original_ordinal = original_edge.ordinal;
+    let original_payload = canonical_finalize.beam_state.sig.edges[original_ordinal]
+        .head_stem
+        .as_mut()
+        .expect("original HeadStem payload");
+    original_payload.head_side = NativeStemHeadSide::Left;
+    original_payload.dy = 0.0;
+    original_payload.extension_point.y = top;
+    let mut right_edge = canonical_finalize.beam_state.sig.edges[original_ordinal];
+    right_edge.ordinal = canonical_finalize.beam_state.sig.edges.len();
+    right_edge.target = canonical_target.0;
+    let right_payload = right_edge
+        .head_stem
+        .as_mut()
+        .expect("right HeadStem payload");
+    right_payload.head_side = NativeStemHeadSide::Right;
+    right_payload.dy = 0.0;
+    right_payload.extension_point.y = bottom;
+    let canonical_edge = right_edge.ordinal;
+    canonical_finalize
+        .beam_state
+        .sig
+        .append_edge(right_edge)
+        .expect("append canonical partner relation");
+    for (stem_vertex, median) in [
+        (
+            NativeSigVertexId(original_target),
+            NativeStemLine {
+                start: NativeStemPoint { x: 0.0, y: top },
+                stop: NativeStemPoint {
+                    x: 0.0,
+                    y: top + 100.0,
+                },
+            },
+        ),
+        (
+            canonical_target,
+            NativeStemLine {
+                start: NativeStemPoint {
+                    x: 0.0,
+                    y: bottom - 100.0,
+                },
+                stop: NativeStemPoint { x: 0.0, y: bottom },
+            },
+        ),
+    ] {
+        let identity = canonical_finalize
+            .beam_state
+            .bindings
+            .stem_vertices
+            .iter()
+            .find_map(|(identity, id)| (*id == stem_vertex).then_some(*identity))
+            .expect("canonical stem identity");
+        canonical_finalize
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter_mut()
+            .find(|stem| stem.stem_identity == identity)
+            .expect("canonical known stem")
+            .geometry
+            .median = median;
+    }
+    let canonical = finalize_native_stems(&canonical_finalize).expect("canonical finalizer");
+    assert!(canonical.multiple_stem_heads.contains(&cleanup_head));
+    assert!(canonical.removed_head_stem_relations.is_empty());
+    assert!(canonical.state_after.beam_state.sig.edges[original_ordinal].active);
+    assert!(canonical.state_after.beam_state.sig.edges[canonical_edge].active);
+
+    // Independent Java corpus evidence pins two real removals, five real
+    // canonical keeps, and the checkNeededStems abnormal epilog.
+    assert_eq!(
+        sha256_hex(GENERIC_FINALIZE_FIXTURE.as_bytes()),
+        "d468cb52f59687604d2204b18aa2364bde12355cb476d007ce205788033b350a"
+    );
+    assert_eq!(
+        sha256_hex(GENERIC_FINALIZE_RUNNER),
+        "ddcaa94b847de8ed50ffdb9e866717da3e888e223117d8453bf06db55ebaa247"
+    );
+    assert_eq!(
+        sha256_hex(GENERIC_FINALIZE_PROBE),
+        "f55cc3fe1f8dc85d817ba84499e407dc759f6710cd815b0eb8007bfca02ac0b1"
+    );
+    assert_eq!(
+        sha256_hex(GENERIC_FINALIZE_INIT),
+        "538f75284a798d4cf96e7f4034bf5368e63f50891f58b712b517fe84f6223006"
+    );
+    let generic_rows = GENERIC_FINALIZE_FIXTURE
+        .lines()
+        .filter(|line| line.starts_with("finalizegeneric "))
+        .collect::<Vec<_>>();
+    assert_eq!(generic_rows.len(), 12);
+    assert_eq!(
+        generic_rows
+            .iter()
+            .filter(|line| line.ends_with("canonical true"))
+            .count(),
+        5
+    );
+    assert_eq!(
+        generic_rows
+            .iter()
+            .filter(|line| line.ends_with("canonical false"))
+            .count(),
+        2
+    );
+    assert!(generic_rows.iter().any(|line| {
+        line.starts_with("finalizegeneric after page allegretto.png#1 system 1 removed [head1317:stem2240:sideRIGHT:")
+            && line.contains("contribution0x1.343d18bd654e6p2/401343d18bd654e6")
+    }));
+    assert!(generic_rows.iter().any(|line| {
+        line.starts_with("finalizegeneric after page zizi.png#1 system 2 removed [head1183:")
+            && line.contains(":sideLEFT:")
+            && line.contains("contribution0x1.bef65980141dbp2/401bef65980141db")
+    }));
+    assert!(generic_rows.iter().any(|line| {
+        *line == "finalizegeneric after page chula.png#1 system 1 removed [] abnormal [HeadInter1389:false->true] syntheticHead 1389"
+    }));
+    let generic_summary = GENERIC_FINALIZE_FIXTURE
+        .lines()
+        .find(|line| line.starts_with("stemsfinalizegeneric summary "))
+        .expect("generic finalizer summary");
+    assert!(generic_summary.contains("schema stems-finalize-generic-v1 rows 12"));
+    assert!(generic_summary.contains("freshRuns 2 freshRunsByteIdentical true"));
+    assert!(generic_summary.contains("nativeScope GenericHeadStemsCleanerAndNeededStems"));
+    assert!(generic_summary.ends_with("javaEvidence ReturnedAfterFinalizeStems"));
 
     // The boundary must reject an unfinished append-retry queue without
     // changing its caller-owned carrier.

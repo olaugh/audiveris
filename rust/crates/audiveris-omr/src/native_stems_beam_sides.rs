@@ -4424,6 +4424,404 @@ pub fn advance_native_stems_head_phase_two_append_retry(
     })
 }
 
+#[derive(Clone, Copy)]
+struct NativeFinalizeHeadStemLink {
+    edge: NativeSigEdgeId,
+    stem: NativeSigVertexId,
+    stem_grade: f64,
+    relation_grade: f64,
+    payload: NativeSigHeadStemPayload,
+}
+
+/// Execute Java's generic `StemsRetriever.finalizeStems` terminal.
+///
+/// The completed carrier owns every input used by `checkHeadStems` and
+/// `checkNeededStems`: the live SIG, stem exclusions and grades, physical stem
+/// medians, head geometry, and Java's reverse-grade head order. Mutations are
+/// applied to a clone, so malformed evidence fails without changing the input.
+pub fn finalize_native_stems(
+    carrier: &NativeStemsHeadPhase1Carrier,
+) -> Result<NativeStemsFinalizeTransaction, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != carrier.heads.len()
+        || carrier.phase_two_index != carrier.unlinked_heads.len()
+    {
+        return Err(stage(
+            "finalizeStems-frontier",
+            "carrier has not completed both HEADS linking phases",
+        ));
+    }
+    carrier
+        .beam_state
+        .sig
+        .validate_integrity()
+        .map_err(|error| stage("finalizeStems-SIG", error))?;
+    carrier
+        .beam_state
+        .bindings
+        .validate_against(&carrier.beam_state.sig)
+        .map_err(|error| stage("finalizeStems-bindings", error))?;
+    let live_vertices = carrier
+        .beam_state
+        .sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && !vertex.removed)
+        .count();
+    let live_edges = carrier
+        .beam_state
+        .sig
+        .edges
+        .iter()
+        .filter(|edge| edge.active)
+        .count();
+    if carrier.beam_state.sig.system_id == 1
+        && carrier.heads.len() == 102
+        && carrier.phase_two_index == 5
+        && live_vertices == 267
+        && live_edges == 370
+        && carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len()
+            == 46
+    {
+        // Preserve the stricter frozen v104 Chula authentication as a
+        // specialization of the generic terminal.
+        authenticate_chula_finalize_native_stems(carrier)?;
+    }
+
+    let mut shadow = carrier.clone();
+    let mut multiple_stem_heads = Vec::new();
+    for head in &carrier.heads {
+        let head_id = shadow
+            .beam_state
+            .bindings
+            .head_vertices
+            .get(&head.reference.reference)
+            .copied()
+            .ok_or_else(|| stage("finalizeStems-head", "head lacks its live SIG binding"))?;
+        if shadow
+            .beam_state
+            .sig
+            .vertex(head_id.0)
+            .is_none_or(|vertex| vertex.kind != NativeSigInterKind::Head)
+        {
+            return Err(stage(
+                "finalizeStems-head",
+                "head binding does not resolve to a live HeadInter",
+            ));
+        }
+        let mut stems = native_finalize_head_stem_links(&shadow, head_id)?;
+        if stems.len() > 1 {
+            multiple_stem_heads.push(head.reference);
+            stems.sort_by(|left, right| right.stem_grade.total_cmp(&left.stem_grade));
+            for partition in native_finalize_stem_partitions(&shadow.beam_state.sig, &stems)? {
+                let mut links = partition
+                    .into_iter()
+                    .filter_map(|index| {
+                        let link = stems[index];
+                        shadow.beam_state.sig.edges[link.edge.0]
+                            .active
+                            .then_some(link)
+                    })
+                    .collect::<Vec<_>>();
+                while links.len() > 2 {
+                    remove_native_finalize_worst(&mut shadow, &mut links)?;
+                }
+                if links.len() == 2
+                    && !native_finalize_is_canonical_share(&shadow, head_id, &links)?
+                {
+                    remove_native_finalize_worst(&mut shadow, &mut links)?;
+                }
+            }
+        }
+    }
+
+    let mut no_stem_heads = Vec::new();
+    for head in &carrier.heads {
+        let head_id = shadow.beam_state.bindings.head_vertices[&head.reference.reference];
+        if native_finalize_head_stem_links(&shadow, head_id)?.is_empty() {
+            no_stem_heads.push(head.reference);
+            if !shadow.beam_state.sig.vertices[head_id.0].abnormal {
+                shadow
+                    .beam_state
+                    .sig
+                    .set_abnormal(head_id, true)
+                    .map_err(|error| stage("finalizeStems-abnormal", error))?;
+            }
+        }
+    }
+    reconcile_known_stems(
+        &mut shadow.beam_state.latest_base_apply,
+        &shadow.beam_state.sig,
+        &shadow.beam_state.bindings,
+    )?;
+    let abnormal_value_changes = carrier
+        .beam_state
+        .sig
+        .vertices
+        .iter()
+        .zip(&shadow.beam_state.sig.vertices)
+        .filter(|(before, after)| before.abnormal != after.abnormal)
+        .count();
+    let abnormal_heads = carrier
+        .heads
+        .iter()
+        .filter_map(|head| {
+            let id = shadow.beam_state.bindings.head_vertices[&head.reference.reference];
+            shadow.beam_state.sig.vertices[id.0]
+                .abnormal
+                .then_some(head.reference)
+        })
+        .collect();
+    let removed_head_stem_relations = carrier
+        .beam_state
+        .sig
+        .edges
+        .iter()
+        .zip(&shadow.beam_state.sig.edges)
+        .filter_map(|(before, after)| {
+            (before.kind == NativeSigRelationKind::HeadStem && before.active && !after.active)
+                .then_some(NativeSigEdgeId(before.ordinal))
+        })
+        .collect();
+    shadow
+        .beam_state
+        .sig
+        .validate_integrity()
+        .map_err(|error| stage("finalizeStems-result", error))?;
+
+    Ok(NativeStemsFinalizeTransaction {
+        checked_heads: carrier.heads.len(),
+        multiple_stem_heads,
+        no_stem_heads,
+        abnormal_heads,
+        removed_head_stem_relations,
+        abnormal_value_changes,
+        state_after: Box::new(shadow),
+    })
+}
+
+fn native_finalize_head_stem_links(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head: NativeSigVertexId,
+) -> Result<Vec<NativeFinalizeHeadStemLink>, NativeStemsBeamSidesError> {
+    let mut links = Vec::new();
+    for edge in carrier
+        .beam_state
+        .sig
+        .incident_edges(head.0)
+        .map_err(|error| stage("finalizeStems-HeadStem", error))?
+        .into_iter()
+        .filter(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+    {
+        if edge.source != head.0 {
+            return Err(stage(
+                "finalizeStems-HeadStem",
+                "HeadStem relation is not directed from its head",
+            ));
+        }
+        let stem = carrier
+            .beam_state
+            .sig
+            .vertex(edge.target)
+            .ok_or_else(|| stage("finalizeStems-HeadStem", "target stem is not live"))?;
+        let relation_grade = edge
+            .support
+            .ok_or_else(|| stage("finalizeStems-HeadStem", "relation lacks support grade"))?
+            .grade;
+        let payload = edge
+            .head_stem
+            .ok_or_else(|| stage("finalizeStems-HeadStem", "relation lacks HeadStem payload"))?;
+        if stem.kind != NativeSigInterKind::Stem
+            || !stem.grade.is_finite()
+            || !relation_grade.is_finite()
+            || !payload.dy.is_finite()
+        {
+            return Err(stage(
+                "finalizeStems-HeadStem",
+                "relation carries invalid stem or measurement state",
+            ));
+        }
+        links.push(NativeFinalizeHeadStemLink {
+            edge: NativeSigEdgeId(edge.ordinal),
+            stem: NativeSigVertexId(edge.target),
+            stem_grade: stem.grade,
+            relation_grade,
+            payload,
+        });
+    }
+    Ok(links)
+}
+
+fn native_finalize_stem_partitions(
+    sig: &NativeSigSystem,
+    stems: &[NativeFinalizeHeadStemLink],
+) -> Result<Vec<Vec<usize>>, NativeStemsBeamSidesError> {
+    let mut concurrent = vec![BTreeSet::new(); stems.len()];
+    let mut conflict = false;
+    for (index, stem) in stems.iter().enumerate() {
+        for edge in sig
+            .incident_edges(stem.stem.0)
+            .map_err(|error| stage("finalizeStems-partitions", error))?
+            .into_iter()
+            .filter(|edge| edge.kind == NativeSigRelationKind::Exclusion)
+        {
+            let opposite = if edge.source == stem.stem.0 {
+                edge.target
+            } else {
+                edge.source
+            };
+            if let Some(other) = stems
+                .iter()
+                .position(|candidate| candidate.stem.0 == opposite)
+                && other > index
+            {
+                concurrent[index].insert(other);
+                conflict = true;
+            }
+        }
+    }
+    if !conflict {
+        return Ok(vec![(0..stems.len()).collect()]);
+    }
+
+    let mut sequences = vec![vec![0_i8; stems.len()]];
+    for (index, forbidden) in concurrent.iter().enumerate() {
+        let prior_count = sequences.len();
+        for sequence_index in 0..prior_count {
+            if sequences[sequence_index][index] == -1 {
+                continue;
+            }
+            sequences[sequence_index][index] = 1;
+            if !forbidden.is_empty() {
+                let mut excluded = sequences[sequence_index].clone();
+                excluded[index] = 0;
+                sequences.push(excluded);
+                for &other in forbidden {
+                    sequences[sequence_index][other] = -1;
+                }
+            }
+        }
+    }
+    Ok(sequences
+        .into_iter()
+        .map(|sequence| {
+            sequence
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, selected)| (selected == 1).then_some(index))
+                .collect()
+        })
+        .collect())
+}
+
+fn remove_native_finalize_worst(
+    carrier: &mut NativeStemsHeadPhase1Carrier,
+    links: &mut Vec<NativeFinalizeHeadStemLink>,
+) -> Result<(), NativeStemsBeamSidesError> {
+    let (index, _) = links
+        .iter()
+        .enumerate()
+        .map(|(index, link)| {
+            // Support.getTargetRatio() = 1 + 10 * HeadStemRelation grade.
+            let target_ratio = 1.0 + (10.0 * link.relation_grade);
+            (index, link.stem_grade * (target_ratio - 1.0))
+        })
+        .min_by(|(_, left), (_, right)| left.total_cmp(right))
+        .ok_or_else(|| stage("finalizeStems-cleaner", "empty contribution set"))?;
+    let discarded = links.remove(index);
+    let edge = carrier.beam_state.sig.edges[discarded.edge.0];
+    carrier
+        .beam_state
+        .sig
+        .remove_edge(discarded.edge)
+        .map_err(|error| stage("finalizeStems-cleaner", error))?;
+    for vertex in [NativeSigVertexId(edge.source), discarded.stem] {
+        let abnormal = !carrier
+            .beam_state
+            .sig
+            .incident_edges(vertex.0)
+            .map_err(|error| stage("finalizeStems-callback", error))?
+            .into_iter()
+            .any(|relation| relation.kind == NativeSigRelationKind::HeadStem);
+        carrier
+            .beam_state
+            .sig
+            .set_abnormal(vertex, abnormal)
+            .map_err(|error| stage("finalizeStems-callback", error))?;
+    }
+    Ok(())
+}
+
+fn native_finalize_is_canonical_share(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_id: NativeSigVertexId,
+    links: &[NativeFinalizeHeadStemLink],
+) -> Result<bool, NativeStemsBeamSidesError> {
+    if links.iter().any(|link| link.payload.dy > 0.2) {
+        return Ok(false);
+    }
+    let left = links
+        .iter()
+        .find(|link| link.payload.head_side == crate::stems_step::NativeStemHeadSide::Left);
+    let right = links
+        .iter()
+        .find(|link| link.payload.head_side == crate::stems_step::NativeStemHeadSide::Right);
+    let (Some(left), Some(right)) = (left, right) else {
+        return Ok(false);
+    };
+    let geometry = |stem: NativeSigVertexId| {
+        let identity = carrier
+            .beam_state
+            .bindings
+            .stem_vertices
+            .iter()
+            .find_map(|(identity, id)| (*id == stem).then_some(*identity))
+            .ok_or_else(|| stage("finalizeStems-canonical", "stem lacks native binding"))?;
+        carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .find(|known| known.stem_identity == identity)
+            .map(|known| known.geometry.median)
+            .ok_or_else(|| stage("finalizeStems-canonical", "stem lacks physical median"))
+    };
+    let left_line = geometry(left.stem)?;
+    let right_line = geometry(right.stem)?;
+    let head = &carrier.beam_state.sig.vertices[head_id.0];
+    let head_center_y = head.bounds.y + (head.bounds.height / 2);
+    let left_mid = (left_line.start.y + left_line.stop.y) / 2.0;
+    let right_mid = (right_line.start.y + right_line.stop.y) / 2.0;
+    if f64::from(head_center_y) >= left_mid || f64::from(head_center_y) <= right_mid {
+        return Ok(false);
+    }
+    let portion = |line: crate::stems_step::NativeStemLine, extension_y: f64| {
+        let margin = f64::from(head.bounds.height) * 0.275;
+        let midpoint = (line.start.y + line.stop.y) / 2.0;
+        if extension_y >= midpoint {
+            if extension_y > line.stop.y - margin {
+                1
+            } else {
+                0
+            }
+        } else if extension_y < line.start.y + margin {
+            -1
+        } else {
+            0
+        }
+    };
+    Ok(portion(left_line, left.payload.extension_point.y) == -1
+        && portion(right_line, right.payload.extension_point.y) == 1)
+}
+
 /// Execute the bounded Chula system-1 `finalizeStems` terminal.
 ///
 /// This authenticates both private Java substeps from owned native state.
@@ -4432,7 +4830,7 @@ pub fn advance_native_stems_head_phase_two_append_retry(
 /// stemless stem-head abnormal; the only two such heads are already abnormal,
 /// so the complete finalizer is an intentional no-op. Any different census
 /// fails closed before a carrier is returned.
-pub fn finalize_native_stems(
+fn authenticate_chula_finalize_native_stems(
     carrier: &NativeStemsHeadPhase1Carrier,
 ) -> Result<NativeStemsFinalizeTransaction, NativeStemsBeamSidesError> {
     if !carrier.frontier_consumed

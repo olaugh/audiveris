@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+    def repoRoot = providers.gradleProperty('rustPortRepo').get()
+    def outputDir = app.layout.buildDirectory.dir('rust-finalize-stems-generic/classes')
+    app.tasks.register('compileFinalizeStemsGenericProbe', JavaCompile) {
+        source = file("${repoRoot}/rust/oracle/java/FinalizeStemsGenericProbe.java")
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+    app.tasks.register('finalizeStemsGenericProbe', JavaExec) {
+        dependsOn 'compileFinalizeStemsGenericProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.FinalizeStemsGenericProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '48g'
+        jvmArgs '-XX:+UnlockExperimentalVMOptions', '-XX:+UseEpsilonGC'
+        systemProperty 'logback.configurationFile',
+                "${repoRoot}/rust/oracle/java/logback-quiet.xml"
+        args = [
+            providers.gradleProperty('finalizeAllegretto').get(), '1', 'false',
+            providers.gradleProperty('finalizeZizi').get(), '1', 'false',
+            providers.gradleProperty('finalizeZizi').get(), '2', 'false',
+            providers.gradleProperty('finalizeChula').get(), '1', 'true'
+        ]
+    }
+}
