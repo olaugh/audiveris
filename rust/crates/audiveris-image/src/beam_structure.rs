@@ -81,6 +81,12 @@ pub struct BeamStructureAnalysis {
     pub lines: Vec<BeamLine>,
     pub global_distance: f64,
     pub mean_thickness: f64,
+    /// Median `y1` of every line built on synthesized evidence: a border the
+    /// creation retry invented, or a level the ink-deficit probe proposed.
+    /// Such lines take the inner-line belt treatment -- their outer belt is
+    /// exactly the fused note ink whose border loss made the synthesis
+    /// necessary -- and still pass every other impact on their own ink.
+    pub synthetic_medians: Vec<f64>,
 }
 
 impl BeamStructureAnalysis {
@@ -189,6 +195,87 @@ impl BeamStructureAnalysis {
                     items: Vec::new(),
                 });
             }
+        }
+    }
+
+    /// Propose the stack levels the borders lost to fusion (enhancement).
+    ///
+    /// A thirty-second stack whose top beam fuses with the run's noteheads
+    /// loses that level's borders entirely; the remaining borders pair
+    /// evenly, so the whole structure builds cleanly -- one level short. The
+    /// glyph's own ink records the loss: `mean_thickness` implies more
+    /// levels than the structure holds lines. For each missing level this
+    /// proposes a candidate line above and below the stack, at the stack's
+    /// own level spacing, and keeps the side whose median actually runs
+    /// through ink (at least half its columns); item grading then accepts or
+    /// refuses the proposal like any other line. Multi-line structures only:
+    /// a lone line's ink surplus is as likely fused noteheads or a ledger
+    /// row (the page-9 lesson) as a hidden level. Added lines have no items;
+    /// run [`Self::populate_empty_items`] afterwards.
+    pub fn add_missing_outer_lines(
+        &mut self,
+        glyph: &RunTable,
+        offset_x: i32,
+        offset_y: i32,
+        typical_height: f64,
+        max_count: usize,
+    ) {
+        if self.lines.len() < 2 {
+            return;
+        }
+        let target = ((self.mean_thickness / typical_height).round_ties_even() as usize)
+            .min(max_count.max(2));
+        if target <= self.lines.len() {
+            return;
+        }
+        let sections = build_sections(glyph, JunctionPolicy::DEFAULT_RATIO);
+        let coverage = |median: Segment| -> f64 {
+            let x1 = median.x1.round_ties_even() as i32;
+            let x2 = median.x2.round_ties_even() as i32;
+            if x2 <= x1 {
+                return 0.0;
+            }
+            let mut hit = 0_usize;
+            for x in x1..=x2 {
+                let y = median.y_at_x(f64::from(x)) - f64::from(offset_y);
+                let x_local = f64::from(x - offset_x);
+                if sections
+                    .iter()
+                    .any(|section| section_contains(section, x_local, y))
+                {
+                    hit += 1;
+                }
+            }
+            hit as f64 / f64::from(x2 - x1 + 1)
+        };
+        for _ in self.lines.len()..target {
+            let spacing = (self.lines.last().unwrap().median.y1
+                - self.lines.first().unwrap().median.y1)
+                / (self.lines.len() - 1) as f64;
+            let shifted = |line: &BeamLine, dy: f64| Segment {
+                y1: line.median.y1 + dy,
+                y2: line.median.y2 + dy,
+                ..line.median
+            };
+            let above = shifted(self.lines.first().unwrap(), -spacing);
+            let below = shifted(self.lines.last().unwrap(), spacing);
+            let (above_cov, below_cov) = (coverage(above), coverage(below));
+            let (median, cov) = if above_cov >= below_cov {
+                (above, above_cov)
+            } else {
+                (below, below_cov)
+            };
+            if cov < 0.5 {
+                return;
+            }
+            self.synthetic_medians.push(median.y1);
+            self.lines.push(BeamLine {
+                median,
+                height: typical_height,
+                items: Vec::new(),
+            });
+            self.lines
+                .sort_by(|one, two| one.median.y1.total_cmp(&two.median.y1));
         }
     }
 
@@ -331,8 +418,10 @@ pub fn analyze_beam_structure(
         .slope();
     let mut top = line_map(top, center, global_slope)?;
     let mut bottom = line_map(bottom, center, global_slope)?;
+    let mut created_offsets: Vec<f64> = Vec::new();
     let complete = |top: &mut Vec<(f64, Segment)>,
                     bottom: &mut Vec<(f64, Segment)>,
+                    created: &mut Vec<f64>,
                     create: bool| {
         complete_border_lines(
             1.0,
@@ -342,6 +431,7 @@ pub fn analyze_beam_structure(
             create,
             top,
             bottom,
+            created,
         );
         complete_border_lines(
             -1.0,
@@ -351,12 +441,13 @@ pub fn analyze_beam_structure(
             create,
             bottom,
             top,
+            created,
         );
     };
     let saved = parameters
         .allow_border_creation
         .then(|| (top.clone(), bottom.clone()));
-    complete(&mut top, &mut bottom, false);
+    complete(&mut top, &mut bottom, &mut created_offsets, false);
     if top.len() != bottom.len()
         && let Some((saved_top, saved_bottom)) = saved
     {
@@ -367,7 +458,8 @@ pub fn analyze_beam_structure(
         // never take this path, so the healthy population is untouched.
         top = saved_top;
         bottom = saved_bottom;
-        complete(&mut top, &mut bottom, true);
+        created_offsets.clear();
+        complete(&mut top, &mut bottom, &mut created_offsets, true);
     }
     top.sort_by(|one, two| one.0.total_cmp(&two.0));
     bottom.sort_by(|one, two| one.0.total_cmp(&two.0));
@@ -376,7 +468,8 @@ pub fn analyze_beam_structure(
     }
 
     let mut lines = Vec::with_capacity(top.len());
-    for ((_, top), (_, bottom)) in top.into_iter().zip(bottom) {
+    let mut synthetic_medians = Vec::new();
+    for ((top_offset, top), (bottom_offset, bottom)) in top.into_iter().zip(bottom) {
         let x1 = top.x1.min(bottom.x1);
         let x2 = top.x2.max(bottom.x2);
         let yt1 = top.y_at_x(x1);
@@ -398,6 +491,12 @@ pub fn analyze_beam_structure(
             height,
             parameters.max_item_x_gap,
         );
+        if created_offsets
+            .iter()
+            .any(|offset| *offset == top_offset || *offset == bottom_offset)
+        {
+            synthetic_medians.push(median.y1);
+        }
         lines.push(BeamLine {
             median,
             height,
@@ -408,6 +507,7 @@ pub fn analyze_beam_structure(
         lines,
         global_distance,
         mean_thickness: glyph.weight() as f64 / glyph.width() as f64,
+        synthetic_medians,
     })
 }
 
@@ -640,6 +740,7 @@ fn complete_border_lines(
     allow_border_creation: bool,
     base: &mut Vec<(f64, Segment)>,
     other: &mut Vec<(f64, Segment)>,
+    created: &mut Vec<f64>,
 ) {
     let base = base.clone();
     let base: &[(f64, Segment)] = &base;
@@ -654,6 +755,7 @@ fn complete_border_lines(
             if allow_border_creation {
                 // Java's dormant allowBorderCreation branch: the missing
                 // opposite border is the found one, one typical height away.
+                created.push(target);
                 other.push((
                     target,
                     Segment {
@@ -1064,13 +1166,13 @@ pub struct BeamImpacts {
     pub raster: BeamRasterEvidence,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BeamImpactRejection {
     Width,
     HeightBelow,
     HeightAbove,
-    CoreRatio,
-    BeltRatio,
+    CoreRatio(BeamRasterEvidence),
+    BeltRatio(BeamRasterEvidence),
 }
 
 /// Java `AreaMask` sampling and `BeamsBuilder.computeImpacts`. Absolute mask
@@ -1135,10 +1237,10 @@ pub fn compute_beam_impacts(
         return Err(BeamImpactRejection::HeightAbove);
     }
     if core_ratio < parameters.min_core_black_ratio {
-        return Err(BeamImpactRejection::CoreRatio);
+        return Err(BeamImpactRejection::CoreRatio(raster_evidence));
     }
     if belt_ratio > parameters.max_belt_black_ratio {
-        return Err(BeamImpactRejection::BeltRatio);
+        return Err(BeamImpactRejection::BeltRatio(raster_evidence));
     }
     Ok(BeamImpacts {
         width: (f64::from(rounded_width) - parameters.min_width_low)
@@ -1356,6 +1458,7 @@ mod tests {
             items: vec![],
         };
         let mut even = BeamStructureAnalysis {
+            synthetic_medians: Vec::new(),
             lines: vec![line.clone()],
             global_distance: 0.0,
             mean_thickness: 6.0,
@@ -1366,6 +1469,7 @@ mod tests {
         assert_eq!(even.lines[0].median.y1, 4.0);
         assert!(even.lines.iter().all(|line| line.items.is_empty()));
         let mut odd = BeamStructureAnalysis {
+            synthetic_medians: Vec::new(),
             lines: vec![line],
             global_distance: 0.0,
             mean_thickness: 5.999,
@@ -1474,7 +1578,7 @@ mod tests {
             },
             height: 4.0,
         };
-        assert_eq!(
+        assert!(matches!(
             compute_beam_impacts(
                 low_core,
                 BeamBeltSides {
@@ -1489,8 +1593,8 @@ mod tests {
                 0.0,
                 impact_parameters()
             ),
-            Err(BeamImpactRejection::CoreRatio)
-        );
+            Err(BeamImpactRejection::CoreRatio(_))
+        ));
     }
 
     #[test]

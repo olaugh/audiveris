@@ -1260,6 +1260,19 @@ fn recognize_native_beams_impl(
                     structure.lines.len(),
                     structure.lines.iter().map(|line| line.items.len()).sum(),
                 );
+            } else {
+                // A structure that created some beams can still lose lines --
+                // a probed stack level, a split half -- and those losses were
+                // invisible. One record per rejected item, same reasons.
+                for (reason, detail) in item_rejections {
+                    record_rejection(
+                        beam_rejections,
+                        reason,
+                        detail,
+                        structure.lines.len(),
+                        structure.lines.iter().map(|line| line.items.len()).sum(),
+                    );
+                }
             }
             for system in systems {
                 if created.is_empty() {

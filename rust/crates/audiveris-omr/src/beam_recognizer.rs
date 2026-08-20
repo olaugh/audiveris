@@ -374,6 +374,13 @@ pub fn check_beam_glyph(
             crate::beam_veto::stacked_beam_split_limit(),
             2.0 * item.min_beam_width_low,
     );
+        analysis.add_missing_outer_lines(
+            raster,
+            component.left,
+            component.top,
+            item.typical_height,
+            crate::beam_veto::stacked_beam_split_limit(),
+        );
         analysis.populate_empty_items(
             raster,
             component.left,
@@ -396,6 +403,7 @@ mod tests {
 
     fn analysis(lines: Vec<(f64, f64, f64, f64)>) -> BeamStructureAnalysis {
         BeamStructureAnalysis {
+            synthetic_medians: Vec::new(),
             lines: lines
                 .into_iter()
                 .map(|(x1, y1, x2, y2)| BeamLine {

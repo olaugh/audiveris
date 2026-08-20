@@ -413,34 +413,52 @@ pub fn create_beam_inters_recording(
             // below only for the bottom one, so an inner beam of a stack is not
             // penalised for touching its neighbours. Java's own comment calls
             // this test not correct; it is reproduced as written.
+            // The outer belts of a beam stack are exactly where a dense
+            // run's noteheads fuse on, and the stack context (parallel border
+            // pairs, core, heights, jitter) already vouches for beam-ness --
+            // Java's own comment calls this test not correct. Under the
+            // fused-headroom gate, outer lines of a multi-line structure and
+            // lines built on synthesized evidence take the inner-line
+            // treatment; a single observed line keeps Java's belt, which is
+            // what keeps fused ledger-and-notehead rows out (the page-9
+            // lesson).
+            let synthetic = structure
+                .synthetic_medians
+                .iter()
+                .any(|median_y| (median_y - line.median.y1).abs() < 0.01);
+            let exempt = synthetic
+                || (line_count >= 2 && crate::beam_veto::fused_beam_headroom_enabled());
             match audiveris_image::beam_structure::compute_beam_impacts(
                 *item,
                 BeamBeltSides {
-                    above: index == 0,
-                    below: index == line_count - 1,
+                    above: index == 0 && !exempt,
+                    below: index == line_count - 1 && !exempt,
                 },
                 pixels,
                 distance,
                 item_parameters.impacts(sheet),
             ) {
-                Err(rejection) => item_rejections.push((
-                    match rejection {
-                    audiveris_image::beam_structure::BeamImpactRejection::Width => "item width",
-                    audiveris_image::beam_structure::BeamImpactRejection::HeightBelow => {
-                        "item too thin"
-                    }
-                    audiveris_image::beam_structure::BeamImpactRejection::HeightAbove => {
-                        "item too thick"
-                    }
-                    audiveris_image::beam_structure::BeamImpactRejection::CoreRatio => {
-                        "item core too pale"
-                    }
-                    audiveris_image::beam_structure::BeamImpactRejection::BeltRatio => {
-                        "item belt too inky"
-                    }
-                    },
-                    None,
-                )),
+                Err(rejection) => {
+                    use audiveris_image::beam_structure::BeamImpactRejection as R;
+                    let evidence = |e: audiveris_image::beam_structure::BeamRasterEvidence| {
+                        format!(
+                            "core {}/{} = {:.2}, belt {}/{} = {:.2}",
+                            e.core_foreground,
+                            e.core_count,
+                            e.core_ratio,
+                            e.belt_foreground,
+                            e.belt_count,
+                            e.belt_ratio,
+                        )
+                    };
+                    item_rejections.push(match rejection {
+                        R::Width => ("item width", None),
+                        R::HeightBelow => ("item too thin", None),
+                        R::HeightAbove => ("item too thick", None),
+                        R::CoreRatio(e) => ("item core too pale", Some(evidence(e))),
+                        R::BeltRatio(e) => ("item belt too inky", Some(evidence(e))),
+                    });
+                }
                 Ok(impacts) => {
                 let impacts = clamped(impacts);
                 let grade = beam_grade(impacts);

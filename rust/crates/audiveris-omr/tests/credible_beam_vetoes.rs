@@ -594,3 +594,59 @@ fn per_line_split_replaces_page7_fat_singles() {
         );
     }
 }
+
+/// Schenker page 7: the pp-run stack must keep all three beam levels, and
+/// the "mega-ledger" that squatted on the missing top level must not return.
+///
+/// The top line of the stack has honest borders and a 0.96 core, but its
+/// belt-above is the run's own noteheads fused on by the closing, and Java's
+/// outer-belt check -- which Java's own comment calls not correct -- vetoed
+/// it. Under AUDIVERIS_FUSED_BEAM_HEADROOM the outer lines of a multi-line
+/// structure take the inner-line belt treatment (a single observed line
+/// keeps Java's belt: that is what keeps fused ledger-and-notehead rows
+/// out). With the top beam owning its ink, the LEDGERS credible-veto filter
+/// drops the 101px "ledger" that the user's screenshot showed there.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn stack_belt_exemption_recovers_page7_top_beam_and_evicts_mega_ledger() {
+    assert!(
+        audiveris_omr::beam_veto::fused_beam_headroom_enabled(),
+        "run with AUDIVERIS_FUSED_BEAM_HEADROOM=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-07.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+
+    let mut ys: Vec<f64> = beams
+        .raw_beams
+        .iter()
+        .filter(|(_, beam)| {
+            let median = beam.item.median;
+            (90.0..=100.0).contains(&median.x1)
+                && (435.0..=452.0).contains(&median.y1)
+                && median.x2 - median.x1 >= 100.0
+        })
+        .map(|(_, beam)| beam.item.median.y1)
+        .collect();
+    ys.sort_by(f64::total_cmp);
+    ys.dedup_by(|a, b| (*a - *b).abs() < 2.0);
+    assert!(
+        ys.len() >= 3,
+        "expected all three pp-run beam levels near x94 y439-449, got {ys:?}"
+    );
+
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let mega = ledgers.ledgers().iter().any(|ledger| {
+        ledger.bounds.width >= 60.0
+            && (430.0..=448.0).contains(&ledger.bounds.y)
+            && ledger.bounds.x >= 85.0
+            && ledger.bounds.x <= 110.0
+    });
+    assert!(!mega, "the 101px mega-ledger must yield to the recovered top beam");
+}

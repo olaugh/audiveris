@@ -1010,6 +1010,13 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                 crate::beam_veto::stacked_beam_split_limit(),
                 2.0 * parameters.structure.min_beam_width_low,
         );
+            structure.add_missing_outer_lines(
+                glyph,
+                spot.left,
+                spot.top,
+                parameters.structure.typical_height,
+                crate::beam_veto::stacked_beam_split_limit(),
+            );
             structure.populate_empty_items(
                 glyph,
                 spot.left,
