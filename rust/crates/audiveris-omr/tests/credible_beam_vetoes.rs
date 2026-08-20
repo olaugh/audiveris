@@ -425,3 +425,59 @@ fn fused_beam_headroom_recovers_page17_triplet_beams() {
         );
     }
 }
+
+/// Schenker page 1: stuck two-beam stacks must produce both beams under
+/// `AUDIVERIS_STACKED_BEAM_SPLIT`.
+///
+/// Java's `splitLines` replaces a fused line with fresh `BeamLine`s whose
+/// item lists are empty and nothing repopulates them, so `createBeamInters`
+/// iterates nothing: the split is dead code, and every sixteenth-note beam
+/// pair whose gutter the closing bridges silently creates zero inters
+/// ("no item to grade", lines 2, items 0). The gate re-runs item retrieval
+/// on the emptied lines. Each asserted region is one such stack; the probe
+/// asserts at least two raw beams whose median y differ by at least half a
+/// typical height.
+///
+/// AUDIVERIS_STACKED_BEAM_SPLIT=1 + the GRID hard-scan profile required.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn stacked_beam_split_recovers_page1_sixteenth_stacks() {
+    assert!(
+        audiveris_omr::beam_veto::stacked_beam_split_enabled(),
+        "run with AUDIVERIS_STACKED_BEAM_SPLIT=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-01.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+
+    // (x-range, y-range) of fused sixteenth stacks previously dropped whole.
+    let targets: [(std::ops::RangeInclusive<f64>, std::ops::RangeInclusive<f64>); 4] = [
+        (335.0..=345.0, 188.0..=204.0),
+        (615.0..=625.0, 184.0..=200.0),
+        (503.0..=511.0, 434.0..=449.0),
+        (138.0..=146.0, 512.0..=528.0),
+    ];
+    for (x_range, y_range) in targets {
+        let mut ys: Vec<f64> = beams
+            .raw_beams
+            .iter()
+            .filter(|(_, beam)| {
+                let median = beam.item.median;
+                x_range.contains(&median.x1)
+                    && y_range.contains(&median.y1)
+                    && median.x2 - median.x1 >= 12.0
+            })
+            .map(|(_, beam)| beam.item.median.y1)
+            .collect();
+        ys.sort_by(f64::total_cmp);
+        assert!(
+            ys.len() >= 2 && ys.last().unwrap() - ys.first().unwrap() >= 2.0,
+            "expected a split pair in x {x_range:?} y {y_range:?}, got {ys:?}"
+        );
+    }
+}

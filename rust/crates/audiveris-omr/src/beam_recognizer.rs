@@ -334,6 +334,16 @@ pub fn check_beam_glyph(
     analysis.adjust_sides(component.left, raster.width(), item.min_beam_width_low);
     extend_middle_lines(&mut analysis);
     analysis.split_stuck_lines_up_to(item.typical_height, crate::beam_veto::stacked_beam_split_limit());
+    if crate::beam_veto::stacked_beam_split_enabled() {
+        // Java leaves split lines with empty item lists, so stuck stacks
+        // create nothing (see `populate_empty_items`).
+        analysis.populate_empty_items(
+            raster,
+            component.left,
+            component.top,
+            item.structure().max_item_x_gap,
+        );
+    }
     check.structure = Some(analysis);
     check
 }

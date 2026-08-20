@@ -129,6 +129,43 @@ impl BeamStructureAnalysis {
             .collect();
     }
 
+    /// Retrieve items for lines the split left empty (enhancement).
+    ///
+    /// Java's `splitLines` replaces a fused line -- whose items `computeLines`
+    /// had already retrieved -- with fresh `BeamLine`s whose item lists are
+    /// empty, and nothing repopulates them, so `createBeamInters` iterates
+    /// nothing and every stuck beam stack silently produces zero inters: the
+    /// split is dead code. On a clean scan the gutters between stacked beams
+    /// stay open and the split rarely fires; on a low-resolution scan the
+    /// morphological closing bridges them, so every multi-beam group dies
+    /// here. This re-runs the same item retrieval `computeLines` used, on the
+    /// same sections, for each line that has no items. Call sites gate it;
+    /// not calling it is byte-exact Java.
+    pub fn populate_empty_items(
+        &mut self,
+        glyph: &RunTable,
+        offset_x: i32,
+        offset_y: i32,
+        max_item_x_gap: i32,
+    ) {
+        if self.lines.iter().all(|line| !line.items.is_empty()) {
+            return;
+        }
+        let sections = build_sections(glyph, JunctionPolicy::DEFAULT_RATIO);
+        for line in &mut self.lines {
+            if line.items.is_empty() {
+                line.items = retrieve_items(
+                    &sections,
+                    offset_x,
+                    offset_y,
+                    line.median,
+                    line.height,
+                    max_item_x_gap,
+                );
+            }
+        }
+    }
+
     /// Java `BeamStructure.adjustSides` over the tight run-table bounds.
     pub fn adjust_sides(&mut self, glyph_left: i32, glyph_width: usize, min_beam_width_low: f64) {
         let left = f64::from(glyph_left);

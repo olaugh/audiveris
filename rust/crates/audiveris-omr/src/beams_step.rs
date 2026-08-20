@@ -1000,6 +1000,16 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             parameters.structure.typical_height,
             crate::beam_veto::stacked_beam_split_limit(),
         );
+        if crate::beam_veto::stacked_beam_split_enabled() {
+            // Java leaves split lines with empty item lists, so stuck stacks
+            // create nothing (see `populate_empty_items`).
+            structure.populate_empty_items(
+                glyph,
+                spot.left,
+                spot.top,
+                parameters.structure.max_item_x_gap,
+            );
+        }
         let raster = BeamRaster {
             table: &config.pixel_filter,
             offset_x: config.pixel_filter_offset_x,

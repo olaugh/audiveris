@@ -50,17 +50,22 @@ pub fn soft_head_blocks_enabled() -> bool {
 /// Under this gate the split honors the count Java already derives from the
 /// stack's own thickness.
 #[must_use]
-pub fn stacked_beam_split_limit() -> usize {
-    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        if std::env::var("AUDIVERIS_STACKED_BEAM_SPLIT")
+pub fn stacked_beam_split_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AUDIVERIS_STACKED_BEAM_SPLIT")
             .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
-        {
-            8
-        } else {
-            2
-        }
     })
+}
+
+/// How many lines a stuck stack may split into: Java's 2, or 8 under the gate.
+///
+/// The gate also repopulates the split lines' items (`populate_empty_items`):
+/// Java's split produces lines with empty item lists that grade to nothing,
+/// so without that step the split -- at any count -- is dead code.
+#[must_use]
+pub fn stacked_beam_split_limit() -> usize {
+    if stacked_beam_split_enabled() { 8 } else { 2 }
 }
 
 /// `AUDIVERIS_FUSED_BEAM_HEADROOM` gate (enhancement, default OFF).
