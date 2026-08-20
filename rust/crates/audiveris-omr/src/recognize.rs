@@ -645,6 +645,8 @@ pub struct NativeBeamRecognition {
     pub beam_rejections: Vec<NativeBeamRejection>,
     /// Every spot component, in extraction order.
     pub beam_spots: Vec<NativeBeamSpot>,
+    /// Beam-thickness measurement, when the enhancement gate is set.
+    pub beam_sizing: Option<crate::beam_sizer::BeamSizing>,
     /// Java `Picture.TableKey.HEAD_SPOTS`, saved from the closed gray raster
     /// at threshold 170 before BEAMS applies its own threshold of 140.
     pub head_spot_runs: RunTable,
@@ -1119,7 +1121,7 @@ fn recognize_native_beams_impl(
         });
     }
 
-    let item = ItemParameters::new(interline, f64::from(main_beam), false);
+    let mut item = ItemParameters::new(interline, f64::from(main_beam), false);
     let sheet = SheetParameters::new(interline);
     let filter = &recognition.no_staff;
     let raster = BeamRaster {
@@ -1160,86 +1162,125 @@ fn recognize_native_beams_impl(
         ordered.sort_by_key(|component| (component.top, component.left));
         ordered
     };
-    for component in browse_order {
-        let systems = systems_for(component);
-        if systems.is_empty() {
-            // Dispatched to no system, so the beam gates never run on it at
-            // all. Recorded because it is otherwise indistinguishable from
-            // ink that was never extracted as a spot.
-            beam_rejections.push(NativeBeamRejection {
-                left: component.left,
-                top: component.top,
-                width: component.width,
-                height: component.height,
-                reason: "no owning system",
-                mean_height: None,
-                mean_distance: None,
-                structure_width: None,
-                slope_gap: None,
-                lines: 0,
-                items: 0,
-            });
-            continue;
-        }
-        let spot_raster = crate::beams_step::component_vertical_raster(component)?;
-        let check = check_beam_glyph(component, &spot_raster, &item, &sheet);
-        let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
-                                reason: &'static str,
-                                lines: usize,
-                                items: usize| {
-            rejections.push(NativeBeamRejection {
-                left: component.left,
-                top: component.top,
-                width: component.width,
-                height: component.height,
-                reason,
-                mean_height: check.mean_height,
-                mean_distance: check.mean_distance,
-                structure_width: check.structure_width,
-                slope_gap: check.slope_gap,
-                lines,
-                items,
-            });
-        };
-        let Some(structure) = check.structure.clone() else {
-            record_rejection(
-                &mut beam_rejections,
-                check.rejection.map_or("unknown", BeamRejection::reason),
-                0,
-                0,
-            );
-            for system in systems {
-                leftover.push((system, native_hook_glyph(component)));
+    // The browse runs once with the sheet's declared beam scale. Under
+    // AUDIVERIS_MEASURED_BEAM_THICKNESS it then re-measures that scale from
+    // the long, confident beams this pass actually found and, if the estimate
+    // moved, runs again -- every beam impact is scaled by that value, so a
+    // low estimate grades legitimate beams to death. Flag off runs the first
+    // pass only, exactly as Java does.
+    let mut browse = |item: &ItemParameters,
+                      initial: &mut Vec<(usize, crate::beam_inters::RawBeam)>,
+                      leftover: &mut Vec<(usize, audiveris_image::beam_hooks::HookGlyph)>,
+                      beam_rejections: &mut Vec<NativeBeamRejection>|
+     -> Result<(), NativeBeamRecognitionError> {
+    for component in browse_order.iter().copied() {
+            let systems = systems_for(component);
+            if systems.is_empty() {
+                // Dispatched to no system, so the beam gates never run on it at
+                // all. Recorded because it is otherwise indistinguishable from
+                // ink that was never extracted as a spot.
+                beam_rejections.push(NativeBeamRejection {
+                    left: component.left,
+                    top: component.top,
+                    width: component.width,
+                    height: component.height,
+                    reason: "no owning system",
+                    mean_height: None,
+                    mean_distance: None,
+                    structure_width: None,
+                    slope_gap: None,
+                    lines: 0,
+                    items: 0,
+                });
+                continue;
             }
-            continue;
-        };
-        let mut item_rejections = Vec::new();
-        let created = crate::beam_inters::create_beam_inters_recording(
-            &structure,
-            &spot_raster,
-            component.left,
-            component.top,
-            raster,
-            &item,
-            &sheet,
-            &mut item_rejections,
-        );
-        if created.is_empty() {
-            // Every gate passed and the structure exists, but no item survived
-            // item-level grading: a distinct failure from being refused outright.
-            record_rejection(
-                &mut beam_rejections,
-                item_rejections.first().copied().unwrap_or("no item to grade"),
-                structure.lines.len(),
-                structure.lines.iter().map(|line| line.items.len()).sum(),
+            let spot_raster = crate::beams_step::component_vertical_raster(component)?;
+            let check = check_beam_glyph(component, &spot_raster, item, &sheet);
+            let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
+                                    reason: &'static str,
+                                    lines: usize,
+                                    items: usize| {
+                rejections.push(NativeBeamRejection {
+                    left: component.left,
+                    top: component.top,
+                    width: component.width,
+                    height: component.height,
+                    reason,
+                    mean_height: check.mean_height,
+                    mean_distance: check.mean_distance,
+                    structure_width: check.structure_width,
+                    slope_gap: check.slope_gap,
+                    lines,
+                    items,
+                });
+            };
+            let Some(structure) = check.structure.clone() else {
+                record_rejection(
+                    beam_rejections,
+                    check.rejection.map_or("unknown", BeamRejection::reason),
+                    0,
+                    0,
+                );
+                for system in systems {
+                    leftover.push((system, native_hook_glyph(component)));
+                }
+                continue;
+            };
+            let mut item_rejections = Vec::new();
+            let created = crate::beam_inters::create_beam_inters_recording(
+                &structure,
+                &spot_raster,
+                component.left,
+                component.top,
+                raster,
+                item,
+                &sheet,
+                &mut item_rejections,
             );
-        }
-        for system in systems {
             if created.is_empty() {
-                leftover.push((system, native_hook_glyph(component)));
+                // Every gate passed and the structure exists, but no item survived
+                // item-level grading: a distinct failure from being refused outright.
+                record_rejection(
+                    beam_rejections,
+                    item_rejections.first().copied().unwrap_or("no item to grade"),
+                    structure.lines.len(),
+                    structure.lines.iter().map(|line| line.items.len()).sum(),
+                );
             }
-            initial.extend(created.iter().map(|beam| (system, *beam)));
+            for system in systems {
+                if created.is_empty() {
+                    leftover.push((system, native_hook_glyph(component)));
+                }
+                initial.extend(created.iter().map(|beam| (system, *beam)));
+            }
         }
+
+        Ok(())
+    };
+    browse(&item, &mut initial, &mut leftover, &mut beam_rejections)?;
+    let beam_sizing = crate::beam_sizer::measured_beam_thickness_enabled().then(|| {
+        let samples = initial
+            .iter()
+            .map(|(_, beam)| crate::beam_sizer::BeamSample {
+                length: beam.item.median.x2 - beam.item.median.x1,
+                thickness: beam.item.height,
+                grade: beam.grade,
+            })
+            .collect::<Vec<_>>();
+        crate::beam_sizer::measure_beam_thickness(
+            &samples,
+            f64::from(interline),
+            f64::from(main_beam),
+        )
+    });
+    if let Some(sizing) = beam_sizing
+        && (sizing.effective - f64::from(main_beam)).abs() > 0.05
+    {
+        item = ItemParameters::new(interline, sizing.effective, false);
+        initial.clear();
+        leftover.clear();
+        beam_rejections.clear();
+        browse(&item, &mut initial, &mut leftover, &mut beam_rejections)?;
     }
 
     let scaling = BeamScaling {
@@ -1380,6 +1421,7 @@ fn recognize_native_beams_impl(
         staff_head_point_sizes,
         spot_count: components.len(),
         beam_spots,
+        beam_sizing,
         raw_beams,
         raw_beam_glyphs,
         beams_after_multiple_rests,

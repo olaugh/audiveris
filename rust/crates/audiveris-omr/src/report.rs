@@ -2223,6 +2223,20 @@ fn suppressed_ledgers(json: &mut Json, ledgers: &NativeLedgerRecognition) {
 /// but which appears in no spot here dissolved during the eight-transform
 /// spot chain, upstream of every beam decision.
 fn beam_spots(json: &mut Json, beams: &NativeBeamRecognition) {
+    if let Some(sizing) = beams.beam_sizing {
+        json.key("beam_sizing");
+        json.open('{');
+        json.field_number("declared", sizing.declared);
+        json.key("measured");
+        match sizing.measured {
+            Some(measured) => json.number(measured),
+            None => json.null(),
+        }
+        json.field_number("effective", sizing.effective);
+        json.field_integer("sample_count", sizing.sample_count as i64);
+        json.field_boolean("clamped", sizing.clamped);
+        json.close('}');
+    }
     json.key("beam_spots");
     json.open('[');
     for spot in &beams.beam_spots {
