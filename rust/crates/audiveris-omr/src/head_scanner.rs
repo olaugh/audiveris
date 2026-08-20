@@ -64,7 +64,17 @@ impl HeadScannerParameters {
         Ok(Self {
             main_interline,
             max_stem,
-            max_distance_low: MAX_DISTANCE_LOW,
+            max_distance_low: if crate::beam_veto::lax_head_distance_enabled() {
+                // Accept every match that still carries a nonzero grade
+                // (the grade formula runs out at MAX_DISTANCE_HIGH). Heads
+                // fused with accidentals, beams, or ledgers measure "far
+                // from the template" and die silently as no_best under
+                // Java's 0.4 cap; between 0.4 and 0.5 they are perfectly
+                // publishable low-grade hypotheses.
+                crate::head_template::MAX_DISTANCE_HIGH
+            } else {
+                MAX_DISTANCE_LOW
+            },
             really_bad_distance: REALLY_BAD_DISTANCE,
             max_template_dx,
             max_closed_dy,

@@ -138,6 +138,22 @@ pub fn create_beam_borders_enabled() -> bool {
     })
 }
 
+/// `AUDIVERIS_LAX_HEAD_DISTANCE` gate (enhancement, default OFF).
+///
+/// Head template matching accepts a candidate only under distance 0.4,
+/// while the grade formula stays positive until 0.5: the band between is
+/// publishable evidence -- exactly where heads fused with accidentals,
+/// beams, and ledgers land -- discarded silently as no_best. Under the
+/// gate the acceptance cap is the grade formula's own limit.
+#[must_use]
+pub fn lax_head_distance_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AUDIVERIS_LAX_HEAD_DISTANCE")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    })
+}
+
 /// Whether a beam's median runs through continuous ink in the
 /// pre-binarization grayscale.
 ///
