@@ -29,7 +29,6 @@ use audiveris_omr::{
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
-    native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::{
         NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamCompletedVLinkEvidence,
         NativeStemsBeamPlanRef, NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
@@ -175,12 +174,10 @@ use audiveris_omr::{
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamCreatedStemGeometry,
         NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistrationAction,
-        NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamKnownSystemStem,
-        NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
+        NativeStemsBeamKnownSystemStem, NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
         NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamSystemStemTransactionState,
         NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
-        prepare_native_stems_beam_vlink_frontier_state,
         prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
@@ -225,60 +222,6 @@ const BEAM_INTER_INDEX_BYTES: usize = 6_259;
 const EXECUTED_BASE_BEAM_SIG_ORDINALS: [usize; 16] = [
     12, 15, 16, 19, 20, 21, 22, 28, 29, 30, 31, 32, 33, 34, 35, 36,
 ];
-
-fn glyph_bootstrap_for_attempt(
-    attempt: &NativeStemsBeamLinkPlanAttempt,
-    registry_text: &str,
-) -> Vec<NativeStemsBeamGlyphRegistryBootstrapEntry> {
-    attempt
-        .glyphs
-        .iter()
-        .map(|glyph| {
-            let content_key = format!(
-                "g:{}:{}:{}:{}:{}",
-                glyph.bounds.x,
-                glyph.bounds.y,
-                glyph.bounds.width,
-                glyph.bounds.height,
-                b15_hydration::run_table_digest(&glyph.structural_key.run_table)
-            );
-            let matches = registry_text
-                .lines()
-                .filter(|line| line.starts_with("stemsbeamglyphregistryentry "))
-                .filter_map(|line| {
-                    let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
-                    let value = |name: &str| {
-                        tokens
-                            .iter()
-                            .position(|token| *token == name)
-                            .and_then(|index| tokens.get(index + 1))
-                            .copied()
-                    };
-                    (value("content") == Some(content_key.as_str())).then(|| {
-                        (
-                            value("id").expect("registry id").parse::<i32>().unwrap(),
-                            value("active") == Some("true"),
-                        )
-                    })
-                })
-                .collect::<Vec<_>>();
-            let [(glyph_id, active_in_index)] = matches.as_slice() else {
-                panic!("selected glyph bootstrap cardinality: {}", matches.len());
-            };
-            NativeStemsBeamGlyphRegistryBootstrapEntry {
-                canonical_alias: usize::try_from(*glyph_id).expect("positive glyph ID"),
-                glyph_id: *glyph_id,
-                content: NativeStemsBeamFixedGlyphContent {
-                    bounds: glyph.bounds,
-                    weight: glyph.weight,
-                    run_table: glyph.structural_key.run_table.clone(),
-                },
-                active_in_index: *active_in_index,
-                strongly_retained: *active_in_index,
-            }
-        })
-        .collect()
-}
 
 const BOUNDARY_FIFTEEN_GATE_PATH: &str =
     "rust/crates/audiveris-omr/tests/native_stems_beam_vlink_b_linker_flag.rs";
@@ -6910,37 +6853,33 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     }));
 
     // Carry transaction 2 through a graph-derived B14 rollover before any
-    // transaction-2 family fixture is opened. The page GlyphIndex bootstrap
-    // is the one disclosed authority still outside native recognition.
+    // transaction-2 family fixture is opened. Glyph selection now comes from
+    // the owned native modeled registry rather than the page GlyphIndex.
     let second_scheduler = &outer_resume.resume.advanced_system;
     let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(second) =
         &outer_resume.resume.status
     else {
         unreachable!()
     };
-    let second_attempt = hydrated
-        .plans
-        .builders
-        .iter()
-        .flat_map(|builder| &builder.attempts)
-        .nth(second.plan.plan_ordinal)
-        .expect("second plan attempt");
-    let registry_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-glyph-registry-chula.txt"),
+    let checker_page = b15_hydration::native_predecessor_page("chula.png");
+    let visible_modeled_count = checker_page.first_system_visible_modeled_count;
+    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
+        1,
+        &checker_page.modeled_canonical_glyphs,
+        visible_modeled_count,
     )
-    .expect("disclosed page GlyphIndex bootstrap");
-    let bootstrap = glyph_bootstrap_for_attempt(second_attempt, &registry_text);
+    .expect("native first-system canonical glyph registry");
     let mut second_transaction_state = native_base.state_after.transaction_state.clone();
     let authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
         &second_transaction_state.system_stems,
         0,
     )
     .expect("dense carried systemStems");
-    prepare_native_stems_beam_vlink_frontier_state(
+    prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
         second_scheduler,
         &hydrated.plans,
         &mut second_transaction_state,
-        &bootstrap,
+        &modeled_registry,
         authority,
     )
     .expect("native transaction-2 preparation");
@@ -6949,9 +6888,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         &hydrated.builder,
         &hydrated.plans,
         &mut second_transaction_state,
-        &b15_hydration::checker_context_for_page(&b15_hydration::native_predecessor_page(
-            "chula.png",
-        )),
+        &b15_hydration::checker_context_for_page(&checker_page),
     )
     .expect("native transaction-2 B12");
     let second_live = project_native_stems_beam_vlink_reuse_live_state(
@@ -7182,14 +7119,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     // From here onward the carried pass uses only native canonical ordinals and
     // full Glyph.equals content. The page-wide Java snapshot is not consulted.
     let third_scheduler = &second_outer_resume.resume.advanced_system;
-    let checker_page = b15_hydration::native_predecessor_page("chula.png");
-    let visible_modeled_count = checker_page.first_system_visible_modeled_count;
-    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
-        1,
-        &checker_page.modeled_canonical_glyphs,
-        visible_modeled_count,
-    )
-    .expect("native first-system canonical glyph registry");
     assert_eq!(modeled_registry.len(), visible_modeled_count);
     let bridge = modeled_registry;
     assert!(hydrated.plans.builders.iter().all(|builder| {
@@ -7199,8 +7128,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .flat_map(|attempt| &attempt.glyphs)
             .all(|glyph| glyph.modeled_canonical_ordinal < visible_modeled_count)
     }));
-    drop(registry_text);
-
     // Retain an independently prepared transaction-3 state for the beam-index
     // authority negative below. It uses the native registry, not a frontier row.
     let mut third_transaction_state = second_base.state_after.transaction_state.clone();

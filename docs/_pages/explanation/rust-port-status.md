@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and thirty-six semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the complete live pre-mutation composition and native SIG assembly into `native_stems::prepare_native_stems`; Boundary 136 replaces the page-wide first-STEMS snapshot with native modeled-glyph identity from transaction 3 through terminal HEADS.
+The first one hundred and thirty-seven semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundary 136 replaces the page-wide first-STEMS snapshot from transaction 3 onward; Boundary 137 extends native modeled-glyph identity to transaction 2.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | One hundred and thirty-six exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundary 135 composes the immutable predecessor and SIG; Boundary 136 carries native modeled-glyph identity from transaction 3 through terminal HEADS without the page-wide Java snapshot. | Replace transactions 1-2 and sparse selected-base identity authority, carry Allegretto natively, widen linked-S/hook/STUMPS and head branches, then add transactional `recognize_native_stems` and schema-1 publication. |
+| 10 | `STEMS` | **Components graded** | One hundred and thirty-seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundary 135 composes the immutable predecessor and SIG; Boundaries 136-137 carry native modeled-glyph identity from transaction 2 through terminal HEADS without the page-wide Java snapshot. | Replace transaction 1 and sparse selected-base identity authority, carry Allegretto natively, widen linked-S/hook/STUMPS and head branches, then add transactional `recognize_native_stems` and schema-1 publication. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -1129,7 +1129,7 @@ head-branch coverage.
 
 ## Next work queue
 
-1. Starting from Boundary 136's native glyph registry, replace transactions 1-2's fixture bootstrap and the sparse 16-row selected-base Java InterIndex authority; transactions 3 through terminal HEADS no longer read the disclosed first-STEMS page snapshot.
+1. Starting from Boundary 137's native transaction-2 bootstrap, replace transaction 1's compact fixture state and the sparse 16-row selected-base Java InterIndex authority; transactions 2 through terminal HEADS no longer read the disclosed first-STEMS page snapshot.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with native-carried state and widen graph-derived B13 linked-S and hook-removal coverage.
 3. Continue after generic `finalizeStems` with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links; also widen STUMPS and competing-hook coverage beyond their single-system/checkpoint evidence.
 4. Expose `recognize_native_stems` once the full scheduler path runs from native products.
@@ -3448,16 +3448,29 @@ bounds, weight, and RunTable content—not Java's page-global glyph number—dri
 every lookup. The operational path imports neither the Java allocator/union
 watermark nor the 592 opaque first-STEMS fingerprint entries.
 
-After the two legacy bootstrap transactions, the Chula carrier uses this native
+After the initial legacy bootstrap transaction, the Chula carrier uses this native
 registry through the remaining SIDES pass, all STUMPS transactions, all measured
 head C-links, and every existing-stem reconciliation. Java glyph numbers remain
 oracle descriptions only. Focused 1/1 (17.34s), full sibling 14/14 (153.26s),
 strict workspace all-target/all-feature Clippy (23.72s), formatting, and diff
 checks pass.
 
-Transactions 1-2's fixture bootstrap, the sparse selected-base Java InterIndex
+Transaction 1's fixture bootstrap, the sparse selected-base Java InterIndex
 bridge, and the reconstructed Allegretto predecessor remain explicit. The
 legacy snapshot fixture/API stays only for isolated compatibility gates.
+
+## Boundary 137: native transaction-2 glyph bootstrap
+
+Transaction 2 now resolves plan 152 directly from
+`NativeStemsModeledGlyphRegistry` before any transaction-2 expected fixture is
+opened. The test no longer reads or parses the disclosed page-wide glyph
+registry file. Native exact content feeds the unchanged graph-derived B13/B14
+and B15-B19 path.
+
+Focused 1/1 (13.84s), full sibling 14/14 (149.59s), strict workspace
+all-target/all-feature Clippy (12.30s), formatting, and diff checks pass.
+Transaction 1's compact fixture state and the sparse selected-base Java
+InterIndex bridge remain.
 
 
 
