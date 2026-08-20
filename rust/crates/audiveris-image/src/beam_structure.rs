@@ -753,6 +753,66 @@ pub fn compute_jitter(
     side: JitterSide,
     corner_margin: f64,
 ) -> f64 {
+    let points = jitter_border_points(glyph, offset_x, offset_y, median, side, corner_margin);
+    let mut line = audiveris_core::basic_line::BasicLine::default();
+    for &(x, y) in &points {
+        line.include_point(x, y);
+    }
+    line.mean_distance().unwrap_or(0.0) / glyph.width() as f64
+}
+
+/// [`compute_jitter`] with fused-ink endpoints trimmed out (enhancement).
+///
+/// The plain jitter fits one line through every border run endpoint, so the
+/// endpoints of noteheads and stem stubs the morphological closing fused onto
+/// a beam dominate the residual -- and dominate a fresh fit too, so trimming
+/// against one's own fit removes nothing (measured: 135 of 136 items still
+/// zeroed). The trim reference must come from outside the contaminated
+/// population: `reference` is the border the structure analysis itself
+/// placed (line median shifted by half the line height), and `tolerance` is
+/// the sheet's `max_distance_to_border` -- the scale Java itself uses for
+/// "on the border" when linking stems. Endpoints farther than that from the
+/// analysed border are fused-object ink, not border; the survivors get their
+/// own least-squares fit and the usual residual-over-width ratio. Falls back
+/// to the untrimmed value when fewer than two points survive.
+#[must_use]
+pub fn compute_jitter_trimmed(
+    glyph: &RunTable,
+    offset_x: i32,
+    offset_y: i32,
+    median: Segment,
+    side: JitterSide,
+    corner_margin: f64,
+    reference: Segment,
+    tolerance: f64,
+) -> f64 {
+    let points = jitter_border_points(glyph, offset_x, offset_y, median, side, corner_margin);
+    let mut line = audiveris_core::basic_line::BasicLine::default();
+    for &(x, y) in &points {
+        line.include_point(x, y);
+    }
+    let untrimmed = line.mean_distance().unwrap_or(0.0) / glyph.width() as f64;
+    let mut trimmed = audiveris_core::basic_line::BasicLine::default();
+    for &(x, y) in &points {
+        if (y - reference.y_at_x(x)).abs() <= tolerance {
+            trimmed.include_point(x, y);
+        }
+    }
+    match trimmed.mean_distance() {
+        Ok(distance) if trimmed.count() >= 2 => distance / glyph.width() as f64,
+        _ => untrimmed,
+    }
+}
+
+/// The border run endpoints both jitter measures fit through.
+fn jitter_border_points(
+    glyph: &RunTable,
+    offset_x: i32,
+    offset_y: i32,
+    median: Segment,
+    side: JitterSide,
+    corner_margin: f64,
+) -> Vec<(f64, f64)> {
     assert_eq!(
         glyph.orientation(),
         Orientation::Vertical,
@@ -764,7 +824,7 @@ pub fn compute_jitter(
     let x1 = (median.x1 + f64::from(dx)).round_ties_even() as i32;
     let x2 = (median.x2 - f64::from(dx)).round_ties_even() as i32;
 
-    let mut line = audiveris_core::basic_line::BasicLine::default();
+    let mut points = Vec::new();
     for section in &sections {
         let bounds = section.bounds();
         let center_x = offset_x + bounds.x as i32 + (bounds.width as i32) / 2;
@@ -788,12 +848,11 @@ pub fn compute_jitter(
                     JitterSide::Top => run.start,
                     JitterSide::Bottom => run.stop(),
                 };
-                line.include_point(f64::from(x), f64::from(offset_y + end as i32));
+                points.push((f64::from(x), f64::from(offset_y + end as i32)));
             }
         }
     }
-
-    line.mean_distance().unwrap_or(0.0) / glyph.width() as f64
+    points
 }
 
 /// Java `LineUtil.yAtX(Line2D, double)`, term for term.

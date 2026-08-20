@@ -375,3 +375,53 @@ fn credible_competitors_recover_page9_lone_a() {
         "the lone A must resolve once sub-scale beams cannot block its template, best grade {best}"
     );
 }
+
+/// Schenker page 17: the triplet-eighth beams the closing fuses with their
+/// noteheads must survive item grading under `AUDIVERIS_FUSED_BEAM_HEADROOM`.
+///
+/// Two symptoms of one disease. The fused ink drags a border fit outward, so
+/// the item measures 5.0-5.7px against a typical height of 4 and dies on
+/// Java's 1.4x ceiling; lifting the ceiling alone then exposed the second
+/// symptom -- the same endpoints zero the jitter impact (137 of 138
+/// below-floor items on this page died at `dist 0.00`). The gate lifts the
+/// ceiling to 2.0x and anchors the jitter trim to the analysed border. Each
+/// asserted region is one triplet beam the user pointed at as missing; the
+/// probe asserts a raw beam at least two interlines wide in each.
+///
+/// AUDIVERIS_FUSED_BEAM_HEADROOM=1 + the GRID hard-scan profile required.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn fused_beam_headroom_recovers_page17_triplet_beams() {
+    assert!(
+        audiveris_omr::beam_veto::fused_beam_headroom_enabled(),
+        "run with AUDIVERIS_FUSED_BEAM_HEADROOM=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-17.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+
+    // (x-range, y-range) of the triplet beams previously graded to death.
+    let targets: [(std::ops::RangeInclusive<f64>, std::ops::RangeInclusive<f64>); 5] = [
+        (105.0..=135.0, 50.0..=58.0),
+        (260.0..=290.0, 529.0..=537.0),
+        (410.0..=442.0, 527.0..=535.0),
+        (490.0..=520.0, 526.0..=534.0),
+        (525.0..=557.0, 525.0..=534.0),
+    ];
+    for (x_range, y_range) in targets {
+        let found = beams.raw_beams.iter().any(|(_, beam)| {
+            let median = beam.item.median;
+            let wide_enough = median.x2 - median.x1 >= 18.0;
+            x_range.contains(&median.x1) && y_range.contains(&median.y1) && wide_enough
+        });
+        assert!(
+            found,
+            "expected a recovered triplet beam with x1 in {x_range:?}, y1 in {y_range:?}"
+        );
+    }
+}

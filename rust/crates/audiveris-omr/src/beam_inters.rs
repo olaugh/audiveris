@@ -289,22 +289,38 @@ pub fn distance_impact(
 ) -> Option<f64> {
     let first = structure.lines.first()?;
     let last = structure.lines.last()?;
-    let top = compute_jitter(
-        glyph,
-        offset_x,
-        offset_y,
-        first.median,
-        JitterSide::Top,
-        item.corner_margin,
-    );
-    let bottom = compute_jitter(
-        glyph,
-        offset_x,
-        offset_y,
-        last.median,
-        JitterSide::Bottom,
-        item.corner_margin,
-    );
+    // Fused noteheads and stem stubs sit exactly on the outermost borders the
+    // jitter measures; the headroom gate trims their endpoints out of the fit
+    // (see `beam_veto::fused_beam_headroom_enabled`).
+    let trimmed = crate::beam_veto::fused_beam_headroom_enabled();
+    let jitter = |median: audiveris_image::beam_structure::Segment, side, height: f64| {
+        if trimmed {
+            let shift = match side {
+                JitterSide::Top => -height / 2.0,
+                JitterSide::Bottom => height / 2.0,
+            };
+            let reference = audiveris_image::beam_structure::Segment {
+                x1: median.x1,
+                y1: median.y1 + shift,
+                x2: median.x2,
+                y2: median.y2 + shift,
+            };
+            audiveris_image::beam_structure::compute_jitter_trimmed(
+                glyph,
+                offset_x,
+                offset_y,
+                median,
+                side,
+                item.corner_margin,
+                reference,
+                sheet.max_distance_to_border,
+            )
+        } else {
+            compute_jitter(glyph, offset_x, offset_y, median, side, item.corner_margin)
+        }
+    };
+    let top = jitter(first.median, JitterSide::Top, first.height);
+    let bottom = jitter(last.median, JitterSide::Bottom, last.height);
     let mean = 0.5 * (top + bottom);
     Some(1.0 - (mean / sheet.max_jitter_ratio))
 }
@@ -350,7 +366,7 @@ pub fn create_beam_inters_recording(
     pixels: BeamRaster<'_>,
     item_parameters: &ItemParameters,
     sheet: &SheetParameters,
-    item_rejections: &mut Vec<&'static str>,
+    item_rejections: &mut Vec<(&'static str, Option<String>)>,
 ) -> Vec<RawBeam> {
     let Some(distance) =
         distance_impact(structure, glyph, offset_x, offset_y, item_parameters, sheet)
@@ -407,7 +423,8 @@ pub fn create_beam_inters_recording(
                 distance,
                 item_parameters.impacts(sheet),
             ) {
-                Err(rejection) => item_rejections.push(match rejection {
+                Err(rejection) => item_rejections.push((
+                    match rejection {
                     audiveris_image::beam_structure::BeamImpactRejection::Width => "item width",
                     audiveris_image::beam_structure::BeamImpactRejection::HeightBelow => {
                         "item too thin"
@@ -421,12 +438,25 @@ pub fn create_beam_inters_recording(
                     audiveris_image::beam_structure::BeamImpactRejection::BeltRatio => {
                         "item belt too inky"
                     }
-                }),
+                    },
+                    None,
+                )),
                 Ok(impacts) => {
                 let impacts = clamped(impacts);
                 let grade = beam_grade(impacts);
                 if grade < MIN_INTER_GRADE {
-                    item_rejections.push("item grade below floor");
+                    item_rejections.push((
+                        "item grade below floor",
+                        Some(format!(
+                            "grade {grade:.3} w {:.2} minh {:.2} maxh {:.2} core {:.2} belt {:.2} dist {:.2}",
+                            impacts.width,
+                            impacts.min_height,
+                            impacts.max_height,
+                            impacts.core,
+                            impacts.belt,
+                            impacts.distance,
+                        )),
+                    ));
                 }
                 if grade >= MIN_INTER_GRADE {
                     beams.push(RawBeam {

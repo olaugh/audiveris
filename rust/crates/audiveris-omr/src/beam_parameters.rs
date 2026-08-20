@@ -58,7 +58,9 @@ impl ItemParameters {
             max_hook_width: to_pixels_double(interline, 2.0),
             typical_height,
             min_height_low: typical_height * 0.7,
-            max_height_high: typical_height * 1.4,
+            // 1.4 in Java; AUDIVERIS_FUSED_BEAM_HEADROOM lifts only this
+            // ceiling (see `beam_veto::beam_height_ceiling_ratio`).
+            max_height_high: typical_height * crate::beam_veto::beam_height_ceiling_ratio(),
             corner_margin: typical_height * 0.2,
             max_item_x_gap: to_pixels_double(interline, 0.5),
             // Java's floor of two: a line slope needs two points, and a small

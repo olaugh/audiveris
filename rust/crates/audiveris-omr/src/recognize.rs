@@ -637,6 +637,8 @@ pub struct NativeBeamRejection {
     /// beams had nothing to iterate, which is a different failure from every
     /// item being graded below the floor.
     pub items: usize,
+    /// Impact-level detail for grade-floor rejections, absent otherwise.
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1185,6 +1187,7 @@ fn recognize_native_beams_impl(
                     width: component.width,
                     height: component.height,
                     reason: "no owning system",
+                    detail: None,
                     mean_height: None,
                     mean_distance: None,
                     structure_width: None,
@@ -1198,6 +1201,7 @@ fn recognize_native_beams_impl(
             let check = check_beam_glyph(component, &spot_raster, item, &sheet);
             let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
                                     reason: &'static str,
+                                    detail: Option<String>,
                                     lines: usize,
                                     items: usize| {
                 rejections.push(NativeBeamRejection {
@@ -1212,12 +1216,14 @@ fn recognize_native_beams_impl(
                     slope_gap: check.slope_gap,
                     lines,
                     items,
+                    detail,
                 });
             };
             let Some(structure) = check.structure.clone() else {
                 record_rejection(
                     beam_rejections,
                     check.rejection.map_or("unknown", BeamRejection::reason),
+                    None,
                     0,
                     0,
                 );
@@ -1240,9 +1246,14 @@ fn recognize_native_beams_impl(
             if created.is_empty() {
                 // Every gate passed and the structure exists, but no item survived
                 // item-level grading: a distinct failure from being refused outright.
+                let (reason, detail) = item_rejections
+                    .first()
+                    .cloned()
+                    .unwrap_or(("no item to grade", None));
                 record_rejection(
                     beam_rejections,
-                    item_rejections.first().copied().unwrap_or("no item to grade"),
+                    reason,
+                    detail,
                     structure.lines.len(),
                     structure.lines.iter().map(|line| line.items.len()).sum(),
                 );

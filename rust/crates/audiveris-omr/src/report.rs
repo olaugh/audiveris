@@ -2284,6 +2284,9 @@ fn suppressed_beams(json: &mut Json, beams: &NativeBeamRecognition) {
                 None => json.null(),
             }
         }
+        if let Some(detail) = &rejection.detail {
+            json.field_string("detail", detail);
+        }
         json.close('}');
     }
     json.close(']');
