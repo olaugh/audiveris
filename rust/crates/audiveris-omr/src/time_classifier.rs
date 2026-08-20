@@ -134,6 +134,50 @@ fn digit_shape(number: i32) -> Option<&'static str> {
     }
 }
 
+/// Whether a whole-time glyph contains the central vertical stroke that
+/// distinguishes cut time from common time.
+///
+/// The bundled classifier occasionally calls a historical cut-time glyph
+/// `COMMON_TIME`: the open C dominates its descriptor while the thin cut
+/// stroke contributes little weight.  Inspecting the selected glyph itself is
+/// both more direct and safer than borrowing the other staff's answer.  The
+/// stroke must traverse most of the glyph, reach its top and bottom, and leave
+/// visible C-curve ink to its left; an ordinary C's own left spine cannot
+/// satisfy that topology.
+fn has_cut_time_stroke(glyph: &HeaderTimeGlyph) -> bool {
+    let width = glyph.raster.width();
+    let height = glyph.raster.height();
+    if width < 5 || height < 8 {
+        return false;
+    }
+
+    let pixels = glyph.raster.to_pixels();
+    let foreground = |x: usize, y: usize| pixels[y * width + x] == 0;
+    // A historical cut stroke can sit slightly left of the geometric centre,
+    // so retain the inner 30–70% and distinguish it from the C's own left
+    // spine by requiring visible C ink farther left of the candidate stroke.
+    let search_left = width * 3 / 10;
+    let search_right = (width * 7 / 10).max(search_left + 1).min(width);
+    let cap = (height / 5).max(1);
+
+    (search_left..search_right).any(|center| {
+        let left = center.saturating_sub(1);
+        let right = (center + 1).min(width - 1);
+        let row_has_ink = |y: usize| (left..=right).any(|x| foreground(x, y));
+        let covered_rows = (0..height).filter(|&y| row_has_ink(y)).count();
+        let reaches_top = (0..cap).any(row_has_ink);
+        let reaches_bottom = (height - cap..height).any(row_has_ink);
+        let left_of_stroke = left.saturating_sub(1);
+        let left_arc_ink = (0..height)
+            .filter(|&y| (0..left_of_stroke).any(|x| foreground(x, y)))
+            .count();
+        covered_rows * 4 >= height * 3
+            && reaches_top
+            && reaches_bottom
+            && left_arc_ink * 4 >= height
+    })
+}
+
 /// Java's `(int) Math.rint(value)`.
 fn java_rint(value: f64) -> i32 {
     value.round_ties_even() as i32
@@ -218,17 +262,18 @@ impl HeaderTimeShapeClassifier for BundledTimeClassifier {
         let ranked = rank_evaluations(candidates, maximum_rank, minimum_grade, None);
 
         let mut evaluations = Vec::new();
+        let cut_time_stroke = kind == HeaderTimeGlyphKind::Whole && has_cut_time_stroke(glyph);
         for evaluation in ranked {
+            let shape = if cut_time_stroke && evaluation.shape == "COMMON_TIME" {
+                "CUT_TIME"
+            } else {
+                evaluation.shape.as_str()
+            };
             let produced = match kind {
-                HeaderTimeGlyphKind::Whole => match whole_value(&evaluation.shape) {
+                HeaderTimeGlyphKind::Whole => match whole_value(shape) {
                     Some(value) => {
                         let symbol_bounds = if value.specific_shape.is_some() {
-                            single_symbol_bounds(
-                                self.family,
-                                &evaluation.shape,
-                                staff_interline,
-                                glyph.bounds,
-                            )?
+                            single_symbol_bounds(self.family, shape, staff_interline, glyph.bounds)?
                         } else {
                             num_den_symbol_bounds(
                                 self.family,
@@ -306,6 +351,47 @@ mod tests {
             raster: RunTable::from_pixels(Orientation::Horizontal, width, height, &pixels)
                 .expect("a well-formed raster"),
         }
+    }
+
+    fn raster_glyph(rows: &[&str]) -> HeaderTimeGlyph {
+        let height = rows.len();
+        let width = rows.first().map_or(0, |row| row.len());
+        assert!(rows.iter().all(|row| row.len() == width));
+        let pixels = rows
+            .iter()
+            .flat_map(|row| row.bytes().map(|pixel| if pixel == b'#' { 0 } else { 255 }))
+            .collect::<Vec<_>>();
+        let weight = pixels.iter().filter(|&&pixel| pixel == 0).count();
+        HeaderTimeGlyph {
+            id: 1,
+            part_ids: vec![1],
+            bounds: HeaderBounds {
+                x: 0,
+                y: 0,
+                width: width as i32,
+                height: height as i32,
+            },
+            weight,
+            centroid_x: 0.0,
+            centroid_y: 0.0,
+            raster: RunTable::from_pixels(Orientation::Horizontal, width, height, &pixels)
+                .expect("a well-formed raster"),
+        }
+    }
+
+    #[test]
+    fn cut_time_stroke_is_distinguished_from_common_time_curve() {
+        let cut = raster_glyph(&[
+            "..###...", ".##.#...", ".#..#...", ".#..#...", ".#..#...", ".#..#...", ".##.#...",
+            "..###...",
+        ]);
+        let common = raster_glyph(&[
+            "..###...", ".##.....", ".#......", ".#......", ".#......", ".#......", ".##.....",
+            "..###...",
+        ]);
+
+        assert!(has_cut_time_stroke(&cut));
+        assert!(!has_cut_time_stroke(&common));
     }
 
     #[test]
