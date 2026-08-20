@@ -103,6 +103,7 @@ fn whole_value(shape: &str) -> Option<NeutralTimeValue> {
 /// `ShapeSet.PartialTimes` label -> the number it denotes.
 fn partial_value(shape: &str) -> Option<i32> {
     match shape {
+        "TIME_ONE" | "DIGIT_1" => Some(1),
         "TIME_TWO" => Some(2),
         "TIME_THREE" => Some(3),
         "TIME_FOUR" => Some(4),
@@ -120,6 +121,7 @@ fn partial_value(shape: &str) -> Option<i32> {
 /// The digit shape naming a single-digit number.
 fn digit_shape(number: i32) -> Option<&'static str> {
     match number {
+        1 => Some("TIME_ONE"),
         2 => Some("TIME_TWO"),
         3 => Some("TIME_THREE"),
         4 => Some("TIME_FOUR"),
@@ -321,9 +323,16 @@ mod tests {
             Some((2, 4))
         );
         assert_eq!(whole_value("TIME_TWO"), None, "a digit is not a whole");
+        assert_eq!(partial_value("TIME_ONE"), Some(1));
+        assert_eq!(
+            partial_value("DIGIT_1"),
+            Some(1),
+            "engraved narrow ones can rank as the text-digit twin"
+        );
         assert_eq!(partial_value("TIME_TWO"), Some(2));
         assert_eq!(partial_value("TIME_SIXTEEN"), Some(16));
         assert_eq!(partial_value("COMMON_TIME"), None);
+        assert_eq!(digit_shape(1), Some("TIME_ONE"));
         assert_eq!(
             digit_shape(12),
             None,
