@@ -138,6 +138,58 @@ pub fn create_beam_borders_enabled() -> bool {
     })
 }
 
+/// Whether a beam's median runs through continuous ink in the
+/// pre-binarization grayscale.
+///
+/// Geometry alone cannot tell a beam from two fused accidental strokes: a
+/// natural's stroke is beam-thick, and two neighboring accidentals bridged
+/// by the closing exceed the credible width (measured: a 22px grade-0.33
+/// "beam" at the head row of Schenker page 7, spanning two naturals'
+/// strokes, vetoed the note between them). The paper gap between the
+/// strokes survives in the retained grayscale even when binarization and
+/// closing have swallowed it. A real beam covers its median wall to wall;
+/// the veto sites require that, and the hypothesis itself is untouched --
+/// only its power to delete.
+#[must_use]
+pub fn ink_continuous_along(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+) -> bool {
+    const INK_CUTOFF: u8 = 200;
+    const MIN_COVERAGE: f64 = 0.85;
+    let left = x1.max(0.0) as usize;
+    let right = (x2.min(width as f64 - 1.0)) as usize;
+    if right <= left {
+        return true;
+    }
+    let mut inked = 0usize;
+    let mut total = 0usize;
+    for x in left..=right {
+        let t = (x as f64 - x1) / (x2 - x1).max(1e-9);
+        let y = y1 + t * (y2 - y1);
+        if y < 1.0 || y >= height as f64 - 1.0 {
+            continue;
+        }
+        let y = y as usize;
+        total += 1;
+        // A one-pixel vertical tolerance so a slightly offset median does
+        // not misread a thin beam as gappy.
+        let darkest = (y - 1..=y + 1)
+            .map(|row| gray[row * width + x])
+            .min()
+            .unwrap_or(255);
+        if darkest <= INK_CUTOFF {
+            inked += 1;
+        }
+    }
+    total == 0 || inked as f64 / total as f64 >= MIN_COVERAGE
+}
+
 /// The sheet-scale context a veto site needs to judge one beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamVetoScale {

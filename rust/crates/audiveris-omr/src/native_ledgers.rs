@@ -802,6 +802,17 @@ fn build_system_zones(
         beam_veto_scale.is_none_or(|scale| {
             !area.synthetic
                 && scale.credible(area.bounds.width as f64, area.bounds.height as f64)
+                // Two fused accidental strokes pass the geometry; the paper
+                // gap between them does not pass the grayscale.
+                && crate::beam_veto::ink_continuous_along(
+                    &grid.scale.gray,
+                    grid.scale.width,
+                    grid.scale.height,
+                    area.item.median.x1,
+                    area.item.median.y1,
+                    area.item.median.x2,
+                    area.item.median.y2,
+                )
         })
     };
     grid.peak_graph

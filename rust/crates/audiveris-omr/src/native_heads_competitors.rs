@@ -310,7 +310,20 @@ pub fn materialize_native_heads_competitors(
     let beam_is_credible = |beam: &RawBeam| {
         beam_veto_scale.is_none_or(|scale| {
             let bounds = beam_bounds(beam.item);
-            !beam.synthetic && scale.credible(f64::from(bounds.width), f64::from(bounds.height))
+            let median = beam.item.median;
+            !beam.synthetic
+                && scale.credible(f64::from(bounds.width), f64::from(bounds.height))
+                // Two fused accidental strokes pass the geometry; the paper
+                // gap between them does not pass the grayscale.
+                && crate::beam_veto::ink_continuous_along(
+                    &grid.scale.gray,
+                    grid.scale.width,
+                    grid.scale.height,
+                    median.x1,
+                    median.y1,
+                    median.x2,
+                    median.y2,
+                )
         })
     };
     let min_beam_width =
