@@ -113,7 +113,7 @@ use audiveris_omr::{
         advance_native_stems_head_open_frontier_order61,
         advance_native_stems_head_open_frontier_order68,
         advance_native_stems_head_open_frontier_order75,
-        advance_native_stems_head_phase_two_first_append_retry,
+        advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
@@ -12874,55 +12874,20 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         order100_continuation.state_after.unlinked_heads
     );
 
-    // Boundary 128: phase 1 is exhausted, so Java runs heads linking phase 2 -
-    // linkSides(append=true) over unlinkedHeads. The queue is x32, x71, x70,
-    // x0, x31, and its first entry is a proven no-op: x32 still reaches one
-    // shared stump on LEFT, so Java re-records the undef and returns false
-    // without touching SIG, the linkers, or the stem registry.
+    // Boundaries 128-132: phase 1 is exhausted, so Java runs heads linking
+    // phase 2 - linkSides(append=true) over unlinkedHeads.  The queue is x32,
+    // x71, x70, x0, x31 and every entry leaves the graph untouched, but not
+    // all for the same reason: x32 and x31 stop at the dual-corner shared
+    // stump and return false, while x71, x70 and x0 short-circuit true on a
+    // linked LEFT after their closed RIGHT is re-evaluated - the closed-side
+    // skip does not apply once append is set.
     assert_eq!(
         order101_continuation.state_after.current_index,
         order101_continuation.state_after.heads.len()
     );
     assert_eq!(order101_continuation.state_after.phase_two_index, 0);
-    let phase2_first = advance_native_stems_head_phase_two_first_append_retry(
-        &order101_continuation.state_after,
-        &checker_page.head_corners.systems[0],
-        &checker_page.head_reachability.systems[0],
-        &checker_page.head_builders.systems[0],
-        &hydrated.plans,
-    )
-    .expect("native phase-2 first append retry");
-    assert_eq!(phase2_first.processed_head.x_ordinal, 32);
-    assert_eq!(phase2_first.processed_head.sig_ordinal, 50);
-    assert_eq!(phase2_first.returned_linked, Some(false));
-    assert_eq!(phase2_first.closed_value_changes, 0);
-    assert!(phase2_first.closed_s_linkers.is_empty());
-    assert_eq!(phase2_first.state_after.phase_two_index, 1);
-    // The retry mutates nothing: Java reports identical relation and linker
-    // state hashes across the call.
     assert_eq!(
-        phase2_first.state_after.beam_state.sig.edges.len(),
-        order101_continuation.state_after.beam_state.sig.edges.len()
-    );
-    assert_eq!(
-        phase2_first.state_after.beam_state.sig.vertices.len(),
         order101_continuation
-            .state_after
-            .beam_state
-            .sig
-            .vertices
-            .len()
-    );
-    assert_eq!(
-        phase2_first.state_after.undefined_sides,
-        order101_continuation.state_after.undefined_sides
-    );
-    assert_eq!(
-        phase2_first.state_after.unlinked_heads,
-        order101_continuation.state_after.unlinked_heads
-    );
-    assert_eq!(
-        phase2_first
             .state_after
             .unlinked_heads
             .iter()
@@ -12930,6 +12895,84 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .collect::<Vec<_>>(),
         vec![32, 71, 70, 0, 31]
     );
+
+    // Entry, its two side decisions, and the sibling heads Java closes.  x71
+    // closes x73; x70 shares that same Stem 2382 and so finds it already
+    // closed; x0 closes x1.  The two that return false never reach a closure.
+    // Entry, its two side decisions, and the number of closure cells Java
+    // actually flips - its linkerChanges count.  The closure writes every head
+    // sharing the stems either way, so x70 writes the same cells as x71 and
+    // flips none: x71 already closed x73 on their shared Stem 2382.  The two
+    // entries returning false stop at the undef branch before any closure.
+    /// x ordinal, SIG ordinal, linkSides return, the two side decisions, and
+    /// the number of closure cells Java flips.
+    type PhaseTwoEntry = (usize, usize, bool, [Option<(bool, bool)>; 2], usize);
+    let phase_two_expected: [PhaseTwoEntry; 5] = [
+        (32, 50, false, [Some((true, true)), None], 0),
+        (71, 49, true, [None, Some((true, false))], 2),
+        (70, 46, true, [None, Some((true, false))], 0),
+        (0, 51, true, [None, Some((false, false))], 2),
+        (31, 47, false, [Some((true, true)), Some((true, false))], 0),
+    ];
+    let mut phase_two_state = *order101_continuation.state_after.clone();
+    let sig_edges_before = phase_two_state.beam_state.sig.edges.len();
+    let sig_vertices_before = phase_two_state.beam_state.sig.vertices.len();
+    for (queue_index, (x_ordinal, sig_ordinal, returned, corners, value_changes)) in
+        phase_two_expected.into_iter().enumerate()
+    {
+        let retry = advance_native_stems_head_phase_two_append_retry(
+            &phase_two_state,
+            &checker_page.head_corners.systems[0],
+            &checker_page.head_reachability.systems[0],
+            &checker_page.head_builders.systems[0],
+            &hydrated.plans,
+        )
+        .expect("native phase-2 append retry");
+        assert_eq!(retry.processed_head.x_ordinal, x_ordinal);
+        assert_eq!(retry.processed_head.sig_ordinal, sig_ordinal);
+        assert_eq!(retry.returned_linked, Some(returned));
+        assert_eq!(retry.closed_value_changes, value_changes);
+        if !returned {
+            assert!(retry.closed_s_linkers.is_empty());
+        }
+        assert_eq!(retry.state_after.phase_two_index, queue_index + 1);
+        // Java reports identical relation and linker state hashes across every
+        // one of these calls: the whole of phase 2 mutates nothing.
+        assert_eq!(
+            retry.state_after.beam_state.sig.edges.len(),
+            sig_edges_before
+        );
+        assert_eq!(
+            retry.state_after.beam_state.sig.vertices.len(),
+            sig_vertices_before
+        );
+        assert_eq!(
+            retry.state_after.undefined_sides,
+            order101_continuation.state_after.undefined_sides
+        );
+        assert_eq!(
+            retry.state_after.unlinked_heads,
+            order101_continuation.state_after.unlinked_heads
+        );
+        // The frozen decisions distinguish a skipped linked side from a
+        // re-evaluated closed one.
+        for (decision, expected) in retry.side_decisions.iter().zip(corners) {
+            match expected {
+                None => {
+                    assert!(decision.linked_before);
+                    assert_eq!(decision.top_can_link, None);
+                    assert_eq!(decision.bottom_can_link, None);
+                }
+                Some((top, bottom)) => {
+                    assert!(!decision.linked_before);
+                    assert_eq!(decision.top_can_link, Some(top));
+                    assert_eq!(decision.bottom_can_link, Some(bottom));
+                }
+            }
+        }
+        phase_two_state = *retry.state_after;
+    }
+    assert_eq!(phase_two_state.phase_two_index, 5);
 
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
@@ -26018,6 +26061,248 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v102_summary, "javaEvidence"),
         "ReturnedAfterFirstAppendRetry"
+    );
+
+    // Boundaries 128-132 expected-only phase-2 append-retry sweep.
+    let v103_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v103.txt"),
+    )
+    .expect("expected-only phase-2 sweep fixture");
+    assert_eq!(
+        sha256_hex(v103_text.as_bytes()),
+        "2c192a356f2aa9447c6b0bea5a5979086646390043b2b1333983038d5d3d03c4"
+    );
+    let v103_rows = v103_text
+        .lines()
+        .filter(|line| line.starts_with("stems"))
+        .collect::<Vec<_>>();
+    assert_eq!(v103_rows.len(), 16);
+    let v103_body = format!("{}\n", v103_rows[..15].join("\n"));
+    assert_eq!(
+        sha256_hex(v103_body.as_bytes()),
+        "494edf4c3590e0b73c27f156e9375ace75a3cc4c480a46be541cac15329b7c38"
+    );
+    let v103_baseline = v103_rows[9];
+    assert_eq!(head_field(v103_baseline, "queueSize"), "5");
+    assert_eq!(
+        head_field(v103_baseline, "queue"),
+        "[x32:sig50:id1389,x71:sig49:id1387,x70:sig46:id1377,x0:sig51:id1390,x31:sig47:id1381]"
+    );
+    let v103_retry0 = v103_rows[10];
+    assert_eq!(head_field(v103_retry0, "queueIndex"), "0");
+    assert_eq!(head_field(v103_retry0, "headX"), "32");
+    assert_eq!(head_field(v103_retry0, "headSig"), "50");
+    assert_eq!(head_field(v103_retry0, "headInterId"), "1389");
+    assert_eq!(head_field(v103_retry0, "append"), "true");
+    assert_eq!(
+        head_field(v103_retry0, "sidesBefore"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(
+        head_field(v103_retry0, "decisions"),
+        "[LEFT:top=true:bottom=true:branch=Both,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    );
+    assert_eq!(head_field(v103_retry0, "returned"), "false");
+    assert_eq!(
+        head_field(v103_retry0, "sidesAfter"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(head_field(v103_retry0, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v103_retry0, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v103_retry0, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v103_retry0, "systemStemsAfter"), "46");
+    // SIG is untouched by every phase-2 entry: the relation state never moves.
+    assert_eq!(
+        head_field(v103_retry0, "relationStateHashBefore"),
+        head_field(v103_retry0, "relationStateHashAfter")
+    );
+    // Nothing moves at all for this entry.
+    assert_eq!(
+        head_field(v103_retry0, "linkerStateHashBefore"),
+        head_field(v103_retry0, "linkerStateHashAfter")
+    );
+    assert_eq!(head_field(v103_retry0, "linkerChanges"), "-");
+    let v103_retry1 = v103_rows[11];
+    assert_eq!(head_field(v103_retry1, "queueIndex"), "1");
+    assert_eq!(head_field(v103_retry1, "headX"), "71");
+    assert_eq!(head_field(v103_retry1, "headSig"), "49");
+    assert_eq!(head_field(v103_retry1, "headInterId"), "1387");
+    assert_eq!(head_field(v103_retry1, "append"), "true");
+    assert_eq!(
+        head_field(v103_retry1, "sidesBefore"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(
+        head_field(v103_retry1, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    );
+    assert_eq!(head_field(v103_retry1, "returned"), "true");
+    assert_eq!(
+        head_field(v103_retry1, "sidesAfter"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(head_field(v103_retry1, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v103_retry1, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v103_retry1, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v103_retry1, "systemStemsAfter"), "46");
+    // SIG is untouched by every phase-2 entry: the relation state never moves.
+    assert_eq!(
+        head_field(v103_retry1, "relationStateHashBefore"),
+        head_field(v103_retry1, "relationStateHashAfter")
+    );
+    // This entry closes a sibling head, so the linker state moves.
+    assert_ne!(
+        head_field(v103_retry1, "linkerStateHashBefore"),
+        head_field(v103_retry1, "linkerStateHashAfter")
+    );
+    assert_eq!(
+        head_field(v103_retry1, "linkerChanges"),
+        "[h:73:LEFT:BOTTOM:true:false->true:true,h:73:LEFT:TOP:true:false->true:true,h:73:RIGHT:BOTTOM:false:false->false:true,h:73:RIGHT:TOP:false:false->false:true,linker:SLinker:head:73:false:false->false:true,linker:SLinker:head:73:true:false->true:true]"
+    );
+    let v103_retry2 = v103_rows[12];
+    assert_eq!(head_field(v103_retry2, "queueIndex"), "2");
+    assert_eq!(head_field(v103_retry2, "headX"), "70");
+    assert_eq!(head_field(v103_retry2, "headSig"), "46");
+    assert_eq!(head_field(v103_retry2, "headInterId"), "1377");
+    assert_eq!(head_field(v103_retry2, "append"), "true");
+    assert_eq!(
+        head_field(v103_retry2, "sidesBefore"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(
+        head_field(v103_retry2, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    );
+    assert_eq!(head_field(v103_retry2, "returned"), "true");
+    assert_eq!(
+        head_field(v103_retry2, "sidesAfter"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(head_field(v103_retry2, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v103_retry2, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v103_retry2, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v103_retry2, "systemStemsAfter"), "46");
+    // SIG is untouched by every phase-2 entry: the relation state never moves.
+    assert_eq!(
+        head_field(v103_retry2, "relationStateHashBefore"),
+        head_field(v103_retry2, "relationStateHashAfter")
+    );
+    // Nothing moves at all for this entry.
+    assert_eq!(
+        head_field(v103_retry2, "linkerStateHashBefore"),
+        head_field(v103_retry2, "linkerStateHashAfter")
+    );
+    assert_eq!(head_field(v103_retry2, "linkerChanges"), "-");
+    let v103_retry3 = v103_rows[13];
+    assert_eq!(head_field(v103_retry3, "queueIndex"), "3");
+    assert_eq!(head_field(v103_retry3, "headX"), "0");
+    assert_eq!(head_field(v103_retry3, "headSig"), "51");
+    assert_eq!(head_field(v103_retry3, "headInterId"), "1390");
+    assert_eq!(head_field(v103_retry3, "append"), "true");
+    assert_eq!(
+        head_field(v103_retry3, "sidesBefore"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(
+        head_field(v103_retry3, "decisions"),
+        "[LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]"
+    );
+    assert_eq!(head_field(v103_retry3, "returned"), "true");
+    assert_eq!(
+        head_field(v103_retry3, "sidesAfter"),
+        "[LEFT:true:true,RIGHT:false:true]"
+    );
+    assert_eq!(head_field(v103_retry3, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v103_retry3, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v103_retry3, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v103_retry3, "systemStemsAfter"), "46");
+    // SIG is untouched by every phase-2 entry: the relation state never moves.
+    assert_eq!(
+        head_field(v103_retry3, "relationStateHashBefore"),
+        head_field(v103_retry3, "relationStateHashAfter")
+    );
+    // This entry closes a sibling head, so the linker state moves.
+    assert_ne!(
+        head_field(v103_retry3, "linkerStateHashBefore"),
+        head_field(v103_retry3, "linkerStateHashAfter")
+    );
+    assert_eq!(
+        head_field(v103_retry3, "linkerChanges"),
+        "[h:1:LEFT:BOTTOM:true:false->true:true,h:1:LEFT:TOP:true:false->true:true,h:1:RIGHT:BOTTOM:false:false->false:true,h:1:RIGHT:TOP:false:false->false:true,linker:SLinker:head:1:false:false->false:true,linker:SLinker:head:1:true:false->true:true]"
+    );
+    let v103_retry4 = v103_rows[14];
+    assert_eq!(head_field(v103_retry4, "queueIndex"), "4");
+    assert_eq!(head_field(v103_retry4, "headX"), "31");
+    assert_eq!(head_field(v103_retry4, "headSig"), "47");
+    assert_eq!(head_field(v103_retry4, "headInterId"), "1381");
+    assert_eq!(head_field(v103_retry4, "append"), "true");
+    assert_eq!(
+        head_field(v103_retry4, "sidesBefore"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(
+        head_field(v103_retry4, "decisions"),
+        "[LEFT:top=true:bottom=true:branch=Both,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    );
+    assert_eq!(head_field(v103_retry4, "returned"), "false");
+    assert_eq!(
+        head_field(v103_retry4, "sidesAfter"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(head_field(v103_retry4, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v103_retry4, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v103_retry4, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v103_retry4, "systemStemsAfter"), "46");
+    // SIG is untouched by every phase-2 entry: the relation state never moves.
+    assert_eq!(
+        head_field(v103_retry4, "relationStateHashBefore"),
+        head_field(v103_retry4, "relationStateHashAfter")
+    );
+    // Nothing moves at all for this entry.
+    assert_eq!(
+        head_field(v103_retry4, "linkerStateHashBefore"),
+        head_field(v103_retry4, "linkerStateHashAfter")
+    );
+    assert_eq!(head_field(v103_retry4, "linkerChanges"), "-");
+    let v103_summary = v103_rows[15];
+    assert_eq!(
+        head_field(v103_summary, "schema"),
+        "stems-head-phase-prefix-v103"
+    );
+    assert_eq!(head_field(v103_summary, "rows"), "15");
+    assert_eq!(
+        head_field(v103_summary, "baseV102RunnerSourceSha256"),
+        "47c6b327c89b67d67b2de1d5d0ae27e3aea9ea7652549a1ecc7a8b9956425b81"
+    );
+    assert_eq!(
+        head_field(v103_summary, "baseV102FixtureSha256"),
+        "f3ba43f3b9808b9e8303b180399f94e21af32490e416243ae9807c772debfa27"
+    );
+    assert_eq!(
+        head_field(v103_summary, "probeSourceSha256"),
+        "20ef761cb178329156c19429a30473f61e83096253e418e9a64db5078dfb82e6"
+    );
+    assert_eq!(
+        head_field(v103_summary, "runnerSourceSha256"),
+        "9714b52a8ce9941ef0832a3f17689fcbdeb5b14246546770cd001167be618b26"
+    );
+    assert_eq!(
+        head_field(v103_summary, "emittedBodySha256"),
+        "494edf4c3590e0b73c27f156e9375ace75a3cc4c480a46be541cac15329b7c38"
+    );
+    assert_eq!(
+        head_field(v103_summary, "semanticPassSha256"),
+        "7eeb4ae6a77f2d6f7e7f99ccf70f38d916c1e0905a44cdf2151271abdb521ac0"
+    );
+    assert_eq!(head_field(v103_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v103_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v103_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedPhaseTwoFullAppendRetrySweep"
+    );
+    assert_eq!(
+        head_field(v103_summary, "javaEvidence"),
+        "ReturnedAfterFinalAppendRetry"
     );
 
     let all_siblings = std::iter::once(&actual)
