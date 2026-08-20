@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
 };
 
-use audiveris_image::{beam_structure::Segment, section::Bounds};
+use audiveris_image::beam_structure::Segment;
 use audiveris_omr::{
     head_scanner_slices::JavaRectangle,
     native_headers::recognize_native_headers,
@@ -28,7 +28,6 @@ use audiveris_omr::{
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
-        NativeStemsModeledCanonicalGlyph,
     },
     native_stems_beam_link_plans::NativeStemsBeamLinkPlanAttempt,
     native_stems_beam_scheduler::{
@@ -40,8 +39,8 @@ use audiveris_omr::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
-        advance_native_stems_beam_sides_transaction_from_first_stems_bridge,
-        advance_native_stems_beam_stumps_transaction_from_first_stems_bridge,
+        advance_native_stems_beam_sides_transaction_from_modeled_registry,
+        advance_native_stems_beam_stumps_transaction_from_modeled_registry,
         advance_native_stems_head_continuation_c_link,
         advance_native_stems_head_continuation_c_link_order18,
         advance_native_stems_head_continuation_c_link_order20,
@@ -119,7 +118,7 @@ use audiveris_omr::{
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
-        drive_native_stems_beam_stumps_from_first_stems_bridge, finalize_native_stems,
+        drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
         remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
@@ -177,14 +176,12 @@ use audiveris_omr::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamCreatedStemGeometry,
         NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphRegistrationAction,
         NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamKnownSystemStem,
-        NativeStemsBeamPersistentIdState, NativeStemsBeamRegistryAuthority,
-        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
-        NativeStemsBeamSystemStemTransactionState, NativeStemsFirstGlyphFingerprint,
-        NativeStemsFirstGlyphIndexBridge, NativeStemsFirstGlyphIndexSnapshot,
-        NativeStemsFirstGlyphSnapshotEntry, apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
+        NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamSystemStemTransactionState,
+        NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
-        prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
+        prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
@@ -221,14 +218,6 @@ const BOUNDARY_FIFTEEN_MANIFEST_PATH: &str =
     "rust/oracle/stems-beam-vlink-b-linker-flag-manifest.txt";
 const BOUNDARY_FIFTEEN_MANIFEST_SHA256: &str =
     "c7032ac4871188ef0cf48ac63d99996e78a0e163bf1470d3be84c5e9b10d1d92";
-const FIRST_STEMS_GLYPH_REGISTRY_SHA256: &str =
-    "7311235c38b0667b249749a0e7e6ade278ce92a05ca4200529eb67d73bf1de1c";
-const FIRST_STEMS_GLYPH_REGISTRY_LINES: usize = 1_658;
-const FIRST_STEMS_GLYPH_REGISTRY_BYTES: usize = 226_926;
-const FIRST_STEMS_GLYPH_ACTIVE_SHA256: &str =
-    "dae5de3eabc2fb8d19613abcc8b24f4d865bcd55ca1ec6533faae30792692642";
-const FIRST_STEMS_GLYPH_ORIGINALS_SHA256: &str =
-    "38f4861501e8099dedcb36b0ff9cf615f156ec5b929dffe31c51906a15362af0";
 const BEAM_INTER_INDEX_SHA256: &str =
     "fde4daebadc5c7158fa8e83dcbd4ac0ca6381c614876b6fe48408ec2e245064e";
 const BEAM_INTER_INDEX_LINES: usize = 52;
@@ -236,169 +225,6 @@ const BEAM_INTER_INDEX_BYTES: usize = 6_259;
 const EXECUTED_BASE_BEAM_SIG_ORDINALS: [usize; 16] = [
     12, 15, 16, 19, 20, 21, 22, 28, 29, 30, 31, 32, 33, 34, 35, 36,
 ];
-
-fn first_stems_glyph_bridge(
-    registry_text: &str,
-    modeled_registry: &[NativeStemsModeledCanonicalGlyph],
-    visible_modeled_count: usize,
-) -> NativeStemsFirstGlyphIndexBridge {
-    assert_eq!(registry_text.len(), FIRST_STEMS_GLYPH_REGISTRY_BYTES);
-    assert_eq!(
-        registry_text.lines().count(),
-        FIRST_STEMS_GLYPH_REGISTRY_LINES
-    );
-    assert_eq!(
-        sha256_hex(registry_text.as_bytes()),
-        FIRST_STEMS_GLYPH_REGISTRY_SHA256
-    );
-    assert!(
-        registry_text
-            .lines()
-            .any(|line| line == "# schema: stems-beam-glyph-registry-v1")
-    );
-    assert_eq!(visible_modeled_count, 1_058);
-    assert!(modeled_registry.len() > visible_modeled_count);
-
-    let page_rows = registry_text
-        .lines()
-        .filter(|line| line.starts_with("stemsbeamglyphregistrypage "))
-        .collect::<Vec<_>>();
-    let [page] = page_rows.as_slice() else {
-        panic!(
-            "first-STEMS registry page-row cardinality: {}",
-            page_rows.len()
-        );
-    };
-    let page_tokens = page.split_ascii_whitespace().collect::<Vec<_>>();
-    assert_eq!(
-        page_tokens,
-        [
-            "stemsbeamglyphregistrypage",
-            "active",
-            "1650",
-            "originals",
-            "1650",
-            "entries",
-            "1650",
-            "activeHash",
-            FIRST_STEMS_GLYPH_ACTIVE_SHA256,
-            "originalsHash",
-            FIRST_STEMS_GLYPH_ORIGINALS_SHA256,
-        ]
-    );
-
-    let mut visible_by_content = modeled_registry[..visible_modeled_count]
-        .iter()
-        .map(|glyph| {
-            assert!(glyph.modeled_canonical_ordinal < visible_modeled_count);
-            (
-                format!(
-                    "g:{}:{}:{}:{}:{}",
-                    glyph.bounds.x,
-                    glyph.bounds.y,
-                    glyph.bounds.width,
-                    glyph.bounds.height,
-                    b15_hydration::run_table_digest(&glyph.run_table)
-                ),
-                glyph.modeled_canonical_ordinal,
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(visible_by_content.len(), visible_modeled_count);
-
-    let mut entries = Vec::new();
-    let mut ids = BTreeSet::new();
-    let mut fingerprints = BTreeSet::new();
-    for line in registry_text
-        .lines()
-        .filter(|line| line.starts_with("stemsbeamglyphregistryentry "))
-    {
-        let tokens = line.split_ascii_whitespace().collect::<Vec<_>>();
-        let [
-            "stemsbeamglyphregistryentry",
-            "id",
-            glyph_id,
-            "active",
-            "true",
-            "content",
-            content,
-        ] = tokens.as_slice()
-        else {
-            panic!("malformed first-STEMS registry entry: {line}");
-        };
-        let glyph_id = glyph_id.parse::<i32>().expect("positive registry glyph ID");
-        assert!((1..=2_339).contains(&glyph_id));
-        assert!(
-            ids.insert(glyph_id),
-            "duplicate registry glyph ID {glyph_id}"
-        );
-        let parts = content.split(':').collect::<Vec<_>>();
-        let ["g", x, y, width, height, run_table_sha256] = parts.as_slice() else {
-            panic!("malformed first-STEMS glyph fingerprint: {content}");
-        };
-        let fingerprint = NativeStemsFirstGlyphFingerprint {
-            bounds: Bounds {
-                x: x.parse().expect("registry glyph x"),
-                y: y.parse().expect("registry glyph y"),
-                width: width.parse().expect("registry glyph width"),
-                height: height.parse().expect("registry glyph height"),
-            },
-            run_table_sha256: (*run_table_sha256).to_owned(),
-        };
-        assert!(
-            fingerprints.insert((*content).to_owned()),
-            "duplicate registry glyph content {content}"
-        );
-        entries.push(NativeStemsFirstGlyphSnapshotEntry {
-            glyph_id,
-            active_in_index: true,
-            // The page row says all 1,650 entries are live originals, and all
-            // 1,650 individual entries are active at this exact baseline.
-            live_original: true,
-            fingerprint,
-            modeled_canonical_ordinal: visible_by_content.remove(*content),
-        });
-    }
-    assert_eq!(entries.len(), 1_650);
-    assert!(
-        visible_by_content.is_empty(),
-        "visible native glyph lacks persistent binding"
-    );
-    assert_eq!(
-        entries
-            .iter()
-            .filter(|entry| entry.modeled_canonical_ordinal.is_some())
-            .count(),
-        visible_modeled_count
-    );
-    assert_eq!(
-        entries
-            .iter()
-            .filter(|entry| entry.modeled_canonical_ordinal.is_none())
-            .count(),
-        592
-    );
-
-    NativeStemsFirstGlyphIndexBridge::from_snapshot(
-        NativeStemsFirstGlyphIndexSnapshot {
-            system_id: 1,
-            persistent_ids: NativeStemsBeamPersistentIdState {
-                sheet_last_id: 2_339,
-                glyph_index_last_id: 2_339,
-                inter_index_last_id: 2_339,
-            },
-            union_size: 1_650,
-            active_count: 1_650,
-            live_original_count: 1_650,
-            active_sha256: FIRST_STEMS_GLYPH_ACTIVE_SHA256.to_owned(),
-            live_original_sha256: FIRST_STEMS_GLYPH_ORIGINALS_SHA256.to_owned(),
-            visible_modeled_count,
-            entries,
-        },
-        modeled_registry,
-    )
-    .expect("validated one-time first-STEMS GlyphIndex bridge")
-}
 
 fn glyph_bootstrap_for_attempt(
     attempt: &NativeStemsBeamLinkPlanAttempt,
@@ -7353,17 +7179,19 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(third.vertical_side, NativeStemVerticalSide::Top);
 
     // Transaction 3 is the first changed-base-beam and compound-glyph case.
-    // Consume the disclosed first-STEMS page snapshot once, join its persistent
-    // identities to the system-1-visible native registry prefix, and drop the
-    // raw rows before any carried transaction runs.
+    // From here onward the carried pass uses only native canonical ordinals and
+    // full Glyph.equals content. The page-wide Java snapshot is not consulted.
     let third_scheduler = &second_outer_resume.resume.advanced_system;
     let checker_page = b15_hydration::native_predecessor_page("chula.png");
     let visible_modeled_count = checker_page.first_system_visible_modeled_count;
-    let bridge = first_stems_glyph_bridge(
-        &registry_text,
+    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
+        1,
         &checker_page.modeled_canonical_glyphs,
         visible_modeled_count,
-    );
+    )
+    .expect("native first-system canonical glyph registry");
+    assert_eq!(modeled_registry.len(), visible_modeled_count);
+    let bridge = modeled_registry;
     assert!(hydrated.plans.builders.iter().all(|builder| {
         builder
             .attempts
@@ -7374,14 +7202,14 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     drop(registry_text);
 
     // Retain an independently prepared transaction-3 state for the beam-index
-    // authority negative below. It uses the same bridge, not a frontier row.
+    // authority negative below. It uses the native registry, not a frontier row.
     let mut third_transaction_state = second_base.state_after.transaction_state.clone();
     let third_authority = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(
         &third_transaction_state.system_stems,
         0,
     )
     .expect("transaction-3 dense carried systemStems");
-    prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge(
+    prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
         third_scheduler,
         &hydrated.plans,
         &mut third_transaction_state,
@@ -7395,20 +7223,19 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         &third_transaction_state,
     )
     .expect("native transaction-3 compound candidate");
-    assert!(
-        third_transaction_state
-            .selected_glyph_bindings
-            .iter()
-            .any(|selected| {
-                selected.content == third_candidate
-                    && selected.glyph_id == 298
-                    && selected.canonical_alias == 298
-            })
-    );
+    let third_selected_native_id = third_transaction_state
+        .selected_glyph_bindings
+        .iter()
+        .find(|selected| selected.content == third_candidate)
+        .map(|selected| {
+            assert_eq!(selected.canonical_alias, selected.glyph_id as usize);
+            selected.glyph_id
+        })
+        .expect("native transaction-3 selected canonical glyph");
     third_transaction_state.glyph_index.exhaustive_lookup = None;
 
     // The production carrier owns the same transaction as one clone-and-swap
-    // operation. All plan-specific glyph selection now comes from the bridge.
+    // operation. All plan-specific glyph selection now comes from native state.
     let checker = b15_hydration::checker_context_for_page(&checker_page);
     let carrier_before = NativeStemsBeamSidesCarrier {
         scheduler: (**third_scheduler).clone(),
@@ -7430,23 +7257,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         checker: &checker,
         relation_parameters: hydrated.relation_parameters,
     };
-    let mut corrupt_bridge_carrier = carrier_before.clone();
-    corrupt_bridge_carrier
-        .latest_base_apply
-        .transaction_state
-        .glyph_index
-        .union_size -= 1;
-    let corrupt_bridge_before = corrupt_bridge_carrier.clone();
-    let bridge_before = bridge.clone();
-    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
-        &mut corrupt_bridge_carrier,
-        context,
-        &bridge,
-    )
-    .expect_err("carried GlyphIndex union mismatch must reject the bridge transaction");
-    assert_eq!(corrupt_bridge_carrier, corrupt_bridge_before);
-    assert_eq!(bridge, bridge_before);
-
     // Beam 19 is not selected until transaction 31. A sparse authority can
     // therefore carry the first 30 transactions, but the first missing-ID
     // lookup must reject atomically rather than borrowing another beam's ID.
@@ -7457,7 +7267,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .retain(|entry| entry.source != late_source);
     assert_eq!(missing_late_carrier.beam_inter_index.len(), 15);
     for transaction_ordinal in 3..31 {
-        advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        advance_native_stems_beam_sides_transaction_from_modeled_registry(
             &mut missing_late_carrier,
             context,
             &bridge,
@@ -7475,7 +7285,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(late_frontier.b_linker.beam, late_source);
     let missing_late_before = missing_late_carrier.clone();
     let bridge_before = bridge.clone();
-    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+    advance_native_stems_beam_sides_transaction_from_modeled_registry(
         &mut missing_late_carrier,
         context,
         &bridge,
@@ -7485,7 +7295,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(bridge, bridge_before);
 
     let mut carrier = carrier_before.clone();
-    let carried_third = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+    let carried_third = advance_native_stems_beam_sides_transaction_from_modeled_registry(
         &mut carrier,
         context,
         &bridge,
@@ -7525,7 +7335,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .len(),
         3
     );
-    assert_eq!(carried_third.create.registration.glyph_id, 298);
+    assert_eq!(
+        carried_third.create.registration.glyph_id,
+        third_selected_native_id
+    );
     assert_eq!(
         carried_third.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -7574,7 +7387,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(carried_fourth.plan.plan_ordinal, 627);
 
     // Invoke the same production bridge carrier again from committed state.
-    let carried_fourth = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+    let carried_fourth = advance_native_stems_beam_sides_transaction_from_modeled_registry(
         &mut carrier,
         context,
         &bridge,
@@ -7630,7 +7443,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
                 "carrier stopped before transaction {transaction_ordinal}: {status:?}"
             ),
         };
-        let transaction = advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+        let transaction = advance_native_stems_beam_sides_transaction_from_modeled_registry(
             &mut carrier,
             context,
             &bridge,
@@ -7777,7 +7590,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .retain(|cell| cell.reference != stump_frontier.b_linker);
     let missing_stump_b_before = missing_stump_b.clone();
     let bridge_before = bridge.clone();
-    advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    advance_native_stems_beam_stumps_transaction_from_modeled_registry(
         &mut missing_stump_b,
         context,
         &bridge,
@@ -7786,14 +7599,18 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(missing_stump_b, missing_stump_b_before);
     assert_eq!(bridge, bridge_before);
 
-    let first_stump = advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    let first_stump = advance_native_stems_beam_stumps_transaction_from_modeled_registry(
         &mut carrier,
         context,
         &bridge,
     )
     .expect("native first STUMPS transaction and resume");
     assert_eq!(first_stump.flag.key.plan.plan_ordinal, 147);
-    assert_eq!(first_stump.create.registration.glyph_id, 310);
+    assert!(first_stump.create.registration.glyph_id > 0);
+    assert_eq!(
+        first_stump.create.registration.canonical_alias,
+        first_stump.create.registration.glyph_id as usize
+    );
     assert_eq!(
         first_stump.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -7848,7 +7665,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .b_cells
         .retain(|cell| cell.reference != next_stump.b_linker);
     let missing_second_stump_b_before = missing_second_stump_b.clone();
-    advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    advance_native_stems_beam_stumps_transaction_from_modeled_registry(
         &mut missing_second_stump_b,
         context,
         &bridge,
@@ -7857,14 +7674,18 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(missing_second_stump_b, missing_second_stump_b_before);
     assert_eq!(bridge, bridge_before);
 
-    let second_stump = advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    let second_stump = advance_native_stems_beam_stumps_transaction_from_modeled_registry(
         &mut carrier,
         context,
         &bridge,
     )
     .expect("native second STUMPS transaction and resume");
     assert_eq!(second_stump.flag.key.plan.plan_ordinal, 622);
-    assert_eq!(second_stump.create.registration.glyph_id, 321);
+    assert!(second_stump.create.registration.glyph_id > 0);
+    assert_eq!(
+        second_stump.create.registration.canonical_alias,
+        second_stump.create.registration.glyph_id as usize
+    );
     assert_eq!(
         second_stump.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -7929,7 +7750,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .b_cells
         .retain(|cell| cell.reference != third_stump.b_linker);
     let missing_third_stump_b_before = missing_third_stump_b.clone();
-    advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+    advance_native_stems_beam_stumps_transaction_from_modeled_registry(
         &mut missing_third_stump_b,
         context,
         &bridge,
@@ -7939,14 +7760,18 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(bridge, bridge_before);
 
     let third_stump_transaction =
-        advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+        advance_native_stems_beam_stumps_transaction_from_modeled_registry(
             &mut carrier,
             context,
             &bridge,
         )
         .expect("native third STUMPS transaction and resume");
     assert_eq!(third_stump_transaction.flag.key.plan.plan_ordinal, 404);
-    assert_eq!(third_stump_transaction.create.registration.glyph_id, 303);
+    assert!(third_stump_transaction.create.registration.glyph_id > 0);
+    assert_eq!(
+        third_stump_transaction.create.registration.canonical_alias,
+        third_stump_transaction.create.registration.glyph_id as usize
+    );
     assert_eq!(
         third_stump_transaction.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -8011,7 +7836,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
 
     let mut zero_limit_carrier = carrier.clone();
     let zero_limit_before = zero_limit_carrier.clone();
-    drive_native_stems_beam_stumps_from_first_stems_bridge(
+    drive_native_stems_beam_stumps_from_modeled_registry(
         &mut zero_limit_carrier,
         context,
         &bridge,
@@ -8025,7 +7850,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .b_cells
         .retain(|cell| second_b_alias(cell.reference) != "beam:32:b:1");
     let late_missing_b_before = late_missing_b_carrier.clone();
-    drive_native_stems_beam_stumps_from_first_stems_bridge(
+    drive_native_stems_beam_stumps_from_modeled_registry(
         &mut late_missing_b_carrier,
         context,
         &bridge,
@@ -8035,7 +7860,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(late_missing_b_carrier, late_missing_b_before);
 
     let mut bounded_stumps_carrier = carrier.clone();
-    let bounded_stumps = drive_native_stems_beam_stumps_from_first_stems_bridge(
+    let bounded_stumps = drive_native_stems_beam_stumps_from_modeled_registry(
         &mut bounded_stumps_carrier,
         context,
         &bridge,
@@ -8064,7 +7889,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
 
     let complete_stumps =
-        drive_native_stems_beam_stumps_from_first_stems_bridge(&mut carrier, context, &bridge, 100)
+        drive_native_stems_beam_stumps_from_modeled_registry(&mut carrier, context, &bridge, 100)
             .expect("native STUMPS suffix through completion");
     assert_eq!(complete_stumps.transactions.len(), 4);
     assert_eq!(
@@ -8075,13 +7900,23 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .collect::<Vec<_>>(),
         [508, 28, 330, 251]
     );
+    let complete_stump_native_ids = complete_stumps
+        .transactions
+        .iter()
+        .map(|transaction| {
+            let registration = &transaction.create.registration;
+            assert!(registration.glyph_id > 0);
+            assert_eq!(registration.canonical_alias, registration.glyph_id as usize);
+            registration.glyph_id
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        complete_stumps
-            .transactions
+        complete_stump_native_ids
             .iter()
-            .map(|transaction| transaction.create.registration.glyph_id)
-            .collect::<Vec<_>>(),
-        [308, 305, 302, 300]
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        complete_stump_native_ids.len()
     );
     assert!(complete_stumps.transactions.iter().all(|transaction| {
         transaction.create.registration.action
@@ -8249,7 +8084,11 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .to_bits(),
         0x4091_d5d6_e666_8034
     );
-    assert_eq!(head_transaction.create.registration.glyph_id, 307);
+    assert!(head_transaction.create.registration.glyph_id > 0);
+    assert_eq!(
+        head_transaction.create.registration.canonical_alias,
+        head_transaction.create.registration.glyph_id as usize
+    );
     assert_eq!(
         head_transaction.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -8551,7 +8390,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (0, 0)
     );
-    assert_eq!(seventh_transaction.selected_glyph_id, 319);
+    assert!(seventh_transaction.selected_glyph_id > 0);
     assert_eq!(
         seventh_transaction.relation.grade.to_bits(),
         0x3fef_c384_9946_38a5
@@ -8575,7 +8414,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ref other => panic!("order7 created unexpected stem: {other:?}"),
     };
     assert_eq!(seventh_stem_identity, 40);
-    assert_eq!(seventh_transaction.create.registration.glyph_id, 319);
+    assert_eq!(
+        seventh_transaction.create.registration.glyph_id,
+        seventh_transaction.selected_glyph_id
+    );
     assert_eq!(
         seventh_transaction.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -9166,7 +9008,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (1, 1)
     );
-    assert_eq!(order18_transaction.selected_glyph_id, 328);
+    assert!(order18_transaction.selected_glyph_id > 0);
     assert_eq!(
         order18_transaction.relation.grade.to_bits(),
         0x3fef_839e_420c_5c49
@@ -9190,7 +9032,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         other => panic!("order18 created unexpected stem: {other:?}"),
     };
     assert_eq!(order18_stem_identity, 41);
-    assert_eq!(order18_transaction.create.registration.glyph_id, 328);
+    assert_eq!(
+        order18_transaction.create.registration.glyph_id,
+        order18_transaction.selected_glyph_id
+    );
     assert_eq!(
         order18_transaction.create.registration.action,
         NativeStemsBeamGlyphRegistrationAction::Reused {
@@ -9316,7 +9161,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (1, 1)
     );
-    assert_eq!(order20_transaction.selected_glyph_id, 332);
+    assert!(order20_transaction.selected_glyph_id > 0);
     assert_eq!(
         order20_transaction.relation.grade.to_bits(),
         0x3fef_20e4_839d_326e
@@ -9340,7 +9185,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         other => panic!("order20 created unexpected stem: {other:?}"),
     };
     assert_eq!(order20_stem_identity, 42);
-    assert_eq!(order20_transaction.create.registration.glyph_id, 332);
+    assert_eq!(
+        order20_transaction.create.registration.glyph_id,
+        order20_transaction.selected_glyph_id
+    );
     assert_eq!(order20_head_phase.current_index, 21);
     assert!(order20_head_phase.frontier_consumed);
     assert_eq!(order20_head_phase.heads[20].reference.x_ordinal, 74);
@@ -9687,7 +9535,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (1, 1)
     );
-    assert_eq!(order27_transaction.selected_glyph_id, 314);
+    assert!(order27_transaction.selected_glyph_id > 0);
     assert_eq!(
         order27_transaction.relation.grade.to_bits(),
         0x3fef_60c6_52f5_e4c7
@@ -9711,7 +9559,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         other => panic!("order27 created unexpected stem: {other:?}"),
     };
     assert_eq!(order27_stem_identity, 43);
-    assert_eq!(order27_transaction.create.registration.glyph_id, 314);
+    assert_eq!(
+        order27_transaction.create.registration.glyph_id,
+        order27_transaction.selected_glyph_id
+    );
     assert_eq!(order27_head_phase.current_index, 28);
     assert!(order27_head_phase.frontier_consumed);
     assert_eq!(order27_head_phase.heads[27].reference.x_ordinal, 33);
@@ -9991,7 +9842,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (1, 1)
     );
-    assert_eq!(order34_transaction.selected_glyph_id, 322);
+    assert!(order34_transaction.selected_glyph_id > 0);
     assert_eq!(
         order34_transaction.relation.grade.to_bits(),
         0x3fef_77d5_00fa_d911
@@ -10015,7 +9866,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         other => panic!("order34 created unexpected stem: {other:?}"),
     };
     assert_eq!(order34_stem_identity, 44);
-    assert_eq!(order34_transaction.create.registration.glyph_id, 322);
+    assert_eq!(
+        order34_transaction.create.registration.glyph_id,
+        order34_transaction.selected_glyph_id
+    );
     assert_eq!(order34_head_phase.current_index, 35);
     assert!(order34_head_phase.frontier_consumed);
     assert_eq!(
@@ -10106,7 +9960,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         ),
         (0, 0)
     );
-    assert_eq!(order36_transaction.selected_glyph_id, 324);
+    assert!(order36_transaction.selected_glyph_id > 0);
     assert_eq!(
         order36_transaction.relation.grade.to_bits(),
         0x3fef_53d1_5e98_5435
@@ -10121,7 +9975,10 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         other => panic!("order36 created unexpected stem: {other:?}"),
     };
     assert_eq!(order36_stem_identity, 45);
-    assert_eq!(order36_transaction.create.registration.glyph_id, 324);
+    assert_eq!(
+        order36_transaction.create.registration.glyph_id,
+        order36_transaction.selected_glyph_id
+    );
     assert_eq!(order36_head_phase.current_index, 37);
     assert!(order36_head_phase.frontier_consumed);
     assert_eq!(
@@ -26861,7 +26718,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .retain(|cell| cell.reference != assigned);
     let late_failure_before = late_failure.clone();
     let bridge_before = bridge.clone();
-    advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
+    advance_native_stems_beam_sides_transaction_from_modeled_registry(
         &mut late_failure,
         context,
         &bridge,

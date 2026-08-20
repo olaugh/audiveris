@@ -66,11 +66,13 @@ use crate::{
         NativeStemsBeamStemCheckerContext, NativeStemsBeamStemGrade,
         NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamVLinkTransaction,
         NativeStemsCreateStemCandidateTransaction, NativeStemsFirstGlyphIndexBridge,
+        NativeStemsGlyphRegistryAuthority, NativeStemsModeledGlyphRegistry,
         apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
+        prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamVLinkerSystem, generic_intersection},
     native_stems_head_builders::{
@@ -379,6 +381,21 @@ pub fn advance_native_stems_beam_sides_transaction_from_first_stems_bridge(
     .and_then(NativeStemsBeamCarrierTransaction::into_sides)
 }
 
+/// Execute one frontier from the owned native canonical-glyph registry.
+pub fn advance_native_stems_beam_sides_transaction_from_modeled_registry(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_beam_sides_transaction_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::Modeled(registry),
+        CarrierPass::Sides,
+    )
+    .and_then(NativeStemsBeamCarrierTransaction::into_sides)
+}
+
 /// Execute one typed STUMPS frontier through B12-B17 and resume its stump
 /// worklist. The first-STEMS bridge remains the glyph identity authority.
 pub fn advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
@@ -395,6 +412,21 @@ pub fn advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
     .and_then(NativeStemsBeamCarrierTransaction::into_stumps)
 }
 
+/// Execute one typed STUMPS frontier from native canonical-glyph identity.
+pub fn advance_native_stems_beam_stumps_transaction_from_modeled_registry(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<NativeStemsBeamStumpsTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_beam_sides_transaction_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::Modeled(registry),
+        CarrierPass::Stumps,
+    )
+    .and_then(NativeStemsBeamCarrierTransaction::into_stumps)
+}
+
 /// Atomically drive a bounded sequence of already-awaited STUMPS frontiers.
 ///
 /// Every transaction is the same B12-B17 plus scheduler-resume operation as
@@ -406,6 +438,35 @@ pub fn drive_native_stems_beam_stumps_from_first_stems_bridge(
     carrier: &mut NativeStemsBeamSidesCarrier,
     context: NativeStemsBeamSidesContext<'_>,
     bridge: &NativeStemsFirstGlyphIndexBridge,
+    transaction_limit: usize,
+) -> Result<NativeStemsBeamStumpsDrive, NativeStemsBeamSidesError> {
+    drive_native_stems_beam_stumps_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::FirstStems(bridge),
+        transaction_limit,
+    )
+}
+
+/// Atomically drive STUMPS from owned native canonical-glyph identity.
+pub fn drive_native_stems_beam_stumps_from_modeled_registry(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    transaction_limit: usize,
+) -> Result<NativeStemsBeamStumpsDrive, NativeStemsBeamSidesError> {
+    drive_native_stems_beam_stumps_with_authority(
+        carrier,
+        context,
+        GlyphAuthority::Modeled(registry),
+        transaction_limit,
+    )
+}
+
+fn drive_native_stems_beam_stumps_with_authority(
+    carrier: &mut NativeStemsBeamSidesCarrier,
+    context: NativeStemsBeamSidesContext<'_>,
+    glyphs: GlyphAuthority<'_>,
     transaction_limit: usize,
 ) -> Result<NativeStemsBeamStumpsDrive, NativeStemsBeamSidesError> {
     if transaction_limit == 0 {
@@ -431,12 +492,13 @@ pub fn drive_native_stems_beam_stumps_from_first_stems_bridge(
             });
         }
 
-        match advance_native_stems_beam_stumps_transaction_from_first_stems_bridge(
+        match advance_native_stems_beam_sides_transaction_with_authority(
             &mut shadow,
             context,
-            bridge,
+            glyphs,
+            CarrierPass::Stumps,
         ) {
-            Ok(transaction) => transactions.push(transaction),
+            Ok(transaction) => transactions.push(transaction.into_stumps()?),
             Err(mut error) => {
                 error.detail = format!(
                     "after {} successful shadow transactions: {}",
@@ -1294,7 +1356,7 @@ pub fn advance_native_stems_head_single_item_c_link(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     let shadow = carrier.clone();
     let reconstructed = begin_native_stems_head_linking_phase1(
@@ -1349,7 +1411,7 @@ pub fn advance_native_stems_head_continuation_c_link(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1386,7 +1448,7 @@ pub fn advance_native_stems_head_continuation_c_link_order18(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1422,7 +1484,7 @@ pub fn advance_native_stems_head_continuation_c_link_order20(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1458,7 +1520,7 @@ pub fn advance_native_stems_head_continuation_c_link_order27(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1494,7 +1556,7 @@ pub fn advance_native_stems_head_continuation_c_link_order34(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1530,7 +1592,7 @@ pub fn advance_native_stems_head_continuation_c_link_order36(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadCLinkTransaction, NativeStemsBeamSidesError> {
     advance_native_stems_head_continuation_c_link_at_queue(
         carrier,
@@ -1602,7 +1664,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order37(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2340) && stem.glyph_id == 294)
+        .find(|stem| stem.inter_id == Some(2340))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1688,7 +1750,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order38(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2372) && stem.glyph_id == 310)
+        .find(|stem| stem.inter_id == Some(2372))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1774,7 +1836,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order39(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2373) && stem.glyph_id == 321)
+        .find(|stem| stem.inter_id == Some(2373))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1860,7 +1922,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order40(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2348) && stem.glyph_id == 290)
+        .find(|stem| stem.inter_id == Some(2348))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1946,7 +2008,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order41(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2357) && stem.glyph_id == 313)
+        .find(|stem| stem.inter_id == Some(2357))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2033,7 +2095,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order42(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350) && stem.glyph_id == 326)
+        .find(|stem| stem.inter_id == Some(2350))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2119,7 +2181,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order43(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2356) && stem.glyph_id == 292)
+        .find(|stem| stem.inter_id == Some(2356))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2205,7 +2267,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order44(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2358) && stem.glyph_id == 301)
+        .find(|stem| stem.inter_id == Some(2358))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2291,7 +2353,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order45(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2374) && stem.glyph_id == 303)
+        .find(|stem| stem.inter_id == Some(2374))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2377,7 +2439,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order46(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350) && stem.glyph_id == 326)
+        .find(|stem| stem.inter_id == Some(2350))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2463,7 +2525,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order47(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2359) && stem.glyph_id == 304)
+        .find(|stem| stem.inter_id == Some(2359))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2549,7 +2611,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order48(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2344) && stem.glyph_id == 296)
+        .find(|stem| stem.inter_id == Some(2344))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2635,7 +2697,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order49(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2369) && stem.glyph_id == 316)
+        .find(|stem| stem.inter_id == Some(2369))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2726,7 +2788,7 @@ pub fn advance_native_stems_head_open_frontier_order50(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2383) && stem.glyph_id == 314)
+        .find(|stem| stem.inter_id == Some(2383))
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -2854,7 +2916,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2361) && stem.glyph_id == 299)
+        .find(|stem| stem.inter_id == Some(2361))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2960,7 +3022,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order52(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2360) && stem.glyph_id == 329)
+        .find(|stem| stem.inter_id == Some(2360))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3068,7 +3130,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order53(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2366) && stem.glyph_id == 320)
+        .find(|stem| stem.inter_id == Some(2366))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3175,7 +3237,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order54(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2349) && stem.glyph_id == 312)
+        .find(|stem| stem.inter_id == Some(2349))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3281,7 +3343,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order55(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2347) && stem.glyph_id == 331)
+        .find(|stem| stem.inter_id == Some(2347))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3387,7 +3449,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2341) && stem.glyph_id == 323)
+        .find(|stem| stem.inter_id == Some(2341))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3493,7 +3555,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order58(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2342) && stem.glyph_id == 298)
+        .find(|stem| stem.inter_id == Some(2342))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3599,7 +3661,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2343) && stem.glyph_id == 333)
+        .find(|stem| stem.inter_id == Some(2343))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3710,7 +3772,7 @@ pub fn advance_native_stems_head_open_frontier_order60(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2382) && stem.glyph_id == 332)
+        .find(|stem| stem.inter_id == Some(2382))
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -3856,7 +3918,7 @@ pub fn advance_native_stems_head_open_frontier_order61(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2382) && stem.glyph_id == 332)
+        .find(|stem| stem.inter_id == Some(2382))
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -3970,7 +4032,7 @@ pub fn advance_native_stems_head_open_frontier_order68(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2384) && stem.glyph_id == 322)
+        .find(|stem| stem.inter_id == Some(2384))
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -4088,7 +4150,7 @@ pub fn advance_native_stems_head_open_frontier_order75(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2383) && stem.glyph_id == 314)
+        .find(|stem| stem.inter_id == Some(2383))
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -5064,7 +5126,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order62(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2355) && stem.glyph_id == 318)
+        .find(|stem| stem.inter_id == Some(2355))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5150,7 +5212,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order63(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2352) && stem.glyph_id == 293)
+        .find(|stem| stem.inter_id == Some(2352))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5237,7 +5299,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order64(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2354) && stem.glyph_id == 315)
+        .find(|stem| stem.inter_id == Some(2354))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5324,7 +5386,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order65(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2363) && stem.glyph_id == 311)
+        .find(|stem| stem.inter_id == Some(2363))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5411,7 +5473,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order66(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2340) && stem.glyph_id == 294)
+        .find(|stem| stem.inter_id == Some(2340))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5498,7 +5560,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order69(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2367) && stem.glyph_id == 295)
+        .find(|stem| stem.inter_id == Some(2367))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5584,7 +5646,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order71(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2370) && stem.glyph_id == 309)
+        .find(|stem| stem.inter_id == Some(2370))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5670,7 +5732,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order74(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2353) && stem.glyph_id == 317)
+        .find(|stem| stem.inter_id == Some(2353))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5756,7 +5818,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order76(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2375) && stem.glyph_id == 308)
+        .find(|stem| stem.inter_id == Some(2375))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5842,7 +5904,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order77(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2346) && stem.glyph_id == 291)
+        .find(|stem| stem.inter_id == Some(2346))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5928,7 +5990,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order78(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2358) && stem.glyph_id == 301)
+        .find(|stem| stem.inter_id == Some(2358))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6014,7 +6076,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order79(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2372) && stem.glyph_id == 310)
+        .find(|stem| stem.inter_id == Some(2372))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6100,7 +6162,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order80(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2357) && stem.glyph_id == 313)
+        .find(|stem| stem.inter_id == Some(2357))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6186,7 +6248,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order81(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2365) && stem.glyph_id == 330)
+        .find(|stem| stem.inter_id == Some(2365))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6272,7 +6334,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order82(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2371) && stem.glyph_id == 306)
+        .find(|stem| stem.inter_id == Some(2371))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6358,7 +6420,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order83(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2356) && stem.glyph_id == 292)
+        .find(|stem| stem.inter_id == Some(2356))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6444,7 +6506,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order84(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2364) && stem.glyph_id == 297)
+        .find(|stem| stem.inter_id == Some(2364))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6531,7 +6593,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order85(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2371) && stem.glyph_id == 306)
+        .find(|stem| stem.inter_id == Some(2371))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6617,7 +6679,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order86(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2362) && stem.glyph_id == 334)
+        .find(|stem| stem.inter_id == Some(2362))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6703,7 +6765,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order87(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2377) && stem.glyph_id == 302)
+        .find(|stem| stem.inter_id == Some(2377))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6789,7 +6851,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order88(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2380) && stem.glyph_id == 319)
+        .find(|stem| stem.inter_id == Some(2380))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6875,7 +6937,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order89(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2351) && stem.glyph_id == 327)
+        .find(|stem| stem.inter_id == Some(2351))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6961,7 +7023,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order90(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2378) && stem.glyph_id == 300)
+        .find(|stem| stem.inter_id == Some(2378))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7048,7 +7110,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order91(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2364) && stem.glyph_id == 297)
+        .find(|stem| stem.inter_id == Some(2364))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7135,7 +7197,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order92(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2362) && stem.glyph_id == 334)
+        .find(|stem| stem.inter_id == Some(2362))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7221,7 +7283,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order94(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2373) && stem.glyph_id == 321)
+        .find(|stem| stem.inter_id == Some(2373))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7307,7 +7369,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order95(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2376) && stem.glyph_id == 305)
+        .find(|stem| stem.inter_id == Some(2376))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7393,7 +7455,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order96(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2345) && stem.glyph_id == 335)
+        .find(|stem| stem.inter_id == Some(2345))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7480,7 +7542,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order97(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2377) && stem.glyph_id == 302)
+        .find(|stem| stem.inter_id == Some(2377))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7567,7 +7629,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order98(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350) && stem.glyph_id == 326)
+        .find(|stem| stem.inter_id == Some(2350))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7653,7 +7715,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order99(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2374) && stem.glyph_id == 303)
+        .find(|stem| stem.inter_id == Some(2374))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7740,7 +7802,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order100(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2366) && stem.glyph_id == 320)
+        .find(|stem| stem.inter_id == Some(2366))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7826,7 +7888,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order101(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2348) && stem.glyph_id == 290)
+        .find(|stem| stem.inter_id == Some(2348))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7922,7 +7984,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
     expectation: NativeStemsHeadMultiHeadReuseExpectation,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     if !carrier.frontier_consumed || carrier.current_index != expectation.queue_index {
@@ -7972,10 +8034,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| {
-            stem.inter_id == Some(expectation.stem_inter_id)
-                && stem.glyph_id == expectation.stem_glyph_id
-        })
+        .find(|stem| stem.inter_id == Some(expectation.stem_inter_id))
         .ok_or_else(|| {
             stage(
                 "HEADS-multi-reuse-CLink-frontier",
@@ -8114,13 +8173,14 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
     if !promoted.active_in_index
         || !promoted.strongly_retained
-        || promoted.glyph_id != expectation.stem_glyph_id
+        || promoted.glyph_id != existing_stem.glyph_id
+        || promoted.content != existing_stem.glyph_content
     {
         return Err(stage(
             "HEADS-CLink-first-STEMS-bridge",
             format!(
-                "selected seed canonical is not the active strongly retained glyph {}",
-                expectation.stem_glyph_id
+                "selected seed canonical does not match carried StemInter {}",
+                expectation.stem_inter_id
             ),
         ));
     }
@@ -8562,7 +8622,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         .clone()
         .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
     if stem.inter_id != Some(expectation.stem_inter_id)
-        || stem.glyph_id != expectation.stem_glyph_id
+        || stem.glyph_id != existing_stem.glyph_id
         || !stem.sig_attached
     {
         return Err(stage(
@@ -8788,7 +8848,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
@@ -8844,7 +8904,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
@@ -8898,7 +8958,7 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
@@ -8953,7 +9013,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order73(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
@@ -9008,7 +9068,7 @@ pub fn advance_native_stems_head_right_side_reuse_c_link_order93(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
@@ -9135,7 +9195,7 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     if !carrier.frontier_consumed || carrier.current_index != 57 {
         return Err(stage(
@@ -9190,7 +9250,7 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2381) && stem.glyph_id == 328)
+        .find(|stem| stem.inter_id == Some(2381))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-CLink-frontier",
@@ -9338,10 +9398,14 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
     let promoted = bridge
         .resolve_native_content(&candidate)
         .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
-    if !promoted.active_in_index || !promoted.strongly_retained || promoted.glyph_id != 328 {
+    if !promoted.active_in_index
+        || !promoted.strongly_retained
+        || promoted.glyph_id != existing_stem.glyph_id
+        || promoted.content != existing_stem.glyph_content
+    {
         return Err(stage(
             "HEADS-CLink-first-STEMS-bridge",
-            "selected seed canonical is not the active strongly retained glyph 328",
+            "selected seed canonical does not match carried StemInter 2381",
         ));
     }
     let known = &mut shadow
@@ -9465,7 +9529,8 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         .stem
         .clone()
         .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
-    if stem.inter_id != Some(2381) || stem.glyph_id != 328 || !stem.sig_attached {
+    if stem.inter_id != Some(2381) || stem.glyph_id != existing_stem.glyph_id || !stem.sig_attached
+    {
         return Err(stage(
             "HEADS-CLink-createStem",
             "reused stem is not the authenticated StemInter 2381/glyph328",
@@ -9687,7 +9752,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order21(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2378) && stem.glyph_id == 300)
+        .find(|stem| stem.inter_id == Some(2378))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -9768,7 +9833,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order22(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2354) && stem.glyph_id == 315)
+        .find(|stem| stem.inter_id == Some(2354))
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -9814,7 +9879,7 @@ fn advance_native_stems_head_continuation_c_link_at_queue(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
     queue_index: usize,
     expected_x_ordinal: usize,
     expected_sig_ordinal: usize,
@@ -9890,7 +9955,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
-    bridge: &NativeStemsFirstGlyphIndexBridge,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
     expected_current_index: usize,
     expected_last_index: usize,
     expected_max_index: usize,
@@ -11301,6 +11366,7 @@ mod tests {
 enum GlyphAuthority<'a> {
     Legacy(NativeStemsBeamSidesGlyphEvidence<'a>),
     FirstStems(&'a NativeStemsFirstGlyphIndexBridge),
+    Modeled(&'a NativeStemsModeledGlyphRegistry),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11438,6 +11504,15 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
                 proof,
             )
         }
+        GlyphAuthority::Modeled(registry) => {
+            prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
+                &shadow.scheduler,
+                context.plans,
+                &mut transaction_state,
+                registry,
+                proof,
+            )
+        }
     }
     .map_err(|error| stage("B12-preparation", error))?;
     let candidate = materialize_native_stems_beam_frontier_candidate(
@@ -11455,7 +11530,7 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
                 transaction_state.glyph_index.exhaustive_lookup = Some(scan.clone());
             }
         }
-        GlyphAuthority::FirstStems(_) => {
+        GlyphAuthority::FirstStems(_) | GlyphAuthority::Modeled(_) => {
             if !transaction_state
                 .selected_glyph_bindings
                 .iter()

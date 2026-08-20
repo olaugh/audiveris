@@ -173,6 +173,134 @@ pub struct NativeStemsFirstGlyphIndexBridge {
     modeled: Vec<NativeStemsBeamKnownCanonicalGlyph>,
 }
 
+/// Native canonical-glyph identity available at one system's first STEMS
+/// frontier.
+///
+/// Identity is the replay's zero-based canonical ordinal plus one. This is an
+/// owned Rust domain derived from exact registration order and `Glyph.equals`
+/// content; it does not import Java's sheet-wide `GlyphIndex`, its opaque
+/// entries, or its allocator watermark.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeStemsModeledGlyphRegistry {
+    system_id: usize,
+    entries: Vec<NativeStemsBeamGlyphRegistryBootstrapEntry>,
+}
+
+/// Exact-content lookup needed by head-origin C-link transactions.
+pub trait NativeStemsGlyphRegistryAuthority {
+    fn resolve_native_content(
+        &self,
+        content: &NativeStemsBeamFixedGlyphContent,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>;
+}
+
+impl NativeStemsModeledGlyphRegistry {
+    pub fn from_modeled_prefix(
+        system_id: usize,
+        modeled_registry: &[NativeStemsModeledCanonicalGlyph],
+        visible_modeled_count: usize,
+    ) -> Result<Self, NativeStemsBeamVLinkTransactionError> {
+        if system_id == 0
+            || visible_modeled_count == 0
+            || visible_modeled_count > modeled_registry.len()
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled glyph registry header",
+            });
+        }
+        let mut entries = Vec::with_capacity(visible_modeled_count);
+        for (ordinal, glyph) in modeled_registry[..visible_modeled_count].iter().enumerate() {
+            let content = NativeStemsBeamFixedGlyphContent {
+                bounds: glyph.bounds,
+                weight: glyph.weight,
+                run_table: glyph.run_table.clone(),
+            };
+            validate_content(&content)?;
+            if glyph.modeled_canonical_ordinal != ordinal
+                || entries
+                    .iter()
+                    .any(|entry: &NativeStemsBeamGlyphRegistryBootstrapEntry| {
+                        entry.content == content
+                    })
+            {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "native modeled glyph registry entries",
+                });
+            }
+            let glyph_id = i32::try_from(ordinal)
+                .ok()
+                .and_then(|value| value.checked_add(1))
+                .ok_or(NativeStemsBeamVLinkTransactionError::PersistentIdExhausted)?;
+            entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                canonical_alias: ordinal + 1,
+                glyph_id,
+                content,
+                active_in_index: true,
+                strongly_retained: true,
+            });
+        }
+        Ok(Self { system_id, entries })
+    }
+
+    #[must_use]
+    pub fn system_id(&self) -> usize {
+        self.system_id
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn selected_bootstrap(
+        &self,
+        selected: &NativeStemsBeamSelectedGlyph,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
+    {
+        let entry = self
+            .entries
+            .get(selected.modeled_canonical_ordinal)
+            .ok_or(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)?;
+        let content = NativeStemsBeamFixedGlyphContent {
+            bounds: selected.bounds,
+            weight: selected.weight,
+            run_table: selected.structural_key.run_table.clone(),
+        };
+        if entry.content != content {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled selected identity",
+            });
+        }
+        Ok(entry.clone())
+    }
+}
+
+impl NativeStemsGlyphRegistryAuthority for NativeStemsModeledGlyphRegistry {
+    fn resolve_native_content(
+        &self,
+        content: &NativeStemsBeamFixedGlyphContent,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
+    {
+        validate_content(content)?;
+        let matches = self
+            .entries
+            .iter()
+            .filter(|entry| entry.content == *content)
+            .collect::<Vec<_>>();
+        let [entry] = matches.as_slice() else {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled glyph content",
+            });
+        };
+        Ok((*entry).clone())
+    }
+}
+
 impl NativeStemsFirstGlyphIndexBridge {
     pub fn from_snapshot(
         snapshot: NativeStemsFirstGlyphIndexSnapshot,
@@ -344,6 +472,16 @@ impl NativeStemsFirstGlyphIndexBridge {
             active_in_index: known.active_in_index,
             strongly_retained: known.strongly_retained,
         })
+    }
+}
+
+impl NativeStemsGlyphRegistryAuthority for NativeStemsFirstGlyphIndexBridge {
+    fn resolve_native_content(
+        &self,
+        content: &NativeStemsBeamFixedGlyphContent,
+    ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
+    {
+        NativeStemsFirstGlyphIndexBridge::resolve_native_content(self, content)
     }
 }
 
@@ -999,6 +1137,44 @@ pub fn prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge(
         .glyphs
         .iter()
         .map(|selected| bridge.selected_bootstrap(selected))
+        .collect::<Result<Vec<_>, _>>()?;
+    prepare_native_stems_beam_vlink_frontier_state(
+        scheduler_system,
+        plan_system,
+        state,
+        &bootstrap,
+        system_stems_proof,
+    )
+}
+
+/// Prepare one frontier from the owned native canonical-glyph registry.
+///
+/// Unlike the first-STEMS bridge, this path reads no page-wide Java snapshot.
+pub fn prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    state: &mut NativeStemsBeamVLinkTransactionState,
+    registry: &NativeStemsModeledGlyphRegistry,
+    system_stems_proof: NativeStemsBeamSystemStemAuthorityProof,
+) -> Result<NativeStemsBeamFrontierPreparation, NativeStemsBeamVLinkTransactionError> {
+    if scheduler_system.system_id != registry.system_id {
+        return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
+    }
+    let frontier = match &scheduler_system.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(
+                NativeStemsBeamVLinkTransactionError::NoAwaitingVLinkTransaction {
+                    system_id: scheduler_system.system_id,
+                },
+            );
+        }
+    };
+    let (attempt, _) = resolve_plan(plan_system, frontier.plan)?;
+    let bootstrap = attempt
+        .glyphs
+        .iter()
+        .map(|selected| registry.selected_bootstrap(selected))
         .collect::<Result<Vec<_>, _>>()?;
     prepare_native_stems_beam_vlink_frontier_state(
         scheduler_system,
