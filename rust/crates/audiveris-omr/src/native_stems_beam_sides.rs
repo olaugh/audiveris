@@ -6058,6 +6058,92 @@ pub fn advance_native_stems_head_existing_stem_retry_order89(
     Ok(continuation)
 }
 
+/// Reconcile the bounded existing-stem retry at order 90.
+///
+/// x27/SIG54 retries LEFT against the already linked existing StemInter
+/// 2378/glyph300: Java skips LEFT as already linked, skips the closed
+/// RIGHT, returns true, and closes sibling x28's cells without touching
+/// SIG, allocator, or system-stem state.  The undefined LEFT sides and the
+/// phase-2 queue carried from orders 50, 60, 61, 68, and 75 stay recorded and unchanged.
+pub fn advance_native_stems_head_existing_stem_retry_order90(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed || carrier.current_index != 90 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier is not the authenticated order90 continuation",
+        ));
+    }
+    let carried_undefined =
+        authenticated_carried_undefined_sides(carrier, &[50, 60, 61, 68, 75], "order90")?;
+    let head = carrier.heads.get(90).ok_or_else(|| {
+        stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order90 head is missing",
+        )
+    })?;
+    if head.reference.x_ordinal != 27 || head.reference.sig_ordinal != 54 {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "carrier head is not x27/SIG54",
+        ));
+    }
+    let left = head
+        .sides
+        .iter()
+        .find(|cell| cell.reference.horizontal == crate::stems_step::NativeStemHeadSide::Left)
+        .ok_or_else(|| stage("HEADS-existing-stem-retry-frontier", "LEFT cell is missing"))?;
+    if !left.linked {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order90 LEFT cell is not linked",
+        ));
+    }
+    let existing_stem = carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.inter_id == Some(2378) && stem.glyph_id == 300)
+        .ok_or_else(|| {
+            stage(
+                "HEADS-existing-stem-retry-frontier",
+                "order90 existing StemInter 2378/glyph300 is missing",
+            )
+        })?;
+    if !existing_stem.sig_attached {
+        return Err(stage(
+            "HEADS-existing-stem-retry-frontier",
+            "order90 existing stem is not SIG-attached",
+        ));
+    }
+    let continuation = continue_native_stems_head_linking_phase1(
+        carrier,
+        head_corners,
+        None,
+        head_builders,
+        plans,
+    )?;
+    if continuation.returned_linked != Some(true)
+        || continuation.processed_head.x_ordinal != 27
+        || continuation.processed_head.sig_ordinal != 54
+        || continuation.closed_value_changes != 2
+        || continuation.state_after.current_index != 91
+        || continuation.state_after.undefined_sides != carried_undefined
+    {
+        return Err(stage(
+            "HEADS-existing-stem-retry-result",
+            "order90 retry did not produce the authenticated closure",
+        ));
+    }
+    Ok(continuation)
+}
+
 /// Bounded expectations for one multi-head existing-stem C-link reuse.
 #[derive(Clone, Copy, Debug)]
 struct NativeStemsHeadMultiHeadReuseExpectation {
