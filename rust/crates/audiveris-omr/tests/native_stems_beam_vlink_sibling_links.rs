@@ -113,6 +113,7 @@ use audiveris_omr::{
         advance_native_stems_head_open_frontier_order61,
         advance_native_stems_head_open_frontier_order68,
         advance_native_stems_head_open_frontier_order75,
+        advance_native_stems_head_phase_two_first_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
@@ -12871,6 +12872,63 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         order101_continuation.state_after.unlinked_heads,
         order100_continuation.state_after.unlinked_heads
+    );
+
+    // Boundary 128: phase 1 is exhausted, so Java runs heads linking phase 2 -
+    // linkSides(append=true) over unlinkedHeads. The queue is x32, x71, x70,
+    // x0, x31, and its first entry is a proven no-op: x32 still reaches one
+    // shared stump on LEFT, so Java re-records the undef and returns false
+    // without touching SIG, the linkers, or the stem registry.
+    assert_eq!(
+        order101_continuation.state_after.current_index,
+        order101_continuation.state_after.heads.len()
+    );
+    assert_eq!(order101_continuation.state_after.phase_two_index, 0);
+    let phase2_first = advance_native_stems_head_phase_two_first_append_retry(
+        &order101_continuation.state_after,
+        &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
+        &checker_page.head_builders.systems[0],
+        &hydrated.plans,
+    )
+    .expect("native phase-2 first append retry");
+    assert_eq!(phase2_first.processed_head.x_ordinal, 32);
+    assert_eq!(phase2_first.processed_head.sig_ordinal, 50);
+    assert_eq!(phase2_first.returned_linked, Some(false));
+    assert_eq!(phase2_first.closed_value_changes, 0);
+    assert!(phase2_first.closed_s_linkers.is_empty());
+    assert_eq!(phase2_first.state_after.phase_two_index, 1);
+    // The retry mutates nothing: Java reports identical relation and linker
+    // state hashes across the call.
+    assert_eq!(
+        phase2_first.state_after.beam_state.sig.edges.len(),
+        order101_continuation.state_after.beam_state.sig.edges.len()
+    );
+    assert_eq!(
+        phase2_first.state_after.beam_state.sig.vertices.len(),
+        order101_continuation
+            .state_after
+            .beam_state
+            .sig
+            .vertices
+            .len()
+    );
+    assert_eq!(
+        phase2_first.state_after.undefined_sides,
+        order101_continuation.state_after.undefined_sides
+    );
+    assert_eq!(
+        phase2_first.state_after.unlinked_heads,
+        order101_continuation.state_after.unlinked_heads
+    );
+    assert_eq!(
+        phase2_first
+            .state_after
+            .unlinked_heads
+            .iter()
+            .map(|head| head.x_ordinal)
+            .collect::<Vec<_>>(),
+        vec![32, 71, 70, 0, 31]
     );
 
     // The authenticated order18 wrapper must fail closed without mutating
@@ -25851,6 +25909,115 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v101_summary, "javaEvidence"),
         "ReturnedAfterFinalPhaseOneHead"
+    );
+
+    // Boundary 128 expected-only phase-2 first append retry.
+    let v102_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v102.txt"),
+    )
+    .expect("expected-only phase-2 append-retry fixture");
+    assert_eq!(
+        sha256_hex(v102_text.as_bytes()),
+        "f3ba43f3b9808b9e8303b180399f94e21af32490e416243ae9807c772debfa27"
+    );
+    let v102_rows = v102_text
+        .lines()
+        .filter(|line| line.starts_with("stems"))
+        .collect::<Vec<_>>();
+    assert_eq!(v102_rows.len(), 12);
+    let v102_body = format!("{}\n", v102_rows[..11].join("\n"));
+    assert_eq!(
+        sha256_hex(v102_body.as_bytes()),
+        "09eab88d7cfcff76341f6e898cb95636fb91d27d78d440821141d0a9797999e1"
+    );
+    // The baseline row is Java's own unlinkedHeads list, which supersedes the
+    // probe's hard-coded unlinkedCount of zero as evidence for the queue.
+    let v102_baseline = v102_rows[9];
+    assert!(v102_baseline.starts_with("stemsheadphasetwobaseline "));
+    assert_eq!(head_field(v102_baseline, "queueSize"), "5");
+    assert_eq!(
+        head_field(v102_baseline, "queue"),
+        "[x32:sig50:id1389,x71:sig49:id1387,x70:sig46:id1377,x0:sig51:id1390,x31:sig47:id1381]"
+    );
+    assert_eq!(
+        head_field(v102_baseline, "terminal"),
+        "ReadyBeforeFirstAppendRetry"
+    );
+    let v102_retry = v102_rows[10];
+    assert!(v102_retry.starts_with("stemsheadphasetwo "));
+    assert_eq!(head_field(v102_retry, "queueIndex"), "0");
+    assert_eq!(head_field(v102_retry, "headX"), "32");
+    assert_eq!(head_field(v102_retry, "headSig"), "50");
+    assert_eq!(head_field(v102_retry, "headInterId"), "1389");
+    assert_eq!(head_field(v102_retry, "append"), "true");
+    assert_eq!(
+        head_field(v102_retry, "sidesBefore"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(head_field(v102_retry, "returned"), "false");
+    assert_eq!(
+        head_field(v102_retry, "sidesAfter"),
+        "[LEFT:false:false,RIGHT:false:false]"
+    );
+    assert_eq!(head_field(v102_retry, "undefs"), "[LEFT]");
+    assert_eq!(head_field(v102_retry, "sigVerticesBefore"), "685");
+    assert_eq!(head_field(v102_retry, "sigVerticesAfter"), "685");
+    assert_eq!(head_field(v102_retry, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v102_retry, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v102_retry, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v102_retry, "systemStemsAfter"), "46");
+    // Identical state hashes across the call are the proof it is a no-op.
+    assert_eq!(
+        head_field(v102_retry, "relationStateHashBefore"),
+        head_field(v102_retry, "relationStateHashAfter")
+    );
+    assert_eq!(
+        head_field(v102_retry, "linkerStateHashBefore"),
+        head_field(v102_retry, "linkerStateHashAfter")
+    );
+    assert_eq!(
+        head_field(v102_retry, "terminal"),
+        "ReturnedAfterFirstAppendRetry"
+    );
+    let v102_summary = v102_rows[11];
+    assert_eq!(
+        head_field(v102_summary, "schema"),
+        "stems-head-phase-prefix-v102"
+    );
+    assert_eq!(head_field(v102_summary, "rows"), "11");
+    assert_eq!(
+        head_field(v102_summary, "baseV101RunnerSourceSha256"),
+        "2ba17be7dba32c36e3e43e41968c0e65b3d324e4805119983a20647f119c7628"
+    );
+    assert_eq!(
+        head_field(v102_summary, "baseV101FixtureSha256"),
+        "229912dfd80b1b2cd02f296354df05238195fb9757ea53be99dfb70e22d62063"
+    );
+    assert_eq!(
+        head_field(v102_summary, "probeSourceSha256"),
+        "2032ac7c09dc98572d4d587c7816d1c182b19b2f02871fea283a926462c1f13e"
+    );
+    assert_eq!(
+        head_field(v102_summary, "runnerSourceSha256"),
+        "47c6b327c89b67d67b2de1d5d0ae27e3aea9ea7652549a1ecc7a8b9956425b81"
+    );
+    assert_eq!(
+        head_field(v102_summary, "emittedBodySha256"),
+        "09eab88d7cfcff76341f6e898cb95636fb91d27d78d440821141d0a9797999e1"
+    );
+    assert_eq!(
+        head_field(v102_summary, "semanticPassSha256"),
+        "8e3c544cbf0f09b703c64f739d492046537bd40b405debe67eebceff0de9e195"
+    );
+    assert_eq!(head_field(v102_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v102_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v102_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedPhaseTwoFirstAppendRetryNoOp"
+    );
+    assert_eq!(
+        head_field(v102_summary, "javaEvidence"),
+        "ReturnedAfterFirstAppendRetry"
     );
 
     let all_siblings = std::iter::once(&actual)
