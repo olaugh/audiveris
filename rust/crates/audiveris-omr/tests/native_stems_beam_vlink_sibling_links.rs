@@ -133,6 +133,7 @@ use audiveris_omr::{
         NativeStemsBeamSigRelationKind, NativeStemsBeamVLinkBaseRolloverAuthority,
         NativeStemsBeamVLinkBeamRuntimeState,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        initialize_native_stems_beam_vlink_base_apply_state_from_native_sig,
         roll_native_stems_beam_vlink_base_apply_state,
     },
     native_stems_beam_vlink_head_links::{
@@ -6500,13 +6501,18 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("system 1 bindings")
         .clone();
 
-    let mut base_state = hydrated.state_before.base_apply_state_before.clone();
+    let persistent_ids = hydrated
+        .state_before
+        .base_apply_state_before
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
     let (first_preparation, mut first_transaction_state) =
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
             &hydrated.scheduler,
             &hydrated.plans,
             &modeled_registry,
-            base_state.transaction_state.glyph_index.persistent_ids,
+            persistent_ids,
         )
         .expect("native transaction-1 B12 frontier state");
     assert_eq!(first_preparation.plan.plan_ordinal, 143);
@@ -6611,7 +6617,22 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("accepted Java B13 final stem")
         .glyph_id = first_create.registration.glyph_id;
     assert_eq!(first_reuse, expected_first_reuse);
-    base_state.transaction_state = first_transaction_state;
+    let mut base_state = initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
+        &first_transaction_state,
+        &first_reuse,
+        &sig,
+        &bindings,
+        &hydrated.stumps,
+        NativeStemsBeamSheetEditState {
+            stub_modified: true,
+            book_modified: true,
+            book_dirty: true,
+        },
+    )
+    .expect("native transaction-1 B14 compact state");
+    assert_eq!(base_state.inter_index.baseline_entry_count, 221);
+    assert_eq!(base_state.sig.baseline_vertex_count, 221);
+    assert_eq!(base_state.sig.baseline_relation_count, 202);
     let native_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         &hydrated.scheduler,
         &hydrated.plans,
@@ -6893,7 +6914,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             second_base_state.sig.baseline_vertex_count,
             second_base_state.sig.baseline_relation_count,
         ),
-        (640, 222, 207)
+        (222, 222, 207)
     );
     let second_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         second_scheduler,
@@ -7206,7 +7227,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert_eq!(
         carrier.latest_base_apply.inter_index.baseline_entry_count,
-        641
+        223
     );
     assert_eq!(
         carrier.latest_base_apply.inter_index.appended_entries.len(),
@@ -26637,7 +26658,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             third_base_state.sig.baseline_vertex_count,
             third_base_state.sig.baseline_relation_count,
         ),
-        (641, 223, 212)
+        (223, 223, 212)
     );
     let third_base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
         third_scheduler,

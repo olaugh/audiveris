@@ -569,6 +569,238 @@ pub struct NativeStemsBeamVLinkBaseApplyState {
     pub committed: Option<NativeStemsBeamVLinkBaseApplyKey>,
 }
 
+/// Construct the first B14 compact state from the production-owned SIG.
+///
+/// The native vertex arena is also the initial local InterIndex domain: its
+/// zero-based ordinal is stable insertion order and its persistent identity is
+/// the one-based vertex identity. The shared persistent-ID counter remains an
+/// explicit field of `transaction_state`, but no opaque Java InterIndex count,
+/// hash, endpoint row, or SIG snapshot participates in this projection.
+pub fn initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
+    transaction_state: &NativeStemsBeamVLinkTransactionState,
+    reuse_check: &NativeStemsBeamVLinkReuseCheck,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    stump_system: &NativeStemsBeamStumpSystem,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyError> {
+    sig.validate_integrity()
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 SIG integrity",
+        })?;
+    bindings.validate_against(sig).map_err(|_| {
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 bindings",
+        }
+    })?;
+    if transaction_state.system_stems.system_id != sig.system_id
+        || reuse_check.system_id != sig.system_id
+        || stump_system.system_id != sig.system_id
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 system",
+        });
+    }
+    let NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { relation } =
+        &reuse_check.outcome
+    else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady);
+    };
+    let final_stem = reuse_check
+        .final_stem
+        .as_ref()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady)?;
+    if final_stem.inter_id.is_some()
+        || final_stem.sig_attached
+        || bindings
+            .stem_vertices
+            .contains_key(&final_stem.stem_identity)
+        || transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .filter(|stem| stem.stem_identity == final_stem.stem_identity)
+            .count()
+            != 1
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 fresh stem",
+        });
+    }
+    let stump_beam = stump_system
+        .beams_by_abscissa
+        .iter()
+        .find(|beam| beam.source == relation.beam)
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 stump beam",
+        })?;
+    let beam_vertex = bindings.beam_vertices.get(&relation.beam).copied().ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 beam binding",
+        },
+    )?;
+    let beam =
+        sig.vertex(beam_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native initial B14 live beam",
+            })?;
+    if beam.removed
+        || !beam.active
+        || !matches!(
+            beam.kind,
+            NativeSigInterKind::Beam | NativeSigInterKind::BeamHook | NativeSigInterKind::SmallBeam
+        )
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 beam kind/state",
+        });
+    }
+    let beam_inter_id = native_inter_id(beam_vertex)?;
+    let ids = transaction_state.glyph_index.persistent_ids;
+    let next_id = ids.sheet_last_id.checked_add(1).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+            phase: "native initial B14 persistent ID overflow",
+        },
+    )?;
+    if transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .any(|stem| stem.inter_id == Some(next_id))
+        || transaction_state
+            .glyph_index
+            .known_canonical_glyphs
+            .iter()
+            .any(|glyph| glyph.glyph_id == next_id)
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 next persistent ID collision",
+        });
+    }
+    let group_vertex = bindings
+        .beam_group_vertices
+        .get(&stump_beam.group_ordinal)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 beam group binding",
+        })?;
+    let group =
+        sig.vertex(group_vertex.0)
+            .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native initial B14 live beam group",
+            })?;
+    if group.kind != NativeSigInterKind::BeamGroup {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 beam group kind",
+        });
+    }
+    let group_state = sig
+        .outgoing_edges(group_vertex.0)
+        .map_err(|_| NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native initial B14 beam group query",
+        })?
+        .iter()
+        .map(|edge| {
+            let member = sig.vertex(edge.target).expect("validated active endpoint");
+            format!(
+                "{}:{}:{}:{}",
+                edge.ordinal, edge.target, member.active, member.abnormal
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let vertex_lineage = sig
+        .vertices
+        .iter()
+        .map(|vertex| format!("{vertex:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let edge_lineage = sig
+        .edges
+        .iter()
+        .map(|edge| format!("{edge:?}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let inter_lineage = format!("native-inter-index-initial-v1:{vertex_lineage}");
+    let certificate = project_native_stems_beam_vlink_base_apply_certificate(
+        sig,
+        bindings,
+        relation.beam,
+        None,
+        relation,
+        reuse_check.plan,
+    )?;
+    Ok(NativeStemsBeamVLinkBaseApplyState {
+        transaction_state: transaction_state.clone(),
+        inter_index: NativeStemsBeamInterIndexApplyState {
+            baseline_entry_count: sig.vertices.len(),
+            baseline_provenance_sha256: sha256_hex(inter_lineage.as_bytes()),
+            beam_lookup: NativeStemsBeamInterIndexLookup::PresentSameObject {
+                index_ordinal: beam_vertex.0,
+                inter_id: beam_inter_id,
+                vip: false,
+                object_matches: 1,
+                inter_id_matches: 1,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+            },
+            stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
+            next_id_lookup: NativeStemsBeamNextPersistentIdLookup::VacantAndNotVip {
+                persistent_id: next_id,
+                inter_id_matches: 0,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+                configured_vip_matches: 0,
+            },
+            appended_entries: Vec::new(),
+        },
+        sig: NativeStemsBeamSigApplyState {
+            system_id: sig.system_id,
+            baseline_vertex_count: sig.vertices.len(),
+            baseline_vertex_provenance_sha256: sha256_hex(vertex_lineage.as_bytes()),
+            baseline_relation_count: sig.edges.len(),
+            baseline_relation_provenance_sha256: sha256_hex(edge_lineage.as_bytes()),
+            beam_vertex: NativeStemsBeamSigVertexLookup::PresentSameObject {
+                vertex_ordinal: beam_vertex.0,
+                sig_vertex_identity: beam_vertex.0,
+                inter_id: beam_inter_id,
+                object_matches: 1,
+            },
+            stem_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            appended_vertices: Vec::new(),
+            appended_relations: Vec::new(),
+            listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
+            beam: NativeStemsBeamVLinkBeamRuntimeState {
+                source: relation.beam,
+                sig_vertex_identity: Some(beam_vertex.0),
+                inter_id: beam_inter_id,
+                inter_indexed: true,
+                sig_system_id: sig.system_id,
+                removed: false,
+                vip: false,
+                abnormal: beam.abnormal,
+                stump_group_ordinal: stump_beam.group_ordinal,
+                beam_group: Some(NativeStemsBeamGroupRuntimeState {
+                    sig_vertex_ordinal: group_vertex.0,
+                    state_sha256: sha256_hex(group_state.as_bytes()),
+                }),
+            },
+            stem: NativeStemsBeamVLinkStemRuntimeState {
+                stem_identity: final_stem.stem_identity,
+                sig_vertex_identity: None,
+                inter_indexed: false,
+                sig_system_id: None,
+                removed: false,
+                vip: false,
+                abnormal: false,
+            },
+        },
+        sheet_edit,
+        certificate: Some(certificate),
+        committed: None,
+    })
+}
+
 /// Roll a committed one-shot B14 state onto the next native scheduler
 /// frontier without importing a transaction-2 B14 fixture.
 ///
