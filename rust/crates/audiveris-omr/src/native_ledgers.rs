@@ -798,9 +798,11 @@ fn build_system_zones(
 ) -> Result<Vec<RawLedgerSystemZone>, NativeLedgerRecognitionError> {
     // With the credible-beam gate set, sub-scale beams never enter the veto
     // lists at all; the parity filter and candidate factory stay untouched.
+    const GOOD_BEAM_GRADE: f64 = 0.35;
     let may_veto = |area: &RawLedgerBeamArea| {
         beam_veto_scale.is_none_or(|scale| {
             !area.synthetic
+                && area.grade >= GOOD_BEAM_GRADE
                 && scale.credible(area.bounds.width as f64, area.bounds.height as f64)
                 // Two fused accidental strokes pass the geometry; the paper
                 // gap between them does not pass the grayscale.
@@ -835,7 +837,7 @@ fn build_system_zones(
                 .beams_after_multiple_rests
                 .iter()
                 .filter(|(system_id, _)| *system_id == id)
-                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
+                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic, beam.grade))
                 .filter(&may_veto)
                 .collect::<Vec<_>>();
             let mut all_beams = raw.clone();
@@ -844,7 +846,7 @@ fn build_system_zones(
                     .hooks
                     .iter()
                     .filter(|(system_id, _)| *system_id == id)
-                    .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
+                    .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic, beam.grade))
                     .filter(&may_veto),
             );
             let good_full_beams = beams
@@ -853,7 +855,7 @@ fn build_system_zones(
                 .filter(|(system_id, beam)| {
                     *system_id == id && beam.kind == BeamKind::Beam && beam.grade >= 0.4
                 })
-                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
+                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic, beam.grade))
                 .filter(&may_veto)
                 .collect();
             Ok(RawLedgerSystemZone {
@@ -871,6 +873,7 @@ fn build_system_zones(
 fn raw_beam_area(
     item: audiveris_image::beam_structure::BeamItem,
     synthetic: bool,
+    grade: f64,
 ) -> RawLedgerBeamArea {
     let bounds = beam_bounds(item);
     RawLedgerBeamArea {
@@ -882,6 +885,7 @@ fn raw_beam_area(
         },
         item,
         synthetic,
+        grade,
     }
 }
 

@@ -99,6 +99,8 @@ pub struct RawLedgerBeamArea {
     pub item: BeamItem,
     /// Provenance: a beam built on synthesized evidence never vetoes.
     pub synthetic: bool,
+    /// The beam's grade; below the good-beam threshold it never vetoes.
+    pub grade: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1616,6 +1618,7 @@ mod tests {
                     height: 1.0,
                 },
                 synthetic: false,
+                grade: 1.0,
             }],
             good_full_beams: Vec::new(),
         };

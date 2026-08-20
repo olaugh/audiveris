@@ -312,6 +312,13 @@ pub fn materialize_native_heads_competitors(
             let bounds = beam_bounds(beam.item);
             let median = beam.item.median;
             !beam.synthetic
+                // A beam that barely graded is a hypothesis, not a court
+                // order: a fused accidental-stroke-plus-notehead blob passes
+                // every geometry test at grade 0.17 and was deleting the
+                // very note it sits on. Java's own good-beam threshold
+                // divides them (real beams here grade 0.4-0.77, the fused
+                // impostors 0.11-0.33).
+                && beam.grade >= GOOD_BEAM_GRADE
                 && scale.credible(f64::from(bounds.width), f64::from(bounds.height))
                 // Two fused accidental strokes pass the geometry; the paper
                 // gap between them does not pass the grayscale.

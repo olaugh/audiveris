@@ -650,3 +650,57 @@ fn stack_belt_exemption_recovers_page7_top_beam_and_evicts_mega_ledger() {
     });
     assert!(!mega, "the 101px mega-ledger must yield to the recovered top beam");
 }
+
+/// Schenker page 7: the B-natural of the m25 run must survive the fused
+/// accidental beside it.
+///
+/// A natural's stroke is beam-thick; fused with the notehead it forms a
+/// 16x5.5 blob that passes every geometric credibility test as a BEAM at
+/// grade 0.17 -- and vetoed the very note it sits on (template grades in
+/// its shadow: 0.01-0.07). Veto power now also requires Java's good-beam
+/// grade (0.35): real beams here grade 0.4-0.77, fused impostors 0.11-0.33.
+/// The head returns at 0.76 the moment the impostor loses standing.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn good_grade_veto_floor_recovers_page7_b_natural() {
+    assert!(
+        audiveris_omr::beam_veto::credible_beam_vetoes_enabled(),
+        "run with AUDIVERIS_CREDIBLE_BEAM_VETOES=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-07.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+    let ledgers = audiveris_omr::native_ledgers::recognize_native_ledgers(&grid, &beams)
+        .expect("LEDGERS");
+    let heads = audiveris_omr::native_heads::recognize_native_heads(
+        &grid, &headers, &stem_seeds, &beams, &ledgers,
+    )
+    .expect("HEADS");
+
+    let mut best = 0.0_f64;
+    for system in &heads.epilog.systems {
+        let staff_system = heads
+            .epilog
+            .staff_epilog
+            .systems
+            .iter()
+            .find(|candidate| candidate.system_id == system.system_id)
+            .expect("staff epilog system");
+        for reference in &system.final_heads {
+            let head = &staff_system.staffs[reference.staff_index].heads[reference.head_index];
+            let bounds = head.bounds;
+            if (420..=436).contains(&bounds.x) && (246..=262).contains(&bounds.y) {
+                best = best.max(head.grade());
+            }
+        }
+    }
+    assert!(
+        best >= 0.6,
+        "the B natural must match once the grade-0.17 impostor cannot veto, best {best}"
+    );
+}
