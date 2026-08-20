@@ -329,6 +329,17 @@ pub fn distance_impact(
     let top = jitter(first.median, JitterSide::Top, first.height);
     let bottom = jitter(last.median, JitterSide::Bottom, last.height);
     let mean = 0.5 * (top + bottom);
+    if trimmed {
+        // The jitter tolerance is a RATIO of glyph width (2%), which was
+        // designed for long beams: a ten-pixel partial beam inherits an RMS
+        // border tolerance of 0.2 pixels -- impossible on any scan -- and
+        // every dotted-figure hook dies at dist 0.00. Under the headroom
+        // gate the tolerance keeps an absolute floor of half a pixel:
+        // mean is residual over width, so compare residuals, not ratios.
+        let width = glyph.width() as f64;
+        let tolerance = (sheet.max_jitter_ratio * width).max(0.5);
+        return Some(1.0 - (mean * width / tolerance));
+    }
     Some(1.0 - (mean / sheet.max_jitter_ratio))
 }
 
