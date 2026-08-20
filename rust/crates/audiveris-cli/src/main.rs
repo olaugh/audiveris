@@ -158,6 +158,7 @@ fn recognize_native_sheet(
             &raster,
             ScaleOptions {
                 specified_interline,
+                staff_anchored_interline: staff_anchored_interline_enabled(),
                 ..ScaleOptions::default()
             },
         )
@@ -169,6 +170,7 @@ fn recognize_native_sheet(
         &raster,
         ScaleOptions {
             specified_interline,
+            staff_anchored_interline: staff_anchored_interline_enabled(),
             ..ScaleOptions::default()
         },
     )
@@ -811,6 +813,18 @@ fn take_stream_json_flag(args: &mut Vec<String>) -> bool {
     let before = args.len();
     args.retain(|argument| argument != "-stream-json");
     args.len() != before
+}
+
+/// `AUDIVERIS_STAFF_ANCHORED_INTERLINE` gate (enhancement, default OFF).
+///
+/// On a dense page the notehead run pairs outvote the staff-line pairs in
+/// the interline histogram and SCALE misreads the sheet wholesale (a bar of
+/// 32nds at interline 6 reads as 9; GRID then finds no staves). Under the
+/// gate the interline peak comes from pairs anchored on line-thin black
+/// runs, which only staff lines produce.
+fn staff_anchored_interline_enabled() -> bool {
+    std::env::var("AUDIVERIS_STAFF_ANCHORED_INTERLINE")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }
 
 fn main() {

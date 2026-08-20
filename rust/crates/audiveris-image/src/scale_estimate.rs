@@ -59,6 +59,12 @@ impl Default for ScaleThresholds {
 pub struct ScaleOptions {
     /// A non-zero value replaces the detected interline, as in Java.
     pub specified_interline: Option<i32>,
+    /// Enhancement (default false = Java): prefer the interline peak of the
+    /// line-conditioned combo histogram. On a dense page the notehead pairs
+    /// outvote the staff pairs and the interline is misread wholesale --
+    /// interline 6 reads as 9 and GRID finds no staves; only pairs anchored
+    /// on line-thin black runs are immune.
+    pub staff_anchored_interline: bool,
     /// A non-zero value replaces measured or guessed beam thickness.
     pub specified_beam: Option<i32>,
     /// Enables Java's almost-blank-page check when the image size is known.
@@ -178,6 +184,20 @@ pub fn estimate_scale(
         (Range::new(interline, interline, interline), None)
     } else {
         retrieve_interline_peaks(&combo_function, thresholds)?
+    };
+    let (combo_peak, combo_peak2) = if options.staff_anchored_interline
+        && specified_interline.is_none()
+    {
+        match histogram_function("line_combo", &histograms.line_combo)
+            .and_then(|function| retrieve_interline_peaks(&function, thresholds))
+        {
+            Ok(anchored) => anchored,
+            // Too little line-thin evidence (a nearly staffless crop):
+            // Java's estimate stands.
+            Err(_) => (combo_peak, combo_peak2),
+        }
+    } else {
+        (combo_peak, combo_peak2)
     };
 
     // Java validates combo spacing before checking whether the page is blank.
@@ -626,6 +646,7 @@ mod tests {
             max_black: 10,
             max_white: 20,
             black,
+            line_combo: combo.clone(),
             combo,
         };
 
@@ -659,6 +680,7 @@ mod tests {
             max_white: 25,
             black: vec![0, 0, 100, 0, 0, 0, 0, 0, 0],
             combo: vec![0; 34],
+            line_combo: vec![0; 34],
         };
         let scale = estimate_scale(
             &histograms,

@@ -11,6 +11,9 @@ pub struct VerticalRunHistograms {
     pub max_white: usize,
     pub black: Vec<usize>,
     pub combo: Vec<usize>,
+    /// The combo restricted to pairs whose black component is line-thin
+    /// (<= [`LINE_BLACK_CAP`]): the staff-anchored interline evidence.
+    pub line_combo: Vec<usize>,
 }
 
 impl VerticalRunHistograms {
@@ -25,12 +28,17 @@ impl VerticalRunHistograms {
 }
 
 #[must_use]
+/// Black runs thicker than this cannot be staff lines at the resolutions
+/// this pipeline targets (lines are 1-2px at interline 6-8, 2-3px at 20).
+pub const LINE_BLACK_CAP: usize = 3;
+
 pub fn vertical_run_histograms(table: &RunTable) -> VerticalRunHistograms {
     assert_eq!(table.orientation(), Orientation::Vertical);
     let max_black = (table.height() as f64 * MAX_BLACK_HEIGHT_RATIO).round_ties_even() as usize;
     let max_white = (table.height() as f64 * MAX_WHITE_HEIGHT_RATIO).round_ties_even() as usize;
     let mut black = vec![0usize; max_black + 1];
     let mut combo = vec![0usize; max_black + max_white + 1];
+    let mut line_combo = vec![0usize; max_black + max_white + 1];
 
     for x in 0..table.width() {
         let mut y_last = 0usize;
@@ -48,9 +56,21 @@ pub fn vertical_run_histograms(table: &RunTable) -> VerticalRunHistograms {
                     // domain, including combos with an oversized adjacent run.
                     if previous_combo < combo.len() {
                         combo[previous_combo] += 1;
+                        // Staff-anchored variant: only pairs whose black
+                        // component is line-thin. On a dense page the
+                        // notehead pairs outvote the staff pairs in the
+                        // plain combo and the interline is misread (a full
+                        // bar of 32nds at interline 6 reads as 9); staff
+                        // lines are the only ink that is reliably 1-3px.
+                        if last_black <= LINE_BLACK_CAP {
+                            line_combo[previous_combo] += 1;
+                        }
                     }
                     if next_combo < combo.len() {
                         combo[next_combo] += 1;
+                        if run.length <= LINE_BLACK_CAP {
+                            line_combo[next_combo] += 1;
+                        }
                     }
                 }
             }
@@ -64,6 +84,7 @@ pub fn vertical_run_histograms(table: &RunTable) -> VerticalRunHistograms {
         max_white,
         black,
         combo,
+        line_combo,
     }
 }
 
