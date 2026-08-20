@@ -6338,6 +6338,16 @@ struct NativeStemsHeadMultiHeadReuseExpectation {
     /// the successful expansion shifts it again.  The frozen relation bits
     /// attest the repeat count; anything else fails closed.
     line_shift_repeats: usize,
+    /// The corner Java's linkSides selects, and the per-side canLink decisions
+    /// it records before selecting it.  Every earlier boundary stops on the
+    /// LEFT BottomOnly corner; order 93 is the first RIGHT TopOnly frontier.
+    frontier_horizontal: crate::stems_step::NativeStemHeadSide,
+    frontier_vertical: crate::stems_step::NativeStemVerticalSide,
+    side_decisions: &'static [(
+        crate::stems_step::NativeStemHeadSide,
+        Option<bool>,
+        Option<bool>,
+    )],
     order_label: &'static str,
 }
 
@@ -6460,18 +6470,25 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         || awaited.state_after.current_index != expectation.queue_index
         || awaited.state_after.frontier.head != head.reference
         || awaited.state_after.frontier.next_corner.head != head.reference.reference
-        || awaited.state_after.frontier.next_corner.horizontal
-            != crate::stems_step::NativeStemHeadSide::Left
-        || awaited.state_after.frontier.next_corner.vertical
-            != crate::stems_step::NativeStemVerticalSide::Bottom
-        || awaited.side_decisions.len() != 1
-        || awaited.side_decisions[0].top_can_link != Some(false)
-        || awaited.side_decisions[0].bottom_can_link != Some(true)
+        || awaited.state_after.frontier.next_corner.horizontal != expectation.frontier_horizontal
+        || awaited.state_after.frontier.next_corner.vertical != expectation.frontier_vertical
+        || awaited.side_decisions.len() != expectation.side_decisions.len()
+        || !awaited
+            .side_decisions
+            .iter()
+            .zip(expectation.side_decisions)
+            .all(|(decision, &(side, top, bottom))| {
+                decision.side == side
+                    && !decision.linked_before
+                    && !decision.closed_before
+                    && decision.top_can_link == top
+                    && decision.bottom_can_link == bottom
+            })
     {
         return Err(stage(
             "HEADS-multi-reuse-CLink-frontier",
             format!(
-                "{} did not stop at the authenticated LEFT BottomOnly frontier",
+                "{} did not stop at the authenticated frontier corner",
                 expectation.order_label
             ),
         ));
@@ -7252,6 +7269,13 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
             closed_x_ordinals: &[70, 71, 74],
             closed_value_changes: 6,
             line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(false),
+                Some(true),
+            )],
             order_label: "order67",
         },
     )
@@ -7301,6 +7325,13 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
             closed_x_ordinals: &[0, 2],
             closed_value_changes: 4,
             line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(false),
+                Some(true),
+            )],
             order_label: "order70",
         },
     )
@@ -7348,6 +7379,13 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
             closed_x_ordinals: &[23],
             closed_value_changes: 2,
             line_shift_repeats: 2,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(false),
+                Some(true),
+            )],
             order_label: "order72",
         },
     )
@@ -7396,7 +7434,76 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order73(
             closed_x_ordinals: &[72, 76],
             closed_value_changes: 4,
             line_shift_repeats: 2,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(false),
+                Some(true),
+            )],
             order_label: "order73",
+        },
+    )
+}
+
+/// Consume the bounded RIGHT-side existing-stem C-link at order 93.
+///
+/// This is the first frontier Java resolves on the RIGHT: LEFT reports
+/// Neither and RIGHT TopOnly, so the walk runs on the upward-pointing
+/// RIGHT/TOP corner.  The seed resolves to already materialized Stem 2379,
+/// reused through one appended RIGHT-side HeadStem relation, and the
+/// transaction closes stem-sharing x38.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_right_side_reuse_c_link_order93(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seeds: &NativeStemSeedSystemRecognition,
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &NativeStemsFirstGlyphIndexBridge,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seeds,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 93,
+            head_x_ordinal: 37,
+            head_sig_ordinal: 44,
+            stem_inter_id: 2379,
+            stem_glyph_id: 307,
+            carried_undef_indexes: &[50, 60, 61, 68, 75],
+            crossed_x_ordinals: &[],
+            included_glyph_count: 1,
+            appended_edge_count: 1,
+            closed_x_ordinals: &[38],
+            closed_value_changes: 2,
+            line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Top,
+            side_decisions: &[
+                (
+                    crate::stems_step::NativeStemHeadSide::Left,
+                    Some(false),
+                    Some(false),
+                ),
+                (
+                    crate::stems_step::NativeStemHeadSide::Right,
+                    Some(true),
+                    Some(false),
+                ),
+            ],
+            order_label: "order93",
         },
     )
 }
