@@ -246,6 +246,24 @@ pub struct NativeStemsHeadPhase1Continuation {
     pub state_after: Box<NativeStemsHeadPhase1Carrier>,
 }
 
+/// Exact no-op result of Java `StemsRetriever.finalizeStems` for the
+/// authenticated Chula system-1 carrier.
+///
+/// `checkHeadStems` has no multi-stem candidate to clean, while
+/// `checkNeededStems` finds precisely two stemless void heads that are
+/// already abnormal.  The returned carrier therefore remains byte-for-byte
+/// equal to the completed phase-2 input.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsFinalizeTransaction {
+    pub checked_heads: usize,
+    pub multiple_stem_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
+    pub no_stem_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
+    pub abnormal_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
+    pub removed_head_stem_relations: Vec<NativeSigEdgeId>,
+    pub abnormal_value_changes: usize,
+    pub state_after: Box<NativeStemsHeadPhase1Carrier>,
+}
+
 /// Atomic removal of one competing hook plus the following SIDES continuation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamHookRemovalTransaction {
@@ -4403,6 +4421,157 @@ pub fn advance_native_stems_head_phase_two_append_retry(
         closed_s_linkers,
         closed_value_changes,
         state_after: Box::new(shadow),
+    })
+}
+
+/// Execute the bounded Chula system-1 `finalizeStems` terminal.
+///
+/// This authenticates both private Java substeps from owned native state.
+/// `checkHeadStems` would only mutate a head with more than one live
+/// `HeadStemRelation`; none exists here. `checkNeededStems` would mark a
+/// stemless stem-head abnormal; the only two such heads are already abnormal,
+/// so the complete finalizer is an intentional no-op. Any different census
+/// fails closed before a carrier is returned.
+pub fn finalize_native_stems(
+    carrier: &NativeStemsHeadPhase1Carrier,
+) -> Result<NativeStemsFinalizeTransaction, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed
+        || carrier.current_index != carrier.heads.len()
+        || carrier.heads.len() != 102
+        || carrier.phase_two_index != carrier.unlinked_heads.len()
+        || carrier.phase_two_index != 5
+    {
+        return Err(stage(
+            "finalizeStems-frontier",
+            "carrier is not the authenticated completed HEADS terminal",
+        ));
+    }
+    authenticated_carried_undefined_sides(carrier, &[50, 60, 61, 68, 75], "finalizeStems")?;
+    carrier
+        .beam_state
+        .sig
+        .validate_integrity()
+        .map_err(|error| stage("finalizeStems-SIG", error))?;
+    carrier
+        .beam_state
+        .bindings
+        .validate_against(&carrier.beam_state.sig)
+        .map_err(|error| stage("finalizeStems-bindings", error))?;
+
+    let live_vertices = carrier
+        .beam_state
+        .sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && !vertex.removed)
+        .count();
+    let live_edges = carrier
+        .beam_state
+        .sig
+        .edges
+        .iter()
+        .filter(|edge| edge.active)
+        .count();
+    let known_stems = &carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems;
+    // The Java oracle counts the full system SIG (685/706). This carrier owns
+    // the corresponding native STEMS projection, whose exact live domain is
+    // 267 vertices / 370 edges, plus all 46 system stems.
+    if live_vertices != 267 || live_edges != 370 || known_stems.len() != 46 {
+        return Err(stage(
+            "finalizeStems-graph",
+            format!(
+                "carrier graph differs from the authenticated finalizer census: {live_vertices}/{live_edges}/{}",
+                known_stems.len()
+            ),
+        ));
+    }
+
+    let mut multiple_stem_heads = Vec::new();
+    let mut no_stem_heads = Vec::new();
+    let mut abnormal_heads = Vec::new();
+    for head in &carrier.heads {
+        let vertex_id = carrier
+            .beam_state
+            .bindings
+            .head_vertices
+            .get(&head.reference.reference)
+            .ok_or_else(|| stage("finalizeStems-head", "head lacks its live SIG binding"))?;
+        let vertex = carrier
+            .beam_state
+            .sig
+            .vertex(vertex_id.0)
+            .ok_or_else(|| stage("finalizeStems-head", "head binding is not live"))?;
+        if vertex.kind != NativeSigInterKind::Head {
+            return Err(stage(
+                "finalizeStems-head",
+                "head binding does not resolve to a HeadInter",
+            ));
+        }
+        let head_stems = carrier
+            .beam_state
+            .sig
+            .incident_edges(vertex_id.0)
+            .map_err(|error| stage("finalizeStems-HeadStem", error))?
+            .into_iter()
+            .filter(|edge| edge.kind == NativeSigRelationKind::HeadStem)
+            .collect::<Vec<_>>();
+        if head_stems.iter().any(|edge| edge.source != vertex_id.0) {
+            return Err(stage(
+                "finalizeStems-HeadStem",
+                "HeadStem relation is not directed from its head",
+            ));
+        }
+        match head_stems.len() {
+            0 => no_stem_heads.push(head.reference),
+            1 => {}
+            _ => multiple_stem_heads.push(head.reference),
+        }
+        if vertex.abnormal {
+            abnormal_heads.push(head.reference);
+        }
+    }
+
+    let expected_stemless = [(32, 50), (31, 47)];
+    let stemless = no_stem_heads
+        .iter()
+        .map(|head| (head.x_ordinal, head.sig_ordinal))
+        .collect::<Vec<_>>();
+    let abnormal = abnormal_heads
+        .iter()
+        .map(|head| (head.x_ordinal, head.sig_ordinal))
+        .collect::<Vec<_>>();
+    if !multiple_stem_heads.is_empty()
+        || stemless != expected_stemless
+        || abnormal != expected_stemless
+        || no_stem_heads.iter().any(|head| {
+            carrier
+                .beam_state
+                .bindings
+                .head_vertices
+                .get(&head.reference)
+                .and_then(|id| carrier.beam_state.sig.vertex(id.0))
+                .is_none_or(|vertex| vertex.shape.as_deref() != Some("NOTEHEAD_VOID"))
+        })
+    {
+        return Err(stage(
+            "finalizeStems-census",
+            "finalizer reaches an unported cleaner or abnormal mutation",
+        ));
+    }
+
+    Ok(NativeStemsFinalizeTransaction {
+        checked_heads: carrier.heads.len(),
+        multiple_stem_heads,
+        no_stem_heads,
+        abnormal_heads,
+        removed_head_stem_relations: Vec::new(),
+        abnormal_value_changes: 0,
+        state_after: Box::new(carrier.clone()),
     })
 }
 

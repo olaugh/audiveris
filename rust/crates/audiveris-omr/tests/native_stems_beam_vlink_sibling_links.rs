@@ -119,7 +119,7 @@ use audiveris_omr::{
         advance_native_stems_head_single_item_c_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
-        drive_native_stems_beam_stumps_from_first_stems_bridge,
+        drive_native_stems_beam_stumps_from_first_stems_bridge, finalize_native_stems,
         remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
@@ -12973,6 +12973,36 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         phase_two_state = *retry.state_after;
     }
     assert_eq!(phase_two_state.phase_two_index, 5);
+
+    // Boundary 133: Java finalizeStems runs checkHeadStems followed by
+    // checkNeededStems. The completed Chula system-1 carrier has no head with
+    // multiple HeadStem relations. Its only stemless stem-heads are the two
+    // void heads x32 and x31, and both are already abnormal, so the exact
+    // finalizer is a fail-closed no-op.
+    let before_finalize = phase_two_state.clone();
+    let finalized = finalize_native_stems(&phase_two_state).expect("native finalizeStems");
+    assert_eq!(finalized.checked_heads, 102);
+    assert!(finalized.multiple_stem_heads.is_empty());
+    assert_eq!(
+        finalized
+            .no_stem_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        vec![(32, 50), (31, 47)]
+    );
+    assert_eq!(finalized.abnormal_heads, finalized.no_stem_heads);
+    assert!(finalized.removed_head_stem_relations.is_empty());
+    assert_eq!(finalized.abnormal_value_changes, 0);
+    assert_eq!(*finalized.state_after, before_finalize);
+
+    // The boundary must reject an unfinished append-retry queue without
+    // changing its caller-owned carrier.
+    let mut unfinished_finalize = phase_two_state.clone();
+    unfinished_finalize.phase_two_index = 4;
+    let unfinished_before = unfinished_finalize.clone();
+    assert!(finalize_native_stems(&unfinished_finalize).is_err());
+    assert_eq!(unfinished_finalize, unfinished_before);
 
     // The authenticated order18 wrapper must fail closed without mutating
     // the carrier when its queue index is tampered with.
@@ -26303,6 +26333,135 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     assert_eq!(
         head_field(v103_summary, "javaEvidence"),
         "ReturnedAfterFinalAppendRetry"
+    );
+
+    // Boundary 133 expected-only finalizeStems census. The runner restores
+    // the production reverse-grade systemHeads list and retriever-owned
+    // undefs map before invoking the private Java finalizer.
+    let v104_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-chula-system1-v104.txt"),
+    )
+    .expect("expected-only finalizeStems fixture");
+    assert_eq!(
+        sha256_hex(v104_text.as_bytes()),
+        "ad1cf4658b6d4f7f30732681f514fe85f6801d5efce2f9629b9347cf513fe8e5"
+    );
+    let v104_rows = v104_text
+        .lines()
+        .filter(|line| line.starts_with("stems"))
+        .collect::<Vec<_>>();
+    assert_eq!(v104_rows.len(), 18);
+    let v104_body = format!("{}\n", v104_rows[..17].join("\n"));
+    assert_eq!(
+        sha256_hex(v104_body.as_bytes()),
+        "5e749de69be552e0446b5a530f7cab9eb3e7fcb05211b6dd99a51eddd4d5fc46"
+    );
+    let v104_baseline = v104_rows[15];
+    assert_eq!(head_field(v104_baseline, "heads"), "102");
+    assert_eq!(head_field(v104_baseline, "multipleStemHeads"), "0");
+    assert_eq!(head_field(v104_baseline, "sameSideHeads"), "0");
+    assert_eq!(head_field(v104_baseline, "noStemHeads"), "2");
+    assert_eq!(head_field(v104_baseline, "abnormalHeads"), "2");
+    assert_eq!(
+        head_field(v104_baseline, "undefs"),
+        "[x32:sig50:id1389:sides[LEFT],x71:sig49:id1387:sides[LEFT],x70:sig46:id1377:sides[LEFT],x0:sig51:id1390:sides[LEFT],x31:sig47:id1381:sides[LEFT]]"
+    );
+    assert_eq!(
+        head_field(v104_baseline, "candidates"),
+        "[x32:sig50:id1389:shapeNOTEHEAD_VOID:relations0:left0:right0:abnormaltrue:rows-,x31:sig47:id1381:shapeNOTEHEAD_VOID:relations0:left0:right0:abnormaltrue:rows-]"
+    );
+    assert_eq!(head_field(v104_baseline, "sigVertices"), "685");
+    assert_eq!(head_field(v104_baseline, "sigEdges"), "706");
+    assert_eq!(head_field(v104_baseline, "systemStems"), "46");
+    assert_eq!(
+        head_field(v104_baseline, "terminal"),
+        "ReadyBeforeFinalizeStems"
+    );
+    let v104_result = v104_rows[16];
+    for field in [
+        "multipleStemHeadsBefore",
+        "multipleStemHeadsAfter",
+        "sameSideHeadsBefore",
+        "sameSideHeadsAfter",
+        "abnormalChanges",
+    ] {
+        assert_eq!(
+            head_field(v104_result, field),
+            if field == "abnormalChanges" { "-" } else { "0" }
+        );
+    }
+    for field in [
+        "noStemHeadsBefore",
+        "noStemHeadsAfter",
+        "abnormalHeadsBefore",
+        "abnormalHeadsAfter",
+    ] {
+        assert_eq!(head_field(v104_result, field), "2");
+    }
+    assert_eq!(head_field(v104_result, "removedHeadStemRelations"), "-");
+    assert_eq!(head_field(v104_result, "addedRelations"), "-");
+    assert_eq!(head_field(v104_result, "sigVerticesBefore"), "685");
+    assert_eq!(head_field(v104_result, "sigVerticesAfter"), "685");
+    assert_eq!(head_field(v104_result, "sigEdgesBefore"), "706");
+    assert_eq!(head_field(v104_result, "sigEdgesAfter"), "706");
+    assert_eq!(head_field(v104_result, "systemStemsBefore"), "46");
+    assert_eq!(head_field(v104_result, "systemStemsAfter"), "46");
+    for (before, after) in [
+        ("sigHashBefore", "sigHashAfter"),
+        ("relationStateHashBefore", "relationStateHashAfter"),
+        ("interHashBefore", "interHashAfter"),
+        ("linkerHashBefore", "linkerHashAfter"),
+        ("allocatorBefore", "allocatorAfter"),
+    ] {
+        assert_eq!(
+            head_field(v104_result, before),
+            head_field(v104_result, after)
+        );
+    }
+    assert_eq!(head_field(v104_result, "allocatorAfter"), "2385");
+    assert_eq!(
+        head_field(v104_result, "terminal"),
+        "ReturnedAfterFinalizeStems"
+    );
+    let v104_summary = v104_rows[17];
+    assert_eq!(
+        head_field(v104_summary, "schema"),
+        "stems-head-phase-prefix-v104"
+    );
+    assert_eq!(head_field(v104_summary, "rows"), "17");
+    assert_eq!(
+        head_field(v104_summary, "baseV103RunnerSourceSha256"),
+        "9714b52a8ce9941ef0832a3f17689fcbdeb5b14246546770cd001167be618b26"
+    );
+    assert_eq!(
+        head_field(v104_summary, "baseV103FixtureSha256"),
+        "2c192a356f2aa9447c6b0bea5a5979086646390043b2b1333983038d5d3d03c4"
+    );
+    assert_eq!(
+        head_field(v104_summary, "probeSourceSha256"),
+        "eb3076ccb85a91f032fe8425ed224a12d9aac66a83533e330436567034efb6b3"
+    );
+    assert_eq!(
+        head_field(v104_summary, "runnerSourceSha256"),
+        "a36fe02337e974fdbb1119d087026d515020fb319fd7d138e4057e37cabfc639"
+    );
+    assert_eq!(
+        head_field(v104_summary, "emittedBodySha256"),
+        "5e749de69be552e0446b5a530f7cab9eb3e7fcb05211b6dd99a51eddd4d5fc46"
+    );
+    assert_eq!(
+        head_field(v104_summary, "semanticPassSha256"),
+        "ee5b0fff2387f4ea4b6c5aaa20835cd07af4619f96be0dc33b3faf780e323669"
+    );
+    assert_eq!(head_field(v104_summary, "freshRuns"), "2");
+    assert_eq!(head_field(v104_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(v104_summary, "nativeScope"),
+        "BoundedSnapshotMinimizedFinalizeStemsCensus"
+    );
+    assert_eq!(
+        head_field(v104_summary, "javaEvidence"),
+        "ReturnedAfterFinalizeStems"
     );
 
     let all_siblings = std::iter::once(&actual)
