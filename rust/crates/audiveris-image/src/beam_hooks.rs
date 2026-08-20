@@ -164,6 +164,7 @@ fn check_hook(input: HookSearchInput<'_>, side: HookSide, glyph: HookGlyph) -> H
         BeamBeltSides {
             above: true,
             below: true,
+                    neutral: false,
         },
         input.raster,
         input.base.distance_impact,

@@ -511,6 +511,7 @@ fn evaluate_item(
         BeamBeltSides {
             above: true,
             below: true,
+                    neutral: false,
         },
         input.raster,
         distance_impact,

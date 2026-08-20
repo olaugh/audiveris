@@ -389,6 +389,7 @@ pub fn create_beam_inters_recording(
                     BeamBeltSides {
                         above: true,
                         below: true,
+                        neutral: false,
                     },
                     pixels,
                     distance,
@@ -433,6 +434,10 @@ pub fn create_beam_inters_recording(
                 BeamBeltSides {
                     above: index == 0 && !exempt,
                     below: index == line_count - 1 && !exempt,
+                    // In a dense run the side margins are the next symbol's
+                    // ink; eight fused pixels must not veto a 130px beam
+                    // with a 0.92 core (page 9, measured).
+                    neutral: exempt,
                 },
                 pixels,
                 distance,

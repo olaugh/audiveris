@@ -1055,7 +1055,35 @@ fn recognize_native_beams_impl(
         .map_err(|_| NativeBeamRecognitionError::InvalidStemScale(stem.maximum))?;
     let mut spot_parameters = SpotParameters::new(max_stem, main_beam);
     spot_parameters.header_erases = header_erases;
-    let chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+    let mut chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+    // The closing radius derives from the declared beam scale, so a stack-
+    // poisoned declaration bridges the gutters before anything downstream
+    // can measure honestly. The pre-closing raster still shows each level;
+    // measure there, and when the sheet's own ink refutes the declaration,
+    // rebuild the chain at the measured thickness.
+    let mut effective_beam = f64::from(main_beam);
+    let beam_sizing = crate::beam_sizer::measured_beam_thickness_enabled().then(|| {
+        crate::beam_sizer::measure_from_erased(
+            &chain.erased,
+            width,
+            height,
+            BEAM_BINARIZATION_THRESHOLD,
+            f64::from(interline),
+            f64::from(main_beam),
+        )
+    });
+    if let Some(sizing) = beam_sizing {
+        if sizing.applied {
+            effective_beam = sizing.effective;
+        }
+        if sizing.closing < f64::from(main_beam) {
+            let rounded = sizing.closing.round_ties_even() as i32;
+            let mut corrected = SpotParameters::new(max_stem, rounded.max(1));
+            corrected.header_erases = spot_parameters.header_erases.clone();
+            spot_parameters = corrected;
+            chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+        }
+    }
     // Java persists this vertical table for HEADS before thresholding the
     // same closed buffer more strictly for BEAMS.
     let head_spot_runs = spot_runs(&chain.closed, width, height, HEAD_BINARIZATION_THRESHOLD)?;
@@ -1123,7 +1151,7 @@ fn recognize_native_beams_impl(
         });
     }
 
-    let mut item = ItemParameters::new(interline, f64::from(main_beam), false);
+    let item = ItemParameters::new(interline, effective_beam, false);
     let sheet = SheetParameters::new(interline);
     let filter = &recognition.no_staff;
     let raster = BeamRaster {
@@ -1173,7 +1201,8 @@ fn recognize_native_beams_impl(
     let mut browse = |item: &ItemParameters,
                       initial: &mut Vec<(usize, crate::beam_inters::RawBeam)>,
                       leftover: &mut Vec<(usize, audiveris_image::beam_hooks::HookGlyph)>,
-                      beam_rejections: &mut Vec<NativeBeamRejection>|
+                      beam_rejections: &mut Vec<NativeBeamRejection>,
+                      line_heights: &mut Vec<f64>|
      -> Result<(), NativeBeamRecognitionError> {
     for component in browse_order.iter().copied() {
             let systems = systems_for(component);
@@ -1199,6 +1228,9 @@ fn recognize_native_beams_impl(
             }
             let spot_raster = crate::beams_step::component_vertical_raster(component)?;
             let check = check_beam_glyph(component, &spot_raster, item, &sheet);
+            if component.width as f64 >= 2.0 * f64::from(interline) {
+                line_heights.extend(&check.line_heights);
+            }
             let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
                                     reason: &'static str,
                                     detail: Option<String>,
@@ -1284,31 +1316,13 @@ fn recognize_native_beams_impl(
 
         Ok(())
     };
-    browse(&item, &mut initial, &mut leftover, &mut beam_rejections)?;
-    let beam_sizing = crate::beam_sizer::measured_beam_thickness_enabled().then(|| {
-        let samples = initial
-            .iter()
-            .map(|(_, beam)| crate::beam_sizer::BeamSample {
-                length: beam.item.median.x2 - beam.item.median.x1,
-                thickness: beam.item.height,
-                grade: beam.grade,
-            })
-            .collect::<Vec<_>>();
-        crate::beam_sizer::measure_beam_thickness(
-            &samples,
-            f64::from(interline),
-            f64::from(main_beam),
-        )
-    });
-    if let Some(sizing) = beam_sizing
-        && (sizing.effective - f64::from(main_beam)).abs() > 0.05
-    {
-        item = ItemParameters::new(interline, sizing.effective, false);
-        initial.clear();
-        leftover.clear();
-        beam_rejections.clear();
-        browse(&item, &mut initial, &mut leftover, &mut beam_rejections)?;
-    }
+    browse(
+        &item,
+        &mut initial,
+        &mut leftover,
+        &mut beam_rejections,
+        &mut Vec::new(),
+    )?;
 
     let scaling = BeamScaling {
         item_parameters: &item,

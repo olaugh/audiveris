@@ -2234,7 +2234,7 @@ fn beam_spots(json: &mut Json, beams: &NativeBeamRecognition) {
         }
         json.field_number("effective", sizing.effective);
         json.field_integer("sample_count", sizing.sample_count as i64);
-        json.field_boolean("clamped", sizing.clamped);
+        json.field_boolean("applied", sizing.applied);
         json.close('}');
     }
     json.key("beam_spots");

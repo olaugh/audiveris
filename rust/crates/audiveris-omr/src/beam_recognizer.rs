@@ -93,6 +93,12 @@ pub struct BeamCheck {
     /// The structure, if every gate passed.
     pub structure: Option<BeamStructureAnalysis>,
     pub rejection: Option<BeamRejection>,
+    /// Border-line heights before any split, for the thickness estimate: a
+    /// stack's line is never thinner than one beam, so the smallest
+    /// recurring height cluster across the page is the single-beam
+    /// thickness even when the sheet-level histogram was poisoned by fused
+    /// stacks.
+    pub line_heights: Vec<f64>,
 }
 
 /// Java's `BeamGroupInter.getMaxSlopeDiff` default.
@@ -289,6 +295,7 @@ pub fn check_beam_glyph(
         slope_gap: None,
         structure: None,
         rejection: None,
+        line_heights: Vec::new(),
     };
 
     // The bounding box, before any ink is looked at.
@@ -363,6 +370,7 @@ pub fn check_beam_glyph(
 
     analysis.adjust_sides(component.left, raster.width(), item.min_beam_width_low);
     extend_middle_lines(&mut analysis);
+    check.line_heights = analysis.lines.iter().map(|line| line.height).collect();
     analysis.split_stuck_lines_up_to(item.typical_height, crate::beam_veto::stacked_beam_split_limit());
     if crate::beam_veto::stacked_beam_split_enabled() {
         // Java leaves split lines with empty item lists, so stuck stacks

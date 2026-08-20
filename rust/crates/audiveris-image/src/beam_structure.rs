@@ -156,12 +156,14 @@ impl BeamStructureAnalysis {
     /// their items; run [`Self::populate_empty_items`] afterwards.
     /// `max_single_line_width` guards the lone-line case: inside a
     /// multi-line structure a thick line is beam-stack context, but a lone
-    /// wide fat line is as likely a fused ledger-and-notehead row as a beam
-    /// pair, and splitting one manufactures credible false beams that veto
-    /// the true ledgers (measured: the page-9 m50 run peaks died exactly
-    /// this way). A narrow fat fragment stays splittable -- below the
-    /// credible-veto width it cannot veto anything, so the split only
-    /// publishes evidence.
+    /// wide fat line at PAIR height is as likely a fused ledger-and-notehead
+    /// row as a beam pair (both measure ~2x typical), and splitting one
+    /// manufactures credible false beams that veto the true ledgers
+    /// (measured: the page-9 m50 run peaks died exactly this way). A narrow
+    /// fat fragment stays splittable -- below the credible-veto width it
+    /// cannot veto anything -- and so does a lone line of at least triple
+    /// height: no ledger-and-head row is three typical heights of solid
+    /// horizontal ink, only a beam stack is.
     pub fn split_thick_lines_up_to(
         &mut self,
         typical_height: f64,
@@ -172,9 +174,14 @@ impl BeamStructureAnalysis {
         let lines = std::mem::take(&mut self.lines);
         for line in lines {
             let count = (line.height / typical_height).round_ties_even() as usize;
-            if count < 2
-                || (single && line.median.x2 - line.median.x1 > max_single_line_width)
-            {
+            // A lone wide line at pair height is as likely a fused ledger row
+            // (ledger plus a head row measures ~2x typical) -- but nothing
+            // except a beam stack is three typical heights of solid
+            // horizontal ink, so a triple-height lone line splits.
+            let guarded = single
+                && line.median.x2 - line.median.x1 > max_single_line_width
+                && count < 3;
+            if count < 2 || guarded {
                 self.lines.push(line);
                 continue;
             }
@@ -463,6 +470,21 @@ pub fn analyze_beam_structure(
     }
     top.sort_by(|one, two| one.0.total_cmp(&two.0));
     bottom.sort_by(|one, two| one.0.total_cmp(&two.0));
+    if top.len() != bottom.len()
+        && parameters.allow_border_creation
+        && top.len().min(bottom.len()) >= 3
+    {
+        // Even with created borders the counts can stay uneven -- fused
+        // noteheads manufacture partial borders on one side only. Refusing
+        // the whole structure loses every level; salvage instead the
+        // alignment that pairs each border with an opposite one typical
+        // height away and drop the leftovers of the longer side. Only for
+        // structures that are stacks on both sides (three or more borders):
+        // a two-border salvage is as likely a fused ledger-and-notehead row
+        // manufacturing a credible false beam (measured: it re-blocked the
+        // page-9 lone A that four earlier fixes recovered).
+        salvage_border_pairs(&mut top, &mut bottom, parameters.typical_height);
+    }
     if top.len() != bottom.len() {
         return Err(BeamStructureError::InconsistentBorderPairs);
     }
@@ -712,6 +734,39 @@ fn border_lines(
         });
     }
     Ok(groups)
+}
+
+/// Drop entries from the longer border list so the sorted zip pairs each
+/// top with the bottom nearest one typical height below it.
+fn salvage_border_pairs(
+    top: &mut Vec<(f64, Segment)>,
+    bottom: &mut Vec<(f64, Segment)>,
+    typical_height: f64,
+) {
+    let (longer, shorter, sign) = if top.len() > bottom.len() {
+        (top, bottom, 1.0)
+    } else {
+        (bottom, top, -1.0)
+    };
+    while longer.len() > shorter.len() {
+        // Removing the entry whose best pairing error is worst leaves the
+        // alignment that zips most consistently.
+        let cost = |offset: f64, other: &[(f64, Segment)]| -> f64 {
+            other
+                .iter()
+                .map(|(other_offset, _)| {
+                    ((other_offset - offset) * sign - typical_height).abs()
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        let worst = (0..longer.len())
+            .max_by(|&a, &b| {
+                cost(longer[a].0, shorter)
+                    .total_cmp(&cost(longer[b].0, shorter))
+            })
+            .unwrap();
+        longer.remove(worst);
+    }
 }
 
 fn line_map(
@@ -1135,6 +1190,11 @@ pub struct BeamImpactParameters {
 pub struct BeamBeltSides {
     pub above: bool,
     pub below: bool,
+    /// Fused-context exemption: sample no belt at all, take belt impact 1.0.
+    /// In a dense run the ink continues into the neighboring symbol on every
+    /// side, so any belt sample measures fusion, not separation. False
+    /// everywhere Java's behavior applies.
+    pub neutral: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1207,16 +1267,24 @@ pub fn compute_beam_impacts(
     let outer = Parallelogram::new(belt_median, item.height + f64::from(top + bottom));
     let (core_foreground, core_count) =
         sample_mask(core, None, raster.table, raster.offset_x, raster.offset_y);
-    let (belt_foreground, belt_count) = sample_mask(
-        outer,
-        Some(core),
-        raster.table,
-        raster.offset_x,
-        raster.offset_y,
-    );
+    let (belt_foreground, belt_count) = if sides.neutral {
+        (0, 0)
+    } else {
+        sample_mask(
+            outer,
+            Some(core),
+            raster.table,
+            raster.offset_x,
+            raster.offset_y,
+        )
+    };
     // Java double division intentionally yields NaN for a zero-area mask.
     let core_ratio = core_foreground as f64 / core_count as f64;
-    let belt_ratio = belt_foreground as f64 / belt_count as f64;
+    let belt_ratio = if sides.neutral {
+        0.0
+    } else {
+        belt_foreground as f64 / belt_count as f64
+    };
     let rounded_width = (item.median.x2 - item.median.x1 + 1.0).round_ties_even() as i32;
     let raster_evidence = BeamRasterEvidence {
         core_foreground,
@@ -1515,6 +1583,7 @@ mod tests {
             BeamBeltSides {
                 above: true,
                 below: true,
+                            neutral: false,
             },
             BeamRaster {
                 table: &raster,
@@ -1558,6 +1627,7 @@ mod tests {
                 BeamBeltSides {
                     above: true,
                     below: false,
+                                    neutral: false,
                 },
                 BeamRaster {
                     table: &raster,
@@ -1584,6 +1654,7 @@ mod tests {
                 BeamBeltSides {
                     above: false,
                     below: false,
+                                    neutral: false,
                 },
                 BeamRaster {
                     table: &raster,

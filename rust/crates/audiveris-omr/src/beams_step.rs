@@ -1038,6 +1038,7 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
                     BeamBeltSides {
                         above: line_index == 0,
                         below: line_index == line_count - 1,
+                                            neutral: false,
                     },
                     raster,
                     parameters.distance_impact,
