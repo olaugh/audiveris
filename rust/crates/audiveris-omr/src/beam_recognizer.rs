@@ -32,6 +32,10 @@ pub enum BeamRejection {
     TooSteep,
     Vertical,
     WavyBorders,
+    NoTopBorder,
+    NoBottomBorder,
+    InconsistentBorderPairs,
+    UndefinedBorderLine,
     TooNarrowWidth,
     DivergingBeams,
 }
@@ -45,9 +49,28 @@ impl BeamRejection {
             Self::TooSlim => "too slim",
             Self::TooSteep => "too steep",
             Self::Vertical => "vertical",
-            Self::WavyBorders => "wavy or inconsistent borders",
+            // Java's computeLines folds every border failure into one
+            // verdict; the specific error lives in `detail()` so the oracle
+            // string stays byte-identical.
+            Self::WavyBorders
+            | Self::NoTopBorder
+            | Self::NoBottomBorder
+            | Self::InconsistentBorderPairs
+            | Self::UndefinedBorderLine => "wavy or inconsistent borders",
             Self::TooNarrowWidth => "too narrow width",
             Self::DivergingBeams => "diverging beams",
+        }
+    }
+
+    /// The specific border failure behind a "wavy or inconsistent borders"
+    /// verdict, report-only.
+    pub fn detail(self) -> Option<&'static str> {
+        match self {
+            Self::NoTopBorder => Some("no usable top border"),
+            Self::NoBottomBorder => Some("no usable bottom border"),
+            Self::InconsistentBorderPairs => Some("inconsistent border pairs"),
+            Self::UndefinedBorderLine => Some("undefined border line"),
+            _ => None,
         }
     }
 }
@@ -299,14 +322,21 @@ pub fn check_beam_glyph(
     let mut analysis =
         match analyze_beam_structure(raster, component.left, component.top, item.structure()) {
             Ok(analysis) => analysis,
-            Err(BeamStructureError::NonVerticalRunTable) => {
-                check.rejection = Some(BeamRejection::WavyBorders);
-                return check;
-            }
-            Err(_) => {
-                // Java's computeLines returns null for any inconsistent border set,
-                // and null and "too far" share one refusal.
-                check.rejection = Some(BeamRejection::WavyBorders);
+            // Java's computeLines returns null for any inconsistent border
+            // set, and null and "too far" share one refusal. The distinct
+            // reasons here are report-only: which error a fused stack died
+            // of is the whole diagnosis (a partially bridged gutter shows up
+            // as unequal border counts, not as waviness).
+            Err(error) => {
+                check.rejection = Some(match error {
+                    BeamStructureError::NoUsableTopBorder => BeamRejection::NoTopBorder,
+                    BeamStructureError::NoUsableBottomBorder => BeamRejection::NoBottomBorder,
+                    BeamStructureError::InconsistentBorderPairs => {
+                        BeamRejection::InconsistentBorderPairs
+                    }
+                    BeamStructureError::UndefinedBorderLine => BeamRejection::UndefinedBorderLine,
+                    _ => BeamRejection::WavyBorders,
+                });
                 return check;
             }
         };
@@ -336,7 +366,14 @@ pub fn check_beam_glyph(
     analysis.split_stuck_lines_up_to(item.typical_height, crate::beam_veto::stacked_beam_split_limit());
     if crate::beam_veto::stacked_beam_split_enabled() {
         // Java leaves split lines with empty item lists, so stuck stacks
-        // create nothing (see `populate_empty_items`).
+        // create nothing (see `populate_empty_items`), and only ever
+        // splits the fully fused single-line case (see
+        // `split_thick_lines_up_to` for the partially fused one).
+        analysis.split_thick_lines_up_to(
+            item.typical_height,
+            crate::beam_veto::stacked_beam_split_limit(),
+            2.0 * item.min_beam_width_low,
+    );
         analysis.populate_empty_items(
             raster,
             component.left,

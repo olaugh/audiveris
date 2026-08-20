@@ -1223,7 +1223,10 @@ fn recognize_native_beams_impl(
                 record_rejection(
                     beam_rejections,
                     check.rejection.map_or("unknown", BeamRejection::reason),
-                    None,
+                    check
+                        .rejection
+                        .and_then(BeamRejection::detail)
+                        .map(str::to_owned),
                     0,
                     0,
                 );

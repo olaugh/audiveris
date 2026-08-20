@@ -81,6 +81,7 @@ impl ItemParameters {
             max_item_x_gap: self.max_item_x_gap as i32,
             min_beam_width_low: self.min_beam_width_low,
             max_hook_width: self.max_hook_width,
+            allow_border_creation: crate::beam_veto::create_beam_borders_enabled(),
         }
     }
 

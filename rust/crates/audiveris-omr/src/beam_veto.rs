@@ -116,6 +116,28 @@ pub fn beam_height_ceiling_ratio() -> f64 {
 /// Java's `maxHeightHigh` ratio in `BeamsBuilder.ItemParameters`.
 pub const JAVA_BEAM_HEIGHT_CEILING_RATIO: f64 = 1.4;
 
+/// `AUDIVERIS_CREATE_BEAM_BORDERS` gate (enhancement, default OFF).
+///
+/// A partially fused beam stack shows unequal border counts -- three top
+/// borders where the gutters stay open, two bottom borders where the closing
+/// bridged one -- and Java's `computeLines` refuses the whole structure
+/// ("This should never happen!", but on a scanned score it happens
+/// constantly; every wide multi-beam blob on Schenker page 7 died of
+/// "inconsistent border pairs"). Java carries the fix, disabled: the
+/// `allowBorderCreation` branch of `completeBorderLines` synthesizes the
+/// missing opposite border one typical height away from the one that was
+/// found. This gate enables that branch, verbatim. Downstream item grading
+/// still applies to whatever the synthetic border implies, so a border
+/// invented on a too-thick blob still has to earn its grade.
+#[must_use]
+pub fn create_beam_borders_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("AUDIVERIS_CREATE_BEAM_BORDERS")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    })
+}
+
 /// The sheet-scale context a veto site needs to judge one beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamVetoScale {

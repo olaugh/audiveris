@@ -70,6 +70,10 @@ pub struct BeamStructureParameters {
     pub max_item_x_gap: i32,
     pub min_beam_width_low: f64,
     pub max_hook_width: f64,
+    /// Java's dormant `allowBorderCreation`: synthesize a missing opposite
+    /// border instead of refusing the structure. False is Java's shipped
+    /// behavior.
+    pub allow_border_creation: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -127,6 +131,65 @@ impl BeamStructureAnalysis {
                 }
             })
             .collect();
+    }
+
+    /// Split every line that is itself thick enough to be a fused pair
+    /// (enhancement).
+    ///
+    /// Java's `splitLines` handles only the fully fused case -- one border
+    /// line for the whole stack -- and its own TODOs ask "what if beamCount =
+    /// 2 and targetCount = 3 or more?". A partially fused stack pairs into
+    /// two lines, one thin and one still holding a fused pair, and that pair
+    /// either dies on the height ceiling or is accepted as a single fat beam.
+    /// The whole-glyph ink ratio cannot see it: gaps in the blob dilute
+    /// weight/width below the split threshold. Here each line is split by its
+    /// own border-fit height. Unlike Java's whole-glyph split, a negative
+    /// gutter is allowed: two beams whose gutter the closing swallowed
+    /// entirely measure thinner than two typical heights, and the honest
+    /// geometry is two typical beams overlapping slightly. Split lines lose
+    /// their items; run [`Self::populate_empty_items`] afterwards.
+    /// `max_single_line_width` guards the lone-line case: inside a
+    /// multi-line structure a thick line is beam-stack context, but a lone
+    /// wide fat line is as likely a fused ledger-and-notehead row as a beam
+    /// pair, and splitting one manufactures credible false beams that veto
+    /// the true ledgers (measured: the page-9 m50 run peaks died exactly
+    /// this way). A narrow fat fragment stays splittable -- below the
+    /// credible-veto width it cannot veto anything, so the split only
+    /// publishes evidence.
+    pub fn split_thick_lines_up_to(
+        &mut self,
+        typical_height: f64,
+        max_count: usize,
+        max_single_line_width: f64,
+    ) {
+        let single = self.lines.len() == 1;
+        let lines = std::mem::take(&mut self.lines);
+        for line in lines {
+            let count = (line.height / typical_height).round_ties_even() as usize;
+            if count < 2
+                || (single && line.median.x2 - line.median.x1 > max_single_line_width)
+            {
+                self.lines.push(line);
+                continue;
+            }
+            let count = count.min(max_count.max(2));
+            let gutter_each = (line.height - (count as f64 * typical_height))
+                / (count - 1) as f64;
+            let first = -(line.height / 2.0) + (typical_height / 2.0);
+            let median = line.median;
+            for index in 0..count {
+                let dy = first + (index as f64 * (typical_height + gutter_each));
+                self.lines.push(BeamLine {
+                    median: Segment {
+                        y1: median.y1 + dy,
+                        y2: median.y2 + dy,
+                        ..median
+                    },
+                    height: typical_height,
+                    items: Vec::new(),
+                });
+            }
+        }
     }
 
     /// Retrieve items for lines the split left empty (enhancement).
@@ -268,22 +331,44 @@ pub fn analyze_beam_structure(
         .slope();
     let mut top = line_map(top, center, global_slope)?;
     let mut bottom = line_map(bottom, center, global_slope)?;
-    complete_border_lines(
-        1.0,
-        center,
-        global_slope,
-        parameters.typical_height,
-        &top,
-        &mut bottom,
-    );
-    complete_border_lines(
-        -1.0,
-        center,
-        global_slope,
-        parameters.typical_height,
-        &bottom,
-        &mut top,
-    );
+    let complete = |top: &mut Vec<(f64, Segment)>,
+                    bottom: &mut Vec<(f64, Segment)>,
+                    create: bool| {
+        complete_border_lines(
+            1.0,
+            center,
+            global_slope,
+            parameters.typical_height,
+            create,
+            top,
+            bottom,
+        );
+        complete_border_lines(
+            -1.0,
+            center,
+            global_slope,
+            parameters.typical_height,
+            create,
+            bottom,
+            top,
+        );
+    };
+    let saved = parameters
+        .allow_border_creation
+        .then(|| (top.clone(), bottom.clone()));
+    complete(&mut top, &mut bottom, false);
+    if top.len() != bottom.len()
+        && let Some((saved_top, saved_bottom)) = saved
+    {
+        // A partially fused stack pairs unevenly -- some gutters open, some
+        // bridged -- and Java refuses the whole structure. Only for that
+        // already-doomed population, retry with Java's dormant
+        // allowBorderCreation branch enabled; structures that pair evenly
+        // never take this path, so the healthy population is untouched.
+        top = saved_top;
+        bottom = saved_bottom;
+        complete(&mut top, &mut bottom, true);
+    }
     top.sort_by(|one, two| one.0.total_cmp(&two.0));
     bottom.sort_by(|one, two| one.0.total_cmp(&two.0));
     if top.len() != bottom.len() {
@@ -552,9 +637,12 @@ fn complete_border_lines(
     center: (f64, f64),
     global_slope: f64,
     typical_height: f64,
-    base: &[(f64, Segment)],
-    other: &mut [(f64, Segment)],
+    allow_border_creation: bool,
+    base: &mut Vec<(f64, Segment)>,
+    other: &mut Vec<(f64, Segment)>,
 ) {
+    let base = base.clone();
+    let base: &[(f64, Segment)] = &base;
     let shift = y_direction * typical_height;
     let tolerance = typical_height * MAX_BORDER_JITTER_RATIO;
     for &(base_offset, base_line) in base {
@@ -563,7 +651,19 @@ fn complete_border_lines(
             .iter()
             .position(|(offset, _)| (*offset - target).abs() <= tolerance)
         else {
-            // Java's allowBorderCreation is false.
+            if allow_border_creation {
+                // Java's dormant allowBorderCreation branch: the missing
+                // opposite border is the found one, one typical height away.
+                other.push((
+                    target,
+                    Segment {
+                        x1: base_line.x1,
+                        y1: base_line.y1 + shift,
+                        x2: base_line.x2,
+                        y2: base_line.y2 + shift,
+                    },
+                ));
+            }
             continue;
         };
         let (_, candidate) = other[index];
@@ -1190,6 +1290,7 @@ mod tests {
             max_item_x_gap: 1,
             min_beam_width_low: 3.0,
             max_hook_width: 7.0,
+            allow_border_creation: false,
         }
     }
 

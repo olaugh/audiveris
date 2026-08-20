@@ -481,3 +481,116 @@ fn stacked_beam_split_recovers_page1_sixteenth_stacks() {
         );
     }
 }
+
+/// Schenker page 7: partially fused triple-beam stacks must build a structure
+/// under `AUDIVERIS_CREATE_BEAM_BORDERS`.
+///
+/// A partially fused stack pairs its borders unevenly -- three top borders
+/// where the gutters stay open, two bottoms where the closing bridged one --
+/// and Java's `computeLines` refuses the whole structure ("This should never
+/// happen!"). Java carries the repair, disabled: `allowBorderCreation`
+/// synthesizes the missing opposite border one typical height away. The gate
+/// enables that branch only for structures whose pairing failed, so evenly
+/// paired structures never take the new path. Each asserted region is one
+/// thirty-second-run stack from the user's page-7 screenshot; the probe
+/// asserts at least three raw beams at distinct heights inside it.
+///
+/// AUDIVERIS_CREATE_BEAM_BORDERS=1 (+ the sibling beam flags) required.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn created_borders_recover_page7_triple_stacks() {
+    assert!(
+        audiveris_omr::beam_veto::create_beam_borders_enabled(),
+        "run with AUDIVERIS_CREATE_BEAM_BORDERS=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-07.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+
+    let targets: [(std::ops::RangeInclusive<f64>, std::ops::RangeInclusive<f64>); 2] = [
+        (120.0..=230.0, 650.0..=695.0),
+        (115.0..=220.0, 805.0..=845.0),
+    ];
+    for (x_range, y_range) in targets {
+        let mut ys: Vec<f64> = beams
+            .raw_beams
+            .iter()
+            .filter(|(_, beam)| {
+                let median = beam.item.median;
+                x_range.contains(&median.x1)
+                    && y_range.contains(&median.y1)
+                    && median.x2 - median.x1 >= 8.0
+            })
+            .map(|(_, beam)| beam.item.median.y1)
+            .collect();
+        ys.sort_by(f64::total_cmp);
+        ys.dedup_by(|a, b| (*a - *b).abs() < 2.0);
+        assert!(
+            ys.len() >= 3,
+            "expected a recovered triple stack in x {x_range:?} y {y_range:?}, got {ys:?}"
+        );
+    }
+}
+
+/// Schenker page 7: a fused pair inside a multi-line structure must split
+/// into two typical-height beams, not survive as one fat beam.
+///
+/// Java's `splitLines` handles only the fully fused single-line case (its
+/// own TODO asks "what if beamCount = 2 and targetCount = 3 or more?"), and
+/// the whole-glyph ink ratio cannot see a fused pair inside a wider blob --
+/// the gaps dilute weight/width below the split threshold. Under
+/// `AUDIVERIS_STACKED_BEAM_SPLIT` every line is additionally split by its own
+/// border-fit height, with negative gutters allowed because a fully swallowed
+/// gutter leaves the pair thinner than two typical heights. The asserted
+/// regions are thirty-second-run fragments from the user's screenshots that
+/// were accepted as single 6.3-7.7px beams; each must yield two beams of
+/// typical thickness instead.
+#[test]
+#[ignore = "manual regression; needs AUDIVERIS_SCHENKER_PAGES and the flag-on env profile"]
+fn per_line_split_replaces_page7_fat_singles() {
+    assert!(
+        audiveris_omr::beam_veto::stacked_beam_split_enabled(),
+        "run with AUDIVERIS_STACKED_BEAM_SPLIT=1"
+    );
+    let pages = std::env::var("AUDIVERIS_SCHENKER_PAGES").expect("AUDIVERIS_SCHENKER_PAGES");
+    let page = std::path::Path::new(&pages).join("page-07.png");
+
+    let grid = recognize_grid_lines(&page).expect("GRID");
+    let headers = recognize_native_headers(&grid).expect("HEADERS");
+    let stem_seeds = recognize_native_stem_seeds(&grid, &headers).expect("STEM_SEEDS");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("BEAMS");
+
+    // Previously single fat beams (thickness 6.7-7.7) in the top-right run.
+    let targets: [(std::ops::RangeInclusive<f64>, std::ops::RangeInclusive<f64>); 2] = [
+        (660.0..=666.0, 158.0..=170.0),
+        (686.0..=692.0, 164.0..=175.0),
+    ];
+    for (x_range, y_range) in targets {
+        let split: Vec<(f64, f64)> = beams
+            .raw_beams
+            .iter()
+            .filter(|(_, beam)| {
+                let median = beam.item.median;
+                x_range.contains(&median.x1) && y_range.contains(&median.y1)
+            })
+            .map(|(_, beam)| (beam.item.median.y1, beam.item.height))
+            .collect();
+        let distinct = {
+            let mut ys: Vec<f64> = split.iter().map(|(y, _)| *y).collect();
+            ys.sort_by(f64::total_cmp);
+            ys.dedup_by(|a, b| (*a - *b).abs() < 1.5);
+            ys.len()
+        };
+        assert!(
+            distinct >= 2 && split.iter().all(|(_, h)| *h < 5.0),
+            "expected the fused pair in x {x_range:?} y {y_range:?} split into \
+             typical-height beams, got {split:?}"
+        );
+    }
+}

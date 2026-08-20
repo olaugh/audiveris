@@ -1002,7 +1002,14 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
         );
         if crate::beam_veto::stacked_beam_split_enabled() {
             // Java leaves split lines with empty item lists, so stuck stacks
-            // create nothing (see `populate_empty_items`).
+            // create nothing (see `populate_empty_items`), and only ever
+            // splits the fully fused single-line case (see
+            // `split_thick_lines_up_to` for the partially fused one).
+            structure.split_thick_lines_up_to(
+                parameters.structure.typical_height,
+                crate::beam_veto::stacked_beam_split_limit(),
+                2.0 * parameters.structure.min_beam_width_low,
+        );
             structure.populate_empty_items(
                 glyph,
                 spot.left,
@@ -1901,7 +1908,8 @@ mod tests {
                 max_item_x_gap: 1,
                 min_beam_width_low: 4.0,
                 max_hook_width: 7.0,
-            },
+                allow_border_creation: false,
+                },
             impacts: BeamImpactParameters {
                 belt_margin_dx: 1,
                 belt_margin_dy: 1,
