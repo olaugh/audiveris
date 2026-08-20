@@ -81,12 +81,22 @@ pub struct BeamStructureAnalysis {
     pub lines: Vec<BeamLine>,
     pub global_distance: f64,
     pub mean_thickness: f64,
+    /// True when this structure is an outer-ink envelope rather than paired
+    /// borders. Envelope structures split by ink projection or not at all:
+    /// the arithmetic splits would happily cut a fused ledger-and-notehead
+    /// row -- whose envelope is tall enough to pass every height rule --
+    /// into credible false beams (measured: the page-9 m50 ledger fixtures
+    /// are the guard).
+    pub envelope: bool,
     /// Median `y1` of every line built on synthesized evidence: a border the
     /// creation retry invented, or a level the ink-deficit probe proposed.
     /// Such lines take the inner-line belt treatment -- their outer belt is
     /// exactly the fused note ink whose border loss made the synthesis
     /// necessary -- and still pass every other impact on their own ink.
-    pub synthetic_medians: Vec<f64>,
+    /// Stored as (reference x, y at that x): `adjust_sides` moves the
+    /// endpoints along the line, so `y1` is not stable but y at any fixed
+    /// abscissa is.
+    pub synthetic_medians: Vec<(f64, f64)>,
 }
 
 impl BeamStructureAnalysis {
@@ -116,6 +126,7 @@ impl BeamStructureAnalysis {
         }
         let count = target_count.min(max_count.max(2));
         let line = &self.lines[0];
+        let parent_synthetic = self.is_synthetic_line(line);
         let total_gutter = line.height - (count as f64 * typical_height);
         if total_gutter < 0.0 {
             return;
@@ -137,6 +148,240 @@ impl BeamStructureAnalysis {
                 }
             })
             .collect();
+        // Provenance is inherited; flag-off structures carry no markers, so
+        // this cannot disturb parity.
+        if parent_synthetic {
+            let children: Vec<BeamLine> = self.lines.clone();
+            for child in &children {
+                self.mark_synthetic(child);
+            }
+        }
+    }
+
+    /// Re-derive a line's levels from the pre-closing ink (enhancement).
+    ///
+    /// Even spacing is arithmetic, not evidence: an envelope over a fused
+    /// stack includes fused notehead ink, so `height / typical` over-counts
+    /// the levels and the phantom lines land on gutters and die core-pale
+    /// (measured: a four-level stack split into seven). And the closed
+    /// raster cannot help -- the closing disk swallows the gutters, which
+    /// is what made the stack an envelope case to begin with -- so the
+    /// levels are read from the PRE-closing raster, where each beam is
+    /// still a separate bar. Each column's ink runs vote with their
+    /// center's offset from the line median (slope-corrected by
+    /// construction) and the offsets cluster into one group per level;
+    /// lines are placed at the cluster medians. Falls back to leaving the
+    /// line alone when fewer than two clusters emerge; run
+    /// [`Self::populate_empty_items`] afterwards.
+    #[allow(clippy::too_many_arguments)]
+    pub fn split_lines_by_projection(
+        &mut self,
+        erased: &[u8],
+        image_width: usize,
+        image_height: usize,
+        ink_threshold: u8,
+        interline: f64,
+        typical_height: f64,
+        max_count: usize,
+    ) {
+        // Vote hygiene: a ledger or staff residue run is thinner than any
+        // beam, and a notehead run is taller than one; neither is level
+        // evidence. Both bounds were measured on the page-9 ledger fixtures
+        // -- without them the head and ledger rows of a fused run vote
+        // themselves into credible false beams.
+        let run_floor = 0.35 * interline;
+        let run_cap = 1.3 * typical_height;
+        let lines = std::mem::take(&mut self.lines);
+        for line in lines {
+            let parent_synthetic = self.is_synthetic_line(&line);
+            let count_by_height =
+                (line.height / typical_height).round_ties_even() as usize;
+            if count_by_height < 2 {
+                self.lines.push(line);
+                continue;
+            }
+            let reach = line.height / 2.0 + typical_height;
+            let x1 = (line.median.x1.max(0.0)) as usize;
+            let x2 = (line.median.x2.min(image_width as f64 - 1.0)) as usize;
+            let mut offsets: Vec<(usize, f64)> = Vec::new();
+            for x in x1..=x2 {
+                let median_y = line.median.y_at_x(x as f64);
+                let lo = ((median_y - reach).max(0.0)) as usize;
+                let hi = ((median_y + reach).min(image_height as f64 - 1.0)) as usize;
+                let mut start: Option<usize> = None;
+                for y in lo..=hi {
+                    // `spots::threshold` counts `pixel <= level` as ink.
+                    let ink = erased[y * image_width + x] <= ink_threshold;
+                    let run_end = |s: usize, e: usize, offsets: &mut Vec<(usize, f64)>| {
+                        let length = (e - s) as f64;
+                        if length >= run_floor && length <= run_cap {
+                            offsets.push((x, (s + e) as f64 / 2.0 - median_y));
+                        }
+                    };
+                    match (ink, start) {
+                        (true, None) => start = Some(y),
+                        (false, Some(s)) => {
+                            run_end(s, y, &mut offsets);
+                            start = None;
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(s) = start {
+                    let length = (hi + 1 - s) as f64;
+                    if length >= run_floor && length <= run_cap {
+                        offsets.push((x, (s + hi + 1) as f64 / 2.0 - median_y));
+                    }
+                }
+            }
+            offsets.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let mut clusters: Vec<Vec<(usize, f64)>> = Vec::new();
+            for &(x, dy) in &offsets {
+                match clusters.last_mut() {
+                    Some(cluster)
+                        if dy - cluster[cluster.len() / 2].1 <= 0.6 * typical_height =>
+                    {
+                        cluster.push((x, dy));
+                    }
+                    _ => clusters.push(vec![(x, dy)]),
+                }
+            }
+            // A level runs the length of the beam; fused noteheads, ledger
+            // stubs, and a neighbor's ink do not. Clusters must be supported
+            // by at least a third of the line's columns.
+            let span = (x2 - x1 + 1).max(1);
+            let support = |cluster: &[(usize, f64)]| {
+                let mut columns: Vec<usize> = cluster.iter().map(|&(x, _)| x).collect();
+                columns.sort_unstable();
+                columns.dedup();
+                columns.len()
+            };
+            // And a level is STRAIGHT: a bar's run centers align within a
+            // pixel of each other once the median's slope is subtracted,
+            // while the partial edge runs of a fused notehead row scatter.
+            // Median absolute deviation separates them cleanly (measured:
+            // without this, the page-9 fused head row voted itself into a
+            // credible false beam that re-blocked the lone A).
+            let tight = |cluster: &[(usize, f64)]| {
+                let center = cluster[cluster.len() / 2].1;
+                let mut deviations: Vec<f64> =
+                    cluster.iter().map(|&(_, dy)| (dy - center).abs()).collect();
+                deviations.sort_by(f64::total_cmp);
+                deviations[deviations.len() / 2] <= (0.35 * typical_height).max(0.8)
+            };
+            clusters.retain(|cluster| support(cluster) * 3 >= span && tight(cluster));
+            // An envelope structure carries no border evidence at all, so
+            // two clusters are as likely a fused ledger row plus a head row
+            // as a beam pair -- the population that vetoed the page-9 lone
+            // A. Only a three-or-more stack is unambiguous from projection
+            // alone; paired-border structures keep the two-cluster case.
+            let min_clusters = if self.envelope { 3 } else { 2 };
+            if clusters.len() < min_clusters || clusters.len() > max_count.max(2) {
+                self.lines.push(line);
+                continue;
+            }
+            for cluster in clusters {
+                let dy = cluster[cluster.len() / 2].1;
+                let child = BeamLine {
+                    median: Segment {
+                        y1: line.median.y1 + dy,
+                        y2: line.median.y2 + dy,
+                        ..line.median
+                    },
+                    height: typical_height,
+                    items: Vec::new(),
+                };
+                if parent_synthetic {
+                    self.mark_synthetic(&child);
+                }
+                self.lines.push(child);
+            }
+        }
+        self.lines
+            .sort_by(|one, two| one.median.y1.total_cmp(&two.median.y1));
+    }
+
+    /// Whether a line rests on synthesized evidence (envelope structures
+    /// count wholesale). Split children must re-register through
+    /// [`Self::mark_synthetic`] because their medians move.
+    fn is_synthetic_line(&self, line: &BeamLine) -> bool {
+        self.envelope
+            || self.synthetic_medians.iter().any(|&(x_ref, y_ref)| {
+                (line.median.y_at_x(x_ref) - y_ref).abs() < 0.5
+            })
+    }
+
+    fn mark_synthetic(&mut self, line: &BeamLine) {
+        self.synthetic_medians.push((
+            (line.median.x1 + line.median.x2) / 2.0,
+            (line.median.y1 + line.median.y2) / 2.0,
+        ));
+    }
+
+    /// Drop synthetic lines the pre-closing ink cannot substantiate
+    /// (enhancement).
+    ///
+    /// A created or probed line is a hypothesis, and the closed raster
+    /// cannot audit it: the closing fattens a 2px ledger row into a
+    /// beam-thick bar, so a line invented opposite a ledger's own (long,
+    /// straight) border grades like a beam and earns veto power (measured:
+    /// the page-9 lone A fixture caught exactly this). The pre-closing
+    /// raster still knows the difference. Each synthetic line must find
+    /// ink at its median in at least half its columns, with a mean run
+    /// length of at least 0.7x the typical beam height.
+    pub fn retain_substantiated_synthetic_lines(
+        &mut self,
+        erased: &[u8],
+        image_width: usize,
+        image_height: usize,
+        ink_threshold: u8,
+        typical_height: f64,
+    ) {
+        if self.synthetic_medians.is_empty() {
+            return;
+        }
+        let synthetic = self.synthetic_medians.clone();
+        self.lines.retain(|line| {
+            if !synthetic
+                .iter()
+                .any(|&(x_ref, y_ref)| (line.median.y_at_x(x_ref) - y_ref).abs() < 0.5)
+            {
+                return true;
+            }
+            let x1 = (line.median.x1.max(0.0)) as usize;
+            let x2 = (line.median.x2.min(image_width as f64 - 1.0)) as usize;
+            if x2 <= x1 {
+                return false;
+            }
+            let mut inked_columns = 0_usize;
+            let mut total_length = 0.0_f64;
+            for x in x1..=x2 {
+                let y = line.median.y_at_x(x as f64);
+                if y < 0.0 || y >= image_height as f64 {
+                    continue;
+                }
+                let y = y as usize;
+                // `spots::threshold` counts `pixel <= level` as ink.
+                if erased[y * image_width + x] > ink_threshold {
+                    continue;
+                }
+                let mut lo = y;
+                while lo > 0 && erased[(lo - 1) * image_width + x] <= ink_threshold {
+                    lo -= 1;
+                }
+                let mut hi = y;
+                while hi + 1 < image_height
+                    && erased[(hi + 1) * image_width + x] <= ink_threshold
+                {
+                    hi += 1;
+                }
+                inked_columns += 1;
+                total_length += (hi - lo + 1) as f64;
+            }
+            let span = x2 - x1 + 1;
+            inked_columns * 2 >= span
+                && total_length / inked_columns.max(1) as f64 >= 0.7 * typical_height
+        });
     }
 
     /// Split every line that is itself thick enough to be a fused pair
@@ -173,6 +418,7 @@ impl BeamStructureAnalysis {
         let single = self.lines.len() == 1;
         let lines = std::mem::take(&mut self.lines);
         for line in lines {
+            let parent_synthetic = self.is_synthetic_line(&line);
             let count = (line.height / typical_height).round_ties_even() as usize;
             // A lone wide line at pair height is as likely a fused ledger row
             // (ledger plus a head row measures ~2x typical) -- but nothing
@@ -192,7 +438,7 @@ impl BeamStructureAnalysis {
             let median = line.median;
             for index in 0..count {
                 let dy = first + (index as f64 * (typical_height + gutter_each));
-                self.lines.push(BeamLine {
+                let child = BeamLine {
                     median: Segment {
                         y1: median.y1 + dy,
                         y2: median.y2 + dy,
@@ -200,7 +446,13 @@ impl BeamStructureAnalysis {
                     },
                     height: typical_height,
                     items: Vec::new(),
-                });
+                };
+                // Provenance is inherited: a level cut out of synthesized
+                // evidence is itself synthesized evidence.
+                if parent_synthetic {
+                    self.mark_synthetic(&child);
+                }
+                self.lines.push(child);
             }
         }
     }
@@ -275,7 +527,8 @@ impl BeamStructureAnalysis {
             if cov < 0.5 {
                 return;
             }
-            self.synthetic_medians.push(median.y1);
+            self.synthetic_medians
+                .push(((median.x1 + median.x2) / 2.0, (median.y1 + median.y2) / 2.0));
             self.lines.push(BeamLine {
                 median,
                 height: typical_height,
@@ -436,6 +689,7 @@ pub fn analyze_beam_structure(
             global_slope,
             parameters.typical_height,
             create,
+            2.0 * parameters.min_beam_width_low,
             top,
             bottom,
             created,
@@ -446,11 +700,13 @@ pub fn analyze_beam_structure(
             global_slope,
             parameters.typical_height,
             create,
+            2.0 * parameters.min_beam_width_low,
             bottom,
             top,
             created,
         );
     };
+    let mut synthetic_envelope = false;
     let saved = parameters
         .allow_border_creation
         .then(|| (top.clone(), bottom.clone()));
@@ -485,6 +741,21 @@ pub fn analyze_beam_structure(
         // page-9 lone A that four earlier fixes recovered).
         salvage_border_pairs(&mut top, &mut bottom, parameters.typical_height);
     }
+    if top.len() != bottom.len() && parameters.allow_border_creation {
+        // Last resort before refusing the whole structure: when the borders
+        // cannot be paired at all, the outermost top and bottom are still
+        // trustworthy -- they face open paper, not fused ink. Collapse to
+        // that envelope as one line; the height-based split then derives the
+        // level count from the envelope the same way it does for a fully
+        // solid stack. This recovers the four-level stacks whose partial
+        // gutters yield two borders on one side and three on the other,
+        // which no pairing can reconcile.
+        let envelope_top = top.remove(0);
+        let envelope_bottom = bottom.pop().expect("borders are non-empty");
+        top = vec![envelope_top];
+        bottom = vec![envelope_bottom];
+        synthetic_envelope = true;
+    }
     if top.len() != bottom.len() {
         return Err(BeamStructureError::InconsistentBorderPairs);
     }
@@ -513,11 +784,13 @@ pub fn analyze_beam_structure(
             height,
             parameters.max_item_x_gap,
         );
-        if created_offsets
-            .iter()
-            .any(|offset| *offset == top_offset || *offset == bottom_offset)
+        if synthetic_envelope
+            || created_offsets
+                .iter()
+                .any(|offset| *offset == top_offset || *offset == bottom_offset)
         {
-            synthetic_medians.push(median.y1);
+            synthetic_medians
+                .push(((median.x1 + median.x2) / 2.0, (median.y1 + median.y2) / 2.0));
         }
         lines.push(BeamLine {
             median,
@@ -529,7 +802,80 @@ pub fn analyze_beam_structure(
         lines,
         global_distance,
         mean_thickness: glyph.weight() as f64 / glyph.width() as f64,
+        envelope: false,
         synthetic_medians,
+    })
+}
+
+/// Build a one-line structure from the glyph's outer ink envelope
+/// (enhancement).
+///
+/// When fused inner borders make the normal analysis fail -- pairing that
+/// cannot reconcile, or a border-fit residual the straightness gate refuses
+/// -- the outermost ink edges are still trustworthy: they face open paper.
+/// Least-squares lines through each column's topmost run start and
+/// bottommost run stop become the envelope; the projection split then
+/// re-derives the levels from the ink inside it. The envelope line is
+/// synthetic (belt-exempt), and every later grade still applies.
+#[must_use]
+pub fn envelope_analysis(
+    glyph: &RunTable,
+    offset_x: i32,
+    offset_y: i32,
+) -> Option<BeamStructureAnalysis> {
+    if glyph.orientation() != Orientation::Vertical {
+        return None;
+    }
+    let mut top_line = audiveris_core::basic_line::BasicLine::default();
+    let mut bottom_line = audiveris_core::basic_line::BasicLine::default();
+    let mut x_min = None;
+    let mut x_max = None;
+    for x in 0..glyph.sequence_count() {
+        let Some(runs) = glyph.sequence(x) else {
+            continue;
+        };
+        let (Some(first), Some(last)) = (runs.first(), runs.last()) else {
+            continue;
+        };
+        let gx = f64::from(offset_x) + x as f64;
+        top_line.include_point(gx, f64::from(offset_y) + first.start as f64);
+        bottom_line.include_point(gx, f64::from(offset_y) + (last.stop() + 1) as f64);
+        x_min = Some(x_min.map_or(gx, |v: f64| v.min(gx)));
+        x_max = Some(x_max.map_or(gx, |v: f64| v.max(gx)));
+    }
+    let (x1, x2) = (x_min?, x_max?);
+    if x2 <= x1 {
+        return None;
+    }
+    let (yt1, yt2) = (top_line.y_at_x(x1).ok()?, top_line.y_at_x(x2).ok()?);
+    let (yb1, yb2) = (bottom_line.y_at_x(x1).ok()?, bottom_line.y_at_x(x2).ok()?);
+    let height = ((yb1 - yt1) + (yb2 - yt2)) / 2.0;
+    if height <= 0.0 {
+        return None;
+    }
+    let median = Segment {
+        x1,
+        y1: (yt1 + yb1) / 2.0,
+        x2,
+        y2: (yt2 + yb2) / 2.0,
+    };
+    let count = top_line.count() + bottom_line.count();
+    let global_distance = (top_line.mean_distance().ok()? * top_line.count() as f64
+        + bottom_line.mean_distance().ok()? * bottom_line.count() as f64)
+        / count as f64;
+    Some(BeamStructureAnalysis {
+        lines: vec![BeamLine {
+            median,
+            height,
+            items: Vec::new(),
+        }],
+        global_distance,
+        mean_thickness: glyph.weight() as f64 / glyph.width() as f64,
+        envelope: true,
+        synthetic_medians: vec![(
+            (median.x1 + median.x2) / 2.0,
+            (median.y1 + median.y2) / 2.0,
+        )],
     })
 }
 
@@ -793,6 +1139,7 @@ fn complete_border_lines(
     global_slope: f64,
     typical_height: f64,
     allow_border_creation: bool,
+    min_created_base_width: f64,
     base: &mut Vec<(f64, Segment)>,
     other: &mut Vec<(f64, Segment)>,
     created: &mut Vec<f64>,
@@ -807,9 +1154,16 @@ fn complete_border_lines(
             .iter()
             .position(|(offset, _)| (*offset - target).abs() <= tolerance)
         else {
-            if allow_border_creation {
+            if allow_border_creation
+                && base_line.x2 - base_line.x1 >= min_created_base_width
+            {
                 // Java's dormant allowBorderCreation branch: the missing
                 // opposite border is the found one, one typical height away.
+                // Only a LONG border earns a created opposite: a beam
+                // level's border spans the blob, while the short arcs of a
+                // fused notehead row do not, and creating opposites for
+                // those manufactures credible false beams (measured: the
+                // page-9 lone A fixture is the guard).
                 created.push(target);
                 other.push((
                     target,
@@ -1526,6 +1880,7 @@ mod tests {
             items: vec![],
         };
         let mut even = BeamStructureAnalysis {
+            envelope: false,
             synthetic_medians: Vec::new(),
             lines: vec![line.clone()],
             global_distance: 0.0,
@@ -1537,6 +1892,7 @@ mod tests {
         assert_eq!(even.lines[0].median.y1, 4.0);
         assert!(even.lines.iter().all(|line| line.items.is_empty()));
         let mut odd = BeamStructureAnalysis {
+            envelope: false,
             synthetic_medians: Vec::new(),
             lines: vec![line],
             global_distance: 0.0,

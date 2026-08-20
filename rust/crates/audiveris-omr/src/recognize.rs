@@ -1055,7 +1055,7 @@ fn recognize_native_beams_impl(
         .map_err(|_| NativeBeamRecognitionError::InvalidStemScale(stem.maximum))?;
     let mut spot_parameters = SpotParameters::new(max_stem, main_beam);
     spot_parameters.header_erases = header_erases;
-    let mut chain = spot_chain(&pixels, width, height, &spot_parameters)?;
+    let chain = spot_chain(&pixels, width, height, &spot_parameters)?;
     // The closing radius derives from the declared beam scale, so a stack-
     // poisoned declaration bridges the gutters before anything downstream
     // can measure honestly. The pre-closing raster still shows each level;
@@ -1072,18 +1072,27 @@ fn recognize_native_beams_impl(
             f64::from(main_beam),
         )
     });
-    if let Some(sizing) = beam_sizing {
-        if sizing.applied {
-            effective_beam = sizing.effective;
-        }
-        if sizing.closing < f64::from(main_beam) {
-            let rounded = sizing.closing.round_ties_even() as i32;
-            let mut corrected = SpotParameters::new(max_stem, rounded.max(1));
-            corrected.header_erases = spot_parameters.header_erases.clone();
-            spot_parameters = corrected;
-            chain = spot_chain(&pixels, width, height, &spot_parameters)?;
-        }
+    let mut projection_chain = None;
+    if let Some(sizing) = beam_sizing
+        && sizing.applied
+    {
+        // Item grading uses the measured thickness. The spots deliberately
+        // do not: shrinking the closing disk fragments every beam at every
+        // destemmed stem crossing, and a solid over-closed stack is the
+        // better spot now that the envelope analysis and projection split
+        // can take one apart. But the projection needs a raster whose
+        // smoothing radii match the real beam -- the declared-scale chain
+        // blurs the gutters shut before the closing even runs -- so a
+        // second chain at the measured thickness serves as evidence only.
+        effective_beam = sizing.effective;
+        let rounded = (sizing.effective.round_ties_even() as i32).max(1);
+        let mut corrected = SpotParameters::new(max_stem, rounded);
+        corrected.header_erases = spot_parameters.header_erases.clone();
+        projection_chain = Some(spot_chain(&pixels, width, height, &corrected)?);
     }
+    let projection_erased: &[u8] = projection_chain
+        .as_ref()
+        .map_or(chain.erased.as_slice(), |corrected| corrected.erased.as_slice());
     // Java persists this vertical table for HEADS before thresholding the
     // same closed buffer more strictly for BEAMS.
     let head_spot_runs = spot_runs(&chain.closed, width, height, HEAD_BINARIZATION_THRESHOLD)?;
@@ -1227,7 +1236,13 @@ fn recognize_native_beams_impl(
                 continue;
             }
             let spot_raster = crate::beams_step::component_vertical_raster(component)?;
-            let check = check_beam_glyph(component, &spot_raster, item, &sheet);
+            let check = check_beam_glyph(
+                component,
+                &spot_raster,
+                item,
+                &sheet,
+                Some((projection_erased, width, height)),
+            );
             if component.width as f64 >= 2.0 * f64::from(interline) {
                 line_heights.extend(&check.line_heights);
             }
@@ -6538,7 +6553,7 @@ mod tests {
 
             let raster =
                 crate::beams_step::component_vertical_raster(component).expect("a spot raster");
-            let check = check_beam_glyph(component, &raster, &item, &sheet);
+            let check = check_beam_glyph(component, &raster, &item, &sheet, None);
             let actual = check
                 .rejection
                 .map(|rejection| rejection.reason().to_owned());
@@ -7266,7 +7281,7 @@ mod tests {
             )];
             let spot_raster =
                 crate::beams_step::component_vertical_raster(component).expect("a spot raster");
-            let check = check_beam_glyph(component, &spot_raster, &item, &sheet);
+            let check = check_beam_glyph(component, &spot_raster, &item, &sheet, None);
             let Some(structure) = check.structure else {
                 for system in systems {
                     leftover.push((*system, hook_glyph(component)));
@@ -7513,7 +7528,7 @@ mod tests {
             for component in &components {
                 let raster =
                     crate::beams_step::component_vertical_raster(component).expect("a spot raster");
-                if check_beam_glyph(component, &raster, &item, &sheet)
+                if check_beam_glyph(component, &raster, &item, &sheet, None)
                     .structure
                     .is_some()
                 {

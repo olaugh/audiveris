@@ -73,6 +73,13 @@ pub struct RawBeam {
     pub item: BeamItem,
     pub impacts: BeamImpacts,
     pub grade: f64,
+    /// True when the line this item came from rests on synthesized evidence
+    /// (a created border, a probed level, an envelope). Synthetic beams stay
+    /// in the SIG as hypotheses but never earn veto power: evidence that was
+    /// partly invented must not delete anything (the page-9 lone A fixture
+    /// is the guard -- a fused ledger-and-notehead row is locally
+    /// indistinguishable from a beam; only its provenance gives it away).
+    pub synthetic: bool,
 }
 
 /// Exact fixed glyph Java's `BeamsBuilder.registerBeam` attaches to a beam.
@@ -380,6 +387,10 @@ pub fn create_beam_inters_recording(
     for (index, line) in structure.lines.iter().enumerate() {
         for item in &line.items {
             let width = item.median.x2 - item.median.x1;
+            let synthetic = structure
+                .synthetic_medians
+                .iter()
+                .any(|&(x_ref, y_ref)| (line.median.y_at_x(x_ref) - y_ref).abs() < 0.5);
 
             // Hooks first, and only for the standard size class. Java checks
             // both belt sides unconditionally here, unlike the beam below.
@@ -405,6 +416,7 @@ pub fn create_beam_inters_recording(
                             item: *item,
                             impacts,
                             grade,
+                            synthetic,
                         });
                     }
                 }
@@ -423,10 +435,6 @@ pub fn create_beam_inters_recording(
             // treatment; a single observed line keeps Java's belt, which is
             // what keeps fused ledger-and-notehead rows out (the page-9
             // lesson).
-            let synthetic = structure
-                .synthetic_medians
-                .iter()
-                .any(|median_y| (median_y - line.median.y1).abs() < 0.01);
             let exempt = synthetic
                 || (line_count >= 2 && crate::beam_veto::fused_beam_headroom_enabled());
             match audiveris_image::beam_structure::compute_beam_impacts(
@@ -491,6 +499,7 @@ pub fn create_beam_inters_recording(
                         item: *item,
                         impacts,
                         grade,
+                        synthetic,
                     });
                 }
                 }
@@ -595,6 +604,7 @@ pub fn build_hooks(
                     item,
                     impacts,
                     grade,
+                    synthetic: false,
                 });
                 raw_beams.push(ExtensionBeam {
                     id: raw_beams.len(),
@@ -788,6 +798,9 @@ pub fn extend_beams(
             item,
             impacts: clamped(impacts),
             grade,
+            // Extension merges do not yet carry provenance; a synthetic beam
+            // can launder through a merge. Tracked as a known gap.
+            synthetic: false,
         });
     }
 

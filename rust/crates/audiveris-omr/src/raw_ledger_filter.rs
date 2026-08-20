@@ -97,6 +97,8 @@ impl RawLedgerStaffZone {
 pub struct RawLedgerBeamArea {
     pub bounds: Bounds,
     pub item: BeamItem,
+    /// Provenance: a beam built on synthesized evidence never vetoes.
+    pub synthetic: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1613,6 +1615,7 @@ mod tests {
                     },
                     height: 1.0,
                 },
+                synthetic: false,
             }],
             good_full_beams: Vec::new(),
         };

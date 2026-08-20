@@ -287,6 +287,7 @@ pub fn check_beam_glyph(
     raster: &RunTable,
     item: &ItemParameters,
     sheet: &SheetParameters,
+    projection_source: Option<(&[u8], usize, usize)>,
 ) -> BeamCheck {
     let mut check = BeamCheck {
         mean_height: None,
@@ -328,7 +329,7 @@ pub fn check_beam_glyph(
 
     let mut analysis =
         match analyze_beam_structure(raster, component.left, component.top, item.structure()) {
-            Ok(analysis) => analysis,
+            Ok(analysis) => Some(analysis),
             // Java's computeLines returns null for any inconsistent border
             // set, and null and "too far" share one refusal. The distinct
             // reasons here are report-only: which error a fused stack died
@@ -344,15 +345,42 @@ pub fn check_beam_glyph(
                     BeamStructureError::UndefinedBorderLine => BeamRejection::UndefinedBorderLine,
                     _ => BeamRejection::WavyBorders,
                 });
-                return check;
+                None
             }
         };
-
-    check.mean_distance = Some(analysis.global_distance);
-    if analysis.global_distance > sheet.max_distance_to_border {
-        check.rejection = Some(BeamRejection::WavyBorders);
-        return check;
+    if let Some(inner) = &analysis {
+        check.mean_distance = Some(inner.global_distance);
+        if inner.global_distance > sheet.max_distance_to_border {
+            check.rejection = Some(BeamRejection::WavyBorders);
+            analysis = None;
+        }
     }
+    let mut analysis = match analysis {
+        Some(analysis) => {
+            check.rejection = None;
+            analysis
+        }
+        // The borders failed -- garbled pairing or a residual the
+        // straightness gate refuses. The outer ink envelope is still
+        // trustworthy (it faces open paper); rebuild from it and let the
+        // projection split re-derive the levels. Only under the gate; the
+        // recorded rejection stands if the envelope cannot be built either.
+        None if crate::beam_veto::create_beam_borders_enabled() => {
+            match audiveris_image::beam_structure::envelope_analysis(
+                raster,
+                component.left,
+                component.top,
+            ) {
+                Some(envelope) => {
+                    check.mean_distance = Some(envelope.global_distance);
+                    check.rejection = None;
+                    envelope
+                }
+                None => return check,
+            }
+        }
+        None => return check,
+    };
 
     let width = structure_width(&analysis);
     check.structure_width = Some(width);
@@ -365,23 +393,60 @@ pub fn check_beam_glyph(
     check.slope_gap = Some(slope_gap);
     if slope_gap > MAX_SLOPE_DIFF {
         check.rejection = Some(BeamRejection::DivergingBeams);
-        return check;
+        // Diverging line slopes are garbled inner borders wearing a
+        // different hat; the envelope retry below applies just the same.
+        if crate::beam_veto::create_beam_borders_enabled()
+            && let Some(envelope) = audiveris_image::beam_structure::envelope_analysis(
+                raster,
+                component.left,
+                component.top,
+            )
+        {
+            check.rejection = None;
+            check.slope_gap = Some(0.0);
+            analysis = envelope;
+        } else {
+            return check;
+        }
     }
 
     analysis.adjust_sides(component.left, raster.width(), item.min_beam_width_low);
     extend_middle_lines(&mut analysis);
     check.line_heights = analysis.lines.iter().map(|line| line.height).collect();
-    analysis.split_stuck_lines_up_to(item.typical_height, crate::beam_veto::stacked_beam_split_limit());
+    if crate::beam_veto::stacked_beam_split_enabled()
+        && let Some((erased, image_width, image_height)) = projection_source
+    {
+        // Evidence before arithmetic: the pre-closing raster still shows
+        // each level, so the projection places the lines; lines it declines
+        // fall through to the even splits below.
+        analysis.split_lines_by_projection(
+            erased,
+            image_width,
+            image_height,
+            audiveris_image::spots::BEAM_BINARIZATION_THRESHOLD,
+            item.min_beam_width_low,
+            item.typical_height,
+            crate::beam_veto::stacked_beam_split_limit(),
+        );
+    }
+    analysis.split_stuck_lines_up_to(
+        item.typical_height,
+        crate::beam_veto::stacked_beam_split_limit(),
+    );
     if crate::beam_veto::stacked_beam_split_enabled() {
         // Java leaves split lines with empty item lists, so stuck stacks
         // create nothing (see `populate_empty_items`), and only ever
         // splits the fully fused single-line case (see
-        // `split_thick_lines_up_to` for the partially fused one).
+        // `split_thick_lines_up_to` for the partially fused one). Envelope
+        // structures may split arithmetically too: their children inherit
+        // the synthetic provenance and therefore carry no veto power, so a
+        // wrong cut can no longer delete anything -- it just publishes a
+        // hypothesis that grading and later joint reasoning judge.
         analysis.split_thick_lines_up_to(
             item.typical_height,
             crate::beam_veto::stacked_beam_split_limit(),
             2.0 * item.min_beam_width_low,
-    );
+        );
         analysis.add_missing_outer_lines(
             raster,
             component.left,
@@ -389,6 +454,11 @@ pub fn check_beam_glyph(
             item.typical_height,
             crate::beam_veto::stacked_beam_split_limit(),
         );
+        // No substantiation pruning here: synthetic lines carry no veto
+        // power (RawBeam::synthetic), so keeping every hypothesis costs
+        // nothing downstream -- and pruning them against the antialiased
+        // pre-closing raster measurably deleted real beams (a 3px beam
+        // erodes to ~2.7px there and failed the 0.7x-typical floor).
         analysis.populate_empty_items(
             raster,
             component.left,
@@ -411,6 +481,7 @@ mod tests {
 
     fn analysis(lines: Vec<(f64, f64, f64, f64)>) -> BeamStructureAnalysis {
         BeamStructureAnalysis {
+            envelope: false,
             synthetic_medians: Vec::new(),
             lines: lines
                 .into_iter()

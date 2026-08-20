@@ -3101,6 +3101,7 @@ pub(crate) mod tests {
                 },
             },
             grade: 0.7,
+            synthetic: false,
         };
         let mut json = Json::default();
         beam_inter(&mut json, 9, 2, &beam);

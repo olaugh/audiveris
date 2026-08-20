@@ -310,7 +310,7 @@ pub fn materialize_native_heads_competitors(
     let beam_is_credible = |beam: &RawBeam| {
         beam_veto_scale.is_none_or(|scale| {
             let bounds = beam_bounds(beam.item);
-            scale.credible(f64::from(bounds.width), f64::from(bounds.height))
+            !beam.synthetic && scale.credible(f64::from(bounds.width), f64::from(bounds.height))
         })
     };
     let min_beam_width =

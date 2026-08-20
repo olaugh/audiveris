@@ -800,7 +800,8 @@ fn build_system_zones(
     // lists at all; the parity filter and candidate factory stay untouched.
     let may_veto = |area: &RawLedgerBeamArea| {
         beam_veto_scale.is_none_or(|scale| {
-            scale.credible(area.bounds.width as f64, area.bounds.height as f64)
+            !area.synthetic
+                && scale.credible(area.bounds.width as f64, area.bounds.height as f64)
         })
     };
     grid.peak_graph
@@ -823,7 +824,7 @@ fn build_system_zones(
                 .beams_after_multiple_rests
                 .iter()
                 .filter(|(system_id, _)| *system_id == id)
-                .map(|(_, beam)| raw_beam_area(beam.item))
+                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
                 .filter(&may_veto)
                 .collect::<Vec<_>>();
             let mut all_beams = raw.clone();
@@ -832,7 +833,7 @@ fn build_system_zones(
                     .hooks
                     .iter()
                     .filter(|(system_id, _)| *system_id == id)
-                    .map(|(_, beam)| raw_beam_area(beam.item))
+                    .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
                     .filter(&may_veto),
             );
             let good_full_beams = beams
@@ -841,7 +842,7 @@ fn build_system_zones(
                 .filter(|(system_id, beam)| {
                     *system_id == id && beam.kind == BeamKind::Beam && beam.grade >= 0.4
                 })
-                .map(|(_, beam)| raw_beam_area(beam.item))
+                .map(|(_, beam)| raw_beam_area(beam.item, beam.synthetic))
                 .filter(&may_veto)
                 .collect();
             Ok(RawLedgerSystemZone {
@@ -856,7 +857,10 @@ fn build_system_zones(
         .collect()
 }
 
-fn raw_beam_area(item: audiveris_image::beam_structure::BeamItem) -> RawLedgerBeamArea {
+fn raw_beam_area(
+    item: audiveris_image::beam_structure::BeamItem,
+    synthetic: bool,
+) -> RawLedgerBeamArea {
     let bounds = beam_bounds(item);
     RawLedgerBeamArea {
         bounds: Bounds {
@@ -866,6 +870,7 @@ fn raw_beam_area(item: audiveris_image::beam_structure::BeamItem) -> RawLedgerBe
             height: usize::try_from(bounds.height).unwrap_or(0),
         },
         item,
+        synthetic,
     }
 }
 

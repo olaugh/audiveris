@@ -151,6 +151,7 @@ fn raw_beam(kind: BeamKind, x: f64, grade: f64) -> RawBeam {
             },
         },
         grade,
+        synthetic: false,
     }
 }
 
