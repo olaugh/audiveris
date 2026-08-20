@@ -333,7 +333,7 @@ pub fn check_beam_glyph(
 
     analysis.adjust_sides(component.left, raster.width(), item.min_beam_width_low);
     extend_middle_lines(&mut analysis);
-    analysis.split_stuck_lines(item.typical_height);
+    analysis.split_stuck_lines_up_to(item.typical_height, crate::beam_veto::stacked_beam_split_limit());
     check.structure = Some(analysis);
     check
 }

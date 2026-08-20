@@ -43,6 +43,26 @@ pub fn soft_head_blocks_enabled() -> bool {
     })
 }
 
+/// `AUDIVERIS_STACKED_BEAM_SPLIT` gate (enhancement, default OFF).
+///
+/// Java splits a fused beam stack into exactly two beams, so a three- or
+/// four-level stack whose gutters have closed up in a scan is unrecoverable.
+/// Under this gate the split honors the count Java already derives from the
+/// stack's own thickness.
+#[must_use]
+pub fn stacked_beam_split_limit() -> usize {
+    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        if std::env::var("AUDIVERIS_STACKED_BEAM_SPLIT")
+            .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        {
+            8
+        } else {
+            2
+        }
+    })
+}
+
 /// The sheet-scale context a veto site needs to judge one beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeamVetoScale {

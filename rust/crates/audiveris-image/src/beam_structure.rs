@@ -85,38 +85,48 @@ impl BeamStructureAnalysis {
     /// items, just as in Java; downstream item retrieval/materialization owns
     /// any subsequent interpretation work.
     pub fn split_stuck_lines(&mut self, typical_height: f64) {
+        self.split_stuck_lines_up_to(typical_height, 2);
+    }
+
+    /// [`Self::split_stuck_lines`] generalized past Java's two-beam case.
+    ///
+    /// Java derives how many beams are fused -- `rint(meanThickness /
+    /// typicalHeight)` -- and then splits into exactly two regardless, so a
+    /// three- or four-beam stack can never be recovered once its gutters fill
+    /// in. `max_count == 2` is that exact behavior; a larger limit lays the
+    /// derived count out evenly across the same total height, which is the
+    /// only evidence available when the gaps are no longer visible.
+    ///
+    /// At `max_count == 2` this is arithmetically identical to Java: the
+    /// two-line case reduces to the same heights and offsets.
+    pub fn split_stuck_lines_up_to(&mut self, typical_height: f64, max_count: usize) {
         let target_count = (self.mean_thickness / typical_height).round_ties_even() as usize;
         if self.lines.len() > 1 || target_count <= self.lines.len() {
             return;
         }
+        let count = target_count.min(max_count.max(2));
         let line = &self.lines[0];
-        let gutter = line.height - (2.0 * typical_height);
-        if gutter < 0.0 {
+        let total_gutter = line.height - (count as f64 * typical_height);
+        if total_gutter < 0.0 {
             return;
         }
-        let new_height = (line.height - gutter) / 2.0;
-        let dy = (new_height + gutter) / 2.0;
+        let gutter_each = total_gutter / (count - 1) as f64;
         let median = line.median;
-        self.lines = vec![
-            BeamLine {
-                median: Segment {
-                    y1: median.y1 - dy,
-                    y2: median.y2 - dy,
-                    ..median
-                },
-                height: new_height,
-                items: Vec::new(),
-            },
-            BeamLine {
-                median: Segment {
-                    y1: median.y1 + dy,
-                    y2: median.y2 + dy,
-                    ..median
-                },
-                height: new_height,
-                items: Vec::new(),
-            },
-        ];
+        let first = -(line.height / 2.0) + (typical_height / 2.0);
+        self.lines = (0..count)
+            .map(|index| {
+                let dy = first + (index as f64 * (typical_height + gutter_each));
+                BeamLine {
+                    median: Segment {
+                        y1: median.y1 + dy,
+                        y2: median.y2 + dy,
+                        ..median
+                    },
+                    height: typical_height,
+                    items: Vec::new(),
+                }
+            })
+            .collect();
     }
 
     /// Java `BeamStructure.adjustSides` over the tight run-table bounds.

@@ -440,6 +440,9 @@ fn recognition_json(
     if let Some(beams) = beams {
         beam_groups(&mut json, beams);
     }
+    if let Some(beams) = beams {
+        suppressed_beams(&mut json, beams);
+    }
     if let Some(ledgers) = ledgers {
         ledger_candidates(&mut json, ledgers);
         suppressed_ledgers(&mut json, ledgers);
@@ -2210,6 +2213,40 @@ fn suppressed_ledgers(json: &mut Json, ledgers: &NativeLedgerRecognition) {
     }
     for inter in &ledgers.chain_collapsed {
         inter_entry(json, "chain_collapse", inter);
+    }
+    json.close(']');
+}
+
+/// Spot components the beam gates refused, with the reason and the values
+/// that gate measured. A beam absent from `inters` and from here was never
+/// extracted as a spot at all.
+fn suppressed_beams(json: &mut Json, beams: &NativeBeamRecognition) {
+    json.key("suppressed_beams");
+    json.open('[');
+    for rejection in &beams.beam_rejections {
+        json.open('{');
+        json.field_string("reason", rejection.reason);
+        bounds(
+            json,
+            f64::from(rejection.left),
+            f64::from(rejection.top),
+            rejection.width as f64,
+            rejection.height as f64,
+        );
+        json.field_integer("structure_lines", rejection.lines as i64);
+        for (name, value) in [
+            ("mean_height", rejection.mean_height),
+            ("mean_distance", rejection.mean_distance),
+            ("structure_width", rejection.structure_width),
+            ("slope_gap", rejection.slope_gap),
+        ] {
+            json.key(name);
+            match value {
+                Some(value) => json.number(value),
+                None => json.null(),
+            }
+        }
+        json.close('}');
     }
     json.close(']');
 }

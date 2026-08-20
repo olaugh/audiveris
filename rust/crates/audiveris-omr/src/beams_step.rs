@@ -996,7 +996,10 @@ impl<Visual: VisualBeams> HeadlessBeamsStep<Visual> {
             glyph.width(),
             parameters.structure.min_beam_width_low,
         );
-        structure.split_stuck_lines(parameters.structure.typical_height);
+        structure.split_stuck_lines_up_to(
+            parameters.structure.typical_height,
+            crate::beam_veto::stacked_beam_split_limit(),
+        );
         let raster = BeamRaster {
             table: &config.pixel_filter,
             offset_x: config.pixel_filter_offset_x,

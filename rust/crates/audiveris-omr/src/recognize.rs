@@ -597,8 +597,32 @@ pub struct GridLinesRecognition {
 /// `raw_beams` is Java's state after `extendBeams`; `hooks` is what
 /// `buildHooks` adds afterward. Grouping reads both collections but does not
 /// change their geometry or impacts.
+/// One spot component that did not become a beam, with the gate that
+/// stopped it and the measurements that gate saw.
+///
+/// BEAMS computes a rejection reason for every candidate and Java discards
+/// it, so an undetected beam is indistinguishable from ink that was never
+/// examined. Publishing it makes "why is this beam missing" answerable from
+/// the report -- the same contract as `suppressed_heads` and
+/// `suppressed_ledgers`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeBeamRejection {
+    pub left: i32,
+    pub top: i32,
+    pub width: usize,
+    pub height: usize,
+    pub reason: &'static str,
+    pub mean_height: Option<f64>,
+    pub mean_distance: Option<f64>,
+    pub structure_width: Option<f64>,
+    pub slope_gap: Option<f64>,
+    pub lines: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct NativeBeamRecognition {
+    /// Spot components the beam gates refused, with reasons.
+    pub beam_rejections: Vec<NativeBeamRejection>,
     /// Java `Picture.TableKey.HEAD_SPOTS`, saved from the closed gray raster
     /// at threshold 170 before BEAMS applies its own threshold of 140.
     pub head_spot_runs: RunTable,
@@ -965,7 +989,7 @@ fn recognize_native_beams_impl(
         retrieve_beam_glyph,
     };
     use crate::beam_parameters::{ItemParameters, SheetParameters};
-    use crate::beam_recognizer::check_beam_glyph;
+    use crate::beam_recognizer::{BeamRejection, check_beam_glyph};
     use crate::stem_seeds_step::{StemScaleComputation, compute_stem_scale};
 
     let pixels = recognition.no_staff.to_pixels();
@@ -1093,6 +1117,7 @@ fn recognize_native_beams_impl(
 
     let mut initial = Vec::new();
     let mut leftover = Vec::new();
+    let mut beam_rejections: Vec<NativeBeamRejection> = Vec::new();
     // Java browses each system's beam spots in `Glyphs.byFullOrdinate` order --
     // top, then left (`BeamsBuilder.buildBeams` sorts exactly this way despite
     // its comment saying abscissa). The SIG's beam insertion order, which STEMS
@@ -1106,11 +1131,47 @@ fn recognize_native_beams_impl(
     for component in browse_order {
         let systems = systems_for(component);
         if systems.is_empty() {
+            // Dispatched to no system, so the beam gates never run on it at
+            // all. Recorded because it is otherwise indistinguishable from
+            // ink that was never extracted as a spot.
+            beam_rejections.push(NativeBeamRejection {
+                left: component.left,
+                top: component.top,
+                width: component.width,
+                height: component.height,
+                reason: "no owning system",
+                mean_height: None,
+                mean_distance: None,
+                structure_width: None,
+                slope_gap: None,
+                lines: 0,
+            });
             continue;
         }
         let spot_raster = crate::beams_step::component_vertical_raster(component)?;
         let check = check_beam_glyph(component, &spot_raster, &item, &sheet);
-        let Some(structure) = check.structure else {
+        let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
+                                reason: &'static str,
+                                lines: usize| {
+            rejections.push(NativeBeamRejection {
+                left: component.left,
+                top: component.top,
+                width: component.width,
+                height: component.height,
+                reason,
+                mean_height: check.mean_height,
+                mean_distance: check.mean_distance,
+                structure_width: check.structure_width,
+                slope_gap: check.slope_gap,
+                lines,
+            });
+        };
+        let Some(structure) = check.structure.clone() else {
+            record_rejection(
+                &mut beam_rejections,
+                check.rejection.map_or("unknown", BeamRejection::reason),
+                0,
+            );
             for system in systems {
                 leftover.push((system, native_hook_glyph(component)));
             }
@@ -1125,6 +1186,11 @@ fn recognize_native_beams_impl(
             &item,
             &sheet,
         );
+        if created.is_empty() {
+            // Every gate passed and the structure exists, but no item survived
+            // item-level grading: a distinct failure from being refused outright.
+            record_rejection(&mut beam_rejections, "no graded item", structure.lines.len());
+        }
         for system in systems {
             if created.is_empty() {
                 leftover.push((system, native_hook_glyph(component)));
@@ -1264,6 +1330,7 @@ fn recognize_native_beams_impl(
     let group_count = group_counts.iter().map(|(_, count)| count).sum();
 
     Ok(NativeBeamRecognition {
+        beam_rejections,
         head_spot_runs,
         black_head_sizing,
         music_font_scale,
