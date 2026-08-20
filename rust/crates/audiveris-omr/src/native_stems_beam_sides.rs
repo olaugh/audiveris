@@ -34,10 +34,9 @@ use crate::{
         apply_native_stems_beam_vlink_b_linker_flag_transaction,
     },
     native_stems_beam_vlink_base_apply::{
-        NativeStemsBeamBeamInterIndexBootstrapEntry, NativeStemsBeamInterIndexAppend,
-        NativeStemsBeamInterIndexLookup, NativeStemsBeamNextPersistentIdLookup,
-        NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyTransaction,
-        NativeStemsBeamVLinkBaseRolloverAuthority,
+        NativeStemsBeamInterIndexAppend, NativeStemsBeamInterIndexLookup,
+        NativeStemsBeamNextPersistentIdLookup, NativeStemsBeamVLinkBaseApplyState,
+        NativeStemsBeamVLinkBaseApplyTransaction, NativeStemsBeamVLinkBaseRolloverAuthority,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
         roll_native_stems_beam_vlink_base_apply_state,
     },
@@ -96,8 +95,6 @@ pub struct NativeStemsBeamSidesCarrier {
     pub bindings: NativeSigSystemBindings,
     pub b_cells: Vec<NativeStemsBeamNativeBLinkerCell>,
     pub s_cells: Vec<NativeStemsBeamNativeSLinkerCell>,
-    pub beam_inter_index: Vec<NativeStemsBeamBeamInterIndexBootstrapEntry>,
-    pub configured_inter_vip_ids: Vec<i32>,
 }
 
 /// Immutable products shared by transactions in one system's SIDES pass.
@@ -10876,8 +10873,6 @@ pub fn continue_native_stems_beam_sides_carrier_into_stumps(
         shadow.bindings.clone(),
         shadow.b_cells.clone(),
         shadow.s_cells.clone(),
-        shadow.beam_inter_index.clone(),
-        shadow.configured_inter_vip_ids.clone(),
     );
     let continuation = continue_native_stems_beam_scheduler_into_stumps(
         &shadow.scheduler,
@@ -10895,8 +10890,6 @@ pub fn continue_native_stems_beam_sides_carrier_into_stumps(
             shadow.bindings.clone(),
             shadow.b_cells.clone(),
             shadow.s_cells.clone(),
-            shadow.beam_inter_index.clone(),
-            shadow.configured_inter_vip_ids.clone(),
         )
     {
         return Err(stage(
@@ -11583,8 +11576,6 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         &shadow.bindings,
         NativeStemsBeamVLinkBaseRolloverAuthority {
             stump_system: context.stumps,
-            beam_inter_index: &shadow.beam_inter_index,
-            configured_inter_vip_ids: &shadow.configured_inter_vip_ids,
         },
     )
     .map_err(|error| stage("B14-rollover", error))?;
