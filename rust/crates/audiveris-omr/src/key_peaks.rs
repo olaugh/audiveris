@@ -320,6 +320,25 @@ pub fn infer_signature(
 
         if mean_short < parameters.min_flat_delta {
             if shape != KeyShapeKind::Sharp {
+                // A clean flat can be followed immediately by sharp-like notation from the
+                // first musical event.  Treating every later stem as part of one signature then
+                // lets a single short interval veto the genuine leading flat.  Preserve the
+                // longest leading flat-spaced prefix and leave the glyph/pitch classifier to
+                // reject any trailing non-flat member.  This is still wholly staff-local visual
+                // evidence: no paired-staff signature or neighbouring-system value is used.
+                let prefix_count = peaks
+                    .windows(2)
+                    .position(|window| {
+                        window[1].center() - window[0].center() < parameters.min_flat_delta
+                    })
+                    .map_or(peak_count, |index| index + 1);
+                if heading <= parameters.max_flat_heading && prefix_count > 0 {
+                    if prefix_count < peak_count {
+                        range.shrink_stop(peaks[prefix_count].min - 1);
+                        peaks.truncate(prefix_count);
+                    }
+                    return -i32::try_from(prefix_count.min(7)).unwrap_or(0);
+                }
                 return 0;
             }
         } else if mean_short > parameters.max_sharp_delta {
@@ -611,6 +630,30 @@ mod tests {
         let signature = infer_signature(&mut peaks, &mut range, KeyShapeKind::Sharp, &parameters());
         assert_eq!(signature, 2, "five peaks lose one, two sharps remain");
         assert_eq!(peaks.len(), 4);
+    }
+
+    #[test]
+    fn flat_inference_preserves_leading_visual_prefix_before_sharp_like_music() {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 100;
+        range.browse_stop = 220;
+        range.set_start(100);
+        // Two flat-spaced stems are followed by a six-pixel accidental/note cluster. The short
+        // interval must not erase the clean leading flat evidence.
+        let mut peaks = [(101, 103), (127, 129), (133, 135), (151, 153)]
+            .into_iter()
+            .map(|(min, max)| KeyPeak {
+                min,
+                main: min,
+                max,
+                height: 40,
+                area: 50,
+            })
+            .collect::<Vec<_>>();
+        let signature = infer_signature(&mut peaks, &mut range, KeyShapeKind::Flat, &parameters());
+        assert_eq!(signature, -2);
+        assert_eq!(peaks.len(), 2);
+        assert_eq!(range.stop(), 132, "the sharp-like suffix is excluded");
     }
 
     #[test]

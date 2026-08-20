@@ -762,6 +762,22 @@ pub fn recognize_native_headers(
             let browse_start = header
                 .clef_stop()
                 .map_or(header.start, |stop| stop.wrapping_add(1));
+            // `select_clefs` intentionally runs after key recognition because key support can
+            // alter the clef winner. Its anchor glyph is already determined, however: the last
+            // live clef candidate preceding the clef-range stop. Use that glyph's full ink edge
+            // to keep its overhang out of key projection. Waiting for `header.clef` here would
+            // always yield `None` and regress bass clefs whose glyph is wider than the symbol.
+            let clef_ink_stop = clef_column.builders().get(&staff.id).and_then(|builder| {
+                let range_stop = header.clef_range.as_ref()?.stop();
+                builder
+                    .candidates
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, candidate)| !candidate.removed && candidate.bounds.x < range_stop)
+                    .max_by_key(|(index, candidate)| (candidate.bounds.x, *index))
+                    .and_then(|(_, candidate)| candidate.glyph_bounds)
+                    .map(HeaderBounds::right)
+            });
             let first = line_ordinate(system_id, staff_input, browse_start, true)?;
             let last = line_ordinate(system_id, staff_input, browse_start, false)?;
             let (envelope_top, envelope_bottom) =
@@ -773,6 +789,7 @@ pub fn recognize_native_headers(
                         .start
                         .wrapping_add(max_header_width(sheet_interline))
                         .wrapping_sub(1),
+                    clef_ink_stop,
                     envelope_top,
                     envelope_bottom,
                     staff_mid_y: f64::from(envelope_top + envelope_bottom) / 2.0,

@@ -928,6 +928,13 @@ fn java_rint_to_i32(value: f64) -> i32 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativeKeyStaffContext {
     pub browse_stop: i32,
+    /// Inclusive right edge of the selected clef's source glyph.
+    ///
+    /// The engraved symbol box can be narrower than the connected ink, especially for bass
+    /// clefs. Starting key projection at the symbol edge lets residual clef ink masquerade as
+    /// the first accidental. This is local visual evidence from the same staff, not a paired-
+    /// staff or neighbouring-system hint.
+    pub clef_ink_stop: Option<i32>,
     pub envelope_top: i32,
     pub envelope_bottom: i32,
     pub staff_mid_y: f64,
@@ -1783,7 +1790,11 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
             .get(&input.staff_id)
             .ok_or(NativeKeyError::MissingParameters(input.staff_id))?;
         let pipeline = parameters.pipeline;
-        let browse_start = input.browse_start.max(input.measure_start);
+        let browse_start = input.browse_start.max(input.measure_start).max(
+            context
+                .clef_ink_stop
+                .map_or(i32::MIN, |stop| stop.saturating_add(1)),
+        );
         let browse_stop = context
             .browse_stop
             .min(input.measure_start + input.projection_width - 1);
@@ -2515,6 +2526,7 @@ mod tests {
         // staff centre the alteration sits.
         let context = NativeKeyStaffContext {
             browse_stop: 0,
+            clef_ink_stop: None,
             envelope_top: 0,
             envelope_bottom: 0,
             staff_mid_y: 139.6,
@@ -2586,6 +2598,7 @@ mod tests {
                 1,
                 NativeKeyStaffContext {
                     browse_stop: 35,
+                    clef_ink_stop: None,
                     envelope_top: 5,
                     envelope_bottom: 27,
                     staff_mid_y: 16.0,
@@ -3132,6 +3145,22 @@ mod tests {
                 .collect::<Vec<_>>(),
             [NeutralKeyAlterShape::Flat, NeutralKeyAlterShape::Flat]
         );
+    }
+
+    #[test]
+    fn native_key_excludes_selected_clef_ink_overhang_from_projection() {
+        let mut recognizer = native_recognizer(FakeKeyClassifier::default());
+        // The fixture contains flats at x=12 and x=22. Treat the first as overhanging clef ink:
+        // projection must begin after its connected glyph, leaving one genuine flat rather than
+        // inferring a two-flat signature and rejecting it during pitch validation.
+        recognizer.contexts.get_mut(&1).unwrap().clef_ink_stop = Some(19);
+
+        let proposals = recognizer.classify_key_shapes(native_input()).unwrap();
+
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].shape, NeutralKeyAlterShape::Flat);
+        assert_eq!(proposals[0].alters.len(), 1);
+        assert_eq!(proposals[0].alters[0].bounds.x, 22);
     }
 
     #[test]
