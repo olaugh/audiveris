@@ -7424,6 +7424,11 @@ This is bounded order-101 existing-stem evidence and the phase-1 terminal; it
 is not phase-2 append-retry, no-link/retry, broader geometry, or wider-corpus
 coverage.
 
+Boundary 127's commit `664185a6b` is the new remote CI baseline: Rust run
+32324836388 passed all 12 shards and Build & Test run 32324836368 passed,
+with no failure or cancellation. It supersedes `5f75f8708`, whose evidence
+the earlier per-boundary sections above record as it stood at the time.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
