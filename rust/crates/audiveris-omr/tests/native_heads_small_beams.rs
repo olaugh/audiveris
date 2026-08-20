@@ -95,6 +95,7 @@ fn explicit_context(
 fn recognition_with_empty_groups(system_ids: &[usize]) -> NativeBeamRecognition {
     NativeBeamRecognition {
         beam_rejections: Vec::new(),
+        beam_spots: Vec::new(),
         head_spot_runs: RunTable::new(Orientation::Vertical, 1, 1).unwrap(),
         black_head_sizing: BlackHeadSizingResult {
             traces: vec![],

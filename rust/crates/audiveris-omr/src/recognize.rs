@@ -597,6 +597,22 @@ pub struct GridLinesRecognition {
 /// `raw_beams` is Java's state after `extendBeams`; `hooks` is what
 /// `buildHooks` adds afterward. Grouping reads both collections but does not
 /// change their geometry or impacts.
+/// One connected component of the closed, thresholded beam buffer -- the
+/// complete set of ink BEAMS is allowed to consider.
+///
+/// `spot_count` alone says how many survived the eight-transform spot chain
+/// but not where, so a beam absent from both `inters` and `suppressed_beams`
+/// could not be distinguished from ink that dissolved before extraction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeBeamSpot {
+    pub left: i32,
+    pub top: i32,
+    pub width: usize,
+    pub height: usize,
+    /// Foreground pixel count, i.e. how solid the blob is.
+    pub weight: usize,
+}
+
 /// One spot component that did not become a beam, with the gate that
 /// stopped it and the measurements that gate saw.
 ///
@@ -617,12 +633,18 @@ pub struct NativeBeamRejection {
     pub structure_width: Option<f64>,
     pub slope_gap: Option<f64>,
     pub lines: usize,
+    /// Items across all structure lines. Zero means the loop that grades
+    /// beams had nothing to iterate, which is a different failure from every
+    /// item being graded below the floor.
+    pub items: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct NativeBeamRecognition {
     /// Spot components the beam gates refused, with reasons.
     pub beam_rejections: Vec<NativeBeamRejection>,
+    /// Every spot component, in extraction order.
+    pub beam_spots: Vec<NativeBeamSpot>,
     /// Java `Picture.TableKey.HEAD_SPOTS`, saved from the closed gray raster
     /// at threshold 170 before BEAMS applies its own threshold of 140.
     pub head_spot_runs: RunTable,
@@ -1039,6 +1061,16 @@ fn recognize_native_beams_impl(
     // per-system beam browse re-sorts. Sorting in place ahead of the sizer
     // silently changes which spot it sees first.
     let components = audiveris_image::glyph_factory::build_glyph_components(&table, 0, 0);
+    let beam_spots = components
+        .iter()
+        .map(|component| NativeBeamSpot {
+            left: component.left,
+            top: component.top,
+            width: component.width,
+            height: component.height,
+            weight: component.weight,
+        })
+        .collect::<Vec<_>>();
 
     // In Java this happens inside `SpotsBuilder.buildSpots`, before the same
     // glyphs are dispatched to systems and interpreted as beams. The switches
@@ -1145,6 +1177,7 @@ fn recognize_native_beams_impl(
                 structure_width: None,
                 slope_gap: None,
                 lines: 0,
+                items: 0,
             });
             continue;
         }
@@ -1152,7 +1185,8 @@ fn recognize_native_beams_impl(
         let check = check_beam_glyph(component, &spot_raster, &item, &sheet);
         let record_rejection = |rejections: &mut Vec<NativeBeamRejection>,
                                 reason: &'static str,
-                                lines: usize| {
+                                lines: usize,
+                                items: usize| {
             rejections.push(NativeBeamRejection {
                 left: component.left,
                 top: component.top,
@@ -1164,6 +1198,7 @@ fn recognize_native_beams_impl(
                 structure_width: check.structure_width,
                 slope_gap: check.slope_gap,
                 lines,
+                items,
             });
         };
         let Some(structure) = check.structure.clone() else {
@@ -1171,13 +1206,15 @@ fn recognize_native_beams_impl(
                 &mut beam_rejections,
                 check.rejection.map_or("unknown", BeamRejection::reason),
                 0,
+                0,
             );
             for system in systems {
                 leftover.push((system, native_hook_glyph(component)));
             }
             continue;
         };
-        let created = create_beam_inters(
+        let mut item_rejections = Vec::new();
+        let created = crate::beam_inters::create_beam_inters_recording(
             &structure,
             &spot_raster,
             component.left,
@@ -1185,11 +1222,17 @@ fn recognize_native_beams_impl(
             raster,
             &item,
             &sheet,
+            &mut item_rejections,
         );
         if created.is_empty() {
             // Every gate passed and the structure exists, but no item survived
             // item-level grading: a distinct failure from being refused outright.
-            record_rejection(&mut beam_rejections, "no graded item", structure.lines.len());
+            record_rejection(
+                &mut beam_rejections,
+                item_rejections.first().copied().unwrap_or("no item to grade"),
+                structure.lines.len(),
+                structure.lines.iter().map(|line| line.items.len()).sum(),
+            );
         }
         for system in systems {
             if created.is_empty() {
@@ -1336,6 +1379,7 @@ fn recognize_native_beams_impl(
         music_font_scale,
         staff_head_point_sizes,
         spot_count: components.len(),
+        beam_spots,
         raw_beams,
         raw_beam_glyphs,
         beams_after_multiple_rests,

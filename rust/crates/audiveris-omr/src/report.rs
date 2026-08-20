@@ -441,6 +441,7 @@ fn recognition_json(
         beam_groups(&mut json, beams);
     }
     if let Some(beams) = beams {
+        beam_spots(&mut json, beams);
         suppressed_beams(&mut json, beams);
     }
     if let Some(ledgers) = ledgers {
@@ -2217,6 +2218,28 @@ fn suppressed_ledgers(json: &mut Json, ledgers: &NativeLedgerRecognition) {
     json.close(']');
 }
 
+/// Every connected component of the closed, thresholded beam buffer: the
+/// complete ink budget BEAMS gets to work with. Ink that a real beam occupies
+/// but which appears in no spot here dissolved during the eight-transform
+/// spot chain, upstream of every beam decision.
+fn beam_spots(json: &mut Json, beams: &NativeBeamRecognition) {
+    json.key("beam_spots");
+    json.open('[');
+    for spot in &beams.beam_spots {
+        json.open('{');
+        bounds(
+            json,
+            f64::from(spot.left),
+            f64::from(spot.top),
+            spot.width as f64,
+            spot.height as f64,
+        );
+        json.field_integer("weight", spot.weight as i64);
+        json.close('}');
+    }
+    json.close(']');
+}
+
 /// Spot components the beam gates refused, with the reason and the values
 /// that gate measured. A beam absent from `inters` and from here was never
 /// extracted as a spot at all.
@@ -2234,6 +2257,7 @@ fn suppressed_beams(json: &mut Json, beams: &NativeBeamRecognition) {
             rejection.height as f64,
         );
         json.field_integer("structure_lines", rejection.lines as i64);
+        json.field_integer("structure_items", rejection.items as i64);
         for (name, value) in [
             ("mean_height", rejection.mean_height),
             ("mean_distance", rejection.mean_distance),

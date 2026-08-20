@@ -324,6 +324,34 @@ pub fn create_beam_inters(
     item_parameters: &ItemParameters,
     sheet: &SheetParameters,
 ) -> Vec<RawBeam> {
+    create_beam_inters_recording(
+        structure,
+        glyph,
+        offset_x,
+        offset_y,
+        pixels,
+        item_parameters,
+        sheet,
+        &mut Vec::new(),
+    )
+}
+
+/// [`create_beam_inters`] that also reports why each item failed.
+///
+/// Java drops the impact rejection on the floor, so a beam-shaped spot that
+/// produced a structure and then graded to nothing is indistinguishable from
+/// one that was never examined. The returned beams are identical either way.
+#[allow(clippy::too_many_arguments)]
+pub fn create_beam_inters_recording(
+    structure: &BeamStructureAnalysis,
+    glyph: &RunTable,
+    offset_x: i32,
+    offset_y: i32,
+    pixels: BeamRaster<'_>,
+    item_parameters: &ItemParameters,
+    sheet: &SheetParameters,
+    item_rejections: &mut Vec<&'static str>,
+) -> Vec<RawBeam> {
     let Some(distance) =
         distance_impact(structure, glyph, offset_x, offset_y, item_parameters, sheet)
     else {
@@ -369,7 +397,7 @@ pub fn create_beam_inters(
             // below only for the bottom one, so an inner beam of a stack is not
             // penalised for touching its neighbours. Java's own comment calls
             // this test not correct; it is reproduced as written.
-            if let Ok(impacts) = audiveris_image::beam_structure::compute_beam_impacts(
+            match audiveris_image::beam_structure::compute_beam_impacts(
                 *item,
                 BeamBeltSides {
                     above: index == 0,
@@ -379,8 +407,27 @@ pub fn create_beam_inters(
                 distance,
                 item_parameters.impacts(sheet),
             ) {
+                Err(rejection) => item_rejections.push(match rejection {
+                    audiveris_image::beam_structure::BeamImpactRejection::Width => "item width",
+                    audiveris_image::beam_structure::BeamImpactRejection::HeightBelow => {
+                        "item too thin"
+                    }
+                    audiveris_image::beam_structure::BeamImpactRejection::HeightAbove => {
+                        "item too thick"
+                    }
+                    audiveris_image::beam_structure::BeamImpactRejection::CoreRatio => {
+                        "item core too pale"
+                    }
+                    audiveris_image::beam_structure::BeamImpactRejection::BeltRatio => {
+                        "item belt too inky"
+                    }
+                }),
+                Ok(impacts) => {
                 let impacts = clamped(impacts);
                 let grade = beam_grade(impacts);
+                if grade < MIN_INTER_GRADE {
+                    item_rejections.push("item grade below floor");
+                }
                 if grade >= MIN_INTER_GRADE {
                     beams.push(RawBeam {
                         kind: if item_parameters.is_small {
@@ -392,6 +439,7 @@ pub fn create_beam_inters(
                         impacts,
                         grade,
                     });
+                }
                 }
             }
         }
