@@ -7590,14 +7590,34 @@ canonical physical geometry, and abnormal mutation on authenticated carrier
 state. Generic `finalizeStems` is complete; remaining STEMS work is outside
 this terminal.
 
+## Boundary 135: production STEMS preparation
+
+`native_stems::prepare_native_stems` is now the owned production composition
+boundary immediately before the first mutating SIDES transaction. It consumes
+completed live GRID, HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS products,
+then materializes head corners, head seeds, beam stumps and VLinkers, beam and
+head reachability, beam and head builders, link plans, scheduler frontiers, and
+the mutable native SIG in Java order. `materialize_native_stems_components`
+exposes the same read-only component chain for wider pages whose upstream
+BEAMS-group SIG is not complete. Both calls are side-effect free and return no
+partial carrier on failure.
+
+The exact Chula downstream carrier gate now obtains its predecessor through
+`prepare_native_stems`, rather than reconstructing this sequence inside test
+code. The focused gate passes 1/1, the full sibling suite passes 14/14, and
+workspace all-target/all-feature Clippy, formatting, and diff checks are clean.
+This boundary removes a test-only composition seam; it does not remove the
+1,650-entry first-STEMS persistent snapshot, the sparse 16-row selected-base
+Java identity bridge, or any later branch/corpus gaps.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Replace the disclosed first-STEMS persistent snapshot and sparse 16-row selected-base
-   Java identity authority;
-   transactions 3-32 no longer receive per-frontier glyph rows, but the full pass is not
-   yet a native-products-only entry point.
+1. Starting from Boundary 135's production pre-mutation composition, replace the
+   disclosed first-STEMS persistent snapshot and sparse 16-row selected-base Java
+   identity authority; transactions 3-32 no longer receive per-frontier glyph rows,
+   but the mutating pass is not yet native-products-only.
 2. Replace the reconstructed Allegretto transaction-28 predecessor with
    native-carried state and widen the graph-derived B13 linked-S and hook-removal paths;
    chula system 1's 68 executed head-side references are unique.

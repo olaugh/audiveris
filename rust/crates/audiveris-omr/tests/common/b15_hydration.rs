@@ -12,26 +12,20 @@ use audiveris_omr::{
     native_ledgers::recognize_native_ledgers,
     native_sig::{NativeSigRecognition, assemble_native_sig},
     native_stem_seeds::{NativeStemSeedRecognition, recognize_native_stem_seeds},
-    native_stems_beam_builders::{
-        NativeStemsBeamBuilderRecognition, NativeStemsBeamBuilderSystem,
-        materialize_native_stems_beam_builders,
-    },
+    native_stems::{materialize_native_stems_components, prepare_native_stems},
+    native_stems_beam_builders::{NativeStemsBeamBuilderRecognition, NativeStemsBeamBuilderSystem},
     native_stems_beam_link_plans::{
         NativeStemsBeamLinkPlanAttempt, NativeStemsBeamLinkPlanRecognition,
-        NativeStemsBeamLinkPlanSystem, materialize_native_stems_beam_link_plans,
+        NativeStemsBeamLinkPlanSystem,
     },
     native_stems_beam_reachability::{
         NativeStemsBeamReachabilityRecognition, NativeStemsBeamReachabilitySystem,
-        materialize_native_stems_beam_reachability,
     },
     native_stems_beam_scheduler::{
         NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerStatus,
-        NativeStemsBeamSchedulerSystem, materialize_native_stems_beam_scheduler_frontiers,
+        NativeStemsBeamSchedulerSystem,
     },
-    native_stems_beam_stumps::{
-        NativeStemsBeamStumpRecognition, NativeStemsBeamStumpSystem,
-        materialize_native_stems_beam_stumps,
-    },
+    native_stems_beam_stumps::{NativeStemsBeamStumpRecognition, NativeStemsBeamStumpSystem},
     native_stems_beam_vlink_b_linker_flag::{
         NativeStemsBeamVLinkBLinkerFlagState, NativeStemsBeamVLinkBLinkerFlagTransaction,
         apply_native_stems_beam_vlink_b_linker_flag_transaction,
@@ -78,21 +72,11 @@ use audiveris_omr::{
     },
     native_stems_beam_vlinkers::{
         NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRecognition, NativeStemsBeamVLinkerRef,
-        NativeStemsBeamVLinkerSystem, materialize_native_stems_beam_vlinkers,
+        NativeStemsBeamVLinkerSystem,
     },
-    native_stems_head_builders::{
-        NativeStemsHeadBuilderRecognition, materialize_native_stems_head_builders,
-    },
-    native_stems_head_corner_reachability::{
-        NativeStemsHeadCornerReachabilityRecognition,
-        materialize_native_stems_head_corner_reachability,
-    },
-    native_stems_head_corners::{
-        NativeStemsHeadCornerRecognition, NativeStemsHeadCornerSystem,
-        materialize_native_stems_head_corners,
-    },
-    native_stems_head_seeds::materialize_native_stems_head_seeds,
-    native_stems_head_stumps::materialize_native_stems_head_stumps,
+    native_stems_head_builders::NativeStemsHeadBuilderRecognition,
+    native_stems_head_corner_reachability::NativeStemsHeadCornerReachabilityRecognition,
+    native_stems_head_corners::{NativeStemsHeadCornerRecognition, NativeStemsHeadCornerSystem},
     recognize::{
         GridLinesRecognition, recognize_grid_lines, recognize_native_beams_with_stem_seeds,
     },
@@ -788,101 +772,52 @@ pub(super) fn native_predecessor_page(image: &str) -> NativePredecessorPage {
         .unwrap_or_else(|error| panic!("{image}: LEDGERS failed: {error}"));
     let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
         .unwrap_or_else(|error| panic!("{image}: HEADS failed: {error}"));
-    let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads).ok();
-    let corners = materialize_native_stems_head_corners(&heads, &stem_seeds)
-        .unwrap_or_else(|error| panic!("{image}: STEMS corners failed: {error}"));
-    let head_seeds = materialize_native_stems_head_seeds(&grid, &stem_seeds, &corners)
-        .unwrap_or_else(|error| panic!("{image}: STEMS head seeds failed: {error}"));
-    let beam_stumps =
-        materialize_native_stems_beam_stumps(&grid, &beams, &heads, &stem_seeds, &head_seeds)
-            .unwrap_or_else(|error| panic!("{image}: STEMS beam stumps failed: {error}"));
-    let beam_vlinkers =
-        materialize_native_stems_beam_vlinkers(&grid, &beams, &stem_seeds, &beam_stumps)
-            .unwrap_or_else(|error| panic!("{image}: STEMS beam VLinkers failed: {error}"));
-    let beam_reachability =
-        materialize_native_stems_beam_reachability(&beams, &beam_stumps, &beam_vlinkers, &corners)
-            .unwrap_or_else(|error| panic!("{image}: STEMS beam reachability failed: {error}"));
-    let head_stumps =
-        materialize_native_stems_head_stumps(&grid, &stem_seeds, &corners, &head_seeds)
-            .unwrap_or_else(|error| panic!("{image}: STEMS head stumps failed: {error}"));
-    let beam_builders = materialize_native_stems_beam_builders(
-        &grid,
-        &beams,
-        &ledgers,
-        &heads,
-        &stem_seeds,
-        &beam_stumps,
-        &beam_vlinkers,
-        &corners,
-        &head_stumps,
-        &beam_reachability,
-    )
-    .unwrap_or_else(|error| panic!("{image}: STEMS beam builders failed: {error}"));
-    let head_reachability = materialize_native_stems_head_corner_reachability(
-        &grid,
-        &stem_seeds,
-        &heads,
-        &corners,
-        &head_seeds,
-        &head_stumps,
-        &beam_stumps,
-        &beam_vlinkers,
-        &beam_reachability,
-    )
-    .unwrap_or_else(|error| panic!("{image}: STEMS head reachability failed: {error}"));
-    let head_builders = materialize_native_stems_head_builders(
-        &grid,
-        &beams,
-        &ledgers,
-        &heads,
-        &stem_seeds,
-        &beam_stumps,
-        &beam_vlinkers,
-        &head_stumps,
-        &beam_builders,
-        &head_reachability,
-        INSPECT_PROFILE,
-    )
-    .unwrap_or_else(|error| panic!("{image}: STEMS head builders failed: {error}"));
-    let plans = materialize_native_stems_beam_link_plans(
-        &stem_seeds,
-        &beam_stumps,
-        &beam_vlinkers,
-        &corners,
-        &head_stumps,
-        &beam_reachability,
-        &beam_builders,
-        &head_builders,
-    )
-    .unwrap_or_else(|error| panic!("{image}: STEMS beam link plans failed: {error}"));
-    let first_system_visible_modeled_count = head_builders
+    let (components, sig) = if image == "chula.png" {
+        let prepared = prepare_native_stems(
+            &grid,
+            &headers,
+            &stem_seeds,
+            &beams,
+            &ledgers,
+            &heads,
+            INSPECT_PROFILE,
+        )
+        .unwrap_or_else(|error| panic!("{image}: STEMS preparation failed: {error}"));
+        (prepared.components, Some(prepared.sig))
+    } else {
+        let components = materialize_native_stems_components(
+            &grid,
+            &stem_seeds,
+            &beams,
+            &ledgers,
+            &heads,
+            INSPECT_PROFILE,
+        )
+        .unwrap_or_else(|error| panic!("{image}: STEMS preparation failed: {error}"));
+        let sig = assemble_native_sig(&grid, &headers, &beams, &ledgers, &heads).ok();
+        (components, sig)
+    };
+    let first_system_visible_modeled_count = components
+        .head_builders
         .systems
         .first()
         .and_then(|system| system.registry_events.last())
         .map(|event| event.modeled_count_after)
         .unwrap_or_else(|| panic!("{image}: first STEMS system has no registry boundary"));
-    let scheduler = materialize_native_stems_beam_scheduler_frontiers(
-        &beams,
-        &beam_stumps,
-        &beam_vlinkers,
-        &beam_builders,
-        &plans,
-    )
-    .unwrap_or_else(|error| panic!("{image}: STEMS beam scheduler failed: {error}"));
     NativePredecessorPage {
         grid,
         stem_seeds,
-        beam_stumps,
-        beam_vlinkers,
-        head_corners: corners,
-        head_reachability,
-        beam_reachability,
-        beam_builders,
-        modeled_canonical_glyphs: head_builders.modeled_canonical_glyphs.clone(),
-        head_builders,
+        beam_stumps: components.beam_stumps,
+        beam_vlinkers: components.beam_vlinkers,
+        head_corners: components.head_corners,
+        head_reachability: components.head_reachability,
+        beam_reachability: components.beam_reachability,
+        beam_builders: components.beam_builders,
+        modeled_canonical_glyphs: components.head_builders.modeled_canonical_glyphs.clone(),
+        head_builders: components.head_builders,
         first_system_visible_modeled_count,
-        plans,
-        scheduler,
+        plans: components.plans,
+        scheduler: components.scheduler,
         sig,
     }
 }
