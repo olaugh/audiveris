@@ -118,6 +118,7 @@ use audiveris_omr::{
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
+        initialize_native_stems_beam_sides_carrier_from_modeled_registry,
         remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::NativeStemsBeamSource,
@@ -6500,6 +6501,31 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .find(|bindings| bindings.system_id == 1)
         .expect("system 1 bindings")
         .clone();
+    let first_checker = b15_hydration::checker_context_for_page(&checker_page);
+    let first_context = NativeStemsBeamSidesContext {
+        plans: &hydrated.plans,
+        builders: &hydrated.builder,
+        stumps: &hydrated.stumps,
+        vlinkers: &hydrated.vlinkers,
+        reachability: &hydrated.reachability,
+        head_corners: &hydrated.head_corners,
+        checker: &first_checker,
+        relation_parameters: hydrated.relation_parameters,
+    };
+    let (initialized_first_carrier, initialized_first_transaction) =
+        initialize_native_stems_beam_sides_carrier_from_modeled_registry(
+            &hydrated.scheduler,
+            &sig,
+            &bindings,
+            first_context,
+            &modeled_registry,
+            NativeStemsBeamSheetEditState {
+                stub_modified: true,
+                book_modified: true,
+                book_dirty: true,
+            },
+        )
+        .expect("atomic native first SIDES carrier");
 
     let (first_preparation, mut first_transaction_state) =
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
@@ -6858,6 +6884,65 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .linked_b_linkers
             .contains(reference)
     }));
+
+    let manual_first_carrier = NativeStemsBeamSidesCarrier {
+        scheduler: (*outer_resume.resume.advanced_system).clone(),
+        latest_base_apply: (*native_base.state_after).clone(),
+        sig: sig.clone(),
+        bindings: bindings.clone(),
+        b_cells: cells.clone(),
+        s_cells: s_cells.clone(),
+    };
+    assert_eq!(
+        initialized_first_carrier.scheduler,
+        manual_first_carrier.scheduler
+    );
+    assert_eq!(initialized_first_carrier.sig, manual_first_carrier.sig);
+    assert_eq!(
+        initialized_first_carrier.bindings,
+        manual_first_carrier.bindings
+    );
+    assert_eq!(
+        initialized_first_carrier.b_cells,
+        manual_first_carrier.b_cells
+    );
+    assert_eq!(
+        initialized_first_carrier.s_cells,
+        manual_first_carrier.s_cells
+    );
+    let mut expected_latest_base = manual_first_carrier.latest_base_apply.clone();
+    for stem in &mut expected_latest_base
+        .transaction_state
+        .system_stems
+        .known_stems
+    {
+        let vertex = initialized_first_carrier.bindings.stem_vertices[&stem.stem_identity];
+        stem.abnormal = initialized_first_carrier.sig.vertices[vertex.0].abnormal;
+    }
+    assert_eq!(
+        initialized_first_carrier.latest_base_apply,
+        expected_latest_base
+    );
+    assert_eq!(initialized_first_transaction.preparation, first_preparation);
+    assert_eq!(initialized_first_transaction.create, first_create);
+    assert_eq!(
+        initialized_first_transaction.reuse_live_state,
+        first_live_state
+    );
+    assert_eq!(initialized_first_transaction.reuse, first_reuse);
+    assert_eq!(initialized_first_transaction.base, native_base);
+    assert_eq!(initialized_first_transaction.siblings, actual);
+    assert_eq!(initialized_first_transaction.heads, head_actual);
+    assert_eq!(initialized_first_transaction.outer_resume, outer_resume);
+
+    // All later transactions now start from the production initializer's
+    // returned carrier rather than the independently reconstructed state.
+    sig = initialized_first_carrier.sig.clone();
+    bindings = initialized_first_carrier.bindings.clone();
+    cells = initialized_first_carrier.b_cells.clone();
+    s_cells = initialized_first_carrier.s_cells.clone();
+    let native_base = &initialized_first_transaction.base;
+    let outer_resume = &initialized_first_transaction.outer_resume;
 
     // Carry transaction 2 through a graph-derived B14 rollover before any
     // transaction-2 family fixture is opened. Glyph selection now comes from
@@ -27064,7 +27149,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             &hydrated.vlinkers,
             &hydrated.reachability,
             &hydrated.builder,
-            &native_base,
+            native_base,
             &hydrated.transaction,
             &mut rollback_cells,
         )

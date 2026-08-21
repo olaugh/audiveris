@@ -1234,7 +1234,8 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
     ),
     NativeStemsBeamVLinkTransactionError,
 > {
-    if scheduler_system.system_id != 1 || plan_system.system_id != 1 || registry.system_id != 1 {
+    let system_id = scheduler_system.system_id;
+    if system_id == 0 || plan_system.system_id != system_id || registry.system_id != system_id {
         return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
     }
     let last_id = i32::try_from(registry.len())
@@ -1245,7 +1246,7 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
         inter_index_last_id: last_id,
     };
     let mut state = NativeStemsBeamVLinkTransactionState {
-        scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 },
+        scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id },
         glyph_index: NativeStemsBeamGlyphIndexTransactionState {
             persistent_ids,
             alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
@@ -1257,7 +1258,7 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
         line_states: Vec::new(),
         applied_line_deltas: Vec::new(),
         system_stems: NativeStemsBeamSystemStemTransactionState {
-            system_id: 1,
+            system_id,
             next_stem_identity: 0,
             authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
             known_stems: Vec::new(),
@@ -1273,7 +1274,7 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
         registry,
         proof,
     )?;
-    state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 };
+    state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id };
     validate_transaction_state(&state)?;
     Ok((preparation, state))
 }

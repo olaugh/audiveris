@@ -35,9 +35,11 @@ use crate::{
     },
     native_stems_beam_vlink_base_apply::{
         NativeStemsBeamInterIndexAppend, NativeStemsBeamInterIndexLookup,
-        NativeStemsBeamNextPersistentIdLookup, NativeStemsBeamVLinkBaseApplyState,
-        NativeStemsBeamVLinkBaseApplyTransaction, NativeStemsBeamVLinkBaseRolloverAuthority,
+        NativeStemsBeamNextPersistentIdLookup, NativeStemsBeamSheetEditState,
+        NativeStemsBeamVLinkBaseApplyState, NativeStemsBeamVLinkBaseApplyTransaction,
+        NativeStemsBeamVLinkBaseRolloverAuthority,
         apply_native_stems_beam_vlink_base_transaction_to_native_sig,
+        initialize_native_stems_beam_vlink_base_apply_state_from_native_sig,
         roll_native_stems_beam_vlink_base_apply_state,
     },
     native_stems_beam_vlink_head_links::{
@@ -58,6 +60,7 @@ use crate::{
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamNativeBLinkerCell, NativeStemsBeamNativeSiblingTransaction,
         apply_native_stems_beam_vlink_sibling_transaction_to_native_sig,
+        initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphEqualsScan,
@@ -68,6 +71,7 @@ use crate::{
         NativeStemsGlyphRegistryAuthority, NativeStemsModeledGlyphRegistry,
         apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
+        initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
@@ -391,6 +395,234 @@ pub fn advance_native_stems_beam_sides_transaction_from_modeled_registry(
         CarrierPass::Sides,
     )
     .and_then(NativeStemsBeamCarrierTransaction::into_sides)
+}
+
+/// Execute the first SIDES frontier and construct its production carrier.
+///
+/// All mutable graph, binding, B-cell, and S-cell authorities are cloned or
+/// initialized locally. A failure at any B12-B19 boundary returns no partial
+/// carrier.
+pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
+{
+    let frontier = match &scheduler.status {
+        NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
+        _ => {
+            return Err(stage(
+                "first-carrier-pass",
+                "scheduler is not awaiting a V frontier",
+            ));
+        }
+    };
+    if !frontier_matches_carrier_pass(frontier, CarrierPass::Sides) {
+        return Err(stage(
+            "first-carrier-pass",
+            "frontier is not a SIDES transaction",
+        ));
+    }
+    sig.validate_integrity()
+        .map_err(|error| stage("first-carrier-SIG", error))?;
+    bindings
+        .validate_against(sig)
+        .map_err(|error| stage("first-carrier-bindings", error))?;
+
+    let relation_parameters = NativeStemsBeamRelationParameters {
+        profile: frontier.plan.stem_profile,
+        ..context.relation_parameters
+    };
+    let (preparation, mut transaction_state) =
+        initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
+            scheduler,
+            context.plans,
+            registry,
+        )
+        .map_err(|error| stage("first-B12-preparation", error))?;
+    let candidate = materialize_native_stems_beam_frontier_candidate(
+        scheduler,
+        context.plans,
+        &transaction_state,
+    )
+    .map_err(|error| stage("first-B12-candidate", error))?;
+    if !transaction_state
+        .selected_glyph_bindings
+        .iter()
+        .any(|selected| {
+            preparation.selected_glyphs.contains(&selected.reference)
+                && selected.content == candidate
+        })
+    {
+        return Err(stage(
+            "first-B12-glyph-authority",
+            "candidate is not a current selected modeled canonical",
+        ));
+    }
+    transaction_state.glyph_index.exhaustive_lookup = None;
+
+    let create = apply_native_stems_beam_vlink_create_stem_transaction(
+        scheduler,
+        context.builders,
+        context.plans,
+        &mut transaction_state,
+        context.checker,
+    )
+    .map_err(|error| stage("first-B12", error))?;
+    let mut s_cells = initialize_native_stems_beam_s_linker_cells(context.head_corners)
+        .map_err(|error| stage("first-S-cells", error))?;
+    let reuse_live_state = project_native_stems_beam_vlink_reuse_live_state(
+        sig,
+        bindings,
+        scheduler,
+        context.plans,
+        &s_cells,
+        &transaction_state.system_stems,
+    )
+    .map_err(|error| stage("first-B13-live-state", error))?;
+    let reuse = evaluate_native_stems_beam_vlink_reuse_check(
+        scheduler,
+        context.plans,
+        context.stumps,
+        context.vlinkers,
+        &create,
+        &transaction_state,
+        &reuse_live_state,
+        relation_parameters,
+    )
+    .map_err(|error| stage("first-B13", error))?;
+    let mut base_state = initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
+        &transaction_state,
+        &reuse,
+        sig,
+        bindings,
+        context.stumps,
+        sheet_edit,
+    )
+    .map_err(|error| stage("first-B14-initialize", error))?;
+    let flag_base_state = base_state.clone();
+    let mut carried_sig = sig.clone();
+    let mut carried_bindings = bindings.clone();
+    let base = apply_native_stems_beam_vlink_base_transaction_to_native_sig(
+        scheduler,
+        context.plans,
+        context.stumps,
+        context.vlinkers,
+        &create,
+        &reuse_live_state,
+        relation_parameters,
+        &reuse,
+        &mut base_state,
+        &mut carried_sig,
+        &mut carried_bindings,
+    )
+    .map_err(|error| stage("first-B14", error))?;
+
+    let mut b_cells = initialize_native_stems_beam_b_linker_cells(context.reachability)
+        .map_err(|error| stage("first-B-cells", error))?;
+    let linked = b_cells
+        .iter()
+        .filter(|cell| cell.reference == frontier.b_linker)
+        .map(|cell| cell.linked)
+        .collect::<Vec<_>>();
+    let [linked] = linked.as_slice() else {
+        return Err(stage(
+            "first-B15-target",
+            "shared B-cell cardinality is not one",
+        ));
+    };
+    let mut flag_state = NativeStemsBeamVLinkBLinkerFlagState {
+        system_id: scheduler.system_id,
+        base_apply_state_before: flag_base_state,
+        target_b_linker: frontier.b_linker,
+        linked: *linked,
+        committed: None,
+    };
+    let flag = apply_native_stems_beam_vlink_b_linker_flag_transaction(
+        scheduler,
+        context.plans,
+        context.stumps,
+        context.vlinkers,
+        &create,
+        &reuse_live_state,
+        relation_parameters,
+        &reuse,
+        &base,
+        &mut flag_state,
+    )
+    .map_err(|error| stage("first-B15", error))?;
+    let siblings = apply_native_stems_beam_vlink_sibling_transaction_to_native_sig(
+        &mut carried_sig,
+        &carried_bindings,
+        scheduler,
+        context.stumps,
+        context.vlinkers,
+        context.reachability,
+        context.builders,
+        &base,
+        &flag,
+        &mut b_cells,
+    )
+    .map_err(|error| stage("first-B16", error))?;
+    let heads = apply_native_stems_beam_vlink_head_transaction_to_native_sig(
+        &mut carried_sig,
+        &carried_bindings,
+        scheduler,
+        context.plans,
+        context.builders,
+        context.head_corners,
+        context.reachability,
+        &flag,
+        &siblings,
+        &b_cells,
+        &mut s_cells,
+    )
+    .map_err(|error| stage("first-B17", error))?;
+    let outer_resume = apply_native_stems_beam_outer_and_resume_transaction(
+        scheduler,
+        context.vlinkers,
+        context.builders,
+        context.plans,
+        context.reachability,
+        &flag,
+        &siblings,
+        &heads,
+        &mut b_cells,
+    )
+    .map_err(|error| stage("first-B18/B19", error))?;
+
+    let mut latest_base_apply = (*base.state_after).clone();
+    reconcile_known_stems(&mut latest_base_apply, &carried_sig, &carried_bindings)?;
+    carried_sig
+        .validate_integrity()
+        .map_err(|error| stage("first-post-transaction-SIG", error))?;
+    carried_bindings
+        .validate_against(&carried_sig)
+        .map_err(|error| stage("first-post-transaction-bindings", error))?;
+
+    let carrier = NativeStemsBeamSidesCarrier {
+        scheduler: (*outer_resume.resume.advanced_system).clone(),
+        latest_base_apply,
+        sig: carried_sig,
+        bindings: carried_bindings,
+        b_cells,
+        s_cells,
+    };
+    let transaction = NativeStemsBeamSidesTransaction {
+        preparation,
+        create,
+        reuse_live_state,
+        reuse,
+        base,
+        flag,
+        siblings,
+        heads,
+        outer_resume,
+    };
+    Ok((carrier, transaction))
 }
 
 /// Execute one typed STUMPS frontier through B12-B17 and resume its stump
