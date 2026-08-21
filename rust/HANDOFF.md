@@ -8372,3 +8372,23 @@ Keep `AUDIVERIS_DEBUG_PURGE=1` in mind: it prints per-peak removal stages on the
 Rust side, and the same diagnosis on the Java side is a temporary log in
 `StaffProjector.removePeak` that walks the stack for the calling `purge*` method
 (reverted after use, easy to reapply).
+
+## Boundary 164: Chula system-1 wider reuse composition
+
+The page-wide phase-1 driver now routes the three already-authenticated wider
+existing-stem expansions at Chula system-1 orders 67, 70, and 73 through their
+owned native transactions before resuming the ordinary generic loop. The
+production adapter consumes only the reduced accepted free-seed glyph state
+that `NativeStemsComponentRecognition` owns; it does not hydrate a Java glyph
+index or consult a result fixture. Single-head reuse remains on the generic
+path (order 72 passes without a special dispatch).
+
+The real Chula page now completes system 1 and fails closed at the next genuine
+gap: system 2 queue 54, x46/SIG94, a wider start/head/chunk expansion. The
+focused page-composition regression proves the old order-67, order-70, and
+order-73 failures are gone and that no partially completed page is returned.
+The richer expansion diagnostic records system, queue, head, selected corner,
+builder/profile, and item composition. No Java oracle or frozen fixture changed.
+Next: instrument the system-2 queue-54 Java transaction and replace the bounded
+routing with a generic existing-stem multi-head dispatcher as wider cases make
+the invariant explicit.

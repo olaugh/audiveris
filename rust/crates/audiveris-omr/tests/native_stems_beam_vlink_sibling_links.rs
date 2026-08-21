@@ -7596,6 +7596,37 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     assert_eq!(retained_for_stumps.len(), 24);
 }
 
+/// The page-wide production driver must consume the three authenticated
+/// wider existing-stem reuse frontiers in Chula system 1 before it exposes
+/// the still-unported system-2 multi-head expansion. This is intentionally a
+/// fail-closed progress gate: it rejects at the next system rather than
+/// silently publishing a partial page.
+#[test]
+fn chula_page_drive_consumes_system_one_multi_head_reuses_atomically() {
+    let path = repo_root().join("data/examples/chula.png");
+    let grid = recognize_grid_lines(path).expect("Chula GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Chula HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Chula STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Chula BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Chula LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Chula HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Chula native STEMS preparation");
+
+    let error = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect_err("system 2 wider multi-head expansion remains fail-closed");
+    assert_eq!(error.phase, "HEADS phase-1 page drive");
+    assert!(error.message.contains("system 2"));
+    assert!(error.message.contains("queue 54 head x46/SIG94"));
+    assert!(!error.message.contains("queue 67 head x73/SIG18"));
+    assert!(!error.message.contains("queue 70 head x1/SIG35"));
+    assert!(!error.message.contains("queue 73 head x75/SIG96"));
+}
+
 /// Direct atomic gate at the first real Java competing-hook checkpoint.
 ///
 /// The checkpoint is reached by executing native Allegretto transactions

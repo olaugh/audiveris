@@ -39,6 +39,9 @@ use crate::{
         NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
+        advance_native_stems_head_multi_head_reuse_c_link_order67_from_glyphs,
+        advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs,
+        advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs,
         advance_native_stems_head_phase_two_append_retry, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -1081,6 +1084,65 @@ impl NativeStemsPreparedRecognition {
                         format!("system {system_id} exceeded its bounded head-event count"),
                         "HEADS phase-1 page drive",
                     ));
+                }
+                let authenticated_reuse = if carrier.frontier_consumed {
+                    let head = &carrier.heads[carrier.current_index];
+                    match (
+                        carrier.current_index,
+                        head.reference.x_ordinal,
+                        head.reference.sig_ordinal,
+                    ) {
+                        (67, 73, 18) => Some(
+                            advance_native_stems_head_multi_head_reuse_c_link_order67_from_glyphs(
+                                &carrier,
+                                head_corners,
+                                head_reachability,
+                                &seed_glyphs.free_glyphs,
+                                head_builders,
+                                plans,
+                                &self.stem_checker,
+                                &registry,
+                            ),
+                        ),
+                        (70, 1, 35) => Some(
+                            advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs(
+                                &carrier,
+                                head_corners,
+                                head_reachability,
+                                &seed_glyphs.free_glyphs,
+                                head_builders,
+                                plans,
+                                &self.stem_checker,
+                                &registry,
+                            ),
+                        ),
+                        (73, 75, 96) => Some(
+                            advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs(
+                                &carrier,
+                                head_corners,
+                                head_reachability,
+                                &seed_glyphs.free_glyphs,
+                                head_builders,
+                                plans,
+                                &self.stem_checker,
+                                &registry,
+                            ),
+                        ),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(continuation) = authenticated_reuse {
+                    let continuation = continuation.map_err(|error| {
+                        phase(
+                            format!("system {system_id}: {error}"),
+                            "HEADS phase-1 page drive",
+                        )
+                    })?;
+                    carrier = (*continuation.state_after).clone();
+                    events.push(NativeStemsHeadPhase1DriveEvent::Continuation(continuation));
+                    continue;
                 }
                 if carrier.frontier_consumed {
                     let continuation = continue_native_stems_head_linking_phase1(

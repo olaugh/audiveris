@@ -8719,7 +8719,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
     head_reachability: &NativeStemsHeadCornerReachabilitySystem,
-    stem_seeds: &NativeStemSeedSystemRecognition,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
@@ -8872,15 +8872,12 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
                     "expansion stump is not a retained vertical seed",
                 ));
             };
-            let seed = stem_seeds
-                .free_glyphs
-                .get(free_glyph_ordinal)
-                .ok_or_else(|| {
-                    stage(
-                        "HEADS-CLink-glyph",
-                        "expansion free vertical-seed ordinal is unavailable",
-                    )
-                })?;
+            let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
+                stage(
+                    "HEADS-CLink-glyph",
+                    "expansion free vertical-seed ordinal is unavailable",
+                )
+            })?;
             if seed.bounds != stump.bounds || seed.weight != stump.weight {
                 return Err(stage(
                     "HEADS-CLink-glyph",
@@ -9589,11 +9586,44 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_order67_from_glyphs(
+        carrier,
+        head_corners,
+        head_reachability,
+        &stem_seeds.free_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+    )
+}
+
+/// Production composition adapter for the authenticated order-67 reuse.
+///
+/// The page-wide STEMS carrier deliberately retains only accepted free seed
+/// glyphs, which are the sole stem-seed authority consumed by the reuse
+/// transaction. Keep the public oracle-facing wrapper above typed to the full
+/// recognition product while allowing the production driver to supply its
+/// owned reduced state.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order67_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
         head_corners,
         head_reachability,
-        stem_seeds,
+        stem_seed_glyphs,
         head_builders,
         plans,
         checker,
@@ -9645,11 +9675,37 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs(
+        carrier,
+        head_corners,
+        head_reachability,
+        &stem_seeds.free_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
         head_corners,
         head_reachability,
-        stem_seeds,
+        stem_seed_glyphs,
         head_builders,
         plans,
         checker,
@@ -9703,7 +9759,7 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
         carrier,
         head_corners,
         head_reachability,
-        stem_seeds,
+        &stem_seeds.free_glyphs,
         head_builders,
         plans,
         checker,
@@ -9754,11 +9810,37 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order73(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs(
+        carrier,
+        head_corners,
+        head_reachability,
+        &stem_seeds.free_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
     advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         carrier,
         head_corners,
         head_reachability,
-        stem_seeds,
+        stem_seed_glyphs,
         head_builders,
         plans,
         checker,
@@ -9813,7 +9895,7 @@ pub fn advance_native_stems_head_right_side_reuse_c_link_order93(
         carrier,
         head_corners,
         head_reachability,
-        stem_seeds,
+        &stem_seeds.free_glyphs,
         head_builders,
         plans,
         checker,
@@ -10735,7 +10817,23 @@ fn advance_native_stems_head_c_link_at_frontier(
     if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
-            "selected frontier is not the bounded start-C shape",
+            format!(
+                "selected frontier is not the bounded start-C shape: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} profile {}/{} items {:?}",
+                head_corners.system_id,
+                expected_current_index,
+                frontier.head.x_ordinal,
+                frontier.head.sig_ordinal,
+                frontier.next_corner.horizontal,
+                frontier.next_corner.vertical,
+                builder.builder_ordinal,
+                builder.max_stem_profile,
+                plans.link_profile,
+                builder
+                    .items
+                    .iter()
+                    .map(|item| (item.kind, item.glyph, item.target, item.contribution))
+                    .collect::<Vec<_>>(),
+            ),
         ));
     }
     let Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
