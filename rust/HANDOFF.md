@@ -8740,5 +8740,32 @@ Strict Boundary-173 runner/fixture pins are
 Focused 1/1 and full sibling 20/20 (148.29s) pass; strict all-features
 workspace Clippy, formatting, and diff checks pass. The next measured system-3
 head is queue 116 x66/SIG33; Boundary 174 does not execute it. The exact remote
-baseline is `df2e3b6e5`: Build & Test 32505335915 and Rust port 32505335796
+baseline is `02f09e64b`: Build & Test 32513292289 and Rust port 32513292385
 both succeeded. Wider-corpus completion remains open.
+
+## Boundary 175: Allegretto system-3 queue-116 prelinked closure
+
+The generic phase-1 continuation consumes x66/SIG33/Inter1743. LEFT is already
+linked and closed through Stem2380, RIGHT is already closed, and Stem2380 also
+carries x67/SIG34. Java returns `true`, closes x67 LEFT then RIGHT, and reports
+exactly two value changes. SIG vertices/edges remain 649/593, system stems stay
+52, relation state and both phase-2 worklists remain unchanged, and the carrier
+advances to queue 117 x86/SIG18/Inter1711. No production source seam changes.
+
+The minimized 13-line / 16,627-byte fixture is byte-identical across warmup
+plus two fresh runs. Fixture, runner, transformed probe, emitted body, and
+semantic-pass SHA-256 values are
+`cc6b2240cc6f6fa13fa294ef17eb01cae65afc8189fba4e4a244d99d76891a8e`,
+`2e2c10929798d25ea10ec0b5912288db59e5feb71f806c784fd60b445fbe89f3`,
+`c0aa6ac09a1d1178134e9b0b65ad0b7166a5c77e3e2ed0f85f574b2ffecb81e3`,
+`1e7e336ad5b0c7f7315ec97bfa9807c8e04d57233c29b3b4f0014fd1422e68c9`,
+and `94d9b566379c926f214a9e37672e1d97a0f5287d2252a48a1d787f7373584564`.
+Strict Boundary-174 runner/fixture pins are
+`b3c426db85a5c5402c7e8d5741e249c15905e0f2d8f4888d491ee9783982afa4` /
+`01bda66e6eecf7d46bdd21f3d2d4d8ec977deff9bc51f01b4a3291092680fca2`.
+
+Focused 1/1 and full sibling 20/20 (151.16s) pass with formatting, strict
+all-features workspace Clippy, and diff checks. The exact remote baseline is
+Boundary 174 commit `02f09e64b`: Build & Test 32513292289 and Rust port
+32513292385 both succeeded. Wider-corpus completion remains open at queue 117
+x86/SIG18.

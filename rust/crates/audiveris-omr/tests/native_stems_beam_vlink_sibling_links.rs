@@ -10008,6 +10008,68 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         before115.unlinked_heads.len() + 1
     );
 
+    // Boundary 175: queue 116 is an ordinary prelinked closure. Its LEFT
+    // side is already linked and closed through Stem2380, its RIGHT side is
+    // already closed, and Java closes both S cells on the other incident
+    // head x67 without mutating the SIG or either phase-two worklist.
+    let before116 = queue115.state_after.as_ref().clone();
+    let queue116 = continue_native_stems_head_linking_phase1(
+        &before116,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("generic queue-116 prelinked closure");
+    assert_eq!(queue116.processed_head.x_ordinal, 66);
+    assert_eq!(queue116.processed_head.sig_ordinal, 33);
+    assert_eq!(queue116.returned_linked, Some(true));
+    assert_eq!(
+        queue116
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, true, true, None, None),
+            (NativeStemHeadSide::Right, false, true, None, None),
+        ]
+    );
+    assert_eq!(queue116.closed_value_changes, 2);
+    assert_eq!(
+        queue116
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (67, 34, NativeStemHeadSide::Left),
+            (67, 34, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(queue116.state_after.current_index, 117);
+    assert!(queue116.state_after.frontier_consumed);
+    assert_eq!(queue116.state_after.heads[117].reference.x_ordinal, 86);
+    assert_eq!(queue116.state_after.heads[117].reference.sig_ordinal, 18);
+    assert_eq!(
+        queue116.state_after.beam_state.sig,
+        before116.beam_state.sig
+    );
+    assert_eq!(
+        queue116.state_after.undefined_sides,
+        before116.undefined_sides
+    );
+    assert_eq!(
+        queue116.state_after.unlinked_heads,
+        before116.unlinked_heads
+    );
+
     let order115_oracle = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order115.txt"),
     )
@@ -10110,6 +10172,103 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(
         order115_field("nativeScope"),
         "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order53MultiSideAndOrder115NoLink"
+    );
+
+    let order116_oracle = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order116.txt"),
+    )
+    .expect("frozen Allegretto system-3 queue-116 Java closure");
+    assert_eq!(
+        sha256_hex(order116_oracle.as_bytes()),
+        "cc6b2240cc6f6fa13fa294ef17eb01cae65afc8189fba4e4a244d99d76891a8e"
+    );
+    let order116_rows = order116_oracle
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(order116_rows.len(), 11);
+    let order116_result = order116_rows
+        .iter()
+        .find(|line| line.contains("headOrder 116 headX 66 headSig 33 headInterId 1743"))
+        .expect("queue-116 prelinked closure result");
+    assert!(order116_result.contains(
+        "sidesBefore [LEFT:true:true,RIGHT:false:true] decisions [LEFT:SkipAlreadyLinked,RIGHT:SkipClosed]"
+    ));
+    assert!(order116_result.contains(
+        "incident [stem2380:headSideLEFT:heads[x66:sig33:id1743:sideLEFT,x67:sig34:id1745:sideLEFT]] returned true"
+    ));
+    assert!(order116_result.contains(
+        "closureWrites [x67:sig34:LEFT:false->true,x67:sig34:RIGHT:false->true] closedValueChanges 2 unlinkedCount 0"
+    ));
+    assert!(order116_result.contains(
+        "sigVerticesBefore 649 sigVerticesAfter 649 sigEdgesBefore 593 sigEdgesAfter 593 systemStemsBefore 52 systemStemsAfter 52"
+    ));
+    assert!(
+        order116_result
+            .contains("nextHeadOrder 117 nextHeadX 86 nextHeadSig 18 nextHeadInterId 1711")
+    );
+    let order116_summary = order116_rows[10]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let order116_field = |name: &str| {
+        order116_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| order116_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto system-3 order-116 summary field")
+    };
+    assert_eq!(
+        order116_field("schema"),
+        "stems-head-phase-prefix-allegretto-system3-order116"
+    );
+    assert_eq!(order116_field("rows"), "10");
+    assert_eq!(
+        order116_field("baseSystem3Order115RunnerSha256"),
+        "b3c426db85a5c5402c7e8d5741e249c15905e0f2d8f4888d491ee9783982afa4"
+    );
+    assert_eq!(
+        order116_field("baseSystem3Order115FixtureSha256"),
+        "01bda66e6eecf7d46bdd21f3d2d4d8ec977deff9bc51f01b4a3291092680fca2"
+    );
+    assert_eq!(
+        order116_field("probeSourceSha256"),
+        "c0aa6ac09a1d1178134e9b0b65ad0b7166a5c77e3e2ed0f85f574b2ffecb81e3"
+    );
+    assert_eq!(
+        order116_field("runnerSourceSha256"),
+        "2e2c10929798d25ea10ec0b5912288db59e5feb71f806c784fd60b445fbe89f3"
+    );
+    assert_eq!(
+        order116_field("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system3-order116.sh",
+            ))
+            .expect("active Allegretto system-3 order-116 runner")
+        )
+    );
+    assert_eq!(
+        order116_field("emittedBodySha256"),
+        "1e7e336ad5b0c7f7315ec97bfa9807c8e04d57233c29b3b4f0014fd1422e68c9"
+    );
+    assert_eq!(
+        order116_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", order116_rows[..10].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        order116_field("semanticPassSha256"),
+        "94d9b566379c926f214a9e37672e1d97a0f5287d2252a48a1d787f7373584564"
+    );
+    assert_eq!(order116_field("freshRuns"), "2");
+    assert_eq!(order116_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        order116_field("nativeScope"),
+        "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order116PrelinkedClosure"
+    );
+    assert_eq!(
+        order116_field("javaEvidence"),
+        "ReturnedBeforeOneHundredEighteenthHead"
     );
 
     // Open the frozen Java result only after the native compound registry,
