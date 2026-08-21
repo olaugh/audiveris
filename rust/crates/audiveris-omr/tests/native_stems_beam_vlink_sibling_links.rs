@@ -1434,14 +1434,13 @@ fn carry_allegretto_sides_transactions(
         hydrated.relation_parameters
     );
     let (mut carrier, first) = initialize_native_stems_beam_sides_carrier_from_modeled_registry(
-        scheduler,
-        sig,
-        bindings,
-        context,
-        &registry,
-        hydrated.state_before.base_apply_state_before.sheet_edit,
+        scheduler, sig, bindings, context, &registry,
     )
     .expect("Allegretto first native SIDES transaction");
+    assert_eq!(
+        carrier.latest_base_apply.sheet_edit,
+        hydrated.state_before.base_apply_state_before.sheet_edit
+    );
     let mut transactions = vec![first];
     while transactions.len() < transaction_count {
         let transaction = advance_native_stems_beam_sides_transaction_from_modeled_registry(
@@ -6422,11 +6421,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             &bindings,
             first_context,
             &modeled_registry,
-            NativeStemsBeamSheetEditState {
-                stub_modified: true,
-                book_modified: true,
-                book_dirty: true,
-            },
         )
         .expect("atomic native first SIDES carrier");
 

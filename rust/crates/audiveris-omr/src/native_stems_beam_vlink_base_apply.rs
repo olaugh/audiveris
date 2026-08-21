@@ -261,6 +261,18 @@ pub struct NativeStemsBeamSheetEditState {
     pub book_dirty: bool,
 }
 
+impl NativeStemsBeamSheetEditState {
+    /// Native recognition reaches STEMS after earlier graph-building stages
+    /// have already marked the sheet stub, book, and book dirty in Java.
+    pub const fn at_stems_entry() -> Self {
+        Self {
+            stub_modified: true,
+            book_modified: true,
+            book_dirty: true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeStemsBeamInterIndexLookup {
     Absent,

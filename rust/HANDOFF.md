@@ -7791,6 +7791,20 @@ full sibling suite passes 14/14 in 159.65s; strict workspace
 all-target/all-feature Clippy passes in 24.34s; formatting and diff checks are
 clean. Wider system carriage is now the next input/branch boundary.
 
+## Boundary 146: production-owned STEMS entry edit state
+
+`NativeStemsBeamSheetEditState::at_stems_entry` now owns the Java/native entry
+invariant that the earlier graph-building stages have already marked the sheet
+stub, book, and book dirty. The atomic first-carrier initializer no longer
+accepts this mutable state from callers. Chula and Allegretto independently
+match the former strict B14 entry state and retain identical transaction and
+terminal results.
+
+Focused Chula and Allegretto hook gates pass; the full sibling suite passes
+14/14 in 157.49s; strict workspace all-target/all-feature Clippy passes in
+22.85s; formatting and diff checks are clean. The first carrier now has no
+fixture-derived execution input; wider system carriage remains next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.

@@ -407,7 +407,6 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
     bindings: &NativeSigSystemBindings,
     context: NativeStemsBeamSidesContext<'_>,
     registry: &NativeStemsModeledGlyphRegistry,
-    sheet_edit: NativeStemsBeamSheetEditState,
 ) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
 {
     let frontier = match &scheduler.status {
@@ -501,7 +500,7 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
         sig,
         bindings,
         context.stumps,
-        sheet_edit,
+        NativeStemsBeamSheetEditState::at_stems_entry(),
     )
     .map_err(|error| stage("first-B14-initialize", error))?;
     let flag_base_state = base_state.clone();
