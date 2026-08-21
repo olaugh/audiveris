@@ -41,6 +41,7 @@ use crate::{
         NativeStemsBeamSchedulerSystem,
     },
     native_stems_beam_vlinkers::NativeStemsBeamVLinkerRef,
+    native_stems_head_builders::NativeStemsHeadBuilderRecognition,
     stem_seeds_step::{
         NativeStemCheckResult, NativeStemCheckerParameters, NativeStemGeometryError,
         NeutralStemGeometry, check_native_stem,
@@ -195,6 +196,33 @@ pub trait NativeStemsGlyphRegistryAuthority {
 }
 
 impl NativeStemsModeledGlyphRegistry {
+    /// Derive one system's visible canonical prefix from the production
+    /// head-builder registry chronology.
+    pub fn from_head_builder_recognition(
+        system_id: usize,
+        recognition: &NativeStemsHeadBuilderRecognition,
+    ) -> Result<Self, NativeStemsBeamVLinkTransactionError> {
+        let system = recognition
+            .systems
+            .iter()
+            .find(|system| system.system_id == system_id)
+            .ok_or(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled glyph registry system",
+            })?;
+        let visible_modeled_count = system
+            .registry_events
+            .last()
+            .map(|event| event.modeled_count_after)
+            .ok_or(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled glyph registry system boundary",
+            })?;
+        Self::from_modeled_prefix(
+            system_id,
+            &recognition.modeled_canonical_glyphs,
+            visible_modeled_count,
+        )
+    }
+
     pub fn from_modeled_prefix(
         system_id: usize,
         modeled_registry: &[NativeStemsModeledCanonicalGlyph],

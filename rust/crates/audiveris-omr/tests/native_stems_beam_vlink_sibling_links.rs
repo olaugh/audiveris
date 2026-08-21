@@ -6471,12 +6471,12 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
             .expect("native predecessors through B15");
     let checker_page = b15_hydration::native_predecessor_page("chula.png");
     let visible_modeled_count = checker_page.first_system_visible_modeled_count;
-    let modeled_registry = NativeStemsModeledGlyphRegistry::from_modeled_prefix(
+    let modeled_registry = NativeStemsModeledGlyphRegistry::from_head_builder_recognition(
         1,
-        &checker_page.modeled_canonical_glyphs,
-        visible_modeled_count,
+        &checker_page.head_builders,
     )
     .expect("native first-system canonical glyph registry");
+    assert_eq!(modeled_registry.len(), visible_modeled_count);
     let grid = recognize_grid_lines(repo_root().join("data/examples/chula.png"))
         .expect("GRID recognition");
     let headers = recognize_native_headers(&grid).expect("HEADERS recognition");
