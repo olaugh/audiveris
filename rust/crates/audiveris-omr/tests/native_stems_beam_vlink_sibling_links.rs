@@ -7035,6 +7035,9 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
                         NativeStemsSystemHeadPhase1FirstOutcome::Linked(transaction) => {
                             (true, transaction.corner.x_ordinal, 0)
                         }
+                        NativeStemsSystemHeadPhase1FirstOutcome::MutatedUnlinked(transaction) => {
+                            (false, transaction.corner.x_ordinal, 0)
+                        }
                         NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation) => (
                             false,
                             continuation.processed_head.x_ordinal,
@@ -7085,6 +7088,19 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
                             NativeStemsBeamCreateStemDisposition::CreatedArtificial { .. }
                             | NativeStemsBeamCreateStemDisposition::Rejected => {}
                         },
+                        NativeStemsHeadPhase1DriveEvent::MutatedUnlinked(transaction) => {
+                            match transaction.create.disposition {
+                                NativeStemsBeamCreateStemDisposition::CreatedChecked { .. } => {
+                                    created += 1
+                                }
+                                NativeStemsBeamCreateStemDisposition::Reused { .. } => reused += 1,
+                                NativeStemsBeamCreateStemDisposition::CreatedArtificial {
+                                    ..
+                                }
+                                | NativeStemsBeamCreateStemDisposition::Rejected => {}
+                            }
+                            unlinked += 1;
+                        }
                         NativeStemsHeadPhase1DriveEvent::Unlinked(_) => unlinked += 1,
                     }
                 }
@@ -8846,6 +8862,7 @@ fn allegretto_system2_order89_beam_c_link_and_order111_multi_head_rejection() {
     );
     assert_eq!(field("javaEvidence"), "ReturnedBeforeNinetyFirstHead");
 
+    let mut mutated_unlinked = Vec::new();
     while start.carrier.current_index < 111 {
         if start.carrier.frontier_consumed {
             let continuation = continue_native_stems_head_linking_phase1(
@@ -8870,11 +8887,33 @@ fn allegretto_system2_order89_beam_c_link_and_order111_multi_head_rejection() {
                 &start.registry,
             )
             .expect("ordinary Allegretto system-2 C-link before queue 111");
-            if let Err(continuation) = outcome {
-                start.carrier = *continuation.state_after;
+            match outcome {
+                Ok(transaction) if !transaction.returned_linked => {
+                    mutated_unlinked.push(transaction);
+                }
+                Ok(_) => {}
+                Err(continuation) => start.carrier = *continuation.state_after,
             }
         }
     }
+    assert_eq!(mutated_unlinked.len(), 1);
+    let queue103 = &mutated_unlinked[0];
+    assert_eq!(queue103.corner.x_ordinal, 85);
+    assert_eq!(queue103.corner.sig_ordinal, 86);
+    assert_eq!(queue103.corner.horizontal, NativeStemHeadSide::Left);
+    assert!(!queue103.returned_linked);
+    let queue103_undefined = queue103
+        .terminal_undefined_side
+        .expect("queue-103 RIGHT same-stump undefined side");
+    assert_eq!(queue103_undefined.head.x_ordinal, 85);
+    assert_eq!(queue103_undefined.horizontal, NativeStemHeadSide::Right);
+    assert!(start.carrier.undefined_sides.contains(&queue103_undefined));
+    assert!(
+        start
+            .carrier
+            .unlinked_heads
+            .contains(&queue103_undefined.head)
+    );
     if start.carrier.frontier_consumed {
         let continuation = continue_native_stems_head_linking_phase1(
             &start.carrier,
@@ -9473,6 +9512,8 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(field("javaEvidence"), "ReturnedBeforeThirtiethHead");
 
     start.carrier = (**after).clone();
+    let mut queue53_transaction = None;
+    let mut queue53_edges_after = None;
     while start.carrier.current_index < 61 {
         if start.carrier.frontier_consumed {
             let next = continue_native_stems_head_linking_phase1(
@@ -9497,11 +9538,33 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
                 &start.registry,
             )
             .expect("ordinary Allegretto system-3 C-link before queue 61");
-            if let Err(next) = outcome {
-                start.carrier = *next.state_after;
+            match outcome {
+                Ok(transaction) if start.carrier.current_index == 54 => {
+                    queue53_edges_after = Some(start.carrier.beam_state.sig.edges.len());
+                    queue53_transaction = Some(transaction);
+                }
+                Ok(_) => {}
+                Err(next) => start.carrier = *next.state_after,
             }
         }
     }
+    let queue53 = queue53_transaction.expect("generic queue-53 multi-side transaction");
+    assert_eq!(queue53.corner.x_ordinal, 107);
+    assert_eq!(queue53.corner.horizontal, NativeStemHeadSide::Left);
+    assert_eq!(queue53.following_side_transactions.len(), 1);
+    let queue53_right = &queue53.following_side_transactions[0];
+    assert_eq!(queue53_right.corner.x_ordinal, 107);
+    assert_eq!(queue53_right.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(queue53_right.corner.vertical, NativeStemVerticalSide::Top);
+    assert_eq!(
+        queue53_right
+            .additional_head_relations
+            .iter()
+            .map(|relation| (relation.corner.x_ordinal, relation.appended))
+            .collect::<Vec<_>>(),
+        [(116, true), (117, false), (108, true)]
+    );
+    assert_eq!(queue53_edges_after, Some(311));
     if start.carrier.frontier_consumed {
         let next = continue_native_stems_head_linking_phase1(
             &start.carrier,
@@ -9629,9 +9692,9 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert!(!created.sig_attached);
 
     assert_eq!(queue61.stem_vertex.0, 267);
-    assert_eq!(queue61.head_stem_edge.0, 310);
+    assert_eq!(queue61.head_stem_edge.0, 313);
     assert_eq!(queue61.beam_stem_edges.len(), 1);
-    assert_eq!(queue61.beam_stem_edges[0].0, 311);
+    assert_eq!(queue61.beam_stem_edges[0].0, 314);
     assert_eq!(queue61.beam_relations.len(), 1);
     let beam_relation = &queue61.beam_relations[0];
     assert_eq!(beam_relation.beam, NativeStemsBeamSource::RawBeam(76));
@@ -9679,7 +9742,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
                 .glyph_index
                 .union_size,
         ),
-        (267, 310, 50, 1_801)
+        (267, 313, 50, 1_801)
     );
     assert_eq!(
         (
@@ -9701,7 +9764,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
                 .glyph_index
                 .union_size,
         ),
-        (268, 312, 51, 1_802)
+        (268, 315, 51, 1_802)
     );
     let before_ids = queue61_before
         .beam_state
@@ -9849,6 +9912,205 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         queue61_before.undefined_sides
     );
     assert_eq!(start.carrier.unlinked_heads, queue61_before.unlinked_heads);
+
+    // Queue 53 must carry Java's crossed x108 RIGHT link all the way to the
+    // later x113 canLink check. With that shared S-cell mutation present,
+    // queue 115 is the measured no-link branch rather than a spurious
+    // successful hard-tail expansion.
+    let mut audit = start.carrier.clone();
+    while audit.current_index < 115 {
+        if audit.frontier_consumed {
+            audit = *continue_native_stems_head_linking_phase1(
+                &audit,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("audit continuation before queue 115")
+            .state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut audit,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("audit C-link before queue 115");
+            if let Err(next) = outcome {
+                audit = *next.state_after;
+            }
+        }
+    }
+    assert_eq!(audit.current_index, 115);
+    assert!(audit.frontier_consumed);
+    let x108 = audit
+        .heads
+        .iter()
+        .find(|head| head.reference.x_ordinal == 108)
+        .expect("queue-115 crossed x108 head");
+    assert_eq!(
+        x108.sides
+            .iter()
+            .map(|side| (side.reference.horizontal, side.linked, side.closed))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, false, true),
+            (NativeStemHeadSide::Right, true, true),
+        ]
+    );
+    let before115 = audit.clone();
+    let queue115 = continue_native_stems_head_linking_phase1(
+        &audit,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("generic queue-115 no-link continuation");
+    assert_eq!(queue115.processed_head.x_ordinal, 113);
+    assert_eq!(queue115.processed_head.sig_ordinal, 75);
+    assert_eq!(queue115.returned_linked, Some(false));
+    assert_eq!(
+        queue115
+            .side_decisions
+            .iter()
+            .map(|decision| {
+                (
+                    decision.side,
+                    decision.top_can_link,
+                    decision.bottom_can_link,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, Some(false), Some(false)),
+            (NativeStemHeadSide::Right, Some(false), Some(false)),
+        ]
+    );
+    assert_eq!(queue115.closed_s_linkers.len(), 2);
+    assert_eq!(queue115.closed_value_changes, 2);
+    assert_eq!(queue115.state_after.current_index, 116);
+    assert!(queue115.state_after.frontier_consumed);
+    assert_eq!(queue115.state_after.heads[116].reference.x_ordinal, 66);
+    assert_eq!(queue115.state_after.heads[116].reference.sig_ordinal, 33);
+    assert_eq!(
+        queue115.state_after.beam_state.sig,
+        before115.beam_state.sig
+    );
+    assert_eq!(
+        queue115.state_after.unlinked_heads.len(),
+        before115.unlinked_heads.len() + 1
+    );
+
+    let order115_oracle = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order115.txt"),
+    )
+    .expect("frozen Allegretto system-3 queue-53/115 Java transaction");
+    assert_eq!(
+        sha256_hex(order115_oracle.as_bytes()),
+        "01bda66e6eecf7d46bdd21f3d2d4d8ec977deff9bc51f01b4a3291092680fca2"
+    );
+    let order115_rows = order115_oracle
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(order115_rows.len(), 15);
+    let order53_frontier = order115_rows
+        .iter()
+        .find(|line| line.starts_with("stemsheadclinkfrontier "))
+        .expect("queue-53 multi-head C-link envelope");
+    assert!(
+        order53_frontier
+            .contains("headOrder 53 headX 107 headSig 80 headInterId 1836 cAlias h:107:RIGHT:TOP")
+    );
+    assert!(order53_frontier.contains("lastIndex 3 maxIndex 3 relations 4"));
+    assert!(order53_frontier.contains("existingStem 2398 lineChanged false"));
+    let order53_result = order115_rows
+        .iter()
+        .find(|line| line.starts_with("stemsheadclinkresult "))
+        .expect("queue-53 multi-side result");
+    assert!(order53_result.contains(
+        "headOrder 53 allocatorBefore 2400 allocatorAfter 2400 registeredGlyphs - addedVertices -"
+    ));
+    for edge in [
+        "sourceId1810:targetId2398",
+        "sourceId1818:targetId2398",
+        "sourceId1836:targetId2394",
+        "sourceId1836:targetId2398",
+    ] {
+        assert!(order53_result.contains(edge));
+    }
+    assert!(order115_rows.iter().any(|line| line
+        == &"stemsheaddebug115 hSide RIGHT vSide TOP length 98 myIndex 0 first h:108:RIGHT:TOP firstX 108 firstLinked true firstClosed true"));
+    let order115_result = order115_rows
+        .iter()
+        .find(|line| line.contains("headOrder 115 headX 113 headSig 75"))
+        .expect("queue-115 no-link result");
+    assert!(order115_result.contains(
+        "decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither]"
+    ));
+    assert!(order115_result.contains(
+        "returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] closureWrites - closedValueChanges 0 unlinkedCount 0"
+    ));
+    assert!(order115_result.contains(
+        "sigVerticesBefore 649 sigVerticesAfter 649 sigEdgesBefore 593 sigEdgesAfter 593 systemStemsBefore 52 systemStemsAfter 52"
+    ));
+    assert!(
+        order115_result
+            .contains("nextHeadOrder 116 nextHeadX 66 nextHeadSig 33 nextHeadInterId 1743")
+    );
+    let order115_summary = order115_rows[14]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let order115_field = |name: &str| {
+        order115_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| order115_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto system-3 order-115 summary field")
+    };
+    assert_eq!(order115_field("rows"), "14");
+    assert_eq!(
+        order115_field("baseSystem3Order61RunnerSha256"),
+        "27d26355c3b58d788d96ddb3d40b3aed4c17fc7c65a0af5c477205df21690f15"
+    );
+    assert_eq!(
+        order115_field("baseSystem3Order61FixtureSha256"),
+        "de80142ffc78b6dd96b156285c365b1997bdbb7228ae47093f1b244dea04b56e"
+    );
+    assert_eq!(
+        order115_field("probeSourceSha256"),
+        "4e42bfb4de50ec8a3d14c8c028b435d115f1ec55b9efe59e249120ae5887db12"
+    );
+    assert_eq!(
+        order115_field("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system3-order115.sh",
+            ))
+            .expect("active Allegretto system-3 order-115 runner")
+        )
+    );
+    assert_eq!(
+        order115_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", order115_rows[..14].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        order115_field("semanticPassSha256"),
+        "fd1a3ca321041ede2ab5d39ffb2742675b19138b5b5082a93f44dbcfed7a6185"
+    );
+    assert_eq!(order115_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        order115_field("nativeScope"),
+        "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order53MultiSideAndOrder115NoLink"
+    );
 
     // Open the frozen Java result only after the native compound registry,
     // checked stem, SIG mutation, beam edge, and continuation are pinned.

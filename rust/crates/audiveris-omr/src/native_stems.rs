@@ -189,6 +189,7 @@ pub struct NativeStemsPageHeadPhase1Start {
 #[derive(Clone, Debug, PartialEq)]
 pub enum NativeStemsSystemHeadPhase1FirstOutcome {
     Linked(Box<NativeStemsHeadCLinkTransaction>),
+    MutatedUnlinked(Box<NativeStemsHeadCLinkTransaction>),
     Unlinked(NativeStemsHeadPhase1Continuation),
 }
 
@@ -244,6 +245,7 @@ pub struct NativeStemsPageHeadPhase1NextAdvance {
 pub enum NativeStemsHeadPhase1DriveEvent {
     Continuation(NativeStemsHeadPhase1Continuation),
     Linked(Box<NativeStemsHeadCLinkTransaction>),
+    MutatedUnlinked(Box<NativeStemsHeadCLinkTransaction>),
     Unlinked(NativeStemsHeadPhase1Continuation),
 }
 
@@ -888,8 +890,11 @@ impl NativeStemsPreparedRecognition {
                 )
             })?;
             let outcome = match outcome {
-                Ok(transaction) => {
+                Ok(transaction) if transaction.returned_linked => {
                     NativeStemsSystemHeadPhase1FirstOutcome::Linked(Box::new(transaction))
+                }
+                Ok(transaction) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::MutatedUnlinked(Box::new(transaction))
                 }
                 Err(continuation) => {
                     NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation)
@@ -1057,8 +1062,11 @@ impl NativeStemsPreparedRecognition {
                 )
             })?;
             let outcome = match outcome {
-                Ok(transaction) => {
+                Ok(transaction) if transaction.returned_linked => {
                     NativeStemsSystemHeadPhase1FirstOutcome::Linked(Box::new(transaction))
+                }
+                Ok(transaction) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::MutatedUnlinked(Box::new(transaction))
                 }
                 Err(continuation) => {
                     NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation)
@@ -1276,8 +1284,11 @@ impl NativeStemsPreparedRecognition {
                     )
                 })?;
                 events.push(match outcome {
-                    Ok(transaction) => {
+                    Ok(transaction) if transaction.returned_linked => {
                         NativeStemsHeadPhase1DriveEvent::Linked(Box::new(transaction))
+                    }
+                    Ok(transaction) => {
+                        NativeStemsHeadPhase1DriveEvent::MutatedUnlinked(Box::new(transaction))
                     }
                     Err(continuation) => NativeStemsHeadPhase1DriveEvent::Unlinked(continuation),
                 });

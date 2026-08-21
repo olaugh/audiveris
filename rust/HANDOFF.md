@@ -8693,6 +8693,52 @@ Focused 1/1 and full sibling 20/20 (148.43s) pass; strict all-features
 workspace Clippy, formatting, and diff checks pass. The production CLI crosses
 queue 61 and now fails closed at Allegretto system 3 queue 115 x113/SIG75
 RIGHT/TOP. Builder 452 contains the start head and sibling x108/SIG67; their
-span reaches Java's hard tail target, so this successful two-head expansion is
-the next bounded gap. The exact remote baseline is `7e87b6c07` pending
-Boundary 173's CI; wider-corpus completion remains open.
+span appeared to reach Java's hard tail target. Boundary 174 below supersedes
+that diagnosis by carrying the missing queue-53 link. The exact remote baseline
+at this boundary was `7e87b6c07`; wider-corpus completion remained open.
+
+## Boundary 174: generic two-side carriage and corrected no-link frontier
+
+The queue-115 diagnosis disproves Boundary 173's apparent next branch. Java
+does not expand x113/SIG75: its RIGHT/TOP builder first encounters x108, whose
+RIGHT side was already linked and closed by queue 53. Both x113 horizontal
+sides choose `Neither`; Java returns `false`, closes the two local S cells,
+changes no SIG relation or system stem, and advances to queue 116 x66/SIG33.
+
+The missing state originated at queue 53 x107/SIG80. Java's
+`HeadLinker.linkSides` does not return after LEFT succeeds: LEFT reuses Stem
+2394, then RIGHT/TOP reuses active glyph 397 / Stem 2398 and plans x107, x116,
+x117, and x108 HeadStem relations. x117 already has its edge; x107, x116, and
+x108 are appended, alongside the LEFT x107→2394 edge. The complete call adds
+four edges, links both x107 sides, propagates the shared RIGHT link to
+x108/x116/x117, and closes the related sibling cells. The generic native
+dispatcher now executes all horizontal sides on one atomic shadow, retains the
+ordered side transactions, authenticates same-content crossed-head stumps, and
+records appended versus pre-existing relations.
+
+This loop also models Java's mutated-then-unlinked case explicitly. A first
+side mutation can survive even when the later side sees the same stump at TOP
+and BOTTOM, records an undefined side, and returns `false`. Production now
+retains that graph mutation while adding the head to the phase-2 queue; the
+sibling gate pins Allegretto system 2 queue 103 x85/SIG86 and preserves the
+exact downstream queue-111 state. A weak head with no linkable corner now takes
+the generic local-close/phase-2-queue path, while the higher-profile
+rather-good retry remains fail-closed.
+
+The warmup plus two fresh Java runs are byte-identical. The 17-line /
+17,020-byte fixture SHA-256 is
+`01bda66e6eecf7d46bdd21f3d2d4d8ec977deff9bc51f01b4a3291092680fca2`.
+Runner, transformed probe, emitted body, and semantic-pass hashes are
+`b3c426db85a5c5402c7e8d5741e249c15905e0f2d8f4888d491ee9783982afa4`,
+`4e42bfb4de50ec8a3d14c8c028b435d115f1ec55b9efe59e249120ae5887db12`,
+`27bf04be971bb5705170e00646a4440fe3107fd679b4b55bd6be6ca27b0782a4`,
+and `fd1a3ca321041ede2ab5d39ffb2742675b19138b5b5082a93f44dbcfed7a6185`.
+Strict Boundary-173 runner/fixture pins are
+`27d26355c3b58d788d96ddb3d40b3aed4c17fc7c65a0af5c477205df21690f15` /
+`de80142ffc78b6dd96b156285c365b1997bdbb7228ae47093f1b244dea04b56e`.
+
+Focused 1/1 and full sibling 20/20 (148.29s) pass; strict all-features
+workspace Clippy, formatting, and diff checks pass. The next measured system-3
+head is queue 116 x66/SIG33; Boundary 174 does not execute it. The exact remote
+baseline is `df2e3b6e5`: Build & Test 32505335915 and Rust port 32505335796
+both succeeded. Wider-corpus completion remains open.

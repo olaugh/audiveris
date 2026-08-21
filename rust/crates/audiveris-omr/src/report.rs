@@ -1608,6 +1608,9 @@ fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
                     NativeStemsHeadPhase1DriveEvent::Linked(_) => {
                         (continuations, linked + 1, unlinked)
                     }
+                    NativeStemsHeadPhase1DriveEvent::MutatedUnlinked(_) => {
+                        (continuations, linked, unlinked + 1)
+                    }
                     NativeStemsHeadPhase1DriveEvent::Unlinked(_) => {
                         (continuations, linked, unlinked + 1)
                     }
