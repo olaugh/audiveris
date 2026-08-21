@@ -17,6 +17,7 @@ use audiveris_image::{
     run_table::RunTable,
     spots::HeaderErase,
 };
+use audiveris_music_font::{MusicFamily, area_pitch_offset, sfnt::FontError};
 
 use crate::{
     clef_classifier::{BundledClefClassifier, ClefClassificationError},
@@ -473,6 +474,7 @@ pub enum NativeHeaderRecognitionError {
         value: i32,
     },
     ClefClassifier(ClefClassificationError),
+    ClefPitchOffset(FontError),
     KeyClassifier(KeyClassificationError),
     TimeClassifier(TimeClassificationError),
     ClefColumn {
@@ -546,6 +548,9 @@ impl fmt::Display for NativeHeaderRecognitionError {
                     "HEADERS clef classifier failed to load: {source}"
                 )
             }
+            Self::ClefPitchOffset(source) => {
+                write!(formatter, "HEADERS F-clef pitch offset failed: {source}")
+            }
             Self::KeyClassifier(source) => {
                 write!(formatter, "HEADERS key classifier failed to load: {source}")
             }
@@ -590,6 +595,7 @@ impl Error for NativeHeaderRecognitionError {
         match self {
             Self::GridContext(source) => Some(source),
             Self::ClefClassifier(source) => Some(source),
+            Self::ClefPitchOffset(source) => Some(source),
             Self::KeyClassifier(source) => Some(source),
             Self::TimeClassifier(source) => Some(source),
             Self::ClefColumn { source, .. } => Some(source),
@@ -639,6 +645,8 @@ pub fn recognize_native_headers(
     let sheet_parameters = SheetClefParameters::new(sheet_interline);
     let sheet_height = i32::try_from(grid.scale.height)
         .map_err(|_| NativeHeaderRecognitionError::SheetHeightOutOfRange(grid.scale.height))?;
+    let f_area_pitch_offset = area_pitch_offset(MusicFamily::Bravura, "F_CLEF")
+        .map_err(NativeHeaderRecognitionError::ClefPitchOffset)?;
 
     let mut clef_geometries = Vec::new();
     let mut clef_parameters = BTreeMap::new();
@@ -687,7 +695,7 @@ pub fn recognize_native_headers(
                     )?,
                     max_eval_rank: crate::clef_parameters::max_eval_rank(),
                     minimum_classifier_grade: MINIMUM_CLEF_GRADE,
-                    f_area_pitch_offset: 0.0,
+                    f_area_pitch_offset,
                 },
             );
         }
@@ -741,6 +749,7 @@ pub fn recognize_native_headers(
             NativeClefProposalRecognizer::new(
                 BundledClefClassifier::bundled()
                     .map_err(NativeHeaderRecognitionError::ClefClassifier)?,
+                GridPitch(&grid.staff_lines),
                 sources.clone(),
                 clef_contexts.clone(),
                 clef_parameters.clone(),
