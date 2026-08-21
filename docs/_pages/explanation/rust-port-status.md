@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and fifty-two semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier; Boundary 144 carries Allegretto system-1 transactions 1-28 through linked-S reuse and competing-hook removal; Boundary 145 derives BeamStem relation parameters from native products; Boundary 146 internalizes the established STEMS-entry edit state; Boundary 147 makes `prepare_native_stems` own the page-wide checker and initializes Batuque system 1 directly from production-prepared state; Boundary 148 moves Batuque's complete 33-transaction system-1 SIDES drive into production; Boundary 149 carries its exact page registry and shared persistent allocator through system 2's constructor chronology; Boundary 150 atomically executes system 2's first `SharedSheetSerial` SIDES transaction; Boundary 151 drives all 40 system-2 SIDES transactions; Boundary 152 drives all three Batuque systems to true `SidesExhausted` with native compound registration and accepted-relation subsets.
+The first one hundred and fifty-three semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier; Boundary 144 carries Allegretto system-1 transactions 1-28 through linked-S reuse and competing-hook removal; Boundary 145 derives BeamStem relation parameters from native products; Boundary 146 internalizes the established STEMS-entry edit state; Boundary 147 makes `prepare_native_stems` own the page-wide checker and initializes Batuque system 1 directly from production-prepared state; Boundary 148 moves Batuque's complete 33-transaction system-1 SIDES drive into production; Boundary 149 carries its exact page registry and shared persistent allocator through system 2's constructor chronology; Boundary 150 atomically executes system 2's first `SharedSheetSerial` SIDES transaction; Boundary 151 drives all 40 system-2 SIDES transactions; Boundary 152 drives all three Batuque systems to true `SidesExhausted` with native compound registration and accepted-relation subsets; Boundary 153 drives Batuque system 1 through all eight retained STUMPS transactions with authenticated existing-stem rollover and builder-owned sibling-linker authority.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -3744,7 +3744,29 @@ still rejects atomically.
 
 The focused gate passes 1/1 in 4.07s; the full sibling suite passes 15/15 in
 160.98s; strict workspace all-target/all-feature Clippy passes in 20.36s;
-formatting and diff checks are clean. Page-wide STUMPS carriage is next.
+formatting and diff checks are clean. Wider-system STUMPS carriage is next.
+
+## Boundary 153: production Batuque system-1 STUMPS completion
+
+The production-prepared system-1 carrier now crosses SIDES→STUMPS and executes
+all eight retained transactions atomically. It reaches the typed post-STUMPS
+terminal at allocator 1,098, 40 known/bound Stems, SIG 230/297, B 67/93, and S
+89/186; all 24 retained beams equal the final local worklist.
+
+This wider page exposed two real authority corrections. B14 rollover now
+accepts and strictly validates both the fresh-stem 1/1/1 append shape and the
+existing-stem 0/0/1 shape, matching the recorded base edge back to its live
+native SIG origin without assuming it is the graph's final edge. B19 STUMPS
+resume authenticates B16 sibling B-linker writes against `StemBuilder` items,
+the catalogue Java queried, rather than requiring every sibling target to own
+a standalone V-linker constructor. Duplicate, primary, unknown, and corrupted
+predecessors remain typed failures; a corrupt reused-stem edge is covered by
+an unchanged-carrier batch rollback assertion.
+
+Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
+151.29s; strict workspace all-target/all-feature Clippy passes in 19.98s;
+formatting and diff checks are clean. Systems 2-3 STUMPS and their shared-page
+registry/allocator handoffs remain next.
 
 
 

@@ -838,12 +838,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
             phase: "native rollover bindings",
         }
     })?;
-    if prior.committed.is_none()
-        || prior.certificate.is_some()
-        || prior.sig.appended_vertices.len() != 1
-        || prior.sig.appended_relations.len() != 1
-        || prior.inter_index.appended_entries.len() != 1
-        || transaction_state.system_stems.system_id != sig.system_id
+    if transaction_state.system_stems.system_id != sig.system_id
         || reuse_check.system_id != sig.system_id
         || stump_system.system_id != sig.system_id
     {
@@ -898,6 +893,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
             phase: "native rollover stem identity",
         });
     }
+    validate_native_rollover_predecessor(prior, transaction_state, sig, bindings)?;
     let stem_vertex = bindings
         .stem_vertices
         .get(&final_stem.stem_identity)
@@ -1117,6 +1113,224 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         certificate: Some(certificate),
         committed: None,
     })
+}
+
+fn validate_native_rollover_predecessor(
+    prior: &NativeStemsBeamVLinkBaseApplyState,
+    transaction_state: &NativeStemsBeamVLinkTransactionState,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+) -> Result<(), NativeStemsBeamVLinkBaseApplyError> {
+    let Some(committed) = prior.committed else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor commit",
+        });
+    };
+    let vertex_appends = prior.sig.appended_vertices.len();
+    if prior.certificate.is_some()
+        || committed.system_id != sig.system_id
+        || prior.sig.system_id != sig.system_id
+        || prior.sig.appended_relations.len() != 1
+        || prior.inter_index.appended_entries.len() != vertex_appends
+        || vertex_appends > 1
+        || prior.sig.baseline_vertex_count.checked_add(vertex_appends) != Some(sig.vertices.len())
+        || prior
+            .inter_index
+            .baseline_entry_count
+            .checked_add(vertex_appends)
+            != Some(sig.vertices.len())
+        || prior
+            .sig
+            .baseline_relation_count
+            .checked_add(1)
+            .is_none_or(|minimum| minimum > sig.edges.len())
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor shape",
+        });
+    }
+
+    let beam_vertex = bindings
+        .beam_vertices
+        .get(&prior.sig.beam.source)
+        .copied()
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor beam binding",
+        })?;
+    if prior.sig.beam.sig_vertex_identity != Some(beam_vertex.0)
+        || prior.sig.beam.sig_system_id != sig.system_id
+        || !prior.sig.beam.inter_indexed
+        || prior.sig.beam.removed
+        || prior.sig.beam.inter_id <= 0
+        || prior.sig.beam_vertex
+            != (NativeStemsBeamSigVertexLookup::PresentSameObject {
+                vertex_ordinal: beam_vertex.0,
+                sig_vertex_identity: beam_vertex.0,
+                inter_id: prior.sig.beam.inter_id,
+                object_matches: 1,
+            })
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor beam",
+        });
+    }
+
+    let compact = prior.sig.appended_relations[0];
+    let expected_stem_vertex = prior.sig.stem.sig_vertex_identity.ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor stem vertex",
+        },
+    )?;
+    let NativeStemsBeamSigRelationKind::BeamStem {
+        beam_portion: expected_portion,
+    } = compact.kind
+    else {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor relation kind",
+        });
+    };
+    let live = sig.edges.get(compact.graph_relation_identity).ok_or(
+        NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor live relation",
+        },
+    )?;
+    if compact.graph_relation_identity != prior.sig.baseline_relation_count
+        || compact.relation_object_identity
+            != NativeStemsBeamRelationObjectIdentity::FreshDraft(committed.plan.plan_ordinal)
+        || compact.source_vertex_identity != beam_vertex.0
+        || compact.target_vertex_identity != expected_stem_vertex
+        || live.ordinal != compact.graph_relation_identity
+        || !live.active
+        || live.source != beam_vertex.0
+        || live.target != expected_stem_vertex
+        || live.kind != NativeSigRelationKind::BeamStem
+        || live.origin
+            != (crate::native_sig::NativeSigRelationOrigin::BeamVBaseDraft {
+                plan_ordinal: committed.plan.plan_ordinal,
+            })
+        || live.beam_portion != expected_portion
+    {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor relation",
+        });
+    }
+
+    let known = transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.stem_identity == prior.sig.stem.stem_identity)
+        .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor known stem",
+        })?;
+    // B16/B17 callbacks may legitimately revise abnormality after this compact
+    // B14 snapshot, so rollover authenticates identity/membership below rather
+    // than requiring the stale callback bit to equal the carried live stem.
+    if prior.sig.stem.removed {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+            phase: "native rollover predecessor stem state",
+        });
+    }
+
+    match vertex_appends {
+        0 => {
+            let (Some(inter_id), true, Some(bound_vertex)) = (
+                known.inter_id,
+                known.sig_attached,
+                bindings
+                    .stem_vertices
+                    .get(&prior.sig.stem.stem_identity)
+                    .copied(),
+            ) else {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor existing membership",
+                });
+            };
+            let expected_index = NativeStemsBeamInterIndexLookup::PresentSameObject {
+                index_ordinal: bound_vertex.0,
+                inter_id,
+                vip: prior.sig.stem.vip,
+                object_matches: 1,
+                inter_id_matches: 1,
+                glyph_active_matches: 0,
+                glyph_original_matches: 0,
+            };
+            let expected_vertex = NativeStemsBeamSigVertexLookup::PresentSameObject {
+                vertex_ordinal: bound_vertex.0,
+                sig_vertex_identity: bound_vertex.0,
+                inter_id,
+                object_matches: 1,
+            };
+            if prior.inter_index.stem_lookup != expected_index
+                || prior.sig.stem_vertex != expected_vertex
+                || prior.inter_index.next_id_lookup
+                    != NativeStemsBeamNextPersistentIdLookup::NotRead
+                || prior.sig.stem.sig_vertex_identity != Some(bound_vertex.0)
+                || !prior.sig.stem.inter_indexed
+                || prior.sig.stem.sig_system_id != Some(sig.system_id)
+                || bound_vertex.0 >= prior.sig.baseline_vertex_count
+                || bound_vertex.0 >= prior.inter_index.baseline_entry_count
+            {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor existing stem",
+                });
+            }
+        }
+        1 => {
+            let entry = prior.inter_index.appended_entries[0];
+            let vertex = prior.sig.appended_vertices[0];
+            let (Some(inter_id), true) = (known.inter_id, known.sig_attached) else {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor appended membership",
+                });
+            };
+            if entry.index_ordinal != prior.inter_index.baseline_entry_count
+                || entry.stem_identity != prior.sig.stem.stem_identity
+                || entry.inter_id != inter_id
+                || entry.vip != prior.sig.stem.vip
+                || vertex.vertex_ordinal != prior.sig.baseline_vertex_count
+                || vertex.sig_vertex_identity != vertex.vertex_ordinal
+                || vertex.stem_identity != prior.sig.stem.stem_identity
+                || vertex.inter_id != inter_id
+                || prior.inter_index.stem_lookup
+                    != (NativeStemsBeamInterIndexLookup::PresentSameObject {
+                        index_ordinal: entry.index_ordinal,
+                        inter_id,
+                        vip: entry.vip,
+                        object_matches: 1,
+                        inter_id_matches: 1,
+                        glyph_active_matches: 0,
+                        glyph_original_matches: 0,
+                    })
+                || prior.sig.stem_vertex
+                    != (NativeStemsBeamSigVertexLookup::PresentSameObject {
+                        vertex_ordinal: vertex.vertex_ordinal,
+                        sig_vertex_identity: vertex.sig_vertex_identity,
+                        inter_id,
+                        object_matches: 1,
+                    })
+                || prior.inter_index.next_id_lookup
+                    != (NativeStemsBeamNextPersistentIdLookup::OccupiedByAppendedStem {
+                        persistent_id: inter_id,
+                        stem_identity: prior.sig.stem.stem_identity,
+                    })
+                || prior.sig.stem.sig_vertex_identity != Some(vertex.sig_vertex_identity)
+                || !prior.sig.stem.inter_indexed
+                || prior.sig.stem.sig_system_id != Some(sig.system_id)
+                || bindings
+                    .stem_vertices
+                    .get(&prior.sig.stem.stem_identity)
+                    .copied()
+                    != Some(NativeSigVertexId(vertex.sig_vertex_identity))
+            {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover predecessor appended stem",
+                });
+            }
+        }
+        _ => unreachable!("validated at most one appended vertex"),
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -24,8 +24,8 @@ use crate::{
     beam_inters::BeamKind,
     native_heads_small_beams::raw_hook_beam_exclusion_key,
     native_stems_beam_builders::{
-        NativeStemsBeamBuilderRecognition, NativeStemsBeamBuilderSystem,
-        NativeStemsBeamBuilderTargetRef,
+        NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderRecognition,
+        NativeStemsBeamBuilderSystem, NativeStemsBeamBuilderTargetRef,
     },
     native_stems_beam_link_plans::{
         NativeStemsBeamLinkPlanAttempt, NativeStemsBeamLinkPlanOutcome,
@@ -2651,10 +2651,11 @@ pub fn continue_native_stems_beam_scheduler_into_stumps(
             .enumerate()
             .any(|(index, reference)| {
                 scheduler_system.linked_b_linkers[..index].contains(reference)
-                    || !v_system
+                    || (!v_system
                         .constructors
                         .iter()
                         .any(|constructor| find_b_linker(constructor, *reference).is_some())
+                        && !builder_b_linker_exists(builder_system, *reference))
             })
     {
         return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
@@ -2917,27 +2918,6 @@ pub fn resume_native_stems_beam_scheduler_after_stumps_transaction(
         || awaiting.horizontal_side.is_some()
         || awaiting.plan.stem_profile != BEAM_SEED_PROFILE
         || !awaiting.linked_sides_before.is_empty()
-        || awaiting.plan != completed.plan
-        || awaiting.b_linker != completed.b_linker
-        || awaiting.v_linker != completed.v_linker
-        || completed.v_linker.b_linker != completed.b_linker
-        || !completed.b15_linked_after
-        || scheduler_system
-            .consumed_v_linkers
-            .contains(&completed.v_linker)
-        || completed
-            .sibling_linked_b_linkers
-            .iter()
-            .enumerate()
-            .any(|(index, reference)| {
-                *reference == completed.b_linker
-                    || completed.sibling_linked_b_linkers[..index].contains(reference)
-                    || !v_system
-                        .constructors
-                        .iter()
-                        .any(|constructor| find_b_linker(constructor, *reference).is_some())
-            })
-        || awaiting.vertical_side != awaiting.v_linker.side
         || awaiting.outcome != NativeStemsBeamLinkPlanOutcome::ReadyForCreateStem
         || awaiting.snapshot.current != awaiting.beam
         || awaiting
@@ -2953,7 +2933,58 @@ pub fn resume_native_stems_beam_scheduler_after_stumps_transaction(
     {
         return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
             system_id,
-            phase: "awaited STUMPS frontier",
+            phase: "awaited STUMPS frontier shape",
+        });
+    }
+    if awaiting.plan != completed.plan
+        || awaiting.b_linker != completed.b_linker
+        || awaiting.v_linker != completed.v_linker
+        || completed.v_linker.b_linker != completed.b_linker
+        || !completed.b15_linked_after
+        || awaiting.vertical_side != awaiting.v_linker.side
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "completed STUMPS frontier identity",
+        });
+    }
+    if scheduler_system
+        .consumed_v_linkers
+        .contains(&completed.v_linker)
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "repeated STUMPS V-linker",
+        });
+    }
+    if completed
+        .sibling_linked_b_linkers
+        .contains(&completed.b_linker)
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "completed STUMPS sibling list repeats target",
+        });
+    }
+    if completed
+        .sibling_linked_b_linkers
+        .iter()
+        .enumerate()
+        .any(|(index, reference)| completed.sibling_linked_b_linkers[..index].contains(reference))
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "completed STUMPS sibling list contains duplicates",
+        });
+    }
+    if completed
+        .sibling_linked_b_linkers
+        .iter()
+        .any(|reference| !builder_b_linker_exists(builder_system, *reference))
+    {
+        return Err(NativeStemsBeamSchedulerError::InvalidTerminal {
+            system_id,
+            phase: "completed STUMPS sibling linker is unknown",
         });
     }
 
@@ -3178,6 +3209,18 @@ pub fn resume_native_stems_beam_scheduler_after_stumps_transaction(
         stump_events: state.events[first_event..].to_vec(),
         status,
         advanced_system: Box::new(advanced_system),
+    })
+}
+
+fn builder_b_linker_exists(
+    system: &NativeStemsBeamBuilderSystem,
+    reference: NativeStemsBeamBLinkerRef,
+) -> bool {
+    system.builders.iter().any(|builder| {
+        builder.items.iter().any(|item| {
+            item.kind == NativeStemsBeamBuilderItemKind::BeamLinker
+                && item.target == Some(NativeStemsBeamBuilderTargetRef::Beam(reference))
+        })
     })
 }
 

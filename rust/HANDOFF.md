@@ -7968,15 +7968,43 @@ liveness rejects without mutation.
 
 The focused gate passes 1/1 in 4.07s; the full sibling suite passes 15/15 in
 160.98s; strict workspace all-target/all-feature Clippy passes in 20.36s;
-formatting and diff checks are clean. Page-wide STUMPS carriage is next.
+formatting and diff checks are clean. Wider-system STUMPS carriage is next.
+
+## Boundary 153: production Batuque system-1 STUMPS completion
+
+`NativeStemsPreparedRecognition::drive_first_system_stumps` now takes the
+production-prepared system-1 SIDES terminal through its complete retained
+STUMPS worklist. The eight atomic B12-B17/resume transactions finish at
+allocator 1,098, 40 known/bound Stems, SIG 230/297, B 67/93, and S 89/186;
+the scheduler reaches `Completed` with the same 24 sources it retained at the
+SIDES terminal.
+
+The first Batuque stump rollover reuses an existing StemInter. Its valid B14
+shape has zero appended InterIndex entries, zero appended SIG vertices, and
+one appended BeamStem edge, unlike Chula's fresh-stem 1/1/1 shape. The native
+rollover validator now authenticates either exact shape against owned
+transaction state, bindings, and the live SIG. It permits later B16/B17 edges
+after the recorded base edge and does not confuse later callback abnormality
+changes with B14 corruption. The focused gate corrupts the reused-stem edge
+and proves the entire bounded STUMPS batch remains unchanged on rejection.
+
+The run also proved that a B16 sibling write may name a B-linker owned by a
+`StemBuilder` item without a standalone V-linker constructor. B19 now checks
+sibling references against that builder catalogue, while preserving strict
+primary-linker, duplicate, and unknown-reference refusals.
+
+Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
+151.29s; strict workspace all-target/all-feature Clippy passes in 19.98s;
+formatting and diff checks are clean. Systems 2-3 STUMPS and the shared-page
+registry/allocator handoff after each completed STUMPS pass are next.
 
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 152's three completed SIDES carriers through each
-   system's STUMPS worklist, preserving the shared registry/allocator between
-   systems. Then generalize
+1. Continue Boundary 153's completed system-1 STUMPS carrier through the
+   shared registry/allocator handoff, then drive systems 2-3 through their
+   STUMPS worklists. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.

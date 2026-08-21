@@ -6585,6 +6585,98 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             .is_err()
     );
     assert_eq!(weak_before_compound, weak_before);
+    let components = &prepared.components;
+    let context = NativeStemsBeamSidesContext {
+        plans: &components.plans.systems[0],
+        builders: &components.beam_builders.systems[0],
+        stumps: &components.beam_stumps.systems[0],
+        vlinkers: &components.beam_vlinkers.systems[0],
+        reachability: &components.beam_reachability.systems[0],
+        head_corners: &components.head_corners.systems[0],
+        checker: &prepared.stem_checker,
+    };
+    let mut corrupt = drive.carrier.clone();
+    continue_native_stems_beam_sides_carrier_into_stumps(&mut corrupt, context)
+        .expect("Batuque system-1 STUMPS continuation for corruption gate");
+    corrupt.latest_base_apply.sig.appended_relations[0].target_vertex_identity += 1;
+    let corrupt_before = corrupt.clone();
+    let registry_before = drive.registry.clone();
+    let error = drive_native_stems_beam_stumps_from_modeled_registry(
+        &mut corrupt,
+        context,
+        &drive.registry,
+        context.builders.builders.len(),
+    )
+    .expect_err("corrupt reused-stem rollover must reject atomically");
+    assert_eq!(error.stage, "B14-rollover");
+    assert!(
+        error
+            .detail
+            .contains("native rollover predecessor relation")
+    );
+    assert_eq!(corrupt, corrupt_before);
+    assert_eq!(drive.registry, registry_before);
+
+    let stumps = prepared
+        .drive_first_system_stumps()
+        .expect("Batuque system-1 complete STUMPS drive");
+    let terminal = &stumps.carrier.latest_base_apply.transaction_state;
+    assert_eq!(stumps.system_id, 1);
+    assert_eq!(stumps.transactions.len(), 8);
+    assert_eq!(stumps.registry.len(), 1_058);
+    assert_eq!(stumps.registry.persistent_ids().sheet_last_id, 1_058);
+    assert_eq!(terminal.glyph_index.union_size, 1_058);
+    assert_eq!(terminal.glyph_index.persistent_ids.sheet_last_id, 1_098);
+    assert_eq!(terminal.system_stems.known_stems.len(), 40);
+    assert_eq!(
+        (
+            stumps.carrier.sig.vertices.len(),
+            stumps.carrier.sig.edges.len()
+        ),
+        (230, 297)
+    );
+    assert_eq!(stumps.carrier.bindings.stem_vertices.len(), 40);
+    assert_eq!(
+        (stumps.carrier.b_cells.len(), stumps.carrier.s_cells.len()),
+        (93, 186)
+    );
+    assert_eq!(
+        stumps
+            .carrier
+            .b_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        67
+    );
+    assert_eq!(
+        stumps
+            .carrier
+            .s_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        89
+    );
+    let NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(first_stump) =
+        &stumps.continuation.status
+    else {
+        panic!("Batuque system 1 did not enter its measured STUMPS worklist");
+    };
+    assert_eq!(
+        first_stump.snapshot.pass,
+        NativeStemsBeamSchedulerPass::Stumps
+    );
+    assert_eq!(first_stump.snapshot.sources.len(), 24);
+    let NativeStemsBeamSchedulerStatus::Completed {
+        retained_for_stumps: completed_retained,
+        final_local_worklist: completed_worklist,
+    } = &stumps.carrier.scheduler.status
+    else {
+        panic!("Batuque system 1 did not reach its true post-STUMPS terminal");
+    };
+    assert_eq!(completed_retained, completed_worklist);
+    assert_eq!(completed_retained, &first_stump.snapshot.sources);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

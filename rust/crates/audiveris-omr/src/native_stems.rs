@@ -29,11 +29,15 @@ use crate::{
     },
     native_stems_beam_scheduler::{
         NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerStatus,
+        NativeStemsBeamSchedulerStumpsContinuation, NativeStemsBeamSchedulerStumpsStatus,
         NativeStemsBeamSchedulerSystem, materialize_native_stems_beam_scheduler_frontiers,
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        NativeStemsBeamStumpsTransaction,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
+        continue_native_stems_beam_sides_carrier_into_stumps,
+        drive_native_stems_beam_stumps_from_modeled_registry,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
     },
@@ -124,6 +128,16 @@ pub type NativeStemsFirstSystemSidesDrive = NativeStemsSystemSidesDrive;
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageSidesDrive {
     pub systems: Vec<NativeStemsSystemSidesDrive>,
+}
+
+/// Atomic completion of one system's SIDES and STUMPS beam-origin passes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemStumpsDrive {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsBeamSidesCarrier,
+    pub continuation: NativeStemsBeamSchedulerStumpsContinuation,
+    pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -454,6 +468,53 @@ impl NativeStemsPreparedRecognition {
             systems.push(drive);
         }
         Ok(NativeStemsPageSidesDrive { systems })
+    }
+
+    /// Drive system 1 through its complete STUMPS worklist after SIDES.
+    ///
+    /// This intentionally precedes rebuilding system 2 so every STUMPS glyph
+    /// and StemInter allocation can participate in the next system's shared
+    /// page identity seed.
+    pub fn drive_first_system_stumps(
+        &self,
+    ) -> Result<NativeStemsSystemStumpsDrive, NativeStemsPreparationError> {
+        let sides = self.drive_first_system_sides()?;
+        let NativeStemsSystemSidesDrive {
+            system_id,
+            registry,
+            mut carrier,
+            ..
+        } = sides;
+        let context = self.sides_context(system_id)?;
+        let continuation =
+            continue_native_stems_beam_sides_carrier_into_stumps(&mut carrier, context)
+                .map_err(|error| phase(error, "STUMPS scheduler continuation"))?;
+        let transaction_limit = context.builders.builders.len();
+        let drive = drive_native_stems_beam_stumps_from_modeled_registry(
+            &mut carrier,
+            context,
+            &registry,
+            transaction_limit,
+        )
+        .map_err(|error| phase(error, "STUMPS drive"))?;
+        if !matches!(
+            drive.status,
+            NativeStemsBeamSchedulerStumpsStatus::Completed { .. }
+        ) {
+            return Err(phase(
+                format!(
+                    "system {system_id} did not complete within its {transaction_limit}-builder bound"
+                ),
+                "STUMPS drive",
+            ));
+        }
+        Ok(NativeStemsSystemStumpsDrive {
+            system_id,
+            registry,
+            carrier,
+            continuation,
+            transactions: drive.transactions,
+        })
     }
 }
 

@@ -2900,7 +2900,39 @@ STUMPS entries. Weak-liveness uncertainty remains a typed refusal.
 
 Focused Batuque passes 1/1 in 4.07s; the full sibling suite passes 15/15 in
 160.98s; strict workspace all-target/all-feature Clippy passes in 20.36s;
-formatting and diff checks are clean. Page-wide STUMPS is next.
+formatting and diff checks are clean. Wider-system STUMPS is next.
+
+## Boundary 153: production Batuque system-1 STUMPS completion
+
+`NativeStemsPreparedRecognition::drive_first_system_stumps` now carries the
+production-prepared Batuque system-1 SIDES terminal through the retained stump
+worklist and returns only after the typed post-STUMPS terminal. The eight
+transactions finish with allocator 1,098, 40 known/bound Stems, SIG 230/297,
+67/93 linked B cells, and 89/186 linked S cells; the 24 retained beams remain
+identical to the final local worklist.
+
+The first wider-corpus rollover exposed a valid B14 predecessor shape that the
+old Chula-only validator rejected: an existing `StemInter` contributes zero
+new InterIndex entries and zero new SIG vertices but still contributes its one
+BeamStem edge. Rollover now authenticates both legal 1/1/1 fresh-stem and 0/0/1
+existing-stem shapes against the live native SIG, including dense counts,
+bindings, persistent membership, the recorded base edge, and its native
+origin. Later B16/B17 edges may follow that base edge and later callbacks may
+revise abnormality, so neither is mistaken for predecessor corruption. A
+tampered reused-stem edge rejects on the shadow carrier with no partial batch
+commit.
+
+The same run also closed a scheduler-authority mismatch: Java's B16 sibling
+write can select a B-linker exposed by a `StemBuilder` item even when that
+linker has no standalone V-linker constructor. STUMPS resume now authenticates
+such sibling assignments against the builder item catalogue actually queried
+by B16, while still rejecting target repetition, duplicates, and unknown
+references.
+
+Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
+151.29s; strict workspace all-target/all-feature Clippy passes in 19.98s;
+formatting and diff checks are clean. Systems 2-3 STUMPS and the page-serial
+registry/allocator handoff after each STUMPS terminal are next.
 
 
 
