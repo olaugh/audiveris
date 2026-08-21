@@ -159,6 +159,37 @@ pub struct NativeStemsBeamRelationParameters {
     pub minimum_grade: f64,
 }
 
+impl NativeStemsBeamRelationParameters {
+    /// Derive Java's BeamStemRelation/checkLink constants from the native
+    /// system products that own the page scale and active STEMS profile.
+    pub fn from_native_products(
+        plans: &NativeStemsBeamLinkPlanSystem,
+        vlinkers: &NativeStemsBeamVLinkerSystem,
+        profile: i32,
+    ) -> Result<Self, NativeStemsBeamVLinkReuseCheckError> {
+        if plans.system_id != vlinkers.system_id
+            || plans.interline <= 0
+            || plans.interline != vlinkers.interline
+            || vlinkers.main_stem_thickness <= 0
+            || !(0..=4).contains(&profile)
+        {
+            return Err(NativeStemsBeamVLinkReuseCheckError::InvalidParameters);
+        }
+        Ok(Self {
+            interline: plans.interline,
+            main_stem_thickness: f64::from(vlinkers.main_stem_thickness),
+            profile,
+            x_in_gap_maximum_profile0: 0.5,
+            x_out_gap_maximum: 0.2,
+            y_gap_maximum: 4.0,
+            x_weight: 1.0,
+            y_weight: 4.0,
+            intrinsic_ratio: 1.0,
+            minimum_grade: 0.1,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamVLinkReuseCheck {
     pub system_id: usize,

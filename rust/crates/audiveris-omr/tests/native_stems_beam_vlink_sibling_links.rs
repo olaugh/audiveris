@@ -1335,7 +1335,6 @@ fn carry_allegretto_sides_transactions(
     b15_hydration::NativePredecessorPage,
     NativeStemsBeamSidesCarrier,
     Vec<NativeStemsBeamSidesTransaction>,
-    NativeStemsBeamRelationParameters,
 ) {
     assert!(transaction_count > 0);
     let page = b15_hydration::native_predecessor_page("allegretto.png");
@@ -1419,8 +1418,21 @@ fn carry_allegretto_sides_transactions(
         reachability,
         head_corners,
         checker: &checker,
-        relation_parameters: hydrated.relation_parameters,
     };
+    assert_eq!(
+        NativeStemsBeamRelationParameters::from_native_products(
+            plans,
+            vlinkers,
+            match &scheduler.status {
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => {
+                    frontier.plan.stem_profile
+                }
+                _ => panic!("Allegretto first frontier is absent"),
+            },
+        )
+        .expect("native Allegretto relation parameters"),
+        hydrated.relation_parameters
+    );
     let (mut carrier, first) = initialize_native_stems_beam_sides_carrier_from_modeled_registry(
         scheduler,
         sig,
@@ -1455,7 +1467,7 @@ fn carry_allegretto_sides_transactions(
         });
         transactions.push(transaction);
     }
-    (page, carrier, transactions, hydrated.relation_parameters)
+    (page, carrier, transactions)
 }
 
 impl RowKind {
@@ -5935,7 +5947,7 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
 /// that read has selected the persistent stem and proved the suffix unread.
 #[test]
 fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
-    let (page, carrier, transactions, _) = carry_allegretto_sides_transactions(27);
+    let (page, carrier, transactions) = carry_allegretto_sides_transactions(27);
     assert_eq!(transactions.len(), 27);
     let plans = &page.plans.systems[0];
     let mut plan_ordinal = 0_usize;
@@ -6131,8 +6143,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
 /// rows stay unopened until the native graph mutation and continuation return.
 #[test]
 fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
-    let (page, mut carrier, transactions, relation_parameters) =
-        carry_allegretto_sides_transactions(28);
+    let (page, mut carrier, transactions) = carry_allegretto_sides_transactions(28);
     assert_eq!(transactions.len(), 28);
     let stumps = &page.beam_stumps.systems[0];
     let sig_of = stumps
@@ -6196,7 +6207,6 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         reachability,
         head_corners,
         checker: &checker,
-        relation_parameters,
     };
     let carrier_before = carrier.clone();
     let before_snapshot = awaiting.snapshot.clone();
@@ -6390,8 +6400,21 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         reachability: &hydrated.reachability,
         head_corners: &hydrated.head_corners,
         checker: &first_checker,
-        relation_parameters: hydrated.relation_parameters,
     };
+    assert_eq!(
+        NativeStemsBeamRelationParameters::from_native_products(
+            &hydrated.plans,
+            &hydrated.vlinkers,
+            match &hydrated.scheduler.status {
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => {
+                    frontier.plan.stem_profile
+                }
+                _ => panic!("Chula first frontier is absent"),
+            },
+        )
+        .expect("native Chula relation parameters"),
+        hydrated.relation_parameters
+    );
     let (initialized_first_carrier, initialized_first_transaction) =
         initialize_native_stems_beam_sides_carrier_from_modeled_registry(
             &hydrated.scheduler,
@@ -7140,7 +7163,6 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         reachability: &hydrated.reachability,
         head_corners: &hydrated.head_corners,
         checker: &checker,
-        relation_parameters: hydrated.relation_parameters,
     };
     let mut carrier = carrier_before.clone();
     let carried_third = advance_native_stems_beam_sides_transaction_from_modeled_registry(

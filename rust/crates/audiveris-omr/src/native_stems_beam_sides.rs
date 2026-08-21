@@ -111,7 +111,6 @@ pub struct NativeStemsBeamSidesContext<'a> {
     pub reachability: &'a NativeStemsBeamReachabilitySystem,
     pub head_corners: &'a NativeStemsHeadCornerSystem,
     pub checker: &'a NativeStemsBeamStemCheckerContext,
-    pub relation_parameters: NativeStemsBeamRelationParameters,
 }
 
 /// Candidate-specific page GlyphIndex evidence for one frontier.
@@ -432,10 +431,12 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
         .validate_against(sig)
         .map_err(|error| stage("first-carrier-bindings", error))?;
 
-    let relation_parameters = NativeStemsBeamRelationParameters {
-        profile: frontier.plan.stem_profile,
-        ..context.relation_parameters
-    };
+    let relation_parameters = NativeStemsBeamRelationParameters::from_native_products(
+        context.plans,
+        context.vlinkers,
+        frontier.plan.stem_profile,
+    )
+    .map_err(|error| stage("first-relation-parameters", error))?;
     let (preparation, mut transaction_state) =
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
             scheduler,
@@ -11700,10 +11701,12 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
             "scheduler linked-B set differs from persistent true cells",
         ));
     }
-    let relation_parameters = NativeStemsBeamRelationParameters {
-        profile: frontier.plan.stem_profile,
-        ..context.relation_parameters
-    };
+    let relation_parameters = NativeStemsBeamRelationParameters::from_native_products(
+        context.plans,
+        context.vlinkers,
+        frontier.plan.stem_profile,
+    )
+    .map_err(|error| stage("relation-parameters", error))?;
     reconcile_known_stems(&mut shadow.latest_base_apply, &shadow.sig, &shadow.bindings)?;
     let mut transaction_state = shadow.latest_base_apply.transaction_state.clone();
     let proof = NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(

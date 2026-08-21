@@ -7774,13 +7774,30 @@ strict workspace all-target/all-feature Clippy passes in 18.57s, and formatting
 and diff checks are clean. Relation-check constants are still hydrated from
 the existing strict fixture; wider-system carriage remains next.
 
+## Boundary 145: production-derived BeamStem relation parameters
+
+`NativeStemsBeamRelationParameters::from_native_products` now derives the
+system interline and main Stem thickness from the native link-plan/V-linker
+products, takes the authenticated frontier profile, and supplies the ported
+Java `BeamStemRelation` constants (x-in 0.5, x-out 0.2, y 4.0, weights 1/4,
+intrinsic ratio 1, minimum grade 0.1). `NativeStemsBeamSidesContext` no longer
+accepts caller-provided relation parameters, so neither the first transaction
+nor later SIDES/STUMPS transactions can be driven by a fixture value.
+
+The Chula and Allegretto gates independently compare the derived product with
+their frozen Java context rows before executing; their full carried results
+remain unchanged. Focused Chula, linked-S, and hook-removal gates pass; the
+full sibling suite passes 14/14 in 159.65s; strict workspace
+all-target/all-feature Clippy passes in 24.34s; formatting and diff checks are
+clean. Wider system carriage is now the next input/branch boundary.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Generalize the native carrier inputs beyond the current Chula and
-   Allegretto system-1 gates, beginning with production-owned relation
-   parameters and wider SIDES/STUMPS, linked-S, and hook-removal branches.
+1. Generalize native carriage beyond the current Chula and Allegretto
+   system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
+   branches.
 2. Continue after Boundary 134, which completes generic `finalizeStems`, with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links:
    carry the
    remaining ordered phase-1 queue and
