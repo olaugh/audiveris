@@ -27,7 +27,7 @@ use audiveris_omr::{
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems::{
         NativeStemsHeadPhase1DriveEvent, NativeStemsHeadPhase1ProgressStatus,
-        NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems,
+        NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems, recognize_native_stems,
     },
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
@@ -7519,6 +7519,11 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             && line.contains("nativeScope FullPageAllSystemsGenericFinalize")
             && line.contains("javaEvidence ReturnedAfterFinalPageFinalize")
     }));
+    let recognized =
+        recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+            .expect("Batuque transactional native STEMS recognition");
+    assert_eq!(recognized.components, prepared.components);
+    assert_eq!(recognized.systems, page_finalized.systems);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

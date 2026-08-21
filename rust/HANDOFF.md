@@ -8197,6 +8197,25 @@ are clean. The next boundary is the transactional
 `recognize_native_stems` entry point, followed by schema-1 publication and
 wider-corpus branch coverage.
 
+## Boundary 162: transactional `recognize_native_stems`
+
+The complete native stage now has a fail-closed production entry point.
+`recognize_native_stems` consumes live completed GRID, HEADERS, STEM_SEEDS,
+BEAMS, LEDGERS, and HEADS products, prepares all immutable construction state
+and native SIGs, drives page-wide SIDES/STUMPS, both head phases, and generic
+`finalizeStems`, and exposes `NativeStemsRecognition` only after every system
+has finalized. Its owned result retains the construction products and each
+system's terminal SIG/registry plus phase-1, retry, and finalization traces.
+
+The Batuque integration gate calls both the independently stepped page path
+and the new one-call entry point and requires their full component and system
+products to compare equal. Boundary 161's fresh Java page-finalization fixture
+remains the external oracle; no new transformed fixture or Java identity is
+introduced. Focused Batuque passes 1/1 in 13.80s; the full sibling suite passes
+15/15 in 142.75s; strict workspace Clippy passes in 20.01s; formatting and diff
+checks are green. Ordinary and stream schema-1 STEMS
+publication is next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.

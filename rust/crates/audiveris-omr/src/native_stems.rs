@@ -282,6 +282,17 @@ pub struct NativeStemsPageFinalizeDrive {
     pub systems: Vec<NativeStemsSystemFinalizeDrive>,
 }
 
+/// Complete owned native STEMS result after every page system has finalized.
+///
+/// Construction products remain available for diagnostics and later
+/// publication, while `systems` owns each system's terminal SIG, registry,
+/// head-phase trace, retries, and generic finalization transaction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsRecognition {
+    pub components: NativeStemsComponentRecognition,
+    pub systems: Vec<NativeStemsSystemFinalizeDrive>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
     pub phase: &'static str,
@@ -1403,5 +1414,36 @@ pub fn prepare_native_stems(
         components,
         sig,
         stem_checker,
+    })
+}
+
+/// Run the complete native STEMS step over live upstream recognition products.
+///
+/// Every fallible predecessor, SIDES/STUMPS transaction, both head-linking
+/// phases, and generic `finalizeStems` executes inside this call. Nothing is
+/// returned unless every system reaches its finalized terminal, so callers
+/// cannot observe or publish a partial page.
+pub fn recognize_native_stems(
+    grid: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    heads: &NativeHeadsRecognition,
+    inspect_profile: i32,
+) -> Result<NativeStemsRecognition, NativeStemsPreparationError> {
+    let prepared = prepare_native_stems(
+        grid,
+        headers,
+        stem_seeds,
+        beams,
+        ledgers,
+        heads,
+        inspect_profile,
+    )?;
+    let finalized = prepared.finalize_all_system_stems()?;
+    Ok(NativeStemsRecognition {
+        components: prepared.components,
+        systems: finalized.systems,
     })
 }
