@@ -10070,6 +10070,82 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         before116.unlinked_heads
     );
 
+    // Boundary 176: queue 117 is the last head in system 3's 118-entry
+    // phase-1 queue. Stem2368 already carries x84, x85, and x86, and every
+    // sibling side is closed, so Java performs four idempotent closure writes
+    // without changing a value or mutating the graph before phase 1 exhausts.
+    let before117 = queue116.state_after.as_ref().clone();
+    let queue117 = continue_native_stems_head_linking_phase1(
+        &before117,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("generic queue-117 final prelinked no-op closure");
+    assert_eq!(queue117.processed_head.x_ordinal, 86);
+    assert_eq!(queue117.processed_head.sig_ordinal, 18);
+    assert_eq!(queue117.returned_linked, Some(true));
+    assert_eq!(
+        queue117
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, true, true, None, None),
+            (NativeStemHeadSide::Right, false, true, None, None),
+        ]
+    );
+    assert_eq!(queue117.closed_value_changes, 0);
+    assert_eq!(
+        queue117
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (84, 27, NativeStemHeadSide::Left),
+            (84, 27, NativeStemHeadSide::Right),
+            (85, 28, NativeStemHeadSide::Left),
+            (85, 28, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(queue117.state_after.current_index, 118);
+    assert_eq!(
+        queue117.state_after.current_index,
+        queue117.state_after.heads.len()
+    );
+    assert_eq!(queue117.state_after.phase_two_index, 0);
+    assert_eq!(
+        queue117
+            .state_after
+            .unlinked_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        [(112, 68), (0, 19), (14, 50), (13, 0), (56, 100), (113, 75)]
+    );
+    assert!(queue117.state_after.frontier_consumed);
+    assert_eq!(
+        queue117.state_after.beam_state.sig,
+        before117.beam_state.sig
+    );
+    assert_eq!(
+        queue117.state_after.undefined_sides,
+        before117.undefined_sides
+    );
+    assert_eq!(
+        queue117.state_after.unlinked_heads,
+        before117.unlinked_heads
+    );
+
     let order115_oracle = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order115.txt"),
     )
@@ -10269,6 +10345,105 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(
         order116_field("javaEvidence"),
         "ReturnedBeforeOneHundredEighteenthHead"
+    );
+
+    let order117_oracle = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order117.txt"),
+    )
+    .expect("frozen Allegretto system-3 final phase-1 Java closure");
+    assert_eq!(
+        sha256_hex(order117_oracle.as_bytes()),
+        "dbe00a31bf256a2a8c071b755e3c3df4e95e3ecce45f9d7020729ae0705e9caf"
+    );
+    let order117_rows = order117_oracle
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(order117_rows.len(), 11);
+    let order117_result = order117_rows
+        .iter()
+        .find(|line| line.contains("headOrder 117 headX 86 headSig 18 headInterId 1711"))
+        .expect("queue-117 final prelinked no-op closure result");
+    assert!(order117_result.contains(
+        "sidesBefore [LEFT:true:true,RIGHT:false:true] decisions [LEFT:SkipAlreadyLinked,RIGHT:SkipClosed]"
+    ));
+    assert!(order117_result.contains(
+        "incident [stem2368:headSideLEFT:heads[x84:sig27:id1731:sideLEFT,x85:sig28:id1733:sideLEFT,x86:sig18:id1711:sideLEFT]] returned true"
+    ));
+    assert!(order117_result.contains(
+        "closureWrites [x84:sig27:LEFT:true->true,x84:sig27:RIGHT:true->true,x85:sig28:LEFT:true->true,x85:sig28:RIGHT:true->true] closedValueChanges 0 unlinkedCount 0"
+    ));
+    assert!(order117_result.contains(
+        "sigVerticesBefore 649 sigVerticesAfter 649 sigEdgesBefore 593 sigEdgesAfter 593 systemStemsBefore 52 systemStemsAfter 52"
+    ));
+    assert!(order117_result.contains(
+        "relationStateHashBefore 63240815cfaf84ffc2ec724c7da0de08d085ca149d6f754e79266e1fedfe6ceb relationStateHashAfter 63240815cfaf84ffc2ec724c7da0de08d085ca149d6f754e79266e1fedfe6ceb"
+    ));
+    assert!(order117_result.contains(
+        "linkerStateHashBefore 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac linkerStateHashAfter 8c951e957d7a414e47facb5e9217390f4d9c4de875467ee5b1bec1dcbdcfd3ac terminal ReturnedAfterLastHead"
+    ));
+    let order117_summary = order117_rows[10]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let order117_field = |name: &str| {
+        order117_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| order117_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto system-3 order-117 summary field")
+    };
+    assert_eq!(
+        order117_field("schema"),
+        "stems-head-phase-prefix-allegretto-system3-order117"
+    );
+    assert_eq!(order117_field("rows"), "10");
+    assert_eq!(
+        order117_field("baseSystem3Order116RunnerSha256"),
+        "2e2c10929798d25ea10ec0b5912288db59e5feb71f806c784fd60b445fbe89f3"
+    );
+    assert_eq!(
+        order117_field("baseSystem3Order116FixtureSha256"),
+        "cc6b2240cc6f6fa13fa294ef17eb01cae65afc8189fba4e4a244d99d76891a8e"
+    );
+    assert_eq!(
+        order117_field("probeSourceSha256"),
+        "f17ce2eead270d2cc2d4390218440f408544b345806d8d683a29451cc90b7c2d"
+    );
+    assert_eq!(
+        order117_field("runnerSourceSha256"),
+        "088128d72a928ac4a16439e1fa61c857901b793ccbc20e79231c0070e7e50086"
+    );
+    assert_eq!(
+        order117_field("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system3-order117.sh",
+            ))
+            .expect("active Allegretto system-3 order-117 runner")
+        )
+    );
+    assert_eq!(
+        order117_field("emittedBodySha256"),
+        "567b8ebb998d7d75e46380c7740e7259454936be517771816aaca4e7369d0478"
+    );
+    assert_eq!(
+        order117_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", order117_rows[..10].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        order117_field("semanticPassSha256"),
+        "69eaf824e4c50b706f2c22c446e465afa966d957a04b2d389ce9a2cad0ba70ad"
+    );
+    assert_eq!(order117_field("freshRuns"), "2");
+    assert_eq!(order117_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        order117_field("nativeScope"),
+        "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order117PrelinkedNoOpClosure"
+    );
+    assert_eq!(
+        order117_field("javaEvidence"),
+        "ReturnedAfterLastPhaseOneHead"
     );
 
     // Open the frozen Java result only after the native compound registry,

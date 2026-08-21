@@ -8769,3 +8769,32 @@ all-features workspace Clippy, and diff checks. The exact remote baseline is
 Boundary 174 commit `02f09e64b`: Build & Test 32513292289 and Rust port
 32513292385 both succeeded. Wider-corpus completion remains open at queue 117
 x86/SIG18.
+
+## Boundary 176: Allegretto system-3 final phase-1 no-op closure
+
+The generic continuation consumes queue 117 x86/SIG18/Inter1711, the last of
+118 phase-1 heads. LEFT is linked/closed through Stem2368 and RIGHT is closed;
+the same stem carries x84/SIG27 and x85/SIG28. Java returns `true` and emits
+the four ordered sibling writes, but each is `true->true`, so zero values
+change. SIG 649/593, 52 system stems, relation/linker hashes, undefined sides,
+and the retry worklist stay unchanged. Native reaches `current_index=118`,
+phase-2 index zero, and carries the exact six-entry retry queue x112/SIG68,
+x0/SIG19, x14/SIG50, x13/SIG0, x56/SIG100, x113/SIG75.
+
+The minimized 13-line / 16,544-byte fixture is byte-identical across warmup
+plus two fresh runs. Fixture, runner, transformed probe, emitted body, and
+semantic-pass SHA-256 values are
+`dbe00a31bf256a2a8c071b755e3c3df4e95e3ecce45f9d7020729ae0705e9caf`,
+`088128d72a928ac4a16439e1fa61c857901b793ccbc20e79231c0070e7e50086`,
+`f17ce2eead270d2cc2d4390218440f408544b345806d8d683a29451cc90b7c2d`,
+`567b8ebb998d7d75e46380c7740e7259454936be517771816aaca4e7369d0478`,
+and `69eaf824e4c50b706f2c22c446e465afa966d957a04b2d389ce9a2cad0ba70ad`.
+Strict Boundary-175 runner/fixture pins are
+`2e2c10929798d25ea10ec0b5912288db59e5feb71f806c784fd60b445fbe89f3` /
+`cc6b2240cc6f6fa13fa294ef17eb01cae65afc8189fba4e4a244d99d76891a8e`.
+
+Focused 1/1 and full sibling 20/20 (154.71s) pass with formatting, strict
+all-features workspace Clippy, and diff checks. Boundary 175 commit
+`ef4ee3e00` is the exact remote baseline: Build & Test 32516450490 and Rust
+port 32516450484 both succeeded, with all 12 Rust shards green. Wider-corpus
+completion resumes at system-3 phase-2 retry index 0, x112/SIG68.
