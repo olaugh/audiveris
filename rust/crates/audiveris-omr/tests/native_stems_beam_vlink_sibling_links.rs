@@ -110,6 +110,7 @@ use audiveris_omr::{
         advance_native_stems_head_multi_head_reuse_c_link_order67,
         advance_native_stems_head_multi_head_reuse_c_link_order70,
         advance_native_stems_head_multi_head_reuse_c_link_order73,
+        advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs,
         advance_native_stems_head_open_frontier_order50,
         advance_native_stems_head_open_frontier_order60,
         advance_native_stems_head_open_frontier_order61,
@@ -8081,6 +8082,7 @@ fn allegretto_heads_queue65_reuse_and_queue79_created_stem() {
                 &seed_glyphs.free_glyphs,
                 head_builders,
                 plans,
+                &prepared.components.beam_vlinkers.systems[0],
                 &prepared.stem_checker,
                 &start.registry,
             )
@@ -8203,6 +8205,7 @@ fn allegretto_heads_queue65_reuse_and_queue79_created_stem() {
                 &seed_glyphs.free_glyphs,
                 head_builders,
                 plans,
+                &prepared.components.beam_vlinkers.systems[0],
                 &prepared.stem_checker,
                 &start.registry,
             )
@@ -8490,6 +8493,356 @@ fn allegretto_heads_queue65_reuse_and_queue79_created_stem() {
         summary_field("javaEvidence"),
         "ReturnedBeforeEightyFirstHead"
     );
+}
+
+/// Allegretto system 2's order-89 start-C expansion crosses two beam linkers.
+/// The generic C-link transaction must retain Java's relation insertion order,
+/// link both persistent B cells, and commit the checked stem atomically.
+#[test]
+fn allegretto_system2_order89_generic_beam_bearing_c_link() {
+    let path = repo_root().join("data/examples/allegretto.png");
+    let grid = recognize_grid_lines(path).expect("Allegretto GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Allegretto HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Allegretto STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Allegretto BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Allegretto LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Allegretto HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Allegretto native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Allegretto post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(1);
+    let head_corners = &prepared.components.head_corners.systems[1];
+    let head_reachability = &prepared.components.head_reachability.systems[1];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[1];
+    let head_builders = &prepared.components.head_builders.systems[1];
+    let plans = &prepared.components.plans.systems[1];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[1];
+
+    while start.carrier.current_index < 89 {
+        if start.carrier.frontier_consumed {
+            let head = start.carrier.heads[start.carrier.current_index].reference;
+            let continuation = if (
+                start.carrier.current_index,
+                head.x_ordinal,
+                head.sig_ordinal,
+            ) == (54, 46, 94)
+            {
+                advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs(
+                    &start.carrier,
+                    head_corners,
+                    head_reachability,
+                    &seed_glyphs.free_glyphs,
+                    head_builders,
+                    plans,
+                    &prepared.stem_checker,
+                    &start.registry,
+                )
+                .expect("Allegretto system-2 queue-54 multi-head reuse")
+            } else {
+                continue_native_stems_head_linking_phase1(
+                    &start.carrier,
+                    head_corners,
+                    Some(head_reachability),
+                    head_builders,
+                    plans,
+                )
+                .expect("ordinary Allegretto system-2 continuation before queue 89")
+            };
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Allegretto system-2 C-link before queue 89");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    if start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Allegretto system-2 continuation to queue-89 frontier");
+        start.carrier = *continuation.state_after;
+    }
+    assert_eq!(start.carrier.current_index, 89);
+    assert!(!start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.frontier.head.x_ordinal, 52);
+    assert_eq!(start.carrier.frontier.head.sig_ordinal, 43);
+    let before = start.carrier.clone();
+    let transaction = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Allegretto system-2 order-89 C-link dispatch")
+    .expect("Allegretto system-2 order-89 links a checked stem");
+
+    assert_eq!(transaction.corner.x_ordinal, 52);
+    assert_eq!(transaction.corner.sig_ordinal, 43);
+    assert_eq!(transaction.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(transaction.corner.vertical, NativeStemVerticalSide::Top);
+    assert_eq!((transaction.last_index, transaction.max_index), (3, 3));
+    assert_eq!(transaction.relation.grade.to_bits(), 0x3fef_ffff_ffff_fe92);
+    assert_eq!(transaction.relation.dx.to_bits(), 0xbd22_4924_9249_2492);
+    assert_eq!(transaction.beam_relations.len(), 2);
+    assert_eq!(transaction.beam_stem_edges.len(), 2);
+    assert_eq!(transaction.linked_b_linkers.len(), 2);
+    assert_eq!(
+        transaction.linked_b_linkers[0].beam,
+        NativeStemsBeamSource::RawBeam(32)
+    );
+    assert_eq!(transaction.linked_b_linkers[0].id, 10);
+    assert_eq!(
+        transaction.linked_b_linkers[1].beam,
+        NativeStemsBeamSource::RawBeam(31)
+    );
+    assert_eq!(transaction.linked_b_linkers[1].id, 10);
+    assert_eq!(
+        transaction.beam_relations[0].grade.to_bits(),
+        0x3fef_6789_64ca_d0c6
+    );
+    assert_eq!(
+        transaction.beam_relations[0].dx.to_bits(),
+        0x3f8b_8adb_bfa3_3cf4
+    );
+    assert_eq!(
+        transaction.beam_relations[0].portion,
+        NativeBeamPortion::Right
+    );
+    assert_eq!(
+        transaction.beam_relations[1].grade.to_bits(),
+        0x3fef_5192_bafb_730a
+    );
+    assert_eq!(
+        transaction.beam_relations[1].dx.to_bits(),
+        0x3f8f_5775_9e0e_aaab
+    );
+    assert_eq!(
+        transaction.beam_relations[1].portion,
+        NativeBeamPortion::Right
+    );
+    assert_eq!(start.carrier.current_index, 90);
+    assert!(start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.heads[90].reference.x_ordinal, 94);
+    assert_eq!(start.carrier.heads[90].reference.sig_ordinal, 51);
+    assert_eq!(start.carrier.undefined_sides, before.undefined_sides);
+    assert_eq!(start.carrier.unlinked_heads, before.unlinked_heads);
+    assert_eq!(
+        start.carrier.beam_state.sig.vertices.len(),
+        before.beam_state.sig.vertices.len() + 1
+    );
+    assert_eq!(
+        start.carrier.beam_state.sig.edges.len(),
+        before.beam_state.sig.edges.len() + 3
+    );
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        before
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len()
+            + 1
+    );
+    let NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } =
+        transaction.create.disposition
+    else {
+        panic!("order-89 must create one checked stem");
+    };
+    assert_eq!(stem_identity, 55);
+    let stem = transaction
+        .create
+        .stem
+        .as_ref()
+        .expect("order-89 created stem");
+    assert_eq!(
+        stem.glyph_content.bounds,
+        audiveris_image::section::Bounds {
+            x: 1183,
+            y: 965,
+            width: 3,
+            height: 104,
+        }
+    );
+    assert_eq!(
+        stem.geometry.ribbon_bounds,
+        JavaRectangle::new(1183, 965, 3, 104)
+    );
+    assert_eq!(
+        match &stem.grade {
+            NativeStemsBeamStemGrade::Checked(check) => check.grade.to_bits(),
+            NativeStemsBeamStemGrade::Artificial(_) => panic!("order-89 stem is checked"),
+        },
+        0x3fe9_313f_54bd_346f
+    );
+    assert_eq!(
+        stem.geometry.median.start.x.to_bits(),
+        0x4092_82fd_a185_dd79
+    );
+    assert_eq!(
+        stem.geometry.median.start.y.to_bits(),
+        0x408e_2800_0000_0000
+    );
+    assert_eq!(stem.geometry.median.stop.x.to_bits(), 0x4092_8321_a794_45fb);
+    assert_eq!(stem.geometry.median.stop.y.to_bits(), 0x4090_b400_0000_0000);
+    assert_eq!(
+        stem.geometry.mean_thickness.to_bits(),
+        0x4002_d89d_89d8_9d8a
+    );
+
+    // Open the independently frozen Java evidence only after native state and
+    // relation geometry have been authenticated.
+    let oracle = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system2-order89.txt"),
+    )
+    .expect("frozen Allegretto system-2 order-89 Java transaction");
+    assert_eq!(
+        sha256_hex(oracle.as_bytes()),
+        "dcfec65a778983cc9615786fe7b9bd008677f456ad8d6f276edb3855be46e45a"
+    );
+    let rows = oracle
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 5);
+    assert!(rows[1].contains("headOrder 89 headX 52 headSig 43 headInterId 1521"));
+    assert!(rows[1].contains("cAlias h:52:RIGHT:TOP"));
+    assert!(rows[1].contains("lastIndex 3 maxIndex 3 relations 3"));
+    assert!(rows[1].contains("selected [glyph:2206:active:id=2206:g:1183:965:3:104:"));
+    assert!(rows[2].contains("allocatorBefore 2385 allocatorAfter 2386"));
+    assert!(rows[2].contains("sourceId1521:targetId2386"));
+    assert!(rows[2].contains("sourceId937:targetId2386"));
+    assert!(rows[2].contains("sourceId938:targetId2386"));
+    assert!(rows[3].contains("nextHeadOrder 90 nextHeadX 94 nextHeadSig 51"));
+    let summary = rows[4].split_ascii_whitespace().collect::<Vec<_>>();
+    let field = |name: &str| {
+        summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto system-2 order-89 summary field")
+    };
+    assert_eq!(field("rows"), "4");
+    assert_eq!(field("freshRuns"), "2");
+    assert_eq!(
+        field("baseProbeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("active base HEADS probe")
+        )
+    );
+    assert_eq!(
+        field("fragmentSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/stems-head-phase-v28-fragment.java"))
+                .expect("active shared HEADS fragment")
+        )
+    );
+    assert_eq!(
+        field("glyphIndexSourceSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root().join("app/src/main/java/org/audiveris/omr/glyph/GlyphIndex.java")
+            )
+            .expect("active Java GlyphIndex source")
+        )
+    );
+    assert_eq!(
+        field("retainedGlyphOverlaySha256"),
+        "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4"
+    );
+    assert_eq!(
+        field("allegrettoSystem2InitSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root()
+                    .join("rust/oracle/java/stems-head-phase-allegretto-system2.init.gradle")
+            )
+            .expect("active Allegretto system-2 init")
+        )
+    );
+    assert_eq!(
+        field("baseSystem1Order79RunnerSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system1-order79.sh"
+            ))
+            .expect("strict Allegretto system-1 order-79 runner")
+        )
+    );
+    assert_eq!(
+        field("baseSystem1Order79FixtureSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root()
+                    .join("rust/oracle/stems-head-phase-prefix-allegretto-system1-order79.txt")
+            )
+            .expect("strict Allegretto system-1 order-79 fixture")
+        )
+    );
+    assert_eq!(
+        field("probeSourceSha256"),
+        "4e111715e281e58c51c724130dca44b6a9c0b3149188e3063f77abd3ab58280e"
+    );
+    assert_eq!(
+        field("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system2-order89.sh",
+            ))
+            .expect("active Allegretto system-2 order-89 runner")
+        )
+    );
+    assert_eq!(
+        field("emittedBodySha256"),
+        "218d8ecd1a889e0046a49594e675572cd2884bf3f8f3411a0d166b8c3b2cbb21"
+    );
+    assert_eq!(
+        field("semanticPassSha256"),
+        "01868de57f3a8f5eb42a3496c62cb141d034b85f0fdf0d3859fe37b7337bccae"
+    );
+    assert_eq!(field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        field("nativeScope"),
+        "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem2Order89CreatedStem"
+    );
+    assert_eq!(field("javaEvidence"), "ReturnedBeforeNinetyFirstHead");
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and
@@ -9996,12 +10349,43 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     let mut head_phase = begin_native_stems_head_linking_phase1(
         &carrier,
         &checker_page.head_corners.systems[0],
+        &checker_page.head_reachability.systems[0],
         &checker_page.head_builders.systems[0],
         &hydrated.plans,
     )
     .expect("native post-STUMPS head-phase frontier");
     assert_eq!(carrier, post_stumps_before);
-    assert_eq!(head_phase.beam_state, carrier);
+    assert_eq!(
+        &head_phase.beam_state.b_cells[..carrier.b_cells.len()],
+        carrier.b_cells.as_slice()
+    );
+    let added_head_b_refs = checker_page.head_reachability.systems[0]
+        .final_beam_arenas
+        .iter()
+        .flat_map(|arena| &arena.entries)
+        .map(|entry| entry.reference)
+        .filter(|reference| {
+            !carrier
+                .b_cells
+                .iter()
+                .any(|cell| cell.reference == *reference)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        head_phase.beam_state.b_cells[carrier.b_cells.len()..]
+            .iter()
+            .map(|cell| cell.reference)
+            .collect::<Vec<_>>(),
+        added_head_b_refs
+    );
+    assert!(
+        head_phase.beam_state.b_cells[carrier.b_cells.len()..]
+            .iter()
+            .all(|cell| !cell.linked && !cell.closed)
+    );
+    let mut beam_state_without_head_anchors = head_phase.beam_state.clone();
+    beam_state_without_head_anchors.b_cells = carrier.b_cells.clone();
+    assert_eq!(beam_state_without_head_anchors, carrier);
     assert_eq!(head_phase.heads.len(), 102);
     assert_eq!(head_phase.current_index, 0);
     assert!(head_phase.unlinked_heads.is_empty());

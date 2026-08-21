@@ -177,6 +177,10 @@ pub enum NativeSigRelationOrigin {
         head_sig_ordinal: usize,
         constructor_ordinal: usize,
     },
+    HeadCLinkBeamDraft {
+        head_sig_ordinal: usize,
+        beam_linker_id: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -425,7 +429,8 @@ fn valid_edge_payload(edge: &NativeSigEdge) -> bool {
     let valid_origin = match edge.origin {
         NativeSigRelationOrigin::BaselineGraph => true,
         NativeSigRelationOrigin::BeamVBaseDraft { .. }
-        | NativeSigRelationOrigin::BeamVSiblingDraft { .. } => {
+        | NativeSigRelationOrigin::BeamVSiblingDraft { .. }
+        | NativeSigRelationOrigin::HeadCLinkBeamDraft { .. } => {
             edge.kind == NativeSigRelationKind::BeamStem
         }
         NativeSigRelationOrigin::BeamVHeadDraft { .. }

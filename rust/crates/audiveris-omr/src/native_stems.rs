@@ -783,6 +783,12 @@ impl NativeStemsPreparedRecognition {
                 |system| system.system_id,
                 "HEADS phase-1 builders",
             )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 reachability",
+            )?;
             let plans = system(
                 &self.components.plans.systems,
                 system_id,
@@ -792,6 +798,7 @@ impl NativeStemsPreparedRecognition {
             let carrier = begin_native_stems_head_linking_phase1(
                 &completed.carrier,
                 head_corners,
+                head_reachability,
                 head_builders,
                 plans,
             )
@@ -856,6 +863,12 @@ impl NativeStemsPreparedRecognition {
                 |system| system.system_id,
                 "HEADS first C-link plans",
             )?;
+            let vlinkers = system(
+                &self.components.beam_vlinkers.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link V-linkers",
+            )?;
             let outcome = advance_native_stems_head_c_link_or_no_link(
                 &mut carrier,
                 head_corners,
@@ -863,6 +876,7 @@ impl NativeStemsPreparedRecognition {
                 &seed_glyphs.free_glyphs,
                 head_builders,
                 plans,
+                vlinkers,
                 &self.stem_checker,
                 &registry,
             )
@@ -1018,6 +1032,12 @@ impl NativeStemsPreparedRecognition {
                 |system| system.system_id,
                 "HEADS next C-link plans",
             )?;
+            let vlinkers = system(
+                &self.components.beam_vlinkers.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link V-linkers",
+            )?;
             let outcome = advance_native_stems_head_c_link_or_no_link(
                 &mut carrier,
                 head_corners,
@@ -1025,6 +1045,7 @@ impl NativeStemsPreparedRecognition {
                 &seed_glyphs.free_glyphs,
                 head_builders,
                 plans,
+                vlinkers,
                 &self.stem_checker,
                 &registry,
             )
@@ -1096,6 +1117,12 @@ impl NativeStemsPreparedRecognition {
                 system_id,
                 |system| system.system_id,
                 "HEADS phase-1 drive plans",
+            )?;
+            let vlinkers = system(
+                &self.components.beam_vlinkers.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive V-linkers",
             )?;
             let mut events = Vec::new();
             while carrier.current_index < carrier.heads.len() {
@@ -1225,6 +1252,7 @@ impl NativeStemsPreparedRecognition {
                     &seed_glyphs.free_glyphs,
                     head_builders,
                     plans,
+                    vlinkers,
                     &self.stem_checker,
                     &registry,
                 )

@@ -175,7 +175,7 @@ fn native_sibling_source_outgoing(
         })
 }
 
-fn native_beam_abnormal(
+pub(crate) fn native_beam_abnormal(
     sig: &NativeSigSystem,
     beam: NativeSigVertexId,
 ) -> Result<bool, NativeStemsBeamVLinkSiblingLinksError> {

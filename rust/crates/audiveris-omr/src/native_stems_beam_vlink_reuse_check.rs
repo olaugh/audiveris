@@ -180,8 +180,13 @@ impl NativeStemsBeamRelationParameters {
             main_stem_thickness: f64::from(vlinkers.main_stem_thickness),
             profile,
             x_in_gap_maximum_profile0: 0.5,
-            x_out_gap_maximum: 0.2,
-            y_gap_maximum: 4.0,
+            x_out_gap_maximum: if profile <= 0 { 0.15 } else { 0.2 },
+            y_gap_maximum: match profile {
+                i32::MIN..=0 => 0.8,
+                1 => 1.2,
+                2 => 2.0,
+                _ => 4.0,
+            },
             x_weight: 1.0,
             y_weight: 4.0,
             intrinsic_ratio: 1.0,
@@ -2018,7 +2023,7 @@ fn evaluate_relation(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn evaluate_relation_geometry(
+pub(crate) fn evaluate_relation_geometry(
     beam_source: NativeStemsBeamSource,
     beam_median: Segment,
     beam_height: f64,

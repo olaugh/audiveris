@@ -8531,3 +8531,42 @@ completes Allegretto system 1 and fails closed next in system 2 at queue 89
 x52/SIG43 RIGHT/TOP, whose builder is start + chunk + two BeamLinkers. Measure
 that beam-bearing head-origin expansion next. Broader corpus completion and
 fresh remote CI remain open.
+
+## Boundary 170: generic beam-bearing head-origin C-link
+
+The snapshot-minimized Allegretto system-2 runner replays the real predecessor
+through heads 0-88 without retaining their snapshots, then measures queue 89
+twice byte-identically. x52/SIG43 selects RIGHT/TOP. Java walks a stump-less
+start, active chunk glyph 2206, RawBeam 32, and RawBeam 31. The last sibling
+BeamLinker returns from inside `CLinker.expand`, so Java deliberately retains
+the initial x52 HeadStem relation while using the chunk-shifted stem line for
+both BeamStem checks and checked-stem creation. The exact HeadStem grade/dx
+bits are `3feffffffffffe92`/`bd22492492492492`; the RawBeam 32 and 31
+BeamStem grade/dx bits are `3fef678964cad0c6`/`3f8b8adbbfa33cf4` and
+`3fef5192bafb730a`/`3f8f57759e0eaaab`.
+
+Java creates StemInter 2386 from glyph 2206, appends one HeadStem plus two
+BeamStem edges, links `beam:2:b:9`, `beam:1:b:9`, and x52 RIGHT, and changes
+SIG 654/619 to 655/622 and system stems 55 to 56. Native now handles this as a
+generic beam-bearing builder tail: phase-1 initialization materializes the
+head-created B-linker anchors that Java appended after the SIDES/STUMPS carrier,
+the relation evaluator converts head-to-beam TOP into the contacted BOTTOM beam
+border, and BeamStem maxima follow Java's active profile (`xOut=0.15` and
+`yGap=0.8` at profile 0). It creates dense Stem 55 / native persistent Inter
+1483, appends the same three exact relation payloads, and commits both native B
+cells plus the parent S cell atomically before queue 90.
+
+The 7-line / 8,234-byte fixture SHA-256 is
+`dcfec65a778983cc9615786fe7b9bd008677f456ad8d6f276edb3855be46e45a`;
+runner, system-2 initializer, transformed probe, body, and semantic-pass hashes
+are `f36f312b0bc82d8cbd4fc176133339515069743a5786eed54a37f76678795986`,
+`9587d9c623beea6c7922dabf6b50cd4d315ed49f4bca28bcc430684362384035`,
+`4e111715e281e58c51c724130dca44b6a9c0b3149188e3063f77abd3ab58280e`,
+`218d8ecd1a889e0046a49594e675572cd2884bf3f8f3411a0d166b8c3b2cbb21`,
+and `01868de57f3a8f5eb42a3496c62cb141d034b85f0fdf0d3859fe37b7337bccae`.
+Focused gates pass, the full sibling suite passes 19/19 in 144.58s, and strict
+all-targets/all-features workspace Clippy, formatting, and diff checks pass.
+Production now advances through queue 89 and fails closed at system 2 queue 111
+x51/SIG36 LEFT/BOTTOM, whose builder is a start stump followed by three sibling
+HeadHalfLinkers (x48, x49, and x50). That generic multi-head expansion is next;
+broader corpus completion and fresh remote CI remain open.

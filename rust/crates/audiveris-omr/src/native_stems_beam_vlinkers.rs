@@ -75,7 +75,7 @@ pub struct NativeStemsBeamPart {
     pub bounds: JavaRectangle,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NativeStemsBeamBLinkerRef {
     pub beam: NativeStemsBeamSource,
     /// Java's one-based `allBLinkers` insertion id, local to the beam.

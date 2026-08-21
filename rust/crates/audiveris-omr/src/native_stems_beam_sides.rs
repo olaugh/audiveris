@@ -53,14 +53,15 @@ use crate::{
         apply_native_stems_beam_outer_and_resume_transaction,
     },
     native_stems_beam_vlink_reuse_check::{
-        NativeStemsBeamRelationParameters, NativeStemsBeamVLinkReuseCheck,
-        NativeStemsBeamVLinkReuseLiveState, evaluate_native_stems_beam_vlink_reuse_check,
+        NativeStemsBeamRelationCheck, NativeStemsBeamRelationParameters,
+        NativeStemsBeamVLinkReuseCheck, NativeStemsBeamVLinkReuseLiveState,
+        evaluate_native_stems_beam_vlink_reuse_check, evaluate_relation_geometry,
         project_native_stems_beam_vlink_reuse_live_state,
     },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamNativeBLinkerCell, NativeStemsBeamNativeSiblingTransaction,
         apply_native_stems_beam_vlink_sibling_transaction_to_native_sig,
-        initialize_native_stems_beam_b_linker_cells,
+        initialize_native_stems_beam_b_linker_cells, native_beam_abnormal,
     },
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphEqualsScan,
@@ -78,7 +79,10 @@ use crate::{
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
         prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
-    native_stems_beam_vlinkers::{NativeStemsBeamVLinkerSystem, generic_intersection},
+    native_stems_beam_vlinkers::{
+        NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef, NativeStemsBeamVLinkerSystem,
+        generic_intersection,
+    },
     native_stems_head_builders::{
         NativeStemsHeadBuilderGlyphRef, NativeStemsHeadBuilderItemKind,
         NativeStemsHeadBuilderSystem, NativeStemsHeadBuilderTargetRef,
@@ -216,6 +220,9 @@ pub struct NativeStemsHeadCLinkTransaction {
     pub create: NativeStemsCreateStemCandidateTransaction,
     pub stem_vertex: NativeSigVertexId,
     pub head_stem_edge: NativeSigEdgeId,
+    pub beam_relations: Vec<NativeStemsBeamRelationCheck>,
+    pub beam_stem_edges: Vec<NativeSigEdgeId>,
+    pub linked_b_linkers: Vec<NativeStemsBeamBLinkerRef>,
     pub s_linker: NativeStemsBeamHeadSLinkerRef,
     pub s_linked_before: bool,
     pub s_linked_after: bool,
@@ -825,6 +832,7 @@ fn drive_native_stems_beam_stumps_with_authority(
 pub fn begin_native_stems_head_linking_phase1(
     carrier: &NativeStemsBeamSidesCarrier,
     head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
 ) -> Result<NativeStemsHeadPhase1Carrier, NativeStemsBeamSidesError> {
@@ -837,6 +845,7 @@ pub fn begin_native_stems_head_linking_phase1(
     if carrier.scheduler.system_id != head_corners.system_id
         || carrier.sig.system_id != head_corners.system_id
         || carrier.bindings.system_id != head_corners.system_id
+        || head_reachability.system_id != head_corners.system_id
         || head_builders.system_id != head_corners.system_id
         || plans.system_id != head_corners.system_id
     {
@@ -964,6 +973,54 @@ pub fn begin_native_stems_head_linking_phase1(
         ));
     }
     let mut beam_state = carrier.clone();
+    // Head inspection can append B-linker anchors after the beam-origin SIDES/STUMPS
+    // carrier was initialized. Java stores these in each beam's shared `allBLinkers`
+    // arena before head linking starts, so materialize the same false/open cells at
+    // this ownership boundary. Existing beam-origin cells retain their live flags.
+    let mut head_b_refs = BTreeSet::new();
+    for arena in &head_reachability.final_beam_arenas {
+        for entry in &arena.entries {
+            if entry.reference.beam != arena.beam
+                || entry.reference.id == 0
+                || !head_b_refs.insert(entry.reference)
+            {
+                return Err(stage(
+                    "HEADS-phase1-B-topology",
+                    "head-reachability B-linker arena is malformed or duplicated",
+                ));
+            }
+            match beam_state
+                .b_cells
+                .iter()
+                .filter(|cell| cell.reference == entry.reference)
+                .count()
+            {
+                0 => beam_state.b_cells.push(NativeStemsBeamNativeBLinkerCell {
+                    reference: entry.reference,
+                    linked: false,
+                    closed: false,
+                }),
+                1 => {}
+                _ => {
+                    return Err(stage(
+                        "HEADS-phase1-B-topology",
+                        "persistent B-linker cell is duplicated",
+                    ));
+                }
+            }
+        }
+    }
+    if beam_state
+        .b_cells
+        .iter()
+        .any(|cell| !head_b_refs.contains(&cell.reference))
+        || !linked_b_cells_match(&beam_state.scheduler.linked_b_linkers, &beam_state.b_cells)
+    {
+        return Err(stage(
+            "HEADS-phase1-B-topology",
+            "head-reachability arena does not extend the carried B-cell authority",
+        ));
+    }
     let mut current_index = 0;
     let mut prefix_closures = Vec::new();
     loop {
@@ -1700,6 +1757,7 @@ pub fn advance_native_stems_head_single_item_c_link(
     let reconstructed = begin_native_stems_head_linking_phase1(
         &shadow.beam_state,
         head_corners,
+        head_reachability,
         head_builders,
         plans,
     )?;
@@ -1722,6 +1780,7 @@ pub fn advance_native_stems_head_single_item_c_link(
         &stem_seeds.free_glyphs,
         head_builders,
         plans,
+        None,
         checker,
         bridge,
         0,
@@ -1799,6 +1858,7 @@ pub fn advance_native_stems_head_bottom_only_c_link(
         stem_seed_glyphs,
         head_builders,
         plans,
+        None,
         checker,
         registry,
         carrier.current_index,
@@ -1824,6 +1884,7 @@ pub fn advance_native_stems_head_c_link_or_no_link(
     stem_seed_glyphs: &[NativeStemSeedGlyph],
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
+    vlinkers: &NativeStemsBeamVLinkerSystem,
     checker: &NativeStemsBeamStemCheckerContext,
     registry: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<
@@ -1983,6 +2044,7 @@ pub fn advance_native_stems_head_c_link_or_no_link(
                 stem_seed_glyphs,
                 head_builders,
                 plans,
+                Some(vlinkers),
                 checker,
                 registry,
                 carrier.current_index,
@@ -10125,7 +10187,7 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order73_from_gly
     clippy::too_many_arguments,
     reason = "the atomic boundary authenticates each independently owned native authority"
 )]
-pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs(
+pub fn advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
     head_reachability: &NativeStemsHeadCornerReachabilitySystem,
@@ -11197,6 +11259,7 @@ fn advance_native_stems_head_continuation_c_link_at_queue(
         &stem_seeds.free_glyphs,
         head_builders,
         plans,
+        None,
         checker,
         bridge,
         queue_index,
@@ -11217,6 +11280,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     stem_seed_glyphs: &[NativeStemSeedGlyph],
     head_builders: &NativeStemsHeadBuilderSystem,
     plans: &NativeStemsBeamLinkPlanSystem,
+    beam_vlinkers: Option<&NativeStemsBeamVLinkerSystem>,
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
     expected_current_index: usize,
@@ -11240,19 +11304,41 @@ fn advance_native_stems_head_c_link_at_frontier(
         .iter()
         .find(|builder| builder.start == frontier.next_corner)
         .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
-    let bounded_shape = match builder.items.as_slice() {
-        [start] => {
-            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
-                && start.glyph == builder.start_stump
-        }
-        [start, chunk] => {
-            start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
-                && start.glyph == builder.start_stump
-                && chunk.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
-                && chunk.glyph.is_some()
-        }
-        _ => false,
+    let Some((start, tail)) = builder.items.split_first() else {
+        return Err(stage("HEADS-CLink-expand", "selected builder is empty"));
     };
+    let mut tail = tail;
+    let bounded_start = start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+        && start.glyph == builder.start_stump;
+    let bounded_chunk = if tail
+        .first()
+        .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph)
+    {
+        let chunk = &tail[0];
+        tail = &tail[1..];
+        chunk.glyph.is_some() && chunk.target.is_none()
+    } else {
+        true
+    };
+    let beam_targets = tail
+        .iter()
+        .map(|item| match (item.kind, item.glyph, item.target) {
+            (
+                NativeStemsHeadBuilderItemKind::BeamLinker,
+                None,
+                Some(NativeStemsHeadBuilderTargetRef::Beam(target)),
+            ) => Ok(target),
+            _ => Err(()),
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let bounded_shape = bounded_start
+        && bounded_chunk
+        && beam_targets.as_ref().is_ok_and(|targets| {
+            targets
+                .iter()
+                .enumerate()
+                .all(|(index, target)| !targets[..index].contains(target))
+        });
     if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
@@ -11274,6 +11360,14 @@ fn advance_native_stems_head_c_link_at_frontier(
                     .collect::<Vec<_>>(),
                 shadow.undefined_sides,
             ),
+        ));
+    }
+    let beam_targets = beam_targets.expect("bounded beam-linker shape was authenticated");
+    let beam_stopped = !beam_targets.is_empty();
+    if !beam_targets.is_empty() && beam_vlinkers.is_none() {
+        return Err(stage(
+            "HEADS-CLink-expand",
+            "beam-bearing C-link has no native V-linker geometry authority",
         ));
     }
     let selected_constructor_ordinal = head_corners.heads_in_sig_order
@@ -11513,25 +11607,66 @@ fn advance_native_stems_head_c_link_at_frontier(
     // Java CLinker.link derives the hard target from this corner's reference
     // point; the theoretical-line endpoint is only the initial `lastY`.
     let hard_y = reach_corner.reference_point.y + f64::from(builder.y_direction * minimum_tail);
-    if builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
+    if beam_targets.is_empty() && builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
         return Err(stage(
             "HEADS-CLink-no-link",
             "single item fails Java's hard tail target",
         ));
     }
-    let relation = project_native_stems_head_c_link_relation(
-        head_corners,
-        head_builders,
-        frontier.next_corner,
-        stem_line,
-        Some(geometry_candidate.bounds),
-        frontier.link_profile,
-    )
-    .map_err(|error| stage("HEADS-CLink-relation", error))?;
+    let initial_stem_line = if builder.y_direction > 0 {
+        builder.theoretical_line
+    } else {
+        crate::stems_step::NativeStemLine {
+            start: builder.theoretical_line.stop,
+            stop: builder.theoretical_line.start,
+        }
+    };
+    // Java records the start-head relation before applying the start item's glyph. A
+    // beam-bearing expansion returns from the last sibling BeamLinker inside the item
+    // loop, so it never reaches the final relation recheck at the bottom of `expand`.
+    // Preserve that initial relation while still evolving `stem_line` for BeamStem
+    // projection and checked-stem creation.
+    let beam_stopped_relation = beam_stopped
+        .then(|| {
+            project_native_stems_head_c_link_relation(
+                head_corners,
+                head_builders,
+                frontier.next_corner,
+                initial_stem_line,
+                reach_corner.stump.map(|stump| stump.bounds),
+                frontier.link_profile,
+            )
+        })
+        .transpose()
+        .map_err(|error| stage("HEADS-CLink-relation", error))?;
+    let (relation, relation_line) = if let Some(relation) = beam_stopped_relation {
+        (relation, initial_stem_line)
+    } else {
+        (
+            project_native_stems_head_c_link_relation(
+                head_corners,
+                head_builders,
+                frontier.next_corner,
+                stem_line,
+                Some(geometry_candidate.bounds),
+                frontier.link_profile,
+            )
+            .map_err(|error| stage("HEADS-CLink-relation", error))?,
+            stem_line,
+        )
+    };
     if !relation.accepted {
         return Err(stage(
             "HEADS-CLink-no-link",
-            "expanded candidate fails Java's final head relation",
+            format!(
+                "expanded candidate fails Java's final head relation: grade {:016x} dx {:016x} line {:016x}:{:016x}->{:016x}:{:016x}",
+                relation.grade.to_bits(),
+                relation.dx.to_bits(),
+                relation_line.start.x.to_bits(),
+                relation_line.start.y.to_bits(),
+                relation_line.stop.x.to_bits(),
+                relation_line.stop.y.to_bits(),
+            ),
         ));
     }
     if relation.derived_horizontal != frontier.next_corner.horizontal {
@@ -11637,6 +11772,21 @@ fn advance_native_stems_head_c_link_at_frontier(
             .set_abnormal(head_vertex, false)
             .and_then(|()| shadow.beam_state.sig.set_abnormal(stem_vertex, false))
             .map_err(|error| stage("HEADS-CLink-callback", error))?;
+        let NativeStemsHeadCLinkBeamAppend {
+            relations: beam_relations,
+            edges: beam_stem_edges,
+            linked: linked_b_linkers,
+        } = append_head_c_link_beam_relations(
+            &mut shadow,
+            &beam_targets,
+            head_reachability,
+            beam_vlinkers,
+            plans,
+            &frontier,
+            stem,
+            stem_line,
+            stem_vertex,
+        )?;
         let s_ref = NativeStemsBeamHeadSLinkerRef {
             head: frontier.head,
             horizontal: relation.derived_horizontal,
@@ -11691,6 +11841,9 @@ fn advance_native_stems_head_c_link_at_frontier(
             create,
             stem_vertex,
             head_stem_edge,
+            beam_relations,
+            beam_stem_edges,
+            linked_b_linkers,
             s_linker: s_ref,
             s_linked_before,
             s_linked_after: true,
@@ -11862,6 +12015,21 @@ fn advance_native_stems_head_c_link_at_frontier(
         .set_abnormal(head_vertex, false)
         .and_then(|()| shadow.beam_state.sig.set_abnormal(stem_vertex, false))
         .map_err(|error| stage("HEADS-CLink-callback", error))?;
+    let NativeStemsHeadCLinkBeamAppend {
+        relations: beam_relations,
+        edges: beam_stem_edges,
+        linked: linked_b_linkers,
+    } = append_head_c_link_beam_relations(
+        &mut shadow,
+        &beam_targets,
+        head_reachability,
+        beam_vlinkers,
+        plans,
+        &frontier,
+        &stem,
+        stem_line,
+        stem_vertex,
+    )?;
     let s_ref = NativeStemsBeamHeadSLinkerRef {
         head: frontier.head,
         horizontal: relation.derived_horizontal,
@@ -11921,6 +12089,9 @@ fn advance_native_stems_head_c_link_at_frontier(
         create,
         stem_vertex,
         head_stem_edge,
+        beam_relations,
+        beam_stem_edges,
+        linked_b_linkers,
         s_linker: s_ref,
         s_linked_before,
         s_linked_after: true,
@@ -11928,6 +12099,231 @@ fn advance_native_stems_head_c_link_at_frontier(
     };
     *carrier = shadow;
     Ok(transaction)
+}
+
+struct NativeStemsHeadCLinkBeamAppend {
+    relations: Vec<NativeStemsBeamRelationCheck>,
+    edges: Vec<NativeSigEdgeId>,
+    linked: Vec<NativeStemsBeamBLinkerRef>,
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the beam-bearing C-link transaction authenticates independent graph authorities"
+)]
+fn append_head_c_link_beam_relations(
+    state: &mut NativeStemsHeadPhase1Carrier,
+    targets: &[NativeStemsBeamBLinkerRef],
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    vlinkers: Option<&NativeStemsBeamVLinkerSystem>,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    frontier: &NativeStemsHeadPhase1Frontier,
+    stem: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamKnownSystemStem,
+    stem_line: crate::stems_step::NativeStemLine,
+    stem_vertex: NativeSigVertexId,
+) -> Result<NativeStemsHeadCLinkBeamAppend, NativeStemsBeamSidesError> {
+    if targets.is_empty() {
+        return Ok(NativeStemsHeadCLinkBeamAppend {
+            relations: Vec::new(),
+            edges: Vec::new(),
+            linked: Vec::new(),
+        });
+    }
+    let vlinkers = vlinkers.ok_or_else(|| {
+        stage(
+            "HEADS-CLink-BeamStem",
+            "beam-bearing C-link has no V-linker geometry authority",
+        )
+    })?;
+    let parameters = NativeStemsBeamRelationParameters::from_native_products(
+        plans,
+        vlinkers,
+        frontier.stem_profile,
+    )
+    .map_err(|error| stage("HEADS-CLink-BeamStem", error))?;
+    let mut projection_stem = stem.clone();
+    projection_stem.geometry.median = stem_line;
+    let mut checks = Vec::with_capacity(targets.len());
+    let mut edges = Vec::with_capacity(targets.len());
+    let mut linked = Vec::with_capacity(targets.len());
+
+    for target in targets {
+        let known_target = head_reachability
+            .final_beam_arenas
+            .iter()
+            .flat_map(|arena| &arena.entries)
+            .filter(|entry| entry.reference == *target)
+            .count();
+        if known_target != 1 {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "builder beam target is missing or duplicated in native head reachability",
+            ));
+        }
+        let matching_cells = state
+            .beam_state
+            .b_cells
+            .iter()
+            .filter(|cell| cell.reference == *target)
+            .count();
+        if matching_cells != 1 {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "builder beam target has no unique persistent B cell",
+            ));
+        }
+        let cell = state
+            .beam_state
+            .b_cells
+            .iter()
+            .find(|cell| cell.reference == *target)
+            .expect("unique target B cell was counted");
+        if cell.linked || cell.closed {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "builder beam target is already linked or closed",
+            ));
+        }
+        let beam_vertex = *state
+            .beam_state
+            .bindings
+            .beam_vertices
+            .get(&target.beam)
+            .ok_or_else(|| stage("HEADS-CLink-BeamStem", "target beam is unbound"))?;
+        let geometry = state
+            .beam_state
+            .sig
+            .vertex(beam_vertex.0)
+            .and_then(|vertex| vertex.beam_geometry)
+            .ok_or_else(|| stage("HEADS-CLink-BeamStem", "target beam geometry is absent"))?;
+        if state
+            .beam_state
+            .sig
+            .directed_edges(beam_vertex.0, stem_vertex.0)
+            .map_err(|error| stage("HEADS-CLink-BeamStem", error))?
+            .iter()
+            .any(|edge| edge.kind == NativeSigRelationKind::BeamStem)
+        {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "target BeamStem relation already exists",
+            ));
+        }
+        let median = Segment {
+            x1: geometry.x1,
+            y1: geometry.y1,
+            x2: geometry.x2,
+            y2: geometry.y2,
+        };
+        // A head corner names the direction from the head toward the beam,
+        // whereas a beam V-linker names the contacted side of the beam. Java
+        // checks the opposite beam border (`headToBeam.opposite()`).
+        let beam_side = match frontier.next_corner.vertical {
+            crate::stems_step::NativeStemVerticalSide::Top => {
+                crate::stems_step::NativeStemVerticalSide::Bottom
+            }
+            crate::stems_step::NativeStemVerticalSide::Bottom => {
+                crate::stems_step::NativeStemVerticalSide::Top
+            }
+        };
+        let delta_y = if beam_side == crate::stems_step::NativeStemVerticalSide::Top {
+            -geometry.height / 2.0
+        } else {
+            geometry.height / 2.0
+        };
+        let border = Segment {
+            x1: median.x1,
+            y1: median.y1 + delta_y,
+            x2: median.x2,
+            y2: median.y2 + delta_y,
+        };
+        let check = evaluate_relation_geometry(
+            target.beam,
+            median,
+            geometry.height,
+            border,
+            NativeStemsBeamVLinkerRef {
+                b_linker: *target,
+                side: beam_side,
+            },
+            beam_side,
+            &projection_stem,
+            parameters,
+        );
+        let extension = check.extension_point.ok_or_else(|| {
+            stage(
+                "HEADS-CLink-BeamStem",
+                "builder beam target fails Java's relation check",
+            )
+        })?;
+        if !check.accepted {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "builder beam target relation is below minimum grade",
+            ));
+        }
+        let edge = NativeSigEdgeId(state.beam_state.sig.edges.len());
+        state
+            .beam_state
+            .sig
+            .append_edge(NativeSigEdge {
+                ordinal: edge.0,
+                active: true,
+                source: beam_vertex.0,
+                target: stem_vertex.0,
+                kind: NativeSigRelationKind::BeamStem,
+                origin: NativeSigRelationOrigin::HeadCLinkBeamDraft {
+                    head_sig_ordinal: frontier.next_corner.sig_ordinal,
+                    beam_linker_id: target.id,
+                },
+                support: Some(NativeSigSupport {
+                    grade: check.grade,
+                    bar_connection_impacts: None,
+                }),
+                beam_portion: Some(check.portion),
+                stem_extension: Some(extension),
+                head_stem: None,
+            })
+            .map_err(|error| stage("HEADS-CLink-BeamStem", error))?;
+        let abnormal = native_beam_abnormal(&state.beam_state.sig, beam_vertex)
+            .map_err(|error| stage("HEADS-CLink-BeamStem", error))?;
+        state
+            .beam_state
+            .sig
+            .set_abnormal(beam_vertex, abnormal)
+            .map_err(|error| stage("HEADS-CLink-BeamStem", error))?;
+        let cell = state
+            .beam_state
+            .b_cells
+            .iter_mut()
+            .find(|cell| cell.reference == *target)
+            .expect("unique target B cell was counted");
+        cell.linked = true;
+        if state.beam_state.scheduler.linked_b_linkers.contains(target) {
+            return Err(stage(
+                "HEADS-CLink-BeamStem",
+                "scheduler already carries newly linked B target",
+            ));
+        }
+        state.beam_state.scheduler.linked_b_linkers.push(*target);
+        checks.push(check);
+        edges.push(edge);
+        linked.push(*target);
+    }
+    if !linked_b_cells_match(
+        &state.beam_state.scheduler.linked_b_linkers,
+        &state.beam_state.b_cells,
+    ) {
+        return Err(stage(
+            "HEADS-CLink-BeamStem",
+            "scheduler and persistent linked-B authorities diverge",
+        ));
+    }
+    Ok(NativeStemsHeadCLinkBeamAppend {
+        relations: checks,
+        edges,
+        linked,
+    })
 }
 
 fn compose_head_c_link_geometry(
