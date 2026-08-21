@@ -8570,3 +8570,44 @@ Production now advances through queue 89 and fails closed at system 2 queue 111
 x51/SIG36 LEFT/BOTTOM, whose builder is a start stump followed by three sibling
 HeadHalfLinkers (x48, x49, and x50). That generic multi-head expansion is next;
 broader corpus completion and fresh remote CI remain open.
+
+## Boundary 171: generic multi-head hard-tail rejection
+
+The strict Allegretto system-2 replay now carries the real predecessor through
+heads 0-110 without snapshots and measures queue 111 twice byte-identically.
+x51/SIG36 selects LEFT/BOTTOM. Its built start stump and sibling x48, x49, and
+x50 RIGHT/BOTTOM linkers produce four accepted transient HeadStem checks, but
+the complete span still misses the hard tail target. Java returns
+`lastIndex=-1` before `createStem`; active glyph 376 has no StemInter, allocator
+2387 is unchanged, SIG 656/626 and system stems 57 are unchanged, and no
+relation is applied. Both x51 S sides close and the queue advances to
+x118/SIG57 at index 112.
+
+The production C-link loop now authenticates a start stump followed only by
+distinct sibling heads and resolves built stumps from the owned pre-builder
+registry, alongside the existing free-seed path. It computes the complete item
+ordinate span and converts only a proven hard-tail miss into Java's ordinary
+no-link result. If that span reaches the hard target, the branch remains
+explicitly fail-closed rather than pretending the successful expansion is a
+rejection. This makes the rule generic and keeps all state atomic.
+
+The frozen fixture is 7 lines / 6,947 bytes, SHA-256
+`1d2dfdec360fcc575ef9b852cbb6502dc82ee6fa8b951d24914bf0ae1bb66063`.
+Runner, transformed probe, emitted body, and semantic-pass hashes are
+`55020b3e312fe20cea3913f4e1b8ac849235f8e84753be66ecdc969b6f4b3365`,
+`dc7df0af651b851e3d1c67d382f42b961955b4763fe5e92583e6f30a407a832d`,
+`a4f9ad50ee8b7b147a02147fbea94959b54e392c6567252a7be4caf6c1a6ef71`,
+and `b81c303a6863f2c88dcc93ef442bc526937e708e136e508d4c8021dbb7af4e36`.
+Strict predecessor pins are Boundary 170 runner
+`f36f312b0bc82d8cbd4fc176133339515069743a5786eed54a37f76678795986`
+and fixture
+`dcfec65a778983cc9615786fe7b9bd008677f456ad8d6f276edb3855be46e45a`.
+
+Focused 1/1 and full sibling 19/19 (144.57s) pass; strict all-features
+workspace Clippy, formatting, and diff checks pass. Boundary 170 commit
+`f87752bbb` is exact-CI green: Build & Test 32490696521 succeeded and Rust
+32490696428 passed all 12 Ubuntu/macOS shards. Production completes Allegretto
+system 2 and fails closed next at system 3 queue 29 x114/SIG76 RIGHT/TOP. Its
+builder 456 is a built start stump plus x112/SIG68 RIGHT/TOP, and its span
+reaches the hard target. Measure and port that successful two-head application
+next; broader corpus completion remains open.

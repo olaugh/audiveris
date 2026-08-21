@@ -14,7 +14,10 @@ use crate::{
         NativeSigSystemBindings, NativeSigVertex, NativeSigVertexId,
     },
     native_stem_seeds::{NativeStemSeedGlyph, NativeStemSeedSystemRecognition},
-    native_stems_beam_builders::{NativeStemsBeamBuilderSystem, java_double_compare},
+    native_stems_beam_builders::{
+        NativeStemsBeamBuilderPreBuilderGlyphSource, NativeStemsBeamBuilderSystem,
+        java_double_compare,
+    },
     native_stems_beam_link_plans::{
         NativeStemsBeamHeadRelationCheck, NativeStemsBeamLinkPlanSystem,
         project_native_stems_head_c_link_relation,
@@ -85,7 +88,8 @@ use crate::{
     },
     native_stems_head_builders::{
         NativeStemsHeadBuilderGlyphRef, NativeStemsHeadBuilderItemKind,
-        NativeStemsHeadBuilderSystem, NativeStemsHeadBuilderTargetRef,
+        NativeStemsHeadBuilderRegistryOccurrence, NativeStemsHeadBuilderSystem,
+        NativeStemsHeadBuilderTargetRef,
     },
     native_stems_head_corner_reachability::{
         NativeStemsHeadCornerReachabilitySystem, NativeStemsHeadCornerRef, NativeStemsHeadStumpRef,
@@ -11310,10 +11314,10 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut tail = tail;
     let bounded_start = start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
         && start.glyph == builder.start_stump;
-    let bounded_chunk = if tail
+    let has_chunk = tail
         .first()
-        .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph)
-    {
+        .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph);
+    let bounded_chunk = if has_chunk {
         let chunk = &tail[0];
         tail = &tail[1..];
         chunk.glyph.is_some() && chunk.target.is_none()
@@ -11331,14 +11335,37 @@ fn advance_native_stems_head_c_link_at_frontier(
             _ => Err(()),
         })
         .collect::<Result<Vec<_>, _>>();
-    let bounded_shape = bounded_start
-        && bounded_chunk
-        && beam_targets.as_ref().is_ok_and(|targets| {
+    let head_targets = tail
+        .iter()
+        .map(|item| match (item.kind, item.glyph, item.target) {
+            (
+                NativeStemsHeadBuilderItemKind::HeadHalfLinker,
+                Some(NativeStemsHeadBuilderGlyphRef::HeadStump { corner }),
+                Some(NativeStemsHeadBuilderTargetRef::Head(target)),
+            ) if corner == target => Ok(target),
+            _ => Err(()),
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let beam_shape = beam_targets.as_ref().is_ok_and(|targets| {
+        targets
+            .iter()
+            .enumerate()
+            .all(|(index, target)| !targets[..index].contains(target))
+    });
+    // A start stump followed only by sibling head linkers is also safe to
+    // enter generically when the complete item span still misses Java's hard
+    // tail target. In that case `expand` returns -1 before createStem or any
+    // relation is applied. If the target is reached, fail closed below until
+    // the successful multi-head application itself is generalized here.
+    let head_shape = !has_chunk
+        && !tail.is_empty()
+        && head_targets.as_ref().is_ok_and(|targets| {
             targets
                 .iter()
                 .enumerate()
                 .all(|(index, target)| !targets[..index].contains(target))
         });
+    let bounded_shape = bounded_start && bounded_chunk && (beam_shape || head_shape);
     if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
@@ -11362,7 +11389,16 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    let beam_targets = beam_targets.expect("bounded beam-linker shape was authenticated");
+    let beam_targets = if beam_shape {
+        beam_targets.expect("bounded beam-linker shape was authenticated")
+    } else {
+        Vec::new()
+    };
+    let head_targets = if head_shape {
+        head_targets.expect("bounded head-linker rejection shape was authenticated")
+    } else {
+        Vec::new()
+    };
     let beam_stopped = !beam_targets.is_empty();
     if !beam_targets.is_empty() && beam_vlinkers.is_none() {
         return Err(stage(
@@ -11418,28 +11454,67 @@ fn advance_native_stems_head_c_link_at_frontier(
                     "selected reachability stump is missing",
                 )
             })?;
-            let NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } = stump.source else {
-                return Err(stage(
-                    "HEADS-CLink-glyph",
-                    "bounded selected stump is not a retained vertical seed",
-                ));
-            };
-            let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
-                stage(
-                    "HEADS-CLink-glyph",
-                    "selected free vertical-seed ordinal is unavailable",
-                )
-            })?;
-            if seed.bounds != stump.bounds || seed.weight != stump.weight {
-                return Err(stage(
-                    "HEADS-CLink-glyph",
-                    "reachability stump and free vertical seed differ",
-                ));
-            }
-            crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-                bounds: seed.bounds,
-                weight: seed.weight,
-                run_table: seed.run_table.clone(),
+            match stump.source {
+                NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } => {
+                    let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
+                        stage(
+                            "HEADS-CLink-glyph",
+                            "selected free vertical-seed ordinal is unavailable",
+                        )
+                    })?;
+                    if seed.bounds != stump.bounds || seed.weight != stump.weight {
+                        return Err(stage(
+                            "HEADS-CLink-glyph",
+                            "reachability stump and free vertical seed differ",
+                        ));
+                    }
+                    crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                        bounds: seed.bounds,
+                        weight: seed.weight,
+                        run_table: seed.run_table.clone(),
+                    }
+                }
+                NativeStemsHeadStumpRef::Built {
+                    head_x_ordinal,
+                    constructor_ordinal,
+                } => {
+                    let built = head_builders
+                        .registry_events
+                        .iter()
+                        .find(|event| {
+                            matches!(
+                                event.occurrence,
+                                NativeStemsHeadBuilderRegistryOccurrence::PreBuilder {
+                                    source:
+                                        NativeStemsBeamBuilderPreBuilderGlyphSource::HeadStump {
+                                            head_x_ordinal: event_x,
+                                            head_sig_ordinal: event_sig,
+                                            constructor_ordinal: event_constructor,
+                                        },
+                                    ..
+                                } if event_x == head_x_ordinal
+                                    && event_sig == frontier.next_corner.sig_ordinal
+                                    && event_constructor == constructor_ordinal
+                            )
+                        })
+                        .ok_or_else(|| {
+                            stage(
+                                "HEADS-CLink-glyph",
+                                "selected built head stump is absent from the carried registry",
+                            )
+                        })?;
+                    if built.bounds != stump.bounds || built.weight != stump.weight {
+                        return Err(stage(
+                            "HEADS-CLink-glyph",
+                            "reachability stump and built registry glyph differ",
+                        ));
+                    }
+                    crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                        bounds: built.bounds,
+                        weight: built.weight,
+                        run_table: built.run_table.clone(),
+                    }
+                }
             }
         }
         None => {
@@ -11580,7 +11655,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         stem_line.stop.x = java_next_up(stem_line.stop.x);
     }
     let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
-    let last_y = if builder.start_stump.is_none() {
+    let last_y = if !head_targets.is_empty() || builder.start_stump.is_none() {
         builder
             .items
             .iter()
@@ -11610,7 +11685,27 @@ fn advance_native_stems_head_c_link_at_frontier(
     if beam_targets.is_empty() && builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
         return Err(stage(
             "HEADS-CLink-no-link",
-            "single item fails Java's hard tail target",
+            "expanded items fail Java's hard tail target",
+        ));
+    }
+    if !head_targets.is_empty() {
+        return Err(stage(
+            "HEADS-CLink-expand",
+            format!(
+                "multi-head expansion reaches Java's hard tail target: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} items {:?}",
+                head_corners.system_id,
+                expected_current_index,
+                frontier.head.x_ordinal,
+                frontier.head.sig_ordinal,
+                frontier.next_corner.horizontal,
+                frontier.next_corner.vertical,
+                builder.builder_ordinal,
+                builder
+                    .items
+                    .iter()
+                    .map(|item| (item.kind, item.glyph, item.target, item.contribution))
+                    .collect::<Vec<_>>(),
+            ),
         ));
     }
     let initial_stem_line = if builder.y_direction > 0 {
