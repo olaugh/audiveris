@@ -25,6 +25,7 @@ use audiveris_omr::{
         assemble_native_sig,
     },
     native_stem_seeds::recognize_native_stem_seeds,
+    native_stems::prepare_native_stems,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
@@ -6133,6 +6134,131 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     assert_eq!(field(summary, "freshRuns"), "2");
     assert_eq!(field(summary, "freshRunsByteIdentical"), "true");
     assert_eq!(field(summary, "stopBeforeSigAddVertex"), "true");
+}
+
+/// The first carried system outside the historical Chula/Allegretto gates
+/// starts from the production-prepared page, including its checker and modeled
+/// registry. Exact Java values below come from the installed Batuque B12-B19
+/// fixtures; no fixture value is supplied to execution.
+#[test]
+fn batuque_system_one_starts_sides_from_production_prepared_state() {
+    let path = repo_root().join("data/examples/batuque.png");
+    let grid = recognize_grid_lines(path).expect("Batuque GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Batuque HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Batuque STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Batuque BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Batuque LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Batuque HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Batuque native STEMS preparation");
+
+    assert_eq!(prepared.stem_checker.no_staff, grid.no_staff);
+    assert_eq!(
+        prepared.stem_checker.parameters.interline,
+        grid.scale.scale.interline.main
+    );
+    assert_eq!(
+        prepared.stem_checker.parameters.maximum_stem_width,
+        stem_seeds.maximum_stem_thickness
+    );
+    assert_eq!(
+        prepared.stem_checker.parameters.belt_margin_dx,
+        (0.15 * f64::from(grid.scale.scale.interline.main)).round_ties_even() as i32
+    );
+    assert_eq!(
+        prepared.stem_checker.parameters.sheet_skew_slope.to_bits(),
+        grid.global_slope.to_bits()
+    );
+    assert_eq!(
+        prepared.stem_checker.minimum_stem_grade.to_bits(),
+        0x3fb4_7ae1_47ae_147c,
+        "Java computes Grades.intrinsicRatio * 0.1 rather than parsing 0.08"
+    );
+    assert_eq!(
+        prepared.stem_checker.artificial_stem_grade.to_bits(),
+        0.4_f64.to_bits()
+    );
+
+    let start = prepared
+        .initialize_first_system_sides()
+        .expect("Batuque system-1 first SIDES transaction");
+    assert_eq!(start.system_id, 1);
+    assert_eq!(start.registry.system_id(), 1);
+    assert_eq!(start.first_transaction.preparation.plan.plan_ordinal, 98);
+    assert_eq!(start.first_transaction.create.system_id, 1);
+    assert_eq!(
+        start
+            .first_transaction
+            .create
+            .stem
+            .as_ref()
+            .expect("created system-1 stem")
+            .grade
+            .grade()
+            .to_bits(),
+        0x3fe9_1480_f411_1904
+    );
+    assert_eq!(
+        start
+            .first_transaction
+            .flag
+            .continuation_support_grade
+            .to_bits(),
+        0x3fee_fb1f_b84e_a5fd
+    );
+    assert_eq!(start.first_transaction.flag.linked_write_count, 1);
+    assert_eq!(start.first_transaction.flag.linked_value_change_count, 1);
+    assert_eq!(start.first_transaction.siblings.siblings.len(), 1);
+    assert_eq!(
+        start.first_transaction.siblings.siblings[0].branch,
+        NativeStemsBeamSiblingBranch::Linked
+    );
+    assert_eq!(
+        start.first_transaction.siblings.graph.appended_edges.len(),
+        1
+    );
+    assert_eq!(start.first_transaction.siblings.b_linker_write_count, 2);
+    assert_eq!(
+        start.first_transaction.siblings.b_linker_value_change_count,
+        2
+    );
+    assert_eq!(start.first_transaction.heads.steps.len(), 3);
+    assert_eq!(start.first_transaction.heads.appended_edges.len(), 3);
+    assert_eq!(start.first_transaction.heads.s_linker_write_count, 3);
+    assert_eq!(start.first_transaction.heads.s_linker_value_change_count, 3);
+    assert!(start.first_transaction.heads.returned_true);
+    assert_eq!(
+        start
+            .first_transaction
+            .outer_resume
+            .outer
+            .linked_write_count,
+        1
+    );
+    assert_eq!(
+        start
+            .first_transaction
+            .outer_resume
+            .outer
+            .linked_value_change_count,
+        0
+    );
+    let NativeStemsBeamSchedulerResumeStatus::AwaitingVLinkTransaction(next) =
+        &start.first_transaction.outer_resume.resume.status
+    else {
+        panic!("Batuque system 1 did not reach its measured second frontier");
+    };
+    assert_eq!(next.plan.plan_ordinal, 111);
+    assert_eq!(start.carrier.scheduler.system_id, 1);
+    assert_eq!(start.carrier.sig.system_id, 1);
+    assert_eq!(start.carrier.bindings.system_id, 1);
+    assert_eq!(
+        start.carrier.scheduler,
+        *start.first_transaction.outer_resume.resume.advanced_system
+    );
 }
 
 /// Direct atomic gate at the first real Java competing-hook checkpoint.

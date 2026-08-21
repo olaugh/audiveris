@@ -11,11 +11,13 @@
 use std::{error::Error, fmt};
 
 use crate::{
+    beam_inters::MIN_INTER_GRADE,
     native_headers::NativeHeaderRecognition,
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
     native_sig::{NativeSigRecognition, assemble_native_sig},
     native_stem_seeds::NativeStemSeedRecognition,
+    native_stem_seeds::STEM_SEEDS_BELT_MARGIN_RATIO,
     native_stems_beam_builders::{
         NativeStemsBeamBuilderRecognition, materialize_native_stems_beam_builders,
     },
@@ -26,10 +28,18 @@ use crate::{
         NativeStemsBeamReachabilityRecognition, materialize_native_stems_beam_reachability,
     },
     native_stems_beam_scheduler::{
-        NativeStemsBeamSchedulerRecognition, materialize_native_stems_beam_scheduler_frontiers,
+        NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerSystem,
+        materialize_native_stems_beam_scheduler_frontiers,
+    },
+    native_stems_beam_sides::{
+        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        initialize_native_stems_beam_sides_carrier_from_modeled_registry,
     },
     native_stems_beam_stumps::{
         NativeStemsBeamStumpRecognition, materialize_native_stems_beam_stumps,
+    },
+    native_stems_beam_vlink_transaction::{
+        NativeStemsBeamStemCheckerContext, NativeStemsModeledGlyphRegistry,
     },
     native_stems_beam_vlinkers::{
         NativeStemsBeamVLinkerRecognition, materialize_native_stems_beam_vlinkers,
@@ -51,7 +61,11 @@ use crate::{
         NativeStemsHeadStumpRecognition, materialize_native_stems_head_stumps,
     },
     recognize::{GridLinesRecognition, NativeBeamRecognition},
+    stem_seeds_step::NativeStemCheckerParameters,
 };
+
+/// Java `StemsRetriever.Constants.artificialStemGrade`.
+const ARTIFICIAL_STEM_GRADE: f64 = 0.4;
 
 /// Complete immutable read-only STEMS construction products.
 #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +90,20 @@ pub struct NativeStemsComponentRecognition {
 pub struct NativeStemsPreparedRecognition {
     pub components: NativeStemsComponentRecognition,
     pub sig: NativeSigRecognition,
+    /// Page-wide checker state shared by every mutating SIDES/STUMPS frontier.
+    pub stem_checker: NativeStemsBeamStemCheckerContext,
+}
+
+/// Atomic production start of the sheet's first mutating SIDES pass.
+///
+/// The registry, carrier, and first transaction are returned together so no
+/// caller can mix system-local products or inject a checker configuration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemSidesStart {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsBeamSidesCarrier,
+    pub first_transaction: NativeStemsBeamSidesTransaction,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,6 +128,115 @@ fn phase(error: impl fmt::Display, phase: &'static str) -> NativeStemsPreparatio
     NativeStemsPreparationError {
         phase,
         message: error.to_string(),
+    }
+}
+
+fn system<'a, T>(
+    systems: &'a [T],
+    system_id: usize,
+    id: impl Fn(&T) -> usize,
+    phase_name: &'static str,
+) -> Result<&'a T, NativeStemsPreparationError> {
+    systems
+        .iter()
+        .find(|system| id(system) == system_id)
+        .ok_or_else(|| phase(format!("system {system_id} is absent"), phase_name))
+}
+
+impl NativeStemsPreparedRecognition {
+    /// Initialize and execute system 1's first SIDES transaction from
+    /// production-owned products only. Later systems must start from the
+    /// shared allocator/registry state committed by every preceding system;
+    /// they are deliberately not reconstructed in isolation here.
+    pub fn initialize_first_system_sides(
+        &self,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        let components = &self.components;
+        let scheduler: &NativeStemsBeamSchedulerSystem = components
+            .scheduler
+            .systems
+            .first()
+            .ok_or_else(|| phase("first system is absent", "SIDES scheduler"))?;
+        let system_id = scheduler.system_id;
+        if system_id != 1 {
+            return Err(phase(
+                format!("first system id is {system_id}, expected 1"),
+                "SIDES scheduler",
+            ));
+        }
+        let plans = system(
+            &components.plans.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES plans",
+        )?;
+        let builders = system(
+            &components.beam_builders.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES builders",
+        )?;
+        let stumps = system(
+            &components.beam_stumps.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES stumps",
+        )?;
+        let vlinkers = system(
+            &components.beam_vlinkers.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES VLinkers",
+        )?;
+        let reachability = system(
+            &components.beam_reachability.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES reachability",
+        )?;
+        let head_corners = system(
+            &components.head_corners.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES head corners",
+        )?;
+        let sig = system(
+            &self.sig.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES SIG",
+        )?;
+        let bindings = system(
+            &self.sig.bindings,
+            system_id,
+            |bindings| bindings.system_id,
+            "SIDES bindings",
+        )?;
+        let registry = NativeStemsModeledGlyphRegistry::from_head_builder_recognition(
+            system_id,
+            &components.head_builders,
+        )
+        .map_err(|error| phase(error, "SIDES modeled registry"))?;
+        let context = NativeStemsBeamSidesContext {
+            plans,
+            builders,
+            stumps,
+            vlinkers,
+            reachability,
+            head_corners,
+            checker: &self.stem_checker,
+        };
+        let (carrier, first_transaction) =
+            initialize_native_stems_beam_sides_carrier_from_modeled_registry(
+                scheduler, sig, bindings, context, &registry,
+            )
+            .map_err(|error| phase(error, "SIDES first transaction"))?;
+        Ok(NativeStemsSystemSidesStart {
+            system_id,
+            registry,
+            carrier,
+            first_transaction,
+        })
     }
 }
 
@@ -234,5 +371,28 @@ pub fn prepare_native_stems(
     )?;
     let sig = assemble_native_sig(grid, headers, beams, ledgers, heads)
         .map_err(|error| phase(error, "SIG assembly"))?;
-    Ok(NativeStemsPreparedRecognition { components, sig })
+    let interline = grid.scale.scale.interline.main;
+    if interline <= 0 || stem_seeds.maximum_stem_thickness <= 0 {
+        return Err(phase(
+            "non-positive interline or maximum stem thickness",
+            "stem checker",
+        ));
+    }
+    let stem_checker = NativeStemsBeamStemCheckerContext {
+        no_staff: grid.no_staff.clone(),
+        parameters: NativeStemCheckerParameters {
+            interline,
+            maximum_stem_width: stem_seeds.maximum_stem_thickness,
+            belt_margin_dx: (STEM_SEEDS_BELT_MARGIN_RATIO * f64::from(interline)).round_ties_even()
+                as i32,
+            sheet_skew_slope: grid.global_slope,
+        },
+        minimum_stem_grade: MIN_INTER_GRADE,
+        artificial_stem_grade: ARTIFICIAL_STEM_GRADE,
+    };
+    Ok(NativeStemsPreparedRecognition {
+        components,
+        sig,
+        stem_checker,
+    })
 }
