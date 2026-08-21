@@ -184,6 +184,7 @@ pub struct NativeStemsFirstGlyphIndexBridge {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsModeledGlyphRegistry {
     system_id: usize,
+    persistent_ids: NativeStemsBeamPersistentIdState,
     entries: Vec<NativeStemsBeamGlyphRegistryBootstrapEntry>,
 }
 
@@ -267,7 +268,17 @@ impl NativeStemsModeledGlyphRegistry {
                 strongly_retained: true,
             });
         }
-        Ok(Self { system_id, entries })
+        let last_id = i32::try_from(entries.len())
+            .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentIdExhausted)?;
+        Ok(Self {
+            system_id,
+            persistent_ids: NativeStemsBeamPersistentIdState {
+                sheet_last_id: last_id,
+                glyph_index_last_id: last_id,
+                inter_index_last_id: last_id,
+            },
+            entries,
+        })
     }
 
     #[must_use]
@@ -285,26 +296,172 @@ impl NativeStemsModeledGlyphRegistry {
         self.entries.is_empty()
     }
 
+    #[must_use]
+    pub fn persistent_ids(&self) -> NativeStemsBeamPersistentIdState {
+        self.persistent_ids
+    }
+
+    /// Carry the exact page registry through one completed system and replay
+    /// the next system's constructor registrations in their production order.
+    ///
+    /// The completed transaction state supplies every native registration
+    /// since this registry prefix. Weak-only entries are deliberately refused:
+    /// Java may have collected them before the next system, so their equality
+    /// presence cannot be inferred without a liveness authority.
+    pub fn carry_into_next_system(
+        &self,
+        completed: &NativeStemsBeamVLinkTransactionState,
+        recognition: &NativeStemsHeadBuilderRecognition,
+    ) -> Result<Self, NativeStemsBeamVLinkTransactionError> {
+        validate_transaction_state(completed)?;
+        let next_system_id = self
+            .system_id
+            .checked_add(1)
+            .ok_or(NativeStemsBeamVLinkTransactionError::SystemOrder)?;
+        let scope_system = match completed.scope {
+            NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id }
+            | NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id } => system_id,
+            NativeStemsBeamVLinkTransactionScope::IsolatedFreshSheetFrontier { .. } => {
+                return Err(NativeStemsBeamVLinkTransactionError::SystemOrder);
+            }
+        };
+        if scope_system != self.system_id
+            || completed.system_stems.system_id != self.system_id
+            || completed.glyph_index.alias_order
+                != NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+            || completed.glyph_index.persistent_ids.sheet_last_id
+                < self.persistent_ids.sheet_last_id
+            || self.entries.len() > completed.glyph_index.union_size
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "cross-system carried registry header",
+            });
+        }
+        let next_system = recognition
+            .systems
+            .iter()
+            .find(|system| system.system_id == next_system_id)
+            .ok_or(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "cross-system next head-builder system",
+            })?;
+
+        let mut entries = self.entries.clone();
+        for known in &completed.glyph_index.known_canonical_glyphs {
+            if !known.strongly_retained {
+                return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+            }
+            let identity_match = entries
+                .iter()
+                .position(|entry| entry.glyph_id == known.glyph_id);
+            let content_match = entries
+                .iter()
+                .position(|entry| entry.content == known.content);
+            match (identity_match, content_match) {
+                (Some(identity), Some(content)) if identity == content => {
+                    let entry = &mut entries[identity];
+                    if entry.canonical_alias != known.canonical_alias {
+                        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                            phase: "cross-system known identity alias",
+                        });
+                    }
+                    entry.active_in_index = known.active_in_index;
+                    entry.strongly_retained = true;
+                }
+                (None, None) => entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                    canonical_alias: known.canonical_alias,
+                    glyph_id: known.glyph_id,
+                    content: known.content.clone(),
+                    active_in_index: known.active_in_index,
+                    strongly_retained: true,
+                }),
+                _ => {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "cross-system known identity/content join",
+                    });
+                }
+            }
+        }
+        if entries.len() != completed.glyph_index.union_size {
+            return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+        }
+
+        let mut persistent_ids = completed.glyph_index.persistent_ids;
+        for (event_ordinal, event) in next_system.registry_events.iter().enumerate() {
+            if event.system_event_ordinal != event_ordinal {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "cross-system registry event order",
+                });
+            }
+            let content = NativeStemsBeamFixedGlyphContent {
+                bounds: event.bounds,
+                weight: event.weight,
+                run_table: event.run_table.clone(),
+            };
+            validate_content(&content)?;
+            let matches = entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.content == content)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [index] => {
+                    entries[*index].active_in_index = true;
+                    entries[*index].strongly_retained = true;
+                }
+                [] => {
+                    let next_id = persistent_ids
+                        .sheet_last_id
+                        .checked_add(1)
+                        .ok_or(NativeStemsBeamVLinkTransactionError::PersistentIdExhausted)?;
+                    persistent_ids = NativeStemsBeamPersistentIdState {
+                        sheet_last_id: next_id,
+                        glyph_index_last_id: next_id,
+                        inter_index_last_id: next_id,
+                    };
+                    entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                        canonical_alias: usize::try_from(next_id).map_err(|_| {
+                            NativeStemsBeamVLinkTransactionError::PersistentIdExhausted
+                        })?,
+                        glyph_id: next_id,
+                        content,
+                        active_in_index: true,
+                        strongly_retained: true,
+                    });
+                }
+                _ => {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "cross-system registry structural equality",
+                    });
+                }
+            }
+        }
+        Ok(Self {
+            system_id: next_system_id,
+            persistent_ids,
+            entries,
+        })
+    }
+
     fn selected_bootstrap(
         &self,
         selected: &NativeStemsBeamSelectedGlyph,
     ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>
     {
-        let entry = self
-            .entries
-            .get(selected.modeled_canonical_ordinal)
-            .ok_or(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)?;
         let content = NativeStemsBeamFixedGlyphContent {
             bounds: selected.bounds,
             weight: selected.weight,
             run_table: selected.structural_key.run_table.clone(),
         };
-        if entry.content != content {
-            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
-                phase: "native modeled selected identity",
-            });
-        }
-        Ok(entry.clone())
+        let matches = self
+            .entries
+            .iter()
+            .filter(|entry| entry.content == content)
+            .collect::<Vec<_>>();
+        let [entry] = matches.as_slice() else {
+            return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+        };
+        Ok((*entry).clone())
     }
 }
 

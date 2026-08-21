@@ -6263,6 +6263,86 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     let drive = prepared
         .drive_first_system_sides()
         .expect("Batuque system-1 complete SIDES drive");
+    assert_eq!(drive.registry.len(), 1_058);
+    assert_eq!(drive.registry.persistent_ids().sheet_last_id, 1_058);
+    assert_eq!(
+        drive
+            .carrier
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .union_size,
+        1_058
+    );
+    assert_eq!(
+        drive
+            .carrier
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids
+            .sheet_last_id,
+        1_090
+    );
+    let system_two_registry = drive
+        .registry
+        .carry_into_next_system(
+            &drive.carrier.latest_base_apply.transaction_state,
+            &prepared.components.head_builders,
+        )
+        .expect("Batuque system-1 to system-2 registry handoff");
+    assert_eq!(system_two_registry.system_id(), 2);
+    assert_eq!(system_two_registry.len(), 1_470);
+    assert_eq!(system_two_registry.persistent_ids().sheet_last_id, 1_502);
+    assert_eq!(
+        system_two_registry.persistent_ids().glyph_index_last_id,
+        1_502
+    );
+    assert_eq!(
+        system_two_registry.persistent_ids().inter_index_last_id,
+        1_502
+    );
+    let isolated_system_two = NativeStemsModeledGlyphRegistry::from_head_builder_recognition(
+        2,
+        &prepared.components.head_builders,
+    )
+    .expect("isolated Batuque system-2 modeled prefix");
+    assert_eq!(isolated_system_two.len(), system_two_registry.len());
+    assert_eq!(isolated_system_two.persistent_ids().sheet_last_id, 1_470);
+    assert_ne!(isolated_system_two, system_two_registry);
+
+    let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
+    assert!(
+        completed_registry_state
+            .glyph_index
+            .known_canonical_glyphs
+            .iter()
+            .all(|glyph| glyph.strongly_retained)
+    );
+    let mut weak_registry_state = completed_registry_state.clone();
+    weak_registry_state.glyph_index.known_canonical_glyphs[0].strongly_retained = false;
+    let weak_before = weak_registry_state.clone();
+    assert!(
+        drive
+            .registry
+            .carry_into_next_system(&weak_registry_state, &prepared.components.head_builders,)
+            .is_err()
+    );
+    assert_eq!(weak_registry_state, weak_before);
+
+    let mut incomplete_registry_state = completed_registry_state.clone();
+    incomplete_registry_state.glyph_index.union_size += 1;
+    let incomplete_before = incomplete_registry_state.clone();
+    assert!(
+        drive
+            .registry
+            .carry_into_next_system(
+                &incomplete_registry_state,
+                &prepared.components.head_builders,
+            )
+            .is_err()
+    );
+    assert_eq!(incomplete_registry_state, incomplete_before);
     assert_eq!(drive.system_id, 1);
     assert_eq!(drive.registry, start.registry);
     assert_eq!(drive.transactions.len(), 33);
