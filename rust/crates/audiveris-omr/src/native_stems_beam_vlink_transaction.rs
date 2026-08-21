@@ -1444,6 +1444,71 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
     Ok((preparation, state))
 }
 
+/// Construct a later system's first shared-sheet B12 frontier.
+///
+/// Unlike the sheet's first frontier, the persistent allocator is not the
+/// structural-registry length: inter allocations from every completed system
+/// remain interleaved in the shared page identity domain. System-local stems
+/// still begin from the proven empty map.
+pub fn initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry(
+    scheduler_system: &NativeStemsBeamSchedulerSystem,
+    plan_system: &NativeStemsBeamLinkPlanSystem,
+    registry: &NativeStemsModeledGlyphRegistry,
+) -> Result<
+    (
+        NativeStemsBeamFrontierPreparation,
+        NativeStemsBeamVLinkTransactionState,
+    ),
+    NativeStemsBeamVLinkTransactionError,
+> {
+    let system_id = scheduler_system.system_id;
+    let persistent_ids = registry.persistent_ids();
+    if system_id <= 1
+        || plan_system.system_id != system_id
+        || registry.system_id != system_id
+        || persistent_ids.sheet_last_id <= 0
+        || persistent_ids.sheet_last_id != persistent_ids.glyph_index_last_id
+        || persistent_ids.sheet_last_id != persistent_ids.inter_index_last_id
+        || usize::try_from(persistent_ids.sheet_last_id)
+            .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch)?
+            < registry.len()
+    {
+        return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
+    }
+    let mut state = NativeStemsBeamVLinkTransactionState {
+        scope: NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id },
+        glyph_index: NativeStemsBeamGlyphIndexTransactionState {
+            persistent_ids,
+            alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+            union_size: registry.len(),
+            known_canonical_glyphs: Vec::new(),
+            exhaustive_lookup: None,
+        },
+        selected_glyph_bindings: Vec::new(),
+        line_states: Vec::new(),
+        applied_line_deltas: Vec::new(),
+        system_stems: NativeStemsBeamSystemStemTransactionState {
+            system_id,
+            next_stem_identity: 0,
+            authority: NativeStemsBeamRegistryAuthority::RequiresExhaustiveScan,
+            known_stems: Vec::new(),
+            exhaustive_lookup: None,
+        },
+    };
+    let proof =
+        NativeStemsBeamSystemStemAuthorityProof::from_empty_stems_entry(&state.system_stems, 0)?;
+    let preparation = prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
+        scheduler_system,
+        plan_system,
+        &mut state,
+        registry,
+        proof,
+    )?;
+    state.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id };
+    validate_transaction_state(&state)?;
+    Ok((preparation, state))
+}
+
 /// Materialize the current frontier's selected glyph candidate without
 /// mutating the registry.
 ///

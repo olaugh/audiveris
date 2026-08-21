@@ -34,6 +34,7 @@ use crate::{
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
+        initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
     },
     native_stems_beam_stumps::{
@@ -309,6 +310,62 @@ impl NativeStemsPreparedRecognition {
             .map_err(|error| phase(error, "SIDES drive transaction"))?;
             transactions.push(transaction);
         }
+    }
+
+    /// Drive system 1 to its SIDES terminal and atomically enter system 2's
+    /// first shared-sheet SIDES transaction.
+    ///
+    /// System 2 receives fresh system-local SIG/binding/linker authorities,
+    /// while the exact page registry, allocator, and sheet edit state come
+    /// from the completed first system. No isolated system-2 reconstruction is
+    /// accepted by this production entry point.
+    pub fn initialize_second_system_sides(
+        &self,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        let first = self.drive_first_system_sides()?;
+        let registry = first
+            .registry
+            .carry_into_next_system(
+                &first.carrier.latest_base_apply.transaction_state,
+                &self.components.head_builders,
+            )
+            .map_err(|error| phase(error, "SIDES cross-system registry"))?;
+        let system_id = registry.system_id();
+        let scheduler = system(
+            &self.components.scheduler.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES scheduler",
+        )?;
+        let context = self.sides_context(system_id)?;
+        let sig = system(
+            &self.sig.systems,
+            system_id,
+            |system| system.system_id,
+            "SIDES SIG",
+        )?;
+        let bindings = system(
+            &self.sig.bindings,
+            system_id,
+            |bindings| bindings.system_id,
+            "SIDES bindings",
+        )?;
+        let (carrier, first_transaction) =
+            initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry(
+                scheduler,
+                sig,
+                bindings,
+                context,
+                &registry,
+                first.carrier.latest_base_apply.sheet_edit,
+            )
+            .map_err(|error| phase(error, "SIDES second-system transaction"))?;
+        Ok(NativeStemsSystemSidesStart {
+            system_id,
+            registry,
+            carrier,
+            first_transaction,
+        })
     }
 }
 

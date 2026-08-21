@@ -72,6 +72,7 @@ use crate::{
         apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
+        initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state,
         prepare_native_stems_beam_vlink_frontier_state_from_first_stems_bridge,
@@ -111,6 +112,14 @@ pub struct NativeStemsBeamSidesContext<'a> {
     pub reachability: &'a NativeStemsBeamReachabilitySystem,
     pub head_corners: &'a NativeStemsHeadCornerSystem,
     pub checker: &'a NativeStemsBeamStemCheckerContext,
+}
+
+#[derive(Clone, Copy)]
+enum NativeStemsBeamSidesCarrierEntry {
+    FirstSystem,
+    SharedSheetSerial {
+        sheet_edit: NativeStemsBeamSheetEditState,
+    },
 }
 
 /// Candidate-specific page GlyphIndex evidence for one frontier.
@@ -409,6 +418,47 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
     registry: &NativeStemsModeledGlyphRegistry,
 ) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
 {
+    initialize_native_stems_beam_sides_carrier_with_entry(
+        scheduler,
+        sig,
+        bindings,
+        context,
+        registry,
+        NativeStemsBeamSidesCarrierEntry::FirstSystem,
+    )
+}
+
+/// Execute a later system's first SIDES frontier from a carried page registry
+/// and allocator. System-local SIG, bindings, and linker cells begin fresh;
+/// the page edit state and persistent identity stream remain serial.
+pub fn initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    sheet_edit: NativeStemsBeamSheetEditState,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
+{
+    initialize_native_stems_beam_sides_carrier_with_entry(
+        scheduler,
+        sig,
+        bindings,
+        context,
+        registry,
+        NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { sheet_edit },
+    )
+}
+
+fn initialize_native_stems_beam_sides_carrier_with_entry(
+    scheduler: &NativeStemsBeamSchedulerSystem,
+    sig: &NativeSigSystem,
+    bindings: &NativeSigSystemBindings,
+    context: NativeStemsBeamSidesContext<'_>,
+    registry: &NativeStemsModeledGlyphRegistry,
+    entry: NativeStemsBeamSidesCarrierEntry,
+) -> Result<(NativeStemsBeamSidesCarrier, NativeStemsBeamSidesTransaction), NativeStemsBeamSidesError>
+{
     let frontier = match &scheduler.status {
         NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier.as_ref(),
         _ => {
@@ -436,13 +486,23 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
         frontier.plan.stem_profile,
     )
     .map_err(|error| stage("first-relation-parameters", error))?;
-    let (preparation, mut transaction_state) =
-        initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
-            scheduler,
-            context.plans,
-            registry,
-        )
-        .map_err(|error| stage("first-B12-preparation", error))?;
+    let (preparation, mut transaction_state) = match entry {
+        NativeStemsBeamSidesCarrierEntry::FirstSystem => {
+            initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
+                scheduler,
+                context.plans,
+                registry,
+            )
+        }
+        NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { .. } => {
+            initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry(
+                scheduler,
+                context.plans,
+                registry,
+            )
+        }
+    }
+    .map_err(|error| stage("first-B12-preparation", error))?;
     let candidate = materialize_native_stems_beam_frontier_candidate(
         scheduler,
         context.plans,
@@ -494,13 +554,19 @@ pub fn initialize_native_stems_beam_sides_carrier_from_modeled_registry(
         relation_parameters,
     )
     .map_err(|error| stage("first-B13", error))?;
+    let sheet_edit = match entry {
+        NativeStemsBeamSidesCarrierEntry::FirstSystem => {
+            NativeStemsBeamSheetEditState::at_stems_entry()
+        }
+        NativeStemsBeamSidesCarrierEntry::SharedSheetSerial { sheet_edit } => sheet_edit,
+    };
     let mut base_state = initialize_native_stems_beam_vlink_base_apply_state_from_native_sig(
         &transaction_state,
         &reuse,
         sig,
         bindings,
         context.stumps,
-        NativeStemsBeamSheetEditState::at_stems_entry(),
+        sheet_edit,
     )
     .map_err(|error| stage("first-B14-initialize", error))?;
     let flag_base_state = base_state.clone();

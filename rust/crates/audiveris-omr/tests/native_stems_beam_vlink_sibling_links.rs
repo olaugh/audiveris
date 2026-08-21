@@ -175,7 +175,8 @@ use audiveris_omr::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamGlyphAliasOrder,
         NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamRegistryAuthority,
         NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
-        NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsBeamVLinkTransactionScope, NativeStemsModeledGlyphRegistry,
+        apply_native_stems_beam_vlink_create_stem_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
         prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
@@ -6310,6 +6311,73 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     assert_eq!(isolated_system_two.len(), system_two_registry.len());
     assert_eq!(isolated_system_two.persistent_ids().sheet_last_id, 1_470);
     assert_ne!(isolated_system_two, system_two_registry);
+
+    let system_two_start = prepared
+        .initialize_second_system_sides()
+        .expect("Batuque system-2 shared-sheet SIDES start");
+    let system_two_state = &system_two_start.carrier.latest_base_apply.transaction_state;
+    assert_eq!(system_two_start.system_id, 2);
+    assert_eq!(system_two_start.registry, system_two_registry);
+    assert_eq!(system_two_start.registry.len(), 1_470);
+    assert_eq!(
+        system_two_start.registry.persistent_ids().sheet_last_id,
+        1_502
+    );
+    assert_eq!(system_two_state.glyph_index.union_size, 1_470);
+    assert_eq!(
+        system_two_state.glyph_index.persistent_ids.sheet_last_id,
+        1_503
+    );
+    assert_eq!(
+        system_two_state
+            .glyph_index
+            .persistent_ids
+            .glyph_index_last_id,
+        1_503
+    );
+    assert_eq!(
+        system_two_state
+            .glyph_index
+            .persistent_ids
+            .inter_index_last_id,
+        1_503
+    );
+    assert_eq!(system_two_state.glyph_index.known_canonical_glyphs.len(), 1);
+    assert_eq!(system_two_state.system_stems.known_stems.len(), 1);
+    assert_eq!(system_two_start.carrier.sig.vertices.len(), 240);
+    assert_eq!(system_two_start.carrier.sig.edges.len(), 199);
+    assert_eq!(system_two_start.carrier.bindings.stem_vertices.len(), 1);
+    assert_eq!(system_two_start.carrier.b_cells.len(), 117);
+    assert_eq!(system_two_start.carrier.s_cells.len(), 244);
+    assert_eq!(
+        system_two_start.first_transaction.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 0 }
+    );
+    assert_eq!(system_two_start.first_transaction.create.plan.system_id, 2);
+    assert_eq!(
+        system_two_start.first_transaction.create.plan.plan_ordinal,
+        514
+    );
+    assert_eq!(
+        system_two_start
+            .first_transaction
+            .create
+            .plan
+            .builder_ordinal,
+        105
+    );
+    assert_eq!(
+        system_two_start.first_transaction.create.plan.stem_profile,
+        4
+    );
+    assert_eq!(
+        system_two_start.first_transaction.create.scope,
+        NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: 2 }
+    );
+    assert_eq!(
+        system_two_state.scope,
+        NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: 2 }
+    );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(
