@@ -8611,3 +8611,44 @@ system 2 and fails closed next at system 3 queue 29 x114/SIG76 RIGHT/TOP. Its
 builder 456 is a built start stump plus x112/SIG68 RIGHT/TOP, and its span
 reaches the hard target. Measure and port that successful two-head application
 next; broader corpus completion remains open.
+
+## Boundary 172: built-stump two-head checked-stem creation
+
+The strict Allegretto system-3 G1 replay carries the real predecessor through
+heads 0-28 without snapshots and emits queue 29 twice byte-identically.
+x114/SIG76 selects RIGHT/TOP. Its built start stump and sibling x112
+RIGHT/TOP both resolve to active Java glyph 397, so Java creates checked
+StemInter 2398, appends x112 then x114 HeadStem relations, closes x112 LEFT
+then RIGHT, and advances to queue 30 x25/SIG4. SIG 644/567 becomes 645/569 and
+system stems 47 becomes 48. The relation grade/dx pairs are exactly
+`3fedf3a95000fdef`/`bfa960be99fb9249` and
+`3fee0ca606d66e3f`/`bfa834e47b7c3cf4`.
+
+Production now resolves `Built` head stumps from the owned pre-builder registry
+instead of rejecting everything except a free seed. The generic multi-head
+transaction creates native Stem 47 / glyph 187 / persistent Inter 1936 with
+Java-exact checked grade `3fe928913bf9fd5e`, ribbon `2198:1806:3:107`, median,
+thickness `4003bd02647c6945`, and both relation payloads. Native SIG 264/301
+becomes 265/303 and system stems 47 becomes 48. The earlier x112 undefined and
+phase-two entries remain carried, matching Java's worklist behavior; the new
+HeadStem relation makes the later retry skip them.
+
+The 12-line / 13,067-byte fixture SHA-256 is
+`4cd7ea37b5f57b27012fc52cea377394d2d0aef97954db34dee988ed823b7549`.
+Runner, system-3 initializer, transformed probe, emitted body, and semantic
+pass are
+`a6729e51a41222156a53d772bbd64fc9c8223d14fc2eddf4769b213f09670ada`,
+`c801a89d512ffc1751c178e41c6dee30a17d559bfe1b6b1822e6bc050f8b91b9`,
+`d9e98b372c7baa03cdb0473162127793ef295538c9021bb7f58025d94f2d9731`,
+`9b339591efe421f2a73c3c10eee7e8f092bf66f5eae506e0480a2b462e3bf5c9`, and
+`b834f6c87d003428b73242a1081835096d9a63c4c36e1af53dc248ed8dad964a`.
+Strict predecessor runner/fixture pins are Boundary 171
+`55020b3e312fe20cea3913f4e1b8ac849235f8e84753be66ecdc969b6f4b3365` /
+`1d2dfdec360fcc575ef9b852cbb6502dc82ee6fa8b951d24914bf0ae1bb66063`.
+
+Focused 1/1 and full sibling 20/20 (147.78s) pass. Production now fails closed
+at Allegretto system 3 queue 61 x57/SIG99 RIGHT/TOP. Builder 228 contains a
+stump-less start, chunk filaments 0 and 1, then RawBeam 76; one earlier x112
+RIGHT undefined side remains carried. Measure and port that successful
+beam-bearing expansion next. The exact remote baseline stays `f87752bbb`
+pending this boundary's CI.

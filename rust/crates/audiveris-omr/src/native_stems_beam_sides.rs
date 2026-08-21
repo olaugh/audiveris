@@ -5882,9 +5882,25 @@ fn authenticated_carried_head_lists(
         })
         .collect::<Result<Vec<_>, _>>()?;
     if carrier.undefined_sides != carried {
+        let actual = carrier
+            .undefined_sides
+            .iter()
+            .map(|side| {
+                (
+                    carrier
+                        .heads
+                        .iter()
+                        .position(|head| head.reference == side.head),
+                    *side,
+                )
+            })
+            .collect::<Vec<_>>();
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
-            format!("{order_label} carrier lacks the carried undefined sides"),
+            format!(
+                "{order_label} carrier undefined sides differ: actual {:?}, expected {:?}",
+                actual, carried
+            ),
         ));
     }
     let unlinked = unlinked_queue_indexes
@@ -8987,36 +9003,79 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
                 )
             })
     };
-    let seed_content =
-        |stump: crate::native_stems_head_corner_reachability::NativeStemsHeadReachabilityStump| -> Result<
+    let stump_content =
+        |corner: NativeStemsHeadCornerRef,
+         stump: crate::native_stems_head_corner_reachability::NativeStemsHeadReachabilityStump|
+         -> Result<
             crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
             NativeStemsBeamSidesError,
         > {
-            let NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } = stump.source else {
-                return Err(stage(
-                    "HEADS-CLink-glyph",
-                    "expansion stump is not a retained vertical seed",
-                ));
-            };
-            let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
-                stage(
-                    "HEADS-CLink-glyph",
-                    "expansion free vertical-seed ordinal is unavailable",
-                )
-            })?;
-            if seed.bounds != stump.bounds || seed.weight != stump.weight {
-                return Err(stage(
-                    "HEADS-CLink-glyph",
-                    "expansion stump and free vertical seed differ",
-                ));
+            match stump.source {
+                NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } => {
+                    let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
+                        stage(
+                            "HEADS-CLink-glyph",
+                            "expansion free vertical-seed ordinal is unavailable",
+                        )
+                    })?;
+                    if seed.bounds != stump.bounds || seed.weight != stump.weight {
+                        return Err(stage(
+                            "HEADS-CLink-glyph",
+                            "expansion stump and free vertical seed differ",
+                        ));
+                    }
+                    Ok(
+                        crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                            bounds: seed.bounds,
+                            weight: seed.weight,
+                            run_table: seed.run_table.clone(),
+                        },
+                    )
+                }
+                NativeStemsHeadStumpRef::Built {
+                    head_x_ordinal,
+                    constructor_ordinal,
+                } => {
+                    let built = head_builders
+                        .registry_events
+                        .iter()
+                        .find(|event| {
+                            matches!(
+                                event.occurrence,
+                                NativeStemsHeadBuilderRegistryOccurrence::PreBuilder {
+                                    source:
+                                        NativeStemsBeamBuilderPreBuilderGlyphSource::HeadStump {
+                                            head_x_ordinal: event_x,
+                                            head_sig_ordinal: event_sig,
+                                            constructor_ordinal: event_constructor,
+                                        },
+                                    ..
+                                } if event_x == head_x_ordinal
+                                    && event_sig == corner.sig_ordinal
+                                    && event_constructor == constructor_ordinal
+                            )
+                        })
+                        .ok_or_else(|| {
+                            stage(
+                                "HEADS-CLink-glyph",
+                                "expansion built head stump is absent from the carried registry",
+                            )
+                        })?;
+                    if built.bounds != stump.bounds || built.weight != stump.weight {
+                        return Err(stage(
+                            "HEADS-CLink-glyph",
+                            "expansion stump and built registry glyph differ",
+                        ));
+                    }
+                    Ok(
+                        crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                            bounds: built.bounds,
+                            weight: built.weight,
+                            run_table: built.run_table.clone(),
+                        },
+                    )
+                }
             }
-            Ok(
-                crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-                    bounds: seed.bounds,
-                    weight: seed.weight,
-                    run_table: seed.run_table.clone(),
-                },
-            )
         };
 
     let start_reach = reach_stump(frontier.next_corner)?;
@@ -9029,7 +9088,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             ),
         )
     })?;
-    let candidate = seed_content(start_stump)?;
+    let candidate = stump_content(frontier.next_corner, start_stump)?;
     let promoted = bridge
         .resolve_native_content(&candidate)
         .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
@@ -9335,7 +9394,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
                             format!("{} crossed head stump is missing", expectation.order_label),
                         )
                     })?;
-                    update_stem_line(seed_content(stump)?, &mut included, &mut stem_line)?;
+                    update_stem_line(stump_content(target, stump)?, &mut included, &mut stem_line)?;
                 }
             }
             NativeStemsHeadBuilderItemKind::ChunkGlyph => {
@@ -9520,8 +9579,12 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             return Err(stage(
                 "HEADS-CLink-createStem",
                 format!(
-                    "created stem is not the authenticated native stem {}",
-                    expectation.stem_identity
+                    "created stem identity/glyph/attachment differs: actual {}/{}/{}, expected {}/{}/false",
+                    stem_identity,
+                    stem.glyph_id,
+                    stem.sig_attached,
+                    expectation.stem_identity,
+                    promoted.glyph_id,
                 ),
             ));
         }
@@ -10360,6 +10423,80 @@ pub fn advance_native_stems_head_multi_head_created_c_link_allegretto_system1_or
                 Some(false),
             )],
             order_label: "allegretto-system1-order79",
+        },
+    )
+}
+
+/// Consume Allegretto system 3's measured built-stump expansion at queue 29.
+///
+/// x114/SIG76 selects RIGHT/TOP and walks its built head stump plus the
+/// sibling x112 RIGHT/TOP linker. Both stumps resolve to the same active
+/// canonical glyph, so Java creates one checked StemInter, appends the x112
+/// and x114 HeadStem relations, closes both x112 sides, and advances without
+/// appending another unlinked head. Java's earlier phase-two worklist entry
+/// remains carried and is skipped later because the HeadStem now exists.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_multi_head_created_c_link_allegretto_system3_order29_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    if head_corners.system_id != 3 {
+        return Err(stage(
+            "HEADS-multi-reuse-CLink-frontier",
+            "Allegretto order29 authority belongs to system 3",
+        ));
+    }
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 29,
+            head_x_ordinal: 114,
+            head_sig_ordinal: 76,
+            stem_identity: 47,
+            stem_glyph_id: -1,
+            create_new_stem: true,
+            carried_undef_sides: &[(10, crate::stems_step::NativeStemHeadSide::Right)],
+            carried_unlinked_indexes: &[10],
+            crossed_x_ordinals: &[112],
+            included_glyph_count: 1,
+            appended_edge_count: 2,
+            closed_x_ordinals: &[112],
+            closed_value_changes: 2,
+            chunks_before_heads: false,
+            stop_on_rejected_chunk: false,
+            start_relation_before_expand: false,
+            line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Top,
+            side_decisions: &[
+                (
+                    crate::stems_step::NativeStemHeadSide::Left,
+                    Some(false),
+                    Some(false),
+                ),
+                (
+                    crate::stems_step::NativeStemHeadSide::Right,
+                    Some(true),
+                    Some(false),
+                ),
+            ],
+            order_label: "allegretto-system3-order29",
         },
     )
 }
