@@ -25,7 +25,10 @@ use audiveris_omr::{
         assemble_native_sig,
     },
     native_stem_seeds::recognize_native_stem_seeds,
-    native_stems::{NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems},
+    native_stems::{
+        NativeStemsHeadPhase1ProgressStatus, NativeStemsSystemHeadPhase1FirstOutcome,
+        prepare_native_stems,
+    },
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
@@ -6918,6 +6921,75 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     assert_eq!(
         page_first.systems[2].carrier.beam_state.sig.edges.len(),
         340
+    );
+    let page_next = prepared
+        .continue_all_system_heads_to_next_frontier()
+        .expect("Batuque page HEADS continuation to next frontier");
+    assert_eq!(
+        page_next
+            .systems
+            .iter()
+            .map(|system| {
+                (
+                    system.system_id,
+                    system.continuations.len(),
+                    system.status,
+                    system.carrier.current_index,
+                    system.carrier.unlinked_heads.len(),
+                    system.carrier.undefined_sides.len(),
+                    system.carrier.frontier.head.reference.staff_index,
+                    system.carrier.frontier.head.reference.head_index,
+                    system.carrier.frontier.head.sig_ordinal,
+                    system.carrier.frontier.head.x_ordinal,
+                    system.carrier.frontier.next_corner.horizontal,
+                    system.carrier.frontier.next_corner.vertical,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (
+                1,
+                18,
+                NativeStemsHeadPhase1ProgressStatus::AwaitingFrontier,
+                25,
+                0,
+                0,
+                1,
+                34,
+                88,
+                76,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom,
+            ),
+            (
+                2,
+                1,
+                NativeStemsHeadPhase1ProgressStatus::AwaitingFrontier,
+                80,
+                1,
+                0,
+                1,
+                63,
+                121,
+                109,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom,
+            ),
+            (
+                3,
+                1,
+                NativeStemsHeadPhase1ProgressStatus::AwaitingFrontier,
+                49,
+                0,
+                0,
+                0,
+                47,
+                46,
+                111,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom,
+            ),
+        ]
     );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

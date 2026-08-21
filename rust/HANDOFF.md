@@ -8067,13 +8067,33 @@ Focused Batuque passes 1/1 in 4.48s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. Remaining page queues, wider expansion
 and reuse, and phase-2 append retries remain next.
 
+## Boundary 157: carry every page system to its next head frontier
+
+`continue_all_system_heads_to_next_frontier` now owns the mutation-free
+continuation loop after Boundary 156's mixed outcomes. It repeatedly applies
+native graph-derived prelinked closures or defined false continuations and
+stops only at the next actionable C-link frontier or a true phase-1 terminal.
+The page result remains atomic and preserves every carried retry head.
+
+Batuque system 1 crosses 18 continuations to index 25 before staff/head/SIG/x
+`(1,34,88,76)`. System 2 stops immediately at index 80 before
+`(1,63,121,109)` while retaining its one phase-2 retry head. System 3 stops
+at index 49 before `(0,47,46,111)`. All three next frontiers are
+LEFT/BOTTOM; no SIG, registry, allocator, or stem mutation occurs in this
+continuation boundary.
+
+Focused Batuque passes 1/1 in 4.82s; the full sibling suite passes 15/15 in
+163.20s; strict workspace all-target/all-feature Clippy passes in 25.56s;
+formatting and diff checks are clean. Consuming these three frontiers is next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 156's three mixed post-frontier carriers through their
-   remaining page-wide head queues, preserving each system's complete native
-   SIG, phase-2 retry list, and shared page identity state. Then generalize
+1. Consume Boundary 157's three authenticated next C-link frontiers, then
+   continue their remaining page-wide head queues while preserving each
+   system's complete native SIG, phase-2 retry list, and shared page identity
+   state. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.

@@ -39,6 +39,7 @@ use crate::{
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
+        continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_modeled_registry,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
@@ -189,6 +190,27 @@ pub struct NativeStemsSystemHeadPhase1FirstAdvance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageHeadPhase1FirstAdvance {
     pub systems: Vec<NativeStemsSystemHeadPhase1FirstAdvance>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeStemsHeadPhase1ProgressStatus {
+    AwaitingFrontier,
+    Phase1Complete,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase1Progress {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+    pub first_outcome: NativeStemsSystemHeadPhase1FirstOutcome,
+    pub continuations: Vec<NativeStemsHeadPhase1Continuation>,
+    pub status: NativeStemsHeadPhase1ProgressStatus,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase1Progress {
+    pub systems: Vec<NativeStemsSystemHeadPhase1Progress>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -763,6 +785,82 @@ impl NativeStemsPreparedRecognition {
             });
         }
         Ok(NativeStemsPageHeadPhase1FirstAdvance { systems })
+    }
+
+    /// Carry each system after its first mixed outcome through ordinary
+    /// prelinked/undefined continuations until the next C-link frontier or a
+    /// true phase-1 queue terminal.
+    pub fn continue_all_system_heads_to_next_frontier(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase1Progress, NativeStemsPreparationError> {
+        let first_page = self.advance_all_system_first_head_frontiers()?;
+        let mut systems = Vec::with_capacity(first_page.systems.len());
+        for first in first_page.systems {
+            let NativeStemsSystemHeadPhase1FirstAdvance {
+                system_id,
+                registry,
+                mut carrier,
+                outcome,
+            } = first;
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS continuation corners",
+            )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS continuation reachability",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS continuation builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS continuation plans",
+            )?;
+            let mut continuations = Vec::new();
+            let status = loop {
+                if carrier.current_index == carrier.heads.len() {
+                    break NativeStemsHeadPhase1ProgressStatus::Phase1Complete;
+                }
+                let continuation = continue_native_stems_head_linking_phase1(
+                    &carrier,
+                    head_corners,
+                    Some(head_reachability),
+                    head_builders,
+                    plans,
+                )
+                .map_err(|error| {
+                    phase(
+                        format!("system {system_id}: {error}"),
+                        "HEADS continuation page drive",
+                    )
+                })?;
+                let awaiting_frontier = continuation.returned_linked.is_none();
+                carrier = (*continuation.state_after).clone();
+                continuations.push(continuation);
+                if awaiting_frontier {
+                    break NativeStemsHeadPhase1ProgressStatus::AwaitingFrontier;
+                }
+            };
+            systems.push(NativeStemsSystemHeadPhase1Progress {
+                system_id,
+                registry,
+                carrier,
+                first_outcome: outcome,
+                continuations,
+                status,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase1Progress { systems })
     }
 }
 
