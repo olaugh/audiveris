@@ -34,14 +34,15 @@ use crate::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
-        NativeStemsBeamStumpsTransaction, NativeStemsHeadCLinkTransaction,
-        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
+        NativeStemsBeamStumpsTransaction, NativeStemsFinalizeTransaction,
+        NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Carrier,
+        NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
         advance_native_stems_head_phase_two_append_retry, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
-        drive_native_stems_beam_stumps_from_modeled_registry,
+        drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
     },
@@ -263,6 +264,22 @@ pub struct NativeStemsSystemHeadPhase2Drive {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageHeadPhase2Drive {
     pub systems: Vec<NativeStemsSystemHeadPhase2Drive>,
+}
+
+/// Atomic generic `finalizeStems` result for one page system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemFinalizeDrive {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub phase_one_events: Vec<NativeStemsHeadPhase1DriveEvent>,
+    pub retries: Vec<NativeStemsHeadPhase1Continuation>,
+    pub transaction: NativeStemsFinalizeTransaction,
+}
+
+/// Atomic page-wide completion through Java's generic `finalizeStems` pass.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageFinalizeDrive {
+    pub systems: Vec<NativeStemsSystemFinalizeDrive>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1196,6 +1213,31 @@ impl NativeStemsPreparedRecognition {
             });
         }
         Ok(NativeStemsPageHeadPhase2Drive { systems })
+    }
+
+    /// Drive every system through both head-linking phases and generic
+    /// `finalizeStems`, exposing no partial page when any finalizer rejects.
+    pub fn finalize_all_system_stems(
+        &self,
+    ) -> Result<NativeStemsPageFinalizeDrive, NativeStemsPreparationError> {
+        let phase_two = self.drive_all_system_head_linking_phase2()?;
+        let mut systems = Vec::with_capacity(phase_two.systems.len());
+        for completed in phase_two.systems {
+            let transaction = finalize_native_stems(&completed.carrier).map_err(|error| {
+                phase(
+                    format!("system {}: {error}", completed.system_id),
+                    "finalizeStems page drive",
+                )
+            })?;
+            systems.push(NativeStemsSystemFinalizeDrive {
+                system_id: completed.system_id,
+                registry: completed.registry,
+                phase_one_events: completed.phase_one_events,
+                retries: completed.retries,
+                transaction,
+            });
+        }
+        Ok(NativeStemsPageFinalizeDrive { systems })
     }
 }
 

@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and sixty semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues with native prefix closure, creation, reuse, rejected-link, undefined-side, and standard dual-corner behavior; Boundary 160 atomically consumes all four page-wide phase-2 append retries under fresh deterministic Java evidence.
+The first one hundred and sixty-one semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues with native prefix closure, creation, reuse, rejected-link, undefined-side, and standard dual-corner behavior; Boundary 160 consumes all four page-wide phase-2 append retries; Boundary 161 atomically finalizes all three systems under fresh deterministic Java page evidence.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | One hundred and sixty exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundaries 135-154 internalize and drive Batuque's page-wide predecessor/SIDES/STUMPS state; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes their four ordered phase-2 retries with zero graph mutation. | Drive finalization page-wide, then add transactional `recognize_native_stems` and schema-1 publication. |
+| 10 | `STEMS` | **Components graded** | One hundred and sixty-one exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundaries 135-154 internalize and drive Batuque's page-wide predecessor/SIDES/STUMPS state; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes their four ordered phase-2 retries; Boundary 161 finalizes all three systems atomically with no graph mutation. | Add transactional `recognize_native_stems`, then schema-1 publication and wider-corpus branch coverage. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -3908,6 +3908,34 @@ and `3d30e22eca5ee67647519fed576083a66ed987bd8803376e72c5462f5758d021`.
 Focused Batuque passes 1/1 in 5.51s; the full sibling suite passes 15/15 in
 152.69s; strict workspace all-target/all-feature Clippy passes in 20.10s;
 formatting and diff checks are clean. Page-wide `finalizeStems` is next.
+
+## Boundary 161: finalize Batuque STEMS page-wide
+
+`finalize_all_system_stems` composes the complete page phase-2 carrier with
+generic `finalize_native_stems`, evaluates each system on a local shadow, and
+publishes no page result unless all three finalizers succeed. A dedicated Java
+probe executes the real Batuque SIDES, STUMPS, both head phases, and private
+`finalizeStems` in foreground system order.
+
+Java and Rust agree exactly: system 1 checks 93 heads with no abnormal result;
+system 2 checks 122 and retains x108/SIG115 plus x109/SIG121 as no-stem
+abnormal heads; system 3 checks 112 and retains x107/SIG47 plus x108/SIG2,
+with their carried RIGHT/LEFT undefined sides. There are no multiple-stem
+heads, removed HeadStem relations, abnormal value changes, graph changes,
+allocator changes, or system-Stem changes. Terminal graph/stem counts remain
+`232/301/42`, `293/406/54`, and `268/344/52`.
+
+Warmup plus two fresh Java runs are byte-identical. Fixture, runner, probe,
+init, and emitted-body SHA-256 are
+`ab6377a2b82cc838633b8c0d79732ddd755a68f11a8b7e40dd39baee7d6278d2`,
+`7e8b8c557d1d321329c72e62cdd932e0faa304591e14b958171ff7a961342ea1`,
+`9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714`,
+`e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548`,
+and `e51e06eb798e3ab6ccaa32ea5db5b88f6285b667fb8162e1777a0faf6c28a3a1`.
+Focused Batuque passes 1/1 in 14.17s; the full sibling suite passes 15/15 in
+156.66s; strict workspace Clippy passes in 19.88s; formatting and diff checks
+are clean. Transactional recognition and schema-1
+publication remain next.
 
 
 

@@ -140,7 +140,8 @@ use audiveris_omr::{
         roll_native_stems_beam_vlink_base_apply_state,
     },
     native_stems_beam_vlink_head_links::{
-        NativeStemsBeamHeadLinkBranch, NativeStemsBeamHeadSLinkerRef,
+        NativeStemsBeamHeadLinkBranch, NativeStemsBeamHeadLinkHeadRef,
+        NativeStemsBeamHeadSLinkerRef,
         apply_native_stems_beam_vlink_head_transaction_to_native_sig,
         initialize_native_stems_beam_s_linker_cells,
     },
@@ -215,6 +216,14 @@ const BATUQUE_PHASE_TWO_PROBE: &[u8] =
     include_bytes!("../../../oracle/java/StemsHeadPhaseTwoPageProbe.java");
 const BATUQUE_PHASE_TWO_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-page.init.gradle");
+const BATUQUE_FINALIZE_FIXTURE: &str =
+    include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
+const BATUQUE_FINALIZE_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-finalize-batuque.sh");
+const BATUQUE_FINALIZE_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/StemsFinalizePageProbe.java");
+const BATUQUE_FINALIZE_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-finalize-page.init.gradle");
 const CORPUS_PAGES: [(&str, &str); 8] = [
     ("chula", "chula.png"),
     ("allegretto", "allegretto.png"),
@@ -7385,6 +7394,130 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         line.contains("stemsheadphase2summary schema stems-head-phase-two-page-v1")
             && line.contains("freshRunsByteIdentical true")
             && line.contains("javaEvidence ReturnedAfterFinalPageRetry")
+    }));
+    let page_finalized = prepared
+        .finalize_all_system_stems()
+        .expect("Batuque complete page finalizeStems drive");
+    assert_eq!(page_finalized.systems.len(), 3);
+    assert_eq!(
+        page_finalized
+            .systems
+            .iter()
+            .map(|system| {
+                let refs = |heads: &[NativeStemsBeamHeadLinkHeadRef]| {
+                    heads
+                        .iter()
+                        .map(|head| (head.x_ordinal, head.sig_ordinal))
+                        .collect::<Vec<_>>()
+                };
+                (
+                    (
+                        system.system_id,
+                        system.phase_one_events.len(),
+                        system.retries.len(),
+                        system.transaction.checked_heads,
+                    ),
+                    (
+                        refs(&system.transaction.multiple_stem_heads),
+                        refs(&system.transaction.no_stem_heads),
+                        refs(&system.transaction.abnormal_heads),
+                    ),
+                    (
+                        system.transaction.removed_head_stem_relations.len(),
+                        system.transaction.abnormal_value_changes,
+                        system.transaction.state_after.phase_two_index,
+                        system.transaction.state_after.unlinked_heads.len(),
+                        system.transaction.state_after.undefined_sides.len(),
+                    ),
+                    (
+                        system.transaction.state_after.beam_state.sig.vertices.len(),
+                        system.transaction.state_after.beam_state.sig.edges.len(),
+                        system
+                            .transaction
+                            .state_after
+                            .beam_state
+                            .latest_base_apply
+                            .transaction_state
+                            .system_stems
+                            .known_stems
+                            .len(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (
+                (1, 89, 0, 93),
+                (vec![], vec![], vec![]),
+                (0, 0, 0, 0, 0),
+                (232, 301, 42)
+            ),
+            (
+                (2, 44, 2, 122),
+                (
+                    vec![],
+                    vec![(108, 115), (109, 121)],
+                    vec![(108, 115), (109, 121)]
+                ),
+                (0, 0, 2, 2, 0),
+                (293, 406, 54),
+            ),
+            (
+                (3, 69, 2, 112),
+                (vec![], vec![(107, 47), (108, 2)], vec![(107, 47), (108, 2)]),
+                (0, 0, 2, 2, 2),
+                (268, 344, 52),
+            ),
+        ]
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_FINALIZE_FIXTURE.as_bytes()),
+        "ab6377a2b82cc838633b8c0d79732ddd755a68f11a8b7e40dd39baee7d6278d2"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_FINALIZE_RUNNER),
+        "7e8b8c557d1d321329c72e62cdd932e0faa304591e14b958171ff7a961342ea1"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_FINALIZE_PROBE),
+        "9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_FINALIZE_INIT),
+        "e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548"
+    );
+    let finalize_java_rows = BATUQUE_FINALIZE_FIXTURE
+        .lines()
+        .filter(|line| line.starts_with("stemsfinalize"))
+        .collect::<Vec<_>>();
+    assert_eq!(finalize_java_rows.len(), 5);
+    assert!(finalize_java_rows.iter().any(|line| {
+        line.contains("stemsfinalizesystem page batuque.png#1 system 1 heads 93")
+            && line.contains("multipleBefore [] noStemBefore [] abnormalBefore []")
+            && line.contains("sigVerticesBefore 232 sigVerticesAfter 232")
+            && line.contains("systemStemsBefore 42 systemStemsAfter 42")
+    }));
+    assert!(finalize_java_rows.iter().any(|line| {
+        line.contains("system 2 heads 122")
+            && line.contains("noStemBefore [x108:sig115:id1708,x109:sig121:id1720]")
+            && line.contains("abnormalAfter [x108:sig115:id1708,x109:sig121:id1720]")
+            && line.contains("removedHeadStem []")
+            && line.contains("abnormalChanges []")
+    }));
+    assert!(finalize_java_rows.iter().any(|line| {
+        line.contains("system 3 heads 112")
+            && line.contains("undefs [x107:sig47:id1817:[RIGHT],x108:sig2:id1727:[LEFT]]")
+            && line.contains("noStemBefore [x107:sig47:id1817,x108:sig2:id1727]")
+            && line.contains("abnormalAfter [x107:sig47:id1817,x108:sig2:id1727]")
+            && line.contains("sigEdgesBefore 344 sigEdgesAfter 344")
+    }));
+    assert!(finalize_java_rows.iter().any(|line| {
+        line.contains("stemsfinalizepagesummary schema stems-finalize-page-v1")
+            && line.contains("rows 4")
+            && line.contains("emittedBodySha256 e51e06eb798e3ab6ccaa32ea5db5b88f6285b667fb8162e1777a0faf6c28a3a1")
+            && line.contains("freshRunsByteIdentical true")
+            && line.contains("nativeScope FullPageAllSystemsGenericFinalize")
+            && line.contains("javaEvidence ReturnedAfterFinalPageFinalize")
     }));
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

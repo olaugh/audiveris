@@ -8168,16 +8168,44 @@ Focused Batuque passes 1/1 in 5.51s; the full sibling suite passes 15/15 in
 152.69s; strict workspace all-target/all-feature Clippy passes in 20.10s;
 formatting and diff checks are clean. Page-wide `finalizeStems` is next.
 
+## Boundary 161: finalize Batuque STEMS page-wide
+
+`finalize_all_system_stems` composes the complete two-phase page carrier with
+generic `finalize_native_stems`, using per-system shadows and withholding the
+page result until every finalizer succeeds. The new Java page probe executes
+real Batuque SIDES, STUMPS, both head phases, and private `finalizeStems` in
+foreground system order.
+
+System 1 checks 93 heads with no abnormal result. System 2 checks 122 and
+preserves x108/SIG115 plus x109/SIG121 as no-stem abnormal heads. System 3
+checks 112 and preserves x107/SIG47 plus x108/SIG2, along with their carried
+RIGHT/LEFT undefined sides. Multiple-stem sets, HeadStem removals, abnormal
+value changes, graph changes, allocator changes, and system-Stem changes are
+all empty. Terminal graph/stem counts remain `232/301/42`, `293/406/54`, and
+`268/344/52`.
+
+Warmup plus two fresh Java passes are byte-identical. Fixture, runner, probe,
+init, and body SHA-256 are
+`ab6377a2b82cc838633b8c0d79732ddd755a68f11a8b7e40dd39baee7d6278d2`,
+`7e8b8c557d1d321329c72e62cdd932e0faa304591e14b958171ff7a961342ea1`,
+`9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714`,
+`e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548`,
+and `e51e06eb798e3ab6ccaa32ea5db5b88f6285b667fb8162e1777a0faf6c28a3a1`.
+Focused Batuque passes 1/1 in 14.17s; the full sibling suite passes 15/15 in
+156.66s; strict workspace Clippy passes in 19.88s; formatting and diff checks
+are clean. The next boundary is the transactional
+`recognize_native_stems` entry point, followed by schema-1 publication and
+wider-corpus branch coverage.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 159's four page-wide retry heads through phase-2 append,
-   preserving each system's complete native SIG, undefined-side sets, and
-   shared page identity state. Then generalize
-   beyond the Chula, Allegretto, and Batuque
-   system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
-   branches.
+1. Compose Boundary 161's atomic page finalization into transactional
+   `recognize_native_stems`, preserving the shared page identity state and
+   exposing no partial stage on any system failure. Then publish the completed
+   native STEMS product through the existing schema-1 ordinary and stream JSON
+   contracts.
 2. Continue after Boundary 134, which completes generic `finalizeStems`, with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links:
    carry the
    remaining ordered phase-1 queue and
