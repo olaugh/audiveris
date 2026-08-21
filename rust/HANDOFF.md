@@ -8494,3 +8494,40 @@ full sibling suite 18/18 (143.22s) pass. Production now advances beyond queue
 65 and fails closed next at queue 79 x82/SIG89 LEFT/TOP, whose builder contains
 a start stump, crossed x80 RIGHT/TOP head stump, and chunk. Measure that wider
 cross-side expansion next.
+
+## Boundary 169: Allegretto crossed-side created-stem C-link
+
+The strict Allegretto replay now carries the real system-1 predecessor through
+heads 0-78 without snapshots and measures queue 79 twice byte-identically.
+x82/SIG89 selects LEFT/TOP. Java walks active seed glyph 297, accepts the
+crossed x80 RIGHT/TOP head, and then stops normally when the trailing chunk
+fails `maxLineGlyphDx`. The initial x82 relation is the relation retained from
+the pre-expansion `canLink` check; x80 is projected from the evolved line.
+Their exact grade/dx bits are `3feffffffffffe18`/`bd28618618618618` and
+`3fe872c0dd16cd02`/`3fb542c107f91e7a`.
+
+The selected canonical has no existing StemInter, so Java allocates checked
+StemInter 2240 with bounds `2299:692:3:47`, grade bits
+`3fe42c27698e7250`, and mean-thickness bits `3ff51b3bea3677d4`;
+SIG 637/562 becomes 638/564 and system stems 39 becomes 40. Native now supports
+that created-stem disposition inside the generic multi-head transaction,
+including mixed carried undefined sides (`x84 LEFT`, `x80 RIGHT`, `x57 LEFT`,
+`x58 LEFT`), raw start/head/chunk ordering, the bounded rejected-chunk stop,
+and pre-expansion start-relation timing. It creates dense Stem 39 / native
+persistent Inter 1022 (not Java's unrelated ID 2240), appends the x82 LEFT and
+x80 RIGHT HeadStem edges, closes x80 LEFT
+then RIGHT, and reaches queue 80 without disturbing the carried phase-2 list.
+
+The 12-line / 12,840-byte fixture SHA-256 is
+`63327c13e4ebba1873fb73d5507b5a34369027ca8c6a4abb60f377cebeee69ee`;
+runner, transformed probe, body, and semantic-pass hashes are
+`bcbf729291881676df19a79e74a0fb4f2266d09f5c5de0565dedf4420759fd95`,
+`b22c21f1b9410ec66aa5445f8aa2f9aa4e4149c02b733abe03617ec6be05c032`,
+`e9802845ac23e54fb14617dc21a63ac1a5be0d5b64e998bf0b8cd0ff1a288d62`, and
+`ffb9b95199d62bce49a95e044b93f09fd0562b74b8917b069e26da0d793ca452`.
+Focused 1/1, full sibling 18/18 (146.26s), strict all-targets/all-features
+workspace Clippy, formatting, and diff checks pass. The production CLI now
+completes Allegretto system 1 and fails closed next in system 2 at queue 89
+x52/SIG43 RIGHT/TOP, whose builder is start + chunk + two BeamLinkers. Measure
+that beam-bearing head-origin expansion next. Broader corpus completion and
+fresh remote CI remain open.
