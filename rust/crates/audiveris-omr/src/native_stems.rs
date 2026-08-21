@@ -16,8 +16,8 @@ use crate::{
     native_heads::NativeHeadsRecognition,
     native_ledgers::NativeLedgerRecognition,
     native_sig::{NativeSigRecognition, assemble_native_sig},
-    native_stem_seeds::NativeStemSeedRecognition,
     native_stem_seeds::STEM_SEEDS_BELT_MARGIN_RATIO,
+    native_stem_seeds::{NativeStemSeedGlyph, NativeStemSeedRecognition},
     native_stems_beam_builders::{
         NativeStemsBeamBuilderRecognition, materialize_native_stems_beam_builders,
     },
@@ -34,9 +34,10 @@ use crate::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
-        NativeStemsBeamStumpsTransaction, NativeStemsHeadPhase1Carrier,
+        NativeStemsBeamStumpsTransaction, NativeStemsHeadCLinkTransaction,
+        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
-        begin_native_stems_head_linking_phase1,
+        advance_native_stems_head_c_link_or_no_link, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         drive_native_stems_beam_stumps_from_modeled_registry,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
@@ -80,6 +81,8 @@ const ARTIFICIAL_STEM_GRADE: f64 = 0.4;
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsComponentRecognition {
     pub inspect_profile: i32,
+    /// Accepted system free glyphs retained for head-origin C-link mutation.
+    pub stem_seed_glyphs: Vec<NativeStemsStemSeedGlyphSystem>,
     pub head_corners: NativeStemsHeadCornerRecognition,
     pub head_seeds: NativeStemsHeadSeedRecognition,
     pub beam_stumps: NativeStemsBeamStumpRecognition,
@@ -91,6 +94,12 @@ pub struct NativeStemsComponentRecognition {
     pub head_builders: NativeStemsHeadBuilderRecognition,
     pub plans: NativeStemsBeamLinkPlanRecognition,
     pub scheduler: NativeStemsBeamSchedulerRecognition,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsStemSeedGlyphSystem {
+    pub system_id: usize,
+    pub free_glyphs: Vec<NativeStemSeedGlyph>,
 }
 
 /// Complete immutable native state immediately before the first mutating
@@ -161,6 +170,25 @@ pub struct NativeStemsSystemHeadPhase1Start {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageHeadPhase1Start {
     pub systems: Vec<NativeStemsSystemHeadPhase1Start>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeStemsSystemHeadPhase1FirstOutcome {
+    Linked(Box<NativeStemsHeadCLinkTransaction>),
+    Unlinked(NativeStemsHeadPhase1Continuation),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase1FirstAdvance {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+    pub outcome: NativeStemsSystemHeadPhase1FirstOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase1FirstAdvance {
+    pub systems: Vec<NativeStemsSystemHeadPhase1FirstAdvance>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -656,6 +684,86 @@ impl NativeStemsPreparedRecognition {
         }
         Ok(NativeStemsPageHeadPhase1Start { systems })
     }
+
+    /// Consume every system's first production-carried phase-1 frontier.
+    ///
+    /// Successful bounded C-links mutate the native SIG and allocator. A
+    /// normal Java `link()` rejection closes the head and queues it for phase
+    /// 2 without graph mutation. The page vector remains atomic.
+    pub fn advance_all_system_first_head_frontiers(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase1FirstAdvance, NativeStemsPreparationError> {
+        let starts = self.begin_all_system_head_linking_phase1()?;
+        let mut systems = Vec::with_capacity(starts.systems.len());
+        for start in starts.systems {
+            let NativeStemsSystemHeadPhase1Start {
+                system_id,
+                registry,
+                mut carrier,
+            } = start;
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link corners",
+            )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link reachability",
+            )?;
+            let seed_glyphs = system(
+                &self.components.stem_seed_glyphs,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link stem seeds",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS first C-link plans",
+            )?;
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                &self.stem_checker,
+                &registry,
+            )
+            .map_err(|error| {
+                phase(
+                    format!("system {system_id}: {error}"),
+                    "HEADS first C-link page drive",
+                )
+            })?;
+            let outcome = match outcome {
+                Ok(transaction) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::Linked(Box::new(transaction))
+                }
+                Err(continuation) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation)
+                }
+            };
+            systems.push(NativeStemsSystemHeadPhase1FirstAdvance {
+                system_id,
+                registry,
+                carrier,
+                outcome,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase1FirstAdvance { systems })
+    }
 }
 
 /// Compose every read-only STEMS construction product in Java order.
@@ -751,6 +859,14 @@ pub fn materialize_native_stems_components(
 
     Ok(NativeStemsComponentRecognition {
         inspect_profile,
+        stem_seed_glyphs: stem_seeds
+            .systems
+            .iter()
+            .map(|system| NativeStemsStemSeedGlyphSystem {
+                system_id: system.raw.system_id,
+                free_glyphs: system.free_glyphs.clone(),
+            })
+            .collect(),
         head_corners,
         head_seeds,
         beam_stumps,

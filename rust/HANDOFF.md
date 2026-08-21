@@ -8044,13 +8044,36 @@ Focused Batuque passes 1/1 in 4.30s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. The next boundary consumes these three
 first C-link frontiers and carries the remaining page-wide head queues.
 
+## Boundary 156: execute the first page-wide head outcomes
+
+`advance_all_system_first_head_frontiers` now owns the accepted STEM_SEEDS
+free glyphs retained by `prepare_native_stems` and executes each system's
+first head frontier atomically. Queue ordinals, selected corners, and bounded
+builder extents come from native state rather than order-specific Java IDs or
+caller-supplied expansion indices.
+
+Batuque systems 1 and 3 consume x56 and x110 LEFT/BOTTOM and each append one
+Stem vertex plus one HeadStem edge. Their carriers advance to indices 8 and
+49 at SIG 231/298 and 265/340. System 2 exercises the first wider-corpus
+normal `CLinker.link` rejection: its 18-pixel start item cannot reach Java's
+37-pixel hard tail. The generic `linkSides` loop tries eligible profiles and
+sides, then closes both S cells, adds the head to the phase-2 queue, and
+advances to index 80 without changing SIG 293/406. The hard target is now
+correctly measured from the selected corner reference point in both created-
+and existing-stem paths.
+
+Focused Batuque passes 1/1 in 4.48s; the full sibling suite passes 15/15 in
+154.01s; strict workspace all-target/all-feature Clippy passes in 19.10s;
+formatting and diff checks are clean. Remaining page queues, wider expansion
+and reuse, and phase-2 append retries remain next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 155's three authenticated first C-link frontiers through
-   page-wide head linking, preserving each system's complete native SIG and
-   shared page identity state. Then generalize
+1. Continue Boundary 156's three mixed post-frontier carriers through their
+   remaining page-wide head queues, preserving each system's complete native
+   SIG, phase-2 retry list, and shared page identity state. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.

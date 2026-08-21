@@ -25,7 +25,7 @@ use audiveris_omr::{
         assemble_native_sig,
     },
     native_stem_seeds::recognize_native_stem_seeds,
-    native_stems::prepare_native_stems,
+    native_stems::{NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems},
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
@@ -6857,6 +6857,68 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             }]
         );
     }
+    let page_first = prepared
+        .advance_all_system_first_head_frontiers()
+        .expect("Batuque first page HEADS outcomes");
+    assert_eq!(page_first.systems.len(), 3);
+    let NativeStemsSystemHeadPhase1FirstOutcome::Linked(system_one) =
+        &page_first.systems[0].outcome
+    else {
+        panic!("Batuque system 1 did not create its first head-origin stem");
+    };
+    assert_eq!(system_one.system_id, 1);
+    assert_eq!(system_one.corner.x_ordinal, 56);
+    assert!(matches!(
+        system_one.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { .. }
+    ));
+    assert_eq!(page_first.systems[0].carrier.current_index, 8);
+    assert_eq!(
+        page_first.systems[0].carrier.beam_state.sig.vertices.len(),
+        231
+    );
+    assert_eq!(
+        page_first.systems[0].carrier.beam_state.sig.edges.len(),
+        298
+    );
+    let NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(system_two) =
+        &page_first.systems[1].outcome
+    else {
+        panic!("Batuque system 2 did not take the measured no-link branch");
+    };
+    assert_eq!(system_two.returned_linked, Some(false));
+    assert_eq!(system_two.closed_value_changes, 2);
+    assert_eq!(system_two.state_after.current_index, 80);
+    assert_eq!(system_two.closed_s_linkers.len(), 2);
+    assert_eq!(
+        page_first.systems[1].carrier.beam_state.sig.vertices.len(),
+        293
+    );
+    assert_eq!(
+        page_first.systems[1].carrier.beam_state.sig.edges.len(),
+        406
+    );
+    assert_eq!(page_first.systems[1].carrier.unlinked_heads.len(), 1);
+    let NativeStemsSystemHeadPhase1FirstOutcome::Linked(system_three) =
+        &page_first.systems[2].outcome
+    else {
+        panic!("Batuque system 3 did not create its first head-origin stem");
+    };
+    assert_eq!(system_three.system_id, 3);
+    assert_eq!(system_three.corner.x_ordinal, 110);
+    assert!(matches!(
+        system_three.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { .. }
+    ));
+    assert_eq!(page_first.systems[2].carrier.current_index, 49);
+    assert_eq!(
+        page_first.systems[2].carrier.beam_state.sig.vertices.len(),
+        265
+    );
+    assert_eq!(
+        page_first.systems[2].carrier.beam_state.sig.edges.len(),
+        340
+    );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(
