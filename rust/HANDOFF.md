@@ -8840,3 +8840,28 @@ all-features workspace Clippy, and diff checks. Boundary 176 commit
 `8185667b7` is the exact remote baseline: Build & Test 32519244924 and Rust
 port 32519244803 both succeeded, all 12 Rust shards green. Resume at system-3
 phase-2 retry index 0, x112/SIG68; four further retries then remain.
+
+## Boundary 178: Allegretto system-3 phase-2 retry zero
+
+The unchanged generic phase-2 append continuation consumes
+x112/SIG68/Inter1812. Append mode re-evaluates its closed/unlinked LEFT side;
+both corners are unlinkable. RIGHT is already linked/closed, so Java returns
+`true`. Native follows the same decisions, then records Java's ordered shared-
+stem closure over x114/SIG76, x117/SIG72, x107/SIG80, x116/SIG71, and
+x108/SIG67, LEFT then RIGHT for each. All ten cells are already closed, so the
+transaction reports zero value changes exactly as Java's empty `sideChanges`.
+SIG 267/317, 52 system stems, allocator 3170, the undefined RIGHT side, and
+the five-head retry authority remain unchanged; only `phase_two_index` moves
+from zero to one.
+
+The strict test reuses Boundary 177's full-page fixture and runner, SHA-256
+`242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c` /
+`9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331`,
+and pins Java grade bits `3fe8d8c228e9b518`, the
+Neither/SkipAlreadyLinked decision pair, unchanged graph/sides, and preserved
+undefined RIGHT. Focused 1/1 and full sibling 20/20 (161.95s) pass with
+formatting, strict all-features workspace Clippy, and diff checks. The current
+exact remote baseline is Boundary 177 commit `61c52f133`: Build & Test
+32524051345 and Rust port 32524051339 both succeeded, all 12 Rust shards
+green. Resume at retry index 1 x14/SIG50, whose
+real append mutation is still deliberately fail-closed.

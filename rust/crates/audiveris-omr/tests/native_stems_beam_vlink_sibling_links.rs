@@ -10256,6 +10256,78 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         before117.unlinked_heads
     );
 
+    // Boundary 178: the corrected five-head worklist enters phase 2 at
+    // x112/SIG68. Append mode re-evaluates its closed LEFT side, finds no
+    // corner, then short-circuits true on the already-linked RIGHT side.
+    // Java changes no S cell and leaves the graph/worklists untouched.
+    let phase_two_0 = advance_native_stems_head_phase_two_append_retry(
+        &queue117.state_after,
+        head_corners,
+        head_reachability,
+        head_builders,
+        plans,
+    )
+    .expect("Allegretto system-3 phase-2 retry 0");
+    assert_eq!(phase_two_0.processed_head.x_ordinal, 112);
+    assert_eq!(phase_two_0.processed_head.sig_ordinal, 68);
+    assert_eq!(phase_two_0.returned_linked, Some(true));
+    assert_eq!(phase_two_0.closed_value_changes, 0);
+    assert_eq!(
+        phase_two_0
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (114, 76, NativeStemHeadSide::Left),
+            (114, 76, NativeStemHeadSide::Right),
+            (117, 72, NativeStemHeadSide::Left),
+            (117, 72, NativeStemHeadSide::Right),
+            (107, 80, NativeStemHeadSide::Left),
+            (107, 80, NativeStemHeadSide::Right),
+            (116, 71, NativeStemHeadSide::Left),
+            (116, 71, NativeStemHeadSide::Right),
+            (108, 67, NativeStemHeadSide::Left),
+            (108, 67, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(
+        phase_two_0
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                NativeStemHeadSide::Left,
+                false,
+                true,
+                Some(false),
+                Some(false),
+            ),
+            (NativeStemHeadSide::Right, true, true, None, None),
+        ]
+    );
+    assert_eq!(phase_two_0.state_after.phase_two_index, 1);
+    assert_eq!(
+        phase_two_0.state_after.beam_state.sig,
+        queue117.state_after.beam_state.sig
+    );
+    assert_eq!(
+        phase_two_0.state_after.undefined_sides,
+        queue117.state_after.undefined_sides
+    );
+    assert_eq!(
+        phase_two_0.state_after.unlinked_heads,
+        queue117.state_after.unlinked_heads
+    );
+
     assert_eq!(
         sha256_hex(ALLEGRETTO_PHASE_TWO_FIXTURE.as_bytes()),
         "242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c"
@@ -10286,6 +10358,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     );
     assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase1audit page allegretto.png#1 system 3 headOrder 100 headX 0 headSig 19 returned true glyph 369:1595:2:48 weight 63 stemId 3170 grade 3fe49d64653090d5 bounds 368:1595:3:48 median 40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000 width 3ff5000000000000 rightBottomStump 369:1595:2:48 sigVerticesBefore 266 sigVerticesAfter 267 sigEdgesBefore 315 sigEdgesAfter 316 systemStemsBefore 51 systemStemsAfter 52 allocatorBefore 3169 allocatorAfter 3170"));
     assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2baseline page allegretto.png#1 system 3 heads 118 queueSize 5 queue [x112:sig68:id1812,x14:sig50:id1777,x13:sig0:id1675,x56:sig100:id1876,x113:sig75:id1826] sigVertices 267 sigEdges 317 systemStems 52 allocator 3170"));
+    assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 0 headX 112 headSig 68 headInterId 1812 grade 3fe8d8c228e9b518 append true sidesBefore [LEFT:false:true,RIGHT:true:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:SkipAlreadyLinked] returned true sidesAfter [LEFT:false:true,RIGHT:true:true] undefs [RIGHT] sideChanges [] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 317 sigEdgesAfter 317 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170"));
     let allegretto_phase_two_summary = allegretto_phase_two_rows[30]
         .split_ascii_whitespace()
         .collect::<Vec<_>>();
