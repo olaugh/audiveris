@@ -17,6 +17,7 @@ use audiveris_image::{
 use crate::{
     header_builder::HeaderSigExclusion,
     headers_step::HeadlessHeaderSystem,
+    key_column::StaffPitchGeometry,
     staff_header::{HeaderBounds, HeaderComponent, StaffHeaderRange},
 };
 
@@ -325,8 +326,9 @@ impl<ClassifierError: Error + 'static> Error for NativeClefError<ClassifierError
 /// Concrete Java lookup → vertical runs → parts → near-graph → connected
 /// subset decomposition. The classifier sees registered glyphs in Java trial
 /// order; all filtering around it remains native.
-pub struct NativeClefProposalRecognizer<Classifier> {
+pub struct NativeClefProposalRecognizer<Classifier, Lines> {
     classifier: Classifier,
+    lines: Lines,
     sources: BTreeMap<usize, RunTable>,
     contexts: BTreeMap<usize, ClefLookupContext>,
     parameters: BTreeMap<usize, NativeClefParameters>,
@@ -335,10 +337,11 @@ pub struct NativeClefProposalRecognizer<Classifier> {
     mutations: Vec<NativeClefMutation>,
 }
 
-impl<Classifier> NativeClefProposalRecognizer<Classifier> {
+impl<Classifier, Lines: StaffPitchGeometry> NativeClefProposalRecognizer<Classifier, Lines> {
     #[must_use]
     pub fn new(
         classifier: Classifier,
+        lines: Lines,
         sources: BTreeMap<usize, RunTable>,
         contexts: BTreeMap<usize, ClefLookupContext>,
         parameters: BTreeMap<usize, NativeClefParameters>,
@@ -347,6 +350,7 @@ impl<Classifier> NativeClefProposalRecognizer<Classifier> {
     ) -> Self {
         Self {
             classifier,
+            lines,
             sources,
             contexts,
             parameters,
@@ -382,8 +386,8 @@ struct SubsetContext<'a> {
     parameters: NativeClefParameters,
 }
 
-impl<Classifier: ClefShapeClassifier> VisualClefProposalRecognizer
-    for NativeClefProposalRecognizer<Classifier>
+impl<Classifier: ClefShapeClassifier, Lines: StaffPitchGeometry> VisualClefProposalRecognizer
+    for NativeClefProposalRecognizer<Classifier, Lines>
 {
     type Error = NativeClefError<Classifier::Error>;
 
@@ -476,7 +480,9 @@ impl<Classifier: ClefShapeClassifier> VisualClefProposalRecognizer
     }
 }
 
-impl<Classifier: ClefShapeClassifier> NativeClefProposalRecognizer<Classifier> {
+impl<Classifier: ClefShapeClassifier, Lines: StaffPitchGeometry>
+    NativeClefProposalRecognizer<Classifier, Lines>
+{
     fn allocate_glyph_id(&mut self) -> Result<usize, NativeClefError<Classifier::Error>> {
         self.next_glyph_id = self
             .next_glyph_id
@@ -542,7 +548,13 @@ impl<Classifier: ClefShapeClassifier> NativeClefProposalRecognizer<Classifier> {
                     glyph_id,
                     shape: evaluation.shape,
                     classifier_grade: evaluation.grade,
-                    reference_pitch: target_pitch(evaluation.shape, &glyph, context.parameters),
+                    reference_pitch: target_pitch(
+                        evaluation.shape,
+                        &glyph,
+                        context.staff_id,
+                        context.parameters,
+                        &self.lines,
+                    ),
                     symbol_bounds: evaluation.symbol_bounds,
                     glyph_bounds: bounds,
                 });
@@ -769,7 +781,9 @@ fn compound_glyph(
 fn target_pitch(
     shape: NeutralClefShape,
     glyph: &NativeClefGlyph,
+    staff_id: usize,
     parameters: NativeClefParameters,
+    lines: &impl StaffPitchGeometry,
 ) -> i32 {
     match shape {
         NeutralClefShape::Treble
@@ -777,9 +791,15 @@ fn target_pitch(
         | NeutralClefShape::TrebleOttavaBassa => 2,
         NeutralClefShape::Percussion => 0,
         NeutralClefShape::Bass | NeutralClefShape::C => {
-            let center_pitch = 4.0
-                * ((2.0 * glyph.centroid_y) - parameters.last_line_y - parameters.first_line_y)
-                / (parameters.last_line_y - parameters.first_line_y);
+            // Java's `ClefInter` calls `Staff.pitchPositionOf(center)`, so the first and last
+            // staff-line splines must be sampled at this glyph's centroid x. The fixed header
+            // midpoint ordinates remain only as a fail-safe for unavailable curve geometry.
+            let (first_line_y, last_line_y) = lines
+                .line_span_at(staff_id, glyph.centroid_x)
+                .filter(|(first, last)| last > first)
+                .unwrap_or((parameters.first_line_y, parameters.last_line_y));
+            let center_pitch = 4.0 * ((2.0 * glyph.centroid_y) - last_line_y - first_line_y)
+                / (last_line_y - first_line_y);
             let offset = if shape == NeutralClefShape::Bass {
                 parameters.f_area_pitch_offset
             } else {
@@ -1428,11 +1448,102 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    struct FlatPitchGeometry {
+        first: f64,
+        last: f64,
+    }
+
+    impl StaffPitchGeometry for FlatPitchGeometry {
+        fn line_span_at(&self, _staff_id: usize, _x: f64) -> Option<(f64, f64)> {
+            Some((self.first, self.last))
+        }
+    }
+
+    struct SlopedPitchGeometry;
+
+    impl StaffPitchGeometry for SlopedPitchGeometry {
+        fn line_span_at(&self, _staff_id: usize, x: f64) -> Option<(f64, f64)> {
+            Some((x / 10.0, 8.0 + (x / 10.0)))
+        }
+    }
+
+    struct MissingPitchGeometry;
+
+    impl StaffPitchGeometry for MissingPitchGeometry {
+        fn line_span_at(&self, _staff_id: usize, _x: f64) -> Option<(f64, f64)> {
+            None
+        }
+    }
+
+    #[test]
+    fn bass_kind_samples_staff_splines_at_the_glyph_centroid() {
+        let glyph = NativeClefGlyph {
+            id: 1,
+            part_ids: vec![1],
+            bounds: HeaderBounds {
+                x: 19,
+                y: 3,
+                width: 3,
+                height: 3,
+            },
+            weight: 1,
+            centroid_x: 20.0,
+            centroid_y: 4.0,
+            raster: RunTable::new(Orientation::Vertical, 1, 1).expect("1x1 raster"),
+        };
+        let parameters = NativeClefParameters {
+            first_line_y: 0.0,
+            last_line_y: 8.0,
+            ..native_parameters()
+        };
+
+        let midpoint_pitch = target_pitch(
+            NeutralClefShape::Bass,
+            &glyph,
+            1,
+            parameters,
+            &FlatPitchGeometry {
+                first: parameters.first_line_y,
+                last: parameters.last_line_y,
+            },
+        );
+        assert_eq!(midpoint_pitch, 0);
+        assert_eq!(
+            clef_kind(NeutralClefShape::Bass, midpoint_pitch),
+            Some(NeutralClefKind::Baritone)
+        );
+
+        let centroid_pitch = target_pitch(
+            NeutralClefShape::Bass,
+            &glyph,
+            1,
+            parameters,
+            &SlopedPitchGeometry,
+        );
+        assert_eq!(centroid_pitch, -2);
+        assert_eq!(
+            clef_kind(NeutralClefShape::Bass, centroid_pitch),
+            Some(NeutralClefKind::Bass)
+        );
+        assert_eq!(
+            target_pitch(
+                NeutralClefShape::Bass,
+                &glyph,
+                1,
+                parameters,
+                &MissingPitchGeometry,
+            ),
+            midpoint_pitch,
+            "missing spline geometry must retain the explicit midpoint fallback"
+        );
+    }
+
     fn native_recognizer(
         black: &[(usize, usize)],
         classifier: RecordingClassifier,
         parameters: NativeClefParameters,
-    ) -> NativeClefProposalRecognizer<RecordingClassifier> {
+    ) -> NativeClefProposalRecognizer<RecordingClassifier, FlatPitchGeometry> {
         let mut pixels = vec![BACKGROUND; 12 * 16];
         for &(x, y) in black {
             pixels[(y * 12) + x] = FOREGROUND;
@@ -1440,6 +1551,10 @@ mod tests {
         let source = RunTable::from_pixels(Orientation::Horizontal, 12, 16, &pixels).unwrap();
         NativeClefProposalRecognizer::new(
             classifier,
+            FlatPitchGeometry {
+                first: parameters.first_line_y,
+                last: parameters.last_line_y,
+            },
             BTreeMap::from([(7, source)]),
             BTreeMap::from([(1, native_context())]),
             BTreeMap::from([(1, parameters)]),

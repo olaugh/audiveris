@@ -143,6 +143,20 @@ header inters, ranges, evidence, and system-owned erase rectangles are now
 published by `audiveris-cli -batch -step HEADERS -json <image>` and retained in
 the BEAMS and LEDGERS documents.
 
+A Graceful Ghost Rag follow-up closed a real-scan F-clef pitch divergence that
+the original 65-staff corpus did not exercise. Clef target pitch now samples the
+first and last native staff-line splines at the glyph centroid x, matching
+Java's `staff.pitchPositionOf(center)`; the old header-midpoint ordinates are an
+explicit fallback only when spline evaluation is unavailable. Production also
+derives Bravura's F-clef area pitch offset instead of assuming zero. On the
+measured system-1 crop Java and Rust now classify the same x=103/y=250/w=29/h=53
+glyph as `Bass`, and all 20 warped plus all 25 dewarped Graceful Ghost system
+crops contain zero `Baritone` clefs. The frozen 65-staff clef corpus and the
+full native HEADERS differential remain unchanged. One low-resolution full-page
+staff on page 5 still reaches `Baritone` while its high-resolution system crop
+is `Bass`, which is retained as a wider GRID/preprocessing geometry issue;
+full-page page 3 still fails earlier during GRID brace processing.
+
 Against a live Java 5.11 oracle across all nine `data/examples` pages:
 
 | Output | Status |

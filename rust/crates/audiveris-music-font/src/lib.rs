@@ -723,7 +723,7 @@ mod pitch_offset_tests {
     use super::*;
 
     #[test]
-    fn the_flat_area_pitch_offset_is_derived_from_the_font() {
+    fn asymmetric_area_pitch_offsets_are_derived_from_the_font() {
         // Java measures this at point size 200 and uses it to correct a flat's pitch, which is why
         // every flat key on the corpus was rejected while sharps passed: a flat's area centre sits
         // well below its focus line, and without the correction the measured pitch misses the
@@ -732,6 +732,12 @@ mod pitch_offset_tests {
         assert!(
             offset > 0.3 && offset < 1.5,
             "flat offset {offset} should be a fraction of a pitch step, not zero or huge"
+        );
+        let f_clef =
+            area_pitch_offset(MusicFamily::Bravura, "F_CLEF").expect("Bravura F clef parses");
+        assert!(
+            f_clef < -0.5 && f_clef > -2.0,
+            "F-clef focus offset {f_clef} should lift the reference pitch by about one step"
         );
         // Sharps and naturals are not in Java's map at all: their area centre *is* their focus.
         assert_eq!(

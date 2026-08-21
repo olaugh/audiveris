@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use audiveris_music_font::{MusicFamily, area_pitch_offset};
 use audiveris_omr::clef_classifier::BundledClefClassifier;
 use audiveris_omr::clef_column::{
     ClefLifecycleRecognizer, ClefLookupParameters, ClefLookupStaffGeometry, HeadlessClefColumn,
@@ -26,6 +27,7 @@ use audiveris_omr::clef_parameters::{
     SheetClefParameters, StaffClefParameters, max_eval_rank, max_part_count,
 };
 use audiveris_omr::headers_step::{HeadlessHeaderStaff, HeadlessHeaderSystem};
+use audiveris_omr::key_column::StaffPitchGeometry;
 use audiveris_omr::recognize::{GridLinesRecognition, StaffLineGeometry, recognize_grid_lines};
 use audiveris_omr::staff_header::{HeaderBounds, StaffHeader};
 
@@ -93,6 +95,18 @@ impl StaffLineOrdinates for GridOrdinates<'_> {
     fn ordinates_at(&self, staff_id: usize, x: i32) -> Option<(i32, i32)> {
         let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
         Some((staff.first_line_y_at(x)?, staff.last_line_y_at(x)?))
+    }
+}
+
+struct GridPitch<'a>(&'a [StaffLineGeometry]);
+
+impl StaffPitchGeometry for GridPitch<'_> {
+    fn line_span_at(&self, staff_id: usize, x: f64) -> Option<(f64, f64)> {
+        let staff = self.0.iter().find(|staff| staff.staff_id == staff_id)?;
+        Some((
+            staff.first_line.y_at_x_ext(x),
+            staff.last_line.y_at_x_ext(x),
+        ))
     }
 }
 
@@ -176,6 +190,8 @@ fn native_clefs_match_java_on_every_corpus_staff() {
         );
 
         let mut parameters = BTreeMap::new();
+        let f_area_pitch_offset =
+            area_pitch_offset(MusicFamily::Bravura, "F_CLEF").expect("Bravura F-clef pitch offset");
         for oracle in oracle_staves {
             let staff = StaffClefParameters::new(oracle.specific_interline);
             let lines = recognition
@@ -203,7 +219,7 @@ fn native_clefs_match_java_on_every_corpus_staff() {
                     min_glyph_weight: usize::try_from(staff.min_glyph_weight).unwrap_or(0),
                     max_eval_rank: max_eval_rank(),
                     minimum_classifier_grade: MINIMUM_CLASSIFIER_GRADE,
-                    f_area_pitch_offset: 0.0,
+                    f_area_pitch_offset,
                 },
             );
         }
@@ -219,6 +235,7 @@ fn native_clefs_match_java_on_every_corpus_staff() {
         let classifier = BundledClefClassifier::bundled().expect("bundled classifier");
         let visual = NativeClefProposalRecognizer::new(
             classifier,
+            GridPitch(&recognition.staff_lines),
             sources,
             contexts.clone(),
             parameters,
