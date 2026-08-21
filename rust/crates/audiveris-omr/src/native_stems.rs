@@ -40,6 +40,7 @@ use crate::{
         NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
+        advance_native_stems_head_multi_head_reuse_c_link_allegretto_system1_order65_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_order67_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs,
@@ -1112,6 +1113,18 @@ impl NativeStemsPreparedRecognition {
                     ) {
                         (54, 46, 94) => Some(
                             advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs(
+                                &carrier,
+                                head_corners,
+                                head_reachability,
+                                &seed_glyphs.free_glyphs,
+                                head_builders,
+                                plans,
+                                &self.stem_checker,
+                                &registry,
+                            ),
+                        ),
+                        (65, 77, 14) => Some(
+                            advance_native_stems_head_multi_head_reuse_c_link_allegretto_system1_order65_from_glyphs(
                                 &carrier,
                                 head_corners,
                                 head_reachability,

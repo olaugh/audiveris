@@ -8464,3 +8464,33 @@ pass. The production CLI now fails closed later, at Allegretto system 1 HEADS
 queue 65 x77/SIG14 LEFT/TOP. Its builder is start stump + chunk + crossed x75
 head, with one carried undefined side. Measure and generalize that multi-item
 C-link expansion next.
+
+## Boundary 168: Allegretto multi-item existing-stem C-link
+
+A snapshot-minimized Java replay now executes Allegretto system 1 from the
+real hook-removal and complete-STUMPS predecessor through heads 0-64 without
+snapshots, then measures queue 65 twice byte-identically. x77/SIG14 selects
+LEFT/TOP. Its builder walks active seed glyph 282, chunk glyph 2034, and the
+crossed x75 LEFT/TOP linker; the composite resolves to existing StemInter
+2236. Java allocates no glyph, Inter, vertex, or system stem. It appends the
+x77 and x75 HeadStem relations with exact grade/dx bits
+`3fe9cd7b1bef63de`/`3fb1a913e59fdb6e` and
+`3fe92d2153d3bb34`/`3fb356694b791249`, links both LEFT cells, and closes x75
+and the previously linked x76. The 12-line / 12,565-byte fixture SHA-256 is
+`0bccd92c0a4305704c5903984ccf9734823bf4879b5aa6f2621595700fa6507d`;
+runner, transformed probe, body, and semantic-pass hashes are
+`be1f28c0528721e23ba24e1b8107f5069310d47a1a537945052d2a536a260e74`,
+`6ae5fe6eddaf4d802973c191c8d945eac8046a1d398499de79c5eb183a489092`,
+`0ea1b9deaa33a644ba432a26bfe6a84391cdee5115bacaa070b71287bb1a3a13`, and
+`d8a600e1dff9c81fa9ebc4eadd5fc9119548343070cdcf0225ec1dbc798b3b37`.
+
+Native reuses the existing generic expansion walk, but now authenticates the
+carried undefined-side and phase-2 unlinked-head lists independently. That is
+required here: x84 contributes the sole carried undefined LEFT side, while
+the unlinked queue is x86 then x84. The live regression reconstructs queue 65,
+pins both relation payloads, proves zero vertex/stem allocation and four x75/x76
+closure value changes, and preserves both carried lists. Focused 1/1 and the
+full sibling suite 18/18 (143.22s) pass. Production now advances beyond queue
+65 and fails closed next at queue 79 x82/SIG89 LEFT/TOP, whose builder contains
+a start stump, crossed x80 RIGHT/TOP head stump, and chunk. Measure that wider
+cross-side expansion next.

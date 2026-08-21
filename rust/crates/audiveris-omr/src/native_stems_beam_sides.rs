@@ -5781,7 +5781,19 @@ fn authenticated_carried_undefined_sides(
     queue_indexes: &[usize],
     order_label: &str,
 ) -> Result<Vec<NativeStemsBeamHeadSLinkerRef>, NativeStemsBeamSidesError> {
-    let carried = queue_indexes
+    authenticated_carried_head_lists(carrier, queue_indexes, queue_indexes, order_label)
+}
+
+/// Authenticate the independently carried Java `undefs` and phase-2
+/// `unlinkedHeads` lists. A head can retain one undefined side while another
+/// side links successfully, in which case it belongs only to `undefs`.
+fn authenticated_carried_head_lists(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    undefined_queue_indexes: &[usize],
+    unlinked_queue_indexes: &[usize],
+    order_label: &str,
+) -> Result<Vec<NativeStemsBeamHeadSLinkerRef>, NativeStemsBeamSidesError> {
+    let carried = undefined_queue_indexes
         .iter()
         .map(|&queue_index| {
             carrier
@@ -5805,10 +5817,28 @@ fn authenticated_carried_undefined_sides(
             format!("{order_label} carrier lacks the carried undefined LEFT sides"),
         ));
     }
-    if carrier.unlinked_heads != carried.iter().map(|cell| cell.head).collect::<Vec<_>>() {
+    let unlinked = unlinked_queue_indexes
+        .iter()
+        .map(|&queue_index| {
+            carrier
+                .heads
+                .get(queue_index)
+                .map(|head| head.reference)
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-existing-stem-retry-frontier",
+                        format!("{order_label} carrier lacks an unlinked predecessor head"),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if carrier.unlinked_heads != unlinked {
         return Err(stage(
             "HEADS-existing-stem-retry-frontier",
-            format!("{order_label} carrier lacks the carried phase-2 unlinked queue"),
+            format!(
+                "{order_label} carrier phase-2 unlinked queue differs: actual {:?}, expected {:?}",
+                carrier.unlinked_heads, unlinked
+            ),
         ));
     }
     Ok(carried)
@@ -8671,6 +8701,7 @@ struct NativeStemsHeadMultiHeadReuseExpectation {
     stem_identity: usize,
     stem_glyph_id: i32,
     carried_undef_indexes: &'static [usize],
+    carried_unlinked_indexes: &'static [usize],
     crossed_x_ordinals: &'static [usize],
     included_glyph_count: usize,
     appended_edge_count: usize,
@@ -8735,9 +8766,10 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             ),
         ));
     }
-    let carried_undefined = authenticated_carried_undefined_sides(
+    let carried_undefined = authenticated_carried_head_lists(
         carrier,
         expectation.carried_undef_indexes,
+        expectation.carried_unlinked_indexes,
         expectation.order_label,
     )?;
     let head = carrier.heads.get(expectation.queue_index).ok_or_else(|| {
@@ -9635,6 +9667,7 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order67_from_gly
             stem_identity: 42,
             stem_glyph_id: 332,
             carried_undef_indexes: &[50, 60, 61],
+            carried_unlinked_indexes: &[50, 60, 61],
             crossed_x_ordinals: &[70, 71],
             included_glyph_count: 2,
             appended_edge_count: 3,
@@ -9717,6 +9750,7 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order70_from_gly
             stem_identity: 44,
             stem_glyph_id: 322,
             carried_undef_indexes: &[50, 60, 61, 68],
+            carried_unlinked_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[0],
             included_glyph_count: 2,
             appended_edge_count: 2,
@@ -9771,6 +9805,7 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
             stem_identity: 45,
             stem_glyph_id: 324,
             carried_undef_indexes: &[50, 60, 61, 68],
+            carried_unlinked_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[],
             included_glyph_count: 1,
             appended_edge_count: 1,
@@ -9852,6 +9887,7 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order73_from_gly
             stem_identity: 40,
             stem_glyph_id: 319,
             carried_undef_indexes: &[50, 60, 61, 68],
+            carried_unlinked_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[72],
             included_glyph_count: 1,
             appended_edge_count: 2,
@@ -9907,6 +9943,7 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_system2_order54_
             stem_identity: 45,
             stem_glyph_id: 127,
             carried_undef_indexes: &[],
+            carried_unlinked_indexes: &[],
             crossed_x_ordinals: &[45],
             included_glyph_count: 2,
             appended_edge_count: 2,
@@ -9921,6 +9958,61 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_system2_order54_
                 Some(true),
             )],
             order_label: "system2-order54",
+        },
+    )
+}
+
+/// Consume Allegretto system 1's measured multi-item C-link at queue 65.
+///
+/// x77/SIG14 selects LEFT/TOP, walks its retained seed, one chunk, and the
+/// crossed x75 LEFT/TOP linker, then reuses carried native Stem 35/glyph 71.
+/// Java appends the x77 and x75 HeadStem relations, links both LEFT cells,
+/// and closes the stem-sharing x75 and x76 heads without allocating a stem.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub fn advance_native_stems_head_multi_head_reuse_c_link_allegretto_system1_order65_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 65,
+            head_x_ordinal: 77,
+            head_sig_ordinal: 14,
+            stem_identity: 35,
+            stem_glyph_id: 71,
+            carried_undef_indexes: &[42],
+            carried_unlinked_indexes: &[31, 42],
+            crossed_x_ordinals: &[75],
+            included_glyph_count: 2,
+            appended_edge_count: 2,
+            closed_x_ordinals: &[75, 76],
+            closed_value_changes: 4,
+            line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Top,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(true),
+                Some(false),
+            )],
+            order_label: "allegretto-system1-order65",
         },
     )
 }
@@ -9962,6 +10054,7 @@ pub fn advance_native_stems_head_right_side_reuse_c_link_order93(
             stem_identity: 39,
             stem_glyph_id: 307,
             carried_undef_indexes: &[50, 60, 61, 68, 75],
+            carried_unlinked_indexes: &[50, 60, 61, 68, 75],
             crossed_x_ordinals: &[],
             included_glyph_count: 1,
             appended_edge_count: 1,

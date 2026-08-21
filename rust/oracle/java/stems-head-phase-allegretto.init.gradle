@@ -1,0 +1,47 @@
+// Temporary read-only Allegretto HEADS probe wiring.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+
+    def outputDir = app.layout.buildDirectory.dir('rust-head-phase-allegretto/classes')
+    def probeSource = providers.gradleProperty('headPhaseV7ProbeSource').get()
+    app.tasks.register('compileStemsHeadPhaseAllegrettoProbe', JavaCompile) {
+        source = file(probeSource)
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+
+    app.tasks.register('stemsHeadPhaseAllegrettoProbe', JavaExec) {
+        dependsOn 'compileStemsHeadPhaseAllegrettoProbe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsBeamSidesLoopProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '48g'
+        jvmArgs '-XX:+UnlockExperimentalVMOptions', '-XX:+UseEpsilonGC'
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        systemProperty 'audiveris.rustport.stumpsTransactionLimit', '400'
+        systemProperty 'audiveris.rustport.hookRemovalProbe', 'true'
+        systemProperty 'audiveris.rustport.headPhasePrefixProbe', 'true'
+
+        def fixture = { String stem ->
+            new File(gradle.rootProject.projectDir,
+                    "rust/oracle/${stem}-allegretto.txt").absolutePath
+        }
+        args = [
+            '--system', '1',
+            "${gradle.rootProject.projectDir}/data/examples/allegretto.png:1",
+            fixture('stems-beam-scheduler'),
+            fixture('stems-beam-expand'),
+            fixture('stems-beam-create-stem'),
+            fixture('stems-beam-vlink-reuse-check'),
+            fixture('stems-beam-vlink-base-apply'),
+            fixture('stems-beam-vlink-b-linker-flag'),
+            fixture('stems-beam-vlink-sibling-links'),
+            fixture('stems-beam-vlink-head-links'),
+            fixture('stems-beam-vlink-outer-blinker'),
+            fixture('stems-beam-scheduler-resume')
+        ]
+    }
+}
