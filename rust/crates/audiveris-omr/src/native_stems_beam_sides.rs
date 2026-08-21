@@ -11823,20 +11823,29 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
             }
         }
         GlyphAuthority::FirstStems(_) | GlyphAuthority::Modeled(_) => {
-            if !transaction_state
-                .selected_glyph_bindings
-                .iter()
-                .any(|selected| {
-                    preparation.selected_glyphs.contains(&selected.reference)
-                        && selected.content == candidate
-                })
-            {
-                return Err(stage(
-                    "B12-glyph-authority",
-                    "candidate is not a current selected modeled canonical",
-                ));
+            let selected_canonical =
+                transaction_state
+                    .selected_glyph_bindings
+                    .iter()
+                    .any(|selected| {
+                        preparation.selected_glyphs.contains(&selected.reference)
+                            && selected.content == candidate
+                    });
+            if !selected_canonical {
+                let GlyphAuthority::Modeled(registry) = glyphs else {
+                    return Err(stage(
+                        "B12-glyph-authority",
+                        "compound candidate requires a complete native registry",
+                    ));
+                };
+                transaction_state.glyph_index.exhaustive_lookup = Some(
+                    registry
+                        .exhaustive_scan(&candidate, &transaction_state)
+                        .map_err(|error| stage("B12-glyph-authority", error))?,
+                );
+            } else {
+                transaction_state.glyph_index.exhaustive_lookup = None;
             }
-            transaction_state.glyph_index.exhaustive_lookup = None;
         }
     }
     let create = apply_native_stems_beam_vlink_create_stem_transaction(

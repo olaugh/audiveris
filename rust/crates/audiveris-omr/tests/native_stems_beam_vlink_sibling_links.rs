@@ -172,9 +172,10 @@ use audiveris_omr::{
         initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamCreateStemDisposition, NativeStemsBeamGlyphAliasOrder,
-        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamRegistryAuthority,
-        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
+        NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphLookup,
+        NativeStemsBeamGlyphAliasOrder, NativeStemsBeamGlyphRegistrationAction,
+        NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
+        NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamVLinkMutation,
         NativeStemsBeamVLinkTransactionScope, NativeStemsModeledGlyphRegistry,
         apply_native_stems_beam_vlink_create_stem_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
@@ -6458,6 +6459,132 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     };
     assert_eq!(retained_for_stumps, final_local_worklist);
     assert_eq!(retained_for_stumps.len(), 33);
+    let page_drive = prepared
+        .drive_all_system_sides()
+        .expect("Batuque complete page SIDES drive");
+    assert_eq!(
+        page_drive
+            .systems
+            .iter()
+            .map(|system| system.system_id)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    let system_three = &page_drive.systems[2];
+    let system_three_terminal = &system_three.carrier.latest_base_apply.transaction_state;
+    assert_eq!(system_three.registry.len(), 1_819);
+    assert_eq!(system_three.registry.persistent_ids().sheet_last_id, 1_891);
+    assert_eq!(system_three.transactions.len(), 28);
+    assert!(system_three.transactions.iter().all(|transaction| {
+        transaction.create.scope
+            == NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: 3 }
+    }));
+    assert_eq!(system_three_terminal.glyph_index.union_size, 1_820);
+    assert_eq!(
+        system_three_terminal
+            .glyph_index
+            .persistent_ids
+            .sheet_last_id,
+        1_920
+    );
+    assert_eq!(system_three_terminal.system_stems.known_stems.len(), 28);
+    assert_eq!(system_three.carrier.sig.vertices.len(), 244);
+    assert_eq!(system_three.carrier.sig.edges.len(), 257);
+    assert_eq!(system_three.carrier.bindings.stem_vertices.len(), 28);
+    assert_eq!(system_three.carrier.b_cells.len(), 101);
+    assert_eq!(
+        system_three
+            .carrier
+            .b_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        50
+    );
+    assert_eq!(system_three.carrier.s_cells.len(), 224);
+    assert_eq!(
+        system_three
+            .carrier
+            .s_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        63
+    );
+    assert!(system_three.carrier.b_cells.iter().all(|cell| !cell.closed));
+    assert!(system_three.carrier.s_cells.iter().all(|cell| !cell.closed));
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &system_three.carrier.scheduler.status
+    else {
+        panic!("Batuque system 3 did not reach its true SIDES terminal");
+    };
+    assert_eq!(retained_for_stumps, final_local_worklist);
+    assert_eq!(retained_for_stumps.len(), 25);
+
+    let seventh = &system_three.transactions[6];
+    assert_eq!(seventh.create.plan.system_id, 3);
+    assert_eq!(seventh.create.plan.plan_ordinal, 94);
+    assert_eq!(seventh.create.plan.builder_ordinal, 18);
+    let plan_system = &prepared.components.plans.systems[2];
+    let seventh_attempt = plan_system.builders[seventh.create.plan.builder_ordinal]
+        .attempts
+        .iter()
+        .find(|attempt| attempt.stem_profile == seventh.create.plan.stem_profile)
+        .expect("system-3 transaction-7 attempt");
+    assert_eq!(seventh_attempt.head_target_count, 4);
+    assert_eq!(seventh_attempt.relations.len(), 3);
+    assert_eq!(seventh.heads.steps.len(), 3);
+
+    let twenty_fourth = &system_three.transactions[23];
+    assert_eq!(twenty_fourth.create.plan.system_id, 3);
+    assert_eq!(twenty_fourth.create.plan.plan_ordinal, 9);
+    assert_eq!(twenty_fourth.create.plan.builder_ordinal, 1);
+    assert_eq!(twenty_fourth.preparation.selected_glyphs.len(), 2);
+    assert_eq!(
+        twenty_fourth.create.candidate_glyph_id_before_registration,
+        None
+    );
+    assert_eq!(twenty_fourth.create.registration.canonical_alias, 1_915);
+    assert_eq!(twenty_fourth.create.registration.glyph_id, 1_915);
+    assert_eq!(
+        twenty_fourth.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Registered
+    );
+    assert_eq!(twenty_fourth.create.registration.post_union_size, 1_820);
+    assert_eq!(
+        twenty_fourth.create.mutation_order,
+        vec![
+            NativeStemsBeamVLinkMutation::GlyphRegistered { glyph_id: 1_915 },
+            NativeStemsBeamVLinkMutation::SystemStemInserted { stem_identity: 23 },
+        ]
+    );
+    let before_compound = &system_three.transactions[22]
+        .base
+        .state_after
+        .transaction_state;
+    let compound_scan = system_three
+        .registry
+        .exhaustive_scan(&twenty_fourth.create.candidate, before_compound)
+        .expect("system-3 compound registry absence proof");
+    assert_eq!(compound_scan.baseline_union_size, 1_819);
+    assert_eq!(compound_scan.scanned_active_count, 1_819);
+    assert_eq!(compound_scan.scanned_live_original_count, 1_819);
+    assert_eq!(
+        compound_scan.lookup,
+        NativeStemsBeamExhaustiveGlyphLookup::Absent
+    );
+    let mut weak_before_compound = before_compound.clone();
+    weak_before_compound.glyph_index.known_canonical_glyphs[0].strongly_retained = false;
+    let weak_before = weak_before_compound.clone();
+    assert!(
+        system_three
+            .registry
+            .exhaustive_scan(&twenty_fourth.create.candidate, &weak_before_compound,)
+            .is_err()
+    );
+    assert_eq!(weak_before_compound, weak_before);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

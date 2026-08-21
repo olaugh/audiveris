@@ -443,6 +443,103 @@ impl NativeStemsModeledGlyphRegistry {
         })
     }
 
+    /// Prove the page-wide structural lookup for a compound candidate from
+    /// the carried registry plus every strongly retained transaction addition.
+    pub fn exhaustive_scan(
+        &self,
+        candidate: &NativeStemsBeamFixedGlyphContent,
+        state: &NativeStemsBeamVLinkTransactionState,
+    ) -> Result<NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamVLinkTransactionError>
+    {
+        validate_content(candidate)?;
+        validate_transaction_state(state)?;
+        if state.system_stems.system_id != self.system_id
+            || state.glyph_index.alias_order != NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+            || state.glyph_index.persistent_ids.sheet_last_id < self.persistent_ids.sheet_last_id
+        {
+            return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                phase: "native modeled exhaustive scan header",
+            });
+        }
+        let mut entries = self.entries.clone();
+        for known in &state.glyph_index.known_canonical_glyphs {
+            if !known.strongly_retained {
+                return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+            }
+            let identity_match = entries
+                .iter()
+                .position(|entry| entry.glyph_id == known.glyph_id);
+            let content_match = entries
+                .iter()
+                .position(|entry| entry.content == known.content);
+            match (identity_match, content_match) {
+                (Some(identity), Some(content)) if identity == content => {
+                    let entry = &mut entries[identity];
+                    if entry.canonical_alias != known.canonical_alias {
+                        return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                            phase: "native modeled exhaustive known alias",
+                        });
+                    }
+                    entry.active_in_index = known.active_in_index;
+                    entry.strongly_retained = true;
+                }
+                (None, None) => entries.push(NativeStemsBeamGlyphRegistryBootstrapEntry {
+                    canonical_alias: known.canonical_alias,
+                    glyph_id: known.glyph_id,
+                    content: known.content.clone(),
+                    active_in_index: known.active_in_index,
+                    strongly_retained: true,
+                }),
+                _ => {
+                    return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                        phase: "native modeled exhaustive identity/content join",
+                    });
+                }
+            }
+        }
+        if entries.len() != state.glyph_index.union_size {
+            return Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry);
+        }
+        let matches = entries
+            .iter()
+            .filter(|entry| entry.content == *candidate)
+            .collect::<Vec<_>>();
+        let lookup = match matches.as_slice() {
+            [] => NativeStemsBeamExhaustiveGlyphLookup::Absent,
+            [entry] => NativeStemsBeamExhaustiveGlyphLookup::Present {
+                canonical_alias: entry.canonical_alias,
+                glyph_id: entry.glyph_id,
+                active_in_index: entry.active_in_index,
+            },
+            _ => {
+                return Err(NativeStemsBeamVLinkTransactionError::RegistryInvariant {
+                    phase: "native modeled exhaustive equality cardinality",
+                });
+            }
+        };
+        let active_count = entries.iter().filter(|entry| entry.active_in_index).count();
+        let live_original_count = entries
+            .iter()
+            .filter(|entry| entry.strongly_retained)
+            .count();
+        Ok(NativeStemsBeamExhaustiveGlyphEqualsScan {
+            candidate: candidate.clone(),
+            alias_order: state.glyph_index.alias_order,
+            baseline_union_size: entries.len(),
+            baseline_active_count: active_count,
+            baseline_live_original_count: live_original_count,
+            baseline_active_sha256: modeled_registry_sha256(&entries, false),
+            baseline_live_original_sha256: modeled_registry_sha256(&entries, true),
+            scanned_active_count: active_count,
+            scanned_live_original_count: live_original_count,
+            equal_active_matches: usize::from(
+                matches.first().is_some_and(|entry| entry.active_in_index),
+            ),
+            equal_original_matches: matches.len(),
+            lookup,
+        })
+    }
+
     fn selected_bootstrap(
         &self,
         selected: &NativeStemsBeamSelectedGlyph,
@@ -2066,6 +2163,43 @@ fn first_stems_snapshot_sha256(
             } else {
                 token
             }
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    let mut bytes = Vec::new();
+    for row in rows {
+        bytes.extend_from_slice(row.as_bytes());
+        bytes.push(b'\n');
+    }
+    sha256_hex(&bytes)
+}
+
+fn modeled_registry_sha256(
+    entries: &[NativeStemsBeamGlyphRegistryBootstrapEntry],
+    originals: bool,
+) -> String {
+    let mut rows = entries
+        .iter()
+        .filter(|entry| {
+            if originals {
+                entry.strongly_retained
+            } else {
+                entry.active_in_index
+            }
+        })
+        .map(|entry| {
+            let bounds = entry.content.bounds;
+            format!(
+                "{}:{}:{}:{}:{}:{}:{}:{}",
+                entry.glyph_id,
+                entry.canonical_alias,
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+                entry.content.weight,
+                run_table_sha256(&entry.content.run_table)
+            )
         })
         .collect::<Vec<_>>();
     rows.sort();

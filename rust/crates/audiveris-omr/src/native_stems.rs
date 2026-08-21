@@ -120,6 +120,12 @@ pub struct NativeStemsSystemSidesDrive {
 /// Compatibility name for the first production system drive.
 pub type NativeStemsFirstSystemSidesDrive = NativeStemsSystemSidesDrive;
 
+/// Atomic SIDES completion for every consecutive system on one page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageSidesDrive {
+    pub systems: Vec<NativeStemsSystemSidesDrive>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
     pub phase: &'static str,
@@ -323,26 +329,27 @@ impl NativeStemsPreparedRecognition {
                 context,
                 &registry,
             )
-            .map_err(|error| phase(error, "SIDES drive transaction"))?;
+            .map_err(|error| {
+                phase(
+                    format!(
+                        "system {system_id} transaction {}: {error}",
+                        transactions.len() + 1
+                    ),
+                    "SIDES drive transaction",
+                )
+            })?;
             transactions.push(transaction);
         }
     }
 
-    /// Drive system 1 to its SIDES terminal and atomically enter system 2's
-    /// first shared-sheet SIDES transaction.
-    ///
-    /// System 2 receives fresh system-local SIG/binding/linker authorities,
-    /// while the exact page registry, allocator, and sheet edit state come
-    /// from the completed first system. No isolated system-2 reconstruction is
-    /// accepted by this production entry point.
-    pub fn initialize_second_system_sides(
+    fn initialize_next_system_sides(
         &self,
+        completed: &NativeStemsSystemSidesDrive,
     ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
-        let first = self.drive_first_system_sides()?;
-        let registry = first
+        let registry = completed
             .registry
             .carry_into_next_system(
-                &first.carrier.latest_base_apply.transaction_state,
+                &completed.carrier.latest_base_apply.transaction_state,
                 &self.components.head_builders,
             )
             .map_err(|error| phase(error, "SIDES cross-system registry"))?;
@@ -373,15 +380,29 @@ impl NativeStemsPreparedRecognition {
                 bindings,
                 context,
                 &registry,
-                first.carrier.latest_base_apply.sheet_edit,
+                completed.carrier.latest_base_apply.sheet_edit,
             )
-            .map_err(|error| phase(error, "SIDES second-system transaction"))?;
+            .map_err(|error| phase(error, "SIDES next-system transaction"))?;
         Ok(NativeStemsSystemSidesStart {
             system_id,
             registry,
             carrier,
             first_transaction,
         })
+    }
+
+    /// Drive system 1 to its SIDES terminal and atomically enter system 2's
+    /// first shared-sheet SIDES transaction.
+    ///
+    /// System 2 receives fresh system-local SIG/binding/linker authorities,
+    /// while the exact page registry, allocator, and sheet edit state come
+    /// from the completed first system. No isolated system-2 reconstruction is
+    /// accepted by this production entry point.
+    pub fn initialize_second_system_sides(
+        &self,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        let first = self.drive_first_system_sides()?;
+        self.initialize_next_system_sides(&first)
     }
 
     /// Drive Batuque's second system from its serial first frontier to a true
@@ -392,6 +413,47 @@ impl NativeStemsPreparedRecognition {
     ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
         let start = self.initialize_second_system_sides()?;
         self.drive_system_sides_start(start)
+    }
+
+    /// Drive every consecutive page system through its true SIDES terminal.
+    ///
+    /// Each later system is initialized only from the preceding committed
+    /// drive's exact registry, allocator, and edit state. The complete vector
+    /// is returned only when all scheduler systems finish; a later failure
+    /// exposes no partial page drive.
+    pub fn drive_all_system_sides(
+        &self,
+    ) -> Result<NativeStemsPageSidesDrive, NativeStemsPreparationError> {
+        let system_count = self.components.scheduler.systems.len();
+        if system_count == 0 {
+            return Err(phase("page has no scheduler systems", "SIDES page drive"));
+        }
+        let mut systems = Vec::with_capacity(system_count);
+        systems.push(self.drive_first_system_sides()?);
+        while systems.len() < system_count {
+            let start = self.initialize_next_system_sides(
+                systems
+                    .last()
+                    .expect("nonempty after first system SIDES drive"),
+            )?;
+            let drive = self.drive_system_sides_start(start)?;
+            let expected_system_id = systems.len() + 1;
+            if drive.system_id != expected_system_id {
+                return Err(phase(
+                    format!(
+                        "system {} followed {}, expected {expected_system_id}",
+                        drive.system_id,
+                        systems
+                            .last()
+                            .expect("nonempty after first system SIDES drive")
+                            .system_id
+                    ),
+                    "SIDES page drive",
+                ));
+            }
+            systems.push(drive);
+        }
+        Ok(NativeStemsPageSidesDrive { systems })
     }
 }
 

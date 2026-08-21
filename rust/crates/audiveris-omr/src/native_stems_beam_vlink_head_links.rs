@@ -347,7 +347,7 @@ pub fn apply_native_stems_beam_vlink_head_transaction_to_native_sig(
         plans.interline,
     )?;
     if plan.relations.is_empty()
-        || plan.relations.len() != plan.head_target_count
+        || plan.relations.len() > plan.head_target_count
         || plan
             .relations
             .iter()
