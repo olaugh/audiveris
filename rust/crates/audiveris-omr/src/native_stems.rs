@@ -28,11 +28,12 @@ use crate::{
         NativeStemsBeamReachabilityRecognition, materialize_native_stems_beam_reachability,
     },
     native_stems_beam_scheduler::{
-        NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerSystem,
-        materialize_native_stems_beam_scheduler_frontiers,
+        NativeStemsBeamSchedulerRecognition, NativeStemsBeamSchedulerStatus,
+        NativeStemsBeamSchedulerSystem, materialize_native_stems_beam_scheduler_frontiers,
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        advance_native_stems_beam_sides_transaction_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
     },
     native_stems_beam_stumps::{
@@ -106,6 +107,15 @@ pub struct NativeStemsSystemSidesStart {
     pub first_transaction: NativeStemsBeamSidesTransaction,
 }
 
+/// Atomic completion of the sheet's first system SIDES pass.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsFirstSystemSidesDrive {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsBeamSidesCarrier,
+    pub transactions: Vec<NativeStemsBeamSidesTransaction>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
     pub phase: &'static str,
@@ -144,6 +154,52 @@ fn system<'a, T>(
 }
 
 impl NativeStemsPreparedRecognition {
+    fn sides_context(
+        &self,
+        system_id: usize,
+    ) -> Result<NativeStemsBeamSidesContext<'_>, NativeStemsPreparationError> {
+        let components = &self.components;
+        Ok(NativeStemsBeamSidesContext {
+            plans: system(
+                &components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES plans",
+            )?,
+            builders: system(
+                &components.beam_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES builders",
+            )?,
+            stumps: system(
+                &components.beam_stumps.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES stumps",
+            )?,
+            vlinkers: system(
+                &components.beam_vlinkers.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES VLinkers",
+            )?,
+            reachability: system(
+                &components.beam_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES reachability",
+            )?,
+            head_corners: system(
+                &components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "SIDES head corners",
+            )?,
+            checker: &self.stem_checker,
+        })
+    }
+
     /// Initialize and execute system 1's first SIDES transaction from
     /// production-owned products only. Later systems must start from the
     /// shared allocator/registry state committed by every preceding system;
@@ -164,42 +220,7 @@ impl NativeStemsPreparedRecognition {
                 "SIDES scheduler",
             ));
         }
-        let plans = system(
-            &components.plans.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES plans",
-        )?;
-        let builders = system(
-            &components.beam_builders.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES builders",
-        )?;
-        let stumps = system(
-            &components.beam_stumps.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES stumps",
-        )?;
-        let vlinkers = system(
-            &components.beam_vlinkers.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES VLinkers",
-        )?;
-        let reachability = system(
-            &components.beam_reachability.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES reachability",
-        )?;
-        let head_corners = system(
-            &components.head_corners.systems,
-            system_id,
-            |system| system.system_id,
-            "SIDES head corners",
-        )?;
+        let context = self.sides_context(system_id)?;
         let sig = system(
             &self.sig.systems,
             system_id,
@@ -217,15 +238,6 @@ impl NativeStemsPreparedRecognition {
             &components.head_builders,
         )
         .map_err(|error| phase(error, "SIDES modeled registry"))?;
-        let context = NativeStemsBeamSidesContext {
-            plans,
-            builders,
-            stumps,
-            vlinkers,
-            reachability,
-            head_corners,
-            checker: &self.stem_checker,
-        };
         let (carrier, first_transaction) =
             initialize_native_stems_beam_sides_carrier_from_modeled_registry(
                 scheduler, sig, bindings, context, &registry,
@@ -237,6 +249,66 @@ impl NativeStemsPreparedRecognition {
             carrier,
             first_transaction,
         })
+    }
+
+    /// Drive system 1 from its first frontier through the true SIDES terminal.
+    ///
+    /// The immutable builder count is a strict progress bound. A competing-hook
+    /// checkpoint or any non-SIDES terminal rejects the whole returned drive;
+    /// callers never receive a guessed partial system completion.
+    pub fn drive_first_system_sides(
+        &self,
+    ) -> Result<NativeStemsFirstSystemSidesDrive, NativeStemsPreparationError> {
+        let NativeStemsSystemSidesStart {
+            system_id,
+            registry,
+            mut carrier,
+            first_transaction,
+        } = self.initialize_first_system_sides()?;
+        let context = self.sides_context(system_id)?;
+        let transaction_limit = context.builders.builders.len();
+        if transaction_limit == 0 {
+            return Err(phase("first system has no builders", "SIDES drive"));
+        }
+        let mut transactions = vec![first_transaction];
+        loop {
+            match &carrier.scheduler.status {
+                NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => {
+                    return Ok(NativeStemsFirstSystemSidesDrive {
+                        system_id,
+                        registry,
+                        carrier,
+                        transactions,
+                    });
+                }
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => {}
+                NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => {
+                    return Err(phase(
+                        "first system reached a competing-hook checkpoint",
+                        "SIDES drive",
+                    ));
+                }
+                NativeStemsBeamSchedulerStatus::Completed { .. } => {
+                    return Err(phase(
+                        "first system reached STUMPS completion during SIDES",
+                        "SIDES drive",
+                    ));
+                }
+            }
+            if transactions.len() >= transaction_limit {
+                return Err(phase(
+                    format!("first system exceeded its {transaction_limit}-builder progress bound"),
+                    "SIDES drive",
+                ));
+            }
+            let transaction = advance_native_stems_beam_sides_transaction_from_modeled_registry(
+                &mut carrier,
+                context,
+                &registry,
+            )
+            .map_err(|error| phase(error, "SIDES drive transaction"))?;
+            transactions.push(transaction);
+        }
     }
 }
 

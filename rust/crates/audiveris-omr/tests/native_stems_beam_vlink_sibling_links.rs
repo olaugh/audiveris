@@ -6141,7 +6141,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
 /// registry. Exact Java values below come from the installed Batuque B12-B19
 /// fixtures; no fixture value is supplied to execution.
 #[test]
-fn batuque_system_one_starts_sides_from_production_prepared_state() {
+fn batuque_system_one_drives_sides_from_production_prepared_state() {
     let path = repo_root().join("data/examples/batuque.png");
     let grid = recognize_grid_lines(path).expect("Batuque GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Batuque HEADERS recognition");
@@ -6259,6 +6259,47 @@ fn batuque_system_one_starts_sides_from_production_prepared_state() {
         start.carrier.scheduler,
         *start.first_transaction.outer_resume.resume.advanced_system
     );
+
+    let drive = prepared
+        .drive_first_system_sides()
+        .expect("Batuque system-1 complete SIDES drive");
+    assert_eq!(drive.system_id, 1);
+    assert_eq!(drive.registry, start.registry);
+    assert_eq!(drive.transactions.len(), 33);
+    assert_eq!(drive.carrier.sig.vertices.len(), 222);
+    assert_eq!(drive.carrier.sig.edges.len(), 263);
+    assert_eq!(drive.carrier.bindings.stem_vertices.len(), 32);
+    assert_eq!(drive.carrier.b_cells.len(), 93);
+    assert_eq!(
+        drive
+            .carrier
+            .b_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        51
+    );
+    assert_eq!(drive.carrier.s_cells.len(), 186);
+    assert_eq!(
+        drive
+            .carrier
+            .s_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        71
+    );
+    assert!(drive.carrier.b_cells.iter().all(|cell| !cell.closed));
+    assert!(drive.carrier.s_cells.iter().all(|cell| !cell.closed));
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &drive.carrier.scheduler.status
+    else {
+        panic!("Batuque system 1 did not reach its true SIDES terminal");
+    };
+    assert_eq!(retained_for_stumps, final_local_worklist);
+    assert_eq!(retained_for_stumps.len(), 24);
 }
 
 /// Direct atomic gate at the first real Java competing-hook checkpoint.
