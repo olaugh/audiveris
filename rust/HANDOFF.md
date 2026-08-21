@@ -8412,3 +8412,28 @@ start linker has no stump and is followed by one chunk. The focused live-page
 gate pins the new atomic stopping point. Next: measure and port that stump-less
 frontier, then extract a generic wider-reuse dispatcher from the accumulated
 system-1/system-2 cases.
+
+## Boundary 166: generic stump-less rejection and complete Chula STEMS
+
+The system-3 order-109 Java predecessor was replayed through real production
+SIDES/STUMPS and heads 0-108 without snapshots. x41/SIG122 first tries
+LEFT/TOP: its single chunk shifts the line, but the final HeadStem projection
+rejects and returns `lastIndex=-1`. Java continues to RIGHT/BOTTOM, where
+active glyph 425 resolves to existing StemInter 2296; one x41 HeadStem edge is
+added, the RIGHT S cell links, and head order 110 x18/SIG0 is next. No
+allocator, vertex, registry, or system-stem change occurs. The three
+byte-identical replay hashes are
+`d07bfcc6915fae64fb8481be8f6b3aaccc6e768a349e9af8b3ea0c46d90ae142`,
+`6cf71daa00322c0e6d20cd745d7d0cf68b2bc7b196a8ab1c3c507bf361ad5c4b`, and
+`6260e8b63601ac71e00a253ce2c803f8373a293e183e78983209742c2dd96788`;
+the frozen fixture SHA-256 is
+`930a9f936f4c5f1eb535e3256e815f44a08f9b96b5aef1fcc52c0c9b28300a15`.
+
+Production now handles stump-less single-chunk starts generically. A rejected
+final relation is an ordinary non-mutating corner failure, so the same
+`linkSides` loop proceeds to the next horizontal side and reuses the carried
+stem through native content identity. The live Chula gate completes every
+phase-1 head in all three systems, phase 2, generic `finalizeStems`, and the
+transactional `recognize_native_stems` entry point. Batuque and the complete
+16-test sibling suite remain green. Continue at the next wider-corpus
+fail-closed branch; Chula no longer supplies the current HEADS blocker.

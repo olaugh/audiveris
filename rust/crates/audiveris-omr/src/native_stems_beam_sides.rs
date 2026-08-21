@@ -10892,36 +10892,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    let Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
-        corner: stump_corner,
-    }) = builder.start_stump
-    else {
-        return Err(stage(
-            "HEADS-CLink-glyph",
-            format!(
-                "bounded head frontier does not start from an attached head stump: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} start {:?} items {:?}",
-                head_corners.system_id,
-                expected_current_index,
-                frontier.head.x_ordinal,
-                frontier.head.sig_ordinal,
-                frontier.next_corner.horizontal,
-                frontier.next_corner.vertical,
-                builder.builder_ordinal,
-                builder.start_stump,
-                builder
-                    .items
-                    .iter()
-                    .map(|item| (item.kind, item.glyph, item.target, item.contribution))
-                    .collect::<Vec<_>>(),
-            ),
-        ));
-    };
-    if stump_corner != frontier.next_corner {
-        return Err(stage(
-            "HEADS-CLink-glyph",
-            "start stump belongs to a different C linker",
-        ));
-    }
     let selected_constructor_ordinal = head_corners.heads_in_sig_order
         [frontier.next_corner.sig_ordinal]
         .corners_in_constructor_order
@@ -10954,34 +10924,95 @@ fn advance_native_stems_head_c_link_at_frontier(
                 "selected reachability corner is missing",
             )
         })?;
-    let stump = reach_corner.stump.ok_or_else(|| {
-        stage(
-            "HEADS-CLink-glyph",
-            "selected reachability stump is missing",
-        )
-    })?;
-    let NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } = stump.source else {
-        return Err(stage(
-            "HEADS-CLink-glyph",
-            "bounded selected stump is not a retained vertical seed",
-        ));
-    };
-    let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
-        stage(
-            "HEADS-CLink-glyph",
-            "selected free vertical-seed ordinal is unavailable",
-        )
-    })?;
-    if seed.bounds != stump.bounds || seed.weight != stump.weight {
-        return Err(stage(
-            "HEADS-CLink-glyph",
-            "reachability stump and free vertical seed differ",
-        ));
-    }
-    let candidate = crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-        bounds: seed.bounds,
-        weight: seed.weight,
-        run_table: seed.run_table.clone(),
+    let candidate = match builder.start_stump {
+        Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
+            corner: stump_corner,
+        }) => {
+            if stump_corner != frontier.next_corner {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "start stump belongs to a different C linker",
+                ));
+            }
+            let stump = reach_corner.stump.ok_or_else(|| {
+                stage(
+                    "HEADS-CLink-glyph",
+                    "selected reachability stump is missing",
+                )
+            })?;
+            let NativeStemsHeadStumpRef::Seed { free_glyph_ordinal } = stump.source else {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "bounded selected stump is not a retained vertical seed",
+                ));
+            };
+            let seed = stem_seed_glyphs.get(free_glyph_ordinal).ok_or_else(|| {
+                stage(
+                    "HEADS-CLink-glyph",
+                    "selected free vertical-seed ordinal is unavailable",
+                )
+            })?;
+            if seed.bounds != stump.bounds || seed.weight != stump.weight {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "reachability stump and free vertical seed differ",
+                ));
+            }
+            crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                bounds: seed.bounds,
+                weight: seed.weight,
+                run_table: seed.run_table.clone(),
+            }
+        }
+        None => {
+            let chunk_ref = builder.items.iter().find_map(|item| match item.glyph {
+                Some(NativeStemsHeadBuilderGlyphRef::Chunk {
+                    builder_ordinal,
+                    filament_ordinal,
+                }) if item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
+                    && builder_ordinal == builder.builder_ordinal =>
+                {
+                    Some(filament_ordinal)
+                }
+                _ => None,
+            });
+            let filament_ordinal = chunk_ref.ok_or_else(|| {
+                stage(
+                    "HEADS-CLink-glyph",
+                    "stump-less selected frontier has no concrete chunk",
+                )
+            })?;
+            let chunk = builder
+                .chunks
+                .iter()
+                .find(|chunk| {
+                    matches!(
+                        chunk.glyph,
+                        NativeStemsHeadBuilderGlyphRef::Chunk {
+                            builder_ordinal,
+                            filament_ordinal: chunk_filament,
+                        } if builder_ordinal == builder.builder_ordinal
+                            && chunk_filament == filament_ordinal
+                    )
+                })
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-CLink-glyph",
+                        "stump-less selected frontier chunk is missing",
+                    )
+                })?;
+            crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                bounds: chunk.bounds,
+                weight: chunk.run_table.weight(),
+                run_table: chunk.run_table.clone(),
+            }
+        }
+        Some(_) => {
+            return Err(stage(
+                "HEADS-CLink-glyph",
+                "bounded selected stump is not a head stump",
+            ));
+        }
     };
     let promoted = bridge
         .resolve_native_content(&candidate)
@@ -11071,7 +11102,18 @@ fn advance_native_stems_head_c_link_at_frontier(
         stem_line.stop.x = java_next_up(stem_line.stop.x);
     }
     let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
-    let last_y = if builder.y_direction > 0 {
+    let last_y = if builder.start_stump.is_none() {
+        builder
+            .items
+            .iter()
+            .fold(stem_line.start.y, |last_y, item| {
+                if builder.y_direction > 0 {
+                    last_y.max(item.line.stop.y)
+                } else {
+                    last_y.min(item.line.start.y)
+                }
+            })
+    } else if builder.y_direction > 0 {
         builder.items[0]
             .line
             .start
@@ -11102,10 +11144,16 @@ fn advance_native_stems_head_c_link_at_frontier(
         frontier.link_profile,
     )
     .map_err(|error| stage("HEADS-CLink-relation", error))?;
-    if !relation.accepted || relation.derived_horizontal != frontier.next_corner.horizontal {
+    if !relation.accepted {
+        return Err(stage(
+            "HEADS-CLink-no-link",
+            "expanded candidate fails Java's final head relation",
+        ));
+    }
+    if relation.derived_horizontal != frontier.next_corner.horizontal {
         return Err(stage(
             "HEADS-CLink-relation",
-            "start-head relation is rejected or changes horizontal side",
+            "start-head relation changes horizontal side",
         ));
     }
 
@@ -11533,6 +11581,12 @@ fn compose_head_c_link_geometry(
             )
         })
         .ok_or_else(|| stage("HEADS-CLink-glyph", "selected chunk glyph is missing"))?;
+    if candidate.bounds == chunk.bounds
+        && candidate.weight == chunk.run_table.weight()
+        && candidate.run_table == chunk.run_table
+    {
+        return Ok(candidate.clone());
+    }
     let min_x = candidate.bounds.x.min(chunk.bounds.x);
     let min_y = candidate.bounds.y.min(chunk.bounds.y);
     let max_x = candidate

@@ -226,6 +226,8 @@ const BATUQUE_FINALIZE_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-finalize-page.init.gradle");
 const CHULA_SYSTEM2_ORDER54_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-chula-system2-order54.txt");
+const CHULA_SYSTEM3_ORDER109_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-chula-system3-order109.txt");
 const CORPUS_PAGES: [(&str, &str); 8] = [
     ("chula", "chula.png"),
     ("allegretto", "allegretto.png"),
@@ -7598,13 +7600,12 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     assert_eq!(retained_for_stumps.len(), 24);
 }
 
-/// The page-wide production driver must consume the three authenticated
-/// wider existing-stem reuse frontiers in Chula systems 1 and 2 before it
-/// exposes the still-unported system-3 stump-less expansion. This is
-/// intentionally a fail-closed progress gate: it rejects at the next system rather than
-/// silently publishing a partial page.
+/// The page-wide production driver must consume the authenticated wider
+/// existing-stem reuse frontiers in all three Chula systems. System 3 order
+/// 109 first rejects a stump-less LEFT/TOP expansion, then continues Java's
+/// side loop and reuses the RIGHT/BOTTOM stem without partial mutation.
 #[test]
-fn chula_page_drive_consumes_first_two_systems_multi_head_reuses_atomically() {
+fn chula_page_drive_completes_all_systems_multi_head_reuses_atomically() {
     assert_eq!(
         sha256_hex(CHULA_SYSTEM2_ORDER54_FIXTURE.as_bytes()),
         "421c6b99552071e39e6b72a3963f5ac46daf41b3bd0c9a560ea45251868f5c09"
@@ -7630,6 +7631,36 @@ fn chula_page_drive_consumes_first_two_systems_multi_head_reuses_atomically() {
     assert!(CHULA_SYSTEM2_ORDER54_FIXTURE.contains(
         "freshRuns 2 freshRunsByteIdentical true fullPassSha256 6e42c2cd20ceffca1d90359d3bc81d7e60780f3cbe29b22b56d1c8e7a9b8b353"
     ));
+    assert_eq!(
+        sha256_hex(CHULA_SYSTEM3_ORDER109_FIXTURE.as_bytes()),
+        "930a9f936f4c5f1eb535e3256e815f44a08f9b96b5aef1fcc52c0c9b28300a15"
+    );
+    assert!(CHULA_SYSTEM3_ORDER109_FIXTURE.contains(
+        "cAlias h:41:LEFT:TOP refPt 0x1.73p9/4087300000000000:0x1.b88p10/409b880000000000"
+    ));
+    assert!(
+        CHULA_SYSTEM3_ORDER109_FIXTURE
+            .contains("lastIndex -1 maxIndex 1 relations 1 relationRows [h:41:LEFT:TOP:")
+    );
+    assert!(CHULA_SYSTEM3_ORDER109_FIXTURE.contains(
+        "cAlias h:41:RIGHT:BOTTOM refPt 0x1.7dp9/4087d00000000000:0x1.b88p10/409b880000000000"
+    ));
+    assert!(
+        CHULA_SYSTEM3_ORDER109_FIXTURE
+            .contains("lastIndex 0 maxIndex 0 relations 1 relationRows [h:41:RIGHT:BOTTOM:")
+    );
+    assert!(CHULA_SYSTEM3_ORDER109_FIXTURE.contains(
+        "existingGlyph glyph:425 existingActive true existingStem 2296 lineChanged false"
+    ));
+    assert!(CHULA_SYSTEM3_ORDER109_FIXTURE.contains(
+        "decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=true:branch=BottomOnly]"
+    ));
+    assert!(
+        CHULA_SYSTEM3_ORDER109_FIXTURE.contains("addedEdges [system3:sourceId1942:targetId2296:")
+    );
+    assert!(CHULA_SYSTEM3_ORDER109_FIXTURE.contains(
+        "leftTopFullPassSha256 d07bfcc6915fae64fb8481be8f6b3aaccc6e768a349e9af8b3ea0c46d90ae142 rightBottomFullPassSha256 6cf71daa00322c0e6d20cd745d7d0cf68b2bc7b196a8ab1c3c507bf361ad5c4b uninstrumentedRightApplyFullPassSha256 6260e8b63601ac71e00a253ce2c803f8373a293e183e78983209742c2dd96788"
+    ));
     let path = repo_root().join("data/examples/chula.png");
     let grid = recognize_grid_lines(path).expect("Chula GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Chula HEADERS recognition");
@@ -7643,16 +7674,60 @@ fn chula_page_drive_consumes_first_two_systems_multi_head_reuses_atomically() {
     let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
         .expect("Chula native STEMS preparation");
 
-    let error = prepared
+    let drive = prepared
         .drive_all_system_head_linking_phase1()
-        .expect_err("system 3 stump-less expansion remains fail-closed");
-    assert_eq!(error.phase, "HEADS phase-1 page drive");
-    assert!(error.message.contains("system 3"));
-    assert!(error.message.contains("queue 109 head x41/SIG122"));
-    assert!(!error.message.contains("queue 54 head x46/SIG94"));
-    assert!(!error.message.contains("queue 67 head x73/SIG18"));
-    assert!(!error.message.contains("queue 70 head x1/SIG35"));
-    assert!(!error.message.contains("queue 73 head x75/SIG96"));
+        .expect("all three Chula systems complete HEADS phase 1");
+    assert_eq!(drive.systems.len(), 3);
+    assert!(
+        drive
+            .systems
+            .iter()
+            .all(|system| system.carrier.current_index == system.carrier.heads.len())
+    );
+    let system3 = &drive.systems[2];
+    let order109 = system3
+        .events
+        .iter()
+        .find_map(|event| match event {
+            NativeStemsHeadPhase1DriveEvent::Linked(transaction)
+                if transaction.corner.x_ordinal == 41 && transaction.corner.sig_ordinal == 122 =>
+            {
+                Some(transaction)
+            }
+            _ => None,
+        })
+        .expect("system 3 order 109 RIGHT/BOTTOM reuse transaction");
+    assert_eq!(
+        order109.corner.horizontal,
+        audiveris_omr::stems_step::NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        order109.corner.vertical,
+        audiveris_omr::stems_step::NativeStemVerticalSide::Bottom
+    );
+    assert_eq!((order109.last_index, order109.max_index), (0, 0));
+    assert!(matches!(
+        order109.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { .. }
+    ));
+    let phase_two = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect("all three Chula systems complete HEADS phase 2");
+    assert_eq!(phase_two.systems.len(), 3);
+    assert!(
+        phase_two.systems.iter().all(|system| {
+            system.carrier.phase_two_index == system.carrier.unlinked_heads.len()
+        })
+    );
+    let finalized = prepared
+        .finalize_all_system_stems()
+        .expect("all three Chula systems complete generic finalizeStems");
+    assert_eq!(finalized.systems.len(), 3);
+    let recognized =
+        recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+            .expect("Chula transactional native STEMS recognition");
+    assert_eq!(recognized.components, prepared.components);
+    assert_eq!(recognized.systems, finalized.systems);
 }
 
 /// Direct atomic gate at the first real Java competing-hook checkpoint.
