@@ -6378,6 +6378,86 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         system_two_state.scope,
         NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: 2 }
     );
+    let system_two_drive = prepared
+        .drive_second_system_sides()
+        .expect("Batuque system-2 complete SIDES drive");
+    let system_two_terminal = &system_two_drive.carrier.latest_base_apply.transaction_state;
+    assert_eq!(system_two_drive.system_id, 2);
+    assert_eq!(system_two_drive.registry.len(), 1_470);
+    assert_eq!(
+        system_two_drive.registry.persistent_ids().sheet_last_id,
+        1_502
+    );
+    assert_eq!(system_two_drive.transactions.len(), 40);
+    assert!(system_two_drive.transactions.iter().all(|transaction| {
+        transaction.create.scope
+            == NativeStemsBeamVLinkTransactionScope::SharedSheetSerial { system_id: 2 }
+    }));
+    assert_eq!(
+        system_two_terminal.glyph_index.persistent_ids.sheet_last_id,
+        1_542
+    );
+    assert_eq!(
+        system_two_terminal
+            .glyph_index
+            .persistent_ids
+            .glyph_index_last_id,
+        1_542
+    );
+    assert_eq!(
+        system_two_terminal
+            .glyph_index
+            .persistent_ids
+            .inter_index_last_id,
+        1_542
+    );
+    assert_eq!(system_two_terminal.system_stems.known_stems.len(), 40);
+    assert_eq!(system_two_drive.carrier.sig.vertices.len(), 279);
+    assert_eq!(system_two_drive.carrier.sig.edges.len(), 349);
+    assert_eq!(system_two_drive.carrier.bindings.stem_vertices.len(), 40);
+    assert_eq!(system_two_drive.carrier.b_cells.len(), 117);
+    assert_eq!(
+        system_two_drive
+            .carrier
+            .b_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        64
+    );
+    assert_eq!(system_two_drive.carrier.s_cells.len(), 244);
+    assert_eq!(
+        system_two_drive
+            .carrier
+            .s_cells
+            .iter()
+            .filter(|cell| cell.linked)
+            .count(),
+        89
+    );
+    assert!(
+        system_two_drive
+            .carrier
+            .b_cells
+            .iter()
+            .all(|cell| !cell.closed)
+    );
+    assert!(
+        system_two_drive
+            .carrier
+            .s_cells
+            .iter()
+            .all(|cell| !cell.closed)
+    );
+    let NativeStemsBeamSchedulerStatus::SidesExhausted {
+        retained_for_stumps,
+        final_local_worklist,
+    } = &system_two_drive.carrier.scheduler.status
+    else {
+        panic!("Batuque system 2 did not reach its true SIDES terminal");
+    };
+    assert_eq!(retained_for_stumps, final_local_worklist);
+    assert_eq!(retained_for_stumps.len(), 33);
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

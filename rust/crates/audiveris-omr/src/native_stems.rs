@@ -108,14 +108,17 @@ pub struct NativeStemsSystemSidesStart {
     pub first_transaction: NativeStemsBeamSidesTransaction,
 }
 
-/// Atomic completion of the sheet's first system SIDES pass.
+/// Atomic completion of one system SIDES pass.
 #[derive(Clone, Debug, PartialEq)]
-pub struct NativeStemsFirstSystemSidesDrive {
+pub struct NativeStemsSystemSidesDrive {
     pub system_id: usize,
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsBeamSidesCarrier,
     pub transactions: Vec<NativeStemsBeamSidesTransaction>,
 }
+
+/// Compatibility name for the first production system drive.
+pub type NativeStemsFirstSystemSidesDrive = NativeStemsSystemSidesDrive;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
@@ -260,22 +263,33 @@ impl NativeStemsPreparedRecognition {
     pub fn drive_first_system_sides(
         &self,
     ) -> Result<NativeStemsFirstSystemSidesDrive, NativeStemsPreparationError> {
+        let start = self.initialize_first_system_sides()?;
+        self.drive_system_sides_start(start)
+    }
+
+    fn drive_system_sides_start(
+        &self,
+        start: NativeStemsSystemSidesStart,
+    ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
         let NativeStemsSystemSidesStart {
             system_id,
             registry,
             mut carrier,
             first_transaction,
-        } = self.initialize_first_system_sides()?;
+        } = start;
         let context = self.sides_context(system_id)?;
         let transaction_limit = context.builders.builders.len();
         if transaction_limit == 0 {
-            return Err(phase("first system has no builders", "SIDES drive"));
+            return Err(phase(
+                format!("system {system_id} has no builders"),
+                "SIDES drive",
+            ));
         }
         let mut transactions = vec![first_transaction];
         loop {
             match &carrier.scheduler.status {
                 NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => {
-                    return Ok(NativeStemsFirstSystemSidesDrive {
+                    return Ok(NativeStemsSystemSidesDrive {
                         system_id,
                         registry,
                         carrier,
@@ -285,20 +299,22 @@ impl NativeStemsPreparedRecognition {
                 NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => {}
                 NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => {
                     return Err(phase(
-                        "first system reached a competing-hook checkpoint",
+                        format!("system {system_id} reached a competing-hook checkpoint"),
                         "SIDES drive",
                     ));
                 }
                 NativeStemsBeamSchedulerStatus::Completed { .. } => {
                     return Err(phase(
-                        "first system reached STUMPS completion during SIDES",
+                        format!("system {system_id} reached STUMPS completion during SIDES"),
                         "SIDES drive",
                     ));
                 }
             }
             if transactions.len() >= transaction_limit {
                 return Err(phase(
-                    format!("first system exceeded its {transaction_limit}-builder progress bound"),
+                    format!(
+                        "system {system_id} exceeded its {transaction_limit}-builder progress bound"
+                    ),
                     "SIDES drive",
                 ));
             }
@@ -366,6 +382,16 @@ impl NativeStemsPreparedRecognition {
             carrier,
             first_transaction,
         })
+    }
+
+    /// Drive Batuque's second system from its serial first frontier to a true
+    /// SIDES terminal. Any competing-hook checkpoint remains fail-closed until
+    /// its removal transaction is carried by production state.
+    pub fn drive_second_system_sides(
+        &self,
+    ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
+        let start = self.initialize_second_system_sides()?;
+        self.drive_system_sides_start(start)
     }
 }
 
