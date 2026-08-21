@@ -7751,14 +7751,36 @@ all later transactions from the production initializer's carrier. Focused 1/1
 and full sibling 14/14 (157.64s) pass; strict workspace all-target/all-feature
 Clippy passes in 9.33s; formatting and diff checks are clean.
 
+## Boundary 144: native Allegretto linked-S and hook-removal carriage
+
+The production carrier now executes Allegretto system 1 SIDES transactions
+1-28 from the production-derived modeled registry. Transaction 28 / plan 25
+selects the already-attached Stem through the owned HeadStem edge and leaves
+the second relation unread; the following typed checkpoint removes the
+competing BeamHook from its naturally carried five-edge neighborhood and
+resumes to `SidesExhausted`. The gates no longer reconstruct the predecessor,
+append artificial Stem vertices, tombstone substitute edges, or join on Java
+persistent Inter IDs.
+
+This carry exposed four generic assumptions and removed them: completed
+`ReadyTransaction` line-delta ledger entries are one-shot evidence rather than
+later known-false prefix input; callback incident rules follow the live
+`BeamHook` runtime class even when source provenance is `RawBeam`; B14 rollover
+accepts a graph-bound existing Stem as well as a fresh one while preserving
+the separate persistent-ID and native-SIG identity domains; and B17 accepts an
+existing normal Stem before recomputing callback abnormality. Focused linked-S
+and hook-removal tests pass, the full sibling suite passes 14/14 in 160.24s,
+strict workspace all-target/all-feature Clippy passes in 18.57s, and formatting
+and diff checks are clean. Relation-check constants are still hydrated from
+the existing strict fixture; wider-system carriage remains next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Starting from Boundary 143's atomic first carrier, replace the
-   reconstructed Allegretto transaction-28 predecessor with native-carried
-   transactions 1-27 and widen the graph-derived B13 linked-S and hook-removal
-   paths.
+1. Generalize the native carrier inputs beyond the current Chula and
+   Allegretto system-1 gates, beginning with production-owned relation
+   parameters and wider SIDES/STUMPS, linked-S, and hook-removal branches.
 2. Continue after Boundary 134, which completes generic `finalizeStems`, with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links:
    carry the
    remaining ordered phase-1 queue and

@@ -1020,6 +1020,14 @@ pub fn prepare_native_stems_beam_vlink_frontier_state(
     shadow.scope = NativeStemsBeamVLinkTransactionScope::SharedSheetSerial {
         system_id: scheduler_system.system_id,
     };
+    // `ReadyTransaction` entries authenticate B13 in the transaction which
+    // applied them. The mutated line state persists, but that one-shot ledger
+    // row must not be mistaken for the next scheduler frontier's cumulative
+    // known-false prefix. Java can reach this shape when a later SIDES
+    // transaction follows an earlier successful V-linker line shift.
+    shadow.applied_line_deltas.retain(|applied| {
+        applied.source != NativeStemsBeamAppliedLineDeltaSource::ReadyTransaction
+    });
     if shadow
         .line_states
         .iter()

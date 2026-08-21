@@ -874,46 +874,78 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         .final_stem
         .as_ref()
         .ok_or(NativeStemsBeamVLinkBaseApplyError::PredecessorNotReady)?;
-    if final_stem.inter_id.is_some()
-        || final_stem.sig_attached
-        || bindings
-            .stem_vertices
-            .contains_key(&final_stem.stem_identity)
-        || transaction_state
-            .system_stems
-            .known_stems
-            .iter()
-            .filter(|stem| stem.stem_identity == final_stem.stem_identity)
-            .count()
-            != 1
-    {
-        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover fresh stem",
-        });
-    }
-    let ids = transaction_state.glyph_index.persistent_ids;
-    let next_id = ids.sheet_last_id.checked_add(1).ok_or(
-        NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
-            phase: "native rollover persistent ID overflow",
-        },
-    )?;
-    let inter_id_matches = transaction_state
+    if transaction_state
         .system_stems
         .known_stems
         .iter()
-        .filter(|stem| stem.inter_id == Some(next_id))
-        .count();
-    let glyph_matches = transaction_state
-        .glyph_index
-        .known_canonical_glyphs
-        .iter()
-        .filter(|glyph| glyph.glyph_id == next_id)
-        .count();
-    if inter_id_matches != 0 || glyph_matches != 0 {
+        .filter(|stem| stem.stem_identity == final_stem.stem_identity)
+        .count()
+        != 1
+    {
         return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
-            phase: "native rollover next persistent ID collision",
+            phase: "native rollover stem identity",
         });
     }
+    let stem_vertex = bindings
+        .stem_vertices
+        .get(&final_stem.stem_identity)
+        .copied();
+    match (final_stem.inter_id, final_stem.sig_attached, stem_vertex) {
+        (None, false, None) => {}
+        (Some(inter_id), true, Some(vertex)) => {
+            let live =
+                sig.vertex(vertex.0)
+                    .ok_or(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                        phase: "native rollover live stem",
+                    })?;
+            if inter_id <= 0 || live.kind != NativeSigInterKind::Stem || live.removed {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover existing stem",
+                });
+            }
+            if live.abnormal != final_stem.abnormal {
+                return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                    phase: "native rollover existing stem abnormal",
+                });
+            }
+            // `inter_id` is the carried persistent glyph/InterIndex identity;
+            // `vertex` is the native SIG insertion identity. They are joined
+            // by the owned stem binding and intentionally need not be equal.
+        }
+        _ => {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover stem membership",
+            });
+        }
+    }
+    let ids = transaction_state.glyph_index.persistent_ids;
+    let next_id = if stem_vertex.is_none() {
+        let next_id = ids.sheet_last_id.checked_add(1).ok_or(
+            NativeStemsBeamVLinkBaseApplyError::UnsupportedV1 {
+                phase: "native rollover persistent ID overflow",
+            },
+        )?;
+        let inter_id_matches = transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .filter(|stem| stem.inter_id == Some(next_id))
+            .count();
+        let glyph_matches = transaction_state
+            .glyph_index
+            .known_canonical_glyphs
+            .iter()
+            .filter(|glyph| glyph.glyph_id == next_id)
+            .count();
+        if inter_id_matches != 0 || glyph_matches != 0 {
+            return Err(NativeStemsBeamVLinkBaseApplyError::InvalidState {
+                phase: "native rollover next persistent ID collision",
+            });
+        }
+        Some(next_id)
+    } else {
+        None
+    };
     let baseline_entry_count = prior
         .inter_index
         .baseline_entry_count
@@ -990,7 +1022,7 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
         sig,
         bindings,
         relation.beam,
-        None,
+        stem_vertex,
         relation,
         reuse_check.plan,
     )?;
@@ -1008,14 +1040,27 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
                 glyph_active_matches: 0,
                 glyph_original_matches: 0,
             },
-            stem_lookup: NativeStemsBeamInterIndexLookup::Absent,
-            next_id_lookup: NativeStemsBeamNextPersistentIdLookup::VacantAndNotVip {
-                persistent_id: next_id,
-                inter_id_matches: 0,
-                glyph_active_matches: 0,
-                glyph_original_matches: 0,
-                configured_vip_matches: 0,
-            },
+            stem_lookup: stem_vertex.map_or(NativeStemsBeamInterIndexLookup::Absent, |vertex| {
+                NativeStemsBeamInterIndexLookup::PresentSameObject {
+                    index_ordinal: vertex.0,
+                    inter_id: final_stem.inter_id.expect("existing stem has an ID"),
+                    vip: false,
+                    object_matches: 1,
+                    inter_id_matches: 1,
+                    glyph_active_matches: 0,
+                    glyph_original_matches: 0,
+                }
+            }),
+            next_id_lookup: next_id.map_or(
+                NativeStemsBeamNextPersistentIdLookup::NotRead,
+                |persistent_id| NativeStemsBeamNextPersistentIdLookup::VacantAndNotVip {
+                    persistent_id,
+                    inter_id_matches: 0,
+                    glyph_active_matches: 0,
+                    glyph_original_matches: 0,
+                    configured_vip_matches: 0,
+                },
+            ),
             appended_entries: Vec::new(),
         },
         sig: NativeStemsBeamSigApplyState {
@@ -1030,19 +1075,30 @@ pub fn roll_native_stems_beam_vlink_base_apply_state(
                 inter_id: beam_runtime.inter_id,
                 object_matches: 1,
             },
-            stem_vertex: NativeStemsBeamSigVertexLookup::Absent,
+            stem_vertex: stem_vertex.map_or(NativeStemsBeamSigVertexLookup::Absent, |vertex| {
+                NativeStemsBeamSigVertexLookup::PresentSameObject {
+                    vertex_ordinal: vertex.0,
+                    sig_vertex_identity: vertex.0,
+                    inter_id: final_stem.inter_id.expect("existing stem has an ID"),
+                    object_matches: 1,
+                }
+            }),
             appended_vertices: Vec::new(),
             appended_relations: Vec::new(),
             listener_topology: NativeStemsBeamSigListenerTopology::SoleStandardSigListener,
             beam: beam_runtime,
             stem: NativeStemsBeamVLinkStemRuntimeState {
                 stem_identity: final_stem.stem_identity,
-                sig_vertex_identity: None,
-                inter_indexed: false,
-                sig_system_id: None,
-                removed: false,
+                sig_vertex_identity: stem_vertex.map(|vertex| vertex.0),
+                inter_indexed: stem_vertex.is_some(),
+                sig_system_id: stem_vertex.map(|_| sig.system_id),
+                removed: stem_vertex
+                    .and_then(|vertex| sig.vertex(vertex.0))
+                    .is_some_and(|vertex| vertex.removed),
                 vip: false,
-                abnormal: false,
+                abnormal: stem_vertex
+                    .and_then(|vertex| sig.vertex(vertex.0))
+                    .is_some_and(|vertex| vertex.abnormal),
             },
         },
         sheet_edit: prior.sheet_edit,
@@ -2220,7 +2276,19 @@ fn validate_callback_queries(
             });
         }
     }
-    let hook = matches!(draft.beam, NativeStemsBeamSource::Hook(_));
+    // Source provenance distinguishes raw-beam and hook construction paths,
+    // but Java's callback rule follows the live Inter runtime class. A
+    // RawBeam source can materialize as a BeamHook (Allegretto plan 15), so
+    // validate the hash with the rule projected from the bound SIG vertex.
+    let hook = matches!(
+        beam_before.rule,
+        NativeStemsBeamBeamIncidentRule::HookHasAnyBeamStem
+    );
+    if graph_relation_identity.is_some() && beam_after.rule != beam_before.rule {
+        return Err(NativeStemsBeamVLinkBaseApplyError::InvalidEvidence {
+            phase: "callback beam rule continuity",
+        });
+    }
     if stem_before.query_provenance_sha256 != stem_incident_query_sha256(&stem_before.relations)
         || stem_after.query_provenance_sha256 != stem_incident_query_sha256(&stem_after.relations)
         || beam_before.query_provenance_sha256
@@ -2442,7 +2510,18 @@ fn validate_beam_incident_rows(
             row.graph_relation_identity,
         )
     }))?;
-    let hook = matches!(draft.beam, NativeStemsBeamSource::Hook(_));
+    // The source enum records how the worklist item was discovered, whereas
+    // Java dispatches the incident query from the live SIG vertex class. A
+    // raw-beam source can therefore carry the hook rule after materializing
+    // as a BeamHook (Allegretto plan 15).
+    let hook = matches!(
+        if after_callback {
+            certificate.beam_incident_after.rule
+        } else {
+            certificate.beam_incident_before.rule
+        },
+        NativeStemsBeamBeamIncidentRule::HookHasAnyBeamStem
+    );
     let effective_stem_vertex = state
         .sig
         .stem
@@ -2513,7 +2592,9 @@ fn validate_beam_incident_rows(
                     || row.opposite_inter_id != stem_inter_id
                     || !relation_is_beam_stem(row.kind)
                     || row.relation_object_identity != certificate.fresh_relation_object_identity))
-            || (hook && row.beam_portion.is_some())
+            // BeamHook.checkAbnormal ignores BeamStemRelation beam portions.
+            // Preserve whatever the live graph carries instead of imposing
+            // the source-construction convention on this runtime-class query.
             || (!hook && row.relevant && row.beam_portion.is_none())
             || (!hook && !row.relevant && row.beam_portion.is_some())
             || (is_new && !hook && row.beam_portion != Some(draft.beam_portion))

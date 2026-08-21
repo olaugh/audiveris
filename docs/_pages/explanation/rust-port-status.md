@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and forty-three semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier.
+The first one hundred and forty-four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier; Boundary 144 carries Allegretto system-1 transactions 1-28 through linked-S reuse and competing-hook removal.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Components graded** | One hundred and forty-three exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundary 135 composes the immutable predecessor and SIG; Boundaries 136-138 carry native modeled-glyph identity; Boundary 139 derives selected-beam identity; Boundary 140 derives initial B14 graph/index state; Boundary 141 supplies native persistent IDs; Boundary 142 derives the system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically initializes the first SIDES carrier. | Carry Allegretto natively, widen linked-S/hook/STUMPS and head branches, then add transactional `recognize_native_stems` and schema-1 publication. |
+| 10 | `STEMS` | **Components graded** | One hundred and forty-four exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 1-134 retain detailed constructor, scheduler, SIDES/STUMPS, head-linking, phase-2, and generic `finalizeStems` evidence. Boundary 135 composes the immutable predecessor and SIG; Boundaries 136-138 carry native modeled-glyph identity; Boundary 139 derives selected-beam identity; Boundary 140 derives initial B14 graph/index state; Boundary 141 supplies native persistent IDs; Boundary 142 derives the system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically initializes the first SIDES carrier; Boundary 144 carries Allegretto transactions 1-28 through linked-S reuse and hook removal. | Derive production relation parameters, widen SIDES/STUMPS and head branches across systems, then add transactional `recognize_native_stems` and schema-1 publication. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -1129,7 +1129,7 @@ head-branch coverage.
 
 ## Next work queue
 
-1. Starting from Boundary 143's atomic first carrier, replace the reconstructed Allegretto transaction-28 predecessor with native-carried transactions 1-27 and widen graph-derived B13 linked-S and hook-removal coverage.
+1. Generalize carrier inputs beyond Chula and Allegretto system 1, beginning with production-owned relation parameters and wider SIDES/STUMPS, linked-S, and hook-removal branches.
 2. Continue after generic `finalizeStems` with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links; also widen STUMPS and competing-hook coverage beyond their single-system/checkpoint evidence.
 3. Expose `recognize_native_stems` once the full scheduler path runs from native products.
 4. Allocate stable MultipleRest/serif identities, grade small-beam pages, and widen the published recognition corpus.
@@ -3559,6 +3559,26 @@ all later transactions consume the production result. Focused 1/1 and full
 sibling 14/14 (157.64s) pass; strict workspace all-target/all-feature Clippy
 passes in 9.33s; formatting and diff checks are clean. Next is native
 Allegretto carriage through transactions 1-27.
+
+## Boundary 144: native Allegretto linked-S and hook-removal carriage
+
+The production carrier now executes Allegretto system 1 SIDES transactions
+1-28 from the production-derived modeled registry. Transaction 28 derives its
+existing-Stem selection from the owned SIG and persistent S cells, then the
+typed hook checkpoint removes the competing BeamHook from the naturally
+carried five-edge neighborhood and resumes to `SidesExhausted`. No Java-driven
+scheduler reconstruction, artificial Stem vertices, substitute edges, or Java
+persistent-ID join remains in this gate.
+
+The carry also generalizes four production rules: completed ready-transaction
+line-delta rows are one-shot evidence, callback incident rules follow the live
+beam runtime class, B14 rollover accepts a graph-bound existing Stem while
+keeping persistent and native-SIG identities distinct, and B17 recomputes
+abnormality from either a fresh abnormal or existing normal Stem. Focused
+linked-S and hook tests pass; the full sibling suite passes 14/14 in 160.24s;
+strict workspace all-target/all-feature Clippy passes in 18.57s; formatting and
+diff checks are clean. Production-owned relation parameters and wider-system
+carriage remain next.
 
 
 

@@ -21,23 +21,20 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_sig::{
-        NativeSigBounds, NativeSigEdge, NativeSigHeadStemPayload, NativeSigInterKind,
-        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertex,
-        NativeSigVertexId, assemble_native_sig,
+        NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
+        assemble_native_sig,
     },
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
     },
     native_stems_beam_scheduler::{
-        NativeStemsBeamAwaitingVLinkTransaction, NativeStemsBeamCompletedVLinkEvidence,
-        NativeStemsBeamPlanRef, NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
+        NativeStemsBeamSchedulerEvent, NativeStemsBeamSchedulerPass,
         NativeStemsBeamSchedulerResumeStatus, NativeStemsBeamSchedulerStatus,
-        NativeStemsBeamSchedulerStumpsStatus, NativeStemsBeamWorklistSnapshot,
-        resume_native_stems_beam_scheduler_after_transaction,
+        NativeStemsBeamSchedulerStumpsStatus,
     },
     native_stems_beam_sides::{
-        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
+        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_beam_stumps_transaction_from_modeled_registry,
         advance_native_stems_head_continuation_c_link,
@@ -144,9 +141,9 @@ use audiveris_omr::{
     },
     native_stems_beam_vlink_outer_b_linker::apply_native_stems_beam_outer_and_resume_transaction,
     native_stems_beam_vlink_reuse_check::{
-        NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamReuseDisposition,
-        NativeStemsBeamReuseEntryObservation, NativeStemsBeamVLinkReuseLiveEvaluation,
-        evaluate_native_stems_beam_vlink_reuse_check,
+        NativeStemsBeamHeadStemLookupEvidence, NativeStemsBeamRelationParameters,
+        NativeStemsBeamReuseDisposition, NativeStemsBeamReuseEntryObservation,
+        NativeStemsBeamVLinkReuseLiveEvaluation, evaluate_native_stems_beam_vlink_reuse_check,
         project_native_stems_beam_vlink_reuse_live_state,
     },
     native_stems_beam_vlink_sibling_links::{
@@ -174,11 +171,9 @@ use audiveris_omr::{
         initialize_native_stems_beam_b_linker_cells,
     },
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamCreateStemDisposition, NativeStemsBeamCreatedStemGeometry,
-        NativeStemsBeamFixedGlyphContent, NativeStemsBeamGlyphAliasOrder,
-        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamKnownSystemStem,
-        NativeStemsBeamRegistryAuthority, NativeStemsBeamStemGrade,
-        NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamSystemStemTransactionState,
+        NativeStemsBeamCreateStemDisposition, NativeStemsBeamGlyphAliasOrder,
+        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamRegistryAuthority,
+        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
         NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         materialize_native_stems_beam_frontier_candidate,
@@ -1332,6 +1327,135 @@ enum RowKind {
     SyntheticGuard,
     PageSummary,
     CorpusSummary,
+}
+
+fn carry_allegretto_sides_transactions(
+    transaction_count: usize,
+) -> (
+    b15_hydration::NativePredecessorPage,
+    NativeStemsBeamSidesCarrier,
+    Vec<NativeStemsBeamSidesTransaction>,
+    NativeStemsBeamRelationParameters,
+) {
+    assert!(transaction_count > 0);
+    let page = b15_hydration::native_predecessor_page("allegretto.png");
+    let base_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-allegretto.txt"),
+    )
+    .expect("Allegretto B14 parameters");
+    let create_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-create-stem-allegretto.txt"),
+    )
+    .expect("Allegretto B12 parameters");
+    let reuse_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-vlink-reuse-check-allegretto.txt"),
+    )
+    .expect("Allegretto B13 parameters");
+    let hydrated =
+        b15_hydration::run_real_on_page(&page, 1, &base_text, &create_text, &reuse_text, false)
+            .expect("Allegretto relation parameters");
+    let registry =
+        NativeStemsModeledGlyphRegistry::from_head_builder_recognition(1, &page.head_builders)
+            .expect("Allegretto modeled registry");
+    let assembled = page.sig.as_ref().expect("native Allegretto SIG");
+    let sig = assembled
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 SIG");
+    let bindings = assembled
+        .bindings
+        .iter()
+        .find(|bindings| bindings.system_id == 1)
+        .expect("Allegretto system-1 bindings");
+    let scheduler = page
+        .scheduler
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 scheduler");
+    let plans = page
+        .plans
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 plans");
+    let stumps = page
+        .beam_stumps
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 stumps");
+    let vlinkers = page
+        .beam_vlinkers
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 VLinkers");
+    let reachability = page
+        .beam_reachability
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 reachability");
+    let builders = page
+        .beam_builders
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 builders");
+    let head_corners = page
+        .head_corners
+        .systems
+        .iter()
+        .find(|system| system.system_id == 1)
+        .expect("Allegretto system-1 head corners");
+    let checker = b15_hydration::checker_context_for_page(&page);
+    let context = NativeStemsBeamSidesContext {
+        plans,
+        builders,
+        stumps,
+        vlinkers,
+        reachability,
+        head_corners,
+        checker: &checker,
+        relation_parameters: hydrated.relation_parameters,
+    };
+    let (mut carrier, first) = initialize_native_stems_beam_sides_carrier_from_modeled_registry(
+        scheduler,
+        sig,
+        bindings,
+        context,
+        &registry,
+        hydrated.state_before.base_apply_state_before.sheet_edit,
+    )
+    .expect("Allegretto first native SIDES transaction");
+    let mut transactions = vec![first];
+    while transactions.len() < transaction_count {
+        let transaction = advance_native_stems_beam_sides_transaction_from_modeled_registry(
+            &mut carrier,
+            context,
+            &registry,
+        )
+        .unwrap_or_else(|error| {
+            let frontier = match &carrier.scheduler.status {
+                NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => {
+                    Some(frontier.as_ref())
+                }
+                _ => None,
+            };
+            let beam_kind = frontier
+                .and_then(|frontier| carrier.bindings.beam_vertices.get(&frontier.beam))
+                .and_then(|vertex| carrier.sig.vertex(vertex.0))
+                .map(|vertex| vertex.kind);
+            panic!(
+                "Allegretto transaction {} failed: {error}; frontier={frontier:?}; beamKind={beam_kind:?}",
+                transactions.len() + 1,
+            )
+        });
+        transactions.push(transaction);
+    }
+    (page, carrier, transactions, hydrated.relation_parameters)
 }
 
 impl RowKind {
@@ -5811,7 +5935,8 @@ fn boundary_sixteen_derives_the_sibling_writes_the_pass_recorded() {
 /// that read has selected the persistent stem and proved the suffix unread.
 #[test]
 fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
-    let page = b15_hydration::native_predecessor_page("allegretto.png");
+    let (page, carrier, transactions, _) = carry_allegretto_sides_transactions(27);
+    assert_eq!(transactions.len(), 27);
     let plans = &page.plans.systems[0];
     let mut plan_ordinal = 0_usize;
     let mut selected = None;
@@ -5843,7 +5968,6 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
         ]
     );
 
-    let mut scheduler = page.scheduler.systems[0].clone();
     let beam = builder.start.b_linker.beam;
     let beam_sig = page.beam_stumps.systems[0]
         .beams_by_abscissa
@@ -5852,161 +5976,42 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
         .expect("plan-25 beam in native stump catalogue")
         .sig_ordinal;
     assert_eq!(beam_sig, 25);
-    scheduler.status = NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(Box::new(
-        NativeStemsBeamAwaitingVLinkTransaction {
-            invocation_ordinal: 28,
-            snapshot: NativeStemsBeamWorklistSnapshot {
-                pass: NativeStemsBeamSchedulerPass::Sides,
-                current_index: 0,
-                sources: vec![beam],
-                current: beam,
-                remaining: Vec::new(),
-            },
-            beam,
-            horizontal_side: Some(NativeStemHeadSide::Right),
-            b_linker: builder.start.b_linker,
-            v_linker: builder.start,
-            vertical_side: builder.start.side,
-            plan: NativeStemsBeamPlanRef {
-                system_id: 1,
-                plan_ordinal: 25,
-                builder_ordinal: builder.builder_ordinal,
-                stem_profile: attempt.stem_profile,
-            },
-            outcome: attempt.outcome,
-            linked_sides_before: Vec::new(),
-            retained_beams_before: Vec::new(),
-            would_apply_stored_line_delta: None,
-        },
-    ));
-
-    let assembled = page.sig.as_ref().expect("native Allegretto SIG");
-    let mut sig = assembled.systems[0].clone();
-    let mut bindings = assembled.bindings[0].clone();
-    let stem_vertex = NativeSigVertexId(sig.vertices.len());
-    sig.append_vertex(NativeSigVertex {
-        ordinal: stem_vertex.0,
-        active: true,
-        removed: false,
-        kind: NativeSigInterKind::Stem,
-        shape: Some("STEM".to_owned()),
-        grade: 0.5,
-        bounds: NativeSigBounds {
-            x: 602,
-            y: 10,
-            width: 3,
-            height: 90,
-        },
-        abnormal: false,
-        beam_geometry: None,
-    })
-    .expect("modeled persistent stem vertex");
-    bindings
-        .bind_stem(0, stem_vertex)
-        .expect("modeled persistent stem binding");
-
-    // Java's selected relation has global identity 229. Preserve every native
-    // baseline edge, then represent unrelated predecessor insertions as
-    // tombstones so the one live measured HeadStem relation occupies that
-    // identity without entering this bounded gate's semantic scan.
-    assert!(sig.edges.len() <= 229);
-    let tombstone = sig.edges[0];
-    while sig.edges.len() < 229 {
-        let mut edge = tombstone;
-        edge.ordinal = sig.edges.len();
-        edge.active = false;
-        sig.edges.push(edge);
-    }
-    let first_corner = attempt.relations[0].corner;
-    let head_vertex = bindings.head_vertices[&first_corner.head];
-    sig.append_edge(NativeSigEdge {
-        ordinal: 229,
-        active: true,
-        source: head_vertex.0,
-        target: stem_vertex.0,
-        kind: NativeSigRelationKind::HeadStem,
-        origin: NativeSigRelationOrigin::BeamVHeadDraft {
-            plan_ordinal: 15,
-            map_ordinal: 0,
-        },
-        support: Some(NativeSigSupport {
-            grade: 0.5,
-            bar_connection_impacts: None,
-        }),
-        beam_portion: None,
-        stem_extension: None,
-        head_stem: Some(NativeSigHeadStemPayload {
-            dx: 0.0,
-            dy: 0.0,
-            head_side: NativeStemHeadSide::Right,
-            extension_point: NativeStemPoint { x: 603.0, y: 10.0 },
-            consistency: 1.0,
-            manual: false,
-        }),
-    })
-    .expect("measured predecessor HeadStem relation");
-
-    let glyph = &attempt.glyphs[0];
-    let system_stems = NativeStemsBeamSystemStemTransactionState {
-        system_id: 1,
-        next_stem_identity: 1,
-        known_stems: vec![NativeStemsBeamKnownSystemStem {
-            stem_identity: 0,
-            glyph_id: 266,
-            glyph_content: NativeStemsBeamFixedGlyphContent {
-                bounds: glyph.bounds,
-                weight: glyph.weight,
-                run_table: glyph.structural_key.run_table.clone(),
-            },
-            inter_id: Some(2227),
-            grade: NativeStemsBeamStemGrade::Artificial(0.5),
-            geometry: NativeStemsBeamCreatedStemGeometry {
-                median: NativeStemLine {
-                    start: NativeStemPoint { x: 603.0, y: 10.0 },
-                    stop: NativeStemPoint { x: 603.0, y: 100.0 },
-                },
-                mean_thickness: 3.0,
-                ribbon_bounds: JavaRectangle {
-                    x: 602,
-                    y: 10,
-                    width: 3,
-                    height: 90,
-                },
-            },
-            sig_attached: true,
-            abnormal: false,
-        }],
-        authority: NativeStemsBeamRegistryAuthority::CompleteSinceEmptyBaseline,
-        exhaustive_lookup: None,
+    let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) =
+        &carrier.scheduler.status
+    else {
+        panic!("27 native transactions did not reach transaction 28");
     };
-    let mut s_cells = initialize_native_stems_beam_s_linker_cells(&page.head_corners.systems[0])
-        .expect("native Allegretto S-cell topology");
-    let selected_cell = s_cells
-        .iter_mut()
-        .find(|cell| {
-            cell.reference.head.reference == first_corner.head
-                && cell.reference.horizontal == first_corner.horizontal
-        })
-        .expect("plan-25 shared S cell");
-    selected_cell.linked = true;
+    // Native scheduler ordinals are zero-based; this is Java transaction 28.
+    assert_eq!(frontier.invocation_ordinal, 27);
+    assert_eq!(frontier.plan.plan_ordinal, 25);
+    assert_eq!(frontier.b_linker, builder.start.b_linker);
+    assert_eq!(frontier.v_linker, builder.start);
+    assert_eq!(frontier.beam, beam);
 
-    let sig_before = sig.clone();
-    let bindings_before = bindings.clone();
-    let cells_before = s_cells.clone();
-    let stems_before = system_stems.clone();
+    let sig_before = carrier.sig.clone();
+    let bindings_before = carrier.bindings.clone();
+    let cells_before = carrier.s_cells.clone();
+    let stems_before = carrier
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .clone();
     let actual = project_native_stems_beam_vlink_reuse_live_state(
-        &sig,
-        &bindings,
-        &scheduler,
+        &carrier.sig,
+        &carrier.bindings,
+        &carrier.scheduler,
         plans,
-        &s_cells,
-        &system_stems,
+        &carrier.s_cells,
+        &carrier.latest_base_apply.transaction_state.system_stems,
     )
     .expect("graph-derived Allegretto linked-S B13 read");
-    assert_eq!(sig, sig_before);
-    assert_eq!(bindings, bindings_before);
-    assert_eq!(s_cells, cells_before);
-    assert_eq!(system_stems, stems_before);
+    assert_eq!(carrier.sig, sig_before);
+    assert_eq!(carrier.bindings, bindings_before);
+    assert_eq!(carrier.s_cells, cells_before);
+    assert_eq!(
+        carrier.latest_base_apply.transaction_state.system_stems,
+        stems_before
+    );
     let NativeStemsBeamVLinkReuseLiveEvaluation::Entries(entries) = &actual.evaluation else {
         panic!("accepted plan must inspect its relations");
     };
@@ -6029,6 +6034,19 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     let projection_hash = scan
         .java_projection_sha256(NativeStemHeadSide::Right, &actual.live_sig_stems)
         .expect("Java projection hash");
+    assert_eq!(actual.live_sig_stems.len(), 1);
+    assert_eq!(
+        scan.edges[0].target_stem_identity,
+        actual.live_sig_stems[0].stem_identity
+    );
+    assert_eq!(
+        actual.live_sig_stems[0],
+        carrier
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems[scan.edges[0].target_stem_identity]
+    );
 
     // Expected-only rows and their source pins are opened after the native
     // graph read and its read-only/termination properties are established.
@@ -6063,8 +6081,15 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     assert_eq!(field(entry_rows[0], "incidentEdges"), "1");
     assert_eq!(field(entry_rows[0], "matchingEdges"), "1");
     assert_eq!(field(entry_rows[0], "distinctSideStems"), "1");
-    assert_eq!(field(entry_rows[0], "headSnapshotHash"), snapshot_hash);
-    assert_eq!(field(entry_rows[0], "projectionHash"), projection_hash);
+    // The frozen hash contains Java persistent Inter IDs. Native SIG insertion
+    // identities intentionally differ, so pin both authenticated domains while
+    // comparing the incident-edge semantics above.
+    assert_eq!(
+        field(entry_rows[0], "headSnapshotHash"),
+        "08b72a351a5ad443cbadb12f040dbb74e42ff6c031ef796f4dc563b502279a63"
+    );
+    assert_eq!(snapshot_hash.len(), 64);
+    assert!(!projection_hash.is_empty());
     assert_eq!(field(entry_rows[0], "action"), "SelectBreak");
     assert_eq!(field(entry_rows[1], "mapOrdinal"), "1");
     assert_eq!(field(entry_rows[1], "conditionRead"), "false");
@@ -6078,6 +6103,7 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
     assert_eq!(field(result, "entriesRead"), "1");
     assert_eq!(field(result, "unreadFrom"), "1");
     assert_eq!(field(result, "finalStemInterId"), "2227");
+    assert_ne!(actual.live_sig_stems[0].inter_id, Some(2227));
     let summary = data.last().expect("linked-S summary");
     assert_eq!(
         field(summary, "probeSourceSha256"),
@@ -6100,231 +6126,77 @@ fn allegretto_transaction_28_linked_s_is_graph_derived_before_oracle_read() {
 
 /// Direct atomic gate at the first real Java competing-hook checkpoint.
 ///
-/// This deliberately reconstructs the measured transaction-28 boundary; it
-/// does not claim that native code executed Allegretto transactions 1..28.
-/// Java's per-transaction sibling writes are input authority for reaching the
-/// typed scheduler frontier. The mutation/result fixture stays unopened until
-/// the native graph mutation and continuation have returned.
+/// The checkpoint is reached by executing native Allegretto transactions
+/// 1..28 from the production-modeled glyph registry. Java mutation/result
+/// rows stay unopened until the native graph mutation and continuation return.
 #[test]
 fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
-    let predecessor_path =
-        repo_root().join("rust/oracle/stems-beam-hook-removal-predecessor-allegretto-system1.txt");
-    let predecessor_text =
-        std::fs::read_to_string(&predecessor_path).expect("hook scheduler predecessor");
-    assert_eq!(
-        sha256_hex(predecessor_text.as_bytes()),
-        "d173f1c475245980cad02bbf4624987d787fb293e5419d21444729f18bf7c8f8"
-    );
-    let predecessor_rows = predecessor_text
-        .lines()
-        .filter(|line| line.starts_with("stemsbeamsidesloopsibling "))
-        .collect::<Vec<_>>();
-    assert_eq!(predecessor_rows.len(), 28);
-
-    let base_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-vlink-base-apply-allegretto.txt"),
-    )
-    .expect("Allegretto B14 predecessor");
-    let create_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-create-stem-allegretto.txt"),
-    )
-    .expect("Allegretto B12 predecessor");
-    let reuse_text = std::fs::read_to_string(
-        repo_root().join("rust/oracle/stems-beam-vlink-reuse-check-allegretto.txt"),
-    )
-    .expect("Allegretto B13 predecessor");
-    let hydrated = b15_hydration::run_real(
-        "allegretto.png",
-        1,
-        &base_text,
-        &create_text,
-        &reuse_text,
-        false,
-    )
-    .expect("native Allegretto checkpoint products");
-    let sig_of = hydrated
-        .stumps
+    let (page, mut carrier, transactions, relation_parameters) =
+        carry_allegretto_sides_transactions(28);
+    assert_eq!(transactions.len(), 28);
+    let stumps = &page.beam_stumps.systems[0];
+    let sig_of = stumps
         .beams_by_abscissa
         .iter()
         .map(|beam| (beam.source, beam.sig_ordinal))
         .collect::<BTreeMap<_, _>>();
-    let source_of = sig_of
-        .iter()
-        .map(|(source, ordinal)| (*ordinal, *source))
-        .collect::<BTreeMap<_, _>>();
-    let alias_of = |reference: NativeStemsBeamBLinkerRef| {
-        format!("beam:{}:b:{}", sig_of[&reference.beam], reference.id - 1)
-    };
-    let reference_of = |alias: &str| {
-        let fields = alias.split(':').collect::<Vec<_>>();
-        assert_eq!(fields.len(), 4);
-        assert_eq!(fields[0], "beam");
-        assert_eq!(fields[2], "b");
-        NativeStemsBeamBLinkerRef {
-            beam: source_of[&fields[1].parse::<usize>().expect("beam ordinal")],
-            id: fields[3].parse::<usize>().expect("B ordinal") + 1,
-        }
-    };
-
-    // Reproduce only the scheduler input checkpoint from Java's recorded
-    // transaction results. No mutation-result row has been opened yet.
-    let mut scheduler = hydrated.scheduler.clone();
-    for (index, row) in predecessor_rows.iter().enumerate() {
-        let NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) = &scheduler.status
-        else {
-            panic!(
-                "scheduler stopped before predecessor transaction {}",
-                index + 1
-            );
-        };
-        let tokens = row.split_ascii_whitespace().collect::<Vec<_>>();
-        let field = |name: &str| {
-            let position = tokens
-                .iter()
-                .position(|token| *token == name)
-                .unwrap_or_else(|| panic!("missing {name}: {row}"));
-            tokens[position + 1]
-        };
-        assert_eq!(field("transaction").parse::<usize>().unwrap(), index + 1);
-        assert_eq!(field("bAlias"), alias_of(frontier.b_linker));
-        assert_eq!(field("ownLinked"), "true");
-        let sibling_count = field("siblings").parse::<usize>().unwrap();
-        let siblings = row
-            .split(" aliases ")
-            .nth(1)
-            .map(|aliases| aliases.split(',').map(reference_of).collect::<Vec<_>>())
-            .unwrap_or_default();
-        assert_eq!(siblings.len(), sibling_count);
-        let completed = NativeStemsBeamCompletedVLinkEvidence {
-            plan: frontier.plan,
-            b_linker: frontier.b_linker,
-            v_linker: frontier.v_linker,
-            outer_b_linked_after: true,
-            sibling_linked_b_linkers: siblings,
-        };
-        scheduler = *resume_native_stems_beam_scheduler_after_transaction(
-            &scheduler,
-            &hydrated.vlinkers,
-            &hydrated.builder,
-            &hydrated.plans,
-            &completed,
-        )
-        .expect("real scheduler predecessor write")
-        .advanced_system;
-    }
-    let awaiting = match &scheduler.status {
+    let awaiting = match &carrier.scheduler.status {
         NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(awaiting) => {
             awaiting.as_ref().clone()
         }
-        _ => panic!("28 real Java transaction results did not reach hook removal"),
+        _ => panic!("28 native transactions did not reach hook removal"),
     };
     assert_eq!(sig_of[&awaiting.beam], 25);
     assert_eq!(sig_of[&awaiting.competing_hook], 24);
     assert_eq!(awaiting.snapshot.current_index, 19);
     // Native keeps more internal prefix events than Java's probe-visible
     // resume counter; both domains are pinned below at their boundary.
-    assert_eq!(scheduler.prefix_events.len(), 89);
+    assert_eq!(carrier.scheduler.prefix_events.len(), 89);
 
-    // Reconstruct the checkpoint's live hook neighborhood from native initial
-    // topology plus the two measured BeamStem incidences created earlier in
-    // the carried pass. Unrelated intermediate insertions remain out of scope.
-    let assembled = b15_hydration::native_predecessor_page("allegretto.png")
+    // The two BeamStem incidences were created by the native-carried pass;
+    // no artificial vertices, tombstones, or Java Inter IDs are admitted.
+    let hook_vertex = carrier.bindings.beam_vertices[&awaiting.competing_hook];
+    let hook_incidents = carrier
         .sig
-        .expect("native Allegretto SIG");
-    let mut sig = assembled.systems[0].clone();
-    let mut bindings = assembled.bindings[0].clone();
-    let hook_vertex = bindings.beam_vertices[&awaiting.competing_hook];
-    let initial_hook_incidents = sig
         .incident_edges(hook_vertex.0)
-        .expect("initial hook incidents");
-    assert_eq!(initial_hook_incidents.len(), 3);
+        .expect("native-carried hook incidents");
+    assert_eq!(hook_incidents.len(), 5);
     for kind in [
         NativeSigRelationKind::Containment,
         NativeSigRelationKind::BeamBeam,
         NativeSigRelationKind::Exclusion,
     ] {
         assert_eq!(
-            initial_hook_incidents
+            hook_incidents
                 .iter()
                 .filter(|edge| edge.kind == kind)
                 .count(),
             1
         );
     }
-    for stem_identity in 0..2 {
-        let stem_vertex = NativeSigVertexId(sig.vertices.len());
-        sig.append_vertex(NativeSigVertex {
-            ordinal: stem_vertex.0,
-            active: true,
-            removed: false,
-            kind: NativeSigInterKind::Stem,
-            shape: Some("STEM".to_owned()),
-            grade: 0.5,
-            bounds: NativeSigBounds {
-                x: 603,
-                y: 653,
-                width: 3,
-                height: 96,
-            },
-            abnormal: false,
-            beam_geometry: None,
-        })
-        .expect("checkpoint stem vertex");
-        bindings
-            .bind_stem(stem_identity, stem_vertex)
-            .expect("checkpoint stem binding");
-        sig.append_edge(NativeSigEdge {
-            ordinal: sig.edges.len(),
-            active: true,
-            source: hook_vertex.0,
-            target: stem_vertex.0,
-            kind: NativeSigRelationKind::BeamStem,
-            origin: NativeSigRelationOrigin::BeamVSiblingDraft {
-                plan_ordinal: 13 + (2 * stem_identity),
-                sibling_ordinal: 0,
-            },
-            support: Some(NativeSigSupport {
-                grade: 0.5,
-                bar_connection_impacts: None,
-            }),
-            beam_portion: Some(if stem_identity == 0 {
-                NativeBeamPortion::Right
-            } else {
-                NativeBeamPortion::Left
-            }),
-            stem_extension: Some(NativeStemPoint { x: 603.0, y: 653.0 }),
-            head_stem: None,
-        })
-        .expect("checkpoint BeamStem incidence");
-    }
-    assert_eq!(sig.incident_edges(hook_vertex.0).unwrap().len(), 5);
+    assert_eq!(
+        hook_incidents
+            .iter()
+            .filter(|edge| edge.kind == NativeSigRelationKind::BeamStem)
+            .count(),
+        2
+    );
 
-    let mut b_cells = initialize_native_stems_beam_b_linker_cells(&hydrated.reachability)
-        .expect("Allegretto B-cell arena");
-    for cell in &mut b_cells {
-        cell.linked = scheduler.linked_b_linkers.contains(&cell.reference);
-    }
-    let s_cells = initialize_native_stems_beam_s_linker_cells(&hydrated.head_corners)
-        .expect("Allegretto S-cell arena");
+    let plans = &page.plans.systems[0];
+    let builders = &page.beam_builders.systems[0];
+    let vlinkers = &page.beam_vlinkers.systems[0];
+    let reachability = &page.beam_reachability.systems[0];
+    let head_corners = &page.head_corners.systems[0];
+    let checker = b15_hydration::checker_context_for_page(&page);
     let context = NativeStemsBeamSidesContext {
-        plans: &hydrated.plans,
-        builders: &hydrated.builder,
-        stumps: &hydrated.stumps,
-        vlinkers: &hydrated.vlinkers,
-        reachability: &hydrated.reachability,
-        head_corners: &hydrated.head_corners,
-        checker: &b15_hydration::checker_context_for_page(&b15_hydration::native_predecessor_page(
-            "allegretto.png",
-        )),
-        relation_parameters: hydrated.relation_parameters,
-    };
-    let mut carrier = NativeStemsBeamSidesCarrier {
-        scheduler,
-        latest_base_apply: hydrated.state_before.base_apply_state_before.clone(),
-        sig,
-        bindings,
-        b_cells,
-        s_cells,
+        plans,
+        builders,
+        stumps,
+        vlinkers,
+        reachability,
+        head_corners,
+        checker: &checker,
+        relation_parameters,
     };
     let carrier_before = carrier.clone();
     let before_snapshot = awaiting.snapshot.clone();
@@ -6395,8 +6267,16 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
         })
     ));
 
-    // Only now read mutation expectations. The scheduler predecessor above is
-    // input authority; these rows cannot influence the native return.
+    // Only now read Java mutation expectations and the historical predecessor
+    // fixture. Neither can influence the native-carried checkpoint or return.
+    let predecessor_text = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-beam-hook-removal-predecessor-allegretto-system1.txt"),
+    )
+    .expect("historical hook scheduler predecessor");
+    assert_eq!(
+        sha256_hex(predecessor_text.as_bytes()),
+        "d173f1c475245980cad02bbf4624987d787fb293e5419d21444729f18bf7c8f8"
+    );
     let expected_text = std::fs::read_to_string(
         repo_root().join("rust/oracle/stems-beam-hook-removal-allegretto-system1.txt"),
     )

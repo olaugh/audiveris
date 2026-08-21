@@ -402,7 +402,11 @@ pub fn apply_native_stems_beam_vlink_head_transaction_to_native_sig(
             .ok_or(NativeStemsBeamVLinkHeadLinksError::InvalidState {
                 phase: "native B17 stem vertex",
             })?;
-    if stem.kind != NativeSigInterKind::Stem || !stem.abnormal {
+    // A freshly created stem is abnormal before its first head callback, but
+    // a B13-selected existing stem can already be normal. B17 owns the live
+    // callback transition below, so only the runtime class is a predecessor
+    // invariant here.
+    if stem.kind != NativeSigInterKind::Stem {
         return Err(NativeStemsBeamVLinkHeadLinksError::InvalidState {
             phase: "native B17 post-B16 stem",
         });
