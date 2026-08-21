@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+    def repoRoot = providers.gradleProperty('rustPortRepo').get()
+    def outputDir = app.layout.buildDirectory.dir('rust-head-phase-two-x14/classes')
+    app.tasks.register('compileStemsHeadPhaseTwoX14Probe', JavaCompile) {
+        source = files(
+                providers.gradleProperty('phaseTwoHeadLinkerSource').get(),
+                providers.gradleProperty('phaseTwoProbeSource').get())
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+    app.tasks.register('stemsHeadPhaseTwoX14Probe', JavaExec) {
+        dependsOn 'compileStemsHeadPhaseTwoX14Probe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsHeadPhaseTwoPageProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '48g'
+        jvmArgs '-XX:+UnlockExperimentalVMOptions', '-XX:+UseEpsilonGC'
+        systemProperty 'logback.configurationFile',
+                "${repoRoot}/rust/oracle/java/logback-quiet.xml"
+        args = [providers.gradleProperty('phaseTwoPage').get()]
+    }
+}

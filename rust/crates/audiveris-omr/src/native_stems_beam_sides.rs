@@ -233,6 +233,10 @@ pub struct NativeStemsHeadCLinkTransaction {
     pub s_linker: NativeStemsBeamHeadSLinkerRef,
     pub s_linked_before: bool,
     pub s_linked_after: bool,
+    /// Ordered S-cell closure writes performed after the successful C-link.
+    /// Reused stems can already connect another head, so this is distinct
+    /// from the selected side's linked write and can be idempotent.
+    pub closed_s_linkers: Vec<NativeStemsBeamHeadSLinkerRef>,
     pub closed_cell_changes: usize,
     /// Java's final `HeadLinker.linkSides` return value. A successful C-link
     /// on the first horizontal side can still be followed by a same-stump
@@ -247,6 +251,17 @@ pub struct NativeStemsHeadCLinkTransaction {
     /// A C-link is atomic, but success on LEFT does not stop Java from
     /// evaluating RIGHT, so the outer call can own more than one mutation.
     pub following_side_transactions: Vec<NativeStemsHeadCLinkTransaction>,
+}
+
+/// One successful phase-2 append retry that reaches the native C-link
+/// transaction engine.
+///
+/// The C-link owns the graph/glyph/stem mutation; `continuation` restores the
+/// completed phase-1 cursor and advances only the carried phase-2 worklist.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase2CLinkTransaction {
+    pub c_link: NativeStemsHeadCLinkTransaction,
+    pub continuation: NativeStemsHeadPhase1Continuation,
 }
 
 /// One additional head relation planned by a multi-head C-link expansion.
@@ -5042,9 +5057,9 @@ pub fn advance_native_stems_head_open_frontier_order75(
 /// (`contrib > maxYGap`) when the walk has not yet reached the hard tail
 /// target, and again after every item has been seen if the tail target is
 /// still short.  Either way `link` returns false having built nothing.
-/// This helper decides only that outcome; any walk that does not stop at
-/// such a gap fails closed, because a successful phase-2 expansion would
-/// reach the unported `reuseStem` append path.
+/// This helper decides only that outcome. A `false` result means the walk
+/// reached `checkStemRelation`; callers without the native append authorities
+/// still fail closed, while the transactional phase-2 C-link path continues.
 fn bounded_phase_two_expand_returns_minus_one(
     corner: NativeStemsHeadCornerRef,
     stem_profile: i32,
@@ -5091,12 +5106,9 @@ fn bounded_phase_two_expand_returns_minus_one(
     if y_dir * java_double_compare(last_y, y_hard) < 0 {
         return Ok(true);
     }
-    // The walk reached the tail target, so Java would go on to
-    // checkStemRelation and, if that holds, build or reuse a stem.
-    Err(stage(
-        "HEADS-phase2-expand",
-        "phase-2 expansion reaches the hard tail target and the unported checkStemRelation append path",
-    ))
+    // The walk reached the tail target, so Java goes on to
+    // checkStemRelation and, if that holds, builds or reuses a stem.
+    Ok(false)
 }
 
 /// Authenticate the carried phase-2 queue without importing corpus-specific
@@ -5399,6 +5411,210 @@ pub fn advance_native_stems_head_phase_two_append_retry(
         closed_s_linkers,
         closed_value_changes,
         state_after: Box::new(shadow),
+    })
+}
+
+/// Execute Allegretto system 3's first real phase-2 append mutation.
+///
+/// The retry at x14/SIG50 first rejects the LEFT/TOP hard-tail expansion, then
+/// reaches RIGHT/BOTTOM. That C-link walks a start stump, the crossed x15
+/// head, and a contained chunk; Java reuses the already attached stem, adds
+/// only x14's missing HeadStem relation, and preserves x15's existing edge.
+/// All mutation is applied to a clone, and the completed phase-1 cursor is
+/// restored before the phase-2 continuation is returned.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    if !carrier.frontier_consumed || carrier.current_index != carrier.heads.len() {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "carrier is not the completed phase-1 terminal",
+        ));
+    }
+    authenticate_native_stems_head_phase_two_queue(carrier)?;
+    let queue_index = carrier.phase_two_index;
+    let head_ref = *carrier.unlinked_heads.get(queue_index).ok_or_else(|| {
+        stage(
+            "HEADS-phase2-CLink",
+            "phase-2 cursor is past the authenticated queue",
+        )
+    })?;
+    if head_corners.system_id != 3
+        || head_reachability.system_id != head_corners.system_id
+        || queue_index != 1
+        || head_ref.x_ordinal != 14
+        || head_ref.sig_ordinal != 50
+    {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "carrier is not the authenticated Allegretto system-3 x14 retry",
+        ));
+    }
+    let head_position = carrier
+        .heads
+        .iter()
+        .position(|head| head.reference == head_ref)
+        .ok_or_else(|| stage("HEADS-phase2-CLink", "queued head is missing"))?;
+    let head = &carrier.heads[head_position];
+    if head.grade.to_bits() != 0x3fc5_ec72_4df1_d54a
+        || head.sides.len() != 2
+        || head.sides[0].reference.horizontal != crate::stems_step::NativeStemHeadSide::Left
+        || head.sides[0].linked
+        || !head.sides[0].closed
+        || head.sides[1].reference.horizontal != crate::stems_step::NativeStemHeadSide::Right
+        || head.sides[1].linked
+        || !head.sides[1].closed
+    {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "x14 grade or carried S-cell state differs from the measured retry",
+        ));
+    }
+
+    let corner = |horizontal, vertical| NativeStemsHeadCornerRef {
+        head: head_ref.reference,
+        sig_ordinal: head_ref.sig_ordinal,
+        x_ordinal: head_ref.x_ordinal,
+        horizontal,
+        vertical,
+    };
+    let left_top = corner(
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemVerticalSide::Top,
+    );
+    let left_bottom = corner(
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemVerticalSide::Bottom,
+    );
+    let right_top = corner(
+        crate::stems_step::NativeStemHeadSide::Right,
+        crate::stems_step::NativeStemVerticalSide::Top,
+    );
+    let right_bottom = corner(
+        crate::stems_step::NativeStemHeadSide::Right,
+        crate::stems_step::NativeStemVerticalSide::Bottom,
+    );
+    let can_link = |corner| {
+        bounded_head_can_link(
+            corner,
+            0,
+            head_builders,
+            &carrier.beam_state.s_cells,
+            plans.min_linker_length,
+            true,
+        )
+    };
+    let (left_top_ok, left_bottom_ok, right_top_ok, right_bottom_ok) = (
+        can_link(left_top)?,
+        can_link(left_bottom)?,
+        can_link(right_top)?,
+        can_link(right_bottom)?,
+    );
+    if (left_top_ok, left_bottom_ok, right_top_ok, right_bottom_ok) != (true, false, false, true)
+        || !bounded_phase_two_expand_returns_minus_one(
+            left_top,
+            0,
+            head_builders,
+            head_reachability,
+        )?
+        || bounded_phase_two_expand_returns_minus_one(
+            right_bottom,
+            0,
+            head_builders,
+            head_reachability,
+        )?
+    {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "x14 corner decisions or expansion terminals differ from Java",
+        ));
+    }
+    let side_decisions = vec![
+        NativeStemsHeadPhase1SideDecision {
+            side: crate::stems_step::NativeStemHeadSide::Left,
+            linked_before: false,
+            closed_before: true,
+            top_can_link: Some(true),
+            bottom_can_link: Some(false),
+        },
+        NativeStemsHeadPhase1SideDecision {
+            side: crate::stems_step::NativeStemHeadSide::Right,
+            linked_before: false,
+            closed_before: true,
+            top_can_link: Some(false),
+            bottom_can_link: Some(true),
+        },
+    ];
+    let phase_two_frontier = NativeStemsHeadPhase1Frontier {
+        head: head_ref,
+        stem_profile: 0,
+        link_profile: plans.link_profile,
+        append: true,
+        side_decisions: side_decisions.clone(),
+        next_corner: right_bottom,
+    };
+    let mut shadow = carrier.clone();
+    shadow.current_index = head_position;
+    shadow.frontier = phase_two_frontier.clone();
+    shadow.frontier_consumed = false;
+    let c_link = advance_native_stems_head_c_link_at_frontier(
+        &mut shadow,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        None,
+        checker,
+        bridge,
+        head_position,
+        2,
+        2,
+        &phase_two_frontier,
+    )?;
+    if !matches!(
+        c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { .. }
+    ) || c_link.s_linker.head != head_ref
+        || c_link.s_linker.horizontal != crate::stems_step::NativeStemHeadSide::Right
+        || c_link.s_linked_before
+        || !c_link.s_linked_after
+        || !c_link.returned_linked
+        || c_link.terminal_undefined_side.is_some()
+        || !c_link.following_side_transactions.is_empty()
+    {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "x14 transaction did not produce the measured reused-stem result",
+        ));
+    }
+
+    shadow.current_index = carrier.current_index;
+    shadow.frontier = carrier.frontier.clone();
+    shadow.frontier_consumed = true;
+    shadow.phase_two_index = queue_index + 1;
+    let continuation = NativeStemsHeadPhase1Continuation {
+        processed_head: head_ref,
+        side_decisions,
+        returned_linked: Some(true),
+        closed_s_linkers: c_link.closed_s_linkers.clone(),
+        closed_value_changes: c_link.closed_cell_changes,
+        state_after: Box::new(shadow),
+    };
+    Ok(NativeStemsHeadPhase2CLinkTransaction {
+        c_link,
+        continuation,
     })
 }
 
@@ -11559,76 +11775,58 @@ fn advance_native_stems_head_c_link_at_frontier(
     let Some((start, tail)) = builder.items.split_first() else {
         return Err(stage("HEADS-CLink-expand", "selected builder is empty"));
     };
-    let mut tail = tail;
     let bounded_start = start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
         && start.glyph == builder.start_stump;
-    let chunk_count = tail
-        .iter()
-        .take_while(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph)
-        .count();
-    let (chunk_items, remaining_tail) = tail.split_at(chunk_count);
-    tail = remaining_tail;
-    let chunk_refs = chunk_items
-        .iter()
-        .map(|item| match (item.glyph, item.target) {
+    let mut chunk_refs = Vec::new();
+    let mut beam_targets = Vec::new();
+    let mut head_targets = Vec::new();
+    let mut bounded_tail = true;
+    for item in tail {
+        match (item.kind, item.glyph, item.target) {
             (
+                NativeStemsHeadBuilderItemKind::ChunkGlyph,
                 Some(NativeStemsHeadBuilderGlyphRef::Chunk {
                     builder_ordinal,
                     filament_ordinal,
                 }),
                 None,
-            ) if builder_ordinal == builder.builder_ordinal => Ok(filament_ordinal),
-            _ => Err(()),
-        })
-        .collect::<Result<Vec<_>, _>>();
-    let bounded_chunks = chunk_refs.as_ref().is_ok_and(|refs| {
-        refs.iter()
-            .enumerate()
-            .all(|(index, reference)| !refs[..index].contains(reference))
-    });
-    let has_chunk = chunk_count != 0;
-    let beam_targets = tail
-        .iter()
-        .map(|item| match (item.kind, item.glyph, item.target) {
+            ) if builder_ordinal == builder.builder_ordinal => {
+                chunk_refs.push(filament_ordinal);
+            }
             (
                 NativeStemsHeadBuilderItemKind::BeamLinker,
                 None,
                 Some(NativeStemsHeadBuilderTargetRef::Beam(target)),
-            ) => Ok(target),
-            _ => Err(()),
-        })
-        .collect::<Result<Vec<_>, _>>();
-    let head_targets = tail
-        .iter()
-        .map(|item| match (item.kind, item.glyph, item.target) {
+            ) => beam_targets.push(target),
             (
                 NativeStemsHeadBuilderItemKind::HeadHalfLinker,
                 Some(NativeStemsHeadBuilderGlyphRef::HeadStump { corner }),
                 Some(NativeStemsHeadBuilderTargetRef::Head(target)),
-            ) if corner == target => Ok(target),
-            _ => Err(()),
-        })
-        .collect::<Result<Vec<_>, _>>();
-    let beam_shape = beam_targets.as_ref().is_ok_and(|targets| {
-        targets
-            .iter()
-            .enumerate()
-            .all(|(index, target)| !targets[..index].contains(target))
-    });
-    // A start stump followed only by sibling head linkers is also safe to
-    // enter generically when the complete item span still misses Java's hard
-    // tail target. In that case `expand` returns -1 before createStem or any
-    // relation is applied. If the target is reached, fail closed below until
-    // the successful multi-head application itself is generalized here.
-    let head_shape = !has_chunk
-        && !tail.is_empty()
-        && head_targets.as_ref().is_ok_and(|targets| {
-            targets
-                .iter()
-                .enumerate()
-                .all(|(index, target)| !targets[..index].contains(target))
-        });
-    let bounded_shape = bounded_start && bounded_chunks && (beam_shape || head_shape);
+            ) if corner == target => head_targets.push(target),
+            _ => bounded_tail = false,
+        }
+    }
+    let bounded_chunks = chunk_refs
+        .iter()
+        .enumerate()
+        .all(|(index, reference)| !chunk_refs[..index].contains(reference));
+    let bounded_beams = beam_targets
+        .iter()
+        .enumerate()
+        .all(|(index, target)| !beam_targets[..index].contains(target));
+    let bounded_heads = head_targets
+        .iter()
+        .enumerate()
+        .all(|(index, target)| !head_targets[..index].contains(target));
+    let beam_shape = !beam_targets.is_empty() && head_targets.is_empty();
+    let head_shape = beam_targets.is_empty() && !head_targets.is_empty();
+    let plain_shape = beam_targets.is_empty() && head_targets.is_empty();
+    let bounded_shape = bounded_start
+        && bounded_tail
+        && bounded_chunks
+        && bounded_beams
+        && bounded_heads
+        && (beam_shape || head_shape || plain_shape);
     if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
@@ -11652,16 +11850,8 @@ fn advance_native_stems_head_c_link_at_frontier(
             ),
         ));
     }
-    let beam_targets = if beam_shape {
-        beam_targets.expect("bounded beam-linker shape was authenticated")
-    } else {
-        Vec::new()
-    };
-    let head_targets = if head_shape {
-        head_targets.expect("bounded head-linker rejection shape was authenticated")
-    } else {
-        Vec::new()
-    };
+    let beam_targets = if beam_shape { beam_targets } else { Vec::new() };
+    let head_targets = if head_shape { head_targets } else { Vec::new() };
     let beam_stopped = !beam_targets.is_empty();
     if !beam_targets.is_empty() && beam_vlinkers.is_none() {
         return Err(stage(
@@ -12317,7 +12507,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         }
         queued_cell.linked = true;
         let current = shadow.heads[expected_current_index].clone();
-        let (_, closed_cell_changes) = close_heads_sharing_prelinked_stems(
+        let (closed_s_linkers, closed_cell_changes) = close_heads_sharing_prelinked_stems(
             &shadow.beam_state.sig,
             &shadow.beam_state.bindings,
             &mut shadow.beam_state.s_cells,
@@ -12353,6 +12543,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             s_linker: s_ref,
             s_linked_before,
             s_linked_after: true,
+            closed_s_linkers,
             closed_cell_changes,
             returned_linked: true,
             terminal_undefined_side: None,
@@ -12617,6 +12808,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         s_linker: s_ref,
         s_linked_before,
         s_linked_after: true,
+        closed_s_linkers: Vec::new(),
         closed_cell_changes: 0,
         returned_linked: true,
         terminal_undefined_side: None,

@@ -8860,8 +8860,55 @@ The strict test reuses Boundary 177's full-page fixture and runner, SHA-256
 and pins Java grade bits `3fe8d8c228e9b518`, the
 Neither/SkipAlreadyLinked decision pair, unchanged graph/sides, and preserved
 undefined RIGHT. Focused 1/1 and full sibling 20/20 (161.95s) pass with
-formatting, strict all-features workspace Clippy, and diff checks. The current
-exact remote baseline is Boundary 177 commit `61c52f133`: Build & Test
-32524051345 and Rust port 32524051339 both succeeded, all 12 Rust shards
-green. Resume at retry index 1 x14/SIG50, whose
+formatting, strict all-features workspace Clippy, and diff checks. Boundary
+178 commit `e99e93a92` is the exact remote baseline: Build & Test 32528147579
+and Rust port 32528147610 both succeeded, all 12 Rust shards green. Resume at
+retry index 1 x14/SIG50, whose
 real append mutation is still deliberately fail-closed.
+
+## Boundary 179: Allegretto system-3 phase-2 x14 append
+
+`advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14`
+closes the first mutating retry in Allegretto system 3. At retry index 1,
+x14/SIG50/Java Inter 1777 has both horizontal sides unlinked/closed. Java's
+LEFT/TOP corner is linkable but its expansion returns `-1`; RIGHT/BOTTOM is
+linkable and succeeds. The generic C-link walk now accepts the measured
+start-head, crossed-head, then chunk ordering. It selects native glyph 204
+(Java glyph 414, bounds 550:1581:3:88, weight 194), resolves the active
+existing Stem 3148 (native stem identity 30 / vertex 247), and adds only
+HeadStem edge 327 from x14. The crossed x15 relation already exists as edge
+256 and is not duplicated.
+
+The transaction advances SIG edges 317 to 318 while preserving 267 vertices,
+52 system stems, allocator 3170, and glyph identities. Java and native agree
+on the reused stem's exact grade, bounds, median, and width; x14's relation
+grade/dx/extension/consistency bits are
+`3fed98996cac8bf2` / `3f9c4c548b8fedb7` /
+`408134a485dee59d:4098840000000000` / `3ff7f2116a3b35fd`.
+The reused-stem closure visits x15, x18, and x19 LEFT then RIGHT, all
+idempotently, and the transaction restores the exhausted phase-1 cursor while
+advancing `phase_two_index` from one to two. The next retry is
+x13/SIG0/Java Inter 1675, grade bits `3fc5aea35e22900d`.
+
+The dedicated 6-line / 3,825-byte minimized Java oracle is byte-identical
+across warmup plus two fresh runs. Fixture, runner, transform, init script,
+emitted-body/semantic, input, base-probe, source `HeadLinker.java`, and
+transformed-source SHA-256 values are
+`f8a18f4ac17d036e0f3481983474d3569668437c6d53670b7f454f707baad1ba`,
+`5f530a9fca946f6ed74877713452b7a64fd66f98810654113a700cd6ee61ced3`,
+`69258e54539f10d7771718a8660b2e012db286c4cfdc7285876831da64f77c92`,
+`b7c2b721836f8238295dfe0ec01b5add5b1b181a82876fa3420c255a205213b8`,
+`cc3d82763e50f425ff96c8551f3e7fdcc3bb55d594a904cb4bb02087f278dd2b`,
+`a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065`,
+`7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2`,
+`f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993`,
+and `76d5028c4756a2cbd01f9f5514639fbea222339755f9deba318749feacfba24a`.
+The runner strictly pins the Boundary-177/178 full-page runner and fixture at
+`9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331` /
+`242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c`.
+
+Focused 1/1, full sibling 20/20 (163.26s), and the canonical standard-feature
+workspace suite pass with formatting, strict all-features workspace Clippy,
+and diff checks. The exact remote predecessor is Boundary 178 commit
+`e99e93a92`: Build & Test 32528147579 and Rust port 32528147610 both
+succeeded, all 12 Rust shards green. Resume at retry index 2, x13/SIG0.
