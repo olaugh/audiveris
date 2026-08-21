@@ -357,12 +357,24 @@ pub fn infer_signature(
                 peak_count -= 1;
             }
             if peak_count / 2 > 7 {
-                0
+                // Recall-first divergence from Java: retain the earliest legal seven-sharp
+                // prefix and let glyph/pitch validation peel any musical-event overrun. A zero
+                // here makes genuine evidence irrecoverable, whereas a surplus slice remains
+                // inspectable downstream.
+                let keep = 14;
+                range.shrink_stop(peaks[keep].min - 1);
+                peaks.truncate(keep);
+                7
             } else {
                 i32::try_from(peak_count / 2).unwrap_or(0)
             }
         } else if peak_count > 7 {
-            0
+            // As above, keep the maximum legal leading flat sequence. Later classification and
+            // clef-relative pitch checks are the appropriate reversible place to reject extras.
+            let keep = 7;
+            range.shrink_stop(peaks[keep].min - 1);
+            peaks.truncate(keep);
+            -7
         } else {
             -i32::try_from(peak_count).unwrap_or(0)
         }
@@ -506,23 +518,72 @@ pub fn compute_starts(
             range,
         );
     } else if signature < 0 {
+        let range_start = range.start().unwrap_or(range.browse_start);
         let first = peaks[0];
-        let flat_heading = first.min - range.start().unwrap_or(range.browse_start);
-        if flat_heading <= parameters.max_flat_heading {
-            starts.push(range.start().unwrap_or(range.browse_start));
-            for peak in &peaks[1..] {
-                starts.push(peak.min);
-            }
-            refine_shape_stop(
-                peaks.last().expect("negative signature implies peaks"),
-                parameters.std_flat_trail,
-                parameters.max_flat_trail,
-                projection,
-                range,
-            );
+        let flat_heading = first.min - range_start;
+        starts.push(range_start);
+        if flat_heading > parameters.max_flat_heading && peaks.len() < 7 {
+            // A large left heading commonly means projection missed the thin stem of the first
+            // flat while `refineAreaStart` still found its bowl. Preserve that area as an empty
+            // leading slot, then start one slot at every observed peak. The component/pitch pass
+            // must still find a flat at the expected clef-relative pitch, so this is a visual
+            // recovery rather than a neighbouring-staff hint.
+            starts.extend(peaks.iter().map(|peak| peak.min));
+        } else {
+            starts.extend(peaks[1..].iter().map(|peak| peak.min));
         }
+        refine_shape_stop(
+            peaks.last().expect("negative signature implies peaks"),
+            parameters.std_flat_trail,
+            parameters.max_flat_trail,
+            projection,
+            range,
+        );
     }
     starts
+}
+
+/// Extend an observed accidental sequence with reversible visual-search slots.
+///
+/// Projection peaks are an efficient seed, not proof that every accidental exists: a worn or
+/// tilted flat can retain enough bowl ink for the glyph classifier while losing the thin vertical
+/// run required by the peak finder. Once two item starts establish local spacing, continue to the
+/// seven-accidental hard cap (or the header browse boundary). Empty slots still need a matching
+/// glyph at the correct clef-relative pitch downstream; they do not become key members by fiat.
+pub fn extend_starts_greedily(
+    starts: &mut Vec<i32>,
+    range: &mut StaffHeaderRange,
+    maximum_items: usize,
+    maximum_spacing: i32,
+) {
+    if starts.len() < 2 || starts.len() >= maximum_items {
+        return;
+    }
+    let mut deltas = starts
+        .windows(2)
+        .map(|window| window[1] - window[0])
+        .filter(|&delta| delta > 0 && delta <= maximum_spacing)
+        .collect::<Vec<_>>();
+    if deltas.is_empty() {
+        return;
+    }
+    deltas.sort_unstable();
+    let spacing = deltas[deltas.len() / 2];
+    let browse_stop = range.browse_stop;
+    while starts.len() < maximum_items {
+        let next = starts
+            .last()
+            .copied()
+            .expect("two starts exist")
+            .saturating_add(spacing);
+        if next > browse_stop {
+            break;
+        }
+        starts.push(next);
+    }
+    if let Some(&last) = starts.last() {
+        range.set_stop(browse_stop.min(last.saturating_add(spacing).saturating_sub(1)));
+    }
 }
 
 /// Java `ShapeBuilder.allocateSlices`: tile `[start, next_start - 1]`, the last one to the stop.
@@ -654,6 +715,72 @@ mod tests {
         assert_eq!(signature, -2);
         assert_eq!(peaks.len(), 2);
         assert_eq!(range.stop(), 132, "the sharp-like suffix is excluded");
+    }
+
+    #[test]
+    fn flat_inference_retains_the_maximum_legal_prefix() {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 100;
+        range.browse_stop = 400;
+        range.set_start(100);
+        let mut peaks = (0..9)
+            .map(|index| KeyPeak {
+                min: 101 + (index * 22),
+                main: 102 + (index * 22),
+                max: 104 + (index * 22),
+                height: 40,
+                area: 50,
+            })
+            .collect::<Vec<_>>();
+
+        let signature = infer_signature(&mut peaks, &mut range, KeyShapeKind::Flat, &parameters());
+
+        assert_eq!(signature, -7);
+        assert_eq!(peaks.len(), 7);
+        assert_eq!(
+            range.stop(),
+            254,
+            "the eighth peak begins rejected suffix ink"
+        );
+    }
+
+    #[test]
+    fn flat_starts_preserve_a_missing_leading_accidental_slot() {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 100;
+        range.browse_stop = 240;
+        range.set_start(100);
+        range.set_stop(220);
+        let peaks = [120, 142, 164, 186]
+            .into_iter()
+            .map(|min| KeyPeak {
+                min,
+                main: min + 1,
+                max: min + 3,
+                height: 40,
+                area: 50,
+            })
+            .collect::<Vec<_>>();
+        let projection = IntegerFunction::new(0, 240);
+
+        let starts = compute_starts(-4, &peaks, &projection, &parameters(), &mut range);
+
+        assert_eq!(starts, vec![100, 120, 142, 164, 186]);
+    }
+
+    #[test]
+    fn greedy_extension_keeps_searching_to_the_hard_cap() {
+        let mut range = StaffHeaderRange::default();
+        range.browse_start = 100;
+        range.browse_stop = 260;
+        range.set_start(100);
+        range.set_stop(185);
+        let mut starts = vec![100, 121, 143, 165];
+
+        extend_starts_greedily(&mut starts, &mut range, 7, 30);
+
+        assert_eq!(starts, vec![100, 121, 143, 165, 187, 209, 231]);
+        assert_eq!(range.stop(), 252);
     }
 
     #[test]

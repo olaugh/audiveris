@@ -24,8 +24,8 @@ use audiveris_music_font::{FLAT_MASS_PITCH_OFFSET, MusicFamily, area_pitch_offse
 use crate::clef_column::{chamfer_gap, component_pixels, push_unique};
 use crate::key_parameters::KeyPipelineParameters;
 use crate::key_peaks::{
-    KeyPeak, KeyShapeKind, allocate_slices, browse_area, compute_starts, infer_signature,
-    merge_peaks, purge_light_peaks, refine_signature,
+    KeyPeak, KeyShapeKind, allocate_slices, browse_area, compute_starts, extend_starts_greedily,
+    infer_signature, merge_peaks, purge_light_peaks,
 };
 use crate::{
     clef_column::NeutralClefKind,
@@ -1898,9 +1898,34 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
             )?;
             merge_peaks(&mut peaks, &projection, &pipeline);
             purge_light_peaks(&mut peaks, kind, &pipeline);
+            let trace_keys = std::env::var_os("AUDIVERIS_TRACE_KEYS").is_some();
+            if trace_keys {
+                eprintln!(
+                    "KEY staff={} shape={shape:?} browse={}..{} raw_peaks={:?}",
+                    input.staff_id,
+                    range.browse_start,
+                    range.browse_stop,
+                    peaks.iter().map(KeyPeak::center).collect::<Vec<_>>()
+                );
+            }
+            // Keep the complete projection-derived accidental sequence alive through glyph and
+            // clef/pitch validation. Java's trailing-ink and weighted-spacing refinements are
+            // precision-first: on uneven or tilted scans they irreversibly delete a genuine last
+            // flat/sharp before the classifier can inspect it. Extra slices are recoverable here
+            // because they still have to classify as this accidental shape and fit the clef; a
+            // missing slice is not. `infer_signature` retains the seven-accidental hard cap and
+            // the header browse boundary.
             let signature = infer_signature(&mut peaks, &mut range, kind, &pipeline);
-            let signature = refine_signature(signature, &mut peaks, &mut range, &pipeline);
-            let starts = compute_starts(signature, &peaks, &projection, &pipeline, &mut range);
+            let mut starts = compute_starts(signature, &peaks, &projection, &pipeline, &mut range);
+            extend_starts_greedily(&mut starts, &mut range, 7, pipeline.max_peak_dx);
+            if trace_keys {
+                eprintln!(
+                    "KEY staff={} shape={shape:?} signature={signature} range={:?} peaks={:?} starts={starts:?}",
+                    input.staff_id,
+                    range,
+                    peaks.iter().map(KeyPeak::center).collect::<Vec<_>>()
+                );
+            }
             if starts.is_empty() {
                 continue;
             }
@@ -2117,20 +2142,86 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
                 .get(&input.staff_id)
                 .cloned()
                 .unwrap_or_default();
-            if !clefs.is_empty()
-                && !self.check_with_clefs_and_fill(
-                    &input,
-                    context,
-                    &parameters,
-                    &pipeline,
-                    shape,
-                    &clefs,
-                    &peaks,
-                    &mut slices,
-                    flat_area_offset,
-                )?
-            {
-                continue;
+            if !clefs.is_empty() {
+                // A greedily extended projection can include the first musical-event peak or an
+                // extra vertical peak from a flat's bowl. Do not let either recoverable surplus
+                // shift/destroy the genuine signature. Validate every ordered slice subsequence,
+                // longest first. This remains staff-local: no neighbouring staff/system value is
+                // used to invent the result, and every retained item still needs visual glyph and
+                // clef-relative pitch support.
+                let original_slices = slices;
+                let mut compatible = None;
+                // The first slice is anchored by `refineAreaStart` (or the explicit missing-first
+                // recovery slot) and must remain. Allowing arbitrary left truncation creates
+                // shifted duplicate keys that compete in lifecycle selection.
+                let mut masks = (1usize..(1usize << original_slices.len()))
+                    .filter(|mask| mask & 1 != 0)
+                    .collect::<Vec<_>>();
+                masks.sort_by_key(|&mask| {
+                    let evidenced = original_slices
+                        .iter()
+                        .enumerate()
+                        .filter(|&(index, slice)| {
+                            mask & (1usize << index) != 0 && slice.glyph.is_some()
+                        })
+                        .count();
+                    (
+                        std::cmp::Reverse(evidenced),
+                        std::cmp::Reverse(mask.count_ones()),
+                        std::cmp::Reverse(mask.trailing_ones()),
+                        mask,
+                    )
+                });
+                for mask in masks {
+                    let mut subsequence = original_slices
+                        .iter()
+                        .enumerate()
+                        .filter(|&(index, _)| mask & (1usize << index) != 0)
+                        .map(|(_, slice)| slice.clone())
+                        .collect::<Vec<_>>();
+                    if self.check_with_clefs_and_fill(
+                        &input,
+                        context,
+                        &parameters,
+                        &pipeline,
+                        shape,
+                        &clefs,
+                        &peaks,
+                        &mut subsequence,
+                        flat_area_offset,
+                    )? {
+                        compatible = Some(subsequence);
+                        break;
+                    }
+                }
+                let Some(prefix) = compatible else {
+                    if trace_keys {
+                        eprintln!(
+                            "KEY staff={} shape={shape:?} rejected_by_clef slices={:?}",
+                            input.staff_id,
+                            original_slices
+                                .iter()
+                                .map(|slice| (slice.start, slice.stop, slice.grade, slice.pitch))
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    continue;
+                };
+                slices = prefix;
+                if let Some(last) = slices.last() {
+                    range.shrink_stop(last.stop);
+                }
+            }
+
+            if trace_keys {
+                eprintln!(
+                    "KEY staff={} shape={shape:?} final_slices={:?}",
+                    input.staff_id,
+                    slices
+                        .iter()
+                        .map(|slice| (slice.start, slice.stop, slice.grade, slice.pitch))
+                        .collect::<Vec<_>>()
+                );
             }
 
             // ---- Alters in slice order ----
@@ -2197,16 +2288,180 @@ impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry> VisualKeyProposa
 
     fn replicate_key(
         &mut self,
-        _system_id: usize,
-        _target_staff_id: usize,
-        _source: &NeutralKeyCandidate,
-        _global_offsets: &[i32],
+        system_id: usize,
+        target_staff_id: usize,
+        source: &NeutralKeyCandidate,
+        global_offsets: &[i32],
     ) -> Result<KeyReplication, Self::Error> {
+        let Some(context) = self.contexts.get(&target_staff_id).copied() else {
+            return Ok(KeyReplication {
+                status: KeyReplicationStatus::NoReplicate,
+                replacement: None,
+            });
+        };
+        let Some(parameters) = self.parameters.get(&target_staff_id).copied() else {
+            return Ok(KeyReplication {
+                status: KeyReplicationStatus::NoReplicate,
+                replacement: None,
+            });
+        };
+        let Some(clef) = self
+            .clef_supports
+            .get(&target_staff_id)
+            .and_then(|clefs| {
+                clefs
+                    .iter()
+                    .filter(|clef| {
+                        key_pitches(
+                            clef.kind,
+                            if source.fifths < 0 {
+                                NeutralKeyAlterShape::Flat
+                            } else {
+                                NeutralKeyAlterShape::Sharp
+                            },
+                        )
+                        .is_some()
+                    })
+                    .max_by(|one, two| one.grade.total_cmp(&two.grade))
+            })
+            .copied()
+        else {
+            return Ok(KeyReplication {
+                status: KeyReplicationStatus::NoClef,
+                replacement: None,
+            });
+        };
+        let count = usize::from(source.fifths.unsigned_abs());
+        if count == 0 || count > 7 || global_offsets.len() < count {
+            return Ok(KeyReplication {
+                status: KeyReplicationStatus::NoReplicate,
+                replacement: None,
+            });
+        }
+        let shape = if source.fifths < 0 {
+            NeutralKeyAlterShape::Flat
+        } else {
+            NeutralKeyAlterShape::Sharp
+        };
+        let expected = key_pitches(clef.kind, shape).expect("filtered above");
+        let source_raster = self
+            .sources
+            .get(&system_id)
+            .ok_or(NativeKeyError::MissingSource(system_id))?
+            .clone();
+        // Staffs in one system share the same measure-start abscissa. Recover it from the source
+        // slice and its system-wide offset rather than from the target clef stop (which is later).
+        let measure_start = source.slices[0].start.saturating_sub(global_offsets[0]);
+
+        // Java's paired-staff replication is deliberately a fallback: the target staff's own
+        // projection/classifier pass has already failed.  Place each requested accidental at the
+        // system-wide offset, but accept it only when the target raster contains local ink.  Thus
+        // the neighbouring staff nominates where to look; it does not fabricate an accidental.
+        let widths = source
+            .slices
+            .iter()
+            .map(|slice| slice.width.max(1))
+            .collect::<Vec<_>>();
+        let heights = source
+            .slices
+            .iter()
+            .filter_map(|slice| slice.alter_bounds.map(|bounds| bounds.height))
+            .collect::<Vec<_>>();
+        let default_width = widths
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(context.staff_interline);
+        let default_height = heights
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(context.staff_interline * 2);
+        let mut slices = Vec::with_capacity(count);
+        let mut bounds = None;
+        for index in 0..count {
+            let start = measure_start.saturating_add(global_offsets[index]);
+            let width = widths.get(index).copied().unwrap_or(default_width);
+            let x = start + width / 2;
+            let Some(center_y) = self.pitch_to_ordinate(
+                target_staff_id,
+                context,
+                f64::from(x),
+                f64::from(expected[index]),
+            ) else {
+                return Ok(KeyReplication {
+                    status: KeyReplicationStatus::NoReplicate,
+                    replacement: None,
+                });
+            };
+            let item = HeaderBounds {
+                x: start,
+                y: center_y - default_height / 2,
+                width,
+                height: default_height,
+            };
+            let ink = black_pixels_in(&source_raster, item);
+            if ink < parameters.minimum_component_weight {
+                return Ok(KeyReplication {
+                    status: KeyReplicationStatus::NoReplicate,
+                    replacement: None,
+                });
+            }
+            let alter_id = self.inter_id()?;
+            slices.push(NeutralKeySlice {
+                start,
+                width,
+                alter_id: Some(alter_id),
+                alter_bounds: Some(item),
+            });
+            bounds = Some(bounds.map_or(item, |mut union: HeaderBounds| {
+                let right = union.right().max(item.right());
+                let bottom = (union.y + union.height - 1).max(item.y + item.height - 1);
+                union.x = union.x.min(item.x);
+                union.y = union.y.min(item.y);
+                union.width = right - union.x + 1;
+                union.height = bottom - union.y + 1;
+                union
+            }));
+        }
+        let id = self.inter_id()?;
+        let bounds = bounds.expect("positive count");
+        let mut range = source.range.clone();
+        range.browse_start = context.clef_ink_stop.map_or(range.browse_start, |x| x + 1);
+        range.set_start(bounds.x);
+        range.shrink_stop(bounds.right());
         Ok(KeyReplication {
-            status: KeyReplicationStatus::NoReplicate,
-            replacement: None,
+            status: KeyReplicationStatus::Ok,
+            replacement: Some(NeutralKeyCandidate {
+                id,
+                fifths: source.fifths,
+                grade: source.grade * 0.8,
+                contextual_grade: source.contextual_grade.map(|grade| grade * 0.8),
+                bounds,
+                range,
+                slices,
+                in_sig: false,
+                staff_id: Some(target_staff_id),
+                frozen: false,
+                removed: false,
+            }),
         })
     }
+}
+
+fn black_pixels_in(source: &RunTable, bounds: HeaderBounds) -> usize {
+    let mut count = 0;
+    for y in bounds.y..bounds.y.saturating_add(bounds.height) {
+        for x in bounds.x..bounds.x.saturating_add(bounds.width) {
+            let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+                continue;
+            };
+            if x < source.width() && y < source.height() && source.get(x, y) == FOREGROUND {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 impl<Classifier: KeyShapeClassifier, Lines: StaffPitchGeometry>

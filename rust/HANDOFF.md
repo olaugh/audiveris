@@ -25,6 +25,20 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
+On 2026-08-20 native key recognition became deliberately recall-first for hard
+scans. Projection peaks seed an accidental sequence but no longer truncate it
+before glyph and clef-relative pitch validation; the legal leading seven are
+retained, weak missing-first and trailing slots remain searchable, and ordered
+subsequences let later validation discard surplus ink. The previously inert
+native paired-staff replication hook now nominates system-aligned positions but
+accepts them only when every target box contains local raster ink. This moves
+the five flattened Graceful Ghost Rag pages from 33/50 to 50/50 key headers,
+with coherent five-flat outer and six-flat middle sections. The targeted key
+column and key peak suites pass; Serpent's Kiss improves from 90/95 to 92/95,
+and Beethoven retains 202 recognized keys. The strict Java-parity header corpus
+is not an accuracy gate for this branch because it intentionally flags these
+hard-scan divergences (as it already does for Rust's corrected cut-time result).
+
 On 2026-08-17 the hard-scan GRID path permanently moved its final bar tail to
 the explicit system staff sequence for `recordBars`, `createGroups`, and
 `createParts`; empty surviving-peak sets no longer erase staff ownership.
