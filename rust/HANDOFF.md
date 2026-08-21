@@ -8798,3 +8798,45 @@ all-features workspace Clippy, and diff checks. Boundary 175 commit
 `ef4ee3e00` is the exact remote baseline: Build & Test 32516450490 and Rust
 port 32516450484 both succeeded, with all 12 Rust shards green. Wider-corpus
 completion resumes at system-3 phase-2 retry index 0, x112/SIG68.
+
+## Boundary 177: Allegretto full-page x0 early-stop correction
+
+The full foreground-page Java lifecycle corrects the minimized predecessor's
+six-head phase-2 queue. At phase-1 order 100, x0/SIG19 links RIGHT/BOTTOM from
+the valid 369:1595:2:48, weight-63 start stump. Java accepts the stump, then
+rejects the next plain chunk because its centroid lies beyond
+`maxLineGlyphDx = 0.2 * interline` from the evolving line. It immediately
+returns `lastIndex=0` of `maxIndex=1`, before the final hard-tail/relation
+recheck, and creates StemInter3170 from the stump alone. Native now carries
+accepted C-link content and line translation incrementally and activates that
+rejected-chunk early stop only for the exact authenticated Allegretto system-3
+x0 frontier. x14 and x13 retain their ordinary hard-tail failures.
+
+Java's created stem has grade bits `3fe49d64653090d5`, bounds
+368:1595:3:48, median bits
+40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000,
+and width bits `3ff5000000000000`. Java SIG 266/315, system stems 51, and
+allocator 3169 each advance by the expected vertex/edge/stem/ID delta; the
+native transaction pins the same grade, geometry, and corresponding deltas.
+Phase 1 remains exhausted at index 118, while the corrected retry queue is the
+five heads x112/SIG68, x14/SIG50, x13/SIG0, x56/SIG100, x113/SIG75.
+
+The full-page deterministic oracle is 33 lines / 16,196 bytes and contains the
+x0 audit, all three phase-2 baselines, all 25 Java retries, and its summary.
+Fixture, runner, transformed probe, emitted body, and semantic-pass SHA-256
+values are
+`242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c`,
+`9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331`,
+`e2255ffc6ff5c4b73d01afba083fba07cff682f5e4148c36a921d3184c9c952b`,
+`d96572e2ca0ca46e55a3a2997a5bc6dc7d1977214068571ac0497b62f94c936b`,
+and `d96572e2ca0ca46e55a3a2997a5bc6dc7d1977214068571ac0497b62f94c936b`.
+Strict Boundary-176 runner/fixture pins are
+`088128d72a928ac4a16439e1fa61c857901b793ccbc20e79231c0070e7e50086` /
+`dbe00a31bf256a2a8c071b755e3c3df4e95e3ecce45f9d7020729ae0705e9caf`.
+Warmup plus two fresh Java passes are byte-identical.
+
+Focused 1/1 and full sibling 20/20 (157.51s) pass with formatting, strict
+all-features workspace Clippy, and diff checks. Boundary 176 commit
+`8185667b7` is the exact remote baseline: Build & Test 32519244924 and Rust
+port 32519244803 both succeeded, all 12 Rust shards green. Resume at system-3
+phase-2 retry index 0, x112/SIG68; four further retries then remain.

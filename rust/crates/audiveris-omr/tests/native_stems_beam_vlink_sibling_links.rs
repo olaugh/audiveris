@@ -39,7 +39,7 @@ use audiveris_omr::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
-        NativeStemsHeadPhase1SideDecision,
+        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1SideDecision,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_beam_stumps_transaction_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link, advance_native_stems_head_continuation_c_link,
@@ -220,6 +220,10 @@ const BATUQUE_PHASE_TWO_PROBE: &[u8] =
     include_bytes!("../../../oracle/java/StemsHeadPhaseTwoPageProbe.java");
 const BATUQUE_PHASE_TWO_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-page.init.gradle");
+const ALLEGRETTO_PHASE_TWO_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-allegretto.txt");
+const ALLEGRETTO_PHASE_TWO_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-allegretto.sh");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -9918,18 +9922,45 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     // queue 115 is the measured no-link branch rather than a spurious
     // successful hard-tail expansion.
     let mut audit = start.carrier.clone();
+    let mut x0_transaction = None;
+    let mut x0_before = None;
+    let mut x0_after = None;
+    let carrier_counts = |carrier: &NativeStemsHeadPhase1Carrier| {
+        (
+            carrier.beam_state.sig.vertices.len(),
+            carrier.beam_state.sig.edges.len(),
+            carrier
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+            carrier
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .glyph_index
+                .persistent_ids
+                .sheet_last_id,
+        )
+    };
     while audit.current_index < 115 {
+        let audit_head = audit.heads[audit.current_index].reference;
         if audit.frontier_consumed {
-            audit = *continue_native_stems_head_linking_phase1(
+            let next = continue_native_stems_head_linking_phase1(
                 &audit,
                 head_corners,
                 Some(head_reachability),
                 head_builders,
                 plans,
             )
-            .expect("audit continuation before queue 115")
-            .state_after;
+            .expect("audit continuation before queue 115");
+            audit = *next.state_after;
         } else {
+            if audit_head.x_ordinal == 0 && audit_head.sig_ordinal == 19 {
+                x0_before = Some(carrier_counts(&audit));
+            }
             let outcome = advance_native_stems_head_c_link_or_no_link(
                 &mut audit,
                 head_corners,
@@ -9942,11 +9973,90 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
                 &start.registry,
             )
             .expect("audit C-link before queue 115");
-            if let Err(next) = outcome {
-                audit = *next.state_after;
+            match outcome {
+                Ok(transaction) if audit_head.x_ordinal == 0 && audit_head.sig_ordinal == 19 => {
+                    x0_after = Some(carrier_counts(&audit));
+                    x0_transaction = Some(transaction);
+                }
+                Ok(_) => {}
+                Err(next) => audit = *next.state_after,
             }
         }
     }
+    let x0_transaction = x0_transaction.expect("system-3 x0 checked-stem transaction");
+    assert_eq!(x0_transaction.corner.x_ordinal, 0);
+    assert_eq!(x0_transaction.corner.sig_ordinal, 19);
+    assert_eq!(x0_transaction.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(
+        x0_transaction.corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(
+        (x0_transaction.last_index, x0_transaction.max_index),
+        (0, 1)
+    );
+    assert_eq!(
+        x0_transaction.create.candidate.bounds,
+        audiveris_image::section::Bounds {
+            x: 369,
+            y: 1_595,
+            width: 2,
+            height: 48,
+        }
+    );
+    assert_eq!(x0_transaction.create.candidate.weight, 63);
+    assert_eq!(
+        x0_transaction.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 51 }
+    );
+    let x0_stem = x0_transaction
+        .create
+        .stem
+        .as_ref()
+        .expect("system-3 x0 checked stem");
+    assert_eq!(x0_stem.stem_identity, 51);
+    assert_eq!(
+        match &x0_stem.grade {
+            NativeStemsBeamStemGrade::Checked(check) => check.grade.to_bits(),
+            NativeStemsBeamStemGrade::Artificial(_) => panic!("x0 stem is checked"),
+        },
+        0x3fe4_9d64_6530_90d5
+    );
+    assert_eq!(
+        x0_stem.geometry.ribbon_bounds,
+        JavaRectangle::new(368, 1_595, 3, 48)
+    );
+    assert_eq!(
+        x0_stem.geometry.median.start.x.to_bits(),
+        0x4077_1723_de22_d21c
+    );
+    assert_eq!(
+        x0_stem.geometry.median.start.y.to_bits(),
+        0x4098_ec00_0000_0000
+    );
+    assert_eq!(
+        x0_stem.geometry.median.stop.x.to_bits(),
+        0x4077_1f7f_d38f_fa01
+    );
+    assert_eq!(
+        x0_stem.geometry.median.stop.y.to_bits(),
+        0x4099_ac00_0000_0000
+    );
+    assert_eq!(
+        x0_stem.geometry.mean_thickness.to_bits(),
+        0x3ff5_0000_0000_0000
+    );
+    let before_counts = x0_before.expect("x0 pre-transaction counts");
+    let after_counts = x0_after.expect("x0 post-transaction counts");
+    assert_eq!(
+        after_counts,
+        (
+            before_counts.0 + 1,
+            before_counts.1 + 1,
+            before_counts.2 + 1,
+            before_counts.3 + 1,
+        )
+    );
     assert_eq!(audit.current_index, 115);
     assert!(audit.frontier_consumed);
     let x108 = audit
@@ -10130,7 +10240,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
             .iter()
             .map(|head| (head.x_ordinal, head.sig_ordinal))
             .collect::<Vec<_>>(),
-        [(112, 68), (0, 19), (14, 50), (13, 0), (56, 100), (113, 75)]
+        [(112, 68), (14, 50), (13, 0), (56, 100), (113, 75)]
     );
     assert!(queue117.state_after.frontier_consumed);
     assert_eq!(
@@ -10144,6 +10254,103 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(
         queue117.state_after.unlinked_heads,
         before117.unlinked_heads
+    );
+
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_FIXTURE.as_bytes()),
+        "242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_RUNNER),
+        "9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_PROBE),
+        "7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_INIT),
+        "1defbc545668eb711395283bc0d8f9216b7402ad3b0f2f64f93812ac739c495e"
+    );
+    let allegretto_phase_two_rows = ALLEGRETTO_PHASE_TWO_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(allegretto_phase_two_rows.len(), 31);
+    assert_eq!(
+        allegretto_phase_two_rows
+            .iter()
+            .filter(|line| line.starts_with("stemsheadphase2retry "))
+            .count(),
+        25
+    );
+    assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase1audit page allegretto.png#1 system 3 headOrder 100 headX 0 headSig 19 returned true glyph 369:1595:2:48 weight 63 stemId 3170 grade 3fe49d64653090d5 bounds 368:1595:3:48 median 40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000 width 3ff5000000000000 rightBottomStump 369:1595:2:48 sigVerticesBefore 266 sigVerticesAfter 267 sigEdgesBefore 315 sigEdgesAfter 316 systemStemsBefore 51 systemStemsAfter 52 allocatorBefore 3169 allocatorAfter 3170"));
+    assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2baseline page allegretto.png#1 system 3 heads 118 queueSize 5 queue [x112:sig68:id1812,x14:sig50:id1777,x13:sig0:id1675,x56:sig100:id1876,x113:sig75:id1826] sigVertices 267 sigEdges 317 systemStems 52 allocator 3170"));
+    let allegretto_phase_two_summary = allegretto_phase_two_rows[30]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let allegretto_phase_two_field = |name: &str| {
+        allegretto_phase_two_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| allegretto_phase_two_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto full-page phase-2 summary field")
+    };
+    assert_eq!(
+        allegretto_phase_two_field("schema"),
+        "stems-head-phase-two-allegretto-v1"
+    );
+    assert_eq!(allegretto_phase_two_field("rows"), "30");
+    assert_eq!(
+        allegretto_phase_two_field("inputSha256"),
+        "a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("stemsRetrieverSourceSha256"),
+        "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("baseProbeSourceSha256"),
+        sha256_hex(BATUQUE_PHASE_TWO_PROBE)
+    );
+    assert_eq!(
+        allegretto_phase_two_field("probeSourceSha256"),
+        "e2255ffc6ff5c4b73d01afba083fba07cff682f5e4148c36a921d3184c9c952b"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("initSourceSha256"),
+        sha256_hex(BATUQUE_PHASE_TWO_INIT)
+    );
+    assert_eq!(
+        allegretto_phase_two_field("runnerSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_RUNNER)
+    );
+    assert_eq!(
+        allegretto_phase_two_field("baseSystem3Order117RunnerSha256"),
+        "088128d72a928ac4a16439e1fa61c857901b793ccbc20e79231c0070e7e50086"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("baseSystem3Order117FixtureSha256"),
+        "dbe00a31bf256a2a8c071b755e3c3df4e95e3ecce45f9d7020729ae0705e9caf"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", allegretto_phase_two_rows[..30].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        allegretto_phase_two_field("semanticPassSha256"),
+        "d96572e2ca0ca46e55a3a2997a5bc6dc7d1977214068571ac0497b62f94c936b"
+    );
+    assert_eq!(allegretto_phase_two_field("freshRuns"), "2");
+    assert_eq!(allegretto_phase_two_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        allegretto_phase_two_field("nativeScope"),
+        "FullPageSystem3X0AndAllSystemsPhaseTwoAppendRetry"
+    );
+    assert_eq!(
+        allegretto_phase_two_field("javaEvidence"),
+        "ReturnedAfterFinalPageRetry"
     );
 
     let order115_oracle = std::fs::read_to_string(

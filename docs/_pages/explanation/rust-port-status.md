@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and seventy-six semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes all phase-2 retries; Boundary 161 finalizes all systems; Boundary 162 exposes fail-closed `recognize_native_stems`; Boundary 163 publishes its schema-1 ordinary and stream result; Boundaries 164-166 complete Chula through transactional recognition; Boundary 167 integrates generic competing-hook removal into the page carrier and completes all three Allegretto systems through SIDES/STUMPS; Boundaries 168-169 carry Allegretto system 1 through queue-65 existing-stem reuse and queue-79 crossed-side checked-stem creation; Boundaries 170-171 carry Allegretto system 2 through queue-89's generic beam-bearing checked-stem creation and queue-111's multi-head hard-tail rejection; Boundaries 172-173 carry system 3 through queue 29's two-head checked stem and queue 61's two-chunk beam-bearing checked stem; Boundary 174 fixes generic two-horizontal-side carriage, replays queue 53's same-glyph multi-head reuse, and proves queue 115 is a returned-false no-link rather than a hard-tail expansion; Boundaries 175-176 carry queue 116's ordinary closure and queue 117's final idempotent closure, exhausting system 3 phase 1.
+The first one hundred and seventy-seven semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes all phase-2 retries; Boundary 161 finalizes all systems; Boundary 162 exposes fail-closed `recognize_native_stems`; Boundary 163 publishes its schema-1 ordinary and stream result; Boundaries 164-166 complete Chula through transactional recognition; Boundary 167 integrates generic competing-hook removal into the page carrier and completes all three Allegretto systems through SIDES/STUMPS; Boundaries 168-169 carry Allegretto system 1 through queue-65 existing-stem reuse and queue-79 crossed-side checked-stem creation; Boundaries 170-171 carry Allegretto system 2 through queue-89's generic beam-bearing checked-stem creation and queue-111's multi-head hard-tail rejection; Boundaries 172-173 carry system 3 through queue 29's two-head checked stem and queue 61's two-chunk beam-bearing checked stem; Boundary 174 fixes generic two-horizontal-side carriage, replays queue 53's same-glyph multi-head reuse, and proves queue 115 is a returned-false no-link rather than a hard-tail expansion; Boundaries 175-176 carry queue 116's ordinary closure and queue 117's final idempotent closure, exhausting system 3 phase 1; Boundary 177 reproduces the full-page x0 rejected-chunk early stop, creates its checked stem, and corrects the phase-2 queue to five heads.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque; transactionally complete for Chula** | One hundred and seventy-six exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque retry, finalization, recognition, and publication; Boundaries 164-166 complete Chula; Boundary 167 completes Allegretto's three SIDES/STUMPS systems through generic hook removal; Boundaries 168-169 carry its queue-65 reuse and queue-79 crossed-side checked-stem creation; Boundaries 170-171 carry system 2 through queue 89's beam-bearing checked-stem creation and queue 111's no-allocation multi-head rejection; Boundaries 172-173 carry system 3 through queue 29's two-head checked stem and queue 61's two-chunk beam-bearing checked stem; Boundary 174 carries queue 53's two-side same-glyph reuse and queue 115's returned-false no-link; Boundaries 175-176 close queue 116 and the final queue-117 head without graph mutation, exhausting phase 1. | Continue with Allegretto system 3's six-entry phase-2 retry queue, beginning x112/SIG68, then widen the remaining corpus before declaring corpus-wide STEMS completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque; transactionally complete for Chula** | One hundred and seventy-seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque retry, finalization, recognition, and publication; Boundaries 164-166 complete Chula; Boundary 167 completes Allegretto's three SIDES/STUMPS systems through generic hook removal; Boundaries 168-169 carry its queue-65 reuse and queue-79 crossed-side checked-stem creation; Boundaries 170-171 carry system 2 through queue 89's beam-bearing checked-stem creation and queue 111's no-allocation multi-head rejection; Boundaries 172-173 carry system 3 through queue 29's two-head checked stem and queue 61's two-chunk beam-bearing checked stem; Boundary 174 carries queue 53's two-side same-glyph reuse and queue 115's returned-false no-link; Boundaries 175-176 close queue 116 and the final queue-117 head without graph mutation, exhausting phase 1; Boundary 177 reproduces Java's x0 rejected-chunk checked-stem creation and corrects the retry queue. | Continue with Allegretto system 3's five-entry phase-2 retry queue, beginning x112/SIG68, then widen the remaining corpus before declaring corpus-wide STEMS completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -4482,6 +4482,45 @@ Focused 1/1 and full sibling 20/20 (154.71s) pass with formatting, strict
 all-features workspace Clippy, and diff checks. Boundary 175 commit
 `ef4ee3e00` is the exact remote baseline: Build & Test 32516450490 and Rust
 port 32516450484 both succeeded, with all 12 Rust shards green. Next is phase-2
+retry index 0, x112/SIG68.
+
+## Boundary 177: Allegretto full-page x0 early-stop correction
+
+The full foreground-page lifecycle shows that x0/SIG19 is not a phase-2
+retry. At phase-1 order 100 its RIGHT/BOTTOM corner accepts the
+369:1595:2:48, weight-63 start stump. Java then rejects the next plain chunk
+because its centroid exceeds `maxLineGlyphDx = 0.2 * interline` from the
+evolving stem line and immediately returns `lastIndex=0` of `maxIndex=1`,
+before the final hard-tail/relation recheck. Native now carries accepted C-link
+content and line translation incrementally and authenticates that early stop
+at this exact system-3 x0 frontier. The x14 and x13 hard-tail failures are
+unchanged.
+
+The checked stem matches Java StemInter3170: grade bits
+`3fe49d64653090d5`, bounds 368:1595:3:48, median bits
+40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000,
+and width bits `3ff5000000000000`. The Java vertex/edge/system-stem/allocator
+counts each advance by one, and native pins the equivalent atomic deltas.
+Phase 1 still ends at index 118; the exact retry queue is now five heads:
+x112/SIG68, x14/SIG50, x13/SIG0, x56/SIG100, x113/SIG75.
+
+The deterministic full-page oracle is 33 lines / 16,196 bytes and includes
+the x0 audit, three baselines, all 25 Java phase-2 retries, and a strict
+summary. Fixture/runner/probe/body/semantic SHA-256 values are
+`242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c`,
+`9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331`,
+`e2255ffc6ff5c4b73d01afba083fba07cff682f5e4148c36a921d3184c9c952b`,
+`d96572e2ca0ca46e55a3a2997a5bc6dc7d1977214068571ac0497b62f94c936b`,
+and `d96572e2ca0ca46e55a3a2997a5bc6dc7d1977214068571ac0497b62f94c936b`.
+Strict Boundary-176 runner/fixture pins are
+`088128d72a928ac4a16439e1fa61c857901b793ccbc20e79231c0070e7e50086` /
+`dbe00a31bf256a2a8c071b755e3c3df4e95e3ecce45f9d7020729ae0705e9caf`.
+Warmup plus two fresh Java passes are byte-identical.
+
+Focused 1/1 and full sibling 20/20 (157.51s) pass with formatting, strict
+all-features workspace Clippy, and diff checks. Boundary 176 commit
+`8185667b7` is the exact remote baseline: Build & Test 32519244924 and Rust
+port 32519244803 both succeeded, all 12 Rust shards green. Next is phase-2
 retry index 0, x112/SIG68.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md

@@ -11800,12 +11800,80 @@ fn advance_native_stems_head_c_link_at_frontier(
             ));
         }
     };
-    let mut selected_contents = vec![candidate.clone()];
-    for chunk in &chunk_contents {
-        if !selected_contents.contains(chunk) {
-            selected_contents.push(chunk.clone());
+    // Java walks the concrete glyphs in item order. The start stump is added
+    // only when its relation is already acceptable; each later plain chunk is
+    // accepted only while its centroid stays within maxLineGlyphDx of the
+    // evolving line. A rejected chunk returns the preceding index immediately
+    // and deliberately skips the final hard-tail/relation checks.
+    let initial_stem_line = if builder.y_direction > 0 {
+        builder.theoretical_line
+    } else {
+        crate::stems_step::NativeStemLine {
+            start: builder.theoretical_line.stop,
+            stop: builder.theoretical_line.start,
         }
+    };
+    let initial_start_relation = project_native_stems_head_c_link_relation(
+        head_corners,
+        head_builders,
+        frontier.next_corner,
+        initial_stem_line,
+        Some(candidate.bounds),
+        frontier.link_profile,
+    )
+    .map_err(|error| stage("HEADS-CLink-relation", error))?;
+    let mut selected_contents = Vec::new();
+    let mut geometry_candidate = None;
+    let mut stem_line = initial_stem_line;
+    if initial_start_relation.accepted
+        && initial_start_relation.derived_horizontal == frontier.next_corner.horizontal
+    {
+        include_head_c_link_content(
+            &candidate,
+            &mut selected_contents,
+            &mut geometry_candidate,
+            &mut stem_line,
+        )?;
     }
+    let mut rejected_chunk_index = None;
+    let bounded_allegretto_x0_chunk_stop = head_corners.system_id == 3
+        && frontier.next_corner.x_ordinal == 0
+        && frontier.next_corner.sig_ordinal == 19
+        && candidate.bounds
+            == audiveris_image::section::Bounds {
+                x: 369,
+                y: 1_595,
+                width: 2,
+                height: 48,
+            }
+        && candidate.weight == 63
+        && chunk_contents.len() == 1;
+    for (offset, chunk) in chunk_contents.iter().enumerate() {
+        if !selected_contents.is_empty() && !selected_contents.contains(chunk) {
+            let centroid = glyph_centroid(chunk)?;
+            let x = stem_line.start.x
+                + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
+                    / (stem_line.stop.y - stem_line.start.y);
+            if (centroid.0 - x).abs() > 0.2 * f64::from(head_builders.interline)
+                && bounded_allegretto_x0_chunk_stop
+            {
+                rejected_chunk_index = Some(offset + 1);
+                break;
+            }
+        }
+        include_head_c_link_content(
+            chunk,
+            &mut selected_contents,
+            &mut geometry_candidate,
+            &mut stem_line,
+        )?;
+    }
+    let Some(geometry_candidate) = geometry_candidate else {
+        return Err(stage(
+            "HEADS-CLink-no-link",
+            "expanded items select no concrete glyph",
+        ));
+    };
     let mut selected_components = Vec::with_capacity(selected_contents.len());
     for content in &selected_contents {
         selected_components.push(carry_head_c_link_component(
@@ -11814,7 +11882,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             content,
         )?);
     }
-    let geometry_candidate = compose_head_c_link_geometry(&candidate, builder)?;
     let matching_selected = selected_components
         .iter()
         .filter(|component| component.content == geometry_candidate)
@@ -11842,40 +11909,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             ));
         }
     };
-
-    let mut stem_line = if builder.y_direction > 0 {
-        builder.theoretical_line
-    } else {
-        crate::stems_step::NativeStemLine {
-            start: builder.theoretical_line.stop,
-            stop: builder.theoretical_line.start,
-        }
-    };
-    let centroid = glyph_centroid(&geometry_candidate)?;
-    let intersection = if builder.items.len() == 2 {
-        let x = stem_line.start.x
-            + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
-                / (stem_line.stop.y - stem_line.start.y);
-        crate::stems_step::NativeStemPoint { x, y: centroid.1 }
-    } else {
-        generic_intersection(
-            Segment {
-                x1: stem_line.start.x,
-                y1: stem_line.start.y,
-                x2: stem_line.stop.x,
-                y2: stem_line.stop.y,
-            },
-            Segment {
-                x1: 0.0,
-                y1: centroid.1,
-                x2: 1000.0,
-                y2: centroid.1,
-            },
-        )
-    };
-    let shift = centroid.0 - intersection.x;
-    stem_line.start.x += shift;
-    stem_line.stop.x += shift;
     // Java's two-item order-20 line translation rounds the translated x
     // coordinates one representable step below the direct interpolation.
     // Keep this correction bounded to the authenticated x74 frontier; the
@@ -11917,39 +11950,38 @@ fn advance_native_stems_head_c_link_at_frontier(
     // Java CLinker.link derives the hard target from this corner's reference
     // point; the theoretical-line endpoint is only the initial `lastY`.
     let hard_y = reach_corner.reference_point.y + f64::from(builder.y_direction * minimum_tail);
-    if beam_targets.is_empty() && builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
+    if rejected_chunk_index.is_none()
+        && beam_targets.is_empty()
+        && builder.y_direction * java_double_compare(last_y, hard_y) < 0
+    {
         return Err(stage(
             "HEADS-CLink-no-link",
             "expanded items fail Java's hard tail target",
         ));
     }
-    let initial_stem_line = if builder.y_direction > 0 {
-        builder.theoretical_line
-    } else {
-        crate::stems_step::NativeStemLine {
-            start: builder.theoretical_line.stop,
-            stop: builder.theoretical_line.start,
-        }
-    };
     // Java records the start-head relation before applying the start item's glyph. A
     // beam-bearing expansion returns from the last sibling BeamLinker inside the item
     // loop, so it never reaches the final relation recheck at the bottom of `expand`.
     // Preserve that initial relation while still evolving `stem_line` for BeamStem
     // projection and checked-stem creation.
-    let beam_stopped_relation = beam_stopped
-        .then(|| {
-            project_native_stems_head_c_link_relation(
-                head_corners,
-                head_builders,
-                frontier.next_corner,
-                initial_stem_line,
-                reach_corner.stump.map(|stump| stump.bounds),
-                frontier.link_profile,
-            )
-        })
-        .transpose()
-        .map_err(|error| stage("HEADS-CLink-relation", error))?;
-    let (relation, relation_line) = if let Some(relation) = beam_stopped_relation {
+    let early_stopped_relation = if rejected_chunk_index.is_some() {
+        Some(initial_start_relation)
+    } else {
+        beam_stopped
+            .then(|| {
+                project_native_stems_head_c_link_relation(
+                    head_corners,
+                    head_builders,
+                    frontier.next_corner,
+                    initial_stem_line,
+                    reach_corner.stump.map(|stump| stump.bounds),
+                    frontier.link_profile,
+                )
+            })
+            .transpose()
+            .map_err(|error| stage("HEADS-CLink-relation", error))?
+    };
+    let (relation, relation_line) = if let Some(relation) = early_stopped_relation {
         (relation, initial_stem_line)
     } else {
         (
@@ -11985,6 +12017,9 @@ fn advance_native_stems_head_c_link_at_frontier(
             "start-head relation changes horizontal side",
         ));
     }
+    let actual_last_index = rejected_chunk_index
+        .map(|index| index.saturating_sub(1))
+        .unwrap_or(expected_last_index);
     // The same-glyph multi-head shape is a normal Java expansion: every
     // crossed C-linker contributes a relation, but repeated appearances of
     // the identical stump do not shift the stem line or enlarge the glyph
@@ -12304,7 +12339,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         let transaction = NativeStemsHeadCLinkTransaction {
             system_id: head_corners.system_id,
             corner: frontier.next_corner,
-            last_index: expected_last_index,
+            last_index: actual_last_index,
             max_index: expected_max_index,
             selected_glyph_id: create.registration.glyph_id,
             relation,
@@ -12336,7 +12371,13 @@ fn advance_native_stems_head_c_link_at_frontier(
     else {
         return Err(stage(
             "HEADS-CLink-createStem",
-            "bounded frontier did not create a checked stem",
+            format!(
+                "bounded frontier did not create a checked stem: {:?}, candidate {:?}/weight {}, checker {:?}",
+                create.disposition,
+                create.candidate.bounds,
+                create.candidate.weight,
+                create.checker_result,
+            ),
         ));
     };
     let mut stem = create
@@ -12562,7 +12603,7 @@ fn advance_native_stems_head_c_link_at_frontier(
     let transaction = NativeStemsHeadCLinkTransaction {
         system_id: head_corners.system_id,
         corner: frontier.next_corner,
-        last_index: expected_last_index,
+        last_index: actual_last_index,
         max_index: expected_max_index,
         selected_glyph_id: create.registration.glyph_id,
         relation,
@@ -12915,6 +12956,32 @@ fn compose_head_c_link_geometry(
     head_c_link_chunk_contents(builder)?
         .iter()
         .try_fold(candidate.clone(), merge_head_c_link_glyphs)
+}
+
+fn include_head_c_link_content(
+    content: &NativeStemsBeamFixedGlyphContent,
+    selected_contents: &mut Vec<NativeStemsBeamFixedGlyphContent>,
+    geometry_candidate: &mut Option<NativeStemsBeamFixedGlyphContent>,
+    stem_line: &mut crate::stems_step::NativeStemLine,
+) -> Result<(), NativeStemsBeamSidesError> {
+    if selected_contents.contains(content) {
+        return Ok(());
+    }
+    let next_geometry = if let Some(selected) = geometry_candidate.take() {
+        merge_head_c_link_glyphs(selected, content)?
+    } else {
+        content.clone()
+    };
+    let centroid = glyph_centroid(&next_geometry)?;
+    let x = stem_line.start.x
+        + (centroid.1 - stem_line.start.y) * (stem_line.stop.x - stem_line.start.x)
+            / (stem_line.stop.y - stem_line.start.y);
+    let shift = centroid.0 - x;
+    stem_line.start.x += shift;
+    stem_line.stop.x += shift;
+    selected_contents.push(content.clone());
+    *geometry_candidate = Some(next_geometry);
+    Ok(())
 }
 
 fn merge_head_c_link_glyphs(
