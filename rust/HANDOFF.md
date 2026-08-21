@@ -8135,6 +8135,39 @@ All carriers finish consumed with `phase_two_index=0`. Focused Batuque passes
 all-target/all-feature Clippy passes in 25.06s; formatting and diff checks are
 clean. Page-wide phase-2 append retry is next.
 
+## Boundary 160: complete Batuque head phase 2 page-wide
+
+`drive_all_system_head_linking_phase2` atomically composes the complete
+phase-1 page drive with each system's ordered append-retry queue. Queue
+authentication is now native and corpus-independent: cursor, unique head and
+undefined-side identities, completed-head membership, and closed direct
+no-link sides are checked before a local shadow advances. A real Java
+`reuseStem` append still rejects the page fail-closed rather than approximating
+its mutation.
+
+System 1 has no retries. System 2 consumes x108/SIG115 and x109/SIG121 with
+BottomOnly/Neither and BottomOnly/TopOnly decisions. Both return false; Java's
+final close loop re-writes their already-closed LEFT/RIGHT cells, so the native
+event stream records four ordered writes and zero value changes. System 3
+consumes x107/SIG47 and x108/SIG2. The first attempts standard LEFT/BOTTOM then
+returns undefined at the RIGHT shared stump; the second returns undefined at
+LEFT immediately. Neither writes a cell. Page terminals preserve SIG/stem
+counts `232/301/42`, `293/406/54`, and `268/344/52`, with phase-two indices
+equal to queue lengths `0/2/2`.
+
+The new Java page oracle reconstructs Batuque from actual HEADS, executes real
+SIDES/STUMPS and both head phases in foreground system order, and emits all
+four retry rows. Warmup plus two fresh passes are byte-identical. Fixture,
+runner, probe, init, and body SHA-256 are
+`41992cf6702bc27b918733e6a1a097c22b729c6dfc7fe332e8603c5e6a02983a`,
+`b0e79187886052aa20ac15421da2eb5169d541b305ef0f04460dfc05add094d6`,
+`7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2`,
+`1defbc545668eb711395283bc0d8f9216b7402ad3b0f2f64f93812ac739c495e`,
+and `3d30e22eca5ee67647519fed576083a66ed987bd8803376e72c5462f5758d021`.
+Focused Batuque passes 1/1 in 5.51s; the full sibling suite passes 15/15 in
+152.69s; strict workspace all-target/all-feature Clippy passes in 20.10s;
+formatting and diff checks are clean. Page-wide `finalizeStems` is next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.

@@ -207,6 +207,14 @@ const GENERIC_FINALIZE_PROBE: &[u8] =
     include_bytes!("../../../oracle/java/FinalizeStemsGenericProbe.java");
 const GENERIC_FINALIZE_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-finalize-generic.init.gradle");
+const BATUQUE_PHASE_TWO_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-batuque.txt");
+const BATUQUE_PHASE_TWO_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-batuque.sh");
+const BATUQUE_PHASE_TWO_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/StemsHeadPhaseTwoPageProbe.java");
+const BATUQUE_PHASE_TWO_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-page.init.gradle");
 const CORPUS_PAGES: [(&str, &str); 8] = [
     ("chula", "chula.png"),
     ("allegretto", "allegretto.png"),
@@ -7129,6 +7137,254 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         system.carrier.frontier_consumed
             && system.carrier.phase_two_index == 0
             && system.carrier.current_index == system.carrier.heads.len()
+    }));
+    let page_phase_two = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect("Batuque complete page HEADS phase-2 drive");
+    assert_eq!(page_phase_two.systems.len(), 3);
+    assert_eq!(
+        page_phase_two
+            .systems
+            .iter()
+            .map(|system| {
+                (
+                    system.system_id,
+                    system.phase_one_events.len(),
+                    system.retries.len(),
+                    system.carrier.phase_two_index,
+                    system.carrier.unlinked_heads.len(),
+                    system.carrier.undefined_sides.len(),
+                    system.carrier.beam_state.sig.vertices.len(),
+                    system.carrier.beam_state.sig.edges.len(),
+                    system
+                        .carrier
+                        .beam_state
+                        .latest_base_apply
+                        .transaction_state
+                        .system_stems
+                        .known_stems
+                        .len(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (1, 89, 0, 0, 0, 0, 232, 301, 42),
+            (2, 44, 2, 2, 2, 0, 293, 406, 54),
+            (3, 69, 2, 2, 2, 2, 268, 344, 52),
+        ]
+    );
+    let phase_two_rows = page_phase_two
+        .systems
+        .iter()
+        .flat_map(|system| {
+            system
+                .retries
+                .iter()
+                .enumerate()
+                .map(move |(queue_index, retry)| {
+                    (
+                        system.system_id,
+                        queue_index,
+                        retry.processed_head.x_ordinal,
+                        retry.processed_head.sig_ordinal,
+                        retry.returned_linked,
+                        retry.closed_value_changes,
+                        retry
+                            .side_decisions
+                            .iter()
+                            .map(|decision| {
+                                (
+                                    decision.side,
+                                    decision.linked_before,
+                                    decision.closed_before,
+                                    decision.top_can_link,
+                                    decision.bottom_can_link,
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                        retry
+                            .closed_s_linkers
+                            .iter()
+                            .map(|side| (side.head.x_ordinal, side.horizontal))
+                            .collect::<Vec<_>>(),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        phase_two_rows,
+        [
+            (
+                2,
+                0,
+                108,
+                115,
+                Some(false),
+                0,
+                vec![
+                    (
+                        NativeStemHeadSide::Left,
+                        false,
+                        true,
+                        Some(false),
+                        Some(true)
+                    ),
+                    (
+                        NativeStemHeadSide::Right,
+                        false,
+                        true,
+                        Some(false),
+                        Some(false),
+                    ),
+                ],
+                vec![
+                    (108, NativeStemHeadSide::Left),
+                    (108, NativeStemHeadSide::Right),
+                ],
+            ),
+            (
+                2,
+                1,
+                109,
+                121,
+                Some(false),
+                0,
+                vec![
+                    (
+                        NativeStemHeadSide::Left,
+                        false,
+                        true,
+                        Some(false),
+                        Some(true)
+                    ),
+                    (
+                        NativeStemHeadSide::Right,
+                        false,
+                        true,
+                        Some(true),
+                        Some(false)
+                    ),
+                ],
+                vec![
+                    (109, NativeStemHeadSide::Left),
+                    (109, NativeStemHeadSide::Right),
+                ],
+            ),
+            (
+                3,
+                0,
+                107,
+                47,
+                Some(false),
+                0,
+                vec![
+                    (
+                        NativeStemHeadSide::Left,
+                        false,
+                        false,
+                        Some(true),
+                        Some(true)
+                    ),
+                    (
+                        NativeStemHeadSide::Right,
+                        false,
+                        false,
+                        Some(true),
+                        Some(true)
+                    ),
+                ],
+                vec![],
+            ),
+            (
+                3,
+                1,
+                108,
+                2,
+                Some(false),
+                0,
+                vec![(
+                    NativeStemHeadSide::Left,
+                    false,
+                    false,
+                    Some(true),
+                    Some(true),
+                )],
+                vec![],
+            ),
+        ]
+    );
+    assert_eq!(
+        page_phase_two
+            .systems
+            .iter()
+            .flat_map(|system| {
+                system.retries.iter().map(|retry| {
+                    let head = retry
+                        .state_after
+                        .heads
+                        .iter()
+                        .find(|head| head.reference == retry.processed_head)
+                        .expect("phase-2 processed head");
+                    (retry.processed_head.x_ordinal, head.grade.to_bits())
+                })
+            })
+            .collect::<Vec<_>>(),
+        [
+            (108, 0x3fd0_8249_65d7_9ebb),
+            (109, 0x3fd0_37cb_4e36_2235),
+            (107, 0x3fd2_e9e8_cd18_7470),
+            (108, 0x3fd0_ec6d_c540_26ed),
+        ]
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_FIXTURE.as_bytes()),
+        "41992cf6702bc27b918733e6a1a097c22b729c6dfc7fe332e8603c5e6a02983a"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_RUNNER),
+        "b0e79187886052aa20ac15421da2eb5169d541b305ef0f04460dfc05add094d6"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_PROBE),
+        "7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2"
+    );
+    assert_eq!(
+        sha256_hex(BATUQUE_PHASE_TWO_INIT),
+        "1defbc545668eb711395283bc0d8f9216b7402ad3b0f2f64f93812ac739c495e"
+    );
+    let phase_two_java_rows = BATUQUE_PHASE_TWO_FIXTURE
+        .lines()
+        .filter(|line| line.starts_with("stemsheadphase2"))
+        .collect::<Vec<_>>();
+    assert_eq!(phase_two_java_rows.len(), 9);
+    assert!(phase_two_java_rows.iter().any(|line| {
+        line.contains("system 2 queueIndex 0 headX 108 headSig 115")
+            && line.contains("decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither]")
+            && line.contains("returned false")
+            && line.contains("sideChanges []")
+    }));
+    assert!(phase_two_java_rows.iter().any(|line| {
+        line.contains("system 2 queueIndex 1 headX 109 headSig 121")
+            && line.contains("decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=true:bottom=false:branch=TopOnly]")
+            && line.contains("returned false")
+            && line.contains("sideChanges []")
+    }));
+    assert!(phase_two_java_rows.iter().any(|line| {
+        line.contains("system 3 queueIndex 0 headX 107 headSig 47")
+            && line.contains("decisions [LEFT:top=true:bottom=true:branch=Both,RIGHT:top=true:bottom=true:branch=Both]")
+            && line.contains("undefs [RIGHT]")
+            && line.contains("sideChanges []")
+    }));
+    assert!(phase_two_java_rows.iter().any(|line| {
+        line.contains("system 3 queueIndex 1 headX 108 headSig 2")
+            && line.contains("decisions [LEFT:top=true:bottom=true:branch=Both,RIGHT:top=true:bottom=false:branch=TopOnly]")
+            && line.contains("undefs [LEFT]")
+            && line.contains("sideChanges []")
+    }));
+    assert!(phase_two_java_rows.iter().any(|line| {
+        line.contains("stemsheadphase2summary schema stems-head-phase-two-page-v1")
+            && line.contains("freshRunsByteIdentical true")
+            && line.contains("javaEvidence ReturnedAfterFinalPageRetry")
     }));
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

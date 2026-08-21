@@ -37,7 +37,8 @@ use crate::{
         NativeStemsBeamStumpsTransaction, NativeStemsHeadCLinkTransaction,
         NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
-        advance_native_stems_head_c_link_or_no_link, begin_native_stems_head_linking_phase1,
+        advance_native_stems_head_c_link_or_no_link,
+        advance_native_stems_head_phase_two_append_retry, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
         drive_native_stems_beam_stumps_from_modeled_registry,
@@ -245,6 +246,23 @@ pub struct NativeStemsSystemHeadPhase1Drive {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageHeadPhase1Drive {
     pub systems: Vec<NativeStemsSystemHeadPhase1Drive>,
+}
+
+/// Atomic completion of one system's phase-1 head queue and carried phase-2
+/// append-retry queue.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase2Drive {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+    pub phase_one_events: Vec<NativeStemsHeadPhase1DriveEvent>,
+    pub retries: Vec<NativeStemsHeadPhase1Continuation>,
+}
+
+/// Atomic page-wide completion of Java's two head-linking phases.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase2Drive {
+    pub systems: Vec<NativeStemsSystemHeadPhase2Drive>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1085,6 +1103,99 @@ impl NativeStemsPreparedRecognition {
             });
         }
         Ok(NativeStemsPageHeadPhase1Drive { systems })
+    }
+
+    /// Drive every system through the complete carried phase-1 queue and then
+    /// Java's ordered phase-2 append retries.
+    ///
+    /// The receiver is immutable and every system advances on local shadows,
+    /// so an unsupported real `reuseStem` append or malformed queue rejects the
+    /// entire page without exposing a partially advanced carrier.
+    pub fn drive_all_system_head_linking_phase2(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase2Drive, NativeStemsPreparationError> {
+        let phase_one = self.drive_all_system_head_linking_phase1()?;
+        let mut systems = Vec::with_capacity(phase_one.systems.len());
+        for completed in phase_one.systems {
+            let NativeStemsSystemHeadPhase1Drive {
+                system_id,
+                registry,
+                mut carrier,
+                events,
+            } = completed;
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-2 drive corners",
+            )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-2 drive reachability",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-2 drive builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-2 drive plans",
+            )?;
+            let queue_len = carrier.unlinked_heads.len();
+            let mut retries = Vec::with_capacity(queue_len);
+            while carrier.phase_two_index < queue_len {
+                if retries.len() >= queue_len {
+                    return Err(phase(
+                        format!("system {system_id} exceeded its carried phase-2 queue"),
+                        "HEADS phase-2 page drive",
+                    ));
+                }
+                let retry = advance_native_stems_head_phase_two_append_retry(
+                    &carrier,
+                    head_corners,
+                    head_reachability,
+                    head_builders,
+                    plans,
+                )
+                .map_err(|error| {
+                    phase(
+                        format!("system {system_id}: {error}"),
+                        "HEADS phase-2 page drive",
+                    )
+                })?;
+                let expected_index = carrier.phase_two_index + 1;
+                if retry.state_after.phase_two_index != expected_index {
+                    return Err(phase(
+                        format!(
+                            "system {system_id} phase-2 retry did not advance exactly one queue entry"
+                        ),
+                        "HEADS phase-2 page drive",
+                    ));
+                }
+                carrier = (*retry.state_after).clone();
+                retries.push(retry);
+            }
+            if carrier.phase_two_index != carrier.unlinked_heads.len() {
+                return Err(phase(
+                    format!("system {system_id} phase-2 queue is not complete"),
+                    "HEADS phase-2 page drive",
+                ));
+            }
+            systems.push(NativeStemsSystemHeadPhase2Drive {
+                system_id,
+                registry,
+                carrier,
+                phase_one_events: events,
+                retries,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase2Drive { systems })
     }
 }
 

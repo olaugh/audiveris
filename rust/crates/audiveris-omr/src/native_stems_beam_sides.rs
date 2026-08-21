@@ -4922,6 +4922,80 @@ fn bounded_phase_two_expand_returns_minus_one(
     ))
 }
 
+/// Authenticate the carried phase-2 queue without importing corpus-specific
+/// head ordinals.
+///
+/// Phase 1 is the sole producer of both collections.  Direct no-link outcomes
+/// contribute only a head, while shared-stump dual-corner outcomes also retain
+/// one or two undefined side cells.  Phase 2 must preserve that insertion
+/// order, and every retained identity must still resolve in the completed
+/// carrier before an append retry is allowed to inspect it.
+fn authenticate_native_stems_head_phase_two_queue(
+    carrier: &NativeStemsHeadPhase1Carrier,
+) -> Result<(), NativeStemsBeamSidesError> {
+    if carrier.phase_two_index > carrier.unlinked_heads.len() {
+        return Err(stage(
+            "HEADS-phase2-queue",
+            "phase-2 cursor is outside the carried unlinked-head queue",
+        ));
+    }
+    let mut seen_heads = BTreeSet::new();
+    for head_ref in &carrier.unlinked_heads {
+        if !seen_heads.insert(*head_ref) {
+            return Err(stage(
+                "HEADS-phase2-queue",
+                "phase-2 queue contains a duplicate head",
+            ));
+        }
+        let head = carrier
+            .heads
+            .iter()
+            .find(|head| head.reference == *head_ref)
+            .ok_or_else(|| {
+                stage(
+                    "HEADS-phase2-queue",
+                    "phase-2 queue head is absent from the completed head order",
+                )
+            })?;
+        let carries_undefined = carrier
+            .undefined_sides
+            .iter()
+            .any(|side| side.head == *head_ref);
+        if !carries_undefined && !head.sides.iter().all(|side| side.closed) {
+            return Err(stage(
+                "HEADS-phase2-queue",
+                "direct no-link phase-2 head does not carry two closed sides",
+            ));
+        }
+    }
+    let mut seen_sides = BTreeSet::new();
+    for side_ref in &carrier.undefined_sides {
+        if !seen_sides.insert(*side_ref) {
+            return Err(stage(
+                "HEADS-phase2-queue",
+                "phase-2 undefined-side authority contains a duplicate cell",
+            ));
+        }
+        if !seen_heads.contains(&side_ref.head) {
+            return Err(stage(
+                "HEADS-phase2-queue",
+                "undefined side does not belong to a queued phase-2 head",
+            ));
+        }
+        let cell_exists = carrier.heads.iter().any(|head| {
+            head.reference == side_ref.head
+                && head.sides.iter().any(|cell| cell.reference == *side_ref)
+        });
+        if !cell_exists {
+            return Err(stage(
+                "HEADS-phase2-queue",
+                "undefined phase-2 side is absent from the completed head carrier",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Advance one entry of Java's heads-linking phase 2.
 ///
 /// After phase 1 exhausts the head queue, `StemsRetriever.linkStems` re-runs
@@ -4929,8 +5003,8 @@ fn bounded_phase_two_expand_returns_minus_one(
 /// `append` set, a linked side still short-circuits to a true return, but the
 /// closed-side skip no longer applies, so a closed-yet-unlinked side is
 /// re-evaluated and may reach a real `link` attempt.  On chula system 1 every
-/// one of the five entries leaves the graph untouched, and this consumes them
-/// one at a time under that authentication.
+/// no-mutation expansion and shared-stump outcomes are handled generically;
+/// an append that reaches Java's real `reuseStem` mutation still fails closed.
 pub fn advance_native_stems_head_phase_two_append_retry(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
@@ -4944,13 +5018,7 @@ pub fn advance_native_stems_head_phase_two_append_retry(
             "carrier is not the completed phase-1 terminal",
         ));
     }
-    let queue = authenticated_carried_undefined_sides(carrier, &[50, 60, 61, 68, 75], "phase2")?;
-    if queue.len() != 5 {
-        return Err(stage(
-            "HEADS-phase2-append",
-            "phase-2 queue is not the authenticated five-head list",
-        ));
-    }
+    authenticate_native_stems_head_phase_two_queue(carrier)?;
     let queue_index = carrier.phase_two_index;
     let head_ref = *carrier.unlinked_heads.get(queue_index).ok_or_else(|| {
         stage(
@@ -4971,138 +5039,136 @@ pub fn advance_native_stems_head_phase_two_append_retry(
     }
 
     let mut side_decisions = Vec::new();
-    let mut linked = false;
-    let mut recorded_undef = false;
-    for horizontal in [
-        crate::stems_step::NativeStemHeadSide::Left,
-        crate::stems_step::NativeStemHeadSide::Right,
-    ] {
-        let side = head
-            .sides
-            .iter()
-            .find(|cell| cell.reference.horizontal == horizontal)
-            .ok_or_else(|| stage("HEADS-phase2-append", "side cell is missing"))?;
-        if side.linked {
-            // Java: `if (sLinker.isLinked()) { linked = true; continue; }`.
-            linked = true;
+    let max_profile = if head.grade >= 0.3 { 3 } else { 0 };
+    let mut linked_result = None;
+    let mut close_on_false = false;
+    'profiles: for stem_profile in 0..=max_profile {
+        let mut linked = false;
+        for horizontal in [
+            crate::stems_step::NativeStemHeadSide::Left,
+            crate::stems_step::NativeStemHeadSide::Right,
+        ] {
+            let side = head
+                .sides
+                .iter()
+                .find(|cell| cell.reference.horizontal == horizontal)
+                .ok_or_else(|| stage("HEADS-phase2-append", "side cell is missing"))?;
+            if side.linked {
+                // Java: `if (sLinker.isLinked()) { linked = true; continue; }`.
+                linked = true;
+                side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                    side: horizontal,
+                    linked_before: true,
+                    closed_before: side.closed,
+                    top_can_link: None,
+                    bottom_can_link: None,
+                });
+                continue;
+            }
+            // Java skips a closed side only when append is false, so phase 2
+            // deliberately falls through to the corner evaluation here.
+            let top = NativeStemsHeadCornerRef {
+                head: head.reference.reference,
+                sig_ordinal: head.reference.sig_ordinal,
+                x_ordinal: head.reference.x_ordinal,
+                horizontal,
+                vertical: crate::stems_step::NativeStemVerticalSide::Top,
+            };
+            let bottom = NativeStemsHeadCornerRef {
+                vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+                ..top
+            };
+            let top_ok = bounded_head_can_link(
+                top,
+                stem_profile,
+                head_builders,
+                &carrier.beam_state.s_cells,
+                plans.min_linker_length,
+                true,
+            )?;
+            let bottom_ok = bounded_head_can_link(
+                bottom,
+                stem_profile,
+                head_builders,
+                &carrier.beam_state.s_cells,
+                plans.min_linker_length,
+                true,
+            )?;
             side_decisions.push(NativeStemsHeadPhase1SideDecision {
                 side: horizontal,
-                linked_before: true,
+                linked_before: false,
                 closed_before: side.closed,
-                top_can_link: None,
-                bottom_can_link: None,
+                top_can_link: Some(top_ok),
+                bottom_can_link: Some(bottom_ok),
             });
-            continue;
+            let selected = match (top_ok, bottom_ok) {
+                (true, true) => {
+                    let stump_of = |corner: NativeStemsHeadCornerRef| {
+                        head_reachability
+                            .heads
+                            .iter()
+                            .flat_map(|entry| &entry.corners)
+                            .find(|reach| reach.reference == corner)
+                            .map(|reach| reach.stump)
+                            .ok_or_else(|| {
+                                stage("HEADS-phase2-append", "reachability corner is missing")
+                            })
+                    };
+                    match (stump_of(top)?, stump_of(bottom)?) {
+                        (Some(top_stump), Some(bottom_stump)) if top_stump == bottom_stump => {
+                            // Java re-adds the side to the existing undef set
+                            // and returns false immediately, even when the
+                            // opposite horizontal side was already linked.
+                            linked_result = Some(false);
+                            break 'profiles;
+                        }
+                        _ if horizontal == crate::stems_step::NativeStemHeadSide::Left => {
+                            Some(bottom)
+                        }
+                        _ => Some(top),
+                    }
+                }
+                (true, false) => Some(top),
+                (false, true) => Some(bottom),
+                (false, false) => None,
+            };
+            let Some(selected) = selected else {
+                continue;
+            };
+            if !bounded_phase_two_expand_returns_minus_one(
+                selected,
+                stem_profile,
+                head_builders,
+                head_reachability,
+            )? {
+                return Err(stage(
+                    "HEADS-phase2-append",
+                    "phase-2 link attempt reaches the unported reuseStem append path",
+                ));
+            }
         }
-        // Java skips a closed side only when append is false, so phase 2
-        // deliberately falls through to the corner evaluation here.
-        let top = NativeStemsHeadCornerRef {
-            head: head.reference.reference,
-            sig_ordinal: head.reference.sig_ordinal,
-            x_ordinal: head.reference.x_ordinal,
-            horizontal,
-            vertical: crate::stems_step::NativeStemVerticalSide::Top,
-        };
-        let bottom = NativeStemsHeadCornerRef {
-            vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
-            ..top
-        };
-        let top_ok = bounded_head_can_link(
-            top,
-            0,
-            head_builders,
-            &carrier.beam_state.s_cells,
-            plans.min_linker_length,
-            true,
-        )?;
-        let bottom_ok = bounded_head_can_link(
-            bottom,
-            0,
-            head_builders,
-            &carrier.beam_state.s_cells,
-            plans.min_linker_length,
-            true,
-        )?;
-        side_decisions.push(NativeStemsHeadPhase1SideDecision {
-            side: horizontal,
-            linked_before: false,
-            closed_before: side.closed,
-            top_can_link: Some(top_ok),
-            bottom_can_link: Some(bottom_ok),
-        });
-        match (top_ok, bottom_ok) {
-            (true, true) => {
-                let stump_of = |corner: NativeStemsHeadCornerRef| {
-                    head_reachability
-                        .heads
-                        .iter()
-                        .flat_map(|entry| &entry.corners)
-                        .find(|reach| reach.reference == corner)
-                        .map(|reach| reach.stump)
-                        .ok_or_else(|| {
-                            stage("HEADS-phase2-append", "reachability corner is missing")
-                        })
-                };
-                match (stump_of(top)?, stump_of(bottom)?) {
-                    (Some(top_stump), Some(bottom_stump)) if top_stump == bottom_stump => {
-                        // Java re-adds the side to an undefs EnumSet that
-                        // already holds it, and returns false immediately.
-                        recorded_undef = true;
-                    }
-                    _ => {
-                        return Err(stage(
-                            "HEADS-phase2-append",
-                            "phase-2 dual-corner differing-stump branch is unported",
-                        ));
-                    }
-                }
-                break;
-            }
-            (true, false) => {
-                // Java calls `clTop.link(..., append)`.  Every chula system 1
-                // attempt fails inside expand, which returns -1 before the
-                // hard tail target and so builds nothing.
-                if !bounded_phase_two_expand_returns_minus_one(
-                    top,
-                    0,
-                    head_builders,
-                    head_reachability,
-                )? {
-                    return Err(stage(
-                        "HEADS-phase2-append",
-                        "phase-2 link attempt reaches the unported reuseStem append path",
-                    ));
-                }
-            }
-            (false, true) => {
-                if !bounded_phase_two_expand_returns_minus_one(
-                    bottom,
-                    0,
-                    head_builders,
-                    head_reachability,
-                )? {
-                    return Err(stage(
-                        "HEADS-phase2-append",
-                        "phase-2 link attempt reaches the unported reuseStem append path",
-                    ));
-                }
-            }
-            (false, false) => {}
+        if linked {
+            linked_result = Some(true);
+            break;
+        }
+        if stem_profile == max_profile {
+            linked_result = Some(false);
+            close_on_false = true;
         }
     }
-    if !linked && !recorded_undef {
-        return Err(stage(
+    let linked = linked_result.ok_or_else(|| {
+        stage(
             "HEADS-phase2-append",
-            "phase-2 retry reaches the unported rather-good retry and closure branch",
-        ));
-    }
+            "phase-2 retry did not reach a terminal Java return",
+        )
+    })?;
 
     let mut shadow = carrier.clone();
     shadow.phase_two_index = queue_index + 1;
     // A phase-2 entry that returns true runs Java's ordered closure over the
     // heads sharing its already linked stems, exactly as a phase-1 return
-    // does.  Entries that return false stop at the undef branch first and
-    // close nothing.
+    // does. A final rather-good failure closes both local sides; the
+    // shared-stump undef return exits before that closure.
     let (closed_s_linkers, closed_value_changes) = if linked {
         let current = shadow
             .heads
@@ -5117,6 +5183,35 @@ pub fn advance_native_stems_head_phase_two_append_retry(
             &mut shadow.heads,
             &current,
         )?
+    } else if close_on_false {
+        let mut writes = Vec::with_capacity(2);
+        let mut value_changes = 0;
+        for side in &head.sides {
+            let persistent = shadow
+                .beam_state
+                .s_cells
+                .iter_mut()
+                .find(|cell| cell.reference == side.reference)
+                .ok_or_else(|| stage("HEADS-phase2-append", "persistent S cell is missing"))?;
+            if !persistent.closed {
+                value_changes += 1;
+            }
+            persistent.closed = true;
+            let queued = shadow
+                .heads
+                .iter_mut()
+                .find(|entry| entry.reference == head_ref)
+                .and_then(|entry| {
+                    entry
+                        .sides
+                        .iter_mut()
+                        .find(|cell| cell.reference == side.reference)
+                })
+                .ok_or_else(|| stage("HEADS-phase2-append", "queued S cell is missing"))?;
+            queued.closed = true;
+            writes.push(side.reference);
+        }
+        (writes, value_changes)
     } else {
         (Vec::new(), 0)
     };
