@@ -26,8 +26,8 @@ use audiveris_omr::{
     },
     native_stem_seeds::recognize_native_stem_seeds,
     native_stems::{
-        NativeStemsHeadPhase1ProgressStatus, NativeStemsSystemHeadPhase1FirstOutcome,
-        prepare_native_stems,
+        NativeStemsHeadPhase1DriveEvent, NativeStemsHeadPhase1ProgressStatus,
+        NativeStemsSystemHeadPhase1FirstOutcome, prepare_native_stems,
     },
     native_stems_beam_builders::{
         NativeStemsBeamBuilder, NativeStemsBeamBuilderItemKind, NativeStemsBeamBuilderTargetRef,
@@ -7033,6 +7033,103 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             .collect::<Vec<_>>(),
         [18, 1, 1]
     );
+    let page_phase_one = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect("Batuque complete page HEADS phase-1 drive");
+    assert_eq!(page_phase_one.systems.len(), 3);
+    assert_eq!(
+        page_phase_one
+            .systems
+            .iter()
+            .map(|system| {
+                let mut continuations = 0;
+                let mut created = 0;
+                let mut reused = 0;
+                let mut unlinked = 0;
+                for event in &system.events {
+                    match event {
+                        NativeStemsHeadPhase1DriveEvent::Continuation(_) => continuations += 1,
+                        NativeStemsHeadPhase1DriveEvent::Linked(transaction) => match transaction
+                            .create
+                            .disposition
+                        {
+                            NativeStemsBeamCreateStemDisposition::CreatedChecked { .. } => {
+                                created += 1
+                            }
+                            NativeStemsBeamCreateStemDisposition::Reused { .. } => reused += 1,
+                            NativeStemsBeamCreateStemDisposition::CreatedArtificial { .. }
+                            | NativeStemsBeamCreateStemDisposition::Rejected => {}
+                        },
+                        NativeStemsHeadPhase1DriveEvent::Unlinked(_) => unlinked += 1,
+                    }
+                }
+                (
+                    (
+                        system.system_id,
+                        system.carrier.heads.len(),
+                        system.carrier.current_index,
+                        system.carrier.prefix_closures.len(),
+                    ),
+                    (
+                        system.events.len(),
+                        continuations,
+                        created,
+                        reused,
+                        unlinked,
+                    ),
+                    (
+                        system.carrier.unlinked_heads.len(),
+                        system.carrier.undefined_sides.len(),
+                    ),
+                    (
+                        system.carrier.beam_state.sig.vertices.len(),
+                        system.carrier.beam_state.sig.edges.len(),
+                        system
+                            .carrier
+                            .beam_state
+                            .latest_base_apply
+                            .transaction_state
+                            .system_stems
+                            .known_stems
+                            .len(),
+                        system
+                            .carrier
+                            .beam_state
+                            .latest_base_apply
+                            .transaction_state
+                            .glyph_index
+                            .persistent_ids
+                            .sheet_last_id,
+                    ),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (
+                (1, 93, 93, 7),
+                (89, 85, 2, 2, 0),
+                (0, 0),
+                (232, 301, 42, 1_100)
+            ),
+            (
+                (2, 122, 122, 79),
+                (44, 42, 0, 0, 2),
+                (2, 0),
+                (293, 406, 54, 1_564)
+            ),
+            (
+                (3, 112, 112, 48),
+                (69, 63, 4, 1, 1),
+                (2, 2),
+                (268, 344, 52, 1_966)
+            ),
+        ]
+    );
+    assert!(page_phase_one.systems.iter().all(|system| {
+        system.carrier.frontier_consumed
+            && system.carrier.phase_two_index == 0
+            && system.carrier.current_index == system.carrier.heads.len()
+    }));
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

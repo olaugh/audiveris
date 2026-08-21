@@ -227,6 +227,26 @@ pub struct NativeStemsPageHeadPhase1NextAdvance {
     pub systems: Vec<NativeStemsSystemHeadPhase1NextAdvance>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum NativeStemsHeadPhase1DriveEvent {
+    Continuation(NativeStemsHeadPhase1Continuation),
+    Linked(Box<NativeStemsHeadCLinkTransaction>),
+    Unlinked(NativeStemsHeadPhase1Continuation),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase1Drive {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+    pub events: Vec<NativeStemsHeadPhase1DriveEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase1Drive {
+    pub systems: Vec<NativeStemsSystemHeadPhase1Drive>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
     pub phase: &'static str,
@@ -962,6 +982,109 @@ impl NativeStemsPreparedRecognition {
             });
         }
         Ok(NativeStemsPageHeadPhase1NextAdvance { systems })
+    }
+
+    /// Drive every system through all currently supported phase-1 head
+    /// outcomes. The page is returned only at true queue completion; any
+    /// unsupported expansion/reuse branch rejects the whole shadow drive.
+    pub fn drive_all_system_head_linking_phase1(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase1Drive, NativeStemsPreparationError> {
+        let starts = self.begin_all_system_head_linking_phase1()?;
+        let mut systems = Vec::with_capacity(starts.systems.len());
+        for start in starts.systems {
+            let NativeStemsSystemHeadPhase1Start {
+                system_id,
+                registry,
+                mut carrier,
+            } = start;
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive corners",
+            )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive reachability",
+            )?;
+            let seed_glyphs = system(
+                &self.components.stem_seed_glyphs,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive stem seeds",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 drive plans",
+            )?;
+            let mut events = Vec::new();
+            while carrier.current_index < carrier.heads.len() {
+                if events.len() > carrier.heads.len().saturating_mul(2) {
+                    return Err(phase(
+                        format!("system {system_id} exceeded its bounded head-event count"),
+                        "HEADS phase-1 page drive",
+                    ));
+                }
+                if carrier.frontier_consumed {
+                    let continuation = continue_native_stems_head_linking_phase1(
+                        &carrier,
+                        head_corners,
+                        Some(head_reachability),
+                        head_builders,
+                        plans,
+                    )
+                    .map_err(|error| {
+                        phase(
+                            format!("system {system_id}: {error}"),
+                            "HEADS phase-1 page drive",
+                        )
+                    })?;
+                    carrier = (*continuation.state_after).clone();
+                    events.push(NativeStemsHeadPhase1DriveEvent::Continuation(continuation));
+                    continue;
+                }
+                let outcome = advance_native_stems_head_c_link_or_no_link(
+                    &mut carrier,
+                    head_corners,
+                    head_reachability,
+                    &seed_glyphs.free_glyphs,
+                    head_builders,
+                    plans,
+                    &self.stem_checker,
+                    &registry,
+                )
+                .map_err(|error| {
+                    phase(
+                        format!("system {system_id}: {error}"),
+                        "HEADS phase-1 page drive",
+                    )
+                })?;
+                events.push(match outcome {
+                    Ok(transaction) => {
+                        NativeStemsHeadPhase1DriveEvent::Linked(Box::new(transaction))
+                    }
+                    Err(continuation) => NativeStemsHeadPhase1DriveEvent::Unlinked(continuation),
+                });
+            }
+            systems.push(NativeStemsSystemHeadPhase1Drive {
+                system_id,
+                registry,
+                carrier,
+                events,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase1Drive { systems })
     }
 }
 

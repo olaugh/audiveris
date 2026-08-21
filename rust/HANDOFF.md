@@ -8106,14 +8106,42 @@ Focused Batuque passes 1/1 in 5.09s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. Continuing the mixed carriers to their
 next action frontiers is next.
 
+## Boundary 159: complete three-system Batuque head phase 1
+
+`drive_all_system_head_linking_phase1` now alternates native continuation and
+action outcomes until every reverse-grade queue reaches its true terminal. A
+per-system `2 * head_count` event bound prevents silent looping, and any
+unsupported branch rejects the entire page shadow.
+
+The generic C-link core now reuses an already attached native Stem by adding
+only the HeadStem edge, linking the selected S cell, and closing sibling
+heads; vertex, allocator, registry, and system-Stem state remain unchanged.
+Dual TOP/BOTTOM reachability now follows Java exactly: one shared non-null
+stump records an undefined side, while differing/missing stumps choose BOTTOM
+on LEFT or TOP on RIGHT.
+
+Batuque terminals are:
+
+- system 1: 93/93 heads, prefix 7, 89 events (85 continuations, 2 creates,
+  2 reuses), no retry/undefined heads, SIG 232/301, 42 stems, allocator 1,100;
+- system 2: 122/122 heads, prefix 79, 44 events (42 continuations, 2 no-link
+  outcomes), 2 retry heads, SIG 293/406, 54 stems, allocator 1,564;
+- system 3: 112/112 heads, prefix 48, 69 events (63 continuations, 4 creates,
+  1 reuse, 1 direct no-link), 2 retry heads/2 undefined sides, SIG 268/344,
+  52 stems, allocator 1,966.
+
+All carriers finish consumed with `phase_two_index=0`. Focused Batuque passes
+1/1 in 5.11s; the full sibling suite passes 15/15 in 156.59s; strict workspace
+all-target/all-feature Clippy passes in 25.06s; formatting and diff checks are
+clean. Page-wide phase-2 append retry is next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 158's three mixed carriers to their next action
-   frontiers and through the remaining page-wide head queues while preserving each
-   system's complete native SIG, phase-2 retry list, and shared page identity
-   state. Then generalize
+1. Continue Boundary 159's four page-wide retry heads through phase-2 append,
+   preserving each system's complete native SIG, undefined-side sets, and
+   shared page identity state. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.
