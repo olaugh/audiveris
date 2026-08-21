@@ -29,17 +29,17 @@ Do not equate either Java or Rust unit-test success with recognition parity.
 
 ## Current status (read this first)
 
-The CLI now performs native schema-1 JSON recognition through HEADS. GRID's
-human-readable report remains unchanged; HEADERS, STEM_SEEDS, BEAMS, LEDGERS,
-and HEADS require `-json` and compose in Java stage order rather than accepting
-invented downstream inputs. HEADS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS
--> LEDGERS -> HEADS, retains every upstream product, and adds identity-free
-final heads, source provenance, exact glyph evidence, beam decisions, and
-tally-scale rows without fabricating Java SIG or glyph IDs.
+The CLI now performs native schema-1 JSON recognition through STEMS. GRID's
+human-readable report remains unchanged; HEADERS through STEMS require `-json`
+and compose in Java stage order rather than accepting invented downstream
+inputs. STEMS runs GRID -> HEADERS -> STEM_SEEDS -> BEAMS -> LEDGERS -> HEADS
+-> STEMS, retains every upstream product, and adds identity-honest final Stem
+geometry/grades, HeadStem links, abnormal/no-stem evidence, and terminal counts
+without fabricating Java SIG, Inter, or Glyph IDs.
 
 `omrscope` now compares the two producers while they run: Rust and Java start
 independently, each publishes an immutable snapshot once it completes GRID,
-HEADERS, STEM_SEEDS, BEAMS, LEDGERS, or HEADS, and the viewer can select any
+HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, or STEMS, and the viewer can select any
 retained snapshot. This is stage-boundary visibility only -- neither producer
 claims to stream individual recognition items while a stage is executing. The
 opt-in Rust `-stream-json` framing adds flushed `@omrscope` markers around the
@@ -8215,6 +8215,26 @@ introduced. Focused Batuque passes 1/1 in 13.80s; the full sibling suite passes
 15/15 in 142.75s; strict workspace Clippy passes in 20.01s; formatting and diff
 checks are green. Ordinary and stream schema-1 STEMS
 publication is next.
+
+## Boundary 163: schema-1 STEMS publication
+
+`stems_json` extends the existing hand-written schema-1 document without
+changing any earlier product. `-step STEMS -json` now composes the seven native
+stages through transactional `recognize_native_stems`, retains the complete
+HEADS payload, and adds exactly one stage-owned `stems` object. Each system
+publishes terminal summaries, all accepted Stem medians/bounds/thicknesses/
+grades, HeadStem payloads, multiple/no-stem/abnormal head sets, and carried
+undefined sides. Native stem identities and SIG ordinals are explicitly named
+and system-scoped; no value is presented as a Java `InterIndex` ID.
+
+Batuque publishes 148 final Stems, 323 live HeadStem relations, 327 checked
+heads, and four abnormal no-stem heads across three systems. The ordinary JSON
+document is byte-identical to the immutable STEMS snapshot emitted between
+`stage_started` and `stage_completed`; stage markers remain ordered GRID,
+HEADERS, STEM_SEEDS, BEAMS, LEDGERS, HEADS, STEMS. The full CLI suite passes;
+its live ordinary/stream contract takes 17.63s. All 11 report tests pass;
+strict workspace Clippy passes in 12.06s; formatting and diff checks are green. Wider-corpus
+SIDES/STUMPS/head branch coverage and exact remote CI remain next.
 
 ## Next implementation slices
 

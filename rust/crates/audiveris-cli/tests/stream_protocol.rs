@@ -14,13 +14,18 @@ fn chula() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../data/examples/chula.png")
 }
 
+fn batuque() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../data/examples/batuque.png")
+}
+
 fn invoke(stage: &str, stream: bool) -> String {
     let mut command = Command::new(binary());
     command.args(["-batch", "-step", stage, "-json"]);
     if stream {
         command.arg("-stream-json");
     }
-    let output = command.arg(chula()).output().expect("run audiveris-cli");
+    let input = if stage == "STEMS" { batuque() } else { chula() };
+    let output = command.arg(input).output().expect("run audiveris-cli");
     assert!(
         output.status.success(),
         "{stage} failed: {}",
@@ -58,7 +63,7 @@ fn payload_for_stage(stream: &str, stage: &str) -> String {
 
 #[test]
 fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
-    for stage in ["GRID", "LEDGERS", "HEADS"] {
+    for stage in ["GRID", "LEDGERS", "HEADS", "STEMS"] {
         let ordinary = invoke(stage, false);
         let stream = invoke(stage, true);
         let payload = payload_for_stage(&stream, stage);
@@ -72,7 +77,16 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
         let expected_stages: &[&str] = match stage {
             "GRID" => &["GRID"],
             "LEDGERS" => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS"],
-            _ => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS", "HEADS"],
+            "HEADS" => &["GRID", "HEADERS", "STEM_SEEDS", "BEAMS", "LEDGERS", "HEADS"],
+            _ => &[
+                "GRID",
+                "HEADERS",
+                "STEM_SEEDS",
+                "BEAMS",
+                "LEDGERS",
+                "HEADS",
+                "STEMS",
+            ],
         };
         let marker_lines: Vec<&str> = stream
             .lines()
@@ -122,6 +136,28 @@ fn stream_keeps_published_stage_payloads_byte_identical_to_ordinary_json() {
                 payload.matches("\"ledger_lines\":").count(),
                 1,
                 "LEDGERS publication includes the inferred ledger-line collection"
+            );
+        }
+        if stage == "STEMS" {
+            assert!(
+                payload.contains("\"stage\":\"STEMS\"")
+                    && payload.contains("\"heads\":")
+                    && payload.contains("\"stems\":"),
+                "STEMS publication retains every upstream product and its stage-owned result"
+            );
+            assert!(payload.contains("\"system_count\":3"));
+            assert!(payload.contains("\"stem_count\":148"));
+            assert!(payload.contains("\"checked_head_count\":327"));
+            assert!(payload.contains("\"abnormal_head_count\":4"));
+            assert_eq!(
+                payload.matches("\"grade_source\":").count(),
+                148,
+                "Batuque publishes every final native Stem exactly once"
+            );
+            assert_eq!(
+                payload.matches("\"stems\":").count(),
+                1,
+                "STEMS stage-owned product is emitted exactly once"
             );
         }
     }

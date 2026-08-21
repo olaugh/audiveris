@@ -57,13 +57,18 @@ use crate::native_heads_staff_epilog::{
     NativeHeadsStaffEpilogSystem,
 };
 use crate::native_ledgers::{NativeLedgerLine, NativeLedgerRecognition};
+use crate::native_sig::{NativeSigInterKind, NativeSigRelationKind};
 use crate::native_stem_seeds::{
     NativeStemSeedDecision, NativeStemSeedGate, NativeStemSeedGlyph, NativeStemSeedRecognition,
 };
+use crate::native_stems::{NativeStemsHeadPhase1DriveEvent, NativeStemsRecognition};
+use crate::native_stems_beam_vlink_head_links::NativeStemsBeamHeadLinkHeadRef;
+use crate::native_stems_beam_vlink_transaction::NativeStemsBeamStemGrade;
 use crate::raw_ledger_filter::MaterializedLedgerInter;
 use crate::recognize::{GridLinesRecognition, NativeBeamRecognition, ScaleRecognition};
 use crate::staff_header::{HeaderBounds, StaffHeaderRange};
 use crate::stem_seeds_step::{NativeStemCheckResult, NativeStemCounts, NativeStemImpacts};
+use crate::stems_step::NativeStemHeadSide;
 
 /// A minimal JSON writer.
 ///
@@ -281,6 +286,7 @@ pub fn ledgers_json(
             beams: Some(beams),
             ledgers: Some(ledgers),
             heads: None,
+            stems: None,
         },
         input,
         sheet,
@@ -315,6 +321,42 @@ pub fn heads_json(
             beams: Some(beams),
             ledgers: Some(ledgers),
             heads: Some(heads),
+            stems: None,
+        },
+        input,
+        sheet,
+    )
+}
+
+/// Emits the complete native schema-1 page through finalized STEMS.
+///
+/// Stems and HeadStem links use explicit native/system-local identities under
+/// the stage-owned `stems` product. Earlier `inters` and `relations` remain
+/// byte-for-byte governed by their existing publication contracts; no Java ID
+/// is fabricated for a native Stem or final Head.
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn stems_json(
+    recognition: &GridLinesRecognition,
+    headers: &NativeHeaderRecognition,
+    stem_seeds: &NativeStemSeedRecognition,
+    beams: &NativeBeamRecognition,
+    ledgers: &NativeLedgerRecognition,
+    heads: &NativeHeadsEpilogRecognition,
+    stems: &NativeStemsRecognition,
+    input: &str,
+    sheet: usize,
+) -> String {
+    recognition_json(
+        "STEMS",
+        recognition,
+        RecognitionProducts {
+            headers: Some(headers),
+            stem_seeds: Some(stem_seeds),
+            beams: Some(beams),
+            ledgers: Some(ledgers),
+            heads: Some(heads),
+            stems: Some(stems),
         },
         input,
         sheet,
@@ -328,6 +370,7 @@ struct RecognitionProducts<'a> {
     beams: Option<&'a NativeBeamRecognition>,
     ledgers: Option<&'a NativeLedgerRecognition>,
     heads: Option<&'a NativeHeadsEpilogRecognition>,
+    stems: Option<&'a NativeStemsRecognition>,
 }
 
 fn recognition_json(
@@ -343,6 +386,7 @@ fn recognition_json(
         beams,
         ledgers,
         heads,
+        stems,
     } = products;
     let mut json = Json::default();
     json.open('{');
@@ -388,6 +432,9 @@ fn recognition_json(
     }
     if let Some(heads) = heads {
         heads_product(&mut json, heads);
+    }
+    if let Some(stems) = stems {
+        stems_product(&mut json, stems);
     }
 
     json.close('}');
@@ -1477,6 +1524,270 @@ fn heads_product(json: &mut Json, heads: &NativeHeadsEpilogRecognition) {
     }
     json.close(']');
     json.close('}');
+}
+
+/// Final native STEMS product. Native identities are named explicitly and
+/// scoped by `system`; they are not inserted into the cross-producer `inters`
+/// collection and therefore cannot be mistaken for Java `InterIndex` IDs.
+fn stems_product(json: &mut Json, stems: &NativeStemsRecognition) {
+    let stem_count = stems
+        .systems
+        .iter()
+        .map(|system| {
+            system
+                .transaction
+                .state_after
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len()
+        })
+        .sum::<usize>();
+    let head_stem_relation_count = stems
+        .systems
+        .iter()
+        .map(|system| {
+            system
+                .transaction
+                .state_after
+                .beam_state
+                .sig
+                .edges
+                .iter()
+                .filter(|edge| edge.active && edge.kind == NativeSigRelationKind::HeadStem)
+                .count()
+        })
+        .sum::<usize>();
+    json.key("stems");
+    json.open('{');
+    json.key("summary");
+    json.open('{');
+    json.field_integer("system_count", stems.systems.len() as i64);
+    json.field_integer("stem_count", stem_count as i64);
+    json.field_integer(
+        "checked_head_count",
+        stems
+            .systems
+            .iter()
+            .map(|system| system.transaction.checked_heads)
+            .sum::<usize>() as i64,
+    );
+    json.field_integer("head_stem_relation_count", head_stem_relation_count as i64);
+    json.field_integer(
+        "abnormal_head_count",
+        stems
+            .systems
+            .iter()
+            .map(|system| system.transaction.abnormal_heads.len())
+            .sum::<usize>() as i64,
+    );
+    json.close('}');
+
+    json.key("systems");
+    json.open('[');
+    for system in &stems.systems {
+        let transaction = &system.transaction;
+        let carrier = &transaction.state_after;
+        let sig = &carrier.beam_state.sig;
+        let bindings = &carrier.beam_state.bindings;
+        let known_stems = &carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems;
+        let (continuation_count, linked_count, unlinked_count) =
+            system.phase_one_events.iter().fold(
+                (0_usize, 0_usize, 0_usize),
+                |(continuations, linked, unlinked), event| match event {
+                    NativeStemsHeadPhase1DriveEvent::Continuation(_) => {
+                        (continuations + 1, linked, unlinked)
+                    }
+                    NativeStemsHeadPhase1DriveEvent::Linked(_) => {
+                        (continuations, linked + 1, unlinked)
+                    }
+                    NativeStemsHeadPhase1DriveEvent::Unlinked(_) => {
+                        (continuations, linked, unlinked + 1)
+                    }
+                },
+            );
+        json.open('{');
+        json.field_integer("system", system.system_id as i64);
+        json.key("summary");
+        json.open('{');
+        json.field_integer("head_count", carrier.heads.len() as i64);
+        json.field_integer("checked_head_count", transaction.checked_heads as i64);
+        json.field_integer(
+            "phase_one_event_count",
+            system.phase_one_events.len() as i64,
+        );
+        json.field_integer("continuation_count", continuation_count as i64);
+        json.field_integer("linked_event_count", linked_count as i64);
+        json.field_integer("unlinked_event_count", unlinked_count as i64);
+        json.field_integer("phase_two_retry_count", system.retries.len() as i64);
+        json.field_integer("stem_count", known_stems.len() as i64);
+        json.field_integer(
+            "head_stem_relation_count",
+            sig.edges
+                .iter()
+                .filter(|edge| edge.active && edge.kind == NativeSigRelationKind::HeadStem)
+                .count() as i64,
+        );
+        json.field_integer(
+            "multiple_stem_head_count",
+            transaction.multiple_stem_heads.len() as i64,
+        );
+        json.field_integer("no_stem_head_count", transaction.no_stem_heads.len() as i64);
+        json.field_integer(
+            "abnormal_head_count",
+            transaction.abnormal_heads.len() as i64,
+        );
+        json.field_integer(
+            "removed_head_stem_relation_count",
+            transaction.removed_head_stem_relations.len() as i64,
+        );
+        json.field_integer(
+            "abnormal_value_changes",
+            transaction.abnormal_value_changes as i64,
+        );
+        json.field_integer(
+            "sig_vertex_count",
+            sig.vertices.iter().filter(|v| v.active).count() as i64,
+        );
+        json.field_integer(
+            "sig_edge_count",
+            sig.edges.iter().filter(|e| e.active).count() as i64,
+        );
+        json.close('}');
+
+        json.key("stem_inters");
+        json.open('[');
+        for stem in known_stems {
+            let vertex_id = bindings
+                .stem_vertices
+                .get(&stem.stem_identity)
+                .expect("final STEMS stem identity must resolve to the terminal SIG");
+            let vertex = sig
+                .vertex(vertex_id.0)
+                .filter(|vertex| vertex.kind == NativeSigInterKind::Stem)
+                .expect("final STEMS binding must resolve to a live Stem vertex");
+            json.open('{');
+            json.field_integer("identity", stem.stem_identity as i64);
+            json.field_integer("sig_ordinal", vertex_id.0 as i64);
+            json.field_string("status", "accepted");
+            integer_bounds(json, "bounds", stem.geometry.ribbon_bounds);
+            json.key("median");
+            json.open('{');
+            json.field_number("x1", stem.geometry.median.start.x);
+            json.field_number("y1", stem.geometry.median.start.y);
+            json.field_number("x2", stem.geometry.median.stop.x);
+            json.field_number("y2", stem.geometry.median.stop.y);
+            json.close('}');
+            json.field_number("thickness", stem.geometry.mean_thickness);
+            json.field_number("grade", stem.grade.grade());
+            json.field_string(
+                "grade_source",
+                match stem.grade {
+                    NativeStemsBeamStemGrade::Checked(_) => "checked",
+                    NativeStemsBeamStemGrade::Artificial(_) => "artificial",
+                },
+            );
+            json.field_boolean("abnormal", vertex.abnormal);
+            json.close('}');
+        }
+        json.close(']');
+
+        json.key("head_stem_relations");
+        json.open('[');
+        for edge in sig
+            .edges
+            .iter()
+            .filter(|edge| edge.active && edge.kind == NativeSigRelationKind::HeadStem)
+        {
+            let payload = edge
+                .head_stem
+                .expect("final HeadStem relation must retain its payload");
+            let head_x_ordinal = carrier
+                .heads
+                .iter()
+                .find(|head| head.reference.sig_ordinal == edge.source)
+                .map(|head| head.reference.x_ordinal);
+            let stem_identity = bindings
+                .stem_vertices
+                .iter()
+                .find_map(|(identity, vertex)| (vertex.0 == edge.target).then_some(*identity))
+                .expect("final HeadStem target must resolve to a native Stem identity");
+            json.open('{');
+            json.field_integer("sig_ordinal", edge.ordinal as i64);
+            json.field_integer("head_sig_ordinal", edge.source as i64);
+            json.key("head_x_ordinal");
+            match head_x_ordinal {
+                Some(ordinal) => json.integer(ordinal as i64),
+                None => json.null(),
+            }
+            json.field_integer("stem_sig_ordinal", edge.target as i64);
+            json.field_integer("stem_identity", stem_identity as i64);
+            json.field_string("head_side", stem_head_side(payload.head_side));
+            json.field_number("dx", payload.dx);
+            json.field_number("dy", payload.dy);
+            json.key("extension");
+            json.open('{');
+            json.field_number("x", payload.extension_point.x);
+            json.field_number("y", payload.extension_point.y);
+            json.close('}');
+            json.field_number("consistency", payload.consistency);
+            json.key("grade");
+            match edge.support {
+                Some(support) => json.number(support.grade),
+                None => json.null(),
+            }
+            json.field_boolean("manual", payload.manual);
+            json.close('}');
+        }
+        json.close(']');
+
+        stems_head_refs(
+            json,
+            "multiple_stem_heads",
+            &transaction.multiple_stem_heads,
+        );
+        stems_head_refs(json, "no_stem_heads", &transaction.no_stem_heads);
+        stems_head_refs(json, "abnormal_heads", &transaction.abnormal_heads);
+        json.key("undefined_sides");
+        json.open('[');
+        for side in &carrier.undefined_sides {
+            json.open('{');
+            json.field_integer("head_sig_ordinal", side.head.sig_ordinal as i64);
+            json.field_integer("head_x_ordinal", side.head.x_ordinal as i64);
+            json.field_string("side", stem_head_side(side.horizontal));
+            json.close('}');
+        }
+        json.close(']');
+        json.close('}');
+    }
+    json.close(']');
+    json.close('}');
+}
+
+fn stems_head_refs(json: &mut Json, name: &str, heads: &[NativeStemsBeamHeadLinkHeadRef]) {
+    json.key(name);
+    json.open('[');
+    for head in heads {
+        json.open('{');
+        json.field_integer("sig_ordinal", head.sig_ordinal as i64);
+        json.field_integer("x_ordinal", head.x_ordinal as i64);
+        json.close('}');
+    }
+    json.close(']');
+}
+
+const fn stem_head_side(side: NativeStemHeadSide) -> &'static str {
+    match side {
+        NativeStemHeadSide::Left => "LEFT",
+        NativeStemHeadSide::Right => "RIGHT",
+    }
 }
 
 fn heads_system(

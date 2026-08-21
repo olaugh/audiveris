@@ -7,12 +7,13 @@ use audiveris_omr::native_headers::recognize_native_headers;
 use audiveris_omr::native_heads::recognize_native_heads;
 use audiveris_omr::native_ledgers::recognize_native_ledgers;
 use audiveris_omr::native_stem_seeds::recognize_native_stem_seeds;
+use audiveris_omr::native_stems::recognize_native_stems;
 use audiveris_omr::recognize::{
     grid_lines_report, recognize_grid_lines_raster, recognize_native_beams_with_stem_seeds,
     recognize_scale_raster, scale_report,
 };
 use audiveris_omr::report::{
-    beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json,
+    beams_json, grid_json, headers_json, heads_json, ledgers_json, stem_seeds_json, stems_json,
 };
 use std::{
     fmt::Write as _,
@@ -26,12 +27,12 @@ fn usage() {
          Usage: audiveris-cli [options] [inputs]\n\n\
          Native text recognition currently stops at -step GRID, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID page.png\n\n\
-         Schema-1 JSON is published through HEADS, e.g.:\n\
-         \x20 audiveris-cli -batch -step HEADS -json page.png\n\n\
+         Schema-1 JSON is published through STEMS, e.g.:\n\
+         \x20 audiveris-cli -batch -step STEMS -json page.png\n\n\
          PNG, JPEG and PDF inputs are accepted. A PDF is a book of sheets and\n\
          every page is processed; -sheets selects a subset, e.g.:\n\
          \x20 audiveris-cli -batch -step GRID score.pdf -sheets 1 3-5\n\n\
-         HEADERS, STEM_SEEDS, BEAMS, LEDGERS, and HEADS currently require -json.\n\
+         HEADERS through STEMS currently require -json.\n\
          Small-beam pages are refused explicitly; later stages use the\n\
          compatibility handoff."
     );
@@ -46,13 +47,19 @@ fn is_native_step(step: OmrStep) -> bool {
                 | OmrStep::Beams
                 | OmrStep::Ledgers
                 | OmrStep::Heads
+                | OmrStep::Stems
         )
 }
 
 fn is_json_only_step(step: OmrStep) -> bool {
     matches!(
         step,
-        OmrStep::Headers | OmrStep::StemSeeds | OmrStep::Beams | OmrStep::Ledgers | OmrStep::Heads
+        OmrStep::Headers
+            | OmrStep::StemSeeds
+            | OmrStep::Beams
+            | OmrStep::Ledgers
+            | OmrStep::Heads
+            | OmrStep::Stems
     )
 }
 
@@ -189,15 +196,48 @@ fn run_native(parameters: &Parameters, json: bool) -> Result<bool, String> {
                     .map_err(|error| {
                         format!("{} sheet {sheet}: HEADS failed: {error}", input.display())
                     })?;
+                    if step == OmrStep::Heads {
+                        print!(
+                            "{}",
+                            heads_json(
+                                &recognition,
+                                &headers,
+                                &stem_seeds,
+                                &beams,
+                                &ledgers,
+                                &heads.epilog,
+                                &input_name,
+                                sheet,
+                            )
+                        );
+                        continue;
+                    }
+                    let inspect_profile = stem_seeds
+                        .systems
+                        .first()
+                        .map_or(1, |system| system.raw.profile);
+                    let stems = recognize_native_stems(
+                        &recognition,
+                        &headers,
+                        &stem_seeds,
+                        &beams,
+                        &ledgers,
+                        &heads,
+                        inspect_profile,
+                    )
+                    .map_err(|error| {
+                        format!("{} sheet {sheet}: STEMS failed: {error}", input.display())
+                    })?;
                     print!(
                         "{}",
-                        heads_json(
+                        stems_json(
                             &recognition,
                             &headers,
                             &stem_seeds,
                             &beams,
                             &ledgers,
                             &heads.epilog,
+                            &stems,
                             &input_name,
                             sheet,
                         )
@@ -359,17 +399,18 @@ fn json_string(value: &str) -> String {
 }
 
 fn stream_stages_through(target: OmrStep) -> Result<&'static [OmrStep], String> {
-    const STAGES: [OmrStep; 6] = [
+    const STAGES: [OmrStep; 7] = [
         OmrStep::Grid,
         OmrStep::Headers,
         OmrStep::StemSeeds,
         OmrStep::Beams,
         OmrStep::Ledgers,
         OmrStep::Heads,
+        OmrStep::Stems,
     ];
     let Some(index) = STAGES.iter().position(|stage| *stage == target) else {
         return Err(format!(
-            "native omrscope stream begins at -step GRID and currently ends at -step HEADS, not -step {target}"
+            "native omrscope stream begins at -step GRID and currently ends at -step STEMS, not -step {target}"
         ));
     };
     Ok(&STAGES[..=index])
@@ -617,6 +658,53 @@ fn run_native_stream(parameters: &Parameters, json: bool) -> Result<bool, String
                     sheet,
                 ))?;
                 stream.stage_completed(OmrStep::Heads, &input_name, sheet, recognition_elapsed)?;
+                if target == OmrStep::Heads {
+                    continue;
+                }
+
+                // STEMS ------------------------------------------------------
+                stream.stage_started(OmrStep::Stems, &input_name, sheet)?;
+                let started = Instant::now();
+                let inspect_profile = stem_seeds
+                    .systems
+                    .first()
+                    .map_or(1, |system| system.raw.profile);
+                let stems = match recognize_native_stems(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                    &heads,
+                    inspect_profile,
+                ) {
+                    Ok(stems) => stems,
+                    Err(error) => {
+                        let message =
+                            format!("{} sheet {sheet}: STEMS failed: {error}", input.display());
+                        stream.stage_failed(
+                            OmrStep::Stems,
+                            &input_name,
+                            sheet,
+                            started.elapsed(),
+                            &message,
+                        )?;
+                        return Err(message);
+                    }
+                };
+                let recognition_elapsed = started.elapsed();
+                stream.snapshot(&stems_json(
+                    &recognition,
+                    &headers,
+                    &stem_seeds,
+                    &beams,
+                    &ledgers,
+                    &heads.epilog,
+                    &stems,
+                    &input_name,
+                    sheet,
+                ))?;
+                stream.stage_completed(OmrStep::Stems, &input_name, sheet, recognition_elapsed)?;
             }
         }
         if processed_sheets == 0 {
@@ -725,10 +813,11 @@ mod tests {
             OmrStep::Beams,
             OmrStep::Ledgers,
             OmrStep::Heads,
+            OmrStep::Stems,
         ] {
             assert!(is_native_step(step), "{step} should be native");
         }
-        assert!(!is_native_step(OmrStep::Stems));
+        assert!(!is_native_step(OmrStep::Reduction));
     }
 
     #[test]
@@ -739,6 +828,7 @@ mod tests {
             OmrStep::Beams,
             OmrStep::Ledgers,
             OmrStep::Heads,
+            OmrStep::Stems,
         ] {
             let parameters = Parameters {
                 step: Some(step),
@@ -751,12 +841,6 @@ mod tests {
                 format!("native -step {step} output currently requires -json")
             );
         }
-
-        let parameters = Parameters {
-            step: Some(OmrStep::Stems),
-            ..Parameters::default()
-        };
-        assert!(!run_native(&parameters, true).expect("unsupported handoff"));
     }
 
     #[test]
@@ -792,7 +876,7 @@ mod tests {
     #[test]
     fn stream_stage_plan_is_java_pipeline_order_and_refuses_unpublished_stages() {
         assert_eq!(
-            stream_stages_through(OmrStep::Heads).expect("HEADS stream plan"),
+            stream_stages_through(OmrStep::Stems).expect("STEMS stream plan"),
             [
                 OmrStep::Grid,
                 OmrStep::Headers,
@@ -800,6 +884,7 @@ mod tests {
                 OmrStep::Beams,
                 OmrStep::Ledgers,
                 OmrStep::Heads,
+                OmrStep::Stems,
             ]
         );
         assert!(
