@@ -224,6 +224,8 @@ const BATUQUE_FINALIZE_PROBE: &[u8] =
     include_bytes!("../../../oracle/java/StemsFinalizePageProbe.java");
 const BATUQUE_FINALIZE_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-finalize-page.init.gradle");
+const CHULA_SYSTEM2_ORDER54_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-chula-system2-order54.txt");
 const CORPUS_PAGES: [(&str, &str); 8] = [
     ("chula", "chula.png"),
     ("allegretto", "allegretto.png"),
@@ -7597,12 +7599,37 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
 }
 
 /// The page-wide production driver must consume the three authenticated
-/// wider existing-stem reuse frontiers in Chula system 1 before it exposes
-/// the still-unported system-2 multi-head expansion. This is intentionally a
-/// fail-closed progress gate: it rejects at the next system rather than
+/// wider existing-stem reuse frontiers in Chula systems 1 and 2 before it
+/// exposes the still-unported system-3 stump-less expansion. This is
+/// intentionally a fail-closed progress gate: it rejects at the next system rather than
 /// silently publishing a partial page.
 #[test]
-fn chula_page_drive_consumes_system_one_multi_head_reuses_atomically() {
+fn chula_page_drive_consumes_first_two_systems_multi_head_reuses_atomically() {
+    assert_eq!(
+        sha256_hex(CHULA_SYSTEM2_ORDER54_FIXTURE.as_bytes()),
+        "421c6b99552071e39e6b72a3963f5ac46daf41b3bd0c9a560ea45251868f5c09"
+    );
+    assert!(
+        CHULA_SYSTEM2_ORDER54_FIXTURE
+            .contains("headOrder 54 headX 46 headSig 94 headInterId 1681 cAlias h:46:LEFT:BOTTOM")
+    );
+    assert!(
+        CHULA_SYSTEM2_ORDER54_FIXTURE
+            .contains("lastIndex 2 maxIndex 2 relations 2 relationRows [h:46:LEFT:BOTTOM:")
+    );
+    assert!(CHULA_SYSTEM2_ORDER54_FIXTURE.contains(
+        "existingGlyph glyph:376 existingActive true existingStem 2285 lineChanged false"
+    ));
+    assert!(
+        CHULA_SYSTEM2_ORDER54_FIXTURE.contains("addedEdges [system2:sourceId1681:targetId2285:")
+    );
+    assert!(CHULA_SYSTEM2_ORDER54_FIXTURE.contains("system2:sourceId1694:targetId2285:"));
+    assert!(CHULA_SYSTEM2_ORDER54_FIXTURE.contains(
+        "decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither]"
+    ));
+    assert!(CHULA_SYSTEM2_ORDER54_FIXTURE.contains(
+        "freshRuns 2 freshRunsByteIdentical true fullPassSha256 6e42c2cd20ceffca1d90359d3bc81d7e60780f3cbe29b22b56d1c8e7a9b8b353"
+    ));
     let path = repo_root().join("data/examples/chula.png");
     let grid = recognize_grid_lines(path).expect("Chula GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Chula HEADERS recognition");
@@ -7618,10 +7645,11 @@ fn chula_page_drive_consumes_system_one_multi_head_reuses_atomically() {
 
     let error = prepared
         .drive_all_system_head_linking_phase1()
-        .expect_err("system 2 wider multi-head expansion remains fail-closed");
+        .expect_err("system 3 stump-less expansion remains fail-closed");
     assert_eq!(error.phase, "HEADS phase-1 page drive");
-    assert!(error.message.contains("system 2"));
-    assert!(error.message.contains("queue 54 head x46/SIG94"));
+    assert!(error.message.contains("system 3"));
+    assert!(error.message.contains("queue 109 head x41/SIG122"));
+    assert!(!error.message.contains("queue 54 head x46/SIG94"));
     assert!(!error.message.contains("queue 67 head x73/SIG18"));
     assert!(!error.message.contains("queue 70 head x1/SIG35"));
     assert!(!error.message.contains("queue 73 head x75/SIG96"));

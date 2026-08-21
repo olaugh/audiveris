@@ -9870,6 +9870,61 @@ pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_order73_from_gly
     )
 }
 
+/// Consume the Java-measured wider existing-stem reuse at Chula system 2,
+/// queue 54.
+///
+/// x46/SIG94 walks the start stump, crossed x45 linker, and one chunk. The
+/// composed candidate resolves to carried native Stem 45/glyph 127; Java adds
+/// x46 and x45 HeadStem relations, then closes stem-sharing x45 and x47 without
+/// allocating or registering another stem.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the atomic boundary authenticates each independently owned native authority"
+)]
+pub(crate) fn advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase1Continuation, NativeStemsBeamSidesError> {
+    advance_native_stems_head_multi_head_reuse_c_link_at_queue(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeStemsHeadMultiHeadReuseExpectation {
+            queue_index: 54,
+            head_x_ordinal: 46,
+            head_sig_ordinal: 94,
+            stem_identity: 45,
+            stem_glyph_id: 127,
+            carried_undef_indexes: &[],
+            crossed_x_ordinals: &[45],
+            included_glyph_count: 2,
+            appended_edge_count: 2,
+            closed_x_ordinals: &[45, 47],
+            closed_value_changes: 4,
+            line_shift_repeats: 1,
+            frontier_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            frontier_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            side_decisions: &[(
+                crate::stems_step::NativeStemHeadSide::Left,
+                Some(false),
+                Some(true),
+            )],
+            order_label: "system2-order54",
+        },
+    )
+}
+
 /// Consume the bounded RIGHT-side existing-stem C-link at order 93.
 ///
 /// This is the first frontier Java resolves on the RIGHT: LEFT reports
@@ -10818,7 +10873,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         return Err(stage(
             "HEADS-CLink-expand",
             format!(
-                "selected frontier is not the bounded start-C shape: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} profile {}/{} items {:?}",
+                "selected frontier is not the bounded start-C shape: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} profile {}/{} items {:?} undefs {:?}",
                 head_corners.system_id,
                 expected_current_index,
                 frontier.head.x_ordinal,
@@ -10833,6 +10888,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                     .iter()
                     .map(|item| (item.kind, item.glyph, item.target, item.contribution))
                     .collect::<Vec<_>>(),
+                shadow.undefined_sides,
             ),
         ));
     }
@@ -10842,7 +10898,22 @@ fn advance_native_stems_head_c_link_at_frontier(
     else {
         return Err(stage(
             "HEADS-CLink-glyph",
-            "bounded head frontier does not start from an attached head stump",
+            format!(
+                "bounded head frontier does not start from an attached head stump: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} start {:?} items {:?}",
+                head_corners.system_id,
+                expected_current_index,
+                frontier.head.x_ordinal,
+                frontier.head.sig_ordinal,
+                frontier.next_corner.horizontal,
+                frontier.next_corner.vertical,
+                builder.builder_ordinal,
+                builder.start_stump,
+                builder
+                    .items
+                    .iter()
+                    .map(|item| (item.kind, item.glyph, item.target, item.contribution))
+                    .collect::<Vec<_>>(),
+            ),
         ));
     };
     if stump_corner != frontier.next_corner {

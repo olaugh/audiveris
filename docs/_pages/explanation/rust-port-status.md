@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and sixty-four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes all phase-2 retries; Boundary 161 finalizes all systems; Boundary 162 exposes fail-closed `recognize_native_stems`; Boundary 163 publishes its schema-1 ordinary and stream result; Boundary 164 carries Chula system 1 through its three wider existing-stem reuse frontiers.
+The first one hundred and sixty-five semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-154 compose and drive Batuque through complete page-wide SIDES/STUMPS; Boundaries 155-159 complete all three phase-1 head queues; Boundary 160 consumes all phase-2 retries; Boundary 161 finalizes all systems; Boundary 162 exposes fail-closed `recognize_native_stems`; Boundary 163 publishes its schema-1 ordinary and stream result; Boundaries 164-165 carry Chula systems 1-2 through wider existing-stem reuse frontiers.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque** | One hundred and sixty-four exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque retry, finalization, fail-closed recognition, and publication; Boundary 164 carries Chula system 1 through orders 67, 70, and 73 without snapshot hydration. | Port the newly exposed Chula system-2 queue-54 multi-head frontier, widen remaining SIDES/STUMPS/head coverage, and close exact remote CI before declaring corpus-wide STEMS completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque** | One hundred and sixty-five exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque retry, finalization, recognition, and publication; Boundaries 164-165 carry Chula systems 1-2 through their measured wider reuse frontiers. | Port the newly exposed Chula system-3 queue-109 stump-less frontier, widen remaining SIDES/STUMPS/head coverage, and close exact remote CI before declaring corpus-wide STEMS completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -4155,6 +4155,18 @@ system-2 queue-54 x46/SIG94 start/head/chunk expansion. The focused page gate
 pins this safe stopping point, and failure diagnostics now include the exact
 builder item shape. Frozen oracle data is unchanged. Next is a measured
 system-2 transaction and generic wider multi-head reuse dispatch.
+
+## Boundary 165: Chula system-2 wider reuse
+
+Two byte-identical Java passes classify system 2 queue 54 x46/SIG94 as a
+LEFT/BottomOnly existing-stem reuse: start + crossed x45 + chunk reuses glyph
+376 / StemInter 2285, adds two HeadStem edges, closes x45 and x47, and allocates
+nothing. The bounded fixture SHA-256 is
+`421c6b99552071e39e6b72a3963f5ac46daf41b3bd0c9a560ea45251868f5c09`.
+
+Native content resolves the candidate to Stem 45/glyph 127 and produces the
+same structural transaction. Chula systems 1 and 2 now finish phase 1; system
+3 queue 109 x41/SIG122 is the next fail-closed stump-less start-plus-chunk gap.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

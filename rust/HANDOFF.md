@@ -8392,3 +8392,23 @@ builder/profile, and item composition. No Java oracle or frozen fixture changed.
 Next: instrument the system-2 queue-54 Java transaction and replace the bounded
 routing with a generic existing-stem multi-head dispatcher as wider cases make
 the invariant explicit.
+
+## Boundary 165: Chula system-2 wider reuse
+
+A fresh Java system-2 replay (warmup plus two byte-identical passes) measures
+queue 54 x46/SIG94 as LEFT/BottomOnly. Its start, crossed x45 linker, and chunk
+resolve to existing Java glyph 376 / StemInter 2285. Java allocates nothing,
+adds HeadStem edges for x46 and x45, closes stem-sharing x45 and x47, and
+advances to x31/SIG36. The bounded four-row fixture is SHA-256
+`421c6b99552071e39e6b72a3963f5ac46daf41b3bd0c9a560ea45251868f5c09`;
+both complete pass outputs are SHA-256
+`6e42c2cd20ceffca1d90359d3bc81d7e60780f3cbe29b22b56d1c8e7a9b8b353`.
+
+Production resolves that candidate through native content to Stem identity 45
+/ native glyph 127, appends the two relations, and performs the same four
+closure changes without Java IDs or allocation. Chula systems 1 and 2 now both
+finish phase 1; the page rejects next at system 3 queue 109 x41/SIG122, whose
+start linker has no stump and is followed by one chunk. The focused live-page
+gate pins the new atomic stopping point. Next: measure and port that stump-less
+frontier, then extract a generic wider-reuse dispatcher from the accumulated
+system-1/system-2 cases.
