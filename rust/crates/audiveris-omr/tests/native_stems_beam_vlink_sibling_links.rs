@@ -7935,6 +7935,76 @@ fn allegretto_hook_removal_checkpoint_is_atomic_and_reaches_sides_exhaustion() {
     assert_eq!(field(expected[4], "freshRunsByteIdentical"), "true");
 }
 
+/// The production page carrier must consume the same typed hook checkpoint;
+/// callers must not need the historical reconstructed predecessor helper.
+#[test]
+fn allegretto_production_sides_carries_competing_hook_removal() {
+    let path = repo_root().join("data/examples/allegretto.png");
+    let grid = recognize_grid_lines(path).expect("Allegretto GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Allegretto HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Allegretto STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Allegretto BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Allegretto LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Allegretto HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Allegretto native STEMS preparation");
+
+    let drive = prepared
+        .drive_first_system_sides()
+        .expect("Allegretto system 1 completes SIDES through hook removal");
+    assert_eq!(drive.system_id, 1);
+    assert_eq!(drive.transactions.len(), 28);
+    assert_eq!(drive.hook_removals.len(), 1);
+    let removal = &drive.hook_removals[0];
+    let stumps = &prepared.components.beam_stumps.systems[0];
+    let sig_of = stumps
+        .beams_by_abscissa
+        .iter()
+        .map(|beam| (beam.source, beam.sig_ordinal))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(sig_of[&removal.beam], 25);
+    assert_eq!(sig_of[&removal.competing_hook], 24);
+    assert_eq!(removal.removed_edges.len(), 5);
+    assert_eq!(removal.group_members_before.len(), 3);
+    assert_eq!(removal.group_members_after.len(), 2);
+    assert!(matches!(
+        drive.carrier.scheduler.status,
+        NativeStemsBeamSchedulerStatus::SidesExhausted { .. }
+    ));
+
+    let page = prepared
+        .drive_all_system_stumps()
+        .expect("all Allegretto systems complete SIDES and STUMPS");
+    assert_eq!(page.systems.len(), 3);
+    assert_eq!(
+        page.systems
+            .iter()
+            .map(|system| system.hook_removals.len())
+            .collect::<Vec<_>>(),
+        [1, 0, 2]
+    );
+    assert!(
+        page.systems
+            .iter()
+            .all(|system| system.hook_removals.iter().all(|removal| {
+                removal.active_vertex_count_after + 1 == removal.active_vertex_count_before
+                    && removal.active_edge_count_after + removal.removed_edges.len()
+                        == removal.active_edge_count_before
+                    && removal.group_members_after.len() + 1 == removal.group_members_before.len()
+                    && !removal
+                        .group_members_after
+                        .contains(&removal.competing_hook)
+            }))
+    );
+    assert!(page.systems.iter().all(|system| matches!(
+        system.carrier.scheduler.status,
+        NativeStemsBeamSchedulerStatus::Completed { .. }
+    )));
+}
+
 /// The first measured transaction now derives B16 from the owned SIG and
 /// typed products.  Java rows are opened only after the complete native
 /// graph/cell result exists.

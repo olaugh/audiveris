@@ -8437,3 +8437,30 @@ phase-1 head in all three systems, phase 2, generic `finalizeStems`, and the
 transactional `recognize_native_stems` entry point. Batuque and the complete
 16-test sibling suite remain green. Continue at the next wider-corpus
 fail-closed branch; Chula no longer supplies the current HEADS blocker.
+
+## Boundary 167: production Allegretto hook removal
+
+`NativeStemsPreparedRecognition::drive_system_sides_start` now treats
+`AwaitingHookRemovalTransaction` as an executable typed frontier. It invokes
+`remove_native_stems_beam_competing_hook_and_resume`, records the atomic result,
+and continues from the returned scheduler state; it no longer rejects a page
+merely because the already-ported hook branch is reached. Both SIDES and
+SIDES+STUMPS result authorities retain their ordered removal transactions.
+
+The live production Allegretto gate proves system 1 executes 28 SIDES
+transactions, removes the exact Java-pinned BeamHook SIG24 competing with Beam
+SIG25 (five incident edges and one member from a three-member group), and
+reaches `SidesExhausted`. Serial carriage completes systems 1-3 through STUMPS
+with hook-removal counts `[1,0,2]`; every removal changes exactly one live
+vertex, its incident-edge count, and one group member. The system-1 fixture is
+unchanged at SHA-256
+`d4c5decf03eaab893c79b2cb7ebd0378f13ac019acc007a38718105c75eacc71`.
+The two system-3 removals extend native structural coverage but are not claimed
+as separately frozen Java result rows.
+
+Focused Allegretto passes 1/1. The full sibling suite passes 17/17 in 147.41s;
+strict all-targets/all-features workspace Clippy, formatting, and diff checks
+pass. The production CLI now fails closed later, at Allegretto system 1 HEADS
+queue 65 x77/SIG14 LEFT/TOP. Its builder is start stump + chunk + crossed x75
+head, with one carried undefined side. Measure and generalize that multi-item
+C-link expansion next.

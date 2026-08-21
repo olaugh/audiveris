@@ -33,7 +33,8 @@ use crate::{
         NativeStemsBeamSchedulerSystem, materialize_native_stems_beam_scheduler_frontiers,
     },
     native_stems_beam_sides::{
-        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        NativeStemsBeamHookRemovalTransaction, NativeStemsBeamSidesCarrier,
+        NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
         NativeStemsBeamStumpsTransaction, NativeStemsFinalizeTransaction,
         NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Carrier,
         NativeStemsHeadPhase1Continuation,
@@ -49,6 +50,7 @@ use crate::{
         drive_native_stems_beam_stumps_from_modeled_registry, finalize_native_stems,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
         initialize_native_stems_beam_sides_carrier_from_modeled_registry,
+        remove_native_stems_beam_competing_hook_and_resume,
     },
     native_stems_beam_stumps::{
         NativeStemsBeamStumpRecognition, materialize_native_stems_beam_stumps,
@@ -138,6 +140,7 @@ pub struct NativeStemsSystemSidesDrive {
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsBeamSidesCarrier,
     pub transactions: Vec<NativeStemsBeamSidesTransaction>,
+    pub hook_removals: Vec<NativeStemsBeamHookRemovalTransaction>,
 }
 
 /// Compatibility name for the first production system drive.
@@ -155,6 +158,7 @@ pub struct NativeStemsSystemStumpsDrive {
     pub system_id: usize,
     pub registry: NativeStemsModeledGlyphRegistry,
     pub carrier: NativeStemsBeamSidesCarrier,
+    pub hook_removals: Vec<NativeStemsBeamHookRemovalTransaction>,
     pub continuation: NativeStemsBeamSchedulerStumpsContinuation,
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
 }
@@ -434,9 +438,9 @@ impl NativeStemsPreparedRecognition {
 
     /// Drive system 1 from its first frontier through the true SIDES terminal.
     ///
-    /// The immutable builder count is a strict progress bound. A competing-hook
-    /// checkpoint or any non-SIDES terminal rejects the whole returned drive;
-    /// callers never receive a guessed partial system completion.
+    /// The immutable builder count is a strict progress bound. Competing-hook
+    /// checkpoints execute the same atomic native removal transaction used by
+    /// the focused gate; any other non-SIDES terminal rejects the whole drive.
     pub fn drive_first_system_sides(
         &self,
     ) -> Result<NativeStemsFirstSystemSidesDrive, NativeStemsPreparationError> {
@@ -463,6 +467,7 @@ impl NativeStemsPreparedRecognition {
             ));
         }
         let mut transactions = vec![first_transaction];
+        let mut hook_removals = Vec::new();
         loop {
             match &carrier.scheduler.status {
                 NativeStemsBeamSchedulerStatus::SidesExhausted { .. } => {
@@ -471,14 +476,24 @@ impl NativeStemsPreparedRecognition {
                         registry,
                         carrier,
                         transactions,
+                        hook_removals,
                     });
                 }
                 NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(_) => {}
                 NativeStemsBeamSchedulerStatus::AwaitingHookRemovalTransaction(_) => {
-                    return Err(phase(
-                        format!("system {system_id} reached a competing-hook checkpoint"),
-                        "SIDES drive",
-                    ));
+                    let removal =
+                        remove_native_stems_beam_competing_hook_and_resume(&mut carrier, context)
+                            .map_err(|error| {
+                            phase(
+                                format!(
+                                    "system {system_id} hook removal {}: {error}",
+                                    hook_removals.len() + 1
+                                ),
+                                "SIDES hook removal",
+                            )
+                        })?;
+                    hook_removals.push(removal);
+                    continue;
                 }
                 NativeStemsBeamSchedulerStatus::Completed { .. } => {
                     return Err(phase(
@@ -659,6 +674,7 @@ impl NativeStemsPreparedRecognition {
             system_id,
             registry,
             mut carrier,
+            hook_removals,
             ..
         } = sides;
         let context = self.sides_context(system_id)?;
@@ -688,6 +704,7 @@ impl NativeStemsPreparedRecognition {
             system_id,
             registry,
             carrier,
+            hook_removals,
             continuation,
             transactions: drive.transactions,
         })
