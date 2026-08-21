@@ -1190,18 +1190,15 @@ pub fn prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry(
 
 /// Construct the first shared-sheet B12 frontier from native modeled glyphs.
 ///
-/// `persistent_ids` is deliberately still explicit: the following B14 bridge
-/// has not yet been migrated away from the shared Java EntityIndex allocator.
-/// Unlike the retired create-stem fixture bootstrap, however, this function
+/// The shared native identity domain begins after the modeled registry. This
+/// keeps modeled glyph and subsequently allocated StemInter identities unique
+/// without importing Java's sheet-wide EntityIndex watermark. The function
 /// imports no page-wide GlyphIndex union, aliases, equality scan, selected
-/// bindings, line state, or `systemStems` snapshot. Those are derived from the
-/// native scheduler/plan products and the owned modeled registry, beginning
-/// with an authoritative empty system-stem map.
+/// bindings, line state, `systemStems` snapshot, or persistent-ID seed.
 pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
     scheduler_system: &NativeStemsBeamSchedulerSystem,
     plan_system: &NativeStemsBeamLinkPlanSystem,
     registry: &NativeStemsModeledGlyphRegistry,
-    persistent_ids: NativeStemsBeamPersistentIdState,
 ) -> Result<
     (
         NativeStemsBeamFrontierPreparation,
@@ -1209,18 +1206,16 @@ pub fn initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_regi
     ),
     NativeStemsBeamVLinkTransactionError,
 > {
-    if scheduler_system.system_id != 1
-        || plan_system.system_id != 1
-        || registry.system_id != 1
-        || persistent_ids.sheet_last_id <= 0
-        || persistent_ids.sheet_last_id != persistent_ids.glyph_index_last_id
-        || persistent_ids.sheet_last_id != persistent_ids.inter_index_last_id
-        || usize::try_from(persistent_ids.sheet_last_id)
-            .ok()
-            .is_none_or(|last_id| last_id < registry.len())
-    {
+    if scheduler_system.system_id != 1 || plan_system.system_id != 1 || registry.system_id != 1 {
         return Err(NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch);
     }
+    let last_id = i32::try_from(registry.len())
+        .map_err(|_| NativeStemsBeamVLinkTransactionError::PersistentAllocatorMismatch)?;
+    let persistent_ids = NativeStemsBeamPersistentIdState {
+        sheet_last_id: last_id,
+        glyph_index_last_id: last_id,
+        inter_index_last_id: last_id,
+    };
     let mut state = NativeStemsBeamVLinkTransactionState {
         scope: NativeStemsBeamVLinkTransactionScope::SharedSheetFirstFrontier { system_id: 1 },
         glyph_index: NativeStemsBeamGlyphIndexTransactionState {

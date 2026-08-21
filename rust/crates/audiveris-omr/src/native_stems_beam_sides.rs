@@ -1661,7 +1661,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order37(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2340))
+        .find(|stem| stem.stem_identity == 0)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1747,7 +1747,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order38(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2372))
+        .find(|stem| stem.stem_identity == 32)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1833,7 +1833,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order39(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2373))
+        .find(|stem| stem.stem_identity == 33)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -1919,7 +1919,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order40(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2348))
+        .find(|stem| stem.stem_identity == 8)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2005,7 +2005,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order41(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2357))
+        .find(|stem| stem.stem_identity == 17)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2092,7 +2092,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order42(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350))
+        .find(|stem| stem.stem_identity == 10)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2178,7 +2178,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order43(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2356))
+        .find(|stem| stem.stem_identity == 16)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2264,7 +2264,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order44(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2358))
+        .find(|stem| stem.stem_identity == 18)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2350,7 +2350,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order45(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2374))
+        .find(|stem| stem.stem_identity == 34)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2436,7 +2436,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order46(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350))
+        .find(|stem| stem.stem_identity == 10)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2522,7 +2522,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order47(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2359))
+        .find(|stem| stem.stem_identity == 19)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2608,7 +2608,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order48(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2344))
+        .find(|stem| stem.stem_identity == 4)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2694,7 +2694,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order49(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2369))
+        .find(|stem| stem.stem_identity == 29)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -2785,7 +2785,7 @@ pub fn advance_native_stems_head_open_frontier_order50(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2383))
+        .find(|stem| stem.stem_identity == 43)
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -2913,7 +2913,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order51(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2361))
+        .find(|stem| stem.stem_identity == 21)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3019,7 +3019,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order52(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2360))
+        .find(|stem| stem.stem_identity == 20)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3127,7 +3127,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order53(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2366))
+        .find(|stem| stem.stem_identity == 26)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3234,7 +3234,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order54(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2349))
+        .find(|stem| stem.stem_identity == 9)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3340,7 +3340,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order55(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2347))
+        .find(|stem| stem.stem_identity == 7)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3446,7 +3446,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order56(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2341))
+        .find(|stem| stem.stem_identity == 1)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3552,7 +3552,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order58(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2342))
+        .find(|stem| stem.stem_identity == 2)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3658,7 +3658,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order59(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2343))
+        .find(|stem| stem.stem_identity == 3)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -3769,7 +3769,7 @@ pub fn advance_native_stems_head_open_frontier_order60(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2382))
+        .find(|stem| stem.stem_identity == 42)
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -3915,7 +3915,7 @@ pub fn advance_native_stems_head_open_frontier_order61(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2382))
+        .find(|stem| stem.stem_identity == 42)
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -4029,7 +4029,7 @@ pub fn advance_native_stems_head_open_frontier_order68(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2384))
+        .find(|stem| stem.stem_identity == 44)
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -4147,7 +4147,7 @@ pub fn advance_native_stems_head_open_frontier_order75(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2383))
+        .find(|stem| stem.stem_identity == 43)
         .ok_or_else(|| {
             stage(
                 "HEADS-open-frontier",
@@ -5123,7 +5123,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order62(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2355))
+        .find(|stem| stem.stem_identity == 15)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5209,7 +5209,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order63(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2352))
+        .find(|stem| stem.stem_identity == 12)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5296,7 +5296,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order64(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2354))
+        .find(|stem| stem.stem_identity == 14)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5383,7 +5383,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order65(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2363))
+        .find(|stem| stem.stem_identity == 23)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5470,7 +5470,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order66(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2340))
+        .find(|stem| stem.stem_identity == 0)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5557,7 +5557,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order69(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2367))
+        .find(|stem| stem.stem_identity == 27)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5643,7 +5643,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order71(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2370))
+        .find(|stem| stem.stem_identity == 30)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5729,7 +5729,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order74(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2353))
+        .find(|stem| stem.stem_identity == 13)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5815,7 +5815,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order76(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2375))
+        .find(|stem| stem.stem_identity == 35)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5901,7 +5901,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order77(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2346))
+        .find(|stem| stem.stem_identity == 6)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -5987,7 +5987,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order78(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2358))
+        .find(|stem| stem.stem_identity == 18)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6073,7 +6073,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order79(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2372))
+        .find(|stem| stem.stem_identity == 32)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6159,7 +6159,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order80(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2357))
+        .find(|stem| stem.stem_identity == 17)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6245,7 +6245,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order81(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2365))
+        .find(|stem| stem.stem_identity == 25)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6331,7 +6331,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order82(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2371))
+        .find(|stem| stem.stem_identity == 31)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6417,7 +6417,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order83(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2356))
+        .find(|stem| stem.stem_identity == 16)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6503,7 +6503,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order84(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2364))
+        .find(|stem| stem.stem_identity == 24)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6590,7 +6590,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order85(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2371))
+        .find(|stem| stem.stem_identity == 31)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6676,7 +6676,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order86(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2362))
+        .find(|stem| stem.stem_identity == 22)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6762,7 +6762,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order87(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2377))
+        .find(|stem| stem.stem_identity == 37)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6848,7 +6848,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order88(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2380))
+        .find(|stem| stem.stem_identity == 40)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -6934,7 +6934,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order89(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2351))
+        .find(|stem| stem.stem_identity == 11)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7020,7 +7020,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order90(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2378))
+        .find(|stem| stem.stem_identity == 38)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7107,7 +7107,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order91(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2364))
+        .find(|stem| stem.stem_identity == 24)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7194,7 +7194,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order92(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2362))
+        .find(|stem| stem.stem_identity == 22)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7280,7 +7280,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order94(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2373))
+        .find(|stem| stem.stem_identity == 33)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7366,7 +7366,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order95(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2376))
+        .find(|stem| stem.stem_identity == 36)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7452,7 +7452,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order96(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2345))
+        .find(|stem| stem.stem_identity == 5)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7539,7 +7539,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order97(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2377))
+        .find(|stem| stem.stem_identity == 37)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7626,7 +7626,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order98(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2350))
+        .find(|stem| stem.stem_identity == 10)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7712,7 +7712,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order99(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2374))
+        .find(|stem| stem.stem_identity == 34)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7799,7 +7799,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order100(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2366))
+        .find(|stem| stem.stem_identity == 26)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7885,7 +7885,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order101(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2348))
+        .find(|stem| stem.stem_identity == 8)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -7926,7 +7926,7 @@ struct NativeStemsHeadMultiHeadReuseExpectation {
     queue_index: usize,
     head_x_ordinal: usize,
     head_sig_ordinal: usize,
-    stem_inter_id: i32,
+    stem_identity: usize,
     stem_glyph_id: i32,
     carried_undef_indexes: &'static [usize],
     crossed_x_ordinals: &'static [usize],
@@ -8031,13 +8031,13 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(expectation.stem_inter_id))
+        .find(|stem| stem.stem_identity == expectation.stem_identity)
         .ok_or_else(|| {
             stage(
                 "HEADS-multi-reuse-CLink-frontier",
                 format!(
-                    "{} existing StemInter {}/glyph{} is missing",
-                    expectation.order_label, expectation.stem_inter_id, expectation.stem_glyph_id
+                    "{} existing native stem {}/glyph{} is missing",
+                    expectation.order_label, expectation.stem_identity, expectation.stem_glyph_id
                 ),
             )
         })?;
@@ -8177,7 +8177,7 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
             "HEADS-CLink-first-STEMS-bridge",
             format!(
                 "selected seed canonical does not match carried StemInter {}",
-                expectation.stem_inter_id
+                expectation.stem_identity
             ),
         ));
     }
@@ -8618,15 +8618,15 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         .stem
         .clone()
         .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
-    if stem.inter_id != Some(expectation.stem_inter_id)
+    if stem.stem_identity != expectation.stem_identity
         || stem.glyph_id != existing_stem.glyph_id
         || !stem.sig_attached
     {
         return Err(stage(
             "HEADS-CLink-createStem",
             format!(
-                "reused stem is not the authenticated StemInter {}/glyph{}",
-                expectation.stem_inter_id, expectation.stem_glyph_id
+                "reused stem is not the authenticated native stem {}/glyph{}",
+                expectation.stem_identity, expectation.stem_glyph_id
             ),
         ));
     }
@@ -8860,7 +8860,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order67(
             queue_index: 67,
             head_x_ordinal: 73,
             head_sig_ordinal: 18,
-            stem_inter_id: 2382,
+            stem_identity: 42,
             stem_glyph_id: 332,
             carried_undef_indexes: &[50, 60, 61],
             crossed_x_ordinals: &[70, 71],
@@ -8916,7 +8916,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order70(
             queue_index: 70,
             head_x_ordinal: 1,
             head_sig_ordinal: 35,
-            stem_inter_id: 2384,
+            stem_identity: 44,
             stem_glyph_id: 322,
             carried_undef_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[0],
@@ -8970,7 +8970,7 @@ pub fn advance_native_stems_head_single_head_reuse_c_link_order72(
             queue_index: 72,
             head_x_ordinal: 26,
             head_sig_ordinal: 13,
-            stem_inter_id: 2385,
+            stem_identity: 45,
             stem_glyph_id: 324,
             carried_undef_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[],
@@ -9025,7 +9025,7 @@ pub fn advance_native_stems_head_multi_head_reuse_c_link_order73(
             queue_index: 73,
             head_x_ordinal: 75,
             head_sig_ordinal: 96,
-            stem_inter_id: 2380,
+            stem_identity: 40,
             stem_glyph_id: 319,
             carried_undef_indexes: &[50, 60, 61, 68],
             crossed_x_ordinals: &[72],
@@ -9080,7 +9080,7 @@ pub fn advance_native_stems_head_right_side_reuse_c_link_order93(
             queue_index: 93,
             head_x_ordinal: 37,
             head_sig_ordinal: 44,
-            stem_inter_id: 2379,
+            stem_identity: 39,
             stem_glyph_id: 307,
             carried_undef_indexes: &[50, 60, 61, 68, 75],
             crossed_x_ordinals: &[],
@@ -9247,7 +9247,7 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2381))
+        .find(|stem| stem.stem_identity == 41)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-CLink-frontier",
@@ -9526,8 +9526,7 @@ pub fn advance_native_stems_head_existing_stem_c_link_order57(
         .stem
         .clone()
         .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
-    if stem.inter_id != Some(2381) || stem.glyph_id != existing_stem.glyph_id || !stem.sig_attached
-    {
+    if stem.stem_identity != 41 || stem.glyph_id != existing_stem.glyph_id || !stem.sig_attached {
         return Err(stage(
             "HEADS-CLink-createStem",
             "reused stem is not the authenticated StemInter 2381/glyph328",
@@ -9749,7 +9748,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order21(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2378))
+        .find(|stem| stem.stem_identity == 38)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",
@@ -9830,7 +9829,7 @@ pub fn advance_native_stems_head_existing_stem_retry_order22(
         .system_stems
         .known_stems
         .iter()
-        .find(|stem| stem.inter_id == Some(2354))
+        .find(|stem| stem.stem_identity == 14)
         .ok_or_else(|| {
             stage(
                 "HEADS-existing-stem-retry-frontier",

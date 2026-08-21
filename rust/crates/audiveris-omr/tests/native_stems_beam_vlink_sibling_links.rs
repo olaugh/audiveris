@@ -6501,20 +6501,20 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .expect("system 1 bindings")
         .clone();
 
-    let persistent_ids = hydrated
-        .state_before
-        .base_apply_state_before
-        .transaction_state
-        .glyph_index
-        .persistent_ids;
     let (first_preparation, mut first_transaction_state) =
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry(
             &hydrated.scheduler,
             &hydrated.plans,
             &modeled_registry,
-            persistent_ids,
         )
         .expect("native transaction-1 B12 frontier state");
+    assert_eq!(
+        first_transaction_state
+            .glyph_index
+            .persistent_ids
+            .sheet_last_id,
+        1058
+    );
     assert_eq!(first_preparation.plan.plan_ordinal, 143);
     assert_eq!(first_preparation.selected_glyphs.len(), 2);
     assert_eq!(first_preparation.known_glyphs_added, 2);
@@ -6656,6 +6656,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     expected_base_stem_before.glyph_id = first_create.registration.glyph_id;
     let mut expected_base_stem_after = hydrated.base_apply.stem_after.clone();
     expected_base_stem_after.glyph_id = first_create.registration.glyph_id;
+    expected_base_stem_after.inter_id = Some(1059);
     assert_eq!(native_base.stem_before, expected_base_stem_before);
     assert_eq!(native_base.stem_after, expected_base_stem_after);
     assert_eq!(
@@ -6671,7 +6672,21 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         hydrated.base_apply.apply_disposition
     );
     assert_eq!(native_base.callback, hydrated.base_apply.callback);
-    assert_eq!(native_base.operations, hydrated.base_apply.operations);
+    let mut expected_operations = hydrated.base_apply.operations.clone();
+    for operation in &mut expected_operations {
+        match operation {
+            audiveris_omr::native_stems_beam_vlink_base_apply::NativeStemsBeamVLinkBaseApplyOperation::SharedPersistentIdAdvanced { before, after } => {
+                *before = 1058;
+                *after = 1059;
+            }
+            audiveris_omr::native_stems_beam_vlink_base_apply::NativeStemsBeamVLinkBaseApplyOperation::StemInterIdAssigned { inter_id, .. }
+            | audiveris_omr::native_stems_beam_vlink_base_apply::NativeStemsBeamVLinkBaseApplyOperation::InterIndexInserted { inter_id, .. } => {
+                *inter_id = 1059;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(native_base.operations, expected_operations);
     assert_eq!(native_base.outcome, hydrated.base_apply.outcome);
     assert_eq!((sig.vertices.len(), sig.edges.len()), (222, 203));
 
@@ -8027,7 +8042,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .iter()
         .find(|stem| stem.stem_identity == stem_identity)
         .expect("attached first-head stem in persistent systemStems");
-    assert_eq!(final_stem.inter_id, Some(2379));
+    assert_eq!(final_stem.inter_id, Some(1098));
     assert!(final_stem.sig_attached);
 
     // Boundary 29: carry the successful first-head mutation through Java's next
@@ -8297,7 +8312,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .iter()
         .find(|stem| stem.stem_identity == seventh_stem_identity)
         .expect("order7 created system stem");
-    assert_eq!(seventh_stem.inter_id, Some(2380));
+    assert_eq!(seventh_stem.inter_id, Some(1099));
     assert_eq!(seventh_transaction.stem_vertex.0, 261);
     assert_eq!(seventh_transaction.head_stem_edge.0, 354);
     assert_eq!(seventh_transaction.s_linker.head.x_ordinal, 76);
@@ -8915,7 +8930,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .iter()
         .find(|stem| stem.stem_identity == order18_stem_identity)
         .expect("order18 created system stem");
-    assert_eq!(order18_stem.inter_id, Some(2381));
+    assert_eq!(order18_stem.inter_id, Some(1100));
     assert_eq!(order18_head_phase.current_index, 19);
     assert!(order18_head_phase.frontier_consumed);
     assert_eq!(order18_head_phase.heads[18].reference.x_ordinal, 63);
@@ -9071,7 +9086,7 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         .iter()
         .find(|stem| stem.stem_identity == order20_stem_identity)
         .expect("order20 created system stem");
-    assert_eq!(order20_stem.inter_id, Some(2382));
+    assert_eq!(order20_stem.inter_id, Some(1101));
     assert_eq!(
         order20_head_phase.beam_state.sig.vertices.len(),
         order20_frontier_before.beam_state.sig.vertices.len() + 1
@@ -12702,6 +12717,15 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
         phase_two_state = *retry.state_after;
     }
     assert_eq!(phase_two_state.phase_two_index, 5);
+    let terminal_ids = phase_two_state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    assert_eq!(terminal_ids.sheet_last_id, 1104);
+    assert_eq!(terminal_ids.glyph_index_last_id, 1104);
+    assert_eq!(terminal_ids.inter_index_last_id, 1104);
 
     // Boundary 133: Java finalizeStems runs checkHeadStems followed by
     // checkNeededStems. The completed Chula system-1 carrier has no head with
