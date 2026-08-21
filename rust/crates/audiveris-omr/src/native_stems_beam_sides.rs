@@ -184,6 +184,9 @@ pub struct NativeStemsHeadPhase1Carrier {
     pub beam_state: NativeStemsBeamSidesCarrier,
     pub heads: Vec<NativeStemsHeadPhase1Head>,
     pub current_index: usize,
+    /// Ordered already-linked heads completed before the first awaited C-link
+    /// frontier. These are real S-cell closure writes, not C-link mutations.
+    pub prefix_closures: Vec<NativeStemsHeadPhase1PrefixClosure>,
     pub unlinked_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
     pub undefined_sides: Vec<NativeStemsBeamHeadSLinkerRef>,
     pub frontier: NativeStemsHeadPhase1Frontier,
@@ -192,6 +195,14 @@ pub struct NativeStemsHeadPhase1Carrier {
     /// completes (StemsRetriever.linkStems); this is the cursor into that
     /// queue, and stays 0 for the whole of phase 1.
     pub phase_two_index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadPhase1PrefixClosure {
+    pub processed_head: NativeStemsBeamHeadLinkHeadRef,
+    pub side_decisions: Vec<NativeStemsHeadPhase1SideDecision>,
+    pub closed_s_linkers: Vec<NativeStemsBeamHeadSLinkerRef>,
+    pub closed_value_changes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -946,114 +957,142 @@ pub fn begin_native_stems_head_linking_phase1(
         });
     }
 
-    let first = heads
-        .first()
-        .cloned()
-        .ok_or_else(|| stage("HEADS-phase1-frontier", "system has no stem-capable head"))?;
-    let mut side_decisions = Vec::new();
-    let mut next_corner = None;
-    for side in &first.sides {
-        if side.linked {
-            side_decisions.push(NativeStemsHeadPhase1SideDecision {
-                side: side.reference.horizontal,
-                linked_before: true,
-                closed_before: side.closed,
-                top_can_link: None,
-                bottom_can_link: None,
-            });
-            continue;
-        }
-        if side.closed {
+    if heads.is_empty() {
+        return Err(stage(
+            "HEADS-phase1-frontier",
+            "system has no stem-capable head",
+        ));
+    }
+    let mut beam_state = carrier.clone();
+    let mut current_index = 0;
+    let mut prefix_closures = Vec::new();
+    loop {
+        let current = heads.get(current_index).cloned().ok_or_else(|| {
+            stage(
+                "HEADS-phase1-frontier",
+                "prelinked prefix exhausted the head queue without a C-link frontier",
+            )
+        })?;
+        let mut side_decisions = Vec::new();
+        let mut next_corner = None;
+        let mut linked_before = false;
+        for side in &current.sides {
+            if side.linked {
+                linked_before = true;
+                side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                    side: side.reference.horizontal,
+                    linked_before: true,
+                    closed_before: side.closed,
+                    top_can_link: None,
+                    bottom_can_link: None,
+                });
+                continue;
+            }
+            if side.closed {
+                side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                    side: side.reference.horizontal,
+                    linked_before: false,
+                    closed_before: true,
+                    top_can_link: None,
+                    bottom_can_link: None,
+                });
+                continue;
+            }
+            let top = side.ordered_observer_corners[0];
+            let bottom = side.ordered_observer_corners[1];
+            let top = NativeStemsHeadCornerRef {
+                head: top.head,
+                sig_ordinal: top.sig_ordinal,
+                x_ordinal: top.x_ordinal,
+                horizontal: top.horizontal,
+                vertical: top.vertical,
+            };
+            let bottom = NativeStemsHeadCornerRef {
+                head: bottom.head,
+                sig_ordinal: bottom.sig_ordinal,
+                x_ordinal: bottom.x_ordinal,
+                horizontal: bottom.horizontal,
+                vertical: bottom.vertical,
+            };
+            let top_ok = bounded_head_can_link(
+                top,
+                0,
+                head_builders,
+                &beam_state.s_cells,
+                plans.min_linker_length,
+                false,
+            )?;
+            let bottom_ok = bounded_head_can_link(
+                bottom,
+                0,
+                head_builders,
+                &beam_state.s_cells,
+                plans.min_linker_length,
+                false,
+            )?;
             side_decisions.push(NativeStemsHeadPhase1SideDecision {
                 side: side.reference.horizontal,
                 linked_before: false,
-                closed_before: true,
-                top_can_link: None,
-                bottom_can_link: None,
+                closed_before: false,
+                top_can_link: Some(top_ok),
+                bottom_can_link: Some(bottom_ok),
             });
-            continue;
-        }
-        let top = side.ordered_observer_corners[0];
-        let bottom = side.ordered_observer_corners[1];
-        let top = NativeStemsHeadCornerRef {
-            head: top.head,
-            sig_ordinal: top.sig_ordinal,
-            x_ordinal: top.x_ordinal,
-            horizontal: top.horizontal,
-            vertical: top.vertical,
-        };
-        let bottom = NativeStemsHeadCornerRef {
-            head: bottom.head,
-            sig_ordinal: bottom.sig_ordinal,
-            x_ordinal: bottom.x_ordinal,
-            horizontal: bottom.horizontal,
-            vertical: bottom.vertical,
-        };
-        let top_ok = bounded_head_can_link(
-            top,
-            0,
-            head_builders,
-            &carrier.s_cells,
-            plans.min_linker_length,
-            false,
-        )?;
-        let bottom_ok = bounded_head_can_link(
-            bottom,
-            0,
-            head_builders,
-            &carrier.s_cells,
-            plans.min_linker_length,
-            false,
-        )?;
-        side_decisions.push(NativeStemsHeadPhase1SideDecision {
-            side: side.reference.horizontal,
-            linked_before: false,
-            closed_before: false,
-            top_can_link: Some(top_ok),
-            bottom_can_link: Some(bottom_ok),
-        });
-        match (top_ok, bottom_ok) {
-            (true, false) => {
-                next_corner = Some(top);
+            match (top_ok, bottom_ok) {
+                (true, false) => next_corner = Some(top),
+                (false, true) => next_corner = Some(bottom),
+                (true, true) => {
+                    return Err(stage(
+                        "HEADS-phase1-frontier",
+                        "prelinked prefix reaches the unported dual-corner selection branch",
+                    ));
+                }
+                (false, false) => {}
+            }
+            if next_corner.is_some() {
                 break;
             }
-            (false, true) => {
-                next_corner = Some(bottom);
-                break;
-            }
-            (true, true) => {
-                return Err(stage(
-                    "HEADS-phase1-frontier",
-                    "first head reaches the unported dual-corner selection branch",
-                ));
-            }
-            (false, false) => {}
         }
-    }
-    let next_corner = next_corner.ok_or_else(|| {
-        stage(
-            "HEADS-phase1-frontier",
-            "first head has no bounded C-link transaction",
-        )
-    })?;
-
-    Ok(NativeStemsHeadPhase1Carrier {
-        beam_state: carrier.clone(),
-        heads,
-        current_index: 0,
-        unlinked_heads: Vec::new(),
-        undefined_sides: Vec::new(),
-        phase_two_index: 0,
-        frontier: NativeStemsHeadPhase1Frontier {
-            head: first.reference,
-            stem_profile: 0,
-            link_profile: plans.link_profile,
-            append: false,
+        if let Some(next_corner) = next_corner {
+            return Ok(NativeStemsHeadPhase1Carrier {
+                beam_state,
+                heads,
+                current_index,
+                prefix_closures,
+                unlinked_heads: Vec::new(),
+                undefined_sides: Vec::new(),
+                phase_two_index: 0,
+                frontier: NativeStemsHeadPhase1Frontier {
+                    head: current.reference,
+                    stem_profile: 0,
+                    link_profile: plans.link_profile,
+                    append: false,
+                    side_decisions,
+                    next_corner,
+                },
+                frontier_consumed: false,
+            });
+        }
+        if !linked_before {
+            return Err(stage(
+                "HEADS-phase1-frontier",
+                "prelinked prefix reaches the rather-good retry/no-link branch",
+            ));
+        }
+        let (closed_s_linkers, closed_value_changes) = close_heads_sharing_prelinked_stems(
+            &beam_state.sig,
+            &beam_state.bindings,
+            &mut beam_state.s_cells,
+            &mut heads,
+            &current,
+        )?;
+        prefix_closures.push(NativeStemsHeadPhase1PrefixClosure {
+            processed_head: current.reference,
             side_decisions,
-            next_corner,
-        },
-        frontier_consumed: false,
-    })
+            closed_s_linkers,
+            closed_value_changes,
+        });
+        current_index += 1;
+    }
 }
 
 fn bounded_head_can_link(

@@ -36,6 +36,7 @@ use audiveris_omr::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        NativeStemsHeadPhase1SideDecision,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
         advance_native_stems_beam_stumps_transaction_from_modeled_registry,
         advance_native_stems_head_continuation_c_link,
@@ -6731,6 +6732,131 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
                 }
         })
     }));
+    let page_heads = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Batuque complete page HEADS phase-1 transfer");
+    assert_eq!(
+        page_heads
+            .systems
+            .iter()
+            .map(|system| {
+                let frontier = &system.carrier.frontier;
+                (
+                    system.system_id,
+                    system.carrier.heads.len(),
+                    system.carrier.current_index,
+                    system.carrier.prefix_closures.len(),
+                    frontier.head.reference.staff_index,
+                    frontier.head.reference.head_index,
+                    frontier.head.sig_ordinal,
+                    frontier.head.x_ordinal,
+                    frontier.next_corner.horizontal,
+                    frontier.next_corner.vertical,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (
+                1,
+                93,
+                7,
+                7,
+                1,
+                30,
+                84,
+                56,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom
+            ),
+            (
+                2,
+                122,
+                79,
+                79,
+                1,
+                57,
+                115,
+                108,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom
+            ),
+            (
+                3,
+                112,
+                48,
+                48,
+                1,
+                57,
+                105,
+                110,
+                NativeStemHeadSide::Left,
+                NativeStemVerticalSide::Bottom
+            ),
+        ]
+    );
+    assert_eq!(
+        page_heads
+            .systems
+            .iter()
+            .map(|system| {
+                let first = system
+                    .carrier
+                    .prefix_closures
+                    .first()
+                    .expect("nonempty Batuque prelinked prefix");
+                let last = system
+                    .carrier
+                    .prefix_closures
+                    .last()
+                    .expect("nonempty Batuque prelinked prefix");
+                (
+                    first.processed_head.reference.staff_index,
+                    first.processed_head.reference.head_index,
+                    first.processed_head.sig_ordinal,
+                    first.processed_head.x_ordinal,
+                    last.processed_head.reference.staff_index,
+                    last.processed_head.reference.head_index,
+                    last.processed_head.sig_ordinal,
+                    last.processed_head.x_ordinal,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (1, 28, 82, 4, 1, 24, 78, 86),
+            (1, 18, 76, 13, 1, 38, 96, 84),
+            (1, 61, 108, 6, 0, 15, 14, 32),
+        ]
+    );
+    for system in &page_heads.systems {
+        assert!(!system.carrier.frontier_consumed);
+        assert!(system.carrier.unlinked_heads.is_empty());
+        assert!(system.carrier.undefined_sides.is_empty());
+        assert!(
+            system
+                .carrier
+                .prefix_closures
+                .iter()
+                .enumerate()
+                .all(|(index, closure)| {
+                    closure.processed_head == system.carrier.heads[index].reference
+                        && closure
+                            .side_decisions
+                            .iter()
+                            .any(|decision| decision.linked_before)
+                        && closure.closed_value_changes <= closure.closed_s_linkers.len()
+                })
+        );
+        assert_eq!(
+            system.carrier.frontier.side_decisions,
+            [NativeStemsHeadPhase1SideDecision {
+                side: NativeStemHeadSide::Left,
+                linked_before: false,
+                closed_before: false,
+                top_can_link: Some(false),
+                bottom_can_link: Some(true),
+            }]
+        );
+    }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

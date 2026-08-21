@@ -34,8 +34,9 @@ use crate::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
-        NativeStemsBeamStumpsTransaction,
+        NativeStemsBeamStumpsTransaction, NativeStemsHeadPhase1Carrier,
         advance_native_stems_beam_sides_transaction_from_modeled_registry,
+        begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         drive_native_stems_beam_stumps_from_modeled_registry,
         initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry,
@@ -146,6 +147,20 @@ pub struct NativeStemsSystemStumpsDrive {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsPageStumpsDrive {
     pub systems: Vec<NativeStemsSystemStumpsDrive>,
+}
+
+/// Production-owned first head-linking frontier for one completed system.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase1Start {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+}
+
+/// Atomic page transfer from all post-STUMPS carriers into head phase 1.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase1Start {
+    pub systems: Vec<NativeStemsSystemHeadPhase1Start>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -592,6 +607,54 @@ impl NativeStemsPreparedRecognition {
             systems.push(drive);
         }
         Ok(NativeStemsPageStumpsDrive { systems })
+    }
+
+    /// Transfer every completed page system into its first phase-1 head
+    /// frontier. A failure in any system exposes no partial page vector.
+    pub fn begin_all_system_head_linking_phase1(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase1Start, NativeStemsPreparationError> {
+        let stumps = self.drive_all_system_stumps()?;
+        let mut systems = Vec::with_capacity(stumps.systems.len());
+        for completed in stumps.systems {
+            let system_id = completed.system_id;
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 corners",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS phase-1 plans",
+            )?;
+            let carrier = begin_native_stems_head_linking_phase1(
+                &completed.carrier,
+                head_corners,
+                head_builders,
+                plans,
+            )
+            .map_err(|error| {
+                phase(
+                    format!("system {system_id}: {error}"),
+                    "HEADS phase-1 page transfer",
+                )
+            })?;
+            systems.push(NativeStemsSystemHeadPhase1Start {
+                system_id,
+                registry: completed.registry,
+                carrier,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase1Start { systems })
     }
 }
 

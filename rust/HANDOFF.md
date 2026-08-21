@@ -8019,13 +8019,38 @@ Focused Batuque passes 1/1 in 4.20s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. The next boundary transfers these three
 post-STUMPS carriers into page-wide head linking.
 
+## Boundary 155: enter page-wide Batuque head linking
+
+`NativeStemsPreparedRecognition::begin_all_system_head_linking_phase1` now
+transfers every completed Batuque STUMPS carrier into the generic phase-1 head
+driver. The page result is atomic: it is published only after all three
+systems validate their live SIG, bindings, persistent S cells, reverse-grade
+head queue, and first actionable frontier.
+
+The generalized entry driver closes the prelinked prefix from native graph
+state before returning a C-link frontier. Systems 1-3 carry queues of
+93/122/112 heads, close prefixes of 7/79/48 heads, and stop at,
+respectively, staff/head/SIG/x `(1,30,84,56)`, `(1,57,115,108)`, and
+`(1,57,105,110)`. Each frontier is the single LEFT/BOTTOM choice with no
+unlinked or undefined head. The first/last prefix heads are system 1
+`(1,28,82,4)` / `(1,24,78,86)`, system 2 `(1,18,76,13)` /
+`(1,38,96,84)`, and system 3 `(1,61,108,6)` / `(0,15,14,32)`.
+Prelinked closures use the live SIG, stem bindings, and S cells and are
+recorded separately from any later C-link mutation. Dual-corner ambiguity
+and the unported rather-good retry/no-link branches still fail closed.
+
+Focused Batuque passes 1/1 in 4.30s; the full sibling suite passes 15/15 in
+152.96s; strict workspace all-target/all-feature Clippy passes in 23.13s;
+formatting and diff checks are clean. The next boundary consumes these three
+first C-link frontiers and carries the remaining page-wide head queues.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 154's three post-STUMPS carriers into page-wide head
-   linking, preserving each system's complete native SIG and shared page
-   identity state. Then generalize
+1. Continue Boundary 155's three authenticated first C-link frontiers through
+   page-wide head linking, preserving each system's complete native SIG and
+   shared page identity state. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.
