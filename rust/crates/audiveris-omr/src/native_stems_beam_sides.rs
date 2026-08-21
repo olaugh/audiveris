@@ -1826,12 +1826,7 @@ pub fn advance_native_stems_head_c_link_or_no_link(
     Result<NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Continuation>,
     NativeStemsBeamSidesError,
 > {
-    if carrier.frontier_consumed
-        || carrier.current_index >= carrier.heads.len()
-        || carrier.prefix_closures.len() != carrier.current_index
-        || !carrier.unlinked_heads.is_empty()
-        || !carrier.undefined_sides.is_empty()
-    {
+    if carrier.frontier_consumed || carrier.current_index >= carrier.heads.len() {
         return Err(stage(
             "HEADS-CLink-native-loop",
             "carrier is not an untouched production head frontier",
@@ -10613,8 +10608,6 @@ fn advance_native_stems_head_c_link_at_frontier(
     if shadow.frontier_consumed
         || shadow.current_index != expected_current_index
         || shadow.frontier != *expected_frontier
-        || !shadow.unlinked_heads.is_empty()
-        || !shadow.undefined_sides.is_empty()
     {
         return Err(stage(
             "HEADS-CLink-frontier",

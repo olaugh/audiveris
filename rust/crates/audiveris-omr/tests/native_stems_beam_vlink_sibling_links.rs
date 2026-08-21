@@ -6991,6 +6991,48 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             ),
         ]
     );
+    let page_second = prepared
+        .advance_all_system_next_head_frontiers()
+        .expect("Batuque page next HEADS frontier outcomes");
+    assert_eq!(
+        page_second
+            .systems
+            .iter()
+            .map(|system| {
+                (
+                    system.system_id,
+                    system.carrier.current_index,
+                    system.carrier.unlinked_heads.len(),
+                    system.carrier.undefined_sides.len(),
+                    system.carrier.beam_state.sig.vertices.len(),
+                    system.carrier.beam_state.sig.edges.len(),
+                    match &system.outcome {
+                        NativeStemsSystemHeadPhase1FirstOutcome::Linked(transaction) => {
+                            (true, transaction.corner.x_ordinal, 0)
+                        }
+                        NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation) => (
+                            false,
+                            continuation.processed_head.x_ordinal,
+                            continuation.closed_value_changes,
+                        ),
+                    },
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (1, 26, 0, 0, 232, 299, (true, 76, 0)),
+            (2, 81, 2, 0, 293, 406, (false, 109, 2)),
+            (3, 50, 0, 0, 266, 341, (true, 111, 0)),
+        ]
+    );
+    assert_eq!(
+        page_second
+            .systems
+            .iter()
+            .map(|system| system.prior_continuations.len())
+            .collect::<Vec<_>>(),
+        [18, 1, 1]
+    );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

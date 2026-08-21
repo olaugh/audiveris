@@ -213,6 +213,20 @@ pub struct NativeStemsPageHeadPhase1Progress {
     pub systems: Vec<NativeStemsSystemHeadPhase1Progress>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsSystemHeadPhase1NextAdvance {
+    pub system_id: usize,
+    pub registry: NativeStemsModeledGlyphRegistry,
+    pub carrier: NativeStemsHeadPhase1Carrier,
+    pub prior_continuations: Vec<NativeStemsHeadPhase1Continuation>,
+    pub outcome: NativeStemsSystemHeadPhase1FirstOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageHeadPhase1NextAdvance {
+    pub systems: Vec<NativeStemsSystemHeadPhase1NextAdvance>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeStemsPreparationError {
     pub phase: &'static str,
@@ -861,6 +875,93 @@ impl NativeStemsPreparedRecognition {
             });
         }
         Ok(NativeStemsPageHeadPhase1Progress { systems })
+    }
+
+    /// Consume each Boundary-157 actionable frontier while preserving carried
+    /// unlinked/undefined phase-2 authority.
+    pub fn advance_all_system_next_head_frontiers(
+        &self,
+    ) -> Result<NativeStemsPageHeadPhase1NextAdvance, NativeStemsPreparationError> {
+        let progress = self.continue_all_system_heads_to_next_frontier()?;
+        let mut systems = Vec::with_capacity(progress.systems.len());
+        for system_progress in progress.systems {
+            let NativeStemsSystemHeadPhase1Progress {
+                system_id,
+                registry,
+                mut carrier,
+                continuations,
+                status,
+                ..
+            } = system_progress;
+            if status != NativeStemsHeadPhase1ProgressStatus::AwaitingFrontier {
+                return Err(phase(
+                    format!("system {system_id} has no next actionable frontier"),
+                    "HEADS next C-link page drive",
+                ));
+            }
+            let head_corners = system(
+                &self.components.head_corners.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link corners",
+            )?;
+            let head_reachability = system(
+                &self.components.head_reachability.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link reachability",
+            )?;
+            let seed_glyphs = system(
+                &self.components.stem_seed_glyphs,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link stem seeds",
+            )?;
+            let head_builders = system(
+                &self.components.head_builders.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link builders",
+            )?;
+            let plans = system(
+                &self.components.plans.systems,
+                system_id,
+                |system| system.system_id,
+                "HEADS next C-link plans",
+            )?;
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                &self.stem_checker,
+                &registry,
+            )
+            .map_err(|error| {
+                phase(
+                    format!("system {system_id}: {error}"),
+                    "HEADS next C-link page drive",
+                )
+            })?;
+            let outcome = match outcome {
+                Ok(transaction) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::Linked(Box::new(transaction))
+                }
+                Err(continuation) => {
+                    NativeStemsSystemHeadPhase1FirstOutcome::Unlinked(continuation)
+                }
+            };
+            systems.push(NativeStemsSystemHeadPhase1NextAdvance {
+                system_id,
+                registry,
+                carrier,
+                prior_continuations: continuations,
+                outcome,
+            });
+        }
+        Ok(NativeStemsPageHeadPhase1NextAdvance { systems })
     }
 }
 

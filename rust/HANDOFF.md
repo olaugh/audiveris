@@ -8086,12 +8086,32 @@ Focused Batuque passes 1/1 in 4.82s; the full sibling suite passes 15/15 in
 163.20s; strict workspace all-target/all-feature Clippy passes in 25.56s;
 formatting and diff checks are clean. Consuming these three frontiers is next.
 
+## Boundary 158: execute the second page-wide head outcomes
+
+The generic page transaction now consumes Boundary 157's x76, x109, and x111
+frontiers while preserving carried phase-2 retry/undefined collections. The
+old early-Chula assumptions that a C-link must occur before any retry head and
+that the initial prefix length must equal the queue index are gone; shadow
+mutation still commits only on a complete typed outcome.
+
+Systems 1 and 3 create one Stem vertex and HeadStem edge at x76 and x111,
+advancing to indices 26 and 50 with SIG 232/299 and 266/341. System 2's x109
+candidate takes the generic rejected-link closure, advances to index 81, and
+appends a second phase-2 retry head while SIG 293/406 remains unchanged. Its
+two earlier/current retry heads and both closed-cell writes are retained in
+order. The 18/1/1 prior continuation traces remain attached to the results.
+
+Focused Batuque passes 1/1 in 5.09s; the full sibling suite passes 15/15 in
+162.53s; strict workspace all-target/all-feature Clippy passes in 25.76s;
+formatting and diff checks are clean. Continuing the mixed carriers to their
+next action frontiers is next.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Consume Boundary 157's three authenticated next C-link frontiers, then
-   continue their remaining page-wide head queues while preserving each
+1. Continue Boundary 158's three mixed carriers to their next action
+   frontiers and through the remaining page-wide head queues while preserving each
    system's complete native SIG, phase-2 retry list, and shared page identity
    state. Then generalize
    beyond the Chula, Allegretto, and Batuque
