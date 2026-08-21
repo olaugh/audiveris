@@ -44,8 +44,10 @@ use crate::{
     native_stems_beam_stumps::{
         NativeStemsBeamStumpRecognition, materialize_native_stems_beam_stumps,
     },
+    native_stems_beam_vlink_base_apply::NativeStemsBeamSheetEditState,
     native_stems_beam_vlink_transaction::{
-        NativeStemsBeamStemCheckerContext, NativeStemsModeledGlyphRegistry,
+        NativeStemsBeamStemCheckerContext, NativeStemsBeamVLinkTransactionState,
+        NativeStemsModeledGlyphRegistry,
     },
     native_stems_beam_vlinkers::{
         NativeStemsBeamVLinkerRecognition, materialize_native_stems_beam_vlinkers,
@@ -138,6 +140,12 @@ pub struct NativeStemsSystemStumpsDrive {
     pub carrier: NativeStemsBeamSidesCarrier,
     pub continuation: NativeStemsBeamSchedulerStumpsContinuation,
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
+}
+
+/// Atomic SIDES+STUMPS completion for every consecutive system on one page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsPageStumpsDrive {
+    pub systems: Vec<NativeStemsSystemStumpsDrive>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -360,12 +368,21 @@ impl NativeStemsPreparedRecognition {
         &self,
         completed: &NativeStemsSystemSidesDrive,
     ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
-        let registry = completed
-            .registry
-            .carry_into_next_system(
-                &completed.carrier.latest_base_apply.transaction_state,
-                &self.components.head_builders,
-            )
+        self.initialize_next_system_sides_from_carried(
+            &completed.registry,
+            &completed.carrier.latest_base_apply.transaction_state,
+            completed.carrier.latest_base_apply.sheet_edit,
+        )
+    }
+
+    fn initialize_next_system_sides_from_carried(
+        &self,
+        completed_registry: &NativeStemsModeledGlyphRegistry,
+        completed_state: &NativeStemsBeamVLinkTransactionState,
+        sheet_edit: NativeStemsBeamSheetEditState,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        let registry = completed_registry
+            .carry_into_next_system(completed_state, &self.components.head_builders)
             .map_err(|error| phase(error, "SIDES cross-system registry"))?;
         let system_id = registry.system_id();
         let scheduler = system(
@@ -389,12 +406,7 @@ impl NativeStemsPreparedRecognition {
         )?;
         let (carrier, first_transaction) =
             initialize_native_stems_beam_serial_sides_carrier_from_modeled_registry(
-                scheduler,
-                sig,
-                bindings,
-                context,
-                &registry,
-                completed.carrier.latest_base_apply.sheet_edit,
+                scheduler, sig, bindings, context, &registry, sheet_edit,
             )
             .map_err(|error| phase(error, "SIDES next-system transaction"))?;
         Ok(NativeStemsSystemSidesStart {
@@ -479,6 +491,21 @@ impl NativeStemsPreparedRecognition {
         &self,
     ) -> Result<NativeStemsSystemStumpsDrive, NativeStemsPreparationError> {
         let sides = self.drive_first_system_sides()?;
+        self.drive_system_stumps_from_sides(sides)
+    }
+
+    fn drive_system_stumps_start(
+        &self,
+        start: NativeStemsSystemSidesStart,
+    ) -> Result<NativeStemsSystemStumpsDrive, NativeStemsPreparationError> {
+        let sides = self.drive_system_sides_start(start)?;
+        self.drive_system_stumps_from_sides(sides)
+    }
+
+    fn drive_system_stumps_from_sides(
+        &self,
+        sides: NativeStemsSystemSidesDrive,
+    ) -> Result<NativeStemsSystemStumpsDrive, NativeStemsPreparationError> {
         let NativeStemsSystemSidesDrive {
             system_id,
             registry,
@@ -515,6 +542,56 @@ impl NativeStemsPreparedRecognition {
             continuation,
             transactions: drive.transactions,
         })
+    }
+
+    /// Initialize the next system only after every prior STUMPS mutation has
+    /// joined the shared page registry, allocator, and edit state.
+    pub fn initialize_next_system_sides_after_stumps(
+        &self,
+        completed: &NativeStemsSystemStumpsDrive,
+    ) -> Result<NativeStemsSystemSidesStart, NativeStemsPreparationError> {
+        self.initialize_next_system_sides_from_carried(
+            &completed.registry,
+            &completed.carrier.latest_base_apply.transaction_state,
+            completed.carrier.latest_base_apply.sheet_edit,
+        )
+    }
+
+    /// Drive every page system through both beam-origin passes in serial Java
+    /// order. No later system can observe the earlier SIDES-only allocator.
+    pub fn drive_all_system_stumps(
+        &self,
+    ) -> Result<NativeStemsPageStumpsDrive, NativeStemsPreparationError> {
+        let system_count = self.components.scheduler.systems.len();
+        if system_count == 0 {
+            return Err(phase("page has no scheduler systems", "STUMPS page drive"));
+        }
+        let mut systems = Vec::with_capacity(system_count);
+        systems.push(self.drive_first_system_stumps()?);
+        while systems.len() < system_count {
+            let start = self.initialize_next_system_sides_after_stumps(
+                systems
+                    .last()
+                    .expect("nonempty after first system STUMPS drive"),
+            )?;
+            let expected_system_id = systems.len() + 1;
+            let drive = self.drive_system_stumps_start(start)?;
+            if drive.system_id != expected_system_id {
+                return Err(phase(
+                    format!(
+                        "system {} followed {}, expected {expected_system_id}",
+                        drive.system_id,
+                        systems
+                            .last()
+                            .expect("nonempty after first system STUMPS drive")
+                            .system_id
+                    ),
+                    "STUMPS page drive",
+                ));
+            }
+            systems.push(drive);
+        }
+        Ok(NativeStemsPageStumpsDrive { systems })
     }
 }
 

@@ -6677,6 +6677,60 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
     };
     assert_eq!(completed_retained, completed_worklist);
     assert_eq!(completed_retained, &first_stump.snapshot.sources);
+    let page_stumps = prepared
+        .drive_all_system_stumps()
+        .expect("Batuque complete page STUMPS drive");
+    assert_eq!(
+        page_stumps
+            .systems
+            .iter()
+            .map(|system| {
+                let state = &system.carrier.latest_base_apply.transaction_state;
+                (
+                    system.system_id,
+                    system.transactions.len(),
+                    system.registry.len(),
+                    system.registry.persistent_ids().sheet_last_id,
+                    state.glyph_index.persistent_ids.sheet_last_id,
+                    state.system_stems.known_stems.len(),
+                    system.carrier.sig.vertices.len(),
+                    system.carrier.sig.edges.len(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (1, 8, 1_058, 1_058, 1_098, 40, 230, 297),
+            (2, 14, 1_470, 1_510, 1_564, 54, 293, 406),
+            (3, 20, 1_819, 1_913, 1_962, 48, 264, 339),
+        ]
+    );
+    assert_eq!(
+        page_stumps
+            .systems
+            .iter()
+            .map(|system| system.transactions.len())
+            .sum::<usize>(),
+        42
+    );
+    for (index, system) in page_stumps.systems.iter().enumerate() {
+        let NativeStemsBeamSchedulerStatus::Completed {
+            retained_for_stumps,
+            final_local_worklist,
+        } = &system.carrier.scheduler.status
+        else {
+            panic!("Batuque system {} did not complete STUMPS", index + 1);
+        };
+        assert_eq!(retained_for_stumps, final_local_worklist);
+        assert_eq!(system.system_id, index + 1);
+    }
+    assert!(page_stumps.systems[1..].iter().all(|system| {
+        system.transactions.iter().all(|transaction| {
+            transaction.create.scope
+                == NativeStemsBeamVLinkTransactionScope::SharedSheetSerial {
+                    system_id: system.system_id,
+                }
+        })
+    }));
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

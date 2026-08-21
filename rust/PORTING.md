@@ -2934,6 +2934,30 @@ Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. Systems 2-3 STUMPS and the page-serial
 registry/allocator handoff after each STUMPS terminal are next.
 
+## Boundary 154: complete three-system Batuque STUMPS page
+
+`NativeStemsPreparedRecognition::drive_all_system_stumps` now composes both
+beam-origin passes in true page order. Each next system is constructed only
+after the preceding system's STUMPS terminal has updated the shared modeled
+registry, persistent allocator, and edit state; the older SIDES-only page
+driver remains an explicit diagnostic boundary and is not reused here. A
+failure in any system returns no partial page vector.
+
+Batuque completes 42 STUMPS transactions across systems 1-3 (8 + 14 + 20).
+The carried registry/terminal tuples are, respectively: system 1
+1,058/allocator 1,098 with 40 stems and SIG 230/297; system 2
+1,470/registry allocator 1,510/final allocator 1,564 with 54 stems and SIG
+293/406; and system 3 1,819/registry allocator 1,913/final allocator 1,962
+with 48 stems and SIG 264/339. Systems 2-3 retain `SharedSheetSerial` scope,
+and every scheduler finishes with its retained and final local worklists
+identical.
+
+Focused Batuque passes 1/1 in 4.20s; the full sibling suite passes 15/15 in
+154.38s; strict workspace all-target/all-feature Clippy passes in 22.22s;
+formatting and diff checks are clean. The next page-wide seam transfers each
+post-STUMPS carrier into head linking, then closes wider head/retry branches
+before `recognize_native_stems` composition.
+
 
 
 Boundary 42 reuses the continuation for head order 16 (x8 / SIG 53 / Java Inter 1395,

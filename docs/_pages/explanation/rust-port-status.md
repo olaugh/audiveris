@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and fifty-three semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier; Boundary 144 carries Allegretto system-1 transactions 1-28 through linked-S reuse and competing-hook removal; Boundary 145 derives BeamStem relation parameters from native products; Boundary 146 internalizes the established STEMS-entry edit state; Boundary 147 makes `prepare_native_stems` own the page-wide checker and initializes Batuque system 1 directly from production-prepared state; Boundary 148 moves Batuque's complete 33-transaction system-1 SIDES drive into production; Boundary 149 carries its exact page registry and shared persistent allocator through system 2's constructor chronology; Boundary 150 atomically executes system 2's first `SharedSheetSerial` SIDES transaction; Boundary 151 drives all 40 system-2 SIDES transactions; Boundary 152 drives all three Batuque systems to true `SidesExhausted` with native compound registration and accepted-relation subsets; Boundary 153 drives Batuque system 1 through all eight retained STUMPS transactions with authenticated existing-stem rollover and builder-owned sibling-linker authority.
+The first one hundred and fifty-four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundary 135 promotes the live pre-mutation composition and native SIG into `prepare_native_stems`; Boundaries 136-138 replace the page-wide first-STEMS snapshot and compact B12/B13 glyph bootstrap; Boundary 139 removes the sparse selected-base Java identity bridge; Boundary 140 derives the first B14 compact graph/index state; Boundary 141 replaces Java's allocator seed with a native identity domain; Boundary 142 derives each system-visible modeled prefix from production head-builder chronology; Boundary 143 atomically constructs the first B12-B19 SIDES carrier; Boundary 144 carries Allegretto system-1 transactions 1-28 through linked-S reuse and competing-hook removal; Boundary 145 derives BeamStem relation parameters from native products; Boundary 146 internalizes the established STEMS-entry edit state; Boundary 147 makes `prepare_native_stems` own the page-wide checker and initializes Batuque system 1 directly from production-prepared state; Boundary 148 moves Batuque's complete 33-transaction system-1 SIDES drive into production; Boundary 149 carries its exact page registry and shared persistent allocator through system 2's constructor chronology; Boundary 150 atomically executes system 2's first `SharedSheetSerial` SIDES transaction; Boundary 151 drives all 40 system-2 SIDES transactions; Boundary 152 drives all three Batuque systems to true `SidesExhausted` with native compound registration and accepted-relation subsets; Boundary 153 drives Batuque system 1 through all eight retained STUMPS transactions with authenticated existing-stem rollover and builder-owned sibling-linker authority; Boundary 154 serially completes all 42 Batuque STUMPS transactions across the three-system page from post-STUMPS registry and allocator state.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -3767,6 +3767,26 @@ Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
 151.29s; strict workspace all-target/all-feature Clippy passes in 19.98s;
 formatting and diff checks are clean. Systems 2-3 STUMPS and their shared-page
 registry/allocator handoffs remain next.
+
+## Boundary 154: complete three-system Batuque STUMPS page
+
+The page driver now serializes SIDES and STUMPS per system instead of driving
+all SIDES systems first. This ensures that system 2's constructor chronology
+sees system 1's post-STUMPS allocator, and system 3 likewise sees all earlier
+mutations. No partial vector is returned when a later system fails.
+
+Batuque executes 8, 14, and 20 STUMPS transactions. Terminal facts are system
+1 allocator 1,098 / 40 stems / SIG 230/297; system 2 carried registry allocator
+1,510 then final allocator 1,564 / 54 stems / SIG 293/406; and system 3 carried
+registry allocator 1,913 then final allocator 1,962 / 48 stems / SIG 264/339.
+The three registry lengths remain 1,058, 1,470, and 1,819, all later
+transactions retain `SharedSheetSerial`, and every scheduler reaches a true
+completion with identical retained/final worklists.
+
+Focused Batuque passes 1/1 in 4.20s; the full sibling suite passes 15/15 in
+154.38s; strict workspace all-target/all-feature Clippy passes in 22.22s;
+formatting and diff checks are clean. Page-wide head transfer and wider
+head/retry branch closure are next.
 
 
 

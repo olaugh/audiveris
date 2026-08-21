@@ -7998,13 +7998,34 @@ Focused Batuque passes 1/1 in 3.95s; the full sibling suite passes 15/15 in
 formatting and diff checks are clean. Systems 2-3 STUMPS and the shared-page
 registry/allocator handoff after each completed STUMPS pass are next.
 
+## Boundary 154: complete three-system Batuque STUMPS page
+
+`NativeStemsPreparedRecognition::drive_all_system_stumps` now runs each
+system's SIDES and STUMPS passes before constructing the next system. The
+next-system registry is derived from the preceding post-STUMPS transaction
+state, so shared page IDs cannot silently fork from the earlier SIDES-only
+terminal. The page vector is published only after all systems complete.
+
+The production drive executes 42 STUMPS transactions: 8, 14, and 20. System 1
+finishes at allocator 1,098 / 40 stems / SIG 230/297. System 2 starts from
+registry allocator 1,510 and finishes at 1,564 / 54 stems / SIG 293/406.
+System 3 starts from registry allocator 1,913 and finishes at 1,962 / 48 stems
+/ SIG 264/339. Registry lengths remain 1,058, 1,470, and 1,819; systems 2-3
+retain `SharedSheetSerial`; every retained worklist equals its completed local
+worklist.
+
+Focused Batuque passes 1/1 in 4.20s; the full sibling suite passes 15/15 in
+154.38s; strict workspace all-target/all-feature Clippy passes in 22.22s;
+formatting and diff checks are clean. The next boundary transfers these three
+post-STUMPS carriers into page-wide head linking.
+
 ## Next implementation slices
 
 Commit each slice separately after the full verification block above.
 
-1. Continue Boundary 153's completed system-1 STUMPS carrier through the
-   shared registry/allocator handoff, then drive systems 2-3 through their
-   STUMPS worklists. Then generalize
+1. Continue Boundary 154's three post-STUMPS carriers into page-wide head
+   linking, preserving each system's complete native SIG and shared page
+   identity state. Then generalize
    beyond the Chula, Allegretto, and Batuque
    system-1 gates across wider SIDES/STUMPS, linked-S, hook-removal, and head
    branches.
