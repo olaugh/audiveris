@@ -71,9 +71,9 @@ use crate::{
         NativeStemsBeamFrontierPreparation, NativeStemsBeamGlyphRegistryBootstrapEntry,
         NativeStemsBeamStemCheckerContext, NativeStemsBeamStemGrade,
         NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamVLinkTransaction,
-        NativeStemsCreateStemCandidateTransaction, NativeStemsFirstGlyphIndexBridge,
-        NativeStemsGlyphRegistryAuthority, NativeStemsModeledGlyphRegistry,
-        apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsBeamVLinkTransactionState, NativeStemsCreateStemCandidateTransaction,
+        NativeStemsFirstGlyphIndexBridge, NativeStemsGlyphRegistryAuthority,
+        NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry,
@@ -11451,16 +11451,31 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut tail = tail;
     let bounded_start = start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
         && start.glyph == builder.start_stump;
-    let has_chunk = tail
-        .first()
-        .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph);
-    let bounded_chunk = if has_chunk {
-        let chunk = &tail[0];
-        tail = &tail[1..];
-        chunk.glyph.is_some() && chunk.target.is_none()
-    } else {
-        true
-    };
+    let chunk_count = tail
+        .iter()
+        .take_while(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph)
+        .count();
+    let (chunk_items, remaining_tail) = tail.split_at(chunk_count);
+    tail = remaining_tail;
+    let chunk_refs = chunk_items
+        .iter()
+        .map(|item| match (item.glyph, item.target) {
+            (
+                Some(NativeStemsHeadBuilderGlyphRef::Chunk {
+                    builder_ordinal,
+                    filament_ordinal,
+                }),
+                None,
+            ) if builder_ordinal == builder.builder_ordinal => Ok(filament_ordinal),
+            _ => Err(()),
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let bounded_chunks = chunk_refs.as_ref().is_ok_and(|refs| {
+        refs.iter()
+            .enumerate()
+            .all(|(index, reference)| !refs[..index].contains(reference))
+    });
+    let has_chunk = chunk_count != 0;
     let beam_targets = tail
         .iter()
         .map(|item| match (item.kind, item.glyph, item.target) {
@@ -11502,7 +11517,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 .enumerate()
                 .all(|(index, target)| !targets[..index].contains(target))
         });
-    let bounded_shape = bounded_start && bounded_chunk && (beam_shape || head_shape);
+    let bounded_shape = bounded_start && bounded_chunks && (beam_shape || head_shape);
     if !bounded_shape || builder.max_stem_profile != plans.link_profile {
         return Err(stage(
             "HEADS-CLink-expand",
@@ -11575,6 +11590,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 "selected reachability corner is missing",
             )
         })?;
+    let chunk_contents = head_c_link_chunk_contents(builder)?;
     let candidate = match builder.start_stump {
         Some(NativeStemsHeadBuilderGlyphRef::HeadStump {
             corner: stump_corner,
@@ -11654,49 +11670,12 @@ fn advance_native_stems_head_c_link_at_frontier(
                 }
             }
         }
-        None => {
-            let chunk_ref = builder.items.iter().find_map(|item| match item.glyph {
-                Some(NativeStemsHeadBuilderGlyphRef::Chunk {
-                    builder_ordinal,
-                    filament_ordinal,
-                }) if item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
-                    && builder_ordinal == builder.builder_ordinal =>
-                {
-                    Some(filament_ordinal)
-                }
-                _ => None,
-            });
-            let filament_ordinal = chunk_ref.ok_or_else(|| {
-                stage(
-                    "HEADS-CLink-glyph",
-                    "stump-less selected frontier has no concrete chunk",
-                )
-            })?;
-            let chunk = builder
-                .chunks
-                .iter()
-                .find(|chunk| {
-                    matches!(
-                        chunk.glyph,
-                        NativeStemsHeadBuilderGlyphRef::Chunk {
-                            builder_ordinal,
-                            filament_ordinal: chunk_filament,
-                        } if builder_ordinal == builder.builder_ordinal
-                            && chunk_filament == filament_ordinal
-                    )
-                })
-                .ok_or_else(|| {
-                    stage(
-                        "HEADS-CLink-glyph",
-                        "stump-less selected frontier chunk is missing",
-                    )
-                })?;
-            crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
-                bounds: chunk.bounds,
-                weight: chunk.run_table.weight(),
-                run_table: chunk.run_table.clone(),
-            }
-        }
+        None => chunk_contents.first().cloned().ok_or_else(|| {
+            stage(
+                "HEADS-CLink-glyph",
+                "stump-less selected frontier has no concrete chunk",
+            )
+        })?,
         Some(_) => {
             return Err(stage(
                 "HEADS-CLink-glyph",
@@ -11704,45 +11683,48 @@ fn advance_native_stems_head_c_link_at_frontier(
             ));
         }
     };
-    let promoted = bridge
-        .resolve_native_content(&candidate)
-        .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
-    if !promoted.active_in_index || !promoted.strongly_retained {
-        return Err(stage(
-            "HEADS-CLink-first-STEMS-bridge",
-            "selected seed canonical is not active and strongly retained",
-        ));
-    }
-    let known = &mut shadow
-        .beam_state
-        .latest_base_apply
-        .transaction_state
-        .glyph_index
-        .known_canonical_glyphs;
-    let existing = known
-        .iter()
-        .filter(|glyph| glyph.content == candidate)
-        .collect::<Vec<_>>();
-    match existing.as_slice() {
-        [] => known.push(
-            crate::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
-                canonical_alias: promoted.canonical_alias,
-                glyph_id: promoted.glyph_id,
-                content: candidate.clone(),
-                active_in_index: promoted.active_in_index,
-                strongly_retained: promoted.strongly_retained,
-            },
-        ),
-        [glyph]
-            if glyph.glyph_id == promoted.glyph_id
-                && glyph.canonical_alias == promoted.canonical_alias => {}
-        _ => {
-            return Err(stage(
-                "HEADS-CLink-first-STEMS-bridge",
-                "promoted seed conflicts with carried canonical state",
-            ));
+    let mut selected_contents = vec![candidate.clone()];
+    for chunk in &chunk_contents {
+        if !selected_contents.contains(chunk) {
+            selected_contents.push(chunk.clone());
         }
     }
+    let mut selected_components = Vec::with_capacity(selected_contents.len());
+    for content in &selected_contents {
+        selected_components.push(carry_head_c_link_component(
+            &mut shadow.beam_state.latest_base_apply.transaction_state,
+            bridge,
+            content,
+        )?);
+    }
+    let geometry_candidate = compose_head_c_link_geometry(&candidate, builder)?;
+    let matching_selected = selected_components
+        .iter()
+        .filter(|component| component.content == geometry_candidate)
+        .collect::<Vec<_>>();
+    let selected_canonical_identity = match matching_selected.as_slice() {
+        [] => {
+            let transaction_state = &mut shadow.beam_state.latest_base_apply.transaction_state;
+            if transaction_state.glyph_index.exhaustive_lookup.is_some() {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "compound equality authority is already occupied",
+                ));
+            }
+            let scan = bridge
+                .exhaustive_native_content_scan(&geometry_candidate, transaction_state)
+                .map_err(|error| stage("HEADS-CLink-glyph", error))?;
+            transaction_state.glyph_index.exhaustive_lookup = Some(scan);
+            None
+        }
+        [component] => Some((component.glyph_id, component.canonical_alias)),
+        _ => {
+            return Err(stage(
+                "HEADS-CLink-glyph",
+                "composite equals more than one selected canonical glyph",
+            ));
+        }
+    };
 
     let mut stem_line = if builder.y_direction > 0 {
         builder.theoretical_line
@@ -11752,7 +11734,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             stop: builder.theoretical_line.start,
         }
     };
-    let geometry_candidate = compose_head_c_link_geometry(&candidate, builder)?;
     let centroid = glyph_centroid(&geometry_candidate)?;
     let intersection = if builder.items.len() == 2 {
         let x = stem_line.start.x
@@ -11911,8 +11892,8 @@ fn advance_native_stems_head_c_link_at_frontier(
     let create = apply_native_stems_create_stem_candidate_transaction(
         head_corners.system_id,
         frontier.stem_profile,
-        candidate,
-        Some((promoted.glyph_id, promoted.canonical_alias)),
+        geometry_candidate,
+        selected_canonical_identity,
         &mut shadow.beam_state.latest_base_apply.transaction_state,
         checker,
     )
@@ -11924,7 +11905,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             .as_ref()
             .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
         if stem.stem_identity != stem_identity
-            || stem.glyph_id != promoted.glyph_id
+            || stem.glyph_id != create.registration.glyph_id
             || !stem.sig_attached
         {
             return Err(stage(
@@ -12068,7 +12049,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             corner: frontier.next_corner,
             last_index: expected_last_index,
             max_index: expected_max_index,
-            selected_glyph_id: promoted.glyph_id,
+            selected_glyph_id: create.registration.glyph_id,
             relation,
             create,
             stem_vertex,
@@ -12316,7 +12297,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         corner: frontier.next_corner,
         last_index: expected_last_index,
         max_index: expected_max_index,
-        selected_glyph_id: promoted.glyph_id,
+        selected_glyph_id: create.registration.glyph_id,
         relation,
         create,
         stem_vertex,
@@ -12558,6 +12539,101 @@ fn append_head_c_link_beam_relations(
     })
 }
 
+fn carry_head_c_link_component(
+    state: &mut NativeStemsBeamVLinkTransactionState,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+    content: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamSidesError> {
+    let promoted = bridge
+        .resolve_native_content(content)
+        .map_err(|error| stage("HEADS-CLink-first-STEMS-bridge", error))?;
+    if !promoted.active_in_index || !promoted.strongly_retained {
+        return Err(stage(
+            "HEADS-CLink-first-STEMS-bridge",
+            "selected component is not active and strongly retained",
+        ));
+    }
+    let existing = state
+        .glyph_index
+        .known_canonical_glyphs
+        .iter()
+        .filter(|glyph| glyph.content == *content)
+        .collect::<Vec<_>>();
+    match existing.as_slice() {
+        [] => state.glyph_index.known_canonical_glyphs.push(
+            crate::native_stems_beam_vlink_transaction::NativeStemsBeamKnownCanonicalGlyph {
+                canonical_alias: promoted.canonical_alias,
+                glyph_id: promoted.glyph_id,
+                content: content.clone(),
+                active_in_index: promoted.active_in_index,
+                strongly_retained: promoted.strongly_retained,
+            },
+        ),
+        [glyph]
+            if glyph.glyph_id == promoted.glyph_id
+                && glyph.canonical_alias == promoted.canonical_alias => {}
+        _ => {
+            return Err(stage(
+                "HEADS-CLink-first-STEMS-bridge",
+                "selected component conflicts with carried canonical state",
+            ));
+        }
+    }
+    Ok(promoted)
+}
+
+fn head_c_link_chunk_contents(
+    builder: &crate::native_stems_head_builders::NativeStemsHeadBuilder,
+) -> Result<
+    Vec<crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent>,
+    NativeStemsBeamSidesError,
+> {
+    builder
+        .items
+        .iter()
+        .filter(|item| item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph)
+        .map(|item| {
+            let Some(NativeStemsHeadBuilderGlyphRef::Chunk {
+                builder_ordinal,
+                filament_ordinal,
+            }) = item.glyph
+            else {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "selected chunk item has no glyph",
+                ));
+            };
+            if builder_ordinal != builder.builder_ordinal || item.target.is_some() {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "selected chunk item belongs to a different builder or target",
+                ));
+            }
+            let chunk = builder
+                .chunks
+                .iter()
+                .find(|chunk| {
+                    matches!(
+                        chunk.glyph,
+                        NativeStemsHeadBuilderGlyphRef::Chunk {
+                            builder_ordinal: chunk_builder,
+                            filament_ordinal: chunk_filament,
+                        } if chunk_builder == builder.builder_ordinal
+                            && chunk_filament == filament_ordinal
+                    )
+                })
+                .ok_or_else(|| stage("HEADS-CLink-glyph", "selected chunk glyph is missing"))?;
+            Ok(
+                crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent {
+                    bounds: chunk.bounds,
+                    weight: chunk.run_table.weight(),
+                    run_table: chunk.run_table.clone(),
+                },
+            )
+        })
+        .collect()
+}
+
 fn compose_head_c_link_geometry(
     candidate: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
     builder: &crate::native_stems_head_builders::NativeStemsHeadBuilder,
@@ -12565,39 +12641,20 @@ fn compose_head_c_link_geometry(
     crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
     NativeStemsBeamSidesError,
 > {
-    let chunk_ref = builder.items.iter().find_map(|item| match item.glyph {
-        Some(NativeStemsHeadBuilderGlyphRef::Chunk {
-            builder_ordinal,
-            filament_ordinal,
-        }) if item.kind == NativeStemsHeadBuilderItemKind::ChunkGlyph
-            && builder_ordinal == builder.builder_ordinal =>
-        {
-            Some(filament_ordinal)
-        }
-        _ => None,
-    });
-    let Some(filament_ordinal) = chunk_ref else {
-        return Ok(candidate.clone());
-    };
-    let chunk = builder
-        .chunks
+    head_c_link_chunk_contents(builder)?
         .iter()
-        .find(|chunk| {
-            matches!(
-                chunk.glyph,
-                NativeStemsHeadBuilderGlyphRef::Chunk {
-                    builder_ordinal,
-                    filament_ordinal: chunk_filament,
-                } if builder_ordinal == builder.builder_ordinal
-                    && chunk_filament == filament_ordinal
-            )
-        })
-        .ok_or_else(|| stage("HEADS-CLink-glyph", "selected chunk glyph is missing"))?;
-    if candidate.bounds == chunk.bounds
-        && candidate.weight == chunk.run_table.weight()
-        && candidate.run_table == chunk.run_table
-    {
-        return Ok(candidate.clone());
+        .try_fold(candidate.clone(), merge_head_c_link_glyphs)
+}
+
+fn merge_head_c_link_glyphs(
+    candidate: crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+    chunk: &crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+) -> Result<
+    crate::native_stems_beam_vlink_transaction::NativeStemsBeamFixedGlyphContent,
+    NativeStemsBeamSidesError,
+> {
+    if candidate == *chunk {
+        return Ok(candidate);
     }
     let min_x = candidate.bounds.x.min(chunk.bounds.x);
     let min_y = candidate.bounds.y.min(chunk.bounds.y);

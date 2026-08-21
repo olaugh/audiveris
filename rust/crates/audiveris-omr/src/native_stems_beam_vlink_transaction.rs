@@ -194,6 +194,18 @@ pub trait NativeStemsGlyphRegistryAuthority {
         &self,
         content: &NativeStemsBeamFixedGlyphContent,
     ) -> Result<NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamVLinkTransactionError>;
+
+    /// Prove the complete equality lookup needed before Java registers a
+    /// newly composed glyph. Snapshot-only authorities deliberately refuse
+    /// this negative proof; a production modeled registry overrides it.
+    fn exhaustive_native_content_scan(
+        &self,
+        _content: &NativeStemsBeamFixedGlyphContent,
+        _state: &NativeStemsBeamVLinkTransactionState,
+    ) -> Result<NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamVLinkTransactionError>
+    {
+        Err(NativeStemsBeamVLinkTransactionError::AwaitingCompleteGlyphRegistry)
+    }
 }
 
 impl NativeStemsModeledGlyphRegistry {
@@ -580,6 +592,15 @@ impl NativeStemsGlyphRegistryAuthority for NativeStemsModeledGlyphRegistry {
             });
         };
         Ok((*entry).clone())
+    }
+
+    fn exhaustive_native_content_scan(
+        &self,
+        content: &NativeStemsBeamFixedGlyphContent,
+        state: &NativeStemsBeamVLinkTransactionState,
+    ) -> Result<NativeStemsBeamExhaustiveGlyphEqualsScan, NativeStemsBeamVLinkTransactionError>
+    {
+        self.exhaustive_scan(content, state)
     }
 }
 

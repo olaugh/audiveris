@@ -9070,7 +9070,7 @@ fn allegretto_system2_order89_beam_c_link_and_order111_multi_head_rejection() {
 }
 
 #[test]
-fn allegretto_system3_order29_creates_one_stem_for_two_heads() {
+fn allegretto_system3_order29_and_order61_create_checked_stems() {
     let path = repo_root().join("data/examples/allegretto.png");
     let grid = recognize_grid_lines(path).expect("Allegretto GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Allegretto HEADERS recognition");
@@ -9471,6 +9471,555 @@ fn allegretto_system3_order29_creates_one_stem_for_two_heads() {
         "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order29MultiHead"
     );
     assert_eq!(field("javaEvidence"), "ReturnedBeforeThirtiethHead");
+
+    start.carrier = (**after).clone();
+    while start.carrier.current_index < 61 {
+        if start.carrier.frontier_consumed {
+            let next = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Allegretto system-3 continuation before queue 61");
+            start.carrier = *next.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Allegretto system-3 C-link before queue 61");
+            if let Err(next) = outcome {
+                start.carrier = *next.state_after;
+            }
+        }
+    }
+    if start.carrier.frontier_consumed {
+        let next = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Allegretto system-3 continuation to queue-61 frontier");
+        start.carrier = *next.state_after;
+    }
+    let queue61_before = start.carrier.clone();
+    let queue61 = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Allegretto system-3 queue-61 dispatch")
+    .expect("Allegretto system-3 queue-61 creates a checked stem");
+
+    assert_eq!(queue61_before.current_index, 61);
+    assert!(!queue61_before.frontier_consumed);
+    assert_eq!(queue61_before.frontier.head.x_ordinal, 57);
+    assert_eq!(queue61_before.frontier.head.sig_ordinal, 99);
+    assert_eq!(
+        queue61_before.frontier.next_corner.horizontal,
+        NativeStemHeadSide::Left
+    );
+    assert_eq!(
+        queue61_before.frontier.next_corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(queue61.system_id, 3);
+    assert_eq!(queue61.corner.x_ordinal, 57);
+    assert_eq!(queue61.corner.sig_ordinal, 99);
+    assert_eq!(queue61.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(queue61.corner.vertical, NativeStemVerticalSide::Top);
+    assert_eq!((queue61.last_index, queue61.max_index), (3, 3));
+    assert_eq!(queue61.selected_glyph_id, 1_939);
+    assert_eq!(queue61.relation.grade.to_bits(), 0x3fef_ffff_ffff_f9e7);
+    assert_eq!(queue61.relation.dx.to_bits(), 0x3d32_4924_9249_2492);
+    assert_eq!(queue61.relation.dy.to_bits(), 0);
+    assert_eq!(
+        queue61.relation.derived_horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(queue61.relation.vertical, NativeStemVerticalSide::Top);
+    assert!(!queue61.relation.horizontal_side_diverges);
+    assert!(queue61.relation.accepted);
+    assert_eq!(
+        queue61.relation.reference_point.x.to_bits(),
+        0x4094_cd3e_5fe5_fe60
+    );
+    assert_eq!(
+        queue61.relation.reference_point.y.to_bits(),
+        0x409e_5000_0000_0000
+    );
+    let head_extension = queue61
+        .relation
+        .extension_point
+        .expect("queue-61 head relation extension");
+    assert_eq!(head_extension.x.to_bits(), 0x4094_cd3e_5fe5_fe66);
+    assert_eq!(head_extension.y.to_bits(), 0x409e_8c00_0000_0000);
+
+    assert_eq!(
+        queue61.create.candidate.bounds,
+        audiveris_image::section::Bounds {
+            x: 1_335,
+            y: 1_857,
+            width: 4,
+            height: 92,
+        }
+    );
+    assert_eq!(queue61.create.candidate.weight, 208);
+    assert_eq!(
+        b15_hydration::run_table_digest(&queue61.create.candidate.run_table),
+        "77521aad19f457101f9c91a97bd84b4e7d2fb825dbc46404b25987c914ff5c1a"
+    );
+    assert_eq!(
+        queue61.create.registration.alias_order,
+        NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal
+    );
+    assert_eq!(queue61.create.registration.canonical_alias, 1_939);
+    assert_eq!(queue61.create.registration.glyph_id, 1_939);
+    assert_eq!(
+        queue61.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Registered
+    );
+    assert_eq!(queue61.create.registration.post_union_size, 1_802);
+    assert_eq!(
+        queue61.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 50 }
+    );
+    assert_eq!(
+        queue61.create.mutation_order,
+        vec![
+            NativeStemsBeamVLinkMutation::GlyphRegistered { glyph_id: 1_939 },
+            NativeStemsBeamVLinkMutation::SystemStemInserted { stem_identity: 50 },
+        ]
+    );
+    assert_eq!(
+        queue61
+            .create
+            .checker_result
+            .as_ref()
+            .expect("queue-61 checked stem")
+            .grade
+            .to_bits(),
+        0x3fe8_e911_7696_16cc
+    );
+    let created = queue61
+        .create
+        .stem
+        .as_ref()
+        .expect("queue-61 createStem product");
+    assert_eq!(created.stem_identity, 50);
+    assert_eq!(created.glyph_id, 1_939);
+    assert_eq!(created.inter_id, None);
+    assert!(!created.sig_attached);
+
+    assert_eq!(queue61.stem_vertex.0, 267);
+    assert_eq!(queue61.head_stem_edge.0, 310);
+    assert_eq!(queue61.beam_stem_edges.len(), 1);
+    assert_eq!(queue61.beam_stem_edges[0].0, 311);
+    assert_eq!(queue61.beam_relations.len(), 1);
+    let beam_relation = &queue61.beam_relations[0];
+    assert_eq!(beam_relation.beam, NativeStemsBeamSource::RawBeam(76));
+    assert_eq!(beam_relation.v_linker.b_linker.id, 4);
+    assert_eq!(beam_relation.v_linker.side, NativeStemVerticalSide::Bottom);
+    assert_eq!(beam_relation.stem_identity, 50);
+    assert_eq!(beam_relation.stem_inter_id, Some(1_940));
+    assert_eq!(beam_relation.grade.to_bits(), 0x3fef_5905_282e_591b);
+    assert_eq!(beam_relation.dx.to_bits(), 0x3f8e_0ee1_5721_cf3d);
+    assert_eq!(beam_relation.dy.to_bits(), 0);
+    assert_eq!(beam_relation.portion, NativeBeamPortion::Right);
+    let beam_extension = beam_relation
+        .extension_point
+        .expect("queue-61 beam relation extension");
+    assert_eq!(beam_extension.x.to_bits(), 0x4094_e4c4_63c1_ed1d);
+    assert_eq!(beam_extension.y.to_bits(), 0x409d_0838_e38e_38f0);
+    assert_eq!(queue61.linked_b_linkers.len(), 1);
+    assert_eq!(
+        queue61.linked_b_linkers[0].beam,
+        NativeStemsBeamSource::RawBeam(76)
+    );
+    assert_eq!(queue61.linked_b_linkers[0].id, 4);
+    assert_eq!(queue61.s_linker.head.x_ordinal, 57);
+    assert_eq!(queue61.s_linker.head.sig_ordinal, 99);
+    assert_eq!(queue61.s_linker.horizontal, NativeStemHeadSide::Right);
+    assert!(!queue61.s_linked_before);
+    assert!(queue61.s_linked_after);
+    assert_eq!(queue61.closed_cell_changes, 0);
+
+    assert_eq!(
+        (
+            queue61_before.beam_state.sig.vertices.len(),
+            queue61_before.beam_state.sig.edges.len(),
+            queue61_before
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+            queue61_before
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .glyph_index
+                .union_size,
+        ),
+        (267, 310, 50, 1_801)
+    );
+    assert_eq!(
+        (
+            start.carrier.beam_state.sig.vertices.len(),
+            start.carrier.beam_state.sig.edges.len(),
+            start
+                .carrier
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+            start
+                .carrier
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .glyph_index
+                .union_size,
+        ),
+        (268, 312, 51, 1_802)
+    );
+    let before_ids = queue61_before
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    let after_ids = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    assert_eq!(before_ids.sheet_last_id, 1_938);
+    assert_eq!(before_ids.glyph_index_last_id, 1_938);
+    assert_eq!(before_ids.inter_index_last_id, 1_938);
+    assert_eq!(after_ids.sheet_last_id, 1_940);
+    assert_eq!(after_ids.glyph_index_last_id, 1_940);
+    assert_eq!(after_ids.inter_index_last_id, 1_940);
+
+    let final_stem = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .last()
+        .expect("queue-61 SIG-attached stem");
+    assert_eq!(final_stem.stem_identity, 50);
+    assert_eq!(final_stem.glyph_id, 1_939);
+    assert_eq!(final_stem.inter_id, Some(1_940));
+    assert!(final_stem.sig_attached);
+    assert_eq!(
+        match &final_stem.grade {
+            NativeStemsBeamStemGrade::Checked(check) => check.grade.to_bits(),
+            NativeStemsBeamStemGrade::Artificial(_) => panic!("queue-61 stem is checked"),
+        },
+        0x3fe8_e911_7696_16cc
+    );
+    assert_eq!(
+        final_stem.geometry.ribbon_bounds,
+        JavaRectangle::new(1_336, 1_857, 4, 92)
+    );
+    assert_eq!(
+        final_stem.geometry.median.start.x.to_bits(),
+        0x4094_e8f6_5b22_e4d5
+    );
+    assert_eq!(
+        final_stem.geometry.median.start.y.to_bits(),
+        0x409d_0400_0000_0000
+    );
+    assert_eq!(
+        final_stem.geometry.median.stop.x.to_bits(),
+        0x4094_e58a_0afe_ac96
+    );
+    assert_eq!(
+        final_stem.geometry.median.stop.y.to_bits(),
+        0x409e_7400_0000_0000
+    );
+    assert_eq!(
+        final_stem.geometry.mean_thickness.to_bits(),
+        0x4002_1642_c859_0b21
+    );
+
+    let appended = &start.carrier.beam_state.sig.edges[queue61_before.beam_state.sig.edges.len()..];
+    assert_eq!(appended.len(), 2);
+    assert_eq!(appended[0].kind, NativeSigRelationKind::HeadStem);
+    assert_eq!(appended[0].target, queue61.stem_vertex.0);
+    assert!(matches!(
+        appended[0].origin,
+        NativeSigRelationOrigin::HeadCLinkDraft {
+            head_sig_ordinal: 99,
+            ..
+        }
+    ));
+    assert_eq!(
+        appended[0]
+            .support
+            .as_ref()
+            .expect("queue-61 HeadStem support")
+            .grade
+            .to_bits(),
+        0x3fef_ffff_ffff_f9e7
+    );
+    let head_payload = appended[0]
+        .head_stem
+        .as_ref()
+        .expect("queue-61 HeadStem payload");
+    assert_eq!(head_payload.dx.to_bits(), 0x3d32_4924_9249_2492);
+    assert_eq!(head_payload.dy.to_bits(), 0);
+    assert_eq!(head_payload.head_side, NativeStemHeadSide::Right);
+    assert_eq!(
+        head_payload.extension_point.x.to_bits(),
+        0x4094_cd3e_5fe5_fe66
+    );
+    assert_eq!(
+        head_payload.extension_point.y.to_bits(),
+        0x409e_8c00_0000_0000
+    );
+    assert_eq!(head_payload.consistency.to_bits(), 0x3ff9_08b5_1d9a_fe43);
+    assert_eq!(appended[1].kind, NativeSigRelationKind::BeamStem);
+    assert_eq!(appended[1].target, queue61.stem_vertex.0);
+    assert!(matches!(
+        appended[1].origin,
+        NativeSigRelationOrigin::HeadCLinkBeamDraft {
+            head_sig_ordinal: 99,
+            beam_linker_id: 4,
+        }
+    ));
+    assert_eq!(appended[1].beam_portion, Some(NativeBeamPortion::Right));
+    assert_eq!(
+        appended[1]
+            .support
+            .as_ref()
+            .expect("queue-61 BeamStem support")
+            .grade
+            .to_bits(),
+        0x3fef_5905_282e_591b
+    );
+    let stored_beam_extension = appended[1]
+        .stem_extension
+        .expect("queue-61 BeamStem extension");
+    assert_eq!(stored_beam_extension.x.to_bits(), 0x4094_e4c4_63c1_ed1d);
+    assert_eq!(stored_beam_extension.y.to_bits(), 0x409d_0838_e38e_38f0);
+
+    assert_eq!(start.carrier.current_index, 62);
+    assert!(start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.heads[62].reference.x_ordinal, 54);
+    assert_eq!(start.carrier.heads[62].reference.sig_ordinal, 97);
+    assert_eq!(
+        start.carrier.heads[62]
+            .sides
+            .iter()
+            .map(|side| (side.reference.horizontal, side.linked, side.closed))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, false, true),
+            (NativeStemHeadSide::Right, true, true),
+        ]
+    );
+    assert_eq!(
+        start.carrier.undefined_sides,
+        queue61_before.undefined_sides
+    );
+    assert_eq!(start.carrier.unlinked_heads, queue61_before.unlinked_heads);
+
+    // Open the frozen Java result only after the native compound registry,
+    // checked stem, SIG mutation, beam edge, and continuation are pinned.
+    let oracle = std::fs::read_to_string(
+        repo_root().join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order61.txt"),
+    )
+    .expect("frozen Allegretto system-3 order-61 Java transaction");
+    assert_eq!(
+        sha256_hex(oracle.as_bytes()),
+        "de80142ffc78b6dd96b156285c365b1997bdbb7228ae47093f1b244dea04b56e"
+    );
+    let rows = oracle
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 10);
+    assert!(rows[0].contains(
+        "allegretto.png#1 system 3 heads 118 sigVertices 636 sigEdges 559 systemStems 39"
+    ));
+    let frontier = rows
+        .iter()
+        .find(|line| line.starts_with("stemsheadclinkfrontier "))
+        .expect("order-61 C-link envelope");
+    assert!(
+        frontier
+            .contains("headOrder 61 headX 57 headSig 99 headInterId 1874 cAlias h:57:RIGHT:TOP")
+    );
+    assert!(frontier.contains("lastIndex 3 maxIndex 3 relations 2"));
+    assert!(frontier.contains(
+        "glyphs 2 selected [glyph:410:active:id=410:g:1336:1857:3:92:200245c882d9b0450106e1c50f24f67c4ffd19a8c9e0a96a9417eb2df6330499,glyph:2000:active:id=2000:g:1335:1938:2:11:f02cf8fcf3994cf254669f357d1bcb6a885f1b8f1b4f7f3738e86233618a9e9a]"
+    ));
+    assert!(frontier.contains(
+        "candidate g:1335:1857:4:92:77521aad19f457101f9c91a97bd84b4e7d2fb825dbc46404b25987c914ff5c1a candidateIdBefore 0 existingGlyph - existingActive false existingStem -"
+    ));
+    let result = rows
+        .iter()
+        .find(|line| line.starts_with("stemsheadclinkresult "))
+        .expect("order-61 C-link result");
+    assert!(result.contains("headOrder 61 allocatorBefore 2400 allocatorAfter 2402"));
+    assert!(result.contains(
+        "registeredGlyphs [glyph:2401:g:1335:1857:4:92:77521aad19f457101f9c91a97bd84b4e7d2fb825dbc46404b25987c914ff5c1a:active=true]"
+    ));
+    assert!(result.contains(
+        "id2402:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=0x1.8e911769616ccp-1/3fe8e911769616cc:bounds=1336:1857:4:92"
+    ));
+    assert!(
+        result
+            .contains("sourceId1041:targetId2402:org.audiveris.omr.sig.relation.BeamStemRelation")
+    );
+    assert!(
+        result
+            .contains("sourceId1874:targetId2402:org.audiveris.omr.sig.relation.HeadStemRelation")
+    );
+    assert!(result.contains("addedSystemStems [g:1335:1857:4:92:"));
+    assert!(result.contains(":stemId2402]"));
+    let continuation = rows
+        .iter()
+        .find(|line| line.starts_with("stemsheadphasecontinue "))
+        .expect("order-61 phase continuation");
+    assert!(continuation.contains("headOrder 61 headX 57 headSig 99 headInterId 1874"));
+    assert!(continuation.contains(
+        "decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=true:bottom=false:branch=TopOnly]"
+    ));
+    assert!(continuation.contains(
+        "returned true sidesAfter [LEFT:false:false,RIGHT:true:false] undefs [] closureWrites - closedValueChanges 0 unlinkedCount 0"
+    ));
+    assert!(continuation.contains(
+        "sigVerticesBefore 647 sigVerticesAfter 648 sigEdgesBefore 579 sigEdgesAfter 581 systemStemsBefore 50 systemStemsAfter 51"
+    ));
+    assert!(
+        continuation.contains("nextHeadOrder 62 nextHeadX 54 nextHeadSig 97 nextHeadInterId 1870")
+    );
+
+    let summary = rows[9].split_ascii_whitespace().collect::<Vec<_>>();
+    let field = |name: &str| {
+        summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto system-3 order-61 summary field")
+    };
+    assert_eq!(
+        field("schema"),
+        "stems-head-phase-prefix-allegretto-system3-order61"
+    );
+    assert_eq!(field("rows"), "9");
+    assert_eq!(
+        field("baseProbeSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/StemsBeamSidesLoopProbe.java"))
+                .expect("base HEADS phase probe")
+        )
+    );
+    assert_eq!(
+        field("fragmentSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join("rust/oracle/java/stems-head-phase-v28-fragment.java"))
+                .expect("shared HEADS phase fragment")
+        )
+    );
+    assert_eq!(
+        field("glyphIndexSourceSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root().join("app/src/main/java/org/audiveris/omr/glyph/GlyphIndex.java")
+            )
+            .expect("Java GlyphIndex source")
+        )
+    );
+    assert_eq!(
+        field("retainedGlyphOverlaySha256"),
+        "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4"
+    );
+    assert_eq!(
+        field("allegrettoSystem3InitSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root()
+                    .join("rust/oracle/java/stems-head-phase-allegretto-system3.init.gradle")
+            )
+            .expect("Allegretto system-3 Gradle init")
+        )
+    );
+    assert_eq!(
+        field("baseSystem3Order29RunnerSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system3-order29.sh"
+            ))
+            .expect("strict Allegretto system-3 order-29 runner")
+        )
+    );
+    assert_eq!(
+        field("baseSystem3Order29FixtureSha256"),
+        sha256_hex(
+            &std::fs::read(
+                repo_root()
+                    .join("rust/oracle/stems-head-phase-prefix-allegretto-system3-order29.txt")
+            )
+            .expect("strict Allegretto system-3 order-29 fixture")
+        )
+    );
+    assert_eq!(
+        field("probeSourceSha256"),
+        "3318d3d122240b9e10dee6573ac3fd3c95b99c640ff229405975771ef63c4666"
+    );
+    assert_eq!(
+        field("runnerSourceSha256"),
+        sha256_hex(
+            &std::fs::read(repo_root().join(
+                "rust/oracle/java/run-stems-head-phase-prefix-allegretto-system3-order61.sh"
+            ))
+            .expect("active Allegretto system-3 order-61 runner")
+        )
+    );
+    assert_eq!(
+        field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", rows[..9].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        field("semanticPassSha256"),
+        "462489439a3152a10a9dc65a002845c72acb3672bcf5f81967b34d6bdbc233ff"
+    );
+    assert_eq!(field("freshRuns"), "2");
+    assert_eq!(field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        field("nativeScope"),
+        "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order61TwoChunkBeamCreatedStem"
+    );
+    assert_eq!(field("javaEvidence"), "ReturnedBeforeSixtyThirdHead");
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and

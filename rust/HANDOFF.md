@@ -8649,6 +8649,50 @@ Strict predecessor runner/fixture pins are Boundary 171
 Focused 1/1 and full sibling 20/20 (147.78s) pass. Production now fails closed
 at Allegretto system 3 queue 61 x57/SIG99 RIGHT/TOP. Builder 228 contains a
 stump-less start, chunk filaments 0 and 1, then RawBeam 76; one earlier x112
-RIGHT undefined side remains carried. Measure and port that successful
-beam-bearing expansion next. The exact remote baseline stays `f87752bbb`
-pending this boundary's CI.
+RIGHT undefined side remains carried. Boundary 172 commit `7e87b6c07` is
+exact-CI green: Build & Test 32499929575 succeeded and Rust 32499929648 passed
+all 12 Ubuntu/macOS shards.
+
+## Boundary 173: multi-chunk beam-bearing checked-stem creation
+
+The strict Allegretto system-3 G1 replay carries the real predecessor through
+heads 0-60 without snapshots and emits queue 61 twice byte-identically.
+x57/SIG99 first presents LEFT/BOTTOM to the carrier, then the same generic
+transaction selects RIGHT/TOP. Its stump-less builder contributes chunk
+filaments 0 and 1 (active Java glyphs 410 and 2000) and RawBeam 76. Java unions
+the chunks into a new 1335:1857:4:92 glyph, creates checked StemInter 2402,
+adds one HeadStem and one BeamStem relation, links beam linker 4, changes SIG
+647/579 to 648/581 and system stems 50 to 51, then advances to queue 62
+x54/SIG97.
+
+Production now carries every selected chunk in Java item order and composes
+their exact run-table union. When no selected component already equals that
+union, the native modeled-glyph registry performs an exhaustive content scan
+before the transaction proves the compound absent and registers it. This keeps
+the snapshot bridge fail-closed for negative identity while letting the owned
+registry supply the authority. Native registers glyph 1939, creates checked
+Stem identity 50 / persistent Inter 1940, and appends HeadStem edge 310 plus
+BeamStem edge 311. Native SIG 267/310 becomes 268/312, system stems 50 becomes
+51, and the carrier reaches the same next head. The native IDs deliberately do
+not mimic Java's; compound content, grade `3fe8e911769616cc`, median, thickness
+`40021642c8590b21`, relation payloads, linker writes, and continuation are
+exact.
+
+The 12-line / 12,990-byte fixture SHA-256 is
+`de80142ffc78b6dd96b156285c365b1997bdbb7228ae47093f1b244dea04b56e`.
+Runner, transformed probe, emitted body, and semantic-pass hashes are
+`27d26355c3b58d788d96ddb3d40b3aed4c17fc7c65a0af5c477205df21690f15`,
+`3318d3d122240b9e10dee6573ac3fd3c95b99c640ff229405975771ef63c4666`,
+`0a8aab562930ad983c0e91fe011a8094c7f039870d10385cc64c9fd74f84a9b9`, and
+`462489439a3152a10a9dc65a002845c72acb3672bcf5f81967b34d6bdbc233ff`.
+Strict predecessor runner/fixture pins are Boundary 172
+`a6729e51a41222156a53d772bbd64fc9c8223d14fc2eddf4769b213f09670ada` /
+`4cd7ea37b5f57b27012fc52cea377394d2d0aef97954db34dee988ed823b7549`.
+
+Focused 1/1 and full sibling 20/20 (148.43s) pass; strict all-features
+workspace Clippy, formatting, and diff checks pass. The production CLI crosses
+queue 61 and now fails closed at Allegretto system 3 queue 115 x113/SIG75
+RIGHT/TOP. Builder 452 contains the start head and sibling x108/SIG67; their
+span reaches Java's hard tail target, so this successful two-head expansion is
+the next bounded gap. The exact remote baseline is `7e87b6c07` pending
+Boundary 173's CI; wider-corpus completion remains open.
