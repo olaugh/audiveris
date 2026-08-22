@@ -10310,3 +10310,28 @@ and `e09730b2a782c767b5a4be157926cda686d65a3838c35965b5a2220dca504f8c`.
 Boundary 220 is strictly pinned; warmup plus two runs are byte-identical.
 Focused, sibling, formatting, strict Clippy, replay, and diff checks pass. No
 production source changed. Continue at queue195 x98/SIG136.
+
+## Boundary 222: rejected active-glyph C-link
+
+Bach system-2 queue195 x98/SIG136/Inter3878 has grade bits
+`3fc70b377918303a`. At profile 0 LEFT selects TOP while RIGHT has no link.
+The exact C-link envelope contains one HeadStem relation and active glyph 5905
+(`960:889:4:19`), but that glyph is not an existing StemInter; `lastIndex=-1`
+and `maxIndex=0`. Java rejects the transaction, returns false with no undefined
+side, closes the LEFT/RIGHT BOTTOM/TOP and S-linker flags on x98, changes no
+SIG vertex, edge, stem, or allocator identity, and advances to queue196
+x111/SIG50/Inter3705. The unchanged generic native dispatcher reproduces the
+same fail-closed result as two closed S-linker values and leaves the 394/596
+SIG and 77 stems intact.
+
+Fixture/runner/transform/probe/init/body SHA-256 values are
+`17039789bc695394dc405f42c6c2ac7c01278c69697bc94f67bfc2bdef22a2f0`,
+`b414b501d758861292d774e3ae1f39800770bb9ee8f3b3901bb01ce04b04e876`,
+`b5c825db71be4138bba720f55b6defffa6e27be237eb3b0479b186207addbd9f`,
+`9cecf0dac637470516c97b2c56ea9d515b7cc728e4082ebc08a3699ed9f1ce25`,
+`1c46b29b9b662fdf0951fdafaf0eda8aa0a4abbdec6b5aeec4cfb19db6e0aad0`,
+and `c35caa91032f3c4305453a2fc222b578164750b6d1ac1efbbb07e1a4a1165a05`.
+Boundary 221 is strictly pinned; warmup plus two runs are byte-identical.
+Focused 1/1, all 29 sibling tests, formatting, strict workspace Clippy, replay,
+and diff checks pass. No production source changed. Continue at queue196
+x111/SIG50.
