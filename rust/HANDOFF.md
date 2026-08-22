@@ -8956,3 +8956,29 @@ Boundary 179 commit
 `5fd12958bf65fca9aa78896924ace95b05ec7def` is the exact remote baseline:
 Build & Test 32536290867 and Rust port 32536290886 both succeeded, all 12 Rust
 shards green. Resume at retry index 3, x56/SIG100.
+
+## Boundary 181: Allegretto system-3 phase-2 x56 no-link
+
+The unchanged generic `advance_native_stems_head_phase_two_append_retry`
+consumes retry index 3 at x56/SIG100/Java Inter 1876. Both sides are
+closed/unlinked. LEFT is TopOnly and RIGHT is BottomOnly, but both selected
+expansions return `-1`; Java and native therefore return `false` without a
+C-link transaction. Native idempotently revisits x56 LEFT then RIGHT, reports
+zero closed-value changes, advances `phase_two_index` from three to four, and
+leaves SIG 267/319, system stems 52, allocator 3170, glyph identities, and
+undefined sides unchanged.
+
+The strict gate pins Java's exact x56 row inside the existing Allegretto
+full-page phase-two fixture/runner, SHA-256
+`242260a9fe7b873ca8597840ea7253d45d6518742e924496ccc4a14bb2a8c41c` /
+`9196aa6841aba9d234c4a82d21185c4ed1367b0329fcfca9930c14f0c6a15331`.
+It authenticates grade bits `3fc5165a40f2ed07`, the TopOnly/BottomOnly
+decision pair, `returned=false`, empty side changes, and unchanged graph and
+allocator counts. Focused 1/1 (3.72s), full sibling 20/20 (150.19s),
+formatting, strict all-features workspace Clippy, and diff checks pass.
+
+Boundary 179 commit `5fd12958bf65fca9aa78896924ace95b05ec7def` remains the exact fully green
+remote baseline (Build & Test 32536290867; Rust port 32536290886, 12/12
+shards). Boundary 180 `9dcdb0c179d0af044a79fb4419119f770f5f6ef9` is pushed; its Build & Test
+32542247629 is green while Rust port 32542247645 is still nonterminal. Resume
+at the final retry index 4, x113/SIG75.

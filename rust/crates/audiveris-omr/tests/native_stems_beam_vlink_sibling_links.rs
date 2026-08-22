@@ -10688,6 +10688,70 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         0x4098_8400_0000_0000
     );
 
+    // Boundary 181: x56 has the same closed/unlinked TopOnly/BottomOnly
+    // shape, but both selected expansions return -1. Java returns false,
+    // performs no graph mutation, and idempotently closes the two local
+    // S-linkers before advancing to the final retry.
+    let phase_two_3 = advance_native_stems_head_phase_two_append_retry(
+        phase_two_2_after,
+        head_corners,
+        head_reachability,
+        head_builders,
+        plans,
+    )
+    .expect("Allegretto system-3 phase-2 retry 3 no-link");
+    assert_eq!(phase_two_3.processed_head.x_ordinal, 56);
+    assert_eq!(phase_two_3.processed_head.sig_ordinal, 100);
+    assert_eq!(phase_two_3.returned_linked, Some(false));
+    assert_eq!(phase_two_3.closed_value_changes, 0);
+    assert_eq!(
+        phase_two_3
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                NativeStemHeadSide::Left,
+                false,
+                true,
+                Some(true),
+                Some(false),
+            ),
+            (
+                NativeStemHeadSide::Right,
+                false,
+                true,
+                Some(false),
+                Some(true),
+            ),
+        ]
+    );
+    assert_eq!(
+        phase_two_3
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (56, 100, NativeStemHeadSide::Left),
+            (56, 100, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(phase_two_3.state_after.phase_two_index, 4);
+    assert_eq!(
+        phase_two_3.state_after.beam_state.sig,
+        phase_two_2_after.beam_state.sig
+    );
+    assert_eq!(phase_two_3.state_after.unlinked_heads[4].x_ordinal, 113);
+    assert_eq!(phase_two_3.state_after.unlinked_heads[4].sig_ordinal, 75);
+
     assert_eq!(
         sha256_hex(ALLEGRETTO_PHASE_TWO_X14_FIXTURE.as_bytes()),
         "f8a18f4ac17d036e0f3481983474d3569668437c6d53670b7f454f707baad1ba"
@@ -10981,6 +11045,7 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase1audit page allegretto.png#1 system 3 headOrder 100 headX 0 headSig 19 returned true glyph 369:1595:2:48 weight 63 stemId 3170 grade 3fe49d64653090d5 bounds 368:1595:3:48 median 40771723de22d21c:4098ec0000000000:40771f7fd38ffa01:4099ac0000000000 width 3ff5000000000000 rightBottomStump 369:1595:2:48 sigVerticesBefore 266 sigVerticesAfter 267 sigEdgesBefore 315 sigEdgesAfter 316 systemStemsBefore 51 systemStemsAfter 52 allocatorBefore 3169 allocatorAfter 3170"));
     assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2baseline page allegretto.png#1 system 3 heads 118 queueSize 5 queue [x112:sig68:id1812,x14:sig50:id1777,x13:sig0:id1675,x56:sig100:id1876,x113:sig75:id1826] sigVertices 267 sigEdges 317 systemStems 52 allocator 3170"));
     assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 0 headX 112 headSig 68 headInterId 1812 grade 3fe8d8c228e9b518 append true sidesBefore [LEFT:false:true,RIGHT:true:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:SkipAlreadyLinked] returned true sidesAfter [LEFT:false:true,RIGHT:true:true] undefs [RIGHT] sideChanges [] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 317 sigEdgesAfter 317 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170"));
+    assert!(allegretto_phase_two_rows.iter().any(|line| line == &"stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 3 headX 56 headSig 100 headInterId 1876 grade 3fc5165a40f2ed07 append true sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=true:branch=BottomOnly] returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges [] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 319 sigEdgesAfter 319 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170"));
     let allegretto_phase_two_summary = allegretto_phase_two_rows[30]
         .split_ascii_whitespace()
         .collect::<Vec<_>>();
