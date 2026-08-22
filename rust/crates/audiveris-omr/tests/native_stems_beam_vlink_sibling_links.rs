@@ -281,6 +281,12 @@ const CARMEN_SYSTEM2_ORDER70_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-carmen-system2-order70.sh");
 const CARMEN_SYSTEM2_ORDER70_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-carmen-system2-order70.init.gradle");
+const CARMEN_SYSTEM5_ORDER62_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-carmen-system5-order62.txt");
+const CARMEN_SYSTEM5_ORDER62_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-carmen-system5-order62.sh");
+const CARMEN_SYSTEM5_ORDER62_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-carmen-system5-order62.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -13030,24 +13036,6 @@ fn carmen_system2_order70_wide_gap_returns_no_link_without_graph_mutation() {
         allocator_before
     );
 
-    // The public atomic page driver now clears this system-2 frontier and
-    // advances to the next independently unsupported wider-corpus shape.
-    let production_error = prepared
-        .drive_all_system_head_linking_phase1()
-        .expect_err("Carmen phase 1 remains fail-closed at the next measured boundary")
-        .to_string();
-    for exact in [
-        "HEADS phase-1 page drive",
-        "system 5 queue 62 head x71/SIG7 corner Left/Top builder 286",
-        "ChunkGlyph",
-        "HeadHalfLinker",
-    ] {
-        assert!(
-            production_error.contains(exact),
-            "production did not advance to the expected Carmen frontier: {exact}"
-        );
-    }
-
     // Open the frozen Java evidence only after reconstructing the native
     // no-link transaction and its immutable graph result.
     assert_eq!(
@@ -13130,6 +13118,332 @@ fn carmen_system2_order70_wide_gap_returns_no_link_without_graph_mutation() {
         head_field(summary, "javaEvidence"),
         "ReturnedBeforeSeventySecondHead"
     );
+}
+
+/// Carmen system 5 crosses x68 without a stump glyph while expanding queue
+/// head 62. Both HeadStem relations are accepted and the active stem glyph is
+/// selected, but the final item still falls short of Java's hard tail. The
+/// result is therefore no-link before `createStem`, with no mutation.
+#[test]
+fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
+    let path = repo_root().join("data/examples/carmen.png");
+    let grid = recognize_grid_lines(path).expect("Carmen GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Carmen HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Carmen STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Carmen BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Carmen LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Carmen HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Carmen native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Carmen post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(4);
+    assert_eq!(start.system_id, 5);
+    let head_corners = &prepared.components.head_corners.systems[4];
+    let head_reachability = &prepared.components.head_reachability.systems[4];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[4];
+    let head_builders = &prepared.components.head_builders.systems[4];
+    let plans = &prepared.components.plans.systems[4];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[4];
+
+    while start.carrier.current_index < 62 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Carmen continuation before system-5 queue 62");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Carmen C-link before system-5 queue 62");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    if start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Carmen continuation to system-5 queue-62 frontier");
+        start.carrier = *continuation.state_after;
+    }
+    assert_eq!(start.carrier.current_index, 62);
+    assert!(!start.carrier.frontier_consumed);
+    assert_eq!(
+        (
+            start.carrier.frontier.head.x_ordinal,
+            start.carrier.frontier.head.sig_ordinal,
+            start.carrier.frontier.next_corner.horizontal,
+            start.carrier.frontier.next_corner.vertical,
+        ),
+        (71, 7, NativeStemHeadSide::Left, NativeStemVerticalSide::Top,)
+    );
+    let builder = head_builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == start.carrier.frontier.next_corner)
+        .expect("Carmen system-5 queue-62 builder");
+    assert_eq!(builder.builder_ordinal, 286);
+    assert_eq!(builder.items.len(), 3);
+    assert!(matches!(
+        (
+            builder.items[2].kind,
+            builder.items[2].glyph,
+            builder.items[2].target
+        ),
+        (
+            NativeStemsHeadBuilderItemKind::HeadHalfLinker,
+            None,
+            Some(
+                audiveris_omr::native_stems_head_builders::NativeStemsHeadBuilderTargetRef::Head(_)
+            )
+        )
+    ));
+
+    let vertices_before = start.carrier.beam_state.sig.vertices.len();
+    let edges_before = start.carrier.beam_state.sig.edges.len();
+    let stems_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let allocator_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    let continuation = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Carmen system-5 queue-62 dispatch")
+    .expect_err("Carmen system-5 queue-62 falls short of the hard tail");
+    assert_eq!(
+        (
+            continuation.processed_head.x_ordinal,
+            continuation.processed_head.sig_ordinal,
+            continuation.returned_linked,
+            continuation.closed_value_changes,
+        ),
+        (71, 7, Some(false), 2)
+    );
+    let expected_profile_decisions = [
+        NativeStemsHeadPhase1SideDecision {
+            side: NativeStemHeadSide::Left,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(true),
+            bottom_can_link: Some(false),
+        },
+        NativeStemsHeadPhase1SideDecision {
+            side: NativeStemHeadSide::Right,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(false),
+            bottom_can_link: Some(false),
+        },
+    ];
+    assert_eq!(continuation.side_decisions.len(), 8);
+    assert!(
+        continuation
+            .side_decisions
+            .chunks_exact(2)
+            .all(|profile| profile == expected_profile_decisions)
+    );
+    assert_eq!(
+        continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (71, 7, NativeStemHeadSide::Left),
+            (71, 7, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(continuation.state_after.current_index, 63);
+    assert_eq!(
+        (
+            continuation.state_after.heads[63].reference.x_ordinal,
+            continuation.state_after.heads[63].reference.sig_ordinal,
+        ),
+        (45, 95)
+    );
+    assert_eq!(
+        continuation.state_after.beam_state.sig.vertices.len(),
+        vertices_before
+    );
+    assert_eq!(
+        continuation.state_after.beam_state.sig.edges.len(),
+        edges_before
+    );
+    assert_eq!(
+        continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_FIXTURE.as_bytes()),
+        "6ee7e36c9294bcb861c128f11b25072ba5f7f84dec3f61a00b4df8d282054358"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_RUNNER),
+        "9cdf28ad67460f64ab4273020e177fa82626d8eeb781a0d2b26f4fb4ad48a423"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_INIT),
+        "5c66ada545193659e444da598fc0924e7cd5c2463a7cd0db5a8e744431c6af07"
+    );
+    let rows = CARMEN_SYSTEM5_ORDER62_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 5);
+    for exact in [
+        "headOrder 62 headX 71 headSig 7 headInterId 2813 cAlias h:71:LEFT:TOP",
+        "lastIndex -1 maxIndex 2 relations 2",
+        "h:68:LEFT:TOP:org.audiveris.omr.sig.relation.HeadStemRelation",
+        "glyphs 2 selected [glyph:614:active:id=614:g:1618:2886:4:108:586630d1d3eea1d3f74400a5a0df60df3fdd8c487df4b86e9ab9561f73511669",
+        "existingGlyph glyph:614 existingActive true existingStem 3446",
+        "allocatorBefore 3446 allocatorAfter 3446 registeredGlyphs - addedVertices - addedEdges - addedSystemStems -",
+        "decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=false:branch=Neither]",
+        "returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] closureWrites - closedValueChanges 0",
+        "sigVerticesBefore 1049 sigVerticesAfter 1049 sigEdgesBefore 867 sigEdgesAfter 867 systemStemsBefore 42 systemStemsAfter 42",
+        "nextHeadOrder 63 nextHeadX 45 nextHeadSig 95 nextHeadInterId 2990",
+    ] {
+        assert!(
+            CARMEN_SYSTEM5_ORDER62_FIXTURE.contains(exact),
+            "missing Carmen system-5 oracle fragment: {exact}"
+        );
+    }
+    let summary = rows[4];
+    assert_eq!(
+        head_field(summary, "schema"),
+        "stems-head-phase-carmen-system5-order62-v1"
+    );
+    assert_eq!(head_field(summary, "rows"), "4");
+    assert_eq!(
+        head_field(summary, "baseSystem2Order70RunnerSha256"),
+        sha256_hex(CARMEN_SYSTEM2_ORDER70_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "baseSystem2Order70FixtureSha256"),
+        sha256_hex(CARMEN_SYSTEM2_ORDER70_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "probeSourceSha256"),
+        "e286786ecf4b8a0eec20bd6b81253f02b1167bc63de1832951da95880e05d979"
+    );
+    assert_eq!(
+        head_field(summary, "runnerSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "emittedBodySha256"),
+        sha256_hex(format!("{}\n", rows[..4].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "semanticPassSha256"),
+        "cd95a20e3c2b0035b8464ebf19d7545edd9c9b1ff2cb871510dd96dfb317c0b3"
+    );
+    assert_eq!(head_field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(summary, "nativeScope"),
+        "CarmenSystem5Order62StumplessCrossedHeadHardTailNoLink"
+    );
+    assert_eq!(
+        head_field(summary, "javaEvidence"),
+        "ReturnedBeforeSixtyFourthHead"
+    );
+
+    let phase_one = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect("all five Carmen systems complete HEADS phase 1");
+    assert_eq!(phase_one.systems.len(), 5);
+    assert!(phase_one.systems.iter().all(|system| {
+        system.carrier.current_index == system.carrier.heads.len()
+            && system.carrier.frontier_consumed
+    }));
+    let system5 = &phase_one.systems[4];
+    assert_eq!(
+        system5
+            .carrier
+            .unlinked_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        [(72, 8), (71, 7), (47, 101)]
+    );
+    assert_eq!(
+        system5
+            .carrier
+            .undefined_sides
+            .iter()
+            .map(|side| (side.head.x_ordinal, side.head.sig_ordinal, side.horizontal))
+            .collect::<Vec<_>>(),
+        [(72, 8, NativeStemHeadSide::Left)]
+    );
+
+    let phase_two_error = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect_err("Carmen phase 2 remains fail-closed at its first append-reuse branch")
+        .to_string();
+    assert!(phase_two_error.contains("HEADS phase-2 page drive"));
+    assert!(phase_two_error.contains("system 2"));
+    assert!(phase_two_error.contains("unported reuseStem append path"));
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and

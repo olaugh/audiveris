@@ -9230,3 +9230,50 @@ chunk, then a stump-less crossed x68/SIG0 head relation. That relation-only
 crossed-head expansion is the next wider-corpus branch. `425d58e82` remains
 the exact fully green remote CI baseline; Boundary 186 is pushed at
 `1d8cbb002` but has no visible workflow run yet.
++
+
+## Boundary 188: complete Carmen head phase 1
+
+Generic head expansion now admits a relation-only crossed
+`HeadHalfLinker`: it projects and records the head relation while leaving
+candidate raster content unchanged when the item has no glyph. The close-head
+predicate now follows Java's recursive Gap rule instead of failing closed. It
+measures the concrete diagonal prefix before the Gap, tries the target head's
+opposite diagonal recursively with cycle protection, and applies Java's
+deliberate true fallback when neither complete diagonal can link. The existing
+show-stopping Gap bound remains unchanged.
+
+Carmen system 5 queue 62 is x71/SIG7/Java Inter 2813. LEFT/TOP builder 286
+contains the start stump, active glyphs 614 and 3126, the direct x71 relation,
+and a relation-only crossed x68/SIG0 target. Java selects both glyphs and both
+HeadStem relations, including relation grade bits
+`3fe955058d9897c0` for crossed x68, but still ends at
+`lastIndex=-1,maxIndex=2`: the walked content falls short of the hard tail.
+No candidate, allocator, glyph, vertex, edge, or system-stem state changes.
+The false result closes x71 LEFT then RIGHT and advances to queue 63,
+x45/SIG95/Java Inter 2990.
+
+The production phase-1 driver now exhausts all five Carmen systems. System 5
+retains unlinked heads `[(72,8),(71,7),(47,101)]` and the one undefined side
+`(72,8,LEFT)`. The next honest fail-closed frontier is Carmen system 2's
+first phase-2 retry: it reaches the still-unported `reuseStem` append path.
+
+The 4-row-plus-summary fixture is 7 lines / 6,051 bytes and is byte-identical
+across warmup plus two fresh runs. Runner/init/fixture/probe/body/semantic
+SHA-256 values are
+`9cdf28ad67460f64ab4273020e177fa82626d8eeb781a0d2b26f4fb4ad48a423`,
+`5c66ada545193659e444da598fc0924e7cd5c2463a7cd0db5a8e744431c6af07`,
+`6ee7e36c9294bcb861c128f11b25072ba5f7f84dec3f61a00b4df8d282054358`,
+`e286786ecf4b8a0eec20bd6b81253f02b1167bc63de1832951da95880e05d979`,
+`b786cbfa0d15a8b7da4e46d8b898d3872b284a53378c46d0e62fc4a3d97544bf`,
+and
+`cd95a20e3c2b0035b8464ebf19d7545edd9c9b1ff2cb871510dd96dfb317c0b3`.
+The runner strictly pins Boundary 187's runner/fixture at
+`c0516e21259912bc5ec1b429878dfc5d26b44a1c54076d1cc7eace3cd700194d` /
+`6bf4d983a98070b7d29089ae8771234838697457b7321c0110452651dd5bb0ff`
+and retains the shared fragment, GlyphIndex-source, overlay, and input hashes.
+
+Focused 1/1, full sibling 25/25 (152.58s), formatting, strict
+all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
+pass. `425d58e82` remains the exact fully green remote CI baseline; no workflow
+run is visible for pushed Boundary 187 commit `2f5b818fc`.

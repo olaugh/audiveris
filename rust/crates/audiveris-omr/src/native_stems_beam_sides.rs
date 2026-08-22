@@ -1288,6 +1288,32 @@ fn bounded_head_can_link(
     min_linker_length: i32,
     append: bool,
 ) -> Result<bool, NativeStemsBeamSidesError> {
+    bounded_head_can_link_inner(
+        corner,
+        stem_profile,
+        builders,
+        s_cells,
+        min_linker_length,
+        append,
+        &mut BTreeSet::new(),
+    )
+}
+
+fn bounded_head_can_link_inner(
+    corner: NativeStemsHeadCornerRef,
+    stem_profile: i32,
+    builders: &NativeStemsHeadBuilderSystem,
+    s_cells: &[NativeStemsBeamNativeSLinkerCell],
+    min_linker_length: i32,
+    append: bool,
+    visiting: &mut BTreeSet<(NativeStemsHeadCornerRef, i32, bool)>,
+) -> Result<bool, NativeStemsBeamSidesError> {
+    if !visiting.insert((corner, stem_profile, append)) {
+        return Err(stage(
+            "HEADS-phase1-canLink",
+            "close-head diagonal recursion revisits the same corner",
+        ));
+    }
     let builder = builders
         .builders
         .iter()
@@ -1306,8 +1332,8 @@ fn bounded_head_can_link(
         .get(&stem_profile)
         .copied()
         .ok_or_else(|| stage("HEADS-phase1-canLink", "builder lacks STRICT gap threshold"))?;
-    let mut saw_gap = false;
-    for item in builder.items.iter().skip(1) {
+    let mut gap_index = None;
+    for (item_index, item) in builder.items.iter().enumerate().skip(1) {
         if item.kind == NativeStemsHeadBuilderItemKind::Gap {
             // Java's getFirstCLinkerAfter stops at a too-wide gap and
             // canLink then reports true; a narrow gap is remembered for
@@ -1315,7 +1341,7 @@ fn bounded_head_can_link(
             if item.contribution > max_gap {
                 return Ok(true);
             }
-            saw_gap = true;
+            gap_index = Some(item_index);
             continue;
         }
         let Some(NativeStemsHeadBuilderTargetRef::Head(target)) = item.target else {
@@ -1338,17 +1364,119 @@ fn bounded_head_can_link(
         if !append && target_side.linked {
             return Ok(false);
         }
-        if !saw_gap {
+        let Some(gap_index) = gap_index else {
             // Java accepts the link when no stem gap separates the two
             // heads (HeadLinker.CLinker.canLink's gapIndex == null branch).
             return Ok(true);
+        };
+        let length_before_gap = bounded_head_builder_length_at(builder, gap_index - 1)?;
+        let opposite_horizontal = match corner.horizontal {
+            crate::stems_step::NativeStemHeadSide::Left => {
+                crate::stems_step::NativeStemHeadSide::Right
+            }
+            crate::stems_step::NativeStemHeadSide::Right => {
+                crate::stems_step::NativeStemHeadSide::Left
+            }
+        };
+        let opposite_vertical = match corner.vertical {
+            crate::stems_step::NativeStemVerticalSide::Top => {
+                crate::stems_step::NativeStemVerticalSide::Bottom
+            }
+            crate::stems_step::NativeStemVerticalSide::Bottom => {
+                crate::stems_step::NativeStemVerticalSide::Top
+            }
+        };
+        let own_diagonal = NativeStemsHeadCornerRef {
+            horizontal: opposite_horizontal,
+            vertical: opposite_vertical,
+            ..corner
+        };
+        let own_diagonal_builder = builders
+            .builders
+            .iter()
+            .find(|candidate| candidate.start == own_diagonal)
+            .ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-canLink",
+                    "current head diagonal corner has no builder",
+                )
+            })?;
+        let own_diagonal_concrete =
+            own_diagonal_builder
+                .lengths
+                .get(&0)
+                .copied()
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-phase1-canLink",
+                        "current head diagonal builder lacks STRICT length",
+                    )
+                })?
+                >= min_linker_length;
+        if own_diagonal_concrete {
+            return Ok(length_before_gap >= min_linker_length);
         }
-        return Err(stage(
-            "HEADS-phase1-canLink",
-            "first head reaches the unported close-head/gap recursion",
-        ));
+
+        let target_diagonal = NativeStemsHeadCornerRef {
+            head: target.head,
+            sig_ordinal: target.sig_ordinal,
+            x_ordinal: target.x_ordinal,
+            horizontal: opposite_horizontal,
+            vertical: corner.vertical,
+        };
+        if bounded_head_can_link_inner(
+            target_diagonal,
+            0,
+            builders,
+            s_cells,
+            min_linker_length,
+            false,
+            visiting,
+        )? {
+            return Ok(length_before_gap >= min_linker_length);
+        }
+
+        // Java deliberately accepts when neither diagonal can provide the
+        // close-head alternative.
+        return Ok(true);
     }
     Ok(true)
+}
+
+fn bounded_head_builder_length_at(
+    builder: &crate::native_stems_head_builders::NativeStemsHeadBuilder,
+    last_index: usize,
+) -> Result<i32, NativeStemsBeamSidesError> {
+    let mut min_y = None::<i32>;
+    let mut max_y = None::<i32>;
+    for item in builder.items.iter().take(last_index + 1) {
+        if item.kind == NativeStemsHeadBuilderItemKind::Gap {
+            continue;
+        }
+        let line_min = item.line.start.y.min(item.line.stop.y).floor() as i32;
+        let line_max = item.line.start.y.max(item.line.stop.y).ceil() as i32;
+        min_y = Some(min_y.map_or(line_min, |value| value.min(line_min)));
+        max_y = Some(max_y.map_or(line_max, |value| value.max(line_max)));
+        if let Some(bounds) = item.head_bounds {
+            min_y = Some(min_y.map_or(bounds.y, |value| value.min(bounds.y)));
+            let bottom = bounds.y.checked_add(bounds.height).ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-canLink",
+                    "head bounds overflow while measuring pre-gap length",
+                )
+            })?;
+            max_y = Some(max_y.map_or(bottom, |value| value.max(bottom)));
+        }
+    }
+    let (Some(min_y), Some(max_y)) = (min_y, max_y) else {
+        return Ok(0);
+    };
+    let theoretical_y = builder.theoretical_line.start.y as i32;
+    Ok(if builder.y_direction > 0 {
+        max_y - theoretical_y
+    } else {
+        theoretical_y - min_y
+    })
 }
 
 /// Continue Java `HeadLinker.linkSides` phase 1 after one successful C-link.
@@ -12138,6 +12266,11 @@ fn advance_native_stems_head_c_link_at_frontier(
                 Some(NativeStemsHeadBuilderGlyphRef::HeadStump { corner }),
                 Some(NativeStemsHeadBuilderTargetRef::Head(target)),
             ) if corner == target => head_targets.push(target),
+            (
+                NativeStemsHeadBuilderItemKind::HeadHalfLinker,
+                None,
+                Some(NativeStemsHeadBuilderTargetRef::Head(target)),
+            ) => head_targets.push(target),
             (NativeStemsHeadBuilderItemKind::Gap, None, None) => {}
             _ => bounded_tail = false,
         }
