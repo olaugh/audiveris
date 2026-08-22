@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and eighty-four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through its measured SIDES/STUMPS, phase-1, phase-2, and generic-finalizer gaps. Boundary 184 begins wider-corpus closure on Zizi: the generic two-side driver now matches Java's one post-link shared-stem closure loop and retains duplicate idempotent S-cell writes reached through distinct stems. The live page drive clears Zizi system 1 and fails closed at system 2 queue 107's three-item RIGHT/TOP expansion.
+The first one hundred and eighty-five semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through its measured SIDES/STUMPS, phase-1, phase-2, and generic-finalizer gaps. Boundary 184 begins wider-corpus closure on Zizi; Boundary 185 ports the ordered crossed-head-stump/chunk-rejection expansion and completes transactional Zizi STEMS plus schema-1 publication. The next live fail-closed frontier is Carmen system 1's dual-corner selection branch.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque; transactionally complete for Chula** | One hundred and eighty-four exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through generic finalization; Boundary 184 fixes Java-order two-side closure and carries Zizi system 1 queue 34's duplicate-idempotent cross-stem writes. The production drive clears Zizi system 1 and fails closed at system 2 queue 107, x89/SIG64 RIGHT/TOP, before builder 356's three-item expansion. | Implement and grade the Zizi system-2 queue-107 expansion, then continue wider-corpus completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula and Allegretto** | One hundred and eighty-five exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through generic finalization; Boundary 184 fixes Java-order two-side closure; Boundary 185 accepts Zizi system 2's crossed x89 stump before rejecting its later chunk, creates the exact two HeadStem edges, and completes the full Zizi production page. | Instrument and grade Carmen system 1's dual-corner selection branch, then continue wider-corpus completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -4726,6 +4726,39 @@ checks pass. `f4629fa1d` is the exact green remote baseline (Build 32545226391;
 Rust 32545226371). The next fail-closed frontier is Zizi system 2 queue 107,
 x89/SIG64 RIGHT/TOP, builder 356 profile 1/1 with start-half, filament-0 chunk,
 and x94/SIG61 LEFT/TOP target-half items; x90/SIG55 LEFT is already undefined.
+
+## Boundary 185: Zizi system-2 crossed-head stump expansion
+
+The generic head C-link operation now walks Java's ordered builder items. A
+crossed head relation is checked before its reachable stump changes the stem
+line, and an accepted crossed head survives a later plain-chunk rejection.
+The same operation appends every accepted crossed HeadStem relation for both
+reused and newly created stems. Native also initializes Java's hard-tail
+`lastY` from the theoretical line's original P1 before reversing the working
+line for upward expansion; that keeps the older Allegretto and Batuque gates
+exact without a page-specific exception.
+
+At Zizi system 2 order 23, x94/SIG61 LEFT/BOTTOM accepts crossed x89/SIG64
+RIGHT/BOTTOM, selects active glyph 245, rejects the following chunk, and
+creates StemInter 1724 with both HeadStem edges. SIG 444/384 becomes 445/386,
+system stems 45 becomes 46, and closure writes x89 then x93 LEFT/RIGHT. The
+following continuation reaches x86/SIG94. This prelinks the old queue-107 x89
+frontier, so transactional `-step STEMS -json` now completes the full Zizi
+page.
+
+The strict nine-row fixture is byte-identical across warmup plus two fresh
+runs. Runner/init/fixture/probe/overlay/body/semantic hashes are
+`33f2ce87e7c727156de4250410052b95dbd209590419c15bb2428be3edec8b9b`,
+`46241f0adbc0ef8746240567b2b54d09ffad062962e07f4deee9c745e6b43d97`,
+`fb9797eb2039cf3f052f7bd7285a94b737a8771075406f772261deded352be9d`,
+`b4375a1d44e7e513a0946520ca146fc84de6dcf8b9c3297c1cb8def09bdb6c5d`,
+`f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4`,
+`5a9c6ad49ca15fb61a765a4334a0cf40868645d8810801dc2f18655829f90954`,
+and `d5ad96dee3d46dedcb150d263c9f350cf2353c09cfc5134ef45456b1803f2a43`.
+Focused Zizi, preserved Allegretto/Batuque, sibling 22/22, production Zizi,
+formatting, strict Clippy, shell syntax, and diff checks pass. `4de83dc30` is
+the exact green predecessor (Build 32547802513; Rust 32547802498). Carmen
+system 1's dual-corner selection branch is next.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

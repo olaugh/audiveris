@@ -9091,3 +9091,48 @@ x94/SIG61 LEFT/TOP target half-linker; x90/SIG55 LEFT is already undefined.
 That is the next measured branch. The un-emitted system-1 suffix is exercised
 by the production drive but is not claimed as independently frozen Java
 evidence.
+
+## Boundary 185: Zizi system-2 crossed-head stump expansion
+
+The generic `advance_native_stems_head_c_link_at_frontier` now walks the
+complete ordered builder item sequence. It evaluates each crossed head's
+relation before contributing that head's reachable stump, retains accepted
+crossed relation plans when a later chunk fails `maxLineGlyphDx`, and appends
+those HeadStem edges for both reused and newly created stems. Java initializes
+its hard-tail `lastY` from the theoretical line's original P1 before reversing
+the working line for upward stems; native now does the same. This restores the
+existing Allegretto x0 and Batuque x109 gates while removing the old bounded
+Allegretto-only chunk-rejection condition.
+
+The exact target is Zizi system 2 head order 23,
+x94/SIG61/Java Inter 1183 LEFT/BOTTOM. It accepts x94 and crossed
+x89/SIG64/Inter1191 RIGHT/BOTTOM, selects active glyph 245 at
+`1940:913:4:57`, rejects the later chunk, and creates checked StemInter 1724.
+The two new HeadStem edges take SIG 444/384 to 445/386 and system stems 45 to
+46. The C-link closes x89 and x93 LEFT then RIGHT; the generic continuation
+revisits x93 and reaches order 24, x86/SIG94/Inter1253. Consequently the old
+production failure at queue 107 x89 is prelinked when encountered, and the
+full Zizi page reaches transactional finalization and emits schema-1 STEMS
+JSON.
+
+The strict fixture has nine semantic rows plus summary and is byte-identical
+across warmup plus two fresh runs. Runner/init/fixture/probe/overlay/body/
+semantic SHA-256 values are
+`33f2ce87e7c727156de4250410052b95dbd209590419c15bb2428be3edec8b9b`,
+`46241f0adbc0ef8746240567b2b54d09ffad062962e07f4deee9c745e6b43d97`,
+`fb9797eb2039cf3f052f7bd7285a94b737a8771075406f772261deded352be9d`,
+`b4375a1d44e7e513a0946520ca146fc84de6dcf8b9c3297c1cb8def09bdb6c5d`,
+`f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4`,
+`5a9c6ad49ca15fb61a765a4334a0cf40868645d8810801dc2f18655829f90954`,
+and `d5ad96dee3d46dedcb150d263c9f350cf2353c09cfc5134ef45456b1803f2a43`.
+The strict Boundary-184 runner/fixture pins are
+`de07f1e244641a2f9f41379b871595201b5158428e28d0f1701927b7221b7f90` /
+`0970b0dafe3a456d30e72b55a2716205e06caa4a93367e9390f00263139117f6`.
+
+Focused Zizi, preserved Allegretto, and preserved Batuque gates pass; the full
+sibling suite is 22/22 in 156.26s. Production Zizi, formatting, strict
+all-target/all-feature Clippy, shell syntax, and diff checks pass.
+`4de83dc3045fc5ef7303752a234dee0260436d63` is the exact fully green remote
+predecessor (Build 32547802513; Rust 32547802498). The next wider-corpus
+production frontier is Carmen system 1's unported dual-corner selection
+branch.

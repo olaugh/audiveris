@@ -195,6 +195,7 @@ use audiveris_omr::{
         prepare_native_stems_beam_vlink_frontier_state_from_modeled_registry,
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
+    native_stems_head_builders::NativeStemsHeadBuilderItemKind,
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
     stems_step::{
         NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint,
@@ -263,6 +264,12 @@ const ZIZI_SYSTEM1_ORDER34_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-zizi-order34.transform.awk");
 const ZIZI_SYSTEM1_ORDER34_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-zizi-order34.init.gradle");
+const ZIZI_SYSTEM2_ORDER23_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-zizi-system2-order23.txt");
+const ZIZI_SYSTEM2_ORDER23_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-zizi-system2-order23.sh");
+const ZIZI_SYSTEM2_ORDER23_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-zizi-system2-order23.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -4599,6 +4606,16 @@ fn sha256_hex(bytes: &[u8]) -> String {
         }
     }
     state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn head_field<'a>(row: &'a str, name: &str) -> &'a str {
+    let fields = row.split_ascii_whitespace().collect::<Vec<_>>();
+    fields
+        .iter()
+        .position(|field| *field == name)
+        .and_then(|index| fields.get(index + 1))
+        .copied()
+        .unwrap_or_else(|| panic!("missing strict head field {name}"))
 }
 
 fn read_sha256(relative: &str) -> Result<String, String> {
@@ -12223,6 +12240,367 @@ fn zizi_system1_order34_repeats_cross_stem_closure_writes() {
         "ZiziSystem1Order34DuplicateIdempotentClosure"
     );
     assert_eq!(field("javaEvidence"), "ReturnedBeforeThirtySixthHead");
+}
+
+#[test]
+fn zizi_system2_order23_links_the_zero_glyph_x89_target() {
+    let path = repo_root().join("data/examples/zizi.png");
+    let grid = recognize_grid_lines(path).expect("Zizi GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Zizi HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Zizi STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Zizi BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Zizi LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Zizi HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Zizi native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Zizi post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(1);
+    let head_corners = &prepared.components.head_corners.systems[1];
+    let head_reachability = &prepared.components.head_reachability.systems[1];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[1];
+    let head_builders = &prepared.components.head_builders.systems[1];
+    let plans = &prepared.components.plans.systems[1];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[1];
+
+    while start.carrier.current_index < 23 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Zizi system-2 continuation before order 23");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Zizi system-2 C-link before order 23");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    if start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Zizi continuation to order-23 C-link frontier");
+        start.carrier = *continuation.state_after;
+    }
+
+    assert_eq!(start.carrier.current_index, 23);
+    assert_eq!(start.carrier.frontier.head.x_ordinal, 94);
+    assert_eq!(start.carrier.frontier.head.sig_ordinal, 61);
+    let builder = head_builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == start.carrier.frontier.next_corner)
+        .expect("x94 LEFT/BOTTOM builder");
+    assert_eq!(builder.items.len(), 3);
+    assert_eq!(
+        builder.items[0].kind,
+        NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+    );
+    assert_eq!(builder.items[0].glyph, None);
+    assert_eq!(builder.items[0].contribution, 0);
+    assert_eq!(
+        builder.items[1].kind,
+        NativeStemsHeadBuilderItemKind::HeadHalfLinker
+    );
+    assert_eq!(builder.items[1].contribution, 21);
+    assert_eq!(
+        builder.items[2].kind,
+        NativeStemsHeadBuilderItemKind::ChunkGlyph
+    );
+    assert_eq!(builder.items[2].contribution, 3);
+    let sig_before = (
+        start.carrier.beam_state.sig.vertices.len(),
+        start.carrier.beam_state.sig.edges.len(),
+    );
+    let stems_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let transaction = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Zizi system-2 order-23 dispatch")
+    .expect("Zizi system-2 order-23 links x94 LEFT/BOTTOM");
+    assert_eq!(transaction.last_index, 1);
+    assert_eq!(transaction.max_index, 2);
+    assert_eq!(transaction.selected_glyph_id, 156);
+    assert_eq!(transaction.relation.grade.to_bits(), 0x3feffffffffffefc);
+    assert_eq!(transaction.relation.dx.to_bits(), 0x3d08618618618618);
+    let start_extension = transaction
+        .relation
+        .extension_point
+        .expect("x94 start relation extension");
+    assert_eq!(start_extension.x.to_bits(), 0x409e7c56a052bf5a);
+    assert_eq!(start_extension.y.to_bits(), 0x408d280000000000);
+    assert_eq!(
+        transaction.create.disposition,
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity: 45 }
+    );
+    assert_eq!(
+        transaction.create.candidate.bounds,
+        audiveris_image::section::Bounds {
+            x: 1_940,
+            y: 913,
+            width: 4,
+            height: 57,
+        }
+    );
+    assert_eq!(transaction.create.candidate.weight, 192);
+    let stem = transaction.create.stem.as_ref().expect("created x94 stem");
+    let NativeStemsBeamStemGrade::Checked(check) = &stem.grade else {
+        panic!("x94 stem must be checker-graded");
+    };
+    assert_eq!(check.grade.to_bits(), 0x3fe6591e13343564);
+    assert_eq!(stem.geometry.median.start.x.to_bits(), 0x409e58eacce7dace);
+    assert_eq!(stem.geometry.median.start.y.to_bits(), 0x408c880000000000);
+    assert_eq!(stem.geometry.median.stop.x.to_bits(), 0x409e5896e2a84794);
+    assert_eq!(stem.geometry.median.stop.y.to_bits(), 0x408e500000000000);
+    assert_eq!(stem.geometry.mean_thickness.to_bits(), 0x400af286bca1af28);
+    assert_eq!(transaction.stem_vertex.0, sig_before.0);
+    assert_eq!(transaction.head_stem_edge.0, sig_before.1);
+    assert_eq!(transaction.additional_head_relations.len(), 1);
+    let crossed = &transaction.additional_head_relations[0];
+    assert_eq!(crossed.corner.x_ordinal, 89);
+    assert_eq!(crossed.corner.sig_ordinal, 64);
+    assert_eq!(crossed.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(crossed.corner.vertical, NativeStemVerticalSide::Bottom);
+    assert_eq!(crossed.relation.grade.to_bits(), 0x3fdd7a5f9d83ce32);
+    assert_eq!(crossed.relation.dx.to_bits(), 0x3fc5ff3f8d00b0c3);
+    let crossed_extension = crossed
+        .relation
+        .extension_point
+        .expect("x89 crossed relation extension");
+    assert_eq!(crossed_extension.x.to_bits(), 0x409e7c18e161c919);
+    assert_eq!(crossed_extension.y.to_bits(), 0x408d800000000000);
+    assert_eq!(crossed.head_stem_edge.0, sig_before.1 + 1);
+    assert!(crossed.appended);
+    assert_eq!(
+        transaction
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        vec![
+            (89, NativeStemHeadSide::Left),
+            (89, NativeStemHeadSide::Right),
+            (93, NativeStemHeadSide::Left),
+            (93, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(transaction.closed_cell_changes, 4);
+    assert_eq!(
+        (
+            start.carrier.beam_state.sig.vertices.len(),
+            start.carrier.beam_state.sig.edges.len(),
+        ),
+        (sig_before.0 + 1, sig_before.1 + 2)
+    );
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before + 1
+    );
+    assert_eq!(start.carrier.current_index, 24);
+    assert!(start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.heads[24].reference.x_ordinal, 86);
+    assert_eq!(start.carrier.heads[24].reference.sig_ordinal, 94);
+    let x89 = start
+        .carrier
+        .heads
+        .iter()
+        .find(|head| head.reference.x_ordinal == 89)
+        .expect("x89 queued head");
+    assert_eq!(
+        x89.sides
+            .iter()
+            .map(|cell| (cell.reference.horizontal, cell.linked, cell.closed))
+            .collect::<Vec<_>>(),
+        vec![
+            (NativeStemHeadSide::Left, false, true),
+            (NativeStemHeadSide::Right, true, true),
+        ]
+    );
+
+    // Open the Java oracle only after independently reconstructing and
+    // pinning the complete native transaction above.
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_FIXTURE.as_bytes()),
+        "fb9797eb2039cf3f052f7bd7285a94b737a8771075406f772261deded352be9d"
+    );
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_RUNNER),
+        "33f2ce87e7c727156de4250410052b95dbd209590419c15bb2428be3edec8b9b"
+    );
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_INIT),
+        "46241f0adbc0ef8746240567b2b54d09ffad062962e07f4deee9c745e6b43d97"
+    );
+    let rows = ZIZI_SYSTEM2_ORDER23_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 10);
+    let frontier = rows[6];
+    assert_eq!(head_field(frontier, "headOrder"), "23");
+    assert_eq!(head_field(frontier, "headX"), "94");
+    assert_eq!(head_field(frontier, "headSig"), "61");
+    assert_eq!(head_field(frontier, "headInterId"), "1183");
+    assert_eq!(head_field(frontier, "cAlias"), "h:94:LEFT:BOTTOM");
+    assert_eq!(head_field(frontier, "lastIndex"), "1");
+    assert_eq!(head_field(frontier, "maxIndex"), "2");
+    assert_eq!(head_field(frontier, "relations"), "2");
+    assert_eq!(head_field(frontier, "glyphs"), "1");
+    assert_eq!(head_field(frontier, "candidateIdBefore"), "245");
+    assert_eq!(head_field(frontier, "existingGlyph"), "glyph:245");
+    assert_eq!(head_field(frontier, "existingActive"), "true");
+    assert_eq!(head_field(frontier, "existingStem"), "-");
+    for exact in [
+        "grade=0x1.ffffffffffefcp-1/3feffffffffffefc",
+        "dx=0x1.8618618618618p-47/3d08618618618618",
+        "h:89:RIGHT:BOTTOM:org.audiveris.omr.sig.relation.HeadStemRelation",
+        "grade=0x1.d7a5f9d83ce32p-2/3fdd7a5f9d83ce32",
+        "dx=0x1.5ff3f8d00b0c3p-3/3fc5ff3f8d00b0c3",
+        "glyph:245:active:id=245:g:1940:913:4:57",
+    ] {
+        assert!(
+            frontier.contains(exact),
+            "missing frontier fragment: {exact}"
+        );
+    }
+    let result = rows[7];
+    assert_eq!(head_field(result, "headOrder"), "23");
+    assert_eq!(head_field(result, "allocatorBefore"), "1723");
+    assert_eq!(head_field(result, "allocatorAfter"), "1724");
+    for exact in [
+        "id1724:org.audiveris.omr.sig.inter.StemInter:shape=STEM:grade=0x1.6591e13343564p-1/3fe6591e13343564:bounds=1940:913:4:57",
+        "median=0x1.e58eacce7dacep10/409e58eacce7dace:0x1.c88p9/408c880000000000:0x1.e5896e2a84794p10/409e5896e2a84794:0x1.e5p9/408e500000000000",
+        "width=0x1.af286bca1af28p1/400af286bca1af28",
+        "sourceId1183:targetId1724",
+        "sourceId1191:targetId1724",
+        "g:1940:913:4:57:43a90897b55374de5d1d62b762e3e8c277c8c24387a3ec075585ef0f62c64958:stemId1724",
+        "h:89:RIGHT:BOTTOM:false:false->true:true",
+        "h:93:RIGHT:BOTTOM:true:false->true:true",
+    ] {
+        assert!(result.contains(exact), "missing result fragment: {exact}");
+    }
+    let continuation = rows[8];
+    assert_eq!(head_field(continuation, "headOrder"), "23");
+    assert_eq!(head_field(continuation, "headX"), "94");
+    assert_eq!(head_field(continuation, "headSig"), "61");
+    assert_eq!(head_field(continuation, "returned"), "true");
+    assert_eq!(head_field(continuation, "closedValueChanges"), "2");
+    assert_eq!(head_field(continuation, "sigVerticesAfter"), "445");
+    assert_eq!(head_field(continuation, "sigEdgesAfter"), "386");
+    assert_eq!(head_field(continuation, "systemStemsAfter"), "46");
+    assert_eq!(head_field(continuation, "nextHeadOrder"), "24");
+    assert_eq!(head_field(continuation, "nextHeadX"), "86");
+    assert_eq!(head_field(continuation, "nextHeadSig"), "94");
+    assert_eq!(head_field(continuation, "nextHeadInterId"), "1253");
+    let body = format!("{}\n", rows[..9].join("\n"));
+    assert_eq!(
+        sha256_hex(body.as_bytes()),
+        "5a9c6ad49ca15fb61a765a4334a0cf40868645d8810801dc2f18655829f90954"
+    );
+    let summary = rows[9];
+    assert_eq!(
+        head_field(summary, "schema"),
+        "stems-head-phase-zizi-system2-order23-v1"
+    );
+    assert_eq!(head_field(summary, "rows"), "9");
+    assert_eq!(
+        head_field(summary, "baseProbeSourceSha256"),
+        "d5d46115fb4358918648d35e24cd043753b62ce709f767f8958d34ba25c9c4cf"
+    );
+    assert_eq!(
+        head_field(summary, "fragmentSourceSha256"),
+        "4f27146b667a76b23e38607b8669ae78edeb73af78cad818ce8a95cedf54300c"
+    );
+    assert_eq!(
+        head_field(summary, "retainedGlyphOverlaySha256"),
+        "f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4"
+    );
+    assert_eq!(
+        head_field(summary, "ziziSystem2InitSha256"),
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_INIT)
+    );
+    assert_eq!(
+        head_field(summary, "baseSystem1Order34RunnerSha256"),
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "baseSystem1Order34FixtureSha256"),
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "probeSourceSha256"),
+        "b4375a1d44e7e513a0946520ca146fc84de6dcf8b9c3297c1cb8def09bdb6c5d"
+    );
+    assert_eq!(
+        head_field(summary, "runnerSourceSha256"),
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "emittedBodySha256"),
+        sha256_hex(body.as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "semanticPassSha256"),
+        "d5ad96dee3d46dedcb150d263c9f350cf2353c09cfc5134ef45456b1803f2a43"
+    );
+    assert_eq!(head_field(summary, "freshRuns"), "2");
+    assert_eq!(head_field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(summary, "nativeScope"),
+        "ZiziSystem2Order23CrossedHeadStumpBeforeChunkRejection"
+    );
+    assert_eq!(
+        head_field(summary, "javaEvidence"),
+        "ReturnedBeforeTwentyFifthHead"
+    );
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and
