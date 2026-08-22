@@ -9553,3 +9553,39 @@ all-target/all-feature workspace Clippy (13.00s), deterministic Java replay,
 oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
 exact green remote CI baseline pending newer terminal evidence. Continue at
 Cucaracha system 1 phase-two queue 10 x42/SIG73's real append.
+
+## Boundary 196: identity-aligned x42 append and six prelinked returns
+
+Native queue 10 x42/SIG73 selects LEFT/BOTTOM and resolves glyph42 to Stem
+identity23 / vertex217. It preserves x39/SIG91 edge257 and x49/SIG117
+edge258, appends one current-head relation, and changes no vertex, stem,
+glyph-ID, or allocator state. Its native relation grade/dx bits are pinned
+independently from Java's nearly identical geometry.
+
+Native queues 11-16 (x133, x58, x125, x138, x48, x17) all run through the
+generic prelinked path: LEFT is linked/closed, neither RIGHT corner can link,
+the retry returns true, and closure traversal changes no values or graph
+objects. Production advances directly to the next real append at queue 17
+x68/SIG76.
+
+Java queue index9 is the identity-aligned x42/SIG73/Inter1091 transaction. It
+selects glyph200/Stem2201, preserves Inter1127 and Inter1181, and adds exactly
+one edge (339→340). Java queue indices10-15 confirm the following six no-op
+returns. Queue16 x68 is deliberately excluded for the next boundary.
+
+The 13-row-plus-summary fixture is 16 lines / 9,639 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body+semantic SHA-256 values are
+`ff8c906f2b6f33316f48e21b16a2fcdf0b2cdd8583c4e210b45d6e8c1132fbe6`,
+`aa8a4c501a0daf54bf3c09ce0ee202574cdd90673e1b369d5e59d3e5128ed819`,
+`614570efcd4a9471ef6692552c9c116b304d24c7171c1e407b0edd5e8710730a`,
+and
+`f88e42d5a3b6b6bcbe100f044f21e0a9a3a44bd6445e7c78acc2297487574cd6`.
+Boundary 195's runner/fixture/transform are pinned at `e1fcae89…` /
+`475c4346…` / `5722bbdc…`.
+
+Focused 1/1 and full sibling 26/26 (153.09s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (13.41s), deterministic Java replay,
+oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
+exact green remote CI baseline pending newer terminal evidence. Continue at
+Cucaracha system 1 phase-two queue 17 x68/SIG76's real append.
