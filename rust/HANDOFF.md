@@ -9620,3 +9620,34 @@ all-target/all-feature workspace Clippy (13.16s), deterministic Java replay,
 oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
 exact green remote CI baseline pending newer terminal evidence. Continue at
 Cucaracha system 1 phase-two queue 19 x14/SIG58's real append.
+
+## Boundary 198: aligned x14 append
+
+Native queue 19 x14/SIG58 selects LEFT/BOTTOM, resolves glyph41 to Stem
+identity32 / vertex226, and appends exactly one current-head relation. The
+existing x8/SIG89 edge319, x13/SIG101 edge320, and x17/SIG112 edge321 remain
+ordered and unchanged; vertex, system-stem, glyph-ID, and allocator state do
+not change. Production advances to the next fail-closed frontier at queue 20
+x45/SIG62.
+
+Java queue index18 independently measures x14/SIG58/Inter1061 selecting
+glyph199/Stem2210, preserving Inter1123, Inter1147, and Inter1171, and changing
+only edges 341→342. The native relation grade/dx bits
+`3fe8362324f5276f` / `3fb5e15152b5f6db` are asserted directly.
+
+The 7-row-plus-summary fixture is 10 lines / 6,704 bytes and is byte-identical
+across warmup plus two fresh runs. Runner/retarget-transform/fixture/
+body+semantic SHA-256 values are
+`eb79eb1de1d4570e4f7b976006c6d14134aa6bf32fbe1de156c24bd7972762ec`,
+`06095681e521b777c988acb90a562ac2941c9e8ef335fea00b952443aba4c08f`,
+`8363a188fdf9d3f32b2bea7545f44c6025cb9228aa1c7c2935023e865d1e232d`,
+and
+`8c7933fa714d698c0dab4bb11b21faf5f3684e24b58159cf924fe1ae82e5ada1`.
+Boundary 197's runner/fixture/transform are pinned at `77a6d85e…` /
+`19b0a62c…` / `b64a7aae…`.
+
+Focused 1/1 (3.79s) and full sibling 26/26 (151.75s) pass. Formatting,
+strict all-target/all-feature workspace Clippy (13.29s), deterministic Java
+replay, oracle shell syntax, and diff checks pass. `425d58e82` remains the
+documented exact green remote CI baseline pending newer terminal evidence.
+Continue at Cucaracha system 1 phase-two queue 20 x45/SIG62's real append.
