@@ -10017,3 +10017,31 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 (13.62s), deterministic replay, and diff checks pass. `425d58e82` remains the
 exact green remote CI baseline. Continue at Bach system 2 queue183
 x62/SIG99; its branch and builder geometry remain to be measured.
+
+## Boundary 210: identity-free four-head prelinked reconciliation
+
+The full-lifecycle Bach system-2 oracle now measures queue183
+x62/SIG99/Inter3804 at grade bits `3fc88ee23b88ee24`. LEFT is already linked
+and RIGHT already closed at all profiles 0-3. One pre-existing incident stem
+structurally joins x59/SIG113, x62/SIG99, x63/SIG100, and x65/SIG196 on LEFT.
+Java returns true, records no undefined side or changed S-cell, and preserves
+394 vertices, 593 edges, 77 system stems, and the allocator.
+
+The generic native phase-one continuation writes x59 LEFT/RIGHT, x63
+LEFT/RIGHT, and x65 LEFT/RIGHT in that order. All six cells were already true,
+so `closed_value_changes=0`; the carrier advances to queue184
+x25/SIG93/Inter3790. The frozen semantic rows intentionally name only x/SIG
+ordinals and `existingStem`, not Java's process-local StemInter or Inter IDs.
+
+Fixture/runner/probe/init/body SHA-256 values are
+`079e8b4995e8610c5eda9370624d93a3e9262f15e2cb5eebf4f2159250974f75`,
+`ac697b86954010c94de4e7767e12d6e80bd79306a0f6f3e8d8c80fa733cda5fe`,
+`05c2ff1c14f4f2284ffb80560c82fce4b66c5d41f8debc21e2f5d91fe910a7bb`,
+`c799ce83ebcffad237d9037f63bfe0b1f092798e54142ed25c75b263af1074d3`,
+and `1bae18ca1122bb13623be12eaec05a64720233c156dd8a4ff09b8c519750e793`.
+The runner also pins Boundary 209's runner and fixture. Warmup plus two fresh
+JVM runs are byte-identical. Focused 1/1, full sibling 29/29 (156.79s),
+formatting, strict all-target/all-feature workspace Clippy (9.44s), oracle
+replay, and diff checks pass. No production source change was needed.
+`425d58e82` remains the exact green remote CI baseline. Continue at Bach system
+2 queue184 x25/SIG93; its branch and builder geometry remain to be measured.
