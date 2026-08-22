@@ -9684,3 +9684,37 @@ all-target/all-feature workspace Clippy (13.35s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the documented exact
 green remote baseline pending newer terminal CI. Continue at Cucaracha system
 1 phase-two queue 22 x71/SIG66's real append.
+
+## Boundary 200: Cucaracha system-one phase-two completion
+
+Native queue22 x71/SIG66 selects LEFT/BOTTOM, resolves glyph40 to existing
+Stem identity30 / vertex224, preserves x70/SIG105 edge283 and x74/SIG120
+edge284, and appends exactly one current-head relation. Native relation
+grade/dx bits are independently pinned at `3fe5554e97cdff05` /
+`3fbd29be97edf9e8`. No vertex, system-stem, glyph-ID, or allocator state
+changes. The continuation returns true and advances phase-two index22→23,
+equal to the 23-item queue length and therefore completing Cucaracha system 1
+phase 2. The page driver now fails closed at Cucaracha system 2 phase-two
+queue8 x56/SIG78's real `reuseStem` append.
+
+Java queue21 independently measures x71/SIG66/Inter1077 through
+glyph198/Stem2208, retains Inter1155 and Inter1187, and changes edges343→344
+without changing vertices232, system stems38, or allocator2216. Java's
+independent relation grade/dx bits are `3fe5554e97ce0182` /
+`3fbd29be97edf3cf`.
+
+The strict seven-row-plus-summary fixture is 10 lines / 6,284 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`3ad18d6e2db7b60980a27deef414bf54ac86df1fdfc127b26539172b4665e918`,
+`a9daae9d492b63c9b9e091f0522bf7e42d270ef113a6f63f5a323066764c0d01`,
+`457f8f28ca9a62fd085b27d5e574b1ff71a9f2f211dec9a0a82d4c30432c20d5`,
+and `5ce49912b802895b8c9c549ef8b08c92c08f6a8942b6d0bd02f8c3f4a2d12f94`.
+Boundary 199's runner/fixture/transform remain pinned at `29733c6d…` /
+`59f27d58…` / `4b3029fe…`.
+
+Focused 1/1 and full sibling 26/26 (153.52s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (13.32s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the documented exact
+green remote CI baseline pending newer terminal evidence. Continue at
+Cucaracha system 2 phase-two queue8 x56/SIG78's real append.
