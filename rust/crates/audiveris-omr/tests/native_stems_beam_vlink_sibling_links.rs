@@ -307,6 +307,12 @@ const CARMEN_SYSTEM3_PHASE_TWO_X0_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-carmen-system3-x0.sh");
 const CARMEN_SYSTEM3_PHASE_TWO_X0_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-carmen-system3-x0.transform.awk");
+const CUCARACHA_SYSTEM2_ORDER56_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-cucaracha-system2-order56.txt");
+const CUCARACHA_SYSTEM2_ORDER56_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-cucaracha-system2-order56.sh");
+const CUCARACHA_SYSTEM2_ORDER56_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-cucaracha-system2-order56.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -14303,6 +14309,272 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
             .expect("Carmen transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
     assert_eq!(recognized.systems, finalized.systems);
+}
+
+/// Java treats a null `StemBuilder.createStem` result as an ordinary false
+/// C-link. Cucaracha system 2 order 56 selects one active 1x15 glyph with a
+/// perfect HeadStem relation, but its stem grade is zero; no graph or registry
+/// mutation is committed and the outer loop closes both S cells.
+#[test]
+fn cucaracha_system2_order56_rejected_stem_returns_no_link() {
+    let path = repo_root().join("data/examples/cucaracha.png");
+    let grid = recognize_grid_lines(path).expect("Cucaracha GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Cucaracha HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Cucaracha STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Cucaracha BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Cucaracha LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Cucaracha HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Cucaracha native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Cucaracha post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(1);
+    assert_eq!(start.system_id, 2);
+    let head_corners = &prepared.components.head_corners.systems[1];
+    let head_reachability = &prepared.components.head_reachability.systems[1];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[1];
+    let head_builders = &prepared.components.head_builders.systems[1];
+    let plans = &prepared.components.plans.systems[1];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[1];
+
+    while start.carrier.current_index < 56 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Cucaracha continuation before system-2 queue 56");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Cucaracha C-link before system-2 queue 56");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    if start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Cucaracha continuation to system-2 queue-56 frontier");
+        start.carrier = *continuation.state_after;
+    }
+    assert_eq!(start.carrier.current_index, 56);
+    assert!(!start.carrier.frontier_consumed);
+    assert_eq!(
+        (
+            start.carrier.frontier.head.x_ordinal,
+            start.carrier.frontier.head.sig_ordinal,
+            start.carrier.frontier.next_corner.horizontal,
+            start.carrier.frontier.next_corner.vertical,
+        ),
+        (
+            56,
+            78,
+            NativeStemHeadSide::Right,
+            NativeStemVerticalSide::Bottom,
+        )
+    );
+    let builder = head_builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == start.carrier.frontier.next_corner)
+        .expect("Cucaracha system-2 queue-56 builder");
+    assert_eq!(builder.items.len(), 3);
+
+    let sig_before = start.carrier.beam_state.sig.clone();
+    let transaction_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .clone();
+    let continuation = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Cucaracha system-2 queue-56 dispatch")
+    .expect_err("rejected createStem is an ordinary no-link");
+    assert_eq!(
+        (
+            continuation.processed_head.x_ordinal,
+            continuation.processed_head.sig_ordinal,
+            continuation.returned_linked,
+            continuation.closed_value_changes,
+        ),
+        (56, 78, Some(false), 2)
+    );
+    let expected_profile_decisions = [
+        NativeStemsHeadPhase1SideDecision {
+            side: NativeStemHeadSide::Left,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(false),
+            bottom_can_link: Some(false),
+        },
+        NativeStemsHeadPhase1SideDecision {
+            side: NativeStemHeadSide::Right,
+            linked_before: false,
+            closed_before: false,
+            top_can_link: Some(false),
+            bottom_can_link: Some(true),
+        },
+    ];
+    assert_eq!(continuation.side_decisions.len(), 8);
+    assert!(
+        continuation
+            .side_decisions
+            .chunks_exact(2)
+            .all(|profile| profile == expected_profile_decisions)
+    );
+    assert_eq!(
+        continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (56, 78, NativeStemHeadSide::Left),
+            (56, 78, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(continuation.state_after.current_index, 57);
+    assert_eq!(
+        (
+            continuation.state_after.heads[57].reference.x_ordinal,
+            continuation.state_after.heads[57].reference.sig_ordinal,
+        ),
+        (132, 84)
+    );
+    assert_eq!(continuation.state_after.beam_state.sig, sig_before);
+    assert_eq!(
+        continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state,
+        transaction_before
+    );
+
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM2_ORDER56_FIXTURE.as_bytes()),
+        "51d9d82641a79a98bc1523cc61237bce3994fa2ba9622710ad009aeb0862a73b"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM2_ORDER56_RUNNER),
+        "08eb22aa38c46490765215c7a1a3b45c6528afb1d3db599fb9a38d69226e6340"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM2_ORDER56_INIT),
+        "4a66495632f0e1a650e57e260e15c7a6f68370fbbaf4bf900b27aa643a2f26e0"
+    );
+    let rows = CUCARACHA_SYSTEM2_ORDER56_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 5);
+    for exact in [
+        "headOrder 56 headX 56 headSig 78 headInterId 1388 cAlias h:56:RIGHT:BOTTOM",
+        "lastIndex 0 maxIndex 2 relations 1",
+        "grade=0x1.0p0/3ff0000000000000",
+        "glyphs 1 selected [glyph:1838:active:id=1838:g:1100:1221:1:15:643f0d2bde1937cd598dfc222af394289a860061d77ded9b37d5489e8f3df2c8]",
+        "existingGlyph glyph:1838 existingActive true existingStem - lineChanged false",
+        "registeredGlyphs - addedVertices - addedEdges - addedSystemStems -",
+        "decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=true:branch=BottomOnly]",
+        "returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] closureWrites - closedValueChanges 0 unlinkedCount 0",
+        "nextHeadOrder 57 nextHeadX 132 nextHeadSig 84 nextHeadInterId 1400",
+    ] {
+        assert!(
+            CUCARACHA_SYSTEM2_ORDER56_FIXTURE.contains(exact),
+            "missing Cucaracha order-56 oracle fragment: {exact}"
+        );
+    }
+    let summary = rows[4];
+    assert_eq!(
+        head_field(summary, "schema"),
+        "stems-head-phase-cucaracha-system2-order56-v1"
+    );
+    assert_eq!(head_field(summary, "rows"), "4");
+    assert_eq!(
+        head_field(summary, "runnerSourceSha256"),
+        sha256_hex(CUCARACHA_SYSTEM2_ORDER56_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "cucarachaSystem2InitSha256"),
+        sha256_hex(CUCARACHA_SYSTEM2_ORDER56_INIT)
+    );
+    assert_eq!(
+        head_field(summary, "predecessorFixtureSetSha256"),
+        "e365077c7432b03f811987470a1f8c7b9666ffcea8135dd0b28b4e823cef0a1d"
+    );
+    assert_eq!(
+        head_field(summary, "emittedBodySha256"),
+        "34cf5cfb88b5490946f90263dd5adc7cfecc66c0ac9003db18a45ea4fcd65421"
+    );
+    assert_eq!(
+        head_field(summary, "semanticPassSha256"),
+        "9c95af3a280b519f93661f9742c0e13910a6551156a40ef7ba967943ccfef341"
+    );
+    assert_eq!(head_field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(summary, "nativeScope"),
+        "CucarachaSystem2Order56RejectedStemNoLink"
+    );
+    assert_eq!(
+        head_field(summary, "javaEvidence"),
+        "ReturnedBeforeFiftyEighthHead"
+    );
+
+    let phase_one = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect("all three Cucaracha systems complete HEADS phase 1");
+    assert!(
+        phase_one
+            .systems
+            .iter()
+            .all(|system| system.carrier.current_index == system.carrier.heads.len())
+    );
+    let phase_two_error = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect_err("next Cucaracha phase-2 append remains fail closed")
+        .to_string();
+    assert!(
+        phase_two_error.contains("system 1: native SIDES carrier failed at HEADS-phase2-append")
+    );
+    assert!(
+        phase_two_error
+            .contains("phase-2 queue 6 head x25/SIG71 reaches the unported reuseStem append path")
+    );
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and

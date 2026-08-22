@@ -1268,6 +1268,8 @@ impl NativeStemsPreparedRecognition {
                     events.push(NativeStemsHeadPhase1DriveEvent::Continuation(continuation));
                     continue;
                 }
+                let current_index = carrier.current_index;
+                let current_head = carrier.heads[current_index].reference;
                 let outcome = advance_native_stems_head_c_link_or_no_link(
                     &mut carrier,
                     head_corners,
@@ -1281,7 +1283,10 @@ impl NativeStemsPreparedRecognition {
                 )
                 .map_err(|error| {
                     phase(
-                        format!("system {system_id}: {error}"),
+                        format!(
+                            "system {system_id} queue {current_index} x{}/SIG{}: {error}",
+                            current_head.x_ordinal, current_head.sig_ordinal
+                        ),
                         "HEADS phase-1 page drive",
                     )
                 })?;

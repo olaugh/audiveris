@@ -10576,7 +10576,18 @@ fn advance_native_stems_head_multi_head_reuse_c_link_at_queue(
         &mut shadow.beam_state.latest_base_apply.transaction_state,
         checker,
     )
-    .map_err(|error| stage("HEADS-CLink-createStem", error))?;
+    .map_err(|error| {
+        stage(
+            "HEADS-CLink-createStem",
+            format!(
+                "x{}/SIG{} {:?}/{:?}: {error}",
+                frontier.next_corner.x_ordinal,
+                frontier.next_corner.sig_ordinal,
+                frontier.next_corner.horizontal,
+                frontier.next_corner.vertical,
+            ),
+        )
+    })?;
     let (stem, stem_vertex) = if expectation.create_new_stem {
         let NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } =
             create.disposition
@@ -13248,18 +13259,47 @@ fn advance_native_stems_head_c_link_at_frontier(
         *carrier = shadow;
         return Ok(transaction);
     }
-    let NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } = create.disposition
-    else {
-        return Err(stage(
-            "HEADS-CLink-createStem",
-            format!(
-                "bounded frontier did not create a checked stem: {:?}, candidate {:?}/weight {}, checker {:?}",
-                create.disposition,
-                create.candidate.bounds,
-                create.candidate.weight,
-                create.checker_result,
-            ),
-        ));
+    let stem_identity = match create.disposition {
+        NativeStemsBeamCreateStemDisposition::CreatedChecked { stem_identity } => stem_identity,
+        NativeStemsBeamCreateStemDisposition::Rejected if create.mutation_order.is_empty() => {
+            // Java's `CLinker.link` treats a null `StemBuilder.createStem`
+            // result as an ordinary false return. The outer `linkSides` loop
+            // then tries any remaining profiles/corners and, if all reject,
+            // closes both S cells and queues the head for phase two. This is
+            // safe to project as the existing no-link outcome only when the
+            // rejected createStem transaction registered/reinserted nothing;
+            // a rejected candidate with observable GlyphIndex mutation still
+            // requires its own authenticated transaction.
+            return Err(stage(
+                "HEADS-CLink-no-link",
+                format!(
+                    "x{}/SIG{} {:?}/{:?} candidate {:?}/weight {} was rejected without mutation",
+                    frontier.next_corner.x_ordinal,
+                    frontier.next_corner.sig_ordinal,
+                    frontier.next_corner.horizontal,
+                    frontier.next_corner.vertical,
+                    create.candidate.bounds,
+                    create.candidate.weight,
+                ),
+            ));
+        }
+        _ => {
+            return Err(stage(
+                "HEADS-CLink-createStem",
+                format!(
+                    "x{}/SIG{} {:?}/{:?} bounded frontier did not create a checked stem: {:?}, candidate {:?}/weight {}, checker {:?}, mutations {:?}",
+                    frontier.next_corner.x_ordinal,
+                    frontier.next_corner.sig_ordinal,
+                    frontier.next_corner.horizontal,
+                    frontier.next_corner.vertical,
+                    create.disposition,
+                    create.candidate.bounds,
+                    create.candidate.weight,
+                    create.checker_result,
+                    create.mutation_order,
+                ),
+            ));
+        }
     };
     let mut stem = create
         .stem

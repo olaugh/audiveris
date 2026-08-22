@@ -9401,3 +9401,44 @@ all-target/all-feature workspace Clippy (15.57s), oracle shell/AWK syntax,
 and diff checks pass. `425d58e82` remains the exact fully green remote CI
 baseline. Continue with the first unsupported STEMS frontier among Cucaracha,
 Hove, and BachInvention5.
+
+## Boundary 192: Cucaracha rejected-stem no-link
+
+Java's `CLinker.link` returns false when expansion selected a glyph and an
+accepted HeadStem relation but `StemBuilder.createStem` returned null. The
+generic native loop now treats a mutation-free `Rejected` create transaction
+as that existing no-link result. Any rejected transaction that registered or
+reinserted a glyph remains fail-closed until separately authenticated. Page
+drive errors now include system, queue, x/SIG, and selected-corner context.
+
+Cucaracha system 2 order 56 is x56/SIG78/Java Inter 1388. LEFT is `Neither`;
+RIGHT/BOTTOM selects active Java glyph 1838 at `1100:1221:1:15`, with a
+grade-1.0, zero-dx HeadStem relation. The candidate's stem checker grade is
+zero, so Java creates no Stem, returns false, changes no SIG/stem/glyph state,
+closes both current SLinkers, and advances to order 57 x132/SIG84/Java Inter
+1400. Native repeats the same side decision over its four allowed profiles,
+discards every mutation-free rejected attempt, closes LEFT then RIGHT, queues
+x56 for phase two, and advances with identical graph, registry, allocator, and
+system-stem state. All three Cucaracha phase-1 queues now exhaust; production
+next fails closed at system 1 phase-2 queue 6 x25/SIG71's real append.
+
+The four-row-plus-summary fixture is 7 lines / 5,294 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/init/fixture/body/
+semantic SHA-256 values are
+`08eb22aa38c46490765215c7a1a3b45c6528afb1d3db599fb9a38d69226e6340`,
+`4a66495632f0e1a650e57e260e15c7a6f68370fbbaf4bf900b27aa643a2f26e0`,
+`51d9d82641a79a98bc1523cc61237bce3994fa2ba9622710ad009aeb0862a73b`,
+`34cf5cfb88b5490946f90263dd5adc7cfecc66c0ac9003db18a45ea4fcd65421`,
+and
+`9c95af3a280b519f93661f9742c0e13910a6551156a40ef7ba967943ccfef341`.
+The generated probe, retained-glyph overlay, and ordered predecessor-fixture
+set are pinned at
+`1fa259fd5befcb10d71f8010c5d2c049c0322ee1bc2df2bff08d88e25fbf4683`,
+`f21487398d9ba162b6459f8f5e1265d56ffc6a8a58e6aa514a03553ee3d05df4`,
+and
+`e365077c7432b03f811987470a1f8c7b9666ffcea8135dd0b28b4e823cef0a1d`.
+
+Focused 1/1 (3.81s) and full sibling 26/26 (150.13s) pass. Formatting,
+strict all-target/all-feature workspace Clippy (12.84s), oracle shell syntax,
+and diff checks pass. `425d58e82` remains the exact fully green remote CI
+baseline; no workflow run was visible yet for Boundary 191 commit `4c25ffe4e`.

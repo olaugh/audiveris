@@ -1,0 +1,51 @@
+// Deterministic Cucaracha system-2 HEADS order-56 probe wiring. The generated GlyphIndex overlay
+// keeps weakly indexed glyphs strongly reachable during the bounded replay without changing
+// production Java behavior.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+
+    def outputDir = app.layout.buildDirectory.dir('rust-head-phase-cucaracha-system2-order56/classes')
+    def probeSource = providers.gradleProperty('headPhaseV7ProbeSource').get()
+    def glyphIndexSource = providers.gradleProperty('headPhaseGlyphIndexSource').get()
+    app.tasks.register('compileStemsHeadPhaseCucarachaSystem2Order56Probe', JavaCompile) {
+        source = files(probeSource, glyphIndexSource)
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+
+    app.tasks.register('stemsHeadPhaseCucarachaSystem2Order56Probe', JavaExec) {
+        dependsOn 'compileStemsHeadPhaseCucarachaSystem2Order56Probe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsBeamSidesLoopProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '16g'
+        jvmArgs '-XX:+UseG1GC'
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        systemProperty 'audiveris.rustport.stumpsTransactionLimit', '400'
+        systemProperty 'audiveris.rustport.hookRemovalProbe', 'true'
+        systemProperty 'audiveris.rustport.headPhasePrefixProbe', 'true'
+        systemProperty 'audiveris.rustport.retainGlyphsForProbe', 'true'
+
+        def fixture = { String stem ->
+            new File(gradle.rootProject.projectDir,
+                    "rust/oracle/${stem}-cucaracha.txt").absolutePath
+        }
+        args = [
+            '--system', '2',
+            "${gradle.rootProject.projectDir}/data/examples/cucaracha.png:1",
+            fixture('stems-beam-scheduler'),
+            fixture('stems-beam-expand'),
+            fixture('stems-beam-create-stem'),
+            fixture('stems-beam-vlink-reuse-check'),
+            fixture('stems-beam-vlink-base-apply'),
+            fixture('stems-beam-vlink-b-linker-flag'),
+            fixture('stems-beam-vlink-sibling-links'),
+            fixture('stems-beam-vlink-head-links'),
+            fixture('stems-beam-vlink-outer-blinker'),
+            fixture('stems-beam-scheduler-resume')
+        ]
+    }
+}
