@@ -9516,3 +9516,40 @@ all-target/all-feature workspace Clippy (13.25s), deterministic Java replay,
 oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
 exact green remote CI baseline pending newer terminal evidence. Continue at
 Cucaracha system 1 phase-two queue 8 x52/SIG75's real append.
+
+## Boundary 195: shifted x52 append and prelinked no-op
+
+The wider native HEADS carrier has one additional earlier phase-two entry, so
+native queue 8 is x52/SIG75, whose Java C-link was already frozen at queue 7.
+LEFT/BOTTOM resolves native glyph44 to Stem identity27 / vertex221, preserves
+x59/SIG119 LEFT edge264, and appends exactly one edge. Vertices, system stems,
+glyph IDs, and allocator state remain unchanged.
+
+Native queue 9 x119/SIG110 is already linked and closed on LEFT. The generic
+retry records `SkipAlreadyLinked`, finds neither RIGHT corner linkable, and
+returns true. Java-order closure traverses x122, x124, x126, x121, x118,
+x123, and x125, LEFT then RIGHT for each. All 14 target flags were already
+true, so the traversal produces zero value changes and no graph mutation.
+The page carrier advances to queue 10 x42/SIG73 without a bounded no-op seam.
+
+The independent Java queue-index-8 row is the same x119/SIG110/Inter1166
+prelinked no-op: no side or graph changes, with vertices232, edges339,
+stems38, and allocator2216 fixed. Boundary 194's queue-7 fixture remains the
+identity-matched authority for x52's C-link.
+
+The two-row-plus-summary fixture is 5 lines / 2,887 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body+semantic SHA-256 values are
+`e1fcae89507e31a8f5d43d2c0338e0f8ac3589c282fe02050c404e8248f71080`,
+`5722bbdc0861b87f04505aab5d08eed64add7cf3ff54b567a4a5435b2f24de7e`,
+`475c4346f01be8331218cdbfb1f335c8df126ea79d9ec883b8006325869b1e3e`,
+and
+`a7aff1b2841a029132f295ac836cd00d4b974b005c2b01a5ffb9afb2caceff6f`.
+Boundary 194's runner/fixture/transform are pinned at `a816aec9…` /
+`8c6871cd…` / `009d2479…`.
+
+Focused 1/1 and full sibling 26/26 (152.74s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (13.00s), deterministic Java replay,
+oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
+exact green remote CI baseline pending newer terminal evidence. Continue at
+Cucaracha system 1 phase-two queue 10 x42/SIG73's real append.

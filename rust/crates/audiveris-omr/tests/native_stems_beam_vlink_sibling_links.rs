@@ -124,6 +124,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order7,
+        advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order8,
         advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
@@ -328,6 +329,13 @@ const CUCARACHA_SYSTEM1_PHASE_TWO_ORDER7_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-cucaracha-system1-order7.sh");
 const CUCARACHA_SYSTEM1_PHASE_TWO_ORDER7_TRANSFORM: &[u8] = include_bytes!(
     "../../../oracle/java/stems-head-phase-two-cucaracha-system1-order7.transform.awk"
+);
+const CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-cucaracha-system1-order8.txt");
+const CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-cucaracha-system1-order8.sh");
+const CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_TRANSFORM: &[u8] = include_bytes!(
+    "../../../oracle/java/stems-head-phase-two-cucaracha-system1-order8.transform.awk"
 );
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
@@ -14332,7 +14340,7 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
 /// perfect HeadStem relation, but its stem grade is zero; no graph or registry
 /// mutation is committed and the outer loop closes both S cells.
 #[test]
-fn cucaracha_order56_no_link_and_phase_two_order67_reuse_stems() {
+fn cucaracha_order56_no_link_and_phase_two_order6789_retries() {
     let path = repo_root().join("data/examples/cucaracha.png");
     let grid = recognize_grid_lines(path).expect("Cucaracha GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Cucaracha HEADERS recognition");
@@ -14872,6 +14880,197 @@ fn cucaracha_order56_no_link_and_phase_two_order67_reuse_stems() {
         glyph_ids_before
     );
 
+    let before_order8 = &order7.continuation.state_after;
+    assert_eq!(
+        (
+            before_order8.unlinked_heads[8].x_ordinal,
+            before_order8.unlinked_heads[8].sig_ordinal,
+        ),
+        (52, 75)
+    );
+    let order8 = advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order8(
+        before_order8,
+        system1_corners,
+        system1_reachability,
+        &prepared.components.stem_seed_glyphs[0].free_glyphs,
+        system1_builders,
+        system1_plans,
+        &prepared.stem_checker,
+        &system1.registry,
+    )
+    .expect("Cucaracha system-1 queue-8 shifted x52 reused-stem append");
+    let order8_c_link = &order8.c_link;
+    assert_eq!(
+        (
+            order8_c_link.corner.x_ordinal,
+            order8_c_link.corner.sig_ordinal,
+            order8_c_link.corner.horizontal,
+            order8_c_link.corner.vertical,
+            order8_c_link.last_index,
+            order8_c_link.max_index,
+            order8_c_link.selected_glyph_id,
+            order8_c_link.stem_vertex.0,
+        ),
+        (
+            52,
+            75,
+            NativeStemHeadSide::Left,
+            NativeStemVerticalSide::Bottom,
+            1,
+            1,
+            44,
+            221,
+        )
+    );
+    assert_eq!(
+        order8_c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 27 }
+    );
+    assert!(order8_c_link.append_reuse.is_none());
+    assert_eq!(order8_c_link.head_stem_edge.0, edges_before + 2);
+    assert_eq!(
+        order8_c_link.relation.grade.to_bits(),
+        0x3fec_70c1_5146_0e9d
+    );
+    assert_eq!(order8_c_link.relation.dx.to_bits(), 0xbfb5_839a_d98e_c925);
+    assert_eq!(
+        order8_c_link
+            .additional_head_relations
+            .iter()
+            .map(|relation| (
+                relation.corner.x_ordinal,
+                relation.corner.sig_ordinal,
+                relation.corner.horizontal,
+                relation.head_stem_edge.0,
+                relation.appended,
+            ))
+            .collect::<Vec<_>>(),
+        [(59, 119, NativeStemHeadSide::Left, 264, false)]
+    );
+    assert_eq!(
+        (
+            order8.continuation.processed_head.x_ordinal,
+            order8.continuation.processed_head.sig_ordinal,
+            order8.continuation.returned_linked,
+            order8.continuation.state_after.phase_two_index,
+        ),
+        (52, 75, Some(true), 9)
+    );
+    assert_eq!(
+        order8
+            .continuation
+            .state_after
+            .beam_state
+            .sig
+            .vertices
+            .len(),
+        vertices_before
+    );
+    assert_eq!(
+        order8.continuation.state_after.beam_state.sig.edges.len(),
+        edges_before + 3
+    );
+    assert_eq!(
+        order8
+            .continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        order8
+            .continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        glyph_ids_before
+    );
+
+    let before_order9 = &order8.continuation.state_after;
+    assert_eq!(
+        (
+            before_order9.unlinked_heads[9].x_ordinal,
+            before_order9.unlinked_heads[9].sig_ordinal,
+        ),
+        (119, 110)
+    );
+    let order9 = advance_native_stems_head_phase_two_append_retry(
+        before_order9,
+        system1_corners,
+        system1_reachability,
+        system1_builders,
+        system1_plans,
+    )
+    .expect("Cucaracha system-1 queue-9 prelinked no-op");
+    assert_eq!(
+        (
+            order9.processed_head.x_ordinal,
+            order9.processed_head.sig_ordinal,
+            order9.returned_linked,
+            order9.state_after.phase_two_index,
+            order9.closed_value_changes,
+        ),
+        (119, 110, Some(true), 10, 0)
+    );
+    assert_eq!(
+        order9
+            .closed_s_linkers
+            .iter()
+            .map(|side| (side.head.x_ordinal, side.head.sig_ordinal, side.horizontal,))
+            .collect::<Vec<_>>(),
+        [
+            (122, 55, NativeStemHeadSide::Left),
+            (122, 55, NativeStemHeadSide::Right),
+            (124, 98, NativeStemHeadSide::Left),
+            (124, 98, NativeStemHeadSide::Right),
+            (126, 127, NativeStemHeadSide::Left),
+            (126, 127, NativeStemHeadSide::Right),
+            (121, 54, NativeStemHeadSide::Left),
+            (121, 54, NativeStemHeadSide::Right),
+            (118, 87, NativeStemHeadSide::Left),
+            (118, 87, NativeStemHeadSide::Right),
+            (123, 97, NativeStemHeadSide::Left),
+            (123, 97, NativeStemHeadSide::Right),
+            (125, 126, NativeStemHeadSide::Left),
+            (125, 126, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(
+        order9
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, true, true, None, None),
+            (
+                NativeStemHeadSide::Right,
+                false,
+                true,
+                Some(false),
+                Some(false),
+            ),
+        ]
+    );
+    assert_eq!(
+        order9.state_after.beam_state.sig.edges.len(),
+        edges_before + 3
+    );
+
     assert_eq!(
         sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER6_FIXTURE.as_bytes()),
         "b8f37f279d7361fe92b6cf17c0b9e7376bc744db30e7fc162ce2e9df10669e07"
@@ -14999,6 +15198,73 @@ fn cucaracha_order56_no_link_and_phase_two_order67_reuse_stems() {
         head_field(order7_summary, "nativeScope"),
         "CucarachaSystem1PhaseTwoOrder7LeftReusedStemAppend"
     );
+
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_FIXTURE.as_bytes()),
+        "475c4346f01be8331218cdbfb1f335c8df126ea79d9ec883b8006325869b1e3e"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_RUNNER),
+        "e1fcae89507e31a8f5d43d2c0338e0f8ac3589c282fe02050c404e8248f71080"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_TRANSFORM),
+        "5722bbdc0861b87f04505aab5d08eed64add7cf3ff54b567a4a5435b2f24de7e"
+    );
+    let order8_rows = CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(order8_rows.len(), 3);
+    let order8_retry = order8_rows[1];
+    assert_eq!(head_field(order8_retry, "queueIndex"), "8");
+    assert_eq!(head_field(order8_retry, "headX"), "119");
+    assert_eq!(head_field(order8_retry, "headSig"), "110");
+    assert_eq!(head_field(order8_retry, "headInterId"), "1166");
+    assert_eq!(head_field(order8_retry, "grade"), "3fdf2b6ee1da3008");
+    for exact in [
+        "sidesBefore [LEFT:true:true,RIGHT:false:true]",
+        "decisions [LEFT:SkipAlreadyLinked,RIGHT:top=false:bottom=false:branch=Neither]",
+        "returned true",
+        "sideChanges []",
+        "sigEdgesBefore 339 sigEdgesAfter 339",
+    ] {
+        assert!(
+            order8_retry.contains(exact),
+            "missing Cucaracha phase-two order-8 oracle fragment: {exact}"
+        );
+    }
+    let order8_summary = order8_rows[2];
+    assert_eq!(
+        head_field(order8_summary, "schema"),
+        "stems-head-phase-two-cucaracha-system1-order8-v1"
+    );
+    assert_eq!(head_field(order8_summary, "rows"), "2");
+    assert_eq!(
+        head_field(order8_summary, "runnerSourceSha256"),
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_RUNNER)
+    );
+    assert_eq!(
+        head_field(order8_summary, "retargetTransformSourceSha256"),
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER8_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(order8_summary, "baseOrder7RunnerSha256"),
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER7_RUNNER)
+    );
+    assert_eq!(
+        head_field(order8_summary, "baseOrder7FixtureSha256"),
+        sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER7_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(order8_summary, "emittedBodySha256"),
+        "a7aff1b2841a029132f295ac836cd00d4b974b005c2b01a5ffb9afb2caceff6f"
+    );
+    assert_eq!(head_field(order8_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(order8_summary, "nativeScope"),
+        "CucarachaSystem1PhaseTwoQueuePosition8PrelinkedNoOp"
+    );
     let phase_two_error = prepared
         .drive_all_system_head_linking_phase2()
         .expect_err("next Cucaracha phase-2 append remains fail closed")
@@ -15008,7 +15274,7 @@ fn cucaracha_order56_no_link_and_phase_two_order67_reuse_stems() {
     );
     assert!(
         phase_two_error
-            .contains("phase-2 queue 8 head x52/SIG75 reaches the unported reuseStem append path")
+            .contains("phase-2 queue 10 head x42/SIG73 reaches the unported reuseStem append path")
     );
 }
 

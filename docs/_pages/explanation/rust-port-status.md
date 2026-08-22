@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and ninety-four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through its measured SIDES/STUMPS, phase-1, phase-2, and generic-finalizer gaps. Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; and Boundaries 193-194 execute Cucaracha system 1 phase-two queues 6-7 through the generic LEFT-origin shared-stem append seam. The next live fail-closed frontier is Cucaracha system 1 phase-2 queue 8 x52/SIG75's real append.
+The first one hundred and ninety-five semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-194 execute Cucaracha system 1 phase-two queues 6-7; and Boundary 195 executes native queue 8's shifted x52 shared-stem append plus generic queue 9's prelinked no-op. The next live fail-closed frontier is Cucaracha system 1 phase-2 queue 10 x42/SIG73's real append.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, and Carmen** | One hundred and ninety-four exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through generic finalization; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes all three Cucaracha phase-1 queues; Boundaries 193-194 execute Cucaracha system 1 phase-two queues 6-7's LEFT-origin reused-stem appends. | Instrument Cucaracha system 1 phase-2 queue 8 x52/SIG75's real `reuseStem` append, then continue wider-corpus completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, and Carmen** | One hundred and ninety-five exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-195 execute Cucaracha system 1 phase-two queues 6-9. | Instrument Cucaracha system 1 phase-2 queue 10 x42/SIG73's real `reuseStem` append, then continue wider-corpus completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -5055,6 +5055,29 @@ transform are pinned at `0f47ae8f…` / `b8f37f27…` / `69955a68…`. Focused
 1/1, full sibling 26/26 (151.67s), formatting, strict workspace Clippy,
 deterministic Java replay, oracle syntax, and diff checks pass. Continue at
 phase-two queue 8 x52/SIG75.
+
+## Boundary 195: shifted x52 append and prelinked no-op
+
+Native queue 8 is x52/SIG75 because the wider Rust HEADS carrier has one
+additional earlier entry. LEFT/BOTTOM resolves glyph44 to Stem identity27 /
+vertex221, preserves x59/SIG119 edge264, and appends one edge with no other
+graph, stem, glyph-ID, or allocator mutation. Boundary 194's Java queue-7
+fixture is the identity-matched C-link authority for this head.
+
+Native queue 9 x119/SIG110 then uses the generic prelinked path. It skips the
+already linked/closed LEFT side, finds neither RIGHT corner linkable, and
+returns true. Seven neighboring heads are traversed LEFT then RIGHT; the 14
+ordered writes all target already-true flags, so value changes and graph
+changes remain zero. Java queue index8 independently confirms the same x119
+prelinked no-op. Production reaches queue 10 x42/SIG73.
+
+The 5-line / 2,887-byte fixture is byte-identical across warmup plus two
+fresh runs. Runner/transform/fixture/body+semantic hashes are `e1fcae89…`,
+`5722bbdc…`, `475c4346…`, and `a7aff1b2…`; Boundary 194's runner/fixture/
+transform are pinned at `a816aec9…` / `8c6871cd…` / `009d2479…`. Focused
+1/1, full sibling 26/26 (152.74s), formatting, strict workspace Clippy,
+deterministic Java replay, oracle syntax, and diff checks pass. Continue at
+phase-two queue 10 x42/SIG73.
 
 
 
