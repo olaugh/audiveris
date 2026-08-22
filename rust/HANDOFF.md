@@ -10126,3 +10126,32 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 (9.21s), replay, and diff checks pass. No production source changed.
 `425d58e82` remains the exact green remote CI baseline. Continue at Bach system
 2 queue187 x178/SIG52; its branch and builder geometry remain to be measured.
+
+## Boundary 214: identity-free existing-stem multi-beam C-link
+
+Bach system-2 queue187 x178/SIG52/Inter3709 has grade bits
+`3fc8482d71f2693a`. Java selects LEFT/BOTTOM at STRICT profile. The builder has
+three items: the start head and two already-linked beam targets at beam SIG
+ordinals 11 and 14, both local B-linker 3. All three items select active glyph
+535 with structural content `1565:761:4:51` and reuse its existing stem.
+
+Native structurally resolves the same glyph and stem, preserves both existing
+BeamStem edges, and adds only the x178 HeadStem edge. The relation has exact
+grade `1.0` and negative-zero `dx`. It closes x181/SIG42 LEFT then RIGHT, adds
+two value changes, preserves 394 vertices, 77 stems, and the allocator, moves
+the edge count 593 to 594, and advances to queue188 x47/SIG57/Inter3719.
+
+The queue-187 probe is a checked transform of the frozen multi-beam probe and
+pins Boundary 213 as its predecessor. Fixture/runner/transform/transformed-
+probe/init/body SHA-256 values are
+`62acbdbea32f228e829d9b49cec8b795308ab77307aea358091e446daf8820c8`,
+`b5f3635b1c364ead19243eb9c25d5388e558ee0ee268e54c63dc7a3c69111fad`,
+`5d32102a183990baaa8324575019e8f3e687293da60355e5e4c321462542051f`,
+`efcb665ce63d49bc2a3e3c9587e2cedaf65076d2fee2746cbe2d8ee22de6fade`,
+`3a83d63f8191f6e9ab734c60793095fe1b8ff85d9580ea934cc7ed7bf1d5a4a2`,
+and `95854d88aace78876d736d5352b62f25e8d730c27d7994e36bdea8fffaf0b9de`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+29/29 (156.33s), formatting, strict all-target/all-feature workspace Clippy
+(10.29s), replay, and diff checks pass. No production source changed.
+`425d58e82` remains the exact green remote CI baseline. Continue at Bach system
+2 queue188 x47/SIG57; its branch and builder geometry remain to be measured.
