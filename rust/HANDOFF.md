@@ -10528,3 +10528,23 @@ Boundary 228 is strictly pinned; warmup plus two fresh JVM runs are
 byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
 Clippy, deterministic replay, and diff checks pass. Continue at queue203
 x125/SIG25.
+
+## Boundary 230: two-head reconciliation with two closure changes
+
+Bach queue203 x125/SIG25 has grade bits `3fc62a1cd058a874`. Profiles 0-3
+skip its linked LEFT and closed RIGHT. Existing LEFT stem membership is x125
+and x127; Java closes x127 LEFT then RIGHT, reports two changed values, leaves
+SIG 394/598 and 77 system stems unchanged, and advances to queue204
+x43/SIG193. The generic native continuation matches exactly; no production
+source changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`c3e004cc45289ad6267c0544bc9879b9d2403bba9cd11a185406731e1e1634af`,
+`76a14fcfee7b3733efe9126afa809d7a8af86da82d83e578f6b358e2648fdccd`,
+`f61d9c19aa2c26ff1a91e01ff4c1b65ece877eb8a37b69124b7dcde3d48dd073`,
+`0a48c5ccd621bd83f325c68ec8e4a238ac62513f683f3f20ddd6b05ab23d7687`,
+`f24fc7c1be0b4e0ee12c9276ca6dba3a97bb9651a3de88e45f9fb14b0c3549c7`,
+and `e737eb6697e547add7907bf5e280e01a0318d778648c6d773ca08add140f051b`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling
+tests, formatting, strict workspace Clippy, replay, and diff checks pass.
+Continue at queue204 x43/SIG193.
