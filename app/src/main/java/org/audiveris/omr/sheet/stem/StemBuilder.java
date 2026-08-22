@@ -73,6 +73,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -1145,12 +1146,25 @@ public class StemBuilder
         //        for (StemItem item : list) {
         //            logger.info("   {}", item);
         //        }
-        // Each item is compared via a single ordinate key, whatever the other item in the pair,
-        // so that the comparator is transitive as required by the sorting contract.
-        Collections.sort(
-                list,
-                (se1,
-                 se2) -> yDir * Double.compare(ordinateKeyOf(se1), ordinateKeyOf(se2)));
+        Collections.sort(list, ordinateComparator(yDir));
+    }
+
+    //--------------------//
+    // ordinateComparator //
+    //--------------------//
+    /**
+     * Report the comparator used to sort stem items along the provided yDir.
+     * <p>
+     * Each item is compared via a single ordinate key, whatever the other item in the pair,
+     * so that the comparator is transitive as required by the sorting contract.
+     *
+     * @param yDir the desired vertical direction
+     * @return the item comparator
+     */
+    static Comparator<StemItem> ordinateComparator (int yDir)
+    {
+        return (se1,
+                se2) -> yDir * Double.compare(ordinateKeyOf(se1, yDir), ordinateKeyOf(se2, yDir));
     }
 
     //---------------//
@@ -1160,9 +1174,11 @@ public class StemBuilder
      * Report the ordinate key used to sort the provided item along yDir.
      *
      * @param item the item to evaluate
+     * @param yDir the desired vertical direction
      * @return the item sorting ordinate
      */
-    private double ordinateKeyOf (StemItem item)
+    private static double ordinateKeyOf (StemItem item,
+                                         int yDir)
     {
         // A half linker item is located on its refPt ordinate
         if (item instanceof HalfLinkerItem hl) {
