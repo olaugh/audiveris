@@ -196,6 +196,7 @@ use audiveris_omr::{
     },
     native_stems_beam_vlinkers::{NativeStemsBeamBLinkerRef, NativeStemsBeamVLinkerRef},
     native_stems_head_builders::NativeStemsHeadBuilderItemKind,
+    native_stems_head_corner_reachability::NativeStemsHeadStumpRef,
     recognize::{recognize_grid_lines, recognize_native_beams_with_stem_seeds},
     stems_step::{
         NativeBeamPortion, NativeStemHeadSide, NativeStemLine, NativeStemPoint,
@@ -270,6 +271,10 @@ const ZIZI_SYSTEM2_ORDER23_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-zizi-system2-order23.sh");
 const ZIZI_SYSTEM2_ORDER23_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-zizi-system2-order23.init.gradle");
+const CARMEN_SYSTEM1_DUAL_CORNERS_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-carmen-system1-dual-corners.txt");
+const CARMEN_SYSTEM1_DUAL_CORNERS_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-carmen-system1-dual-corners.sh");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -12600,6 +12605,230 @@ fn zizi_system2_order23_links_the_zero_glyph_x89_target() {
     assert_eq!(
         head_field(summary, "javaEvidence"),
         "ReturnedBeforeTwentyFifthHead"
+    );
+}
+
+/// Carmen system 1 reaches the end of its initial phase-1 transfer without a
+/// C-link frontier. The last two heads each expose both vertical C-linkers on
+/// LEFT, but Java detects that both corners resolve to the same stump and
+/// returns the side as undefined for phase 2 instead of choosing either
+/// corner. This is persistent queue state, not a graph transaction.
+#[test]
+fn carmen_system1_shared_stump_dual_corners_complete_the_initial_prefix() {
+    let path = repo_root().join("data/examples/carmen.png");
+    let grid = recognize_grid_lines(path).expect("Carmen GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Carmen HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Carmen STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Carmen BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Carmen LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Carmen HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Carmen native STEMS preparation");
+    let page = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Carmen post-STUMPS head carriers");
+    assert_eq!(page.systems.len(), 5);
+    let system = &page.systems[0];
+    let carrier = &system.carrier;
+
+    assert_eq!(system.system_id, 1);
+    assert_eq!(carrier.heads.len(), 45);
+    assert_eq!(carrier.current_index, carrier.heads.len());
+    assert_eq!(carrier.prefix_closures.len(), carrier.heads.len());
+    assert!(carrier.frontier_consumed);
+    assert_eq!(carrier.phase_two_index, 0);
+    assert_eq!(
+        carrier
+            .unlinked_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        [(39, 3), (38, 2)]
+    );
+    assert_eq!(
+        carrier
+            .undefined_sides
+            .iter()
+            .map(|side| { (side.head.x_ordinal, side.head.sig_ordinal, side.horizontal,) })
+            .collect::<Vec<_>>(),
+        [
+            (39, 3, NativeStemHeadSide::Left),
+            (38, 2, NativeStemHeadSide::Left),
+        ]
+    );
+    assert_eq!(
+        (
+            carrier.beam_state.sig.vertices.len(),
+            carrier.beam_state.sig.edges.len(),
+            carrier
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+        ),
+        // Native SIG publication uses native identities and does not fabricate
+        // Java's two extra vertices/three extra edges. The important boundary
+        // invariant is that the dual-corner classification adds none.
+        (161, 172, 18)
+    );
+
+    let reachability = &prepared.components.head_reachability.systems[0];
+    for (x_ordinal, sig_ordinal) in [(39, 3), (38, 2)] {
+        let head = carrier
+            .heads
+            .iter()
+            .find(|head| {
+                head.reference.x_ordinal == x_ordinal && head.reference.sig_ordinal == sig_ordinal
+            })
+            .expect("Carmen shared-stump head");
+        let left = head
+            .sides
+            .iter()
+            .find(|side| side.reference.horizontal == NativeStemHeadSide::Left)
+            .expect("Carmen shared-stump LEFT side");
+        assert!(!left.linked);
+        assert!(!left.closed);
+        assert_eq!(left.ordered_observer_corners.len(), 2);
+
+        let stumps = left
+            .ordered_observer_corners
+            .iter()
+            .map(|corner| {
+                reachability
+                    .heads
+                    .iter()
+                    .flat_map(|head| &head.corners)
+                    .find(|candidate| {
+                        candidate.reference.head == corner.head
+                            && candidate.reference.sig_ordinal == corner.sig_ordinal
+                            && candidate.reference.x_ordinal == corner.x_ordinal
+                            && candidate.reference.horizontal == corner.horizontal
+                            && candidate.reference.vertical == corner.vertical
+                    })
+                    .expect("Carmen dual corner reachability")
+                    .stump
+                    .expect("Carmen dual corner stump")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(stumps[0], stumps[1]);
+        assert_eq!(
+            stumps[0].source,
+            NativeStemsHeadStumpRef::Seed {
+                free_glyph_ordinal: if x_ordinal == 39 { 24 } else { 25 },
+            }
+        );
+        assert!(stumps[0].weight > 0);
+
+        let closure = carrier
+            .prefix_closures
+            .iter()
+            .find(|closure| closure.processed_head == head.reference)
+            .expect("Carmen shared-stump prefix record");
+        assert_eq!(closure.processed_head, head.reference);
+        assert_eq!(
+            closure.side_decisions,
+            [NativeStemsHeadPhase1SideDecision {
+                side: NativeStemHeadSide::Left,
+                linked_before: false,
+                closed_before: false,
+                top_can_link: Some(true),
+                bottom_can_link: Some(true),
+            }]
+        );
+        assert!(closure.closed_s_linkers.is_empty());
+        assert_eq!(closure.closed_value_changes, 0);
+    }
+
+    // Open the Java oracle only after independently reconstructing the native
+    // queue and proving that no graph transaction occurred.
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM1_DUAL_CORNERS_FIXTURE.as_bytes()),
+        "28018b4010fc1a08a45569298b06f737164c86398a2e46f277bceb869fedf089"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM1_DUAL_CORNERS_RUNNER),
+        "070c3febcf34348fc8ce643c17d99757a7845daf4f1379e591a7922b1a0da1b9"
+    );
+    let rows = CARMEN_SYSTEM1_DUAL_CORNERS_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        "stemsfinalizepage page carmen.png#1 systems 5 mode ForegroundPageSerial"
+    );
+    for exact in [
+        "system 1 heads 45",
+        "undefs [x39:sig3:id2137:[LEFT],x38:sig2:id2135:[LEFT]]",
+        "noStemBefore [x38:sig2:id2135,x39:sig3:id2137]",
+        "abnormalBefore [x38:sig2:id2135,x39:sig3:id2137]",
+        "removedHeadStem [] abnormalAfter [x38:sig2:id2135,x39:sig3:id2137] abnormalChanges []",
+        "sigVerticesBefore 163 sigVerticesAfter 163 sigEdgesBefore 175 sigEdgesAfter 175",
+        "systemStemsBefore 18 systemStemsAfter 18 allocatorBefore 3253 allocatorAfter 3253",
+    ] {
+        assert!(
+            rows[1].contains(exact),
+            "missing Carmen row fragment: {exact}"
+        );
+    }
+    let body = format!("{}\n", rows[..2].join("\n"));
+    assert_eq!(
+        sha256_hex(body.as_bytes()),
+        "27c8e7343d2beff061e04cf1f1e9efb18078afee943923aa14ada60a88dc22aa"
+    );
+    let summary = rows[2];
+    assert_eq!(
+        head_field(summary, "schema"),
+        "stems-head-phase-carmen-system1-dual-corners-v1"
+    );
+    assert_eq!(head_field(summary, "rows"), "2");
+    assert_eq!(
+        head_field(summary, "inputSha256"),
+        "249330d6558d410f64f550180d3a659dd3c9c340dcdcb5ae08e809c273fe2e44"
+    );
+    assert_eq!(
+        head_field(summary, "stemsRetrieverSourceSha256"),
+        "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7"
+    );
+    assert_eq!(
+        head_field(summary, "probeSourceSha256"),
+        "9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714"
+    );
+    assert_eq!(
+        head_field(summary, "initSourceSha256"),
+        "e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548"
+    );
+    assert_eq!(
+        head_field(summary, "runnerSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM1_DUAL_CORNERS_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "emittedBodySha256"),
+        sha256_hex(body.as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "baseZiziOrder23RunnerSha256"),
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "baseZiziOrder23FixtureSha256"),
+        sha256_hex(ZIZI_SYSTEM2_ORDER23_FIXTURE.as_bytes())
+    );
+    assert_eq!(head_field(summary, "freshRuns"), "2");
+    assert_eq!(head_field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(summary, "nativeScope"),
+        "CarmenSystem1SharedStumpDualCornerPrefix"
+    );
+    assert_eq!(
+        head_field(summary, "javaEvidence"),
+        "ReturnedAfterFinalPageFinalize"
     );
 }
 

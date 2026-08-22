@@ -194,8 +194,10 @@ pub struct NativeStemsHeadPhase1Carrier {
     pub beam_state: NativeStemsBeamSidesCarrier,
     pub heads: Vec<NativeStemsHeadPhase1Head>,
     pub current_index: usize,
-    /// Ordered already-linked heads completed before the first awaited C-link
-    /// frontier. These are real S-cell closure writes, not C-link mutations.
+    /// Ordered heads completed before the first awaited C-link frontier (or
+    /// before the queue is exhausted). Already-linked entries carry their
+    /// real S-cell closure writes; shared-stump dual-corner entries carry an
+    /// empty closure while their side/head move to the phase-2 queues.
     pub prefix_closures: Vec<NativeStemsHeadPhase1PrefixClosure>,
     pub unlinked_heads: Vec<NativeStemsBeamHeadLinkHeadRef>,
     pub undefined_sides: Vec<NativeStemsBeamHeadSLinkerRef>,
@@ -1070,17 +1072,57 @@ pub fn begin_native_stems_head_linking_phase1(
         ));
     }
     let mut current_index = 0;
-    let mut prefix_closures = Vec::new();
+    let mut prefix_closures: Vec<NativeStemsHeadPhase1PrefixClosure> = Vec::new();
+    let mut unlinked_heads = Vec::new();
+    let mut undefined_sides = Vec::new();
     loop {
-        let current = heads.get(current_index).cloned().ok_or_else(|| {
-            stage(
-                "HEADS-phase1-frontier",
-                "prelinked prefix exhausted the head queue without a C-link frontier",
-            )
-        })?;
+        let Some(current) = heads.get(current_index).cloned() else {
+            let terminal_head = heads.last().ok_or_else(|| {
+                stage(
+                    "HEADS-phase1-frontier",
+                    "system has no terminal head after prefix completion",
+                )
+            })?;
+            let terminal_head_ref = terminal_head.reference;
+            let terminal_corner = terminal_head.sides[0].ordered_observer_corners[0];
+            let terminal_decisions = prefix_closures
+                .last()
+                .map(|closure| closure.side_decisions.clone())
+                .ok_or_else(|| {
+                    stage(
+                        "HEADS-phase1-frontier",
+                        "completed prefix has no terminal decision record",
+                    )
+                })?;
+            return Ok(NativeStemsHeadPhase1Carrier {
+                beam_state,
+                heads,
+                current_index,
+                prefix_closures,
+                unlinked_heads,
+                undefined_sides,
+                phase_two_index: 0,
+                frontier: NativeStemsHeadPhase1Frontier {
+                    head: terminal_head_ref,
+                    stem_profile: 0,
+                    link_profile: plans.link_profile,
+                    append: false,
+                    side_decisions: terminal_decisions,
+                    next_corner: NativeStemsHeadCornerRef {
+                        head: terminal_corner.head,
+                        sig_ordinal: terminal_corner.sig_ordinal,
+                        x_ordinal: terminal_corner.x_ordinal,
+                        horizontal: terminal_corner.horizontal,
+                        vertical: terminal_corner.vertical,
+                    },
+                },
+                frontier_consumed: true,
+            });
+        };
         let mut side_decisions = Vec::new();
         let mut next_corner = None;
         let mut linked_before = false;
+        let mut dual_corner_undefined = false;
         for side in &current.sides {
             if side.linked {
                 linked_before = true;
@@ -1146,16 +1188,54 @@ pub fn begin_native_stems_head_linking_phase1(
                 (true, false) => next_corner = Some(top),
                 (false, true) => next_corner = Some(bottom),
                 (true, true) => {
-                    return Err(stage(
-                        "HEADS-phase1-frontier",
-                        "prelinked prefix reaches the unported dual-corner selection branch",
-                    ));
+                    let stump_of = |corner: NativeStemsHeadCornerRef| {
+                        head_reachability
+                            .heads
+                            .iter()
+                            .flat_map(|head| &head.corners)
+                            .find(|reach| reach.reference == corner)
+                            .map(|reach| reach.stump)
+                            .ok_or_else(|| {
+                                stage(
+                                    "HEADS-phase1-dual-corner",
+                                    "dual-corner reachability corner is missing",
+                                )
+                            })
+                    };
+                    match (stump_of(top)?, stump_of(bottom)?) {
+                        (Some(top_stump), Some(bottom_stump)) if top_stump == bottom_stump => {
+                            undefined_sides.push(side.reference);
+                            unlinked_heads.push(current.reference);
+                            dual_corner_undefined = true;
+                        }
+                        _ => {
+                            next_corner = Some(
+                                if side.reference.horizontal
+                                    == crate::stems_step::NativeStemHeadSide::Left
+                                {
+                                    bottom
+                                } else {
+                                    top
+                                },
+                            );
+                        }
+                    }
                 }
                 (false, false) => {}
             }
-            if next_corner.is_some() {
+            if next_corner.is_some() || dual_corner_undefined {
                 break;
             }
+        }
+        if dual_corner_undefined {
+            prefix_closures.push(NativeStemsHeadPhase1PrefixClosure {
+                processed_head: current.reference,
+                side_decisions,
+                closed_s_linkers: Vec::new(),
+                closed_value_changes: 0,
+            });
+            current_index += 1;
+            continue;
         }
         if let Some(next_corner) = next_corner {
             return Ok(NativeStemsHeadPhase1Carrier {
@@ -1163,8 +1243,8 @@ pub fn begin_native_stems_head_linking_phase1(
                 heads,
                 current_index,
                 prefix_closures,
-                unlinked_heads: Vec::new(),
-                undefined_sides: Vec::new(),
+                unlinked_heads,
+                undefined_sides,
                 phase_two_index: 0,
                 frontier: NativeStemsHeadPhase1Frontier {
                     head: current.reference,

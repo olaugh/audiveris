@@ -9136,3 +9136,51 @@ all-target/all-feature Clippy, shell syntax, and diff checks pass.
 predecessor (Build 32547802513; Rust 32547802498). The next wider-corpus
 production frontier is Carmen system 1's unported dual-corner selection
 branch.
+
+## Boundary 186: Carmen system-1 shared-stump dual corners
+
+`begin_native_stems_head_linking_phase1` now handles Java's generic
+shared-stump guard while it consumes the initial head prefix. When both
+vertical C-linkers of one open horizontal side can link, native resolves their
+live reachability stumps. Equal non-null stumps do not select either corner:
+the side is recorded as undefined, the head is appended to the phase-2 retry
+queue, an empty prefix-closure record preserves queue order, and phase 1
+continues without SIG, stem, allocator, or S-cell mutation. Different or
+missing stumps take Java's ordinary choice (BOTTOM for LEFT, TOP for RIGHT).
+The transfer can now also return a consumed carrier when this prefix exhausts
+the complete head queue instead of inventing an actionable C-link.
+
+Carmen system 1 exercises the equal-stump branch twice. Its 45-head initial
+transfer carries x39/SIG3 LEFT followed by x38/SIG2 LEFT as the exact
+undefined/unlinked retry queue; x39's TOP/BOTTOM corners share native seed 24
+and x38's share seed 25. Both entries have zero closure writes. The native
+carrier stays at 161 vertices, 172 edges, and 18 system stems and reaches
+`current_index=45` with `frontier_consumed=true`. Java's independently owned
+SIG remains 163/175 with 18 stems and allocator 3253, and finalization retains
+both heads as abnormal no-stem heads without removing a relation or changing
+an abnormal flag.
+
+The page-finalizer oracle emits the Carmen page row and exact system-1 row,
+then a strict summary. It is byte-identical across warmup plus two fresh runs.
+Runner/fixture/input/StemsRetriever/probe/init/body SHA-256 values are
+`070c3febcf34348fc8ce643c17d99757a7845daf4f1379e591a7922b1a0da1b9`,
+`28018b4010fc1a08a45569298b06f737164c86398a2e46f277bceb869fedf089`,
+`249330d6558d410f64f550180d3a659dd3c9c340dcdcb5ae08e809c273fe2e44`,
+`26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7`,
+`9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714`,
+`e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548`,
+and `27c8e7343d2beff061e04cf1f1e9efb18078afee943923aa14ada60a88dc22aa`.
+The runner pins Boundary 185's runner/fixture at
+`33f2ce87e7c727156de4250410052b95dbd209590419c15bb2428be3edec8b9b` /
+`fb9797eb2039cf3f052f7bd7285a94b737a8771075406f772261deded352be9d`.
+
+Focused 1/1, full sibling 23/23 (153.37s), formatting, strict
+all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
+pass. Production Carmen clears system 1 and fails closed next at system 2 queue
+70, x13/SIG10 RIGHT/BOTTOM, builder 55 profile 1/1. Its ordered items are a
+31-pixel start-head stump, a 5-pixel Gap, and a 51-pixel filament-0 chunk;
+carried undefined LEFT sides are x37/SIG20, x38/SIG24, and x36/SIG23. That
+Gap-aware expansion is the next measured wider-corpus branch.
+`425d58e821c1e03e15c885307607b3154d46edd8` is the exact fully green remote
+predecessor: Build & Test 32551514978 and all 12 Rust-port shards in
+32551514933 succeeded.
