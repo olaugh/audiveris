@@ -424,6 +424,14 @@ const HOVE_SYSTEM5_PHASE_TWO_ORDER1_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-hove-system5-order1.sh");
 const HOVE_SYSTEM5_PHASE_TWO_ORDER1_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-hove-system5-order1.transform.awk");
+const BACH_SYSTEM1_ORDER37_RETRY_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-bach-system1-order37-retry.txt");
+const BACH_SYSTEM1_ORDER37_RETRY_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-bach-system1-order37-retry.sh");
+const BACH_SYSTEM1_ORDER37_RETRY_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/StemsHeadPhaseOneRetryPageProbe.java");
+const BACH_SYSTEM1_ORDER37_RETRY_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -17065,6 +17073,181 @@ fn cucaracha_order56_no_link_and_all_system_stems_complete() {
             .expect("Cucaracha transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
     assert_eq!(recognized.systems, finalized.systems);
+}
+
+/// A rather-good phase-1 head retries all four Java stem profiles before it
+/// may be declared unlinked. Bach system 1 queue 37 remains `Neither` on both
+/// sides at profiles 0 through 3, then closes locally without graph mutation.
+#[test]
+fn bach_system1_order37_exhausts_higher_profiles_before_no_link() {
+    let path = repo_root().join("data/examples/BachInvention5.jpg");
+    let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Bach STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Bach BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Bach LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Bach HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Bach native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Bach post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(0);
+    assert_eq!(start.system_id, 1);
+    let head_corners = &prepared.components.head_corners.systems[0];
+    let head_reachability = &prepared.components.head_reachability.systems[0];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[0];
+    let head_builders = &prepared.components.head_builders.systems[0];
+    let plans = &prepared.components.plans.systems[0];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[0];
+
+    while start.carrier.current_index < 37 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Bach continuation before system-1 queue 37");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Bach C-link before system-1 queue 37");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    assert_eq!(start.carrier.current_index, 37);
+    assert!(start.carrier.frontier_consumed);
+    let vertices_before = start.carrier.beam_state.sig.vertices.len();
+    let edges_before = start.carrier.beam_state.sig.edges.len();
+    let stems_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let allocator_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+
+    let continuation = continue_native_stems_head_linking_phase1(
+        &start.carrier,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("Bach system-1 queue-37 higher-profile retry");
+    assert_eq!(
+        (
+            continuation.processed_head.x_ordinal,
+            continuation.processed_head.sig_ordinal,
+            continuation.returned_linked,
+            continuation.closed_value_changes,
+        ),
+        (3, 95, Some(false), 2)
+    );
+    assert_eq!(continuation.side_decisions.len(), 8);
+    assert!(continuation.side_decisions.chunks_exact(2).all(|profile| {
+        profile.iter().all(|decision| {
+            decision.top_can_link == Some(false) && decision.bottom_can_link == Some(false)
+        })
+    }));
+    assert_eq!(
+        continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (3, 95, NativeStemHeadSide::Left),
+            (3, 95, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(continuation.state_after.current_index, 38);
+    assert_eq!(
+        (
+            continuation.state_after.heads[38].reference.x_ordinal,
+            continuation.state_after.heads[38].reference.sig_ordinal,
+        ),
+        (44, 36)
+    );
+    assert_eq!(
+        continuation.state_after.beam_state.sig.vertices.len(),
+        vertices_before
+    );
+    assert_eq!(
+        continuation.state_after.beam_state.sig.edges.len(),
+        edges_before
+    );
+    assert_eq!(
+        continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM1_ORDER37_RETRY_FIXTURE.as_bytes()),
+        "2964eb04060e03a97db6c44cd8de3cc383a59a082b9f56524290c3181aacafaa"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM1_ORDER37_RETRY_RUNNER),
+        "8edea3da64b607b16ccf5a30191d6c14429c3106b9aa8e263e4f6ea24e913d61"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM1_ORDER37_RETRY_PROBE),
+        "f71177c81db91fb46ec392f53f854dbc37ceb05dd4e50ad3d3ef315d2d380772"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM1_ORDER37_RETRY_INIT),
+        "a2b5123237974823bf131d3e17ef8c27035062c00e9bfe15aeb9b17ce8a324df"
+    );
+    assert!(BACH_SYSTEM1_ORDER37_RETRY_FIXTURE.contains(
+        "stemProfile 3 decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=false:branch=Neither]"
+    ));
+    assert!(BACH_SYSTEM1_ORDER37_RETRY_FIXTURE.contains(
+        "returned false undefs [] sideChanges [x3:sig95:LEFT:false:false->false:true,x3:sig95:RIGHT:false:false->false:true] incidents []"
+    ));
 }
 
 #[test]

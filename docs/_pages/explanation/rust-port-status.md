@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first two hundred and seven semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; and Boundary 207 preserves Java's pre-MultipleRest beam-group identities while assembling the live post-rest native SIG. Bach now reaches its first real system-1 higher-profile retry for a rather-good unlinked head.
+The first two hundred and eight semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 preserves Java's pre-MultipleRest beam-group identities; and Boundary 208 ports the generic phase-one rather-good retry through profiles 0-3. Bach now completes system 1 and reaches system 2 queue182's profile-1 multi-beam C-link.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, Cucaracha, and Hove** | Two hundred and seven exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; and Boundary 207 carries pre-rest beam groups into Bach's post-rest native SIG. | Continue with Bach system 1's higher-profile rather-good unlinked-head retry, then widen schema-1 publication. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, Cucaracha, and Hove** | Two hundred and eight exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundaries 192-205 complete Cucaracha; Boundary 206 completes Hove; Boundary 207 carries pre-rest beam groups into Bach's post-rest native SIG; and Boundary 208 retries rather-good unlinked heads through Java profiles 0-3. | Implement Bach system 2 queue182's profile-1 LEFT/BOTTOM builder with two concrete BeamLinker stumps, then widen schema-1 publication. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -5346,6 +5346,28 @@ corpora remain exact, including both affected Bach stump rows at
 the first real system-1 higher-profile retry for a rather-good unlinked head.
 Focused and downstream corpus gates, formatting, strict workspace Clippy, and
 diff checks pass. No oracle changed.
+
+## Boundary 208: generic phase-one rather-good profile retry
+
+The native phase-one continuation now matches Java's recursive profile retry
+for rather-good unlinked heads. It evaluates profiles 0 through 3 in order,
+retains linked/closed and shared-stump behavior, carries a later-profile C-link
+frontier, and closes the local S cells only after every profile fails.
+
+The deterministic Bach system-1 oracle measures queue37 x3/SIG95/Inter3599:
+LEFT and RIGHT remain `Neither` on all four profiles, Java returns false with
+no undefined side, closes x3 LEFT then RIGHT, and advances to
+x44/SIG36/Inter3481 with graph, stems, and allocator unchanged. Fixture,
+runner, probe, init, and body hashes are
+`2964eb04060e03a97db6c44cd8de3cc383a59a082b9f56524290c3181aacafaa`,
+`8edea3da64b607b16ccf5a30191d6c14429c3106b9aa8e263e4f6ea24e913d61`,
+`f71177c81db91fb46ec392f53f854dbc37ceb05dd4e50ad3d3ef315d2d380772`,
+`a2b5123237974823bf131d3e17ef8c27035062c00e9bfe15aeb9b17ce8a324df`,
+and `8efab31e3192446991f12e3e2587ad565f8a7c5b30d194e626ec10b7a019e51c`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, sibling 28/28,
+formatting, strict Clippy, replay, and diff checks pass. Bach system 1 now
+completes; continue at system 2 queue182's profile-1 LEFT/BOTTOM builder, which
+joins the start head to two concrete BeamLinker stump items.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

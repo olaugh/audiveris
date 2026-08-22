@@ -9950,3 +9950,34 @@ all-target/all-feature workspace Clippy (11.88s), and diff checks are clean.
 No oracle changed: existing Java fixtures detected and grade this lifecycle
 fix. `425d58e82` remains the exact green remote CI baseline. Continue at Bach
 system 1's higher-profile rather-good unlinked-head retry.
+
+## Boundary 208: generic phase-one rather-good profile retry
+
+Java recursively calls `HeadLinker.linkSides` with stem profiles 1, 2, and 3
+when STRICT profile 0 leaves a rather-good head unlinked. The generic native
+phase-one continuation now preserves that control flow. Every profile appends
+its ordered LEFT/RIGHT decisions, linked and closed sides retain their skip
+semantics, the dual-corner shared-stump branch still records an undefined side,
+and a later successful profile becomes the authenticated C-link frontier.
+Only exhaustion of profiles 0 through 3 closes both local S cells and queues
+the head for phase 2.
+
+The full-lifecycle Bach system-1 fixture measures queue37 x3/SIG95/Inter3599
+at grade bits `3fdcd6c4146e1fa4`. Both sides are `Neither` at every profile.
+Java returns false, records no undefined side, closes x3 LEFT then RIGHT, and
+advances to x44/SIG36/Inter3481 with SIG 216/257, system stems37, and allocator
+all unchanged. Native derives the same result from production GRID, HEADERS,
+STEM_SEEDS, BEAMS, LEDGERS, HEADS, SIG, and builder state.
+
+Fixture/runner/probe/init/body SHA-256 values are
+`2964eb04060e03a97db6c44cd8de3cc383a59a082b9f56524290c3181aacafaa`,
+`8edea3da64b607b16ccf5a30191d6c14429c3106b9aa8e263e4f6ea24e913d61`,
+`f71177c81db91fb46ec392f53f854dbc37ceb05dd4e50ad3d3ef315d2d380772`,
+`a2b5123237974823bf131d3e17ef8c27035062c00e9bfe15aeb9b17ce8a324df`,
+and `8efab31e3192446991f12e3e2587ad565f8a7c5b30d194e626ec10b7a019e51c`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+28/28 (156.94s), formatting, strict all-target/all-feature workspace Clippy
+(14.08s), deterministic replay, and diff checks pass. `425d58e82` remains the
+exact green remote CI baseline. Bach system 1 now completes; continue at
+system 2 phase-one queue182 x138/SIG149, where profile 1 selects LEFT/BOTTOM
+and the builder contains the start head plus two concrete BeamLinker stumps.

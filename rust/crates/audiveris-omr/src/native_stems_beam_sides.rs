@@ -1667,6 +1667,7 @@ pub fn continue_native_stems_head_linking_phase1(
     let undefined_sides_before = shadow.undefined_sides.len();
     let mut side_decisions = Vec::new();
     let mut next_corner = None;
+    let mut selected_profile = 0;
     let mut linked_before = false;
     for side in &current.sides {
         if side.linked {
@@ -1787,6 +1788,128 @@ pub fn continue_native_stems_head_linking_phase1(
             break;
         }
     }
+    // Java recursively retries a rather-good unlinked head with stem profiles
+    // 1 through RATHER_GOOD_HEAD (3).  The phase-1 carrier must therefore
+    // distinguish "STRICT found no corner" from "all four profiles found no
+    // corner": the former can still produce a later-profile frontier, while
+    // the latter closes both S cells and enters the phase-2 queue.
+    if next_corner.is_none()
+        && !linked_before
+        && shadow.undefined_sides.len() == undefined_sides_before
+        && current.grade >= 0.3
+    {
+        'retry_profiles: for stem_profile in 1..=3 {
+            for side in &current.sides {
+                if side.linked {
+                    side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                        side: side.reference.horizontal,
+                        linked_before: true,
+                        closed_before: side.closed,
+                        top_can_link: None,
+                        bottom_can_link: None,
+                    });
+                    continue;
+                }
+                if side.closed {
+                    side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                        side: side.reference.horizontal,
+                        linked_before: false,
+                        closed_before: true,
+                        top_can_link: None,
+                        bottom_can_link: None,
+                    });
+                    continue;
+                }
+                let top = side.ordered_observer_corners[0];
+                let bottom = side.ordered_observer_corners[1];
+                let top = NativeStemsHeadCornerRef {
+                    head: top.head,
+                    sig_ordinal: top.sig_ordinal,
+                    x_ordinal: top.x_ordinal,
+                    horizontal: top.horizontal,
+                    vertical: top.vertical,
+                };
+                let bottom = NativeStemsHeadCornerRef {
+                    head: bottom.head,
+                    sig_ordinal: bottom.sig_ordinal,
+                    x_ordinal: bottom.x_ordinal,
+                    horizontal: bottom.horizontal,
+                    vertical: bottom.vertical,
+                };
+                let top_ok = bounded_head_can_link(
+                    top,
+                    stem_profile,
+                    head_builders,
+                    &shadow.beam_state.s_cells,
+                    plans.min_linker_length,
+                    false,
+                )?;
+                let bottom_ok = bounded_head_can_link(
+                    bottom,
+                    stem_profile,
+                    head_builders,
+                    &shadow.beam_state.s_cells,
+                    plans.min_linker_length,
+                    false,
+                )?;
+                side_decisions.push(NativeStemsHeadPhase1SideDecision {
+                    side: side.reference.horizontal,
+                    linked_before: false,
+                    closed_before: false,
+                    top_can_link: Some(top_ok),
+                    bottom_can_link: Some(bottom_ok),
+                });
+                match (top_ok, bottom_ok) {
+                    (true, false) => next_corner = Some(top),
+                    (false, true) => next_corner = Some(bottom),
+                    (true, true) => {
+                        let reachability = head_reachability.ok_or_else(|| {
+                            stage(
+                                "HEADS-phase1-continue-retry",
+                                "dual-corner retry requires reachability authentication",
+                            )
+                        })?;
+                        let stump_of = |corner: NativeStemsHeadCornerRef| {
+                            reachability
+                                .heads
+                                .iter()
+                                .flat_map(|head| &head.corners)
+                                .find(|reach| reach.reference == corner)
+                                .map(|reach| reach.stump)
+                                .ok_or_else(|| {
+                                    stage(
+                                        "HEADS-phase1-continue-retry",
+                                        "dual-corner retry reachability is missing",
+                                    )
+                                })
+                        };
+                        match (stump_of(top)?, stump_of(bottom)?) {
+                            (Some(top_stump), Some(bottom_stump)) if top_stump == bottom_stump => {
+                                shadow.undefined_sides.push(side.reference);
+                                break 'retry_profiles;
+                            }
+                            _ => {
+                                next_corner = Some(
+                                    if side.reference.horizontal
+                                        == crate::stems_step::NativeStemHeadSide::Left
+                                    {
+                                        bottom
+                                    } else {
+                                        top
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    (false, false) => {}
+                }
+                if next_corner.is_some() {
+                    selected_profile = stem_profile;
+                    break 'retry_profiles;
+                }
+            }
+        }
+    }
     if shadow.undefined_sides.len() > undefined_sides_before {
         // Java's caller adds every head whose linkSides returns false to
         // the phase-2 unlinkedHeads queue (StemsRetriever heads linking
@@ -1805,12 +1928,6 @@ pub fn continue_native_stems_head_linking_phase1(
     }
     let Some(next_corner) = next_corner else {
         if !linked_before {
-            if current.grade >= 0.3 {
-                return Err(stage(
-                    "HEADS-phase1-continue-retry",
-                    "rather-good unlinked head requires higher-profile retry",
-                ));
-            }
             let mut closed_s_linkers = Vec::with_capacity(2);
             let mut closed_value_changes = 0;
             for side in &current.sides {
@@ -1875,7 +1992,7 @@ pub fn continue_native_stems_head_linking_phase1(
 
     shadow.frontier = NativeStemsHeadPhase1Frontier {
         head: current.reference,
-        stem_profile: 0,
+        stem_profile: selected_profile,
         link_profile: plans.link_profile,
         append: false,
         side_decisions: side_decisions.clone(),
