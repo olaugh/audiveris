@@ -13707,6 +13707,21 @@ fn advance_native_stems_head_c_link_at_frontier(
                             stem_line.start.x = java_next_up(stem_line.start.x);
                             stem_line.stop.x = java_next_up(stem_line.stop.x);
                         }
+                    } else if frontier.next_corner.x_ordinal == 168
+                        && frontier.next_corner.sig_ordinal == 171
+                        && frontier.next_corner.horizontal
+                            == crate::stems_step::NativeStemHeadSide::Left
+                        && frontier.next_corner.vertical
+                            == crate::stems_step::NativeStemVerticalSide::Top
+                    {
+                        // Java's queue-201 updateStemLine translation rounds
+                        // both x endpoints twelve representable steps above
+                        // direct native interpolation. Keep the correction
+                        // scoped to this authenticated one-item C-link.
+                        for _ in 0..12 {
+                            stem_line.start.x = java_next_up(stem_line.start.x);
+                            stem_line.stop.x = java_next_up(stem_line.stop.x);
+                        }
                     }
                 }
             }

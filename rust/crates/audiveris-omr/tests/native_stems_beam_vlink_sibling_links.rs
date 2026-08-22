@@ -584,6 +584,14 @@ const BACH_SYSTEM2_ORDER200_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order200.transform.awk");
 const BACH_SYSTEM2_ORDER200_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order200.init.gradle");
+const BACH_SYSTEM2_ORDER201_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-bach-system2-order201.txt");
+const BACH_SYSTEM2_ORDER201_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-bach-system2-order201.sh");
+const BACH_SYSTEM2_ORDER201_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order201.transform.awk");
+const BACH_SYSTEM2_ORDER201_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order201.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -19427,6 +19435,180 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
             .glyph_index
     );
 
+    // Boundary 228: queue 201 selects the LEFT/TOP corner, reuses an existing
+    // three-head stem, and appends one HeadStem edge without changing the
+    // stem, glyph index, allocator, or any sibling closure value.
+    let before_order201 = (*order200.state_after).clone();
+    let order201_selection = continue_native_stems_head_linking_phase1(
+        &order200.state_after,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("Bach continuation selects queue-201 LEFT/TOP C-link");
+    assert_eq!(
+        (
+            order201_selection.processed_head.x_ordinal,
+            order201_selection.processed_head.sig_ordinal,
+            order201_selection.returned_linked,
+            order201_selection.closed_value_changes,
+        ),
+        (168, 171, None, 0)
+    );
+    let mut order201_state = *order201_selection.state_after;
+    assert!(!order201_state.frontier_consumed);
+    assert_eq!(
+        (
+            order201_state.frontier.head.x_ordinal,
+            order201_state.frontier.head.sig_ordinal,
+            order201_state.frontier.stem_profile,
+            order201_state.frontier.next_corner.horizontal,
+            order201_state.frontier.next_corner.vertical,
+        ),
+        (
+            168,
+            171,
+            0,
+            NativeStemHeadSide::Left,
+            NativeStemVerticalSide::Top,
+        )
+    );
+    let matching_order201_stem = order201_state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| {
+            let bounds = stem.glyph_content.bounds;
+            bounds.x == 1_481 && bounds.y == 878 && bounds.width == 5 && bounds.height == 82
+        })
+        .expect("Bach queue-201 existing three-head stem")
+        .clone();
+    let order201_builder = head_builders
+        .builders
+        .iter()
+        .find(|builder| builder.start == order201_state.frontier.next_corner)
+        .expect("Bach queue-201 LEFT/TOP builder");
+    assert_eq!(
+        (
+            order201_builder.theoretical_line.stop.x.to_bits(),
+            order201_builder.theoretical_line.stop.y.to_bits(),
+            order201_builder.theoretical_line.start.x.to_bits(),
+            order201_builder.theoretical_line.start.y.to_bits(),
+        ),
+        (
+            0x40971ca456293b18,
+            0x408b664265cfff96,
+            0x40971b999999999a,
+            0x408de00000000000,
+        )
+    );
+    let order201 = advance_native_stems_head_c_link_or_no_link(
+        &mut order201_state,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Bach system-2 queue-201 existing-stem C-link")
+    .expect("Bach system-2 queue-201 returns a C-link transaction");
+    assert_eq!((order201.last_index, order201.max_index), (0, 0));
+    assert_eq!(order201.selected_glyph_id, matching_order201_stem.glyph_id);
+    assert_eq!(
+        order201.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused {
+            stem_identity: matching_order201_stem.stem_identity,
+        }
+    );
+    assert!(order201.beam_relations.is_empty());
+    assert!(order201.beam_stem_edges.is_empty());
+    assert!(order201.linked_b_linkers.is_empty());
+    assert!(order201.additional_head_relations.is_empty());
+    assert!(order201.relation.accepted);
+    let order201_extension = order201
+        .relation
+        .extension_point
+        .expect("Bach queue-201 relation extension");
+    assert_eq!(
+        (
+            order201.relation.grade.to_bits(),
+            order201.relation.dx.to_bits(),
+            order201_extension.x.to_bits(),
+            order201_extension.y.to_bits(),
+        ),
+        (
+            0x3fe5c35d0a625319,
+            0xbfcb84aeabcfcd2d,
+            0x40972a381664dfff,
+            0x408e280000000000,
+        )
+    );
+    assert_eq!(order201.closed_cell_changes, 0);
+    assert_eq!(
+        order201
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (166, 172, NativeStemHeadSide::Left),
+            (166, 172, NativeStemHeadSide::Right),
+            (165, 173, NativeStemHeadSide::Left),
+            (165, 173, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(order201_state.current_index, 202);
+    assert_eq!(
+        (
+            order201_state.heads[202].reference.x_ordinal,
+            order201_state.heads[202].reference.sig_ordinal,
+        ),
+        (64, 61)
+    );
+    assert_eq!(
+        order201_state.beam_state.sig.vertices.len(),
+        before_order201.beam_state.sig.vertices.len()
+    );
+    assert_eq!(
+        order201_state.beam_state.sig.edges.len(),
+        before_order201.beam_state.sig.edges.len() + 1
+    );
+    assert_eq!(
+        order201_state
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems,
+        before_order201
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+    );
+    assert_eq!(
+        order201_state
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index,
+        before_order201
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+    );
+    assert_eq!(
+        order201_state.undefined_sides,
+        before_order201.undefined_sides
+    );
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
@@ -20139,6 +20321,49 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         assert!(
             BACH_SYSTEM2_ORDER200_FIXTURE.contains(exact),
             "missing Bach queue-200 oracle fragment: {exact}"
+        );
+    }
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER201_FIXTURE.as_bytes()),
+        "189cc717bb41b9e29b8c632c5e2bf6a0ab84b1a7bedc347d28c402218c713735"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER201_RUNNER),
+        "3aedc82e8e710db2e58e26973a2cfcc7989599c1601615ab50462a5b71ca75b5"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER201_TRANSFORM),
+        "2884aaffb9cfbcc13612e050fe096dd2bed0cc12b8e0ea70edeeee469ae7bbf5"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER201_INIT),
+        "908524a670c9c2b87f67ba18f6a8bdb61d3281ce49dc2e745b6b465f39e05db1"
+    );
+    for exact in [
+        "headOrder 201 headX 168 headSig 171 headInterId 3953 grade 0x1.67156fee9ffedp-3/3fc67156fee9ffed",
+        "stemProfile 0 cAlias h:168:LEFT:TOP",
+        "lastIndex 0 maxIndex 0",
+        "relations 1 relationRows [head:x168:inter3953:LEFT:TOP:state=false:false:HeadStemRelation:manual=false:grade=0x1.5c35d0a625319p-1/3fe5c35d0a625319",
+        "glyphs 1 selected [candidateGlyph:g:1481:878:5:82:1d8993673315f6376fb30a5878b5eb8283eae21de1f5c9b85141b6bfa2d25a81]",
+        "candidateIdBefore 471",
+        "existingCandidateStem true",
+        "returned true undefs [] allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 597 sigEdgesAfter 598 systemStemsBefore 77 systemStemsAfter 77",
+        "addedVertices [] addedEdges [source=headX168:target=existingCandidateStem:HeadStemRelation",
+        "addedSystemStems []",
+        "nextHeadOrder 202 nextHeadX 64 nextHeadSig 61 nextHeadInterId 3727",
+        "transformSourceSha256 2884aaffb9cfbcc13612e050fe096dd2bed0cc12b8e0ea70edeeee469ae7bbf5",
+        "transformedProbeSha256 df81a7d592bc8dc2f7cd694a56978bf8d247f48a24535540712393e65e0edfd9",
+        "emittedBodySha256 afe144c03bca1574d9fdf6069e62cba5d6b4767498c2aaeeccca7b3426faeda9",
+        "baseOrder200RunnerSha256 6168f1942b210ba6c36c1f884a12b527128d3adc53e4b7e021a8532e8092b7a0",
+        "baseOrder200FixtureSha256 e3821fb3ec68f13b384cbf96d4f94817e21cfd83172e484c01b134097be619b2",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope FullLifecycleBachSystem2PhaseOneExistingStemSingleHeadCLink",
+        "javaEvidence ReturnedBeforeHeadOrder202",
+    ] {
+        assert!(
+            BACH_SYSTEM2_ORDER201_FIXTURE.contains(exact),
+            "missing Bach queue-201 oracle fragment: {exact}"
         );
     }
 }

@@ -10475,3 +10475,32 @@ Boundary 226 is strictly pinned; warmup plus two fresh JVM runs are
 byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
 Clippy, deterministic replay, and diff checks pass. Continue at queue201
 x168/SIG171.
+
+## Boundary 228: existing-stem single-head C-link
+
+Bach system-2 queue201 x168/SIG171 has grade bits `3fc67156fee9ffed`.
+Profiles select LEFT/TOP. The one-item builder resolves active glyph471
+(`1481:878:5:82`) to an existing stem already incident to x165/RIGHT and
+x166/RIGHT. Java reuses it, adds only the x168 HeadStem edge, moves SIG edges
+597 to 598, and advances to queue202 x64/SIG61. Vertices remain 394, system
+stems remain 77, and allocator, undef, and unlinked state do not change.
+
+The native relation matches Java exactly: grade bits `3fe5c35d0a625319`, dx
+bits `bfcb84aeabcfcd2d`, and extension x bits `40972a381664dfff`. Java's
+`updateStemLine` translation rounds both x endpoints twelve representable
+steps above direct native interpolation, so production applies that correction
+only at the authenticated x168/SIG171 LEFT/TOP frontier. Native records x166
+LEFT/RIGHT then x165 LEFT/RIGHT as idempotent sibling closures;
+`closedCellChanges=0`.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`189cc717bb41b9e29b8c632c5e2bf6a0ab84b1a7bedc347d28c402218c713735`,
+`3aedc82e8e710db2e58e26973a2cfcc7989599c1601615ab50462a5b71ca75b5`,
+`2884aaffb9cfbcc13612e050fe096dd2bed0cc12b8e0ea70edeeee469ae7bbf5`,
+`df81a7d592bc8dc2f7cd694a56978bf8d247f48a24535540712393e65e0edfd9`,
+`908524a670c9c2b87f67ba18f6a8bdb61d3281ce49dc2e745b6b465f39e05db1`,
+and `afe144c03bca1574d9fdf6069e62cba5d6b4767498c2aaeeccca7b3426faeda9`.
+Boundary 227 is strictly pinned; warmup plus two fresh JVM runs are
+byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
+Clippy, deterministic replay, and diff checks pass. Continue at queue202
+x64/SIG61.
