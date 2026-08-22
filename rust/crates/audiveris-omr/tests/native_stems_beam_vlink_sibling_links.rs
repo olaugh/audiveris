@@ -480,6 +480,14 @@ const BACH_SYSTEM2_ORDER187_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order187.transform.awk");
 const BACH_SYSTEM2_ORDER187_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order187.init.gradle");
+const BACH_SYSTEM2_ORDER188_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-bach-system2-order188.txt");
+const BACH_SYSTEM2_ORDER188_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-bach-system2-order188.sh");
+const BACH_SYSTEM2_ORDER188_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order188.transform.awk");
+const BACH_SYSTEM2_ORDER188_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order188.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -18021,6 +18029,166 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         allocator_before
     );
 
+    let order188_selection = continue_native_stems_head_linking_phase1(
+        &order187_state,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("Bach continuation selects queue-188 LEFT/TOP C-link");
+    assert_eq!(
+        (
+            order188_selection.processed_head.x_ordinal,
+            order188_selection.processed_head.sig_ordinal,
+            order188_selection.returned_linked,
+            order188_selection.closed_value_changes,
+        ),
+        (47, 57, None, 0)
+    );
+    let mut order188_state = *order188_selection.state_after;
+    assert!(!order188_state.frontier_consumed);
+    assert_eq!(
+        (
+            order188_state.frontier.next_corner.horizontal,
+            order188_state.frontier.next_corner.vertical,
+        ),
+        (NativeStemHeadSide::Left, NativeStemVerticalSide::Top)
+    );
+    let matching_order188_stem = order188_state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| {
+            let bounds = stem.glyph_content.bounds;
+            bounds.x == 540 && bounds.y == 722 && bounds.width == 5 && bounds.height == 73
+        })
+        .expect("Bach queue-188 existing multi-head stem")
+        .clone();
+    let order188 = advance_native_stems_head_c_link_or_no_link(
+        &mut order188_state,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Bach system-2 queue-188 multi-head existing-stem C-link")
+    .expect("Bach system-2 queue-188 returns a C-link transaction");
+    assert_eq!((order188.last_index, order188.max_index), (1, 1));
+    assert_eq!(order188.selected_glyph_id, matching_order188_stem.glyph_id);
+    assert_eq!(
+        order188.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused {
+            stem_identity: matching_order188_stem.stem_identity,
+        }
+    );
+    assert!(order188.beam_relations.is_empty());
+    assert!(order188.beam_stem_edges.is_empty());
+    assert!(order188.linked_b_linkers.is_empty());
+    assert_eq!(order188.additional_head_relations.len(), 1);
+    let order188_crossed = &order188.additional_head_relations[0];
+    let order188_extension = order188
+        .relation
+        .extension_point
+        .expect("Bach queue-188 main relation extension");
+    let order188_crossed_extension = order188_crossed
+        .relation
+        .extension_point
+        .expect("Bach queue-188 crossed relation extension");
+    assert_eq!(
+        (
+            order188.relation.grade.to_bits(),
+            order188.relation.dx.to_bits(),
+            order188_crossed.relation.grade.to_bits(),
+            order188_crossed.relation.dx.to_bits(),
+            order188_extension.x.to_bits(),
+            order188_extension.y.to_bits(),
+            order188_crossed_extension.x.to_bits(),
+            order188_crossed_extension.y.to_bits(),
+        ),
+        (
+            0x3fe7cb9fff0ca1d8,
+            0xbfc6e39073a980f1,
+            0x3feb43e5758fd513,
+            0x3fab54928678de1e,
+            0x4080ef84fcae174c,
+            0x4088c80000000000,
+            0x4080eff0bc477b18,
+            0x4088480000000000,
+        )
+    );
+    assert_eq!(
+        (
+            order188_crossed.corner.x_ordinal,
+            order188_crossed.corner.sig_ordinal,
+            order188_crossed.corner.horizontal,
+            order188_crossed.corner.vertical,
+            order188_crossed.appended,
+        ),
+        (
+            48,
+            38,
+            NativeStemHeadSide::Left,
+            NativeStemVerticalSide::Top,
+            true,
+        )
+    );
+    assert_eq!(order188.closed_cell_changes, 4);
+    assert_eq!(
+        order188
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (45, 58, NativeStemHeadSide::Left),
+            (45, 58, NativeStemHeadSide::Right),
+            (42, 66, NativeStemHeadSide::Left),
+            (42, 66, NativeStemHeadSide::Right),
+            (48, 38, NativeStemHeadSide::Left),
+            (48, 38, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(order188_state.current_index, 189);
+    assert_eq!(
+        (
+            order188_state.heads[189].reference.x_ordinal,
+            order188_state.heads[189].reference.sig_ordinal,
+        ),
+        (164, 51)
+    );
+    assert_eq!(
+        order188_state.beam_state.sig.vertices.len(),
+        vertices_before
+    );
+    assert_eq!(order188_state.beam_state.sig.edges.len(), edges_before + 4);
+    assert_eq!(
+        order188_state
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        order188_state
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
@@ -18236,6 +18404,49 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         assert!(
             BACH_SYSTEM2_ORDER187_FIXTURE.contains(exact),
             "missing Bach queue-187 oracle fragment: {exact}"
+        );
+    }
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER188_FIXTURE.as_bytes()),
+        "6aa06fe00a0816367a4cc2586f2edfa33580e9f8ec15b5d757ec92bd5f81e69d"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER188_RUNNER),
+        "29e80ba56b7f613cda7fbddb567545f45c53042d9a77bab2942d75b6e3388778"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER188_TRANSFORM),
+        "2e6e5177fa7e14bb7d0c50706f5752cc7bf7ba2e45e8023ebc53f4ca3a6bb466"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER188_INIT),
+        "179202a088b6ed50956a1fa55093e59006080cddeeb46b753cca0c6ca340d045"
+    );
+    for exact in [
+        "headOrder 188 headX 47 headSig 57 headInterId 3719 grade 0x1.83f6ac882908dp-3/3fc83f6ac882908d",
+        "cAlias h:47:LEFT:TOP",
+        "lastIndex 1 maxIndex 1",
+        "relations 2 relationRows [head:x47:inter3719:LEFT:TOP",
+        "head:x48:inter3681:LEFT:TOP:state=false:false:HeadStemRelation",
+        "glyphs 1 selected [id485:g:540:722:5:73:0b7943a4496a48853182077400a16c28ba226f29a865c861e6e340210226a311]",
+        "existingCandidateStem true",
+        "existingBeamRelations []",
+        "allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 594 sigEdgesAfter 596 systemStemsBefore 77 systemStemsAfter 77",
+        "addedVertices [] addedEdges [source=headX47:target=existingCandidateStem:HeadStemRelation",
+        "source=headX48:target=existingCandidateStem:HeadStemRelation",
+        "addedSystemStems []",
+        "nextHeadOrder 189 nextHeadX 164 nextHeadSig 51",
+        "transformSourceSha256 2e6e5177fa7e14bb7d0c50706f5752cc7bf7ba2e45e8023ebc53f4ca3a6bb466",
+        "transformedProbeSha256 1f102875149c3b26cbc17d9f8344c33d3d789bd2093722633e7d8c041e8ac7f9",
+        "emittedBodySha256 3a77205b34b8b4eea8fe6da9404fc37c3531fbaf0dda63339c09eb8d303f4f82",
+        "baseOrder187RunnerSha256 b5f3635b1c364ead19243eb9c25d5388e558ee0ee268e54c63dc7a3c69111fad",
+        "baseOrder187FixtureSha256 62acbdbea32f228e829d9b49cec8b795308ab77307aea358091e446daf8820c8",
+        "freshRuns 2 freshRunsByteIdentical true",
+    ] {
+        assert!(
+            BACH_SYSTEM2_ORDER188_FIXTURE.contains(exact),
+            "missing Bach queue-188 oracle fragment: {exact}"
         );
     }
 }

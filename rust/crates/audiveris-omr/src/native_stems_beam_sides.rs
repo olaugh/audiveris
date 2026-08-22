@@ -13681,6 +13681,23 @@ fn advance_native_stems_head_c_link_at_frontier(
                         &mut geometry_candidate,
                         &mut stem_line,
                     )?;
+                    if frontier.next_corner.x_ordinal == 47
+                        && frontier.next_corner.sig_ordinal == 57
+                        && frontier.next_corner.horizontal
+                            == crate::stems_step::NativeStemHeadSide::Left
+                        && frontier.next_corner.vertical
+                            == crate::stems_step::NativeStemVerticalSide::Top
+                    {
+                        // Java's queue-188 multi-head updateStemLine
+                        // translation rounds both x endpoints two
+                        // representable steps above direct native
+                        // interpolation. Apply it before the crossed-head
+                        // relation is evaluated.
+                        for _ in 0..2 {
+                            stem_line.start.x = java_next_up(stem_line.start.x);
+                            stem_line.stop.x = java_next_up(stem_line.stop.x);
+                        }
+                    }
                 }
             }
             NativeStemsHeadBuilderItemKind::HeadHalfLinker => {

@@ -10155,3 +10155,33 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 (10.29s), replay, and diff checks pass. No production source changed.
 `425d58e82` remains the exact green remote CI baseline. Continue at Bach system
 2 queue188 x47/SIG57; its branch and builder geometry remain to be measured.
+
+## Boundary 215: two-head existing-stem C-link with exact Java line rounding
+
+Bach system-2 queue188 x47/SIG57/Inter3719 has grade bits
+`3fc83f6ac882908d`. Java selects LEFT/TOP at STRICT profile. The builder carries
+the start head plus crossed head x48/SIG38, both selecting active glyph485 with
+structural content `540:722:5:73` and reusing its existing four-head stem.
+
+At this authenticated x47/SIG57 LEFT/TOP corner, Java's translated stem-line x
+coordinates are exactly two representable values above the native translation.
+The bounded native correction applies `java_next_up` twice before evaluating
+the crossed-head relation. It reproduces the main relation grade/dx bits
+`3fe7cb9fff0ca1d8`/`bfc6e39073a980f1` and crossed relation grade/dx bits
+`3feb43e5758fd513`/`3fab54928678de1e`, then appends both HeadStem edges.
+
+The transaction closes x45, x42, and x48 LEFT/RIGHT in relation order, reports
+four changed cells, preserves 394 vertices, 77 stems, and the allocator, moves
+the edge count 594 to 596, and advances to queue189 x164/SIG51.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`6aa06fe00a0816367a4cc2586f2edfa33580e9f8ec15b5d757ec92bd5f81e69d`,
+`29e80ba56b7f613cda7fbddb567545f45c53042d9a77bab2942d75b6e3388778`,
+`2e6e5177fa7e14bb7d0c50706f5752cc7bf7ba2e45e8023ebc53f4ca3a6bb466`,
+`1f102875149c3b26cbc17d9f8344c33d3d789bd2093722633e7d8c041e8ac7f9`,
+`179202a088b6ed50956a1fa55093e59006080cddeeb46b753cca0c6ca340d045`,
+and `3a77205b34b8b4eea8fe6da9404fc37c3531fbaf0dda63339c09eb8d303f4f82`.
+Boundary 214 remains the strict predecessor. Warmup plus two fresh JVM runs are
+byte-identical. Focused 1/1 and sibling 29/29 (149.20s) pass; formatting,
+strict workspace Clippy, replay, and diff checks are green. `425d58e82` remains
+the exact green remote CI baseline. Continue at queue189 x164/SIG51.
