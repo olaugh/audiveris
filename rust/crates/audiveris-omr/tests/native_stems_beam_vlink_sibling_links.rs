@@ -120,6 +120,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113,
+        advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
@@ -293,6 +294,12 @@ const CARMEN_SYSTEM2_PHASE_TWO_ORDER0_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-carmen-system2-order0.sh");
 const CARMEN_SYSTEM2_PHASE_TWO_ORDER0_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-carmen-system2-order0.transform.awk");
+const CARMEN_SYSTEM3_PHASE_TWO_X1_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-carmen-system3-x1.txt");
+const CARMEN_SYSTEM3_PHASE_TWO_X1_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-carmen-system3-x1.sh");
+const CARMEN_SYSTEM3_PHASE_TWO_X1_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-carmen-system3-x1.transform.awk");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -13627,14 +13634,396 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
     }
     assert_eq!(system2_terminal.phase_two_index, 9);
 
+    let system3 = &phase_one.systems[2];
+    let system3_phase_two_zero = advance_native_stems_head_phase_two_append_retry(
+        &system3.carrier,
+        &prepared.components.head_corners.systems[2],
+        &prepared.components.head_reachability.systems[2],
+        &prepared.components.head_builders.systems[2],
+        &prepared.components.plans.systems[2],
+    )
+    .expect("Carmen system-3 phase-two queue 0 no-link");
+    assert_eq!(
+        (
+            system3_phase_two_zero.processed_head.x_ordinal,
+            system3_phase_two_zero.processed_head.sig_ordinal,
+            system3_phase_two_zero.returned_linked,
+            system3_phase_two_zero.state_after.phase_two_index,
+        ),
+        (26, 54, Some(false), 1)
+    );
+    let system3_phase_two_one =
+        advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1(
+            &system3_phase_two_zero.state_after,
+            &prepared.components.head_corners.systems[2],
+            &prepared.components.head_reachability.systems[2],
+            &prepared.components.stem_seed_glyphs[2].free_glyphs,
+            &prepared.components.head_builders.systems[2],
+            &prepared.components.plans.systems[2],
+            &prepared.stem_checker,
+            &system3.registry,
+        )
+        .expect("Carmen system-3 phase-two queue 1 reused-stem append");
+    let system3_phase_two_one_after = &system3_phase_two_one.continuation.state_after;
+    assert_eq!(
+        (
+            system3_phase_two_one.continuation.processed_head.x_ordinal,
+            system3_phase_two_one
+                .continuation
+                .processed_head
+                .sig_ordinal,
+            system3_phase_two_one.continuation.returned_linked,
+            system3_phase_two_one.continuation.closed_value_changes,
+            system3_phase_two_one_after.phase_two_index,
+        ),
+        (1, 53, Some(true), 0, 2)
+    );
+    assert_eq!(
+        system3_phase_two_one
+            .continuation
+            .side_decisions
+            .iter()
+            .map(|decision| (
+                decision.side,
+                decision.linked_before,
+                decision.closed_before,
+                decision.top_can_link,
+                decision.bottom_can_link,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                NativeStemHeadSide::Left,
+                false,
+                true,
+                Some(true),
+                Some(false),
+            ),
+            (
+                NativeStemHeadSide::Right,
+                false,
+                true,
+                Some(false),
+                Some(true),
+            ),
+        ]
+    );
+    assert_eq!(
+        system3_phase_two_one
+            .continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (3, 13, NativeStemHeadSide::Left),
+            (3, 13, NativeStemHeadSide::Right),
+            (6, 4, NativeStemHeadSide::Left),
+            (6, 4, NativeStemHeadSide::Right),
+            (7, 5, NativeStemHeadSide::Left),
+            (7, 5, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(
+        (
+            system3_phase_two_zero
+                .state_after
+                .beam_state
+                .sig
+                .vertices
+                .len(),
+            system3_phase_two_zero
+                .state_after
+                .beam_state
+                .sig
+                .edges
+                .len(),
+            system3_phase_two_zero
+                .state_after
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+        ),
+        (279, 323, 43)
+    );
+    assert_eq!(
+        system3_phase_two_one_after.beam_state.sig.vertices.len(),
+        system3_phase_two_zero
+            .state_after
+            .beam_state
+            .sig
+            .vertices
+            .len()
+    );
+    assert_eq!(
+        system3_phase_two_one_after.beam_state.sig.edges.len(),
+        system3_phase_two_zero
+            .state_after
+            .beam_state
+            .sig
+            .edges
+            .len()
+            + 1
+    );
+    assert_eq!(
+        system3_phase_two_one_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        system3_phase_two_zero
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len()
+    );
+    assert_eq!(
+        system3_phase_two_one_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        system3_phase_two_zero
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids
+    );
+
+    let x1_c_link = &system3_phase_two_one.c_link;
+    assert_eq!(x1_c_link.system_id, 3);
+    assert_eq!(x1_c_link.corner.x_ordinal, 1);
+    assert_eq!(x1_c_link.corner.sig_ordinal, 53);
+    assert_eq!(x1_c_link.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(x1_c_link.corner.vertical, NativeStemVerticalSide::Bottom);
+    assert_eq!((x1_c_link.last_index, x1_c_link.max_index), (2, 2));
+    assert_eq!(x1_c_link.selected_glyph_id, 182);
+    assert_eq!(
+        x1_c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 6 }
+    );
+    assert_eq!(
+        x1_c_link.create.candidate.bounds,
+        audiveris_image::section::Bounds {
+            x: 304,
+            y: 1_695,
+            width: 3,
+            height: 93,
+        }
+    );
+    assert_eq!(x1_c_link.create.candidate.weight, 265);
+    assert_eq!(x1_c_link.create.registration.glyph_id, 182);
+    assert!(x1_c_link.create.checker_result.is_none());
+    assert!(x1_c_link.create.mutation_order.is_empty());
+    let x1_stem = x1_c_link
+        .create
+        .stem
+        .as_ref()
+        .expect("Carmen x1 reused stem");
+    assert_eq!((x1_stem.stem_identity, x1_stem.glyph_id), (6, 182));
+    assert_eq!(x1_stem.grade.grade().to_bits(), 0x3fe9_1634_207a_e7b3);
+    assert_eq!(
+        x1_stem.geometry.ribbon_bounds,
+        JavaRectangle::new(304, 1_695, 4, 93)
+    );
+    assert_eq!(
+        x1_stem.geometry.median.start.x.to_bits(),
+        0x4073_196e_7e5d_6dc8
+    );
+    assert_eq!(
+        x1_stem.geometry.median.start.y.to_bits(),
+        0x409a_7c00_0000_0000
+    );
+    assert_eq!(
+        x1_stem.geometry.median.stop.x.to_bits(),
+        0x4073_17cf_db3d_2959
+    );
+    assert_eq!(
+        x1_stem.geometry.median.stop.y.to_bits(),
+        0x409b_f000_0000_0000
+    );
+    assert_eq!(
+        x1_stem.geometry.mean_thickness.to_bits(),
+        0x4006_cbb2_ecbb_2ecc
+    );
+    assert_eq!(x1_c_link.stem_vertex.0, 242);
+    assert_eq!(x1_c_link.head_stem_edge.0, 323);
+    assert_eq!(x1_c_link.relation.grade.to_bits(), 0x3fee_44da_1a6b_455d);
+    assert_eq!(x1_c_link.relation.dx.to_bits(), 0xbfa5_8edf_7166_c000);
+    let x1_extension = x1_c_link
+        .relation
+        .extension_point
+        .expect("Carmen x1 relation extension");
+    assert_eq!(x1_extension.x.to_bits(), 0x4073_11da_3d5d_9492);
+    assert_eq!(x1_extension.y.to_bits(), 0x409a_5800_0000_0000);
+    assert_eq!(x1_c_link.additional_head_relations.len(), 1);
+    let x1_crossed = &x1_c_link.additional_head_relations[0];
+    assert_eq!(
+        (
+            x1_crossed.corner.x_ordinal,
+            x1_crossed.corner.sig_ordinal,
+            x1_crossed.corner.horizontal,
+            x1_crossed.head_stem_edge.0,
+            x1_crossed.appended,
+        ),
+        (3, 13, NativeStemHeadSide::Left, 198, false)
+    );
+    assert_eq!(x1_crossed.relation.grade.to_bits(), 0x3fed_dabd_ac73_b24b);
+    assert_eq!(x1_crossed.relation.dx.to_bits(), 0xbfaa_8ad3_1182_7e7a);
+    let x1_crossed_extension = x1_crossed
+        .relation
+        .extension_point
+        .expect("Carmen crossed x3 relation extension");
+    assert_eq!(x1_crossed_extension.x.to_bits(), 0x4073_116b_1a83_7da3);
+    assert_eq!(x1_crossed_extension.y.to_bits(), 0x409a_8000_0000_0000);
+    assert!(x1_c_link.beam_relations.is_empty());
+    assert!(x1_c_link.beam_stem_edges.is_empty());
+    assert!(x1_c_link.linked_b_linkers.is_empty());
+    assert!(!x1_c_link.s_linked_before);
+    assert!(x1_c_link.s_linked_after);
+    assert_eq!(x1_c_link.closed_cell_changes, 0);
+    assert!(x1_c_link.returned_linked);
+    assert!(x1_c_link.terminal_undefined_side.is_none());
+    assert!(x1_c_link.following_side_transactions.is_empty());
+    let x1_edge = &system3_phase_two_one_after.beam_state.sig.edges[323];
+    assert_eq!(x1_edge.kind, NativeSigRelationKind::HeadStem);
+    assert_eq!(x1_edge.target, 242);
+    assert_eq!(
+        x1_edge
+            .support
+            .as_ref()
+            .expect("Carmen x1 support")
+            .grade
+            .to_bits(),
+        0x3fee_44da_1a6b_455d
+    );
+    let x1_payload = x1_edge
+        .head_stem
+        .as_ref()
+        .expect("Carmen x1 HeadStem payload");
+    assert_eq!(x1_payload.head_side, NativeStemHeadSide::Right);
+    assert_eq!(x1_payload.dx.to_bits(), 0xbfa5_8edf_7166_c000);
+    assert_eq!(x1_payload.dy.to_bits(), 0);
+    assert_eq!(x1_payload.consistency.to_bits(), 0x3ff9_4e5e_0a72_f054);
+    assert_eq!(
+        x1_payload.extension_point.x.to_bits(),
+        0x4073_11da_3d5d_9492
+    );
+    assert_eq!(
+        x1_payload.extension_point.y.to_bits(),
+        0x409a_5800_0000_0000
+    );
+
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM3_PHASE_TWO_X1_FIXTURE.as_bytes()),
+        "f9656d9bb2a917fbd059c58c0692803d8d8fd3c714ed95d3ac981d9e3604c8e0"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM3_PHASE_TWO_X1_RUNNER),
+        "e0bf5408f12c652e530990c35bce21ca3ec64bd610d02139919198133dccb4f8"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM3_PHASE_TWO_X1_TRANSFORM),
+        "a452fbc760da01105bcd445af2461a6d0fcc7dbfad35fe31ff66d41fc7b2b79e"
+    );
+    let x1_rows = CARMEN_SYSTEM3_PHASE_TWO_X1_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(x1_rows.len(), 4);
+    for exact in [
+        "stemsheadphase2carmens3x1frontier headInterId 2505 corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 2 maxIndex 2 relations 2",
+        "head#2505-Clnk-BR:grade3fee44da1a6b455d:dxbfa58edf7166c000",
+        "head#2426-Clnk-BL:grade3feddabdac73b24b:dxbfaa8ad311827e7a",
+        "glyphs 2 selected [id495:304:1695:3:93:weight265,id3617:306:1695:1:93:weight93]",
+        "existingStem id3949:glyphid495:304:1695:3:93:weight265:grade3fe91634207ae7b3",
+        "verticesBefore 279 edgesBefore 323 allocatorBefore 3985",
+        "stemsheadphase2carmens3x1result headInterId 2505",
+        "reusedExisting true applied grade3fee44da1a6b455d:dxbfa58edf7166c000",
+        "consistency3ff94e5e0a72f054",
+        "verticesBefore 279 verticesAfter 279 edgesBefore 323 edgesAfter 324 allocatorBefore 3985 allocatorAfter 3985",
+        "queueIndex 1 headX 1 headSig 53 headInterId 2505 grade 3fcace942310a4a7 append true",
+        "decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=true:branch=BottomOnly] returned true",
+        "sideChanges [x1:sig53:RIGHT:false:true->true:true]",
+        "sigVerticesBefore 279 sigVerticesAfter 279 sigEdgesBefore 323 sigEdgesAfter 324 systemStemsBefore 43 systemStemsAfter 43 allocatorBefore 3985 allocatorAfter 3985",
+    ] {
+        assert!(
+            CARMEN_SYSTEM3_PHASE_TWO_X1_FIXTURE.contains(exact),
+            "missing Carmen system-3 x1 oracle fragment: {exact}"
+        );
+    }
+    let x1_summary = x1_rows[3];
+    assert_eq!(
+        head_field(x1_summary, "schema"),
+        "stems-head-phase-two-carmen-system3-x1-v1"
+    );
+    assert_eq!(head_field(x1_summary, "rows"), "3");
+    assert_eq!(
+        head_field(x1_summary, "runnerSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM3_PHASE_TWO_X1_RUNNER)
+    );
+    assert_eq!(
+        head_field(x1_summary, "retargetTransformSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM3_PHASE_TWO_X1_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(x1_summary, "baseTransformSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X14_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(x1_summary, "initSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X14_INIT)
+    );
+    assert_eq!(
+        head_field(x1_summary, "basePhaseTwoRunnerSha256"),
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_RUNNER)
+    );
+    assert_eq!(
+        head_field(x1_summary, "basePhaseTwoFixtureSha256"),
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(x1_summary, "emittedBodySha256"),
+        "e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f"
+    );
+    assert_eq!(
+        head_field(x1_summary, "semanticPassSha256"),
+        "e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f"
+    );
+    assert_eq!(head_field(x1_summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(x1_summary, "nativeScope"),
+        "BoundedCarmenSystem3PhaseTwoX1ReusedStemAppend"
+    );
+    assert_eq!(
+        head_field(x1_summary, "javaEvidence"),
+        "ReturnedBeforeSystem3RetryIndex2"
+    );
+
     let phase_two_error = prepared
         .drive_all_system_head_linking_phase2()
-        .expect_err("Carmen phase 2 remains fail-closed at its first append-reuse branch")
+        .expect_err("Carmen phase 2 remains fail-closed at its next append-reuse branch")
         .to_string();
     assert!(phase_two_error.contains("HEADS phase-2 page drive"));
     assert!(phase_two_error.contains("system 3"), "{phase_two_error}");
     assert!(
         phase_two_error.contains("unported reuseStem append path"),
+        "{phase_two_error}"
+    );
+    assert!(
+        phase_two_error.contains("queue 3 head x0/SIG3"),
         "{phase_two_error}"
     );
 }

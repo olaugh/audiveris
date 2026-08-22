@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first one hundred and eighty-nine semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through its measured SIDES/STUMPS, phase-1, phase-2, and generic-finalizer gaps. Boundary 184 begins wider-corpus closure on Zizi; Boundary 185 completes transactional Zizi STEMS plus schema-1 publication; Boundary 186 carries Carmen system 1's equal-stump dual corners into its exact two-head retry queue; Boundary 187 reproduces Java's generic show-stopping-gap no-link return; Boundary 188 ports relation-only crossed-head expansion plus Java's recursive close-head/gap feasibility and completes Carmen phase 1 across all five systems; Boundary 189 ports final-relation rejection and exhausts all nine Carmen system-2 phase-2 retries without mutation. The next live fail-closed frontier is Carmen system 3 phase-2 queue 1's real `reuseStem` append.
+The first one hundred and ninety semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through its measured SIDES/STUMPS, phase-1, phase-2, and generic-finalizer gaps. Boundary 184 begins wider-corpus closure on Zizi; Boundary 185 completes transactional Zizi STEMS plus schema-1 publication; Boundary 186 carries Carmen system 1's equal-stump dual corners into its exact two-head retry queue; Boundary 187 reproduces Java's generic show-stopping-gap no-link return; Boundary 188 ports relation-only crossed-head expansion plus Java's recursive close-head/gap feasibility and completes Carmen phase 1 across all five systems; Boundary 189 ports final-relation rejection and exhausts all nine Carmen system-2 phase-2 retries without mutation; Boundary 190 executes Carmen system 3 queue 1's real reused-stem append from native-carried identities. The next live fail-closed frontier is Carmen system 3 phase-2 queue 3 x0/SIG3's next real `reuseStem` append.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula and Allegretto** | One hundred and eighty-nine exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through generic finalization; Boundary 184 fixes Java-order two-side closure; Boundary 185 completes Zizi; Boundary 186 consumes Carmen system 1's shared-stump dual-corner prefix; Boundary 187 consumes Carmen system 2 queue 70's gap-bounded no-link branch; Boundary 188 completes Carmen phase 1 across all five systems; Boundary 189 exhausts all nine Carmen system-2 phase-2 no-links. | Instrument and grade Carmen system 3 phase-2 queue 1's real `reuseStem` append, then continue wider-corpus completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula and Allegretto** | One hundred and ninety exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 carry Allegretto through generic finalization; Boundary 184 fixes Java-order two-side closure; Boundary 185 completes Zizi; Boundary 186 consumes Carmen system 1's shared-stump dual-corner prefix; Boundary 187 consumes Carmen system 2 queue 70's gap-bounded no-link branch; Boundary 188 completes Carmen phase 1 across all five systems; Boundary 189 exhausts all nine Carmen system-2 phase-2 no-links; Boundary 190 appends Carmen system 3 queue 1's exact reused-stem relation. | Instrument and grade Carmen system 3 phase-2 queue 3 x0/SIG3's next real `reuseStem` append, then continue wider-corpus completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -4919,6 +4919,45 @@ the transformed HeadLinker SHA-256 is
 Focused 1/1 and full sibling 25/25 (152.46s) pass. Formatting, strict
 all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
 pass. `425d58e82` remains the exact fully green remote CI baseline.
+
+## Boundary 190: Carmen system-3 phase-2 reused-stem append
+
+The bounded phase-2 reused-stem transaction is now shared across authenticated
+systems instead of naming Allegretto in its implementation. Carmen system 3
+queue 0 x26/SIG54 first returns no-link without mutation. Queue 1
+x1/SIG53 then selects RIGHT/BOTTOM (`lastIndex=maxIndex=2`), resolves native
+glyph 182 to already attached native Stem identity 6 / vertex 242, and appends
+only the missing x1 HeadStem edge 323. Relation grade/dx/consistency bits are
+`3fee44da1a6b455d` / `bfa58edf7166c000` / `3ff94e5e0a72f054`.
+The crossed x3/SIG13 relation remains the pre-existing edge 198.
+
+The graph changes from 279/323 to 279/324 while 43 system stems and the
+allocator remain unchanged. Java-order closure writes x3, x6, and x7
+LEFT-then-RIGHT; all six are idempotent. Only x1 RIGHT changes from
+unlinked/closed to linked/closed, and the phase-two cursor advances from 1 to
+2. The production page driver consumes queue 2's ordinary no-link and now
+fails closed precisely at queue 3 x0/SIG3's next real append.
+
+The three-row-plus-summary fixture is 6 lines / 3,915 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body/semantic SHA-256 values are
+`e0bf5408f12c652e530990c35bce21ca3ec64bd610d02139919198133dccb4f8`,
+`a452fbc760da01105bcd445af2461a6d0fcc7dbfad35fe31ff66d41fc7b2b79e`,
+`f9656d9bb2a917fbd059c58c0692803d8d8fd3c714ed95d3ac981d9e3604c8e0`,
+`e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f`,
+and
+`e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f`.
+The runner pins Boundary 189's runner/fixture at
+`d3c7fd2c2183a4b296903006938894f0e1204e5f3c6c8d879ee011ad69baa9cb` /
+`51ffc157e92fafce82f8bdc2797e7cb2947e140a70587cf0c1fe87b7c6e9b5e0`
+and the reused Allegretto x14 transform/init at
+`69258e54539f10d7771718a8660b2e012db286c4cfdc7285876831da64f77c92` /
+`b7c2b721836f8238295dfe0ec01b5add5b1b181a82876fa3420c255a205213b8`.
+
+Focused 1/1 and full sibling 25/25 (156.99s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (14.82s), oracle shell/AWK syntax,
+and diff checks pass. `425d58e82` remains the exact fully green remote CI
+baseline.
 
 
 

@@ -5687,7 +5687,10 @@ pub fn advance_native_stems_head_phase_two_append_retry(
             )? {
                 return Err(stage(
                     "HEADS-phase2-append",
-                    "phase-2 link attempt reaches the unported reuseStem append path",
+                    format!(
+                        "phase-2 queue {queue_index} head x{}/SIG{} reaches the unported reuseStem append path",
+                        head_ref.x_ordinal, head_ref.sig_ordinal
+                    ),
                 ));
             }
         }
@@ -5770,7 +5773,8 @@ pub fn advance_native_stems_head_phase_two_append_retry(
 }
 
 #[derive(Clone, Copy)]
-struct NativeAllegrettoPhaseTwoReusedStemRetry {
+struct NativePhaseTwoReusedStemRetry {
+    system_id: usize,
     queue_index: usize,
     x_ordinal: usize,
     sig_ordinal: usize,
@@ -5812,7 +5816,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
-    advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_stem(
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
         carrier,
         head_corners,
         head_reachability,
@@ -5821,7 +5825,8 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
         plans,
         checker,
         bridge,
-        NativeAllegrettoPhaseTwoReusedStemRetry {
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
             queue_index: 1,
             x_ordinal: 14,
             sig_ordinal: 50,
@@ -5862,7 +5867,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13(
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
-    advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_stem(
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
         carrier,
         head_corners,
         head_reachability,
@@ -5871,7 +5876,8 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13(
         plans,
         checker,
         bridge,
-        NativeAllegrettoPhaseTwoReusedStemRetry {
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
             queue_index: 2,
             x_ordinal: 13,
             sig_ordinal: 0,
@@ -5911,7 +5917,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
 ) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
-    advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_stem(
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
         carrier,
         head_corners,
         head_reachability,
@@ -5920,7 +5926,8 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113
         plans,
         checker,
         bridge,
-        NativeAllegrettoPhaseTwoReusedStemRetry {
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
             queue_index: 4,
             x_ordinal: 113,
             sig_ordinal: 75,
@@ -5942,11 +5949,17 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113
     )
 }
 
+/// Execute Carmen system 3's first successful phase-two append retry.
+///
+/// Queue zero is a no-link. Queue one reaches x1/SIG53 RIGHT/BOTTOM, resolves
+/// active glyph 182 to the already attached native Stem identity 6, preserves
+/// crossed x3's existing relation, and appends only x1's missing HeadStem
+/// edge.
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
 )]
-fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_stem(
+pub fn advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1(
     carrier: &NativeStemsHeadPhase1Carrier,
     head_corners: &NativeStemsHeadCornerSystem,
     head_reachability: &NativeStemsHeadCornerReachabilitySystem,
@@ -5955,7 +5968,53 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
     plans: &NativeStemsBeamLinkPlanSystem,
     checker: &NativeStemsBeamStemCheckerContext,
     bridge: &impl NativeStemsGlyphRegistryAuthority,
-    expected: NativeAllegrettoPhaseTwoReusedStemRetry,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
+            queue_index: 1,
+            x_ordinal: 1,
+            sig_ordinal: 53,
+            grade_bits: 0x3fca_ce94_2310_a4a7,
+            can_link: (true, false, false, true),
+            left_top_returns_minus_one: true,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 182,
+            stem_identity: 6,
+            stem_vertex: 242,
+            relation_grade_bits: 0x3fee_44da_1a6b_455d,
+            relation_dx_bits: 0xbfa5_8edf_7166_c000,
+            crossed_x_ordinal: 3,
+            crossed_sig_ordinal: 13,
+            crossed_edge: 198,
+        },
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+    expected: NativePhaseTwoReusedStemRetry,
 ) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
     if !carrier.frontier_consumed || carrier.current_index != carrier.heads.len() {
         return Err(stage(
@@ -5971,7 +6030,7 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
             "phase-2 cursor is past the authenticated queue",
         )
     })?;
-    if head_corners.system_id != 3
+    if head_corners.system_id != expected.system_id
         || head_reachability.system_id != head_corners.system_id
         || queue_index != expected.queue_index
         || head_ref.x_ordinal != expected.x_ordinal
@@ -5979,7 +6038,7 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
     {
         return Err(stage(
             "HEADS-phase2-CLink",
-            "carrier is not the authenticated Allegretto system-3 shared-stem retry",
+            "carrier is not the authenticated shared-stem phase-2 retry",
         ));
     }
     let head_position = carrier

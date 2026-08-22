@@ -9315,3 +9315,42 @@ the transformed HeadLinker SHA-256 is
 Focused 1/1 and full sibling 25/25 (152.46s) pass. Formatting, strict
 all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
 pass. `425d58e82` remains the exact fully green remote CI baseline.
+
+## Boundary 190: Carmen system-3 phase-2 reused-stem append
+
+The bounded phase-2 reused-stem transaction is now shared across authenticated
+systems instead of naming Allegretto in its implementation. Carmen system 3
+queue 0 x26/SIG54 first returns no-link without mutation. Queue 1
+x1/SIG53 then selects RIGHT/BOTTOM (`lastIndex=maxIndex=2`), resolves native
+glyph 182 to already attached native Stem identity 6 / vertex 242, and appends
+only the missing x1 HeadStem edge 323. Relation grade/dx/consistency bits are
+`3fee44da1a6b455d` / `bfa58edf7166c000` / `3ff94e5e0a72f054`.
+The crossed x3/SIG13 relation remains the pre-existing edge 198.
+
+The graph changes from 279/323 to 279/324 while 43 system stems and the
+allocator remain unchanged. Java-order closure writes x3, x6, and x7
+LEFT-then-RIGHT; all six are idempotent. Only x1 RIGHT changes from
+unlinked/closed to linked/closed, and the phase-two cursor advances from 1 to
+2. The production page driver consumes queue 2's ordinary no-link and now
+fails closed precisely at queue 3 x0/SIG3's next real append.
+
+The three-row-plus-summary fixture is 6 lines / 3,915 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body/semantic SHA-256 values are
+`e0bf5408f12c652e530990c35bce21ca3ec64bd610d02139919198133dccb4f8`,
+`a452fbc760da01105bcd445af2461a6d0fcc7dbfad35fe31ff66d41fc7b2b79e`,
+`f9656d9bb2a917fbd059c58c0692803d8d8fd3c714ed95d3ac981d9e3604c8e0`,
+`e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f`,
+and
+`e4774f68f89c64a93d52bda54944a19c9ab992ca5c8eda2741c168ff2c3a496f`.
+The runner pins Boundary 189's runner/fixture at
+`d3c7fd2c2183a4b296903006938894f0e1204e5f3c6c8d879ee011ad69baa9cb` /
+`51ffc157e92fafce82f8bdc2797e7cb2947e140a70587cf0c1fe87b7c6e9b5e0`
+and the reused Allegretto x14 transform/init at
+`69258e54539f10d7771718a8660b2e012db286c4cfdc7285876831da64f77c92` /
+`b7c2b721836f8238295dfe0ec01b5add5b1b181a82876fa3420c255a205213b8`.
+
+Focused 1/1 and full sibling 25/25 (156.99s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (14.82s), oracle shell/AWK syntax,
+and diff checks pass. `425d58e82` remains the exact fully green remote CI
+baseline.
