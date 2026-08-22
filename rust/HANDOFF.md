@@ -10575,3 +10575,32 @@ The strict queue203 runner/fixture predecessors remain pinned. Warmup plus two
 fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, deterministic
 replay, and diff checks pass. Continue at queue205 x24/SIG210.
+
+## Boundary 232: RIGHT/BOTTOM existing-stem two-item C-link
+
+Bach system-2 queue205 x24/SIG210 has grade bits `3fc5feedd5bd0624`.
+Profiles select RIGHT/BOTTOM. The two-item builder selects active candidate
+glyph `416:875:6:59` plus support glyph `418:875:3:59`, then resolves the
+candidate to the existing five-head stem incident to x24/RIGHT and
+x25/x27/x28/x29 on LEFT. Java reuses the stem, adds only x24's HeadStem edge,
+moves SIG edges 598 to 599, and advances to queue206 x118/SIG211. Vertices
+remain 394, system stems remain 77, and allocator, glyph index, undef, and
+unlinked state do not change.
+
+The native relation matches Java exactly: grade bits `3fe896f1c36b9f48`, dx
+bits `bfc4f7aef51fecb5`, and extension bits
+`407a2d0b45d0b5c3:408b680000000000`. Native records x29 LEFT/RIGHT before
+x25, x27, and x28 LEFT/RIGHT in incident order; all eight sibling closures are
+idempotent, so `closedCellChanges=0`. No production source changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`7b9b4ea178041618cab27d29b0cdcd8e175a75328c62a1843906e19efb7e9b3e`,
+`ae770812470954f0f00f2228a0c3b213f7d33ac5dc474fe6124d8f308e29e69b`,
+`ebd1afa4600b2cdad0105d78cbacd2235dbefa5e7d77d4b20eefa6699f2b674b`,
+`11bced10ebe7d09a718777ac30eca681a03cf9e2c4917e86805f8ac7b279b873`,
+`4e4771086ff5f6ac5aa1a43401a8145ab1f96b0d215468390341dda4fc9dabc9`,
+and `119cf927f600d12753d3d25221fa0a194566b50ee1346c3370236796905bd52c`.
+The strict queue204 runner/fixture predecessors remain pinned. Warmup plus two
+fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, deterministic
+replay, and diff checks pass. Continue at queue206 x118/SIG211.
