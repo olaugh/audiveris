@@ -10371,3 +10371,29 @@ Boundary 222 is strictly pinned; warmup plus two fresh JVM runs are
 byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
 Clippy, deterministic replay, and diff checks pass. Continue at queue197
 x30/SIG95.
+
+## Boundary 224: shared-stump RIGHT undef after rejected LEFT C-link
+
+Bach system-2 queue197 x30/SIG95/Inter3796 has grade bits
+`3fc6fcdd84b3b8f4`. Every profile reports LEFT `TopOnly` and RIGHT `Both`.
+Java rejects the LEFT/TOP C-link, observes one shared non-null stump at both
+RIGHT corners, records RIGHT as undefined, and returns false. There are no
+side or closure writes and no SIG, stem, glyph-index, or allocator mutation;
+the 394/597 SIG and 77 stems carry to queue198 x50/SIG194.
+
+The generic native path already matches: its first continuation exposes the
+LEFT/TOP candidate, and the complete C-link-or-no-link driver rejects that
+candidate before taking the RIGHT shared-stump exit. The gate pins the new
+RIGHT undefined side and phase-2 unlinked-head entry as well as the unchanged
+owned graph/registry state. No production source changed.
+
+Fixture/runner/transform/transformed-probe/init/body hashes are
+`b892f0cb13a466a5453dfc77c3fe609f5cf6d8df198a75f8a8ca16280b441dcb`,
+`433ebe809905a7d80fbe1773fe2e293a7c63dc773daefaca350cd5ce7375245b`,
+`787d7201a0bc8398d4fede9a8d5859d7db1ab17353eba910ba3b8b527930bce1`,
+`d40bc67fdfb596f08ac15c03941a7bc415f6884a5a6ebd39f4171fb7e96437d6`,
+`ebb5747c2a5e29c7506c28d47a34ac1f3ae1a912a4e0fe8ed84b45bd255def63`,
+and `977b43c9cb1db94cdc3c86f7b4a83984d84a6b60036a88c1a64ecdbc633e3e96`.
+Boundary 223 is strictly pinned; warmup plus two fresh runs are identical.
+Focused 1/1, all 29 sibling tests (151.84s), formatting, strict workspace
+Clippy, replay, and diff checks pass. Continue at queue198 x50/SIG194.
