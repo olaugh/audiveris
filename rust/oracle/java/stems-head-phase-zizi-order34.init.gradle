@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+
+    def outputDir = app.layout.buildDirectory.dir('rust-head-zizi-order34/classes')
+    app.tasks.register('compileStemsHeadZiziOrder34Probe', JavaCompile) {
+        source = file(providers.gradleProperty('ziziOrder34ProbeSource').get())
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+
+    app.tasks.register('stemsHeadZiziOrder34Probe', JavaExec) {
+        dependsOn 'compileStemsHeadZiziOrder34Probe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsHeadPhaseTwoPageProbe'
+        workingDir = app.projectDir
+        maxHeapSize = '48g'
+        jvmArgs '-XX:+UnlockExperimentalVMOptions', '-XX:+UseEpsilonGC'
+        systemProperty 'logback.configurationFile',
+                "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        args = ["${gradle.rootProject.projectDir}/data/examples/zizi.png"]
+    }
+}

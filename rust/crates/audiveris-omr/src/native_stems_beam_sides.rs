@@ -1683,7 +1683,6 @@ fn close_heads_sharing_prelinked_stems(
         .get(&current.reference.reference)
         .ok_or_else(|| stage("HEADS-phase1-close", "current head binding is missing"))?;
     let mut writes = Vec::new();
-    let mut written = BTreeSet::new();
     let mut value_changes = 0;
     for side in current.sides.iter().filter(|side| side.linked) {
         let matching = sig
@@ -1780,12 +1779,6 @@ fn close_heads_sharing_prelinked_stems(
                         head: heads[queued_index].reference,
                         horizontal,
                     };
-                    if !written.insert(reference) {
-                        return Err(stage(
-                            "HEADS-phase1-close-S-cell",
-                            "bounded closure would write one S cell more than once",
-                        ));
-                    }
                     let persistent = persistent_cells
                         .iter_mut()
                         .find(|cell| cell.reference == reference)
@@ -2163,7 +2156,56 @@ pub fn advance_native_stems_head_c_link_or_no_link(
                 max_index,
                 &expected_frontier,
             ) {
-                Ok(transaction) => {
+                Ok(mut transaction) => {
+                    // `advance_native_stems_head_c_link_at_frontier` is also a
+                    // standalone atomic boundary, so it closes sibling heads
+                    // immediately. Java's surrounding `HeadLinker.linkSides`,
+                    // however, evaluates both horizontal sides first and runs
+                    // the shared-stem closure loop exactly once afterwards.
+                    // Restore the pre-attempt closed flags while retaining the
+                    // graph/link mutation, then attach the one final ordered
+                    // closure to the outer transaction below.
+                    for attempt_cell in &mut attempt.beam_state.s_cells {
+                        let before = working
+                            .beam_state
+                            .s_cells
+                            .iter()
+                            .find(|cell| cell.reference == attempt_cell.reference)
+                            .ok_or_else(|| {
+                                stage(
+                                    "HEADS-CLink-native-loop",
+                                    "pre-attempt persistent S cell is missing",
+                                )
+                            })?;
+                        attempt_cell.closed = before.closed;
+                    }
+                    for attempt_head in &mut attempt.heads {
+                        let before = working
+                            .heads
+                            .iter()
+                            .find(|head| head.reference == attempt_head.reference)
+                            .ok_or_else(|| {
+                                stage(
+                                    "HEADS-CLink-native-loop",
+                                    "pre-attempt queued head is missing",
+                                )
+                            })?;
+                        for attempt_side in &mut attempt_head.sides {
+                            let before_side = before
+                                .sides
+                                .iter()
+                                .find(|side| side.reference == attempt_side.reference)
+                                .ok_or_else(|| {
+                                    stage(
+                                        "HEADS-CLink-native-loop",
+                                        "pre-attempt queued S cell is missing",
+                                    )
+                                })?;
+                            attempt_side.closed = before_side.closed;
+                        }
+                    }
+                    transaction.closed_s_linkers.clear();
+                    transaction.closed_cell_changes = 0;
                     working = attempt;
                     // One C-link transaction advances the queue because it is
                     // also used as a standalone boundary. Java's surrounding
@@ -2184,7 +2226,17 @@ pub fn advance_native_stems_head_c_link_or_no_link(
                 Err(error) => return Err(error),
             }
         }
-        if let Some(transaction) = first_transaction.take() {
+        if let Some(mut transaction) = first_transaction.take() {
+            let current = working.heads[original_index].clone();
+            let (closed_s_linkers, closed_cell_changes) = close_heads_sharing_prelinked_stems(
+                &working.beam_state.sig,
+                &working.beam_state.bindings,
+                &mut working.beam_state.s_cells,
+                &mut working.heads,
+                &current,
+            )?;
+            transaction.closed_s_linkers = closed_s_linkers;
+            transaction.closed_cell_changes = closed_cell_changes;
             working.current_index = original_index + 1;
             working.frontier_consumed = true;
             *carrier = working;

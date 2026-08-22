@@ -9045,6 +9045,49 @@ The runner directly pins Boundary 182's x113 runner/fixture at
 
 Focused 1/1 (3.86s), full sibling 20/20 (153.23s), formatting, strict
 all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
-pass. Boundary 179 remains the exact fully green remote baseline; no exact
-Boundary-182 workflows were visible at this check. Resume by widening the
-completed generic STEMS drive and finalizer to the next corpus system/page.
+pass. Boundary 179 remained the exact fully green remote baseline at that
+check; Boundary 184 below begins the wider-corpus drive.
+
+## Boundary 184: Zizi system-1 duplicate-idempotent closure
+
+The first Zizi production drive exposed a generic `HeadLinker.linkSides`
+ordering mismatch at system 1 head order 34, x26/SIG106/Java Inter 1055. Both
+sides start open. LEFT selects `BottomOnly` and shares Java Stem 1690 with x28
+LEFT; RIGHT selects `TopOnly` and shares Stem 1691 with x28 RIGHT. Java applies
+both C-link mutations before one shared-stem closure loop, so it writes x28
+LEFT/RIGHT false-to-true and then repeats x28 LEFT/RIGHT true-to-true through
+the second stem. The exact four-write order has two value changes.
+
+The generic native two-side driver now retains each successful inner C-link's
+graph/link mutation while restoring its provisional closed flags, clears the
+child transaction's premature closure evidence, and runs the shared-stem
+closure once after both horizontal sides. Closure still suppresses duplicate
+heads within one stem, but no longer rejects the same S cell reached through
+two distinct stems. The result keeps 238 vertices and 44 system stems, advances
+edges 242 to 244, leaves the native allocator unchanged, and reaches queue 35
+before x68/SIG102. Java allocator 1693 remains oracle evidence only and is not
+imported as native identity.
+
+The dedicated one-row Java oracle is byte-identical across warmup plus two
+fresh runs. Fixture/runner/transform/init/probe/body SHA-256 values are
+`0970b0dafe3a456d30e72b55a2716205e06caa4a93367e9390f00263139117f6`,
+`de07f1e244641a2f9f41379b871595201b5158428e28d0f1701927b7221b7f90`,
+`db0196bc8088e45ee550e7cc595f799bdcda079ce595c1bbf70c5994d06965ca`,
+`55836b16d632f805b78427fb2c969becffb8f2c97df1c361d47be673fe169ca2`,
+`f14692de5a59a0153ed58ded0cf18d5f736e57e327f3cf7fa5e26b9cfe0e3d4e`,
+and `670de47539abe7f140f66fe77e812bb53ddc42982fb5a95a712ec56c71d88313`.
+The runner pins Boundary 183's finalize runner/fixture at
+`abafa7d183ae151baa7ed4d8005257c562e0c49fb939fe931a7571994d70d890` /
+`cfb9e6011ed29aa30e6e90db6eeae931a3a6533d7339d80519a5ddd650c0ff0c`.
+
+Focused 1/1, full sibling 21/21 (146.80s), formatting, strict all-feature
+workspace Clippy, oracle shell syntax, and diff checks pass. Commit
+`f4629fa1d984d497b203431395a1945c16c184c8` is the current exact fully green
+remote baseline: Build & Test 32545226391 and Rust port 32545226371 both
+succeeded. The production page drive now clears Zizi system 1 and fails closed
+at system 2 queue 107, x89/SIG64 RIGHT/TOP, builder 356 profile 1/1. Its three
+items are the x89 start half-linker, builder-356 filament-0 chunk, and
+x94/SIG61 LEFT/TOP target half-linker; x90/SIG55 LEFT is already undefined.
+That is the next measured branch. The un-emitted system-1 suffix is exercised
+by the production drive but is not claimed as independently frozen Java
+evidence.

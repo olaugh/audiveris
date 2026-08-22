@@ -255,6 +255,14 @@ const ALLEGRETTO_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-allegretto-v1.txt");
 const ALLEGRETTO_FINALIZE_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-finalize-allegretto.sh");
+const ZIZI_SYSTEM1_ORDER34_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-zizi-system1-order34.txt");
+const ZIZI_SYSTEM1_ORDER34_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-zizi-system1-order34.sh");
+const ZIZI_SYSTEM1_ORDER34_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-zizi-order34.transform.awk");
+const ZIZI_SYSTEM1_ORDER34_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-zizi-order34.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -11947,6 +11955,274 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         "BoundedSnapshotMinimizedG1RetainedGlyphAllegrettoSystem3Order61TwoChunkBeamCreatedStem"
     );
     assert_eq!(field("javaEvidence"), "ReturnedBeforeSixtyThirdHead");
+}
+
+/// Zizi's first wider-corpus gap links the same sibling head through two
+/// distinct stems. Java therefore writes that sibling's LEFT/RIGHT S cells
+/// twice: the first pair changes false to true and the second pair is an
+/// intentional idempotent true-to-true write. The native closure must retain
+/// that exact order instead of rejecting the second stem globally.
+#[test]
+fn zizi_system1_order34_repeats_cross_stem_closure_writes() {
+    let path = repo_root().join("data/examples/zizi.png");
+    let grid = recognize_grid_lines(path).expect("Zizi GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Zizi HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Zizi STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Zizi BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Zizi LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Zizi HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Zizi native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Zizi post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(0);
+    let head_corners = &prepared.components.head_corners.systems[0];
+    let head_reachability = &prepared.components.head_reachability.systems[0];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[0];
+    let head_builders = &prepared.components.head_builders.systems[0];
+    let plans = &prepared.components.plans.systems[0];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[0];
+
+    while start.carrier.current_index < 34 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Zizi continuation before queue 34");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Zizi C-link before queue 34");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+
+    if start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Zizi continuation to queue-34 C-link frontier");
+        start.carrier = *continuation.state_after;
+    }
+
+    assert_eq!(start.carrier.current_index, 34);
+    assert!(!start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.frontier.head.x_ordinal, 26);
+    assert_eq!(start.carrier.frontier.head.sig_ordinal, 106);
+    let vertices_before = start.carrier.beam_state.sig.vertices.len();
+    let edges_before = start.carrier.beam_state.sig.edges.len();
+    let stems_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let allocator_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    assert_eq!(
+        (vertices_before, edges_before, stems_before),
+        (238, 242, 44)
+    );
+
+    let transaction = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Zizi queue-34 dispatch")
+    .expect("Zizi queue-34 links both horizontal sides");
+
+    assert_eq!(transaction.corner.x_ordinal, 26);
+    assert_eq!(transaction.corner.sig_ordinal, 106);
+    assert_eq!(transaction.corner.horizontal, NativeStemHeadSide::Left);
+    assert_eq!(transaction.corner.vertical, NativeStemVerticalSide::Bottom);
+    assert_eq!(transaction.closed_cell_changes, 2);
+    assert_eq!(transaction.following_side_transactions.len(), 1);
+    let right = &transaction.following_side_transactions[0];
+    assert_eq!(right.corner.x_ordinal, 26);
+    assert_eq!(right.corner.sig_ordinal, 106);
+    assert_eq!(right.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(right.corner.vertical, NativeStemVerticalSide::Top);
+    assert_eq!(right.closed_cell_changes, 0);
+    let closure =
+        |transaction: &audiveris_omr::native_stems_beam_sides::NativeStemsHeadCLinkTransaction| {
+            transaction
+                .closed_s_linkers
+                .iter()
+                .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+                .collect::<Vec<_>>()
+        };
+    let expected_closure = vec![
+        (28, 108, NativeStemHeadSide::Left),
+        (28, 108, NativeStemHeadSide::Right),
+        (28, 108, NativeStemHeadSide::Left),
+        (28, 108, NativeStemHeadSide::Right),
+    ];
+    assert_eq!(closure(&transaction), expected_closure);
+    assert!(closure(right).is_empty());
+    assert_eq!(start.carrier.current_index, 35);
+    assert!(start.carrier.frontier_consumed);
+    assert_eq!(start.carrier.heads[35].reference.x_ordinal, 68);
+    assert_eq!(start.carrier.heads[35].reference.sig_ordinal, 102);
+    assert_eq!(start.carrier.beam_state.sig.vertices.len(), vertices_before);
+    assert_eq!(start.carrier.beam_state.sig.edges.len(), edges_before + 2);
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
+    // Open the oracle only after the native transaction is independently
+    // reconstructed and pinned.
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_FIXTURE.as_bytes()),
+        "0970b0dafe3a456d30e72b55a2716205e06caa4a93367e9390f00263139117f6"
+    );
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_RUNNER),
+        "de07f1e244641a2f9f41379b871595201b5158428e28d0f1701927b7221b7f90"
+    );
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_TRANSFORM),
+        "db0196bc8088e45ee550e7cc595f799bdcda079ce595c1bbf70c5994d06965ca"
+    );
+    assert_eq!(
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_INIT),
+        "55836b16d632f805b78427fb2c969becffb8f2c97df1c361d47be673fe169ca2"
+    );
+    let rows = ZIZI_SYSTEM1_ORDER34_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].starts_with(
+        "stemsheadziziorder34 page zizi.png#1 system 1 headOrder 34 headX 26 headSig 106 headInterId 1055 grade 3fe7cebd72cca19d"
+    ));
+    for exact in [
+        "sidesBefore [LEFT:false:false,RIGHT:false:false]",
+        "decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=true:bottom=false:branch=TopOnly]",
+        "incident [stem1690:headSideLEFT:heads[x28:sig108:id1059:sideLEFT,x26:sig106:id1055:sideLEFT],stem1691:headSideRIGHT:heads[x28:sig108:id1059:sideRIGHT,x26:sig106:id1055:sideRIGHT]]",
+        "closureWrites [x28:sig108:LEFT:false->true,x28:sig108:RIGHT:false->true,x28:sig108:LEFT:true->true,x28:sig108:RIGHT:true->true] closedValueChanges 2",
+        "sigVerticesBefore 238 sigVerticesAfter 238 sigEdgesBefore 242 sigEdgesAfter 244 systemStemsBefore 44 systemStemsAfter 44 allocatorBefore 1693 allocatorAfter 1693",
+        "nextHeadOrder 35 nextHeadX 68 nextHeadSig 102 nextHeadInterId 1047 terminal ReturnedBeforeThirtySixthHead",
+    ] {
+        assert!(
+            rows[0].contains(exact),
+            "missing Java row fragment: {exact}"
+        );
+    }
+    let summary = rows[1].split_ascii_whitespace().collect::<Vec<_>>();
+    let field = |name: &str| {
+        summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| summary.get(index + 1))
+            .copied()
+            .expect("strict Zizi system-1 order-34 summary field")
+    };
+    assert_eq!(field("schema"), "stems-head-phase-zizi-system1-order34-v1");
+    assert_eq!(field("rows"), "1");
+    assert_eq!(
+        field("inputSha256"),
+        "f6c613b3a60423dadde60d5e61ee7c1a641eef71c9fc6b6e8bdf5fab4c3c3e94"
+    );
+    assert_eq!(
+        field("stemsRetrieverSourceSha256"),
+        "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7"
+    );
+    assert_eq!(
+        field("baseProbeSourceSha256"),
+        "7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2"
+    );
+    assert_eq!(
+        field("transformSourceSha256"),
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_TRANSFORM)
+    );
+    assert_eq!(
+        field("transformedProbeSourceSha256"),
+        "f14692de5a59a0153ed58ded0cf18d5f736e57e327f3cf7fa5e26b9cfe0e3d4e"
+    );
+    assert_eq!(
+        field("initSourceSha256"),
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_INIT)
+    );
+    assert_eq!(
+        field("runnerSourceSha256"),
+        sha256_hex(ZIZI_SYSTEM1_ORDER34_RUNNER)
+    );
+    assert_eq!(
+        field("baseFinalizeRunnerSha256"),
+        sha256_hex(ALLEGRETTO_FINALIZE_RUNNER)
+    );
+    assert_eq!(
+        field("baseFinalizeFixtureSha256"),
+        sha256_hex(ALLEGRETTO_FINALIZE_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", rows[0]).as_bytes())
+    );
+    assert_eq!(field("freshRuns"), "2");
+    assert_eq!(field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        field("nativeScope"),
+        "ZiziSystem1Order34DuplicateIdempotentClosure"
+    );
+    assert_eq!(field("javaEvidence"), "ReturnedBeforeThirtySixthHead");
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and
