@@ -9809,3 +9809,34 @@ Focused 1/1 (3.73s), full sibling 26/26 (152.87s), formatting, strict
 all-target/all-feature workspace Clippy (13.63s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
 CI baseline. Continue at Cucaracha system 2 phase-two queue16 x109/SIG81.
+
+## Boundary 204: Cucaracha system-two phase-two queue 16
+
+Native queue16 x109/SIG81 selects LEFT/BOTTOM, resolves glyph95 to existing
+Stem identity37 / vertex249, preserves x111/SIG110 edge282 and x114/SIG122
+edge283, and appends one current-head relation. The later RIGHT/BOTTOM
+expansion returns `-1`. Relation grade/dx bits `3fef148d14458919` /
+`bf9734df7f4c3cf4` exactly match Java. No vertex, system-stem, glyph-ID, or
+allocator mutation occurs. The continuation advances index16→17; generic
+queues17-23 complete system 2, and generic system-3 queues0-18 expose queue19
+x37/SIG11's real `reuseStem` append.
+
+Java queue16 independently measures x109/SIG81/Inter1394 selecting glyphs253
+and 2575, candidate253, and existing Stem2654. It retains Inter1453 and
+Inter1477, changes only edges350→351, and keeps vertices255, system stems43,
+and allocator2659 fixed.
+
+The strict seven-row-plus-summary fixture is 10 lines / 6,358 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`0307f76f0da438d3609c1dcaa602656eca732de9fd377bd25325e94c78ffea77`,
+`bc9205d1e88c653d7d7cb553cc525d559a69e87b4736efe615c975daf82ae425`,
+`200afe8ef54faf6a11ecf094bc2394b485dee7f0eb6ed68aa632e4e4bdbbdd5d`,
+and `77964df581176281c035325c64ddacb5d73abe745f687134be5291e25062c6ef`.
+Boundary 203's runner/fixture/transform remain pinned at `8b260716…` /
+`cb394f3b…` / `3d076bd7…`.
+
+Focused 1/1 (3.77s), full sibling 26/26 (153.57s), formatting, strict
+all-target/all-feature workspace Clippy (13.88s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
+CI baseline. Continue at Cucaracha system 3 phase-two queue19 x37/SIG11.
