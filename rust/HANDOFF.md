@@ -9230,8 +9230,6 @@ chunk, then a stump-less crossed x68/SIG0 head relation. That relation-only
 crossed-head expansion is the next wider-corpus branch. `425d58e82` remains
 the exact fully green remote CI baseline; Boundary 186 is pushed at
 `1d8cbb002` but has no visible workflow run yet.
-+
-
 ## Boundary 188: complete Carmen head phase 1
 
 Generic head expansion now admits a relation-only crossed
@@ -9277,3 +9275,43 @@ Focused 1/1, full sibling 25/25 (152.58s), formatting, strict
 all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
 pass. `425d58e82` remains the exact fully green remote CI baseline; no workflow
 run is visible for pushed Boundary 187 commit `2f5b818fc`.
+
+## Boundary 189: Carmen system-2 phase-2 final-relation no-link
+
+Java's phase-2 `CLinker.expand` can reach the hard tail and still return
+`-1` when the final start-head relation is rejected. The generic bounded
+projection now distinguishes that result from an accepted relation that may
+mutate through `reuseStem`. It reconstructs the selected plain chunk
+contents, updates the candidate line in Java order, projects the HeadStem
+relation, and returns no-link only when the relation is rejected. Richer
+stump/crossed-head shapes remain fail-closed.
+
+Carmen system 2 phase-2 queue 0 is x20/SIG43/Java Inter 2318. LEFT/TOP ends
+before its hard tail after selecting active glyphs 457 and 3448. RIGHT/BOTTOM
+selects glyph 3449 and reaches its hard tail, but the final relation is null.
+Java returns false with no side, graph, stem, glyph, relation, or allocator
+mutation; native records the current head's idempotent LEFT-then-RIGHT closure
+writes and advances the phase-two cursor from 0 to 1. The unchanged generic
+operation then consumes the remaining eight no-link retries, completing all
+nine Carmen system-2 phase-two entries. The page drive now fails closed at
+Carmen system 3 queue 1, x1/SIG53: the first measured successful
+`reuseStem` append (queue 0 is a no-link).
+
+The 4-row-plus-summary fixture is 7 lines / 3,089 bytes and is byte-identical
+across warmup plus two fresh runs. Runner/transform/fixture/body/semantic
+SHA-256 values are
+`d3c7fd2c2183a4b296903006938894f0e1204e5f3c6c8d879ee011ad69baa9cb`,
+`23914c17f353f0c140474fab16bb9d6fbe62482b42821d21de6d98920ef33b4e`,
+`51ffc157e92fafce82f8bdc2797e7cb2947e140a70587cf0c1fe87b7c6e9b5e0`,
+`5a7f830ff69b2123011fc5bcb18b9ccfab16b59b263c598e482fa52d8432753d`,
+and
+`5a7f830ff69b2123011fc5bcb18b9ccfab16b59b263c598e482fa52d8432753d`.
+The runner strictly pins Boundary 188's runner/fixture at
+`9cdf28ad67460f64ab4273020e177fa82626d8eeb781a0d2b26f4fb4ad48a423` /
+`6ee7e36c9294bcb861c128f11b25072ba5f7f84dec3f61a00b4df8d282054358`;
+the transformed HeadLinker SHA-256 is
+`cb1f310b26ed3b5e29b84fbe3fe72f09768c2dbf3ef369abf9b29d326d4ac931`.
+
+Focused 1/1 and full sibling 25/25 (152.46s) pass. Formatting, strict
+all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
+pass. `425d58e82` remains the exact fully green remote CI baseline.

@@ -5328,16 +5328,16 @@ pub fn advance_native_stems_head_open_frontier_order75(
 /// Decide Java `CLinker.expand`'s `-1` outcome for a bounded phase-2 link
 /// attempt.
 ///
-/// Java returns `-1` from two places: at the first show-stopping gap
-/// (`contrib > maxYGap`) when the walk has not yet reached the hard tail
-/// target, and again after every item has been seen if the tail target is
-/// still short.  Either way `link` returns false having built nothing.
-/// This helper decides only that outcome. A `false` result means the walk
-/// reached `checkStemRelation`; callers without the native append authorities
-/// still fail closed, while the transactional phase-2 C-link path continues.
+/// Java returns `-1` at a show-stopping gap before the hard tail, after an
+/// exhausted walk that is still short, and when the final start-head
+/// `checkStemRelation` rejects. The first two outcomes are generic. The last
+/// is projected only for the bounded stump-less start plus plain-chunk shape;
+/// richer shapes still return `false` so their callers fail closed before a
+/// possible append mutation.
 fn bounded_phase_two_expand_returns_minus_one(
     corner: NativeStemsHeadCornerRef,
     stem_profile: i32,
+    head_corners: &NativeStemsHeadCornerSystem,
     head_builders: &NativeStemsHeadBuilderSystem,
     head_reachability: &NativeStemsHeadCornerReachabilitySystem,
 ) -> Result<bool, NativeStemsBeamSidesError> {
@@ -5381,8 +5381,87 @@ fn bounded_phase_two_expand_returns_minus_one(
     if y_dir * java_double_compare(last_y, y_hard) < 0 {
         return Ok(true);
     }
-    // The walk reached the tail target, so Java goes on to
-    // checkStemRelation and, if that holds, builds or reuses a stem.
+
+    let Some((start, tail)) = builder.items.split_first() else {
+        return Ok(false);
+    };
+    let bounded_plain_shape = start.kind == NativeStemsHeadBuilderItemKind::StartHeadHalfLinker
+        && start.glyph.is_none()
+        && start.target.is_none()
+        && tail.iter().all(|item| {
+            matches!(
+                (item.kind, item.glyph, item.target),
+                (
+                    NativeStemsHeadBuilderItemKind::ChunkGlyph,
+                    Some(NativeStemsHeadBuilderGlyphRef::Chunk { builder_ordinal, .. }),
+                    None,
+                ) if builder_ordinal == builder.builder_ordinal
+            )
+        });
+    if !bounded_plain_shape {
+        return Ok(false);
+    }
+    let mut stem_line = if y_dir > 0 {
+        builder.theoretical_line
+    } else {
+        crate::stems_step::NativeStemLine {
+            start: builder.theoretical_line.stop,
+            stop: builder.theoretical_line.start,
+        }
+    };
+    let mut selected_contents = Vec::new();
+    let mut geometry_candidate = None;
+    for item in tail {
+        let Some(NativeStemsHeadBuilderGlyphRef::Chunk {
+            builder_ordinal,
+            filament_ordinal,
+        }) = item.glyph
+        else {
+            return Ok(false);
+        };
+        let chunk = builder
+            .chunks
+            .iter()
+            .find(|chunk| {
+                matches!(
+                    chunk.glyph,
+                    NativeStemsHeadBuilderGlyphRef::Chunk {
+                        builder_ordinal: chunk_builder,
+                        filament_ordinal: chunk_filament,
+                    } if chunk_builder == builder_ordinal
+                        && chunk_filament == filament_ordinal
+                )
+            })
+            .ok_or_else(|| stage("HEADS-phase2-expand", "plain chunk glyph is missing"))?;
+        let content = NativeStemsBeamFixedGlyphContent {
+            bounds: chunk.bounds,
+            weight: chunk.run_table.weight(),
+            run_table: chunk.run_table.clone(),
+        };
+        include_head_c_link_content(
+            &content,
+            &mut selected_contents,
+            &mut geometry_candidate,
+            &mut stem_line,
+        )?;
+    }
+    if geometry_candidate.is_none() {
+        return Ok(true);
+    }
+    let relation = project_native_stems_head_c_link_relation(
+        head_corners,
+        head_builders,
+        corner,
+        stem_line,
+        None,
+        head_builders.system_profile,
+    )
+    .map_err(|error| stage("HEADS-phase2-expand", error))?;
+    if !relation.accepted || relation.derived_horizontal != corner.horizontal {
+        return Ok(true);
+    }
+    // The walk reached the tail and accepted the relation, so Java may build
+    // or reuse a stem. The mutation-bearing caller remains fail-closed.
     Ok(false)
 }
 
@@ -5602,6 +5681,7 @@ pub fn advance_native_stems_head_phase_two_append_retry(
             if !bounded_phase_two_expand_returns_minus_one(
                 selected,
                 stem_profile,
+                head_corners,
                 head_builders,
                 head_reachability,
             )? {
@@ -5967,6 +6047,7 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
             && !bounded_phase_two_expand_returns_minus_one(
                 left_top,
                 0,
+                head_corners,
                 head_builders,
                 head_reachability,
             )?)
@@ -5999,6 +6080,7 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
     if bounded_phase_two_expand_returns_minus_one(
         selected_corner,
         0,
+        head_corners,
         head_builders,
         head_reachability,
     )? {

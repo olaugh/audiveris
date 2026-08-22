@@ -287,6 +287,12 @@ const CARMEN_SYSTEM5_ORDER62_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-carmen-system5-order62.sh");
 const CARMEN_SYSTEM5_ORDER62_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-carmen-system5-order62.init.gradle");
+const CARMEN_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-carmen-system2-order0.txt");
+const CARMEN_SYSTEM2_PHASE_TWO_ORDER0_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-carmen-system2-order0.sh");
+const CARMEN_SYSTEM2_PHASE_TWO_ORDER0_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-carmen-system2-order0.transform.awk");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -13437,13 +13443,200 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
         [(72, 8, NativeStemHeadSide::Left)]
     );
 
+    let system2 = &phase_one.systems[1];
+    assert_eq!(system2.system_id, 2);
+    assert_eq!(system2.carrier.phase_two_index, 0);
+    assert_eq!(system2.carrier.unlinked_heads.len(), 9);
+    assert_eq!(
+        (
+            system2.carrier.unlinked_heads[0].x_ordinal,
+            system2.carrier.unlinked_heads[0].sig_ordinal,
+        ),
+        (20, 43)
+    );
+    let phase_two_vertices_before = system2.carrier.beam_state.sig.vertices.len();
+    let phase_two_edges_before = system2.carrier.beam_state.sig.edges.len();
+    let phase_two_stems_before = system2
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let phase_two_allocator_before = system2
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    let phase_two_zero = advance_native_stems_head_phase_two_append_retry(
+        &system2.carrier,
+        &prepared.components.head_corners.systems[1],
+        &prepared.components.head_reachability.systems[1],
+        &prepared.components.head_builders.systems[1],
+        &prepared.components.plans.systems[1],
+    )
+    .expect("Carmen system-2 phase-two queue zero final-relation no-link");
+    assert_eq!(
+        (
+            phase_two_zero.processed_head.x_ordinal,
+            phase_two_zero.processed_head.sig_ordinal,
+            phase_two_zero.returned_linked,
+            phase_two_zero.closed_value_changes,
+            phase_two_zero.state_after.phase_two_index,
+        ),
+        (20, 43, Some(false), 0, 1)
+    );
+    assert_eq!(
+        phase_two_zero
+            .side_decisions
+            .iter()
+            .map(|decision| {
+                (
+                    decision.side,
+                    decision.top_can_link,
+                    decision.bottom_can_link,
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemHeadSide::Left, Some(true), Some(false)),
+            (NativeStemHeadSide::Right, Some(false), Some(true)),
+        ]
+    );
+    assert_eq!(
+        phase_two_zero
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (20, 43, NativeStemHeadSide::Left),
+            (20, 43, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(
+        (
+            phase_two_zero.state_after.beam_state.sig.vertices.len(),
+            phase_two_zero.state_after.beam_state.sig.edges.len(),
+            phase_two_zero
+                .state_after
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+            phase_two_zero
+                .state_after
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .glyph_index
+                .persistent_ids,
+        ),
+        (
+            phase_two_vertices_before,
+            phase_two_edges_before,
+            phase_two_stems_before,
+            phase_two_allocator_before,
+        )
+    );
+
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE.as_bytes()),
+        "51ffc157e92fafce82f8bdc2797e7cb2947e140a70587cf0c1fe87b7c6e9b5e0"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_RUNNER),
+        "d3c7fd2c2183a4b296903006938894f0e1204e5f3c6c8d879ee011ad69baa9cb"
+    );
+    assert_eq!(
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_TRANSFORM),
+        "23914c17f353f0c140474fab16bb9d6fbe62482b42821d21de6d98920ef33b4e"
+    );
+    let phase_two_rows = CARMEN_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(phase_two_rows.len(), 5);
+    for exact in [
+        "stemsheadphase2baseline page carmen.png#1 system 2 heads 83 queueSize 9 queue [x20:sig43:id2318",
+        "corner TL hSide LEFT vSide TOP",
+        "lastIndex -1 maxIndex 1 relations 1",
+        "glyphs 2 selected [id457:714:1066:4:50:weight109,id3448:714:1066:3:50:weight53] terminal ExpandMinusOne",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex -1 maxIndex 1 relations 0 relationRows [] glyphs 1 selected [id3449:737:1096:3:89:weight208] terminal ExpandMinusOne",
+        "queueIndex 0 headX 20 headSig 43 headInterId 2318 grade 3fd1c048106d27f0 append true",
+        "returned false sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
+        "sigVerticesBefore 218 sigVerticesAfter 218 sigEdgesBefore 247 sigEdgesAfter 247 systemStemsBefore 33 systemStemsAfter 33 allocatorBefore 3609 allocatorAfter 3609",
+    ] {
+        assert!(
+            CARMEN_SYSTEM2_PHASE_TWO_ORDER0_FIXTURE.contains(exact),
+            "missing Carmen phase-two oracle fragment: {exact}"
+        );
+    }
+    let phase_two_summary = phase_two_rows[4];
+    assert_eq!(
+        head_field(phase_two_summary, "schema"),
+        "stems-head-phase-two-carmen-system2-order0-v1"
+    );
+    assert_eq!(head_field(phase_two_summary, "rows"), "4");
+    assert_eq!(
+        head_field(phase_two_summary, "runnerSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_RUNNER)
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "transformSourceSha256"),
+        sha256_hex(CARMEN_SYSTEM2_PHASE_TWO_ORDER0_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "baseSystem5Order62RunnerSha256"),
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_RUNNER)
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "baseSystem5Order62FixtureSha256"),
+        sha256_hex(CARMEN_SYSTEM5_ORDER62_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "emittedBodySha256"),
+        "5a7f830ff69b2123011fc5bcb18b9ccfab16b59b263c598e482fa52d8432753d"
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "freshRunsByteIdentical"),
+        "true"
+    );
+    assert_eq!(
+        head_field(phase_two_summary, "nativeScope"),
+        "BoundedCarmenSystem2PhaseTwoOrder0FinalRelationNoLink"
+    );
+
+    let mut system2_terminal = (*phase_two_zero.state_after).clone();
+    while system2_terminal.phase_two_index < system2_terminal.unlinked_heads.len() {
+        system2_terminal = *advance_native_stems_head_phase_two_append_retry(
+            &system2_terminal,
+            &prepared.components.head_corners.systems[1],
+            &prepared.components.head_reachability.systems[1],
+            &prepared.components.head_builders.systems[1],
+            &prepared.components.plans.systems[1],
+        )
+        .expect("remaining Carmen system-2 phase-two no-link retries")
+        .state_after;
+    }
+    assert_eq!(system2_terminal.phase_two_index, 9);
+
     let phase_two_error = prepared
         .drive_all_system_head_linking_phase2()
         .expect_err("Carmen phase 2 remains fail-closed at its first append-reuse branch")
         .to_string();
     assert!(phase_two_error.contains("HEADS phase-2 page drive"));
-    assert!(phase_two_error.contains("system 2"));
-    assert!(phase_two_error.contains("unported reuseStem append path"));
+    assert!(phase_two_error.contains("system 3"), "{phase_two_error}");
+    assert!(
+        phase_two_error.contains("unported reuseStem append path"),
+        "{phase_two_error}"
+    );
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and
