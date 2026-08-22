@@ -10291,3 +10291,22 @@ and `45c66483e7f9dd860de1ddd03959b1133046b697d164697d4a25f263577703a0`.
 Warmup plus two JVM runs are byte-identical. Focused, sibling, formatting,
 strict Clippy, replay, and diff checks pass. No production source changed.
 Continue at queue194 x16/SIG184.
+
+## Boundary 221: three-head zero-change reconciliation
+
+Bach system-2 queue194 x16/SIG184/Inter3979 has grade bits
+`3fc72898e7071d70`. LEFT is linked and RIGHT closed at profiles 0-3. Its
+existing stem joins x15/SIG177, x16/SIG184, and x17/SIG185. Java changes no
+cells; native emits x15 then x17 LEFT/RIGHT idempotently, preserves the 394/596
+SIG, 77 stems, and allocator, and advances to queue195 x98/SIG136.
+
+Fixture/runner/transform/probe/init/body SHA-256 values are
+`7a5316a3d6c4864dfa770feb795ae91d6c5986068cb73523aa5b33d7a1c3bfa0`,
+`30e22fd5a74078d620a5dfe413cb7d996fa31310aa9984f9a24bc36384188b34`,
+`1451eb534927e47401183d802afec22a134464f0af63a3c1eb193fe6bf784623`,
+`7f38401a41c29ef2b327f4db0004504e33118275434c106a13ef961a38405460`,
+`b2c24e4bb20ff62f0d6c8dc694afc6f325f175a7e8f0ad418b23a85c32e17143`,
+and `e09730b2a782c767b5a4be157926cda686d65a3838c35965b5a2220dca504f8c`.
+Boundary 220 is strictly pinned; warmup plus two runs are byte-identical.
+Focused, sibling, formatting, strict Clippy, replay, and diff checks pass. No
+production source changed. Continue at queue195 x98/SIG136.
