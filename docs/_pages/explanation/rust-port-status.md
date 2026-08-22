@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first two hundred and one semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; and Boundary 201 executes Cucaracha system 2 queue 8's existing-stem append. The next live fail-closed frontier is Cucaracha system 2 phase-2 queue 9 x132/SIG84's real append.
+The first two hundred and two semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; and Boundaries 201-202 execute Cucaracha system 2 queues 8-9's existing-stem appends. The next live fail-closed frontier is Cucaracha system 2 phase-2 queue 10 x84/SIG80's real append.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, and Carmen** | Two hundred and one exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; Boundary 201 executes system 2 queue 8. | Instrument Cucaracha system 2 phase-2 queue 9 x132/SIG84's real `reuseStem` append, then continue wider-corpus completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, and Carmen** | Two hundred and two exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; Boundaries 201-202 execute system 2 queues 8-9. | Instrument Cucaracha system 2 phase-2 queue 10 x84/SIG80's real `reuseStem` append, then continue wider-corpus completion. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -5209,6 +5209,29 @@ Boundary 200's strict pins are `3ad18d6e…` / `457f8f28…` / `a9daae9d…`.
 Focused 1/1 (3.83s), full sibling 26/26 (152.25s), formatting, strict
 workspace Clippy (13.52s), deterministic Java replay, oracle syntax, and diff
 checks pass. Continue at Cucaracha system 2 phase-two queue9 x132/SIG84.
+
+## Boundary 202: Cucaracha system-two phase-two queue 9
+
+Native queue9 x132/SIG84 selects LEFT/BOTTOM, resolves glyph93 to existing
+Stem identity35/vertex247, preserves x129/SIG103 edge268 and x139/SIG125
+edge269, and appends one relation. Exact relation grade/dx bits
+`3fed051e7bce623f` / `bfb22f195fe0a492` match Java. No vertex, system-stem,
+glyph-ID, or allocator mutation occurs. The continuation advances index9→10
+and exposes queue10 x84/SIG80's real `reuseStem` append.
+
+Java queue9 confirms x132/SIG84/Inter1400 selecting glyph251/Stem2652,
+retaining Inter1438 and Inter1483, and changing only edges348→349.
+
+The 10-line / 6,314-byte fixture contains seven semantic rows plus summary and
+is byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`d1e2a3dd39c1f2f73b8ffc7d907e5361f33bbbd57a7dbf3ad68e3cc11ae0973c`,
+`af763c75140add0f67a9ccb3b077797fdf7c640c5b80a122697de63f5beeb0a2`,
+`e7d97fbf829b52730dfdf4f219a0a7fd87cde3a8f7f8f301c788746492529f01`,
+and `fcfef4137dad57cfd43d5c6c48bf71497cf78094f57169242449241cde725e4f`.
+Focused 1/1, full sibling 26/26 (153.99s), formatting, strict Clippy,
+deterministic Java replay, oracle syntax, and diff checks pass. Continue at
+Cucaracha system 2 phase-two queue10 x84/SIG80.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md
