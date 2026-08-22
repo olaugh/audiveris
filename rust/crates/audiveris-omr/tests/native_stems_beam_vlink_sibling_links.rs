@@ -134,6 +134,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order9,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order10,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order16,
+        advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19,
         advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
@@ -408,6 +409,13 @@ const CUCARACHA_SYSTEM2_PHASE_TWO_ORDER16_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-cucaracha-system2-order16.sh");
 const CUCARACHA_SYSTEM2_PHASE_TWO_ORDER16_TRANSFORM: &[u8] = include_bytes!(
     "../../../oracle/java/stems-head-phase-two-cucaracha-system2-order16.transform.awk"
+);
+const CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-cucaracha-system3-order19.txt");
+const CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-cucaracha-system3-order19.sh");
+const CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_TRANSFORM: &[u8] = include_bytes!(
+    "../../../oracle/java/stems-head-phase-two-cucaracha-system3-order19.transform.awk"
 );
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
@@ -14412,7 +14420,7 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
 /// perfect HeadStem relation, but its stem grade is zero; no graph or registry
 /// mutation is committed and the outer loop closes both S cells.
 #[test]
-fn cucaracha_order56_no_link_and_phase_two_through_system2_queue16() {
+fn cucaracha_order56_no_link_and_all_system_stems_complete() {
     let path = repo_root().join("data/examples/cucaracha.png");
     let grid = recognize_grid_lines(path).expect("Cucaracha GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Cucaracha HEADERS recognition");
@@ -15933,6 +15941,96 @@ fn cucaracha_order56_no_link_and_phase_two_through_system2_queue16() {
         (Some(true), 17, system2_edges_before + 4)
     );
 
+    let system3 = &phase_one.systems[2];
+    let system3_corners = &prepared.components.head_corners.systems[2];
+    let system3_reachability = &prepared.components.head_reachability.systems[2];
+    let system3_builders = &prepared.components.head_builders.systems[2];
+    let system3_plans = &prepared.components.plans.systems[2];
+    let mut before_system3_order19 = system3.carrier.clone();
+    for expected_index in 0..19 {
+        let retry = advance_native_stems_head_phase_two_append_retry(
+            &before_system3_order19,
+            system3_corners,
+            system3_reachability,
+            system3_builders,
+            system3_plans,
+        )
+        .expect("Cucaracha system-3 ordinary retry before queue 19");
+        assert_eq!(retry.state_after.phase_two_index, expected_index + 1);
+        before_system3_order19 = *retry.state_after;
+    }
+    let system3_edges_before = before_system3_order19.beam_state.sig.edges.len();
+    let order19 = advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19(
+        &before_system3_order19,
+        system3_corners,
+        system3_reachability,
+        &prepared.components.stem_seed_glyphs[2].free_glyphs,
+        system3_builders,
+        system3_plans,
+        &prepared.stem_checker,
+        &system3.registry,
+    )
+    .expect("Cucaracha system-3 terminal queue-19 reused-stem append");
+    assert_eq!(
+        (
+            order19.c_link.corner.x_ordinal,
+            order19.c_link.corner.sig_ordinal,
+            order19.c_link.selected_glyph_id,
+            order19.c_link.stem_vertex.0,
+            order19.c_link.last_index,
+            order19.c_link.max_index,
+        ),
+        (37, 11, 159, 177, 2, 2)
+    );
+    assert_eq!(
+        order19.c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 13 }
+    );
+    assert_eq!(
+        order19.c_link.relation.grade.to_bits(),
+        0x3fe4_e1c6_1700_dadc
+    );
+    assert_eq!(order19.c_link.relation.dx.to_bits(), 0x3fbe_433d_3ee0_6618);
+    assert_eq!(
+        order19
+            .c_link
+            .additional_head_relations
+            .iter()
+            .map(|relation| (
+                relation.corner.x_ordinal,
+                relation.corner.sig_ordinal,
+                relation.head_stem_edge.0,
+                relation.appended,
+            ))
+            .collect::<Vec<_>>(),
+        [(32, 49, 207, false)]
+    );
+    assert_eq!(
+        (
+            order19.continuation.returned_linked,
+            order19.continuation.state_after.phase_two_index,
+            order19.continuation.state_after.unlinked_heads.len(),
+            order19
+                .continuation
+                .state_after
+                .beam_state
+                .sig
+                .vertices
+                .len(),
+            order19.continuation.state_after.beam_state.sig.edges.len(),
+            order19
+                .continuation
+                .state_after
+                .beam_state
+                .latest_base_apply
+                .transaction_state
+                .system_stems
+                .known_stems
+                .len(),
+        ),
+        (Some(true), 20, 20, 198, system3_edges_before + 1, 34)
+    );
+
     assert_eq!(
         sha256_hex(CUCARACHA_SYSTEM1_PHASE_TWO_ORDER6_FIXTURE.as_bytes()),
         "b8f37f279d7361fe92b6cf17c0b9e7376bc744db30e7fc162ce2e9df10669e07"
@@ -16845,19 +16943,121 @@ fn cucaracha_order56_no_link_and_phase_two_through_system2_queue16() {
         head_field(system2_order16_summary, "javaEvidence"),
         "ReturnedAfterSystem2RetryIndex16"
     );
-    let phase_two_error = prepared
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_FIXTURE.as_bytes()),
+        "a4ede84ed937da65006924da3b3de35e24d33dd229d9391aae136e436b1477ff"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_RUNNER),
+        "26af234811b815d1e2012311838045cd80adec4c3d67c3dd19c732160600fb34"
+    );
+    assert_eq!(
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_TRANSFORM),
+        "35f69316834081b0e6f8354e0bfbb856952930941652ccd04db2ee23dcc1d432"
+    );
+    let system3_order19_rows = CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(system3_order19_rows.len(), 8);
+    for exact in [
+        "system 3 heads 113 queueSize 20",
+        "headInterId 1555 corner BL hSide LEFT vSide BOTTOM",
+        "lastIndex 2 maxIndex 2 relations 2",
+        "glyphs 2 selected [id317:834:1560:4:91:weight307,id2868:834:1560:4:91:weight198]",
+        "sourceHeadId 1632 sourceCorner BL sourceSide LEFT relationGrade 3fedecef2ef1a8ba",
+        "selectedStem id2989:glyphid317:834:1560:4:91:weight307",
+        "reusedExisting true applied grade3fe4e1c61700dadc:dx3fbe433d3ee06618",
+        "queueIndex 19 headX 37 headSig 11 headInterId 1555",
+        "decisions [LEFT:top=false:bottom=true:branch=BottomOnly,RIGHT:top=false:bottom=false:branch=Neither] returned true",
+        "sideChanges [x37:sig11:LEFT:false:true->true:true]",
+        "sigEdgesBefore 250 sigEdgesAfter 251 systemStemsBefore 34 systemStemsAfter 34",
+    ] {
+        assert!(
+            CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_FIXTURE.contains(exact),
+            "missing Cucaracha system-3 phase-two queue-19 oracle fragment: {exact}"
+        );
+    }
+    let system3_order19_summary = system3_order19_rows[7];
+    assert_eq!(
+        head_field(system3_order19_summary, "schema"),
+        "stems-head-phase-two-cucaracha-system3-order19-v1"
+    );
+    assert_eq!(head_field(system3_order19_summary, "rows"), "7");
+    assert_eq!(
+        head_field(system3_order19_summary, "runnerSourceSha256"),
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_RUNNER)
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "retargetTransformSourceSha256"),
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "baseSystem2Order16RunnerSha256"),
+        sha256_hex(CUCARACHA_SYSTEM2_PHASE_TWO_ORDER16_RUNNER)
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "baseSystem2Order16FixtureSha256"),
+        sha256_hex(CUCARACHA_SYSTEM2_PHASE_TWO_ORDER16_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(
+            system3_order19_summary,
+            "baseSystem2Order16RetargetTransformSha256"
+        ),
+        sha256_hex(CUCARACHA_SYSTEM2_PHASE_TWO_ORDER16_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "emittedBodySha256"),
+        "81451bfd11189860d64e970ab4a81714b1a3ff7cfddfac1ef8c10f1e6f5fe74c"
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "semanticPassSha256"),
+        "81451bfd11189860d64e970ab4a81714b1a3ff7cfddfac1ef8c10f1e6f5fe74c"
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "freshRunsByteIdentical"),
+        "true"
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "nativeScope"),
+        "CucarachaSystem3PhaseTwoOrder19ReusedStemAppend"
+    );
+    assert_eq!(
+        head_field(system3_order19_summary, "javaEvidence"),
+        "ReturnedAfterSystem3RetryIndex19"
+    );
+
+    let page_phase_two = prepared
         .drive_all_system_head_linking_phase2()
-        .expect_err("next Cucaracha system-2 phase-2 queue remains fail closed")
-        .to_string();
+        .expect("all three Cucaracha systems complete HEADS phase 2");
+    assert_eq!(page_phase_two.systems.len(), 3);
     assert!(
-        phase_two_error.contains("system 3: native SIDES carrier failed at HEADS-phase2-append"),
-        "unexpected next Cucaracha boundary: {phase_two_error}"
+        page_phase_two.systems.iter().all(|system| {
+            system.carrier.phase_two_index == system.carrier.unlinked_heads.len()
+        })
     );
-    assert!(
-        phase_two_error
-            .contains("phase-2 queue 19 head x37/SIG11 reaches the unported reuseStem append path"),
-        "unexpected next Cucaracha boundary: {phase_two_error}"
+    let finalized = prepared
+        .finalize_all_system_stems()
+        .expect("all three Cucaracha systems complete generic finalizeStems");
+    assert_eq!(
+        finalized
+            .systems
+            .iter()
+            .map(|system| (
+                system.system_id,
+                system.transaction.checked_heads,
+                system.transaction.removed_head_stem_relations.len(),
+                system.transaction.abnormal_value_changes,
+            ))
+            .collect::<Vec<_>>(),
+        [(1, 142, 0, 0), (2, 150, 0, 0), (3, 113, 0, 0)]
     );
+    let recognized =
+        recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+            .expect("Cucaracha transactional native STEMS recognition");
+    assert_eq!(recognized.components, prepared.components);
+    assert_eq!(recognized.systems, finalized.systems);
 }
 
 /// The first measured transaction now derives B16 from the owned SIG and

@@ -207,7 +207,7 @@ owned HEADS entry point is now the path graded by the eight-page differential,
 and the CLI publishes its final heads, provenance, decisions, counts, and scale
 rows without fabricating Java IDs.
 
-The first two hundred and four semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; and Boundaries 201-204 execute Cucaracha system 2 queues 8-10 and 16's existing-stem appends, while queues 11-15 and 17-23 use generic logic, completing system 2 phase 2. The next live fail-closed frontier is Cucaracha system 3 phase-2 queue 19 x37/SIG11's real append.
+The first two hundred and five semantic `STEMS` boundaries are production-shaped and graded. Boundaries 1-134 cover the exact construction, scheduler, mutation, head-linking, phase-2, and generic `finalizeStems` behavior detailed below; Boundaries 135-163 complete and publish Batuque; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; Boundaries 201-204 complete system 2 phase 2; and Boundary 205 executes system 3's terminal queue-19 existing-stem append, after which generic `finalizeStems` and transactional `recognize_native_stems` complete the page. Continue with the first unsupported transactional frontier among Hove and BachInvention5.
 `materialize_native_stems_head_corners` consumes the owned final HEADS product
 plus live STEM_SEEDS parameters, retains final stem-capable heads in SIG order,
 and exposes Java's stable abscissa and reverse-grade permutations without
@@ -1019,7 +1019,7 @@ is present but the musical interpretation is not.
 | 7 | `BEAMS` | **Native and published** | Native GRID -> HEADERS -> STEM_SEEDS composition feeds the spot chain, system dispatch, beam creation, measured extension, hooks, grouping, and schema-1 output. A fresh-JVM Java counterfactual over 803 final beam/hook inters, 493 groups, and one multiple rest proves actual seeds change zero records on the original eight pages. D039 adds the natural acceptance case: one system-2 beam changes, with endpoint, height, six impacts, and grade bit-exact to Java. The original gate still matches 2,739 spots, 30 erases, and 787/787 raw beams. Production retains exact group memberships and now runs the real MultipleRest pass from a freshly recomputed staff projector: Bach system 6 replaces source ordinal 182 with median, grade, height, staff, and two-serif evidence exact to Java; the retained start/stop pitch is a port-pinned intermediate, since Java's oracle publishes the rest's grade and bounds but never its pitch. | Allocate stable SIG/glyph/relation identities for the retained MultipleRest and serifs, then grade small beams and widen the corpus. |
 | 8 | `LEDGERS` | **Native and published** | Native composition consumes GRID's `NO_STAFF`, curved staff/system geometry, and the oracle-free BEAMS result after MultipleRest source-beam deletion. Schema 1 includes all seven impacts, live exclusions, and curved inferred paths. All 581 final Java inters and 95 inferred paths on the eight beam sheets match after sheet-wide one-sigma post-analysis and rebuild. Every final live ledger now retains its exact positioned fixed glyph raster from the referenced filtered sections; Chula's per-system section dispatch is also exact at 2,042/591/961. Ledger grades are now gated on raw f64 bit patterns rather than the nine-decimal fixture: all eight of Chula's system-1 ledgers match Java bit for bit, after correcting `y_at_x_ext` to evaluate the staff-line spline the way `LineInfo.yAt` does. | Widen beyond the example corpus. |
 | 9 | `HEADS` | **Native and published** | The complete production entry point composes live GRID, HEADERS, STEM_SEEDS, BEAMS, and LEDGERS state through prolog, template lookup, seed and range glyph creation, staff duplicate/overlap handling, attachment, small-beam arbitration, and tally analysis. The eight-page top-level differential matches all 3,609 heads entering the epilog, 62 duplicate removals, 2,725 overlap exclusions, 3,547 post-duplicate heads, 191 beam inputs and registered glyphs, 10,053 ordered beam checks by exact per-system hash, 26 head removals, 3,521 final heads, 1,451 tally inputs, and 18 scale rows. Schema 1 publishes identity-free final-head provenance, exact glyph evidence, beam decisions, counts, and scale rows. | Widen the published corpus. |
-| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, and Carmen** | Two hundred and four exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; Boundary 192 completes Cucaracha phase 1; Boundaries 193-200 complete Cucaracha system 1 phase 2; Boundaries 201-204 complete system 2 phase 2 through measured queues 8-10 and 16 plus generic queues 11-15 and 17-23. | Instrument Cucaracha system 3 phase-2 queue 19 x37/SIG11's real `reuseStem` append, then continue wider-corpus completion. |
+| 10 | `STEMS` | **Native, graded, and published for Batuque and Zizi; transactionally complete for Chula, Allegretto, Carmen, and Cucaracha** | Two hundred and five exact production boundaries consume live final HEADS, GRID, BEAMS, LEDGERS, HEADERS, and STEM_SEEDS state. Boundaries 160-163 complete Batuque recognition/publication; Boundaries 164-166 complete Chula; Boundaries 167-183 complete Allegretto; Boundaries 184-185 complete Zizi; Boundaries 186-191 complete Carmen; and Boundaries 192-205 complete all three Cucaracha systems through generic `finalizeStems` and transactional recognition. | Continue with the first unsupported transactional frontier among Hove and BachInvention5, then widen schema-1 publication. |
 | 11 | `REDUCTION` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Semantic reduction rules. |
 | 12 | `CUE_BEAMS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | Cue-beam recognition and linking. |
 | 13 | `TEXTS` | **Lifecycle only** | Dependency-light lifecycle and contracts. | OCR, roles, language handling, and SIG materialization. |
@@ -5278,6 +5278,30 @@ and `77964df581176281c035325c64ddacb5d73abe745f687134be5291e25062c6ef`.
 Focused 1/1, full sibling 26/26 (153.57s), formatting, strict Clippy,
 deterministic Java replay, oracle syntax, and diff checks pass. Continue at
 Cucaracha system 3 phase-two queue19 x37/SIG11.
+
+## Boundary 205: Cucaracha system-three phase-two completion
+
+Native queue19 x37/SIG11 selects LEFT/BOTTOM, resolves glyph159 to existing
+Stem identity13/vertex177, preserves x32/SIG49 edge207, and appends one
+relation with exact grade/dx bits `3fe4e1c61700dadc` / `3fbe433d3ee06618`.
+Edges advance 250→251 while vertices198, stems34, glyph identities, and
+allocator3009 remain fixed. The cursor advances 19→20 and exhausts system 3.
+
+Java independently measures Inter1555, glyphs317+2868/candidate317,
+Stem2989, and retained Inter1632. The 10-line / 5,826-byte fixture is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`26af234811b815d1e2012311838045cd80adec4c3d67c3dd19c732160600fb34`,
+`35f69316834081b0e6f8354e0bfbb856952930941652ccd04db2ee23dcc1d432`,
+`a4ede84ed937da65006924da3b3de35e24d33dd229d9391aae136e436b1477ff`,
+and `81451bfd11189860d64e970ab4a81714b1a3ff7cfddfac1ef8c10f1e6f5fe74c`.
+
+All three phase-two queues now exhaust. Generic `finalizeStems` checks
+142/150/113 heads with no removals or abnormal changes, and transactional
+recognition reproduces the same page. Focused 1/1, sibling 26/26, formatting,
+strict Clippy, deterministic Java replay, oracle syntax, and diff checks pass.
+Continue with the first unsupported transactional frontier among Hove and
+BachInvention5.
 
 [porting]: https://github.com/olaugh/audiveris/blob/master/rust/PORTING.md
 [handoff]: https://github.com/olaugh/audiveris/blob/master/rust/HANDOFF.md

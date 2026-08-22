@@ -6665,6 +6665,54 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order
     )
 }
 
+/// Execute Cucaracha system 3's terminal queue-19 reused-stem append.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
+            queue_index: 19,
+            x_ordinal: 37,
+            sig_ordinal: 11,
+            grade_bits: 0x3fc5_874e_6adc_a3c0,
+            can_link: (false, true, false, false),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 159,
+            candidate_stem_identity: 13,
+            stem_identity: 13,
+            stem_vertex: 177,
+            relation_grade_bits: 0x3fe4_e1c6_1700_dadc,
+            relation_dx_bits: 0x3fbe_433d_3ee0_6618,
+            append_reuse_source: None,
+            additional_relations: &[(32, 49, 207)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"

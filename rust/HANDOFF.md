@@ -9840,3 +9840,41 @@ Focused 1/1 (3.77s), full sibling 26/26 (153.57s), formatting, strict
 all-target/all-feature workspace Clippy (13.88s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
 CI baseline. Continue at Cucaracha system 3 phase-two queue19 x37/SIG11.
+
+## Boundary 205: Cucaracha system-three phase-two completion
+
+Native terminal queue19 x37/SIG11 selects LEFT/BOTTOM, resolves native glyph159
+to existing Stem identity13 / vertex177, preserves x32/SIG49 edge207, and
+appends one current-head relation. Relation grade/dx bits
+`3fe4e1c61700dadc` / `3fbe433d3ee06618` exactly match Java. No vertex,
+system-stem, glyph-ID, or allocator mutation occurs; edges250→251 and the
+phase-two cursor advances 19→20, equal to the carried queue length.
+
+Java independently measures x37/SIG11/Inter1555 selecting glyphs317 and 2868,
+candidate317, and existing Stem2989. It retains Inter1632, changes only
+edges250→251, and keeps vertices198, system stems34, and allocator3009 fixed.
+The carried native identities are deliberately native rather than copied from
+those Java EntityIndex values.
+
+This terminal closes all three Cucaracha phase-two queues. Generic
+`finalizeStems` checks 142/150/113 heads with zero relation removals or
+abnormal-value changes, and transactional `recognize_native_stems` reproduces
+the same prepared components and finalized systems. Cucaracha is therefore
+transactionally complete end to end, though it is not added to the narrower
+schema-1 publication corpus by this boundary.
+
+The strict seven-row-plus-summary fixture is 10 lines / 5,826 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`26af234811b815d1e2012311838045cd80adec4c3d67c3dd19c732160600fb34`,
+`35f69316834081b0e6f8354e0bfbb856952930941652ccd04db2ee23dcc1d432`,
+`a4ede84ed937da65006924da3b3de35e24d33dd229d9391aae136e436b1477ff`,
+and `81451bfd11189860d64e970ab4a81714b1a3ff7cfddfac1ef8c10f1e6f5fe74c`.
+Boundary 204's runner/fixture/transform remain pinned at `0307f76f…` /
+`200afe8e…` / `bc9205d1…`.
+
+Focused 1/1 (4.38s), full sibling 26/26 (154.39s), formatting, strict
+all-target/all-feature workspace Clippy (13.75s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
+CI baseline. Continue with the first unsupported transactional STEMS frontier
+among Hove and BachInvention5.
