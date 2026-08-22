@@ -9651,3 +9651,36 @@ strict all-target/all-feature workspace Clippy (13.29s), deterministic Java
 replay, oracle shell syntax, and diff checks pass. `425d58e82` remains the
 documented exact green remote CI baseline pending newer terminal evidence.
 Continue at Cucaracha system 1 phase-two queue 20 x45/SIG62's real append.
+
+## Boundary 199: aligned x45 append and x56 prelinked return
+
+Native queue 20 x45/SIG62 selects LEFT/BOTTOM, resolves glyph42 to existing
+Stem identity23 / vertex217, preserves x43/SIG103 edge323 and x48/SIG116
+edge324, and appends one current relation. No vertex, system-stem, glyph-ID,
+or allocator state changes. Native independently computes relation grade/dx
+bits `3fe6918be20e8fdc` / `3fba18036d0d0f3d`. Queue 21 x56/SIG82 then
+returns true through the generic prelinked path with zero graph or closure
+value changes. The transactional page driver now reaches the next real append
+at fail-closed queue 22 x71/SIG66.
+
+Java queue19 measures the aligned x45/SIG62/Inter1069 append through
+glyph200/Stem2201, retains Inter1151 and Inter1179, and changes edges 342→343.
+Its independent relation bits are `3fe6918be20e8d71` /
+`3fba18036d0d1555`. Java queue20 confirms x56/SIG82/Inter1109's prelinked
+no-op.
+
+The strict fixture is 11 lines / 6,787 bytes with eight semantic rows plus
+summary and is byte-identical across warmup plus two fresh runs. Runner,
+transform, fixture, and body/semantic hashes are
+`29733c6d93a1d5642d24cfe742b9d3f9314230818ca5919acd1a5b21552e74a7`,
+`4b3029fec45ef99cdd24804ec7e88ac04578a62f2e1e71e127088ee5554c56ba`,
+`59f27d582bda0a3a144a68b5dc37a0ac586ad89de19c64d993aed15cfdbed2c4`,
+and `37c5c7ddd68f9a923e132ccc62fe834a720006e106143ad97b4260c63e3cb791`.
+Boundary 198's runner/fixture/transform remain strictly pinned at
+`eb79eb1d…` / `8363a188…` / `06095681…`.
+
+Focused 1/1 (3.83s), full sibling 26/26 (150.63s), formatting, strict
+all-target/all-feature workspace Clippy (13.35s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the documented exact
+green remote baseline pending newer terminal CI. Continue at Cucaracha system
+1 phase-two queue 22 x71/SIG66's real append.
