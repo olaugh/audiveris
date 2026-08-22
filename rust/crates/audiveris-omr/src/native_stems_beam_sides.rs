@@ -13400,7 +13400,17 @@ fn advance_native_stems_head_c_link_at_frontier(
         ));
     }
     let beam_targets = if beam_shape { beam_targets } else { Vec::new() };
-    let beam_stopped = !beam_targets.is_empty();
+    // Java's sibling-beam scan accidentally reads `sb.get(i)` inside its
+    // `for (j = i + 1; ...)` loop.  Whenever another item follows a beam, that
+    // reread sees the current beam in its own group and clears `stop`; only a
+    // beam that is literally the final builder item returns early.  A trailing
+    // glyph therefore reaches the final head-relation recheck on the evolved
+    // composite line (Bach system 2 queue 196 exercises this shape).
+    let beam_stopped = !beam_targets.is_empty()
+        && builder
+            .items
+            .last()
+            .is_some_and(|item| item.kind == NativeStemsHeadBuilderItemKind::BeamLinker);
     if !beam_targets.is_empty() && beam_vlinkers.is_none() {
         return Err(stage(
             "HEADS-CLink-expand",

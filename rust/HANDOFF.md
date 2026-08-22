@@ -10335,3 +10335,39 @@ Boundary 221 is strictly pinned; warmup plus two runs are byte-identical.
 Focused 1/1, all 29 sibling tests, formatting, strict workspace Clippy, replay,
 and diff checks pass. No production source changed. Continue at queue196
 x111/SIG50.
+
+## Boundary 223: trailing-glyph multi-beam existing-stem C-link
+
+Bach system-2 queue196 x111/SIG50/Inter3705 has grade bits
+`3fc709c65e42a4c0`. Profile 0 selects LEFT/BOTTOM while RIGHT has no link. The
+exact builder contains the head item, two already-linked beam items for
+SIG12/b2 and SIG15/b2, then a trailing support glyph; `lastIndex=maxIndex=3`.
+The candidate raster `1080:765:5:50` already belongs to the concrete 77-stem
+registry, so Java reuses that stem, retains both existing BeamStem relations,
+and appends only the HeadStem edge from x111. The SIG changes from 394/596 to
+394/597 without allocating a vertex, stem, or glyph identity, closes x115
+LEFT then RIGHT, and advances to queue197 x30/SIG95/Inter3796. The exact final
+HeadStem grade/dx bits are `3fe78b0e784bc6c4` and `bfc77c64aef254b5`.
+
+This boundary fixes one production semantic mismatch in Java's
+`CLinker.expand` sibling loop. Java accidentally reads the current beam item
+inside the later-item scan, so any item after a beam clears the early-stop
+condition; only a beam that is literally the final builder item returns early.
+The trailing glyph at queue196 therefore reaches the final head-relation
+recheck on the evolved composite line. Native now preserves that behavior
+generically instead of treating every beam-bearing expansion as stopped. The
+oracle also replaces the fresh-JVM auxiliary glyph number with stable
+content-derived candidate/support aliases, so no transient Java glyph ID is
+an authority.
+
+Fixture/runner/transform/init/probe/body SHA-256 values are
+`3ecc95849d57978667c0e7da58f3717755ca864ce1de12d1e9c37231210c47f2`,
+`efaada105b573927a755c27fcc2510ba6eb12ffc0904104f2d1c1f117616f52a`,
+`89513ad31d19efccb33d933f340cf3aed687e1c16b0fdfc7186ebf4478ea3046`,
+`1464cf3e45fc89aa88db3d10fdb16d9b0386e592986f45652bb56b680b11dbbd`,
+`856613241d852da7e300e8793699bc80208c967bac8e7e58e7114ce7fab3739e`,
+and `ae8d5fde3be59f6074a615ab80478c6de1861d47ca1e89aeaae9fae0915a0635`.
+Boundary 222 is strictly pinned; warmup plus two fresh JVM runs are
+byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
+Clippy, deterministic replay, and diff checks pass. Continue at queue197
+x30/SIG95.
