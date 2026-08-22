@@ -135,6 +135,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order10,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system2_order16,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19,
+        advance_native_stems_head_phase_two_append_c_link_hove_system5_order1,
         advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
@@ -417,6 +418,12 @@ const CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_RUNNER: &[u8] =
 const CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_TRANSFORM: &[u8] = include_bytes!(
     "../../../oracle/java/stems-head-phase-two-cucaracha-system3-order19.transform.awk"
 );
+const HOVE_SYSTEM5_PHASE_TWO_ORDER1_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-hove-system5-order1.txt");
+const HOVE_SYSTEM5_PHASE_TWO_ORDER1_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-hove-system5-order1.sh");
+const HOVE_SYSTEM5_PHASE_TWO_ORDER1_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-hove-system5-order1.transform.awk");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -17056,6 +17063,283 @@ fn cucaracha_order56_no_link_and_all_system_stems_complete() {
     let recognized =
         recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
             .expect("Cucaracha transactional native STEMS recognition");
+    assert_eq!(recognized.components, prepared.components);
+    assert_eq!(recognized.systems, finalized.systems);
+}
+
+#[test]
+fn hove_system5_queue1_reuses_the_terminal_stem_and_completes_the_page() {
+    let path = repo_root().join("data/examples/hove.png");
+    let grid = recognize_grid_lines(path).expect("Hove GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Hove HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Hove STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Hove BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Hove LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Hove HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Hove native STEMS preparation");
+    let phase_one = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect("Hove HEADS phase 1");
+    let system = &phase_one.systems[4];
+    assert_eq!(system.system_id, 5);
+    assert_eq!(system.carrier.phase_two_index, 0);
+    assert_eq!(system.carrier.unlinked_heads.len(), 2);
+    let after_zero = advance_native_stems_head_phase_two_append_retry(
+        &system.carrier,
+        &prepared.components.head_corners.systems[4],
+        &prepared.components.head_reachability.systems[4],
+        &prepared.components.head_builders.systems[4],
+        &prepared.components.plans.systems[4],
+    )
+    .expect("Hove system-5 queue 0");
+    assert_eq!(after_zero.state_after.phase_two_index, 1);
+    let state = &after_zero.state_after;
+    let matching_stems = state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .filter(|stem| {
+            let bounds = stem.glyph_content.bounds;
+            bounds.x == 2_198 && bounds.y == 1_699 && bounds.width == 4 && bounds.height == 107
+        })
+        .collect::<Vec<_>>();
+    let matching_glyphs = prepared.components.stem_seed_glyphs[4]
+        .free_glyphs
+        .iter()
+        .filter(|glyph| {
+            let bounds = glyph.bounds;
+            bounds.x == 2_198 && bounds.y == 1_699 && bounds.width == 4 && bounds.height == 107
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching_stems.len(), 1);
+    assert_eq!(matching_glyphs.len(), 1);
+    assert_eq!(matching_stems[0].stem_identity, 25);
+    assert_eq!(matching_stems[0].glyph_id, 226);
+    assert_eq!(matching_stems[0].inter_id, Some(1_815));
+
+    let vertices_before = state.beam_state.sig.vertices.len();
+    let edges_before = state.beam_state.sig.edges.len();
+    let stems_before = state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let allocator_before = state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+    let order1 = advance_native_stems_head_phase_two_append_c_link_hove_system5_order1(
+        state,
+        &prepared.components.head_corners.systems[4],
+        &prepared.components.head_reachability.systems[4],
+        &prepared.components.stem_seed_glyphs[4].free_glyphs,
+        &prepared.components.head_builders.systems[4],
+        &prepared.components.plans.systems[4],
+        &prepared.stem_checker,
+        &system.registry,
+    )
+    .expect("Hove system-5 queue-1 RIGHT/TOP reused-stem append");
+    assert_eq!(order1.c_link.system_id, 5);
+    assert_eq!(order1.c_link.corner.x_ordinal, 67);
+    assert_eq!(order1.c_link.corner.sig_ordinal, 52);
+    assert_eq!(order1.c_link.corner.horizontal, NativeStemHeadSide::Right);
+    assert_eq!(order1.c_link.corner.vertical, NativeStemVerticalSide::Top);
+    assert_eq!((order1.c_link.last_index, order1.c_link.max_index), (1, 1));
+    assert_eq!(order1.c_link.selected_glyph_id, 226);
+    assert_eq!(order1.c_link.stem_vertex, NativeSigVertexId(128));
+    assert_eq!(
+        order1.c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 25 }
+    );
+    assert_eq!(
+        order1.c_link.relation.grade.to_bits(),
+        0x3fef_ab11_5e07_2942
+    );
+    assert_eq!(order1.c_link.relation.dx.to_bits(), 0x3f6f_c451_4038_cccd);
+    assert_eq!(
+        order1
+            .c_link
+            .additional_head_relations
+            .iter()
+            .map(|relation| (
+                relation.corner.x_ordinal,
+                relation.corner.sig_ordinal,
+                relation.corner.horizontal,
+                relation.head_stem_edge.0,
+                relation.appended,
+            ))
+            .collect::<Vec<_>>(),
+        [(65, 46, NativeStemHeadSide::Right, 143, false)]
+    );
+    assert_eq!(
+        (
+            order1.continuation.processed_head.x_ordinal,
+            order1.continuation.processed_head.sig_ordinal,
+            order1.continuation.returned_linked,
+            order1.continuation.state_after.phase_two_index,
+        ),
+        (67, 52, Some(true), 2)
+    );
+    assert_eq!(
+        order1
+            .continuation
+            .state_after
+            .beam_state
+            .sig
+            .vertices
+            .len(),
+        vertices_before
+    );
+    assert_eq!(
+        order1.continuation.state_after.beam_state.sig.edges.len(),
+        edges_before + 1
+    );
+    assert_eq!(
+        order1
+            .continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        order1
+            .continuation
+            .state_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
+    assert_eq!(
+        sha256_hex(HOVE_SYSTEM5_PHASE_TWO_ORDER1_FIXTURE.as_bytes()),
+        "b3b6f9f88e158793eec8072c2f8aee1ebb9508acf5b908965651015c4d10d341"
+    );
+    assert_eq!(
+        sha256_hex(HOVE_SYSTEM5_PHASE_TWO_ORDER1_RUNNER),
+        "e4af37df9ef194bf2da94d05101f452384144dd5ffbe5856f35fe5aebb179547"
+    );
+    assert_eq!(
+        sha256_hex(HOVE_SYSTEM5_PHASE_TWO_ORDER1_TRANSFORM),
+        "2f54cd2e91e0d930912e7decc1d7222512918b0a14103010e9fa2dee05762eeb"
+    );
+    let rows = HOVE_SYSTEM5_PHASE_TWO_ORDER1_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 6);
+    for exact in [
+        "system 5 heads 71 queueSize 2 queue [x65:sig46:id1709,x67:sig52:id1721]",
+        "sourceHeadId 1709 sourceCorner TR sourceSide RIGHT relationGrade 3fefee72d76d6b41",
+        "stem id2931:glyphid284:2198:1699:4:107:weight399",
+        "lastIndex 1 selectedStem id2931",
+        "head#1721-Clnk-TR:grade3fefab115e072942:dx3f6fc4514038cccd",
+        "vertices 136 edges 160 allocator 2937 terminal ReturnedHeadCLinkTransaction",
+        "queueIndex 1 headX 67 headSig 52 headInterId 1721 grade 3fc74ccccccccccd",
+        "decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly] returned true",
+        "sideChanges [x67:sig52:RIGHT:false:true->true:true]",
+    ] {
+        assert!(
+            HOVE_SYSTEM5_PHASE_TWO_ORDER1_FIXTURE.contains(exact),
+            "missing Hove system-5 queue-1 oracle fragment: {exact}"
+        );
+    }
+    let summary = rows[5];
+    assert_eq!(
+        head_field(summary, "schema"),
+        "stems-head-phase-two-hove-system5-order1-v1"
+    );
+    assert_eq!(head_field(summary, "rows"), "5");
+    assert_eq!(
+        head_field(summary, "runnerSourceSha256"),
+        sha256_hex(HOVE_SYSTEM5_PHASE_TWO_ORDER1_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "retargetTransformSourceSha256"),
+        sha256_hex(HOVE_SYSTEM5_PHASE_TWO_ORDER1_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(summary, "baseBoundary205RunnerSha256"),
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_RUNNER)
+    );
+    assert_eq!(
+        head_field(summary, "baseBoundary205FixtureSha256"),
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        head_field(summary, "baseBoundary205RetargetTransformSha256"),
+        sha256_hex(CUCARACHA_SYSTEM3_PHASE_TWO_ORDER19_TRANSFORM)
+    );
+    assert_eq!(
+        head_field(summary, "emittedBodySha256"),
+        "0078c65201a8b8b426beaf4cee7ad67928fb1b5252e15b46108b2b5486753e71"
+    );
+    assert_eq!(
+        head_field(summary, "semanticPassSha256"),
+        "0078c65201a8b8b426beaf4cee7ad67928fb1b5252e15b46108b2b5486753e71"
+    );
+    assert_eq!(head_field(summary, "freshRunsByteIdentical"), "true");
+    assert_eq!(
+        head_field(summary, "nativeScope"),
+        "HoveSystem5PhaseTwoOrder1ReusedStemAppend"
+    );
+    assert_eq!(
+        head_field(summary, "javaEvidence"),
+        "ReturnedAfterSystem5RetryIndex1"
+    );
+
+    let page_phase_two = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect("all five Hove systems complete HEADS phase 2");
+    assert_eq!(page_phase_two.systems.len(), 5);
+    assert!(
+        page_phase_two.systems.iter().all(|system| {
+            system.carrier.phase_two_index == system.carrier.unlinked_heads.len()
+        })
+    );
+    let finalized = prepared
+        .finalize_all_system_stems()
+        .expect("all five Hove systems complete generic finalizeStems");
+    assert_eq!(
+        finalized
+            .systems
+            .iter()
+            .map(|system| (
+                system.system_id,
+                system.transaction.checked_heads,
+                system.transaction.removed_head_stem_relations.len(),
+                system.transaction.abnormal_value_changes,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (1, 65, 0, 0),
+            (2, 90, 0, 0),
+            (3, 52, 0, 0),
+            (4, 65, 0, 0),
+            (5, 71, 0, 0),
+        ]
+    );
+    let recognized =
+        recognize_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+            .expect("Hove transactional native STEMS recognition");
     assert_eq!(recognized.components, prepared.components);
     assert_eq!(recognized.systems, finalized.systems);
 }

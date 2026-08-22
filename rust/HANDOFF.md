@@ -9878,3 +9878,41 @@ all-target/all-feature workspace Clippy (13.75s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
 CI baseline. Continue with the first unsupported transactional STEMS frontier
 among Hove and BachInvention5.
+
+## Boundary 206: Hove system-five phase-two completion
+
+Native terminal queue1 x67/SIG52 selects RIGHT/TOP, resolves native glyph226
+to existing Stem identity25 / vertex128, preserves x65/SIG46 edge143, and
+appends the current-head relation at edge159. Relation grade/dx bits
+`3fefab115e072942` / `3f6fc4514038cccd` exactly match Java. Vertices136,
+system stems32, glyph IDs, and allocator2937 remain fixed; edges advance
+159→160 and the phase-two cursor advances 1→2, exhausting system 5.
+
+Java independently measures x67/SIG52/Inter1721 selecting glyph284 and
+existing Stem2931. It retains Inter1709 and changes only the one edge and the
+x67 RIGHT side flag. Native identities remain independently derived from
+carried Rust state rather than copied from Java's EntityIndex.
+
+This terminal closes all five Hove phase-two queues. Generic `finalizeStems`
+checks 65/90/52/65/71 heads with zero relation removals or abnormal-value
+changes, transactional `recognize_native_stems` reproduces the same prepared
+components and finalized systems, and production `-step STEMS -json` succeeds
+for Hove.
+
+The strict five-row-plus-summary fixture is 8 lines / 3,627 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`e4af37df9ef194bf2da94d05101f452384144dd5ffbe5856f35fe5aebb179547`,
+`2f54cd2e91e0d930912e7decc1d7222512918b0a14103010e9fa2dee05762eeb`,
+`b3b6f9f88e158793eec8072c2f8aee1ebb9508acf5b908965651015c4d10d341`,
+and `0078c65201a8b8b426beaf4cee7ad67928fb1b5252e15b46108b2b5486753e71`.
+Boundary 205's runner/fixture/transform remain pinned at
+`26af234811b815d1e2012311838045cd80adec4c3d67c3dd19c732160600fb34`,
+`a4ede84ed937da65006924da3b3de35e24d33dd229d9391aae136e436b1477ff`,
+and `35f69316834081b0e6f8354e0bfbb856952930941652ccd04db2ee23dcc1d432`.
+
+Focused 1/1 (3.86s), full sibling 27/27 (156.52s), formatting, strict
+all-target/all-feature workspace Clippy (13.45s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
+CI baseline. Continue at BachInvention5 system 6's missing carried BEAMS
+groups, the first remaining unsupported transactional STEMS frontier.
