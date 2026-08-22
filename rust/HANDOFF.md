@@ -10101,3 +10101,28 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 (8.51s), replay, and diff checks pass. No production source changed.
 `425d58e82` remains the exact green remote CI baseline. Continue at Bach system
 2 queue186 x190/SIG214; its branch and builder geometry remain to be measured.
+
+## Boundary 213: identity-free no-link closure
+
+Bach system-2 queue186 x190/SIG214/Inter4036 has grade bits
+`3fc857b6c55b3c0d`. Neither side can link at profiles 0-3. Java returns false,
+records no undefined head or incident stem, closes x190 LEFT then RIGHT, and
+preserves 394 vertices, 593 edges, 77 system stems, and the allocator. Native's
+generic continuation evaluates the single operational profile for this grade,
+reproduces the two ordered closures with `closed_value_changes=2`, and advances
+to queue187 x178/SIG52/Inter3709 without graph mutation.
+
+The queue-186 probe is a mechanical transform of Boundary 210's identity-free
+source and pins Boundary 212 as its predecessor. Fixture/runner/transform/
+transformed-probe/init/body SHA-256 values are
+`729145d6ecd237c7cf420323f980384e119efac24eed97a2393bc1a91dbba8b9`,
+`38b6854c8a1a58cc4e463f119bf60317a5fc4501cc22bd21c091850e3cb9558a`,
+`ab01e72ce28d279aa95fa66d5c0e0f86533e8d9f8ba058fcfa9a20ea3e1b9dc0`,
+`f0c4689aeee121c8e74e565fa92c40ab38827197a986a02c44080503757177ac`,
+`4b36fba6bab07e37401f56e1652f6d97b38aff7ce99ababab60ff874388c673d`,
+and `e5b83dc66a534e93fb5774e6b74adea3954a8dd81c03e4e89f5d4db3fcc34eff`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+29/29 (153.63s), formatting, strict all-target/all-feature workspace Clippy
+(9.21s), replay, and diff checks pass. No production source changed.
+`425d58e82` remains the exact green remote CI baseline. Continue at Bach system
+2 queue187 x178/SIG52; its branch and builder geometry remain to be measured.
