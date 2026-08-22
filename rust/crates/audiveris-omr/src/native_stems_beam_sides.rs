@@ -2327,7 +2327,22 @@ pub fn advance_native_stems_head_c_link_or_no_link(
     let mut shadow = working;
     let mut closed_s_linkers = Vec::new();
     let mut closed_value_changes = 0;
-    for side in &current.sides {
+    // Java stores SLinkers in an EnumMap and closes them LEFT then RIGHT.
+    // Constructor order is not an authority for this observable transaction.
+    for horizontal in [
+        crate::stems_step::NativeStemHeadSide::Left,
+        crate::stems_step::NativeStemHeadSide::Right,
+    ] {
+        let side = current
+            .sides
+            .iter()
+            .find(|side| side.reference.horizontal == horizontal)
+            .ok_or_else(|| {
+                stage(
+                    "HEADS-CLink-native-loop",
+                    "queued head is missing a horizontal S cell",
+                )
+            })?;
         let persistent = shadow
             .beam_state
             .s_cells
@@ -12123,6 +12138,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 Some(NativeStemsHeadBuilderGlyphRef::HeadStump { corner }),
                 Some(NativeStemsHeadBuilderTargetRef::Head(target)),
             ) if corner == target => head_targets.push(target),
+            (NativeStemsHeadBuilderItemKind::Gap, None, None) => {}
             _ => bounded_tail = false,
         }
     }
@@ -12151,7 +12167,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         return Err(stage(
             "HEADS-CLink-expand",
             format!(
-                "selected frontier is not the bounded start-C shape: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} profile {}/{} items {:?} undefs {:?}",
+                "selected frontier is not the bounded start-C shape: system {} queue {} head x{}/SIG{} corner {:?}/{:?} builder {} profile {}/{} items {:?} decisions {:?} undefs {:?}",
                 head_corners.system_id,
                 expected_current_index,
                 frontier.head.x_ordinal,
@@ -12166,6 +12182,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                     .iter()
                     .map(|item| (item.kind, item.glyph, item.target, item.contribution))
                     .collect::<Vec<_>>(),
+                frontier.side_decisions,
                 shadow.undefined_sides,
             ),
         ));
@@ -12298,6 +12315,16 @@ fn advance_native_stems_head_c_link_at_frontier(
     let mut start_relation_before_expand = None;
     let mut additional_relation_plans = Vec::new();
     let mut rejected_chunk_item_index = None;
+    let mut gap_stop_item_index = None;
+    let max_gap = head_builders
+        .gap_map
+        .get(&frontier.stem_profile)
+        .copied()
+        .ok_or_else(|| stage("HEADS-CLink-expand", "builder lacks STRICT gap threshold"))?;
+    let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
+    let best_tail = java_rint(2.5 * f64::from(head_builders.interline));
+    let hard_y = reach_corner.reference_point.y + f64::from(builder.y_direction * minimum_tail);
+    let soft_y = reach_corner.reference_point.y + f64::from(builder.y_direction * best_tail);
     // Java initializes `lastY` from the theoretical line's P1 before it
     // reverses the working stem line for upward expansion.  Using the reversed
     // line's start would begin at the remote target and falsely satisfy the
@@ -12475,7 +12502,37 @@ fn advance_native_stems_head_c_link_at_frontier(
                 // Beam-bearing builders are applied by the relation append
                 // below. The measured builders carry no concrete beam glyph.
             }
-            NativeStemsHeadBuilderItemKind::Gap | NativeStemsHeadBuilderItemKind::SeedGlyph => {
+            NativeStemsHeadBuilderItemKind::Gap => {
+                // Java does not update lastY for a GapItem. A show-stopping
+                // gap returns -1 immediately when the walk has not reached
+                // the hard tail, so CLinker.link returns false without a
+                // glyph, relation, allocator, or SIG mutation.
+                if item.contribution > max_gap {
+                    if builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
+                        return Err(stage(
+                            "HEADS-CLink-no-link",
+                            "expanded items hit a wide gap before Java's hard tail target",
+                        ));
+                    }
+                    gap_stop_item_index = Some(item_index);
+                    break;
+                }
+                // Java's soft-tail shortcut can additionally inspect and
+                // include the immediately following GlyphItem. That branch
+                // is not yet authenticated by a deterministic transaction,
+                // so retain the fail-closed boundary instead of approximating
+                // its candidate selection.
+                if beam_targets.is_empty()
+                    && builder.y_direction * java_double_compare(last_y, soft_y) >= 0
+                {
+                    return Err(stage(
+                        "HEADS-CLink-expand",
+                        "soft-target gap stop with following-glyph probe remains unmeasured",
+                    ));
+                }
+                continue;
+            }
+            NativeStemsHeadBuilderItemKind::SeedGlyph => {
                 return Err(stage(
                     "HEADS-CLink-expand",
                     "selected builder contains an unported bounded item kind",
@@ -12542,11 +12599,10 @@ fn advance_native_stems_head_c_link_at_frontier(
         stem_line.start.x = java_next_up(stem_line.start.x);
         stem_line.stop.x = java_next_up(stem_line.stop.x);
     }
-    let minimum_tail = java_rint(1.75 * f64::from(head_builders.interline));
     // Java CLinker.link derives the hard target from this corner's reference
     // point; the theoretical-line endpoint is only the initial `lastY`.
-    let hard_y = reach_corner.reference_point.y + f64::from(builder.y_direction * minimum_tail);
     if rejected_chunk_item_index.is_none()
+        && gap_stop_item_index.is_none()
         && beam_targets.is_empty()
         && builder.y_direction * java_double_compare(last_y, hard_y) < 0
     {
@@ -12560,7 +12616,8 @@ fn advance_native_stems_head_c_link_at_frontier(
     // loop, so it never reaches the final relation recheck at the bottom of `expand`.
     // Preserve that initial relation while still evolving `stem_line` for BeamStem
     // projection and checked-stem creation.
-    let stopped_before_final_relation = rejected_chunk_item_index.is_some() || beam_stopped;
+    let stopped_before_final_relation =
+        rejected_chunk_item_index.is_some() || gap_stop_item_index.is_some() || beam_stopped;
     if stopped_before_final_relation && start_relation_before_expand.is_none() {
         return Err(stage(
             "HEADS-CLink-no-link",
@@ -12607,6 +12664,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         ));
     }
     let actual_last_index = rejected_chunk_item_index
+        .or(gap_stop_item_index)
         .map(|index| index.saturating_sub(1))
         .unwrap_or(expected_last_index);
 

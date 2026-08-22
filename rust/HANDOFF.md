@@ -9184,3 +9184,49 @@ Gap-aware expansion is the next measured wider-corpus branch.
 `425d58e821c1e03e15c885307607b3154d46edd8` is the exact fully green remote
 predecessor: Build & Test 32551514978 and all 12 Rust-port shards in
 32551514933 succeeded.
+
+## Boundary 187: Carmen system-2 show-stopping gap no-link
+
+The generic head C-link expansion now accepts typed `Gap` items and applies
+Java's profile-specific `maxYGap` rule. A gap never advances `lastY`. When
+its contribution exceeds the threshold before the hard tail target, expansion
+returns no-link immediately with no candidate creation, glyph registration,
+allocator change, relation, SIG edge, or system stem. If the hard tail was
+already reached, the walk stops at the preceding item. The separate
+soft-target/following-glyph shortcut remains explicitly fail-closed until a
+deterministic Java transaction authenticates it. Generic no-link closure now
+also writes the current head's S cells in Java's LEFT-then-RIGHT EnumMap order.
+
+Carmen system 2 queue 70 is x13/SIG10/Java Inter 2252. Java first rejects
+LEFT/TOP and then reaches RIGHT/BOTTOM builder 55: a 31-pixel start stump,
+5-pixel Gap, and 51-pixel chunk. The wide gap occurs before the 37-pixel hard
+tail. Active glyph 465 / native candidate content `628:1081:3:47` is
+observed but not registered or attached. Both attempts return false; x13
+LEFT and RIGHT close in order and the head joins phase 2. Native and Java each
+preserve their pre-transaction graph, stem, and allocator state and advance to
+queue 71, x27/SIG16/Java Inter 2266. Java's independent transaction remains at
+1040 vertices, 824 edges, 33 stems, and allocator 3366.
+
+The 4-row-plus-summary fixture is 7 lines / 5,474 bytes and is byte-identical
+across warmup plus two fresh runs. Runner/init/fixture/probe/body/semantic
+SHA-256 values are
+`c0516e21259912bc5ec1b429878dfc5d26b44a1c54076d1cc7eace3cd700194d`,
+`cdd0f38b472bd6c29b90d389783e99b16b788578cdb6ab409632c612ad86c5f6`,
+`6bf4d983a98070b7d29089ae8771234838697457b7321c0110452651dd5bb0ff`,
+`bbd9d309d51dc66c6703127397a72191342a59076af75e84ba039dd0bc846aa9`,
+`781c4627ceef9fcf378ee07ef56fefd4d098a99d6a08d50db1961f00d6c39158`,
+and
+`c3456f9c96304a256b19c3668fe5e77e1c0e889764458e6246554abaa4a6e0d7`.
+The runner strictly pins Boundary 186's runner/fixture at
+`070c3febcf34348fc8ce643c17d99757a7845daf4f1379e591a7922b1a0da1b9` /
+`28018b4010fc1a08a45569298b06f737164c86398a2e46f277bceb869fedf089`
+and retains the shared fragment/overlay hashes.
+
+Focused 1/1, full sibling 24/24 (153.04s), formatting, strict
+all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
+pass. The atomic production Carmen drive clears system 2 queue 70 and now
+fails closed at system 5 queue 62, x71/SIG7 LEFT/TOP, builder 286: start stump,
+chunk, then a stump-less crossed x68/SIG0 head relation. That relation-only
+crossed-head expansion is the next wider-corpus branch. `425d58e82` remains
+the exact fully green remote CI baseline; Boundary 186 is pushed at
+`1d8cbb002` but has no visible workflow run yet.
