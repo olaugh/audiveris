@@ -10045,3 +10045,32 @@ formatting, strict all-target/all-feature workspace Clippy (9.44s), oracle
 replay, and diff checks pass. No production source change was needed.
 `425d58e82` remains the exact green remote CI baseline. Continue at Bach system
 2 queue184 x25/SIG93; its branch and builder geometry remain to be measured.
+
+## Boundary 211: transformed four-head mixed-change reconciliation
+
+Bach system-2 queue184 is x25/SIG93/Inter3790, grade bits
+`3fc87c4777a649dd`. LEFT is already linked and RIGHT closed across profiles
+0-3. Its pre-existing stem structurally joins x25/SIG93, x27/SIG178,
+x28/SIG179, and x29/SIG92 on LEFT. Java returns true and changes only x28
+LEFT from linked/open to linked/closed and x28 RIGHT from unlinked/open to
+unlinked/closed; SIG 394/593, 77 stems, and the allocator do not change.
+
+The generic native continuation preserves the incident edge order rather than
+the sorted structural display: x29 LEFT/RIGHT, x27 LEFT/RIGHT, then x28
+LEFT/RIGHT. The first four writes are idempotent, the last two change values,
+and the carrier advances to queue185 x192/SIG76/Inter3757.
+
+Boundary 211 derives its probe mechanically from Boundary 210's identity-free
+source. Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`7a77078895e488d1be44d0f57c272d0d022fc278c86ba13d94925f8ff111aebe`,
+`16c64b513e86df490b141cfa6189d3f80ac76c18ea483ae1d4d81325a2a3b805`,
+`64514c7fc90e30ee745f02628a9a44461d175477ba93c8a80bb158fdb9d499e3`,
+`3787d760a4a9f6fadd552910ff4876a38990d59625e9fa405c453bf6b918350e`,
+`66f7873e1eaaef9ff5504ec23e561eb1c015fc5756f36c0220c69f590127e648`,
+and `8ef60ed510ea962fde3199051794cdcdaae5d12c3d59ac367fe2bfef65696a74`.
+The Boundary 210 source, runner, and fixture are exact predecessor pins.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+29/29 (153.12s), formatting, strict all-target/all-feature workspace Clippy
+(8.87s), replay, and diff checks pass. No production source changed.
+`425d58e82` remains the exact green remote CI baseline. Continue at Bach system
+2 queue185 x192/SIG76; its branch and builder geometry remain to be measured.
