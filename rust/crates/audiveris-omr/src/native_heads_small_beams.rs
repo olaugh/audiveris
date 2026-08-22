@@ -325,8 +325,9 @@ fn beam_contextual_grades(
         .iter()
         .map(|rest| rest.source_beam_ordinal)
         .collect::<Vec<_>>();
-    // Group member ordinals use all raw system beams followed by all secondary
-    // hooks. Raw ordinals remain global source identities.
+    // Java builds groups from all raw system beams plus secondary hooks before
+    // multiple-rest replacement. Raw ordinals remain global source identities;
+    // removed members are filtered only when the live contextual grade is read.
     let members = recognition
         .raw_beams
         .iter()

@@ -1325,6 +1325,39 @@ fn append_beams(
     bindings: &mut NativeSigSystemBindings,
 ) -> Result<(), NativeSigError> {
     let first = graph.vertices.len();
+    // Java's `BeamsBuilder.buildBeams()` creates BeamGroupInter containment
+    // before `BeamsStep` invokes `MultipleRestsBuilder`. Replacing a rest-like
+    // beam removes that beam and its incident relations, but it does not
+    // geometrically regroup the surviving beams. Keep the pre-rest grouping
+    // input and map its members onto the live post-rest vertex stream below.
+    let grouping = beams
+        .raw_beams
+        .iter()
+        .enumerate()
+        .filter(|(_, (owner, _))| *owner == system_id)
+        .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::RawBeam(ordinal), beam))
+        .chain(
+            beams
+                .hooks
+                .iter()
+                .enumerate()
+                .filter(|(_, (owner, _))| *owner == system_id)
+                .map(|(ordinal, (_, beam))| (NativeStemsBeamSource::Hook(ordinal), beam)),
+        )
+        .collect::<Vec<_>>();
+    let evidence = crate::beam_inters::group_beams(
+        &grouping.iter().map(|(_, beam)| **beam).collect::<Vec<_>>(),
+        interline,
+    );
+    let groups = beams
+        .group_memberships
+        .iter()
+        .find(|membership| membership.system_id == system_id)
+        .ok_or(NativeSigError::MissingBeamGroup(system_id))?;
+    if evidence.groups != groups.groups {
+        return Err(NativeSigError::MissingBeamGroup(system_id));
+    }
+
     let mut created = Vec::new();
     for (owner, beam) in &beams.beams_after_multiple_rests {
         if *owner != system_id {
@@ -1358,32 +1391,32 @@ fn append_beams(
             return Err(NativeSigError::DuplicateBeamBinding { system_id, source });
         }
     }
-    let exclusions = created
-        .windows(2)
+    let live_indices = created
+        .iter()
         .enumerate()
-        .filter(|(_, pair)| {
+        .map(|(index, (source, _))| (*source, index))
+        .collect::<BTreeMap<_, _>>();
+    let grouping_to_live = grouping
+        .iter()
+        .map(|(source, _)| live_indices.get(source).copied())
+        .collect::<Vec<_>>();
+    let exclusions = grouping
+        .windows(2)
+        .filter(|pair| {
             pair[0].1.item == pair[1].1.item
                 && pair[0].1.kind == BeamKind::Hook
                 && pair[1].1.kind != BeamKind::Hook
         })
-        .map(|(index, _)| (first + index, first + index + 1))
+        .filter_map(|pair| {
+            let source = live_indices.get(&pair[0].0).copied()?;
+            let target = live_indices.get(&pair[1].0).copied()?;
+            Some((first + source, first + target))
+        })
         .collect::<BTreeSet<_>>();
     for &(source, target) in &exclusions {
         push_edge(graph, source, target, NativeSigRelationKind::Exclusion);
     }
 
-    let evidence = crate::beam_inters::group_beams(
-        &created.iter().map(|(_, beam)| **beam).collect::<Vec<_>>(),
-        interline,
-    );
-    let groups = beams
-        .group_memberships
-        .iter()
-        .find(|membership| membership.system_id == system_id)
-        .ok_or(NativeSigError::MissingBeamGroup(system_id))?;
-    if evidence.groups != groups.groups {
-        return Err(NativeSigError::MissingBeamGroup(system_id));
-    }
     let mut active = Vec::<bool>::new();
     for event in &evidence.events {
         match *event {
@@ -1401,17 +1434,21 @@ fn append_beams(
     }
     let mut group_ordinals = vec![None; active.len()];
     let mut final_groups = groups.groups.iter().enumerate();
+    let mut live_group_ordinal = 0;
     for (provisional, is_active) in active.iter().copied().enumerate() {
         if !is_active {
             continue;
         }
-        let (group_ordinal, group) = final_groups
+        let (_pre_rest_group_ordinal, group) = final_groups
             .next()
             .expect("one final group per active identity");
         let mut bounds = None;
         for &index in group {
+            let Some(live_index) = grouping_to_live.get(index).copied().flatten() else {
+                continue;
+            };
             let beam = created
-                .get(index)
+                .get(live_index)
                 .ok_or(NativeSigError::InvalidBeamMember { system_id, index })?
                 .1;
             let item = beam_bounds(beam.item);
@@ -1423,6 +1460,11 @@ fn append_beams(
             };
             bounds = Some(bounds.map_or(item, |current: NativeSigBounds| current.union(item)));
         }
+        // Removing the sole member extensively removes its dying ensemble in
+        // Java. Such an empty pre-rest group has no live SIG vertex or binding.
+        let Some(bounds) = bounds else {
+            continue;
+        };
         let vertex = NativeSigVertexId(push_vertex(
             graph,
             NativeSigVertex {
@@ -1432,18 +1474,14 @@ fn append_beams(
                 kind: NativeSigInterKind::BeamGroup,
                 shape: None,
                 grade: 1.0,
-                bounds: bounds.unwrap_or(NativeSigBounds {
-                    x: 0,
-                    y: 0,
-                    width: 0,
-                    height: 0,
-                }),
+                bounds,
                 abnormal: false,
                 beam_geometry: None,
             },
         ));
         group_ordinals[provisional] = Some(vertex.0);
-        bindings.bind_beam_group(group_ordinal, vertex)?;
+        bindings.bind_beam_group(live_group_ordinal, vertex)?;
+        live_group_ordinal += 1;
     }
 
     #[derive(Clone, Copy)]
@@ -1454,9 +1492,12 @@ fn append_beams(
     let mut members = vec![Vec::<usize>::new(); active.len()];
     let mut pending = Vec::<Pending>::new();
     let add_member = |group: usize,
-                      beam: usize,
+                      pre_rest_beam: usize,
                       members: &mut Vec<Vec<usize>>,
                       pending: &mut Vec<Pending>| {
+        let Some(beam) = grouping_to_live.get(pre_rest_beam).copied().flatten() else {
+            return;
+        };
         if members[group].contains(&beam) {
             return;
         }

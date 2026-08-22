@@ -421,7 +421,9 @@ pub struct NativeBeamRecognition {
     /// Within each system, groups retain `group_beams` creation order and
     /// members retain relation insertion order. A member ordinal indexes the
     /// system-local grouping input: all matching `raw_beams` in source order,
-    /// followed by all matching `hooks` in source order.
+    /// followed by all matching `hooks` in source order. Java creates these
+    /// groups before multiple-rest replacement; later consumers remove the
+    /// retired source from each preserved group without regrouping survivors.
     pub group_memberships: Vec<NativeBeamGroupMembership>,
     pub group_counts: Vec<(usize, usize)>,
     pub group_count: usize,

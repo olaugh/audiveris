@@ -4524,8 +4524,9 @@ owned graph, and bindings are cloned and committed atomically; chula system 1 ap
 exact Stem vertex 221 and LEFT BeamStem edge 202, updates abnormal state, and still matches
 the frozen Java transaction. Certificate endpoint identities explicitly distinguish the
 legacy Java EntityIndex domain from one-based native vertices, so no fixture-derived ID
-map crosses into production. This gate is deliberately chula-system-1-only: broader SIG
-assembly still has corpus gaps such as Bach system 6's missing BEAMS group product.
+map crosses into production. This gate is deliberately chula-system-1-only. Its then-open
+Bach system-6 BEAMS-group gap is subsequently closed by Boundary 207 without changing
+this historical B14 evidence.
 
 The graph portion of B16 now also derives and commits natively for that first transaction.
 `project_native_stems_beam_vlink_sibling_graph` resolves BeamGroup 0 and Stem 143 from
@@ -9916,3 +9917,36 @@ all-target/all-feature workspace Clippy (13.45s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the exact green remote
 CI baseline. Continue at BachInvention5 system 6's missing carried BEAMS
 groups, the first remaining unsupported transactional STEMS frontier.
+
+## Boundary 207: preserve pre-rest beam-group identity into native SIG
+
+The Bach system-6 failure was a lifecycle mismatch, not missing geometry.
+Java's `BeamsBuilder.buildBeams()` creates `BeamGroupInter` containment before
+`BeamsStep` invokes `MultipleRestsBuilder`; deleting the rest-like beam removes
+that vertex and its incident containment, but does not regroup the survivors.
+Native BEAMS already retained the correct pre-rest group evidence, while
+`append_beams` incorrectly reran geometric grouping on the compact post-rest
+beam stream and rejected system 6.
+
+Native SIG assembly now replays the authenticated pre-rest group event stream,
+maps each source identity onto the live post-rest vertex stream, omits only the
+retired member and its incident relations, preserves surviving group vertices,
+containment and BeamBeam relations, and removes a group only if its sole member
+was retired. Bach raw beam ordinal182 is system-local member23 of pre-rest
+group `[18,23]`; the live group keeps member18 instead of being recomputed into
+the different post-rest partition.
+
+The focused MultipleRest gate pins that pre/post grouping difference. Existing
+Java-backed competitor, native-SIG, reachability, stump, and V-linker corpora
+all pass unchanged; in particular the two affected Bach stump rows retain
+`groupMembers 2`. Production Bach now passes BEAMS/SIG assembly and stops at
+the first real STEMS gap in system 1: a rather-good unlinked head requiring the
+higher-profile retry branch.
+
+Focused MultipleRest 1/1, HEADS competitors 2/2, small-beam epilog 6/6,
+STEM_SEEDS/BEAMS 4/4, native SIG 10/10 (five explicit diagnostics ignored),
+and the three downstream Java corpus gates pass. Formatting, strict
+all-target/all-feature workspace Clippy (11.88s), and diff checks are clean.
+No oracle changed: existing Java fixtures detected and grade this lifecycle
+fix. `425d58e82` remains the exact green remote CI baseline. Continue at Bach
+system 1's higher-profile rather-good unlinked-head retry.

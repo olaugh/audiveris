@@ -95,4 +95,39 @@ fn bach_system_six_produces_one_identity_free_multiple_rest_replacement() {
         .map(|(_, beam)| *beam)
         .collect::<Vec<_>>();
     assert_eq!(beams.beams_after_multiple_rests, expected);
+
+    // `BeamsBuilder.buildBeams()` creates `BeamGroupInter` containment before
+    // `BeamsStep` invokes `MultipleRestsBuilder`. Replacing the rest-like beam
+    // removes that vertex and its containment edge, but does not geometrically
+    // regroup the survivors. This preserved identity is observable in the
+    // Java-backed HEADS and STEMS corpus fixtures.
+    let post_rest_grouping_input = beams
+        .beams_after_multiple_rests
+        .iter()
+        .chain(&beams.hooks)
+        .filter(|(system_id, _)| *system_id == rest.system_id)
+        .map(|(_, beam)| *beam)
+        .collect::<Vec<_>>();
+    let pre_rest_grouping_input = beams
+        .raw_beams
+        .iter()
+        .chain(&beams.hooks)
+        .filter(|(system_id, _)| *system_id == rest.system_id)
+        .map(|(_, beam)| *beam)
+        .collect::<Vec<_>>();
+    let retained = beams
+        .group_memberships
+        .iter()
+        .find(|membership| membership.system_id == rest.system_id)
+        .expect("Bach system 6 beam groups");
+    let post_rest_groups = audiveris_omr::beam_inters::group_beams(
+        &post_rest_grouping_input,
+        grid.scale.scale.interline.main,
+    );
+    let pre_rest_groups = audiveris_omr::beam_inters::group_beams(
+        &pre_rest_grouping_input,
+        grid.scale.scale.interline.main,
+    );
+    assert_eq!(retained.groups, pre_rest_groups.groups);
+    assert_ne!(retained.groups, post_rest_groups.groups);
 }
