@@ -10397,3 +10397,29 @@ and `977b43c9cb1db94cdc3c86f7b4a83984d84a6b60036a88c1a64ecdbc633e3e96`.
 Boundary 223 is strictly pinned; warmup plus two fresh runs are identical.
 Focused 1/1, all 29 sibling tests (151.84s), formatting, strict workspace
 Clippy, replay, and diff checks pass. Continue at queue198 x50/SIG194.
+
+## Boundary 225: idempotent three-head prelinked reconciliation
+
+Bach system-2 queue198 x50/SIG194 has grade bits
+`3fc6db971f86d8c4`. Profiles 0-3 all skip its already-linked LEFT and closed
+RIGHT. The existing LEFT stem joins x49/SIG190, x50/SIG194, and x51/SIG195.
+Java returns true with no graph, stem, glyph-index, allocator, or undefined-side
+change and advances to queue199 x32/SIG94.
+
+The unchanged generic native continuation emits the ordered x49 LEFT/RIGHT then
+x51 LEFT/RIGHT closure list. All four cells were already closed, so the
+reconciliation is idempotent and `closedValueChanges=0`; the q197 RIGHT undef
+and phase-2 unlinked-head entry remain carried unchanged. No production source
+changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`7626e4524b7ea776bcef7fdd5dd61055050960ac0e5faa83fe80ae573f607b62`,
+`cc08ce359dd0ce437240c5282d126d7ec65f32fa66c42bab98ecc20e060a0676`,
+`4d031e6107719248f4a2b079eeed82c04c349843994c8adcb0b13619838200e7`,
+`96cfc05e41a6521a8944c0c8a8c0502d4f3832c3d69625ccfaac95b67a0faffe`,
+`2f45e7b42922e17b30b999885c9abcf599c588156b6e2ef78a808b45ef45275a`,
+and `6aa6fba2dab9bd3a80ccdf69c8e7377f21fb94c02fccca932eb5253ccf12063a`.
+Boundary 224 is strictly pinned; warmup plus two fresh JVM runs are
+byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
+Clippy, deterministic replay, and diff checks pass. Continue at queue199
+x32/SIG94.
