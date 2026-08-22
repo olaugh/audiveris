@@ -10273,3 +10273,21 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 and sibling
 29/29 (152.70s), formatting, strict workspace Clippy, replay, and diff checks pass. No
 production source changed. `425d58e82` remains the exact green remote CI
 baseline. Continue at queue193 x27/SIG178.
+
+## Boundary 220: repeated four-head zero-change reconciliation
+
+Bach system-2 queue193 x27/SIG178/Inter3967 has grade bits
+`3fc7297297297297`. LEFT is linked and RIGHT closed at profiles 0-3. Its
+existing stem joins x25/SIG93, x27/SIG178, x28/SIG179, and x29/SIG92. Java
+changes no cells; native emits x29, x25, then x28 LEFT/RIGHT in relation order.
+The 394/596 SIG, 77 stems, and allocator remain fixed before queue194
+x16/SIG184. Fixture/runner/transform/probe/init/body hashes are
+`47e2f14e4393fd18cf840427152faa783527a3714c5aef0576d116b5aa69a726`,
+`c976c0d9297c4ff03f900391cac20b2c22a9c306371553e3e051e44c44a44bac`,
+`86581b47c885bdac9e62d9304c4f64e4183ade6be242e23a495268edc161e4ae`,
+`a69389fe8adfabddd7a6fb91fb4bdab16c98dd5ebfe7e43a58dceb6a2fd86d30`,
+`d2c36888f850a0c0145ae2eccb1727c310c19c85db2501706f0e0580f401eb86`,
+and `45c66483e7f9dd860de1ddd03959b1133046b697d164697d4a25f263577703a0`.
+Warmup plus two JVM runs are byte-identical. Focused, sibling, formatting,
+strict Clippy, replay, and diff checks pass. No production source changed.
+Continue at queue194 x16/SIG184.
