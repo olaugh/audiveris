@@ -10251,3 +10251,25 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 and sibling
 29/29 (156.78s), formatting, strict workspace Clippy, replay, and diff checks pass. No
 production source changed. `425d58e82` remains the exact green remote CI
 baseline. Continue at queue192 x173/SIG160.
+
+## Boundary 219: right-side zero-change reconciliation
+
+Bach system-2 queue192 x173/SIG160/Inter3931 has grade bits
+`3fc7376bd270bc10`. LEFT is closed and RIGHT already linked across profiles
+0-3. Its existing stem joins x170/SIG165, x171/SIG166, and x173/SIG160 on
+RIGHT. Java returns true without value changes; native emits the idempotent
+x170 then x171 LEFT/RIGHT writes, preserves the 394/596 SIG, 77 stems, and
+allocator, and advances to queue193 x27/SIG178.
+
+The queue-183 source is transformed with Boundary 218 strictly pinned.
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`2f16f58f978732969374cd98cf373abf0aafe465b06446fefb346a5c20bec1ea`,
+`6bcfa2d04b9cb77e564e1be8e33fd143bac975b1f425c1e5d4bdd60bf1739caf`,
+`ebeaa341807699e4d490b90279bcaccbd4bcf48babdb0008773743a0d9e22ef4`,
+`946f543331a6a09ef701e834606e1ec5c405296ed69b959c89ed432802c1c484`,
+`994a1f57b02b044cd3c224bb39f7038dadeafdc06b46ac7b1cc2f40ba37aeef8`,
+and `08e9bfa02f9646c243bee05096843c899f1c7f4ccdcbdadfabbebc33b9dfd12c`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1 and sibling
+29/29 (152.70s), formatting, strict workspace Clippy, replay, and diff checks pass. No
+production source changed. `425d58e82` remains the exact green remote CI
+baseline. Continue at queue193 x27/SIG178.
