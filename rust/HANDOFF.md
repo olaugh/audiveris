@@ -9442,3 +9442,44 @@ Focused 1/1 (3.81s) and full sibling 26/26 (150.13s) pass. Formatting,
 strict all-target/all-feature workspace Clippy (12.84s), oracle shell syntax,
 and diff checks pass. `425d58e82` remains the exact fully green remote CI
 baseline; no workflow run was visible yet for Boundary 191 commit `4c25ffe4e`.
+
+## Boundary 193: Cucaracha phase-two LEFT reused-stem append
+
+The shared phase-two mutation seam now authenticates the selected horizontal
+side instead of assuming every successful append is RIGHT-origin, and it
+compares an ordered slice of crossed-head relations rather than assuming at
+most one. Existing Allegretto and Carmen wrappers continue to select RIGHT;
+Cucaracha system 1 queue 6 selects LEFT/BOTTOM. Both bottom corners pass
+`canLink`, LEFT commits first, and the later RIGHT/BOTTOM expansion returns
+`-1` without a second mutation.
+
+The Java page queue's index-6 entry is x12/SIG69/Inter1083. Its LEFT/BOTTOM
+builder expands through existing glyph199 and Stem2210, preserves crossed
+Inter1173's LEFT relation, appends only Inter1083's LEFT HeadStem edge, and
+changes edges 337→338 with vertices 232, system stems 38, and allocator 2216
+unchanged. The native carried queue's index-6 entry is x25/SIG71: its active
+glyph43 resolves to Stem identity31 / vertex225, the ordered pre-existing
+x22/SIG90 and x32/SIG115 relations remain edges274/275, and exactly one new
+LEFT HeadStem edge is appended. No vertex, stem, glyph ID, or allocator state
+changes. The carrier advances to phase-two queue 7 x12/SIG69. This boundary
+authenticates the generic queue-position/control/mutation seam; it does not
+claim Java/native x- or SIG-ordinal identity where the wider HEADS sets still
+differ.
+
+The seven-row-plus-summary fixture is 10 lines / 5,719 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body+semantic SHA-256 values are
+`0f47ae8f886f5ab28d69ef04c1214a69e16fc22493c59d8a442e44f11b0d8c18`,
+`69955a68e2acfada60b7e245dbb9eb636f1beb84d3020682364002179f61ced1`,
+`b8f37f279d7361fe92b6cf17c0b9e7376bc744db30e7fc162ce2e9df10669e07`,
+and
+`ec9f27448d849a8fa88bb3ff785818a9229ddc2686f7a700f46b591200211611`.
+The runner strictly pins Boundary 192's runner/fixture at
+`08eb22aa38c46490765215c7a1a3b45c6528afb1d3db599fb9a38d69226e6340` /
+`51d9d82641a79a98bc1523cc61237bce3994fa2ba9622710ad009aeb0862a73b`.
+
+Focused 1/1 and full sibling 26/26 (152.74s) pass. The final Java replay,
+formatting, strict all-target/all-feature workspace Clippy, oracle shell
+syntax, and diff checks pass. `425d58e82` remains the documented exact green
+remote baseline pending newer terminal CI. Continue at Cucaracha system 1
+phase-two queue 7 x12/SIG69's real append.
