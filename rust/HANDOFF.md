@@ -9483,3 +9483,36 @@ formatting, strict all-target/all-feature workspace Clippy, oracle shell
 syntax, and diff checks pass. `425d58e82` remains the documented exact green
 remote baseline pending newer terminal CI. Continue at Cucaracha system 1
 phase-two queue 7 x12/SIG69's real append.
+
+## Boundary 194: Cucaracha consecutive LEFT shared-stem append
+
+Cucaracha system 1 phase-two queue 7 now executes through the generic
+LEFT-origin shared-stem seam. Native x12/SIG69 (grade bits
+`0x3fe1a49132208b3d`) selects LEFT/BOTTOM after both bottom corners pass.
+Active glyph41 resolves to Stem identity32 / vertex226; the ordered existing
+x18/SIG113 LEFT relation remains edge278; and one current-head edge is the
+only graph mutation. Vertices, stems, glyph IDs, and allocator state are
+unchanged. The transactional carrier advances to queue 8 x52/SIG75.
+
+The independent Java queue-position transaction is index7
+x52/SIG75/Inter1095. It selects glyph202/Stem2205, preserves Inter1185's LEFT
+relation, and changes only edges 338→339 while vertices232, stems38, and
+allocator2216 remain fixed. Java/native x and SIG ordinals are deliberately
+not conflated; the boundary proves ordered control and mutation parity.
+
+The seven-row-plus-summary fixture is 10 lines / 5,921 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body+semantic SHA-256 values are
+`a816aec9285f4a08de6f14eafc961ca073597f355a169a877e71b388dfcfe004`,
+`009d2479d330f754c5603f0051ea40631ded4a0752798910aa2bea78707bfcd0`,
+`8c6871cddfbb751f341cab49d075ed1c73008ac5119dfd5183dc80a61e363333`,
+and
+`ec71cbcb857514b8751d0bfa8f93e271116a01a6131f7102739905d9c5ecb34a`.
+The runner pins Boundary 193's runner/fixture/transform at `0f47ae8f…` /
+`b8f37f27…` / `69955a68…`.
+
+Focused 1/1 and full sibling 26/26 (151.67s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (13.25s), deterministic Java replay,
+oracle shell syntax, and diff checks pass. `425d58e82` remains the documented
+exact green remote CI baseline pending newer terminal evidence. Continue at
+Cucaracha system 1 phase-two queue 8 x52/SIG75's real append.

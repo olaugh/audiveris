@@ -6124,6 +6124,58 @@ pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order
     )
 }
 
+/// Execute Cucaracha system 1 queue 7's LEFT/BOTTOM append retry.
+///
+/// The immediately following phase-two head reaches another already attached
+/// shared stem. Java selects LEFT/BOTTOM, preserves the crossed-head
+/// relations, and appends only the current head's missing HeadStem edge.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order7(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 1,
+            queue_index: 7,
+            x_ordinal: 12,
+            sig_ordinal: 69,
+            grade_bits: 0x3fe1_a491_3220_8b3d,
+            can_link: (false, true, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Left,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 1,
+            max_index: 1,
+            selected_glyph_id: 41,
+            candidate_stem_identity: 32,
+            stem_identity: 32,
+            stem_vertex: 226,
+            relation_grade_bits: 0x3feb_a810_9d86_8966,
+            relation_dx_bits: 0xbfb9_e96a_7efa_a30c,
+            append_reuse_source: None,
+            additional_relations: &[(18, 113, 278)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
@@ -6181,7 +6233,14 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
     {
         return Err(stage(
             "HEADS-phase2-CLink",
-            "retry grade or carried S-cell state differs from the measured transaction",
+            format!(
+                "retry grade or carried S-cell state differs from the measured transaction: grade {:016x}, sides {:?}",
+                head.grade.to_bits(),
+                head.sides
+                    .iter()
+                    .map(|side| (side.reference.horizontal, side.linked, side.closed))
+                    .collect::<Vec<_>>()
+            ),
         ));
     }
 
