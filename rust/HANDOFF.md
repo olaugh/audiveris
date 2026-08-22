@@ -9979,5 +9979,41 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 28/28 (156.94s), formatting, strict all-target/all-feature workspace Clippy
 (14.08s), deterministic replay, and diff checks pass. `425d58e82` remains the
 exact green remote CI baseline. Bach system 1 now completes; continue at
-system 2 phase-one queue182 x138/SIG149, where profile 1 selects LEFT/BOTTOM
-and the builder contains the start head plus two concrete BeamLinker stumps.
+system 2 phase-one queue182 x138/SIG149, where STRICT profile 0 selects
+LEFT/BOTTOM and the builder contains the start head plus two concrete
+BeamLinker stumps.
+
+## Boundary 209: reuse a concrete multi-beam stump without duplicate edges
+
+The generic native C-link transaction now consumes concrete `BeamLinker`
+stump items instead of accepting only target-only beam placeholders. Seed
+stumps resolve through the carried free-glyph table, built stumps resolve
+through the unique native pre-builder registry event, and each BeamStem
+relation is evaluated against the evolving stem line immediately after its
+own item, matching Java's builder order. A unique already-present BeamStem
+edge is authenticated rather than duplicated; its B cell and scheduler flag
+must agree and remain open, while an absent relation still follows the
+existing append-and-link path.
+
+The full-lifecycle Bach system-2 oracle authenticates queue182
+x138/SIG149/Inter3906 at STRICT stem profile 0. LEFT/BOTTOM expands the start
+head plus beam SIG27/B3 and SIG31/B3. All three items share glyph
+`g:1258:902:4:51:914abffc6b78ac27eb996e0ab3a118a381eee00ebff10ecd7bd1b661842e2b06`;
+the two BeamStem relations are already present, linked, open, grade 1, and
+`CENTER`. Java reuses the existing candidate Stem, adds only the HeadStem
+edge from x138, leaves 394 vertices / 77 system stems / allocator unchanged,
+advances edges 592→593, closes native x140/SIG141 LEFT then RIGHT, and reaches
+queue183 x62/SIG99/Inter3804. Native reproduces the same structural mutation
+without importing Java's process-local Stem or allocator identities.
+
+Fixture/runner/probe/init/body SHA-256 values are
+`7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760`,
+`b1e40651458dec4914e89b53fadbb1ac9406cdea4dd988af27c9df8cd869b817`,
+`72e85d0de1838664db221fa890917b83a1140bf6ee5ea99b0a1f6bc1839fec33`,
+`3140eec01b976a5cf934183c37ef07528bacc874abe67a0491f409505daf888b`,
+and `79c38429801cea5f11a2c9c5a241aba636603500b946c0dd6d9cc84b20625dad`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+29/29 (157.13s), formatting, strict all-target/all-feature workspace Clippy
+(13.62s), deterministic replay, and diff checks pass. `425d58e82` remains the
+exact green remote CI baseline. Continue at Bach system 2 queue183
+x62/SIG99; its branch and builder geometry remain to be measured.

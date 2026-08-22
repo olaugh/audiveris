@@ -432,6 +432,14 @@ const BACH_SYSTEM1_ORDER37_RETRY_PROBE: &[u8] =
     include_bytes!("../../../oracle/java/StemsHeadPhaseOneRetryPageProbe.java");
 const BACH_SYSTEM1_ORDER37_RETRY_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach.init.gradle");
+const BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-bach-system2-order182-multibeam.txt");
+const BACH_SYSTEM2_ORDER182_MULTIBEAM_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-bach-system2-order182-multibeam.sh");
+const BACH_SYSTEM2_ORDER182_MULTIBEAM_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/StemsHeadMultiBeamCLinkPageProbe.java");
+const BACH_SYSTEM2_ORDER182_MULTIBEAM_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-multibeam-bach.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -17248,6 +17256,254 @@ fn bach_system1_order37_exhausts_higher_profiles_before_no_link() {
     assert!(BACH_SYSTEM1_ORDER37_RETRY_FIXTURE.contains(
         "returned false undefs [] sideChanges [x3:sig95:LEFT:false:false->false:true,x3:sig95:RIGHT:false:false->false:true] incidents []"
     ));
+}
+
+/// A beam-bearing C-link can encounter the same already-registered stump at
+/// its start and at two already-linked beam targets. Java still evaluates all
+/// three planned relations, reuses the existing stem, and adds only the new
+/// HeadStem edge before closing the other incident head.
+#[test]
+fn bach_system2_order182_reuses_multibeam_stump_without_duplicate_beam_edges() {
+    let path = repo_root().join("data/examples/BachInvention5.jpg");
+    let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Bach STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Bach BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Bach LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Bach HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Bach native STEMS preparation");
+    let mut starts = prepared
+        .begin_all_system_head_linking_phase1()
+        .expect("Bach post-STUMPS head carriers")
+        .systems;
+    let mut start = starts.remove(1);
+    assert_eq!(start.system_id, 2);
+    let head_corners = &prepared.components.head_corners.systems[1];
+    let head_reachability = &prepared.components.head_reachability.systems[1];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[1];
+    let head_builders = &prepared.components.head_builders.systems[1];
+    let plans = &prepared.components.plans.systems[1];
+    let vlinkers = &prepared.components.beam_vlinkers.systems[1];
+
+    while start.carrier.current_index < 182 {
+        if start.carrier.frontier_consumed {
+            let continuation = continue_native_stems_head_linking_phase1(
+                &start.carrier,
+                head_corners,
+                Some(head_reachability),
+                head_builders,
+                plans,
+            )
+            .expect("ordinary Bach continuation before system-2 queue 182");
+            start.carrier = *continuation.state_after;
+        } else {
+            let outcome = advance_native_stems_head_c_link_or_no_link(
+                &mut start.carrier,
+                head_corners,
+                head_reachability,
+                &seed_glyphs.free_glyphs,
+                head_builders,
+                plans,
+                vlinkers,
+                &prepared.stem_checker,
+                &start.registry,
+            )
+            .expect("ordinary Bach C-link before system-2 queue 182");
+            if let Err(continuation) = outcome {
+                start.carrier = *continuation.state_after;
+            }
+        }
+    }
+    while start.carrier.frontier_consumed {
+        let continuation = continue_native_stems_head_linking_phase1(
+            &start.carrier,
+            head_corners,
+            Some(head_reachability),
+            head_builders,
+            plans,
+        )
+        .expect("Bach continuation selecting system-2 queue 182");
+        start.carrier = *continuation.state_after;
+    }
+    assert_eq!(start.carrier.current_index, 182);
+    assert_eq!(
+        (
+            start.carrier.frontier.head.x_ordinal,
+            start.carrier.frontier.head.sig_ordinal,
+            start.carrier.frontier.stem_profile,
+            start.carrier.frontier.next_corner.horizontal,
+            start.carrier.frontier.next_corner.vertical,
+        ),
+        (
+            138,
+            149,
+            0,
+            NativeStemHeadSide::Left,
+            NativeStemVerticalSide::Bottom,
+        )
+    );
+    let matching_stem = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| {
+            let bounds = stem.glyph_content.bounds;
+            bounds.x == 1_258 && bounds.y == 902 && bounds.width == 4 && bounds.height == 51
+        })
+        .expect("Bach queue-182 existing stump stem")
+        .clone();
+    let vertices_before = start.carrier.beam_state.sig.vertices.len();
+    let edges_before = start.carrier.beam_state.sig.edges.len();
+    let stems_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .len();
+    let allocator_before = start
+        .carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index
+        .persistent_ids;
+
+    let transaction = advance_native_stems_head_c_link_or_no_link(
+        &mut start.carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Bach system-2 queue-182 multi-beam C-link")
+    .expect("Bach system-2 queue-182 returns a C-link transaction");
+    assert_eq!((transaction.last_index, transaction.max_index), (2, 2));
+    assert_eq!(transaction.selected_glyph_id, matching_stem.glyph_id);
+    assert_eq!(
+        transaction.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused {
+            stem_identity: matching_stem.stem_identity,
+        }
+    );
+    assert_eq!(
+        transaction.stem_vertex,
+        start.carrier.beam_state.bindings.stem_vertices[&matching_stem.stem_identity]
+    );
+    assert_eq!(transaction.beam_relations.len(), 2);
+    assert!(transaction.beam_relations.iter().all(|relation| {
+        relation.accepted
+            && relation.grade.to_bits() == 1.0f64.to_bits()
+            && relation.dx.to_bits() == 0.0f64.to_bits()
+            && relation.dy.to_bits() == 0.0f64.to_bits()
+            && relation.portion == NativeBeamPortion::Center
+            && relation.stem_identity == matching_stem.stem_identity
+    }));
+    assert_eq!(
+        transaction
+            .beam_relations
+            .iter()
+            .map(|relation| (relation.beam, relation.v_linker.b_linker.id))
+            .collect::<Vec<_>>(),
+        [
+            (NativeStemsBeamSource::RawBeam(48), 3),
+            (NativeStemsBeamSource::RawBeam(52), 3),
+        ]
+    );
+    assert!(transaction.beam_stem_edges.is_empty());
+    assert!(transaction.linked_b_linkers.is_empty());
+    assert_eq!(transaction.relation.grade.to_bits(), 0x3fefffffffffee6f);
+    assert_eq!(transaction.relation.dx.to_bits(), 0x3d4a5a5a5a5a5a5a);
+    assert_eq!(transaction.closed_cell_changes, 2);
+    assert_eq!(
+        transaction
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (140, 141, NativeStemHeadSide::Left),
+            (140, 141, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(start.carrier.current_index, 183);
+    assert_eq!(
+        (
+            start.carrier.heads[183].reference.x_ordinal,
+            start.carrier.heads[183].reference.sig_ordinal,
+        ),
+        (62, 99)
+    );
+    assert_eq!(start.carrier.beam_state.sig.vertices.len(), vertices_before);
+    assert_eq!(start.carrier.beam_state.sig.edges.len(), edges_before + 1);
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .len(),
+        stems_before
+    );
+    assert_eq!(
+        start
+            .carrier
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        allocator_before
+    );
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
+        "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_RUNNER),
+        "b1e40651458dec4914e89b53fadbb1ac9406cdea4dd988af27c9df8cd869b817"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_PROBE),
+        "72e85d0de1838664db221fa890917b83a1140bf6ee5ea99b0a1f6bc1839fec33"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_INIT),
+        "3140eec01b976a5cf934183c37ef07528bacc874abe67a0491f409505daf888b"
+    );
+    for exact in [
+        "stemProfile 0",
+        "lastIndex 2 maxIndex 2",
+        "relations 3 relationRows [head:x138:inter3906:LEFT:BOTTOM",
+        "beam:sig27:inter2063:b3:state=true:false:BeamStemRelation",
+        "beam:sig31:inter2071:b3:state=true:false:BeamStemRelation",
+        "glyphs 1 selected [id533:g:1258:902:4:51:914abffc",
+        "existingCandidateStem true",
+        "allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 592 sigEdgesAfter 593",
+        "addedEdges [source=headX138:target=existingCandidateStem:HeadStemRelation",
+        "nextHeadOrder 183 nextHeadX 62 nextHeadSig 99",
+    ] {
+        assert!(
+            BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.contains(exact),
+            "missing Bach multi-beam oracle fragment: {exact}"
+        );
+    }
 }
 
 #[test]
