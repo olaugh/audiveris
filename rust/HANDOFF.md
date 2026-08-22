@@ -10074,3 +10074,30 @@ Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
 (8.87s), replay, and diff checks pass. No production source changed.
 `425d58e82` remains the exact green remote CI baseline. Continue at Bach system
 2 queue185 x192/SIG76; its branch and builder geometry remain to be measured.
+
+## Boundary 212: transformed three-head zero-change reconciliation
+
+Bach system-2 queue185 x192/SIG76/Inter3757 has grade bits
+`3fc861861861861a`. LEFT is already linked and RIGHT closed at profiles 0-3.
+Its existing stem structurally joins x191/SIG75, x192/SIG76, and x193/SIG77
+on LEFT. Java returns true without undefined sides or cell changes; 394
+vertices, 593 edges, 77 system stems, and the allocator stay fixed.
+
+Native emits x191 LEFT/RIGHT then x193 LEFT/RIGHT in relation order. All four
+writes are idempotent, `closed_value_changes=0`, and the carrier advances to
+queue186 x190/SIG214/Inter4036.
+
+The queue-185 probe is a mechanical transform of Boundary 210's identity-free
+source and pins Boundary 211 as its predecessor. Fixture/runner/transform/
+transformed-probe/init/body SHA-256 values are
+`bba0a8a3a80a6bb1d5693fb3cdb6a1764e798e9c3ca34000a08b78a8f2b386b7`,
+`5d15aa20ae4a7282b059dd3d6cd556c248be8b9f532739d66c5ad2b57cfe8c09`,
+`61bd7b3e2aff7418a034cff7b70453dd1db180d59ee3731f07b5f60044798dc7`,
+`a8b102ab3485a79d5def994540b6401d3a6bdbffa946f13f3ff52514cd050057`,
+`568926dc325d8e9633ec3df663466df5ca14109725a35ef9ca5060e988069d13`,
+and `9d3ea66878524b64a58a764370915fc0ae64de4ca171a25ec33952e6489b9834`.
+Warmup plus two fresh JVM runs are byte-identical. Focused 1/1, full sibling
+29/29 (148.07s), formatting, strict all-target/all-feature workspace Clippy
+(8.51s), replay, and diff checks pass. No production source changed.
+`425d58e82` remains the exact green remote CI baseline. Continue at Bach system
+2 queue186 x190/SIG214; its branch and builder geometry remain to be measured.
