@@ -9354,3 +9354,50 @@ Focused 1/1 and full sibling 25/25 (156.99s) pass. Formatting, strict
 all-target/all-feature workspace Clippy (14.82s), oracle shell/AWK syntax,
 and diff checks pass. `425d58e82` remains the exact fully green remote CI
 baseline.
+
+## Boundary 191: ordered append reuse completes Carmen STEMS
+
+Java's append-mode `reuseStem(lastIndex)` does not necessarily retain the stem
+already attached to the selected candidate. It scans the current C-linker and
+preceding builder items in order and can select an earlier crossed head's stem.
+The generic native C-link engine now performs that scan from owned builder and
+SIG state, keeps the selected candidate-stem provenance, exposes the separate
+append reuse, and uses the ordered result as the new HeadStem target.
+
+Carmen system 3 phase-2 queue 3 is x0/SIG3/Java Inter 2405. RIGHT/BOTTOM
+selects Java glyph 531 (native glyph 218), whose existing short candidate is
+Java Stem 3984 / native Stem identity 41. Java crosses x3/SIG13 and reuses long
+Stem 3949 instead; native follows existing edge 198 to Stem identity 6 /
+vertex 242 and appends edge 324 from native head vertex 133. The graph changes
+279/324→279/325 while 43 stems and the allocator remain unchanged. Closure
+records x3, x6, x7, and x1 LEFT then RIGHT, all idempotent, and the phase-two
+cursor advances 3→4.
+
+The unchanged generic retry driver consumes the rest of the page. All five
+Carmen systems exhaust phase two at 2/2, 9/9, 11/11, 5/5, and 3/3 entries;
+their graph terminals are 161/172, 218/247, 279/325, 261/299, and 264/315.
+Generic `finalizeStems` checks 45/83/106/93/102 heads with no relation removals
+or abnormal-value changes. `recognize_native_stems` reproduces the same
+prepared components and finalized systems, so Carmen is now transactionally
+complete across all five systems.
+
+The three-row-plus-summary fixture is 6 lines / 3,680 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/retarget-transform/
+fixture/body/semantic SHA-256 values are
+`667310b7936cc9341aac3e145d19328f43e7777e85fef6cb0480dbe2e4c86c4b`,
+`29f9b38aba7393883d1b7ff5aff6035e7fc1d0397d001ed5ded0fe8c64d29774`,
+`448af58ab47cbfea66a8cee14f95fb376ebd668692e36afd242e7af4f5cbaad8`,
+`a3d2e45a4f4fce8f4d98047fb1ac914b36c94215cb6180eda35b9f8462a6372f`,
+and
+`a3d2e45a4f4fce8f4d98047fb1ac914b36c94215cb6180eda35b9f8462a6372f`.
+The runner pins Boundary 190's runner/fixture at
+`e0bf5408f12c652e530990c35bce21ca3ec64bd610d02139919198133dccb4f8` /
+`f9656d9bb2a917fbd059c58c0692803d8d8fd3c714ed95d3ac981d9e3604c8e0`
+and its x1 transform at
+`a452fbc760da01105bcd445af2461a6d0fcc7dbfad35fe31ff66d41fc7b2b79e`.
+
+Focused 1/1 and full sibling 25/25 (151.07s) pass. Formatting, strict
+all-target/all-feature workspace Clippy (15.57s), oracle shell/AWK syntax,
+and diff checks pass. `425d58e82` remains the exact fully green remote CI
+baseline. Continue with the first unsupported STEMS frontier among Cucaracha,
+Hove, and BachInvention5.

@@ -226,6 +226,11 @@ pub struct NativeStemsHeadCLinkTransaction {
     pub selected_glyph_id: i32,
     pub relation: NativeStemsBeamHeadRelationCheck,
     pub create: NativeStemsCreateStemCandidateTransaction,
+    /// Java's phase-two `reuseStem(lastIndex)` can select a stem already
+    /// attached to an earlier C-linker before it falls back to `createStem`.
+    /// This is present only when that ordered append lookup selects a
+    /// different stem from the expanded glyph candidate's existing stem.
+    pub append_reuse: Option<NativeStemsHeadCLinkAppendReuse>,
     pub stem_vertex: NativeSigVertexId,
     pub head_stem_edge: NativeSigEdgeId,
     pub additional_head_relations: Vec<NativeStemsHeadCLinkAdditionalHeadRelation>,
@@ -277,6 +282,14 @@ pub struct NativeStemsHeadCLinkAdditionalHeadRelation {
     pub relation: NativeStemsBeamHeadRelationCheck,
     pub head_stem_edge: NativeSigEdgeId,
     pub appended: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsHeadCLinkAppendReuse {
+    pub source_corner: NativeStemsHeadCornerRef,
+    pub head_stem_edge: NativeSigEdgeId,
+    pub stem_identity: usize,
+    pub stem_vertex: NativeSigVertexId,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -5785,13 +5798,13 @@ struct NativePhaseTwoReusedStemRetry {
     last_index: usize,
     max_index: usize,
     selected_glyph_id: i32,
+    candidate_stem_identity: usize,
     stem_identity: usize,
     stem_vertex: usize,
     relation_grade_bits: u64,
     relation_dx_bits: u64,
-    crossed_x_ordinal: usize,
-    crossed_sig_ordinal: usize,
-    crossed_edge: usize,
+    append_reuse_source: Option<(usize, usize, usize)>,
+    additional_relation: Option<(usize, usize, usize)>,
 }
 
 /// Execute Allegretto system 3's first real phase-2 append mutation.
@@ -5837,13 +5850,13 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
             last_index: 2,
             max_index: 2,
             selected_glyph_id: 204,
+            candidate_stem_identity: 30,
             stem_identity: 30,
             stem_vertex: 247,
             relation_grade_bits: 0x3fed_9899_6cac_8bf2,
             relation_dx_bits: 0x3f9c_4c54_8b8f_edb7,
-            crossed_x_ordinal: 15,
-            crossed_sig_ordinal: 11,
-            crossed_edge: 256,
+            append_reuse_source: None,
+            additional_relation: Some((15, 11, 256)),
         },
     )
 }
@@ -5888,13 +5901,13 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13(
             last_index: 2,
             max_index: 2,
             selected_glyph_id: 204,
+            candidate_stem_identity: 30,
             stem_identity: 30,
             stem_vertex: 247,
             relation_grade_bits: 0x3fed_9899_6cac_8bf2,
             relation_dx_bits: 0x3f9c_4c54_8b8f_edb7,
-            crossed_x_ordinal: 15,
-            crossed_sig_ordinal: 11,
-            crossed_edge: 256,
+            append_reuse_source: None,
+            additional_relation: Some((15, 11, 256)),
         },
     )
 }
@@ -5938,13 +5951,13 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113
             last_index: 1,
             max_index: 1,
             selected_glyph_id: 187,
+            candidate_stem_identity: 47,
             stem_identity: 47,
             stem_vertex: 264,
             relation_grade_bits: 0x3fea_63f9_c75c_f906,
             relation_dx_bits: 0x3fb0_115c_aff3_c30c,
-            crossed_x_ordinal: 108,
-            crossed_sig_ordinal: 67,
-            crossed_edge: 310,
+            append_reuse_source: None,
+            additional_relation: Some((108, 67, 310)),
         },
     )
 }
@@ -5990,13 +6003,65 @@ pub fn advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1(
             last_index: 2,
             max_index: 2,
             selected_glyph_id: 182,
+            candidate_stem_identity: 6,
             stem_identity: 6,
             stem_vertex: 242,
             relation_grade_bits: 0x3fee_44da_1a6b_455d,
             relation_dx_bits: 0xbfa5_8edf_7166_c000,
-            crossed_x_ordinal: 3,
-            crossed_sig_ordinal: 13,
-            crossed_edge: 198,
+            append_reuse_source: None,
+            additional_relation: Some((3, 13, 198)),
+        },
+    )
+}
+
+/// Execute Carmen system 3 queue 3's ordered append-mode stem reuse.
+///
+/// The expanded x0 candidate is the short native Stem identity 41, but Java's
+/// `reuseStem(lastIndex)` inspects crossed x3 before calling `createStem` and
+/// therefore selects x3's already attached Stem identity 6. Only x0's missing
+/// RIGHT HeadStem edge is appended.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 3,
+            queue_index: 3,
+            x_ordinal: 0,
+            sig_ordinal: 3,
+            grade_bits: 0x3fca_4063_aab2_cd80,
+            can_link: (true, false, false, true),
+            left_top_returns_minus_one: true,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 1,
+            max_index: 2,
+            selected_glyph_id: 218,
+            candidate_stem_identity: 41,
+            stem_identity: 6,
+            stem_vertex: 242,
+            relation_grade_bits: 0x3fef_ffff_ffff_ffe1,
+            relation_dx_bits: 0xbce8_6186_1861_8618,
+            append_reuse_source: Some((3, 13, 198)),
+            additional_relation: None,
         },
     )
 }
@@ -6175,9 +6240,35 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         expected.max_index,
         &phase_two_frontier,
     )?;
+    let append_reuse = c_link.append_reuse.as_ref().map(|reuse| {
+        (
+            reuse.source_corner.x_ordinal,
+            reuse.source_corner.sig_ordinal,
+            reuse.head_stem_edge.0,
+            reuse.stem_identity,
+            reuse.stem_vertex.0,
+        )
+    });
+    let expected_append_reuse = expected
+        .append_reuse_source
+        .map(|(x, sig, edge)| (x, sig, edge, expected.stem_identity, expected.stem_vertex));
+    let additional_relation = match c_link.additional_head_relations.as_slice() {
+        [] => None,
+        [relation] if !relation.appended => Some((
+            relation.corner.x_ordinal,
+            relation.corner.sig_ordinal,
+            relation.head_stem_edge.0,
+        )),
+        _ => {
+            return Err(stage(
+                "HEADS-phase2-CLink",
+                "retry produced an unexpected additional-head relation set",
+            ));
+        }
+    };
     if c_link.create.disposition
         != (NativeStemsBeamCreateStemDisposition::Reused {
-            stem_identity: expected.stem_identity,
+            stem_identity: expected.candidate_stem_identity,
         })
         || c_link.selected_glyph_id != expected.selected_glyph_id
         || c_link.stem_vertex.0 != expected.stem_vertex
@@ -6185,11 +6276,8 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         || c_link.max_index != expected.max_index
         || c_link.relation.grade.to_bits() != expected.relation_grade_bits
         || c_link.relation.dx.to_bits() != expected.relation_dx_bits
-        || c_link.additional_head_relations.len() != 1
-        || c_link.additional_head_relations[0].corner.x_ordinal != expected.crossed_x_ordinal
-        || c_link.additional_head_relations[0].corner.sig_ordinal != expected.crossed_sig_ordinal
-        || c_link.additional_head_relations[0].head_stem_edge.0 != expected.crossed_edge
-        || c_link.additional_head_relations[0].appended
+        || append_reuse != expected_append_reuse
+        || additional_relation != expected.additional_relation
         || c_link.s_linker.head != head_ref
         || c_link.s_linker.horizontal != crate::stems_step::NativeStemHeadSide::Right
         || c_link.s_linked_before
@@ -12951,19 +13039,39 @@ fn advance_native_stems_head_c_link_at_frontier(
         checker,
     )
     .map_err(|error| stage("HEADS-CLink-createStem", error))?;
-    if let NativeStemsBeamCreateStemDisposition::Reused { stem_identity } = &create.disposition {
-        let stem_identity = *stem_identity;
-        let stem = create
-            .stem
-            .as_ref()
+    let candidate_stem_identity = match create.disposition {
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity } => Some(stem_identity),
+        _ => None,
+    };
+    let append_reuse = if frontier.append {
+        resolve_head_c_link_append_reuse(&shadow, builder, actual_last_index, frontier.next_corner)?
+            .filter(|reuse| Some(reuse.stem_identity) != candidate_stem_identity)
+    } else {
+        None
+    };
+    let reused_stem_identity = append_reuse
+        .as_ref()
+        .map(|reuse| reuse.stem_identity)
+        .or(candidate_stem_identity);
+    if let Some(stem_identity) = reused_stem_identity {
+        let stem = shadow
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == stem_identity)
+            .cloned()
             .ok_or_else(|| stage("HEADS-CLink-createStem", "reused stem is absent"))?;
-        if stem.stem_identity != stem_identity
-            || stem.glyph_id != create.registration.glyph_id
-            || !stem.sig_attached
+        if !stem.sig_attached
+            || (append_reuse.is_none()
+                && (stem.glyph_id != create.registration.glyph_id
+                    || create.stem.as_ref() != Some(&stem)))
         {
             return Err(stage(
                 "HEADS-CLink-createStem",
-                "reused stem does not match the selected canonical glyph",
+                "reused stem does not match the selected append authority",
             ));
         }
         let stem_vertex = *shadow
@@ -12972,6 +13080,15 @@ fn advance_native_stems_head_c_link_at_frontier(
             .stem_vertices
             .get(&stem_identity)
             .ok_or_else(|| stage("HEADS-CLink-stem-binding", "reused stem is unbound"))?;
+        if append_reuse
+            .as_ref()
+            .is_some_and(|reuse| reuse.stem_vertex != stem_vertex)
+        {
+            return Err(stage(
+                "HEADS-CLink-stem-binding",
+                "append reuse and live stem binding disagree",
+            ));
+        }
         let head_vertex = *shadow
             .beam_state
             .bindings
@@ -13056,7 +13173,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             beam_vlinkers,
             plans,
             &frontier,
-            stem,
+            &stem,
             stem_line,
             stem_vertex,
         )?;
@@ -13112,6 +13229,7 @@ fn advance_native_stems_head_c_link_at_frontier(
             selected_glyph_id: create.registration.glyph_id,
             relation,
             create,
+            append_reuse,
             stem_vertex,
             head_stem_edge,
             additional_head_relations,
@@ -13378,6 +13496,7 @@ fn advance_native_stems_head_c_link_at_frontier(
         selected_glyph_id: create.registration.glyph_id,
         relation,
         create,
+        append_reuse: None,
         stem_vertex,
         head_stem_edge,
         additional_head_relations,
@@ -13395,6 +13514,78 @@ fn advance_native_stems_head_c_link_at_frontier(
     };
     *carrier = shadow;
     Ok(transaction)
+}
+
+fn resolve_head_c_link_append_reuse(
+    state: &NativeStemsHeadPhase1Carrier,
+    builder: &crate::native_stems_head_builders::NativeStemsHeadBuilder,
+    last_index: usize,
+    start_corner: NativeStemsHeadCornerRef,
+) -> Result<Option<NativeStemsHeadCLinkAppendReuse>, NativeStemsBeamSidesError> {
+    for (item_index, item) in builder.items.iter().enumerate() {
+        if item_index > last_index {
+            break;
+        }
+        let corner = match (item.kind, item.target) {
+            (NativeStemsHeadBuilderItemKind::StartHeadHalfLinker, None) => start_corner,
+            (
+                NativeStemsHeadBuilderItemKind::HeadHalfLinker,
+                Some(NativeStemsHeadBuilderTargetRef::Head(corner)),
+            ) => corner,
+            _ => continue,
+        };
+        let head_vertex = *state
+            .beam_state
+            .bindings
+            .head_vertices
+            .get(&corner.head)
+            .ok_or_else(|| stage("HEADS-CLink-reuseStem", "C-linker head is unbound"))?;
+        let matching = state
+            .beam_state
+            .sig
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.active
+                    && edge.source == head_vertex.0
+                    && edge.kind == NativeSigRelationKind::HeadStem
+                    && edge
+                        .head_stem
+                        .as_ref()
+                        .is_some_and(|payload| payload.head_side == corner.horizontal)
+            })
+            .collect::<Vec<_>>();
+        if matching.len() > 1 {
+            return Err(stage(
+                "HEADS-CLink-reuseStem",
+                "one C-linker side resolves to multiple live stems",
+            ));
+        }
+        let Some(edge) = matching.first() else {
+            continue;
+        };
+        let stem_vertex = NativeSigVertexId(edge.target);
+        let matching_identities = state
+            .beam_state
+            .bindings
+            .stem_vertices
+            .iter()
+            .filter_map(|(identity, vertex)| (*vertex == stem_vertex).then_some(*identity))
+            .collect::<Vec<_>>();
+        let [stem_identity] = matching_identities.as_slice() else {
+            return Err(stage(
+                "HEADS-CLink-reuseStem",
+                "reused stem vertex lacks one unique native identity",
+            ));
+        };
+        return Ok(Some(NativeStemsHeadCLinkAppendReuse {
+            source_corner: corner,
+            head_stem_edge: NativeSigEdgeId(edge.ordinal),
+            stem_identity: *stem_identity,
+            stem_vertex,
+        }));
+    }
+    Ok(None)
 }
 
 fn append_head_c_link_additional_head_relations(
