@@ -8912,3 +8912,47 @@ workspace suite pass with formatting, strict all-features workspace Clippy,
 and diff checks. The exact remote predecessor is Boundary 178 commit
 `e99e93a92`: Build & Test 32528147579 and Rust port 32528147610 both
 succeeded, all 12 Rust shards green. Resume at retry index 2, x13/SIG0.
+
+## Boundary 180: Allegretto system-3 phase-2 x13 append
+
+`advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13`
+continues the shared-stem transaction at retry index 2. x13/SIG0/Java Inter
+1675 has the same TopOnly/BottomOnly corner decisions and measured
+RIGHT/BOTTOM C-link envelope as x14. It selects native glyph 204 (Java glyphs
+414+2894), resolves existing Stem 3148 (native identity 30 / vertex 247),
+preserves x15's existing edge 256, and adds only x13's RIGHT HeadStem edge
+328. SIG edges advance 318 to 319 while vertices 267, system stems 52,
+allocator 3170, and glyph identity remain unchanged.
+
+The common authenticated helper now serves both x14 and x13 without weakening
+their queue/head/grade guards. x13's exact relation grade/dx/extension/
+consistency bits are `3fed98996cac8bf2` / `3f9c4c548b8fedb7` /
+`408134a485dee59d:4098840000000000` / `3ff7f2116a3b35fd`.
+The reused-stem closure visits x15, x18, x19, and the preceding x14 LEFT then
+RIGHT, all idempotently. Native advances `phase_two_index` from two to three
+and stops before x56/SIG100/Java Inter 1876, grade bits
+`3fc5165a40f2ed07`.
+
+The dedicated 6-line / 3,813-byte minimized Java oracle is byte-identical
+across warmup plus two fresh runs. Fixture, runner, transform, init script,
+emitted-body/semantic, input, base-probe, source `HeadLinker.java`, and
+transformed-source SHA-256 values are
+`4ebbaa69132cdee430d38b9b27622ae1e64e0d12554ead8e6a782ab8dcdbde3f`,
+`1bdfd26b350170a8f4d17290ea6f336f544b6ee8ee9dc1566bcf00654cd59ac2`,
+`42dbccb9b9f05178358c54488aec0d8ae3339aca6083b25b1f73aff069c59a10`,
+`c4a870d654f1a60c4fe8be37f63806b676858d659fc220c08d4432f70c6253e9`,
+`33c4f489a66eefbb11034857f0d2cb991d47fb7582b943358da25817a1e2d60c`,
+`a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065`,
+`7b467c57b65e57aa052296164129ae8c016d82756c9f804d8e1072747b0a76b2`,
+`f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993`,
+and `b2106f6b3e20eeedb46bf0e6926dc6b760581edcb6d65fd381401596c65c71ad`.
+The runner directly pins Boundary 179's x14 runner and fixture at
+`5f530a9fca946f6ed74877713452b7a64fd66f98810654113a700cd6ee61ced3` /
+`f8a18f4ac17d036e0f3481983474d3569668437c6d53670b7f454f707baad1ba`.
+
+Focused 1/1, full sibling 20/20 (146.77s), and the canonical workspace suite
+pass with formatting, strict all-features workspace Clippy, and diff checks.
+Boundary 179 commit
+`5fd12958bf65fca9aa78896924ace95b05ec7def` is the exact remote baseline:
+Build & Test 32536290867 and Rust port 32536290886 both succeeded, all 12 Rust
+shards green. Resume at retry index 3, x56/SIG100.
