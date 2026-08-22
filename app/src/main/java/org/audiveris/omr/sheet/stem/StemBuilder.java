@@ -1145,25 +1145,32 @@ public class StemBuilder
         //        for (StemItem item : list) {
         //            logger.info("   {}", item);
         //        }
+        // Each item is compared via a single ordinate key, whatever the other item in the pair,
+        // so that the comparator is transitive as required by the sorting contract.
         Collections.sort(
                 list,
                 (se1,
-                 se2) ->
-                {
-                    // Linker pairs are sorted on their refPt ordinate
-                    if (se1 instanceof HalfLinkerItem hl1) {
-                        if (se2 instanceof HalfLinkerItem hl2) {
-                            final Point2D p1 = hl1.linker.getReferencePoint();
-                            final Point2D p2 = hl2.linker.getReferencePoint();
-                            return yDir * Double.compare(p1.getY(), p2.getY());
-                        }
-                    }
+                 se2) -> yDir * Double.compare(ordinateKeyOf(se1), ordinateKeyOf(se2)));
+    }
 
-                    // Others are sorted on their line starting ordinate
-                    return (yDir > 0) //
-                            ? Double.compare(se1.line.getY1(), se2.line.getY1())
-                            : Double.compare(se2.line.getY2(), se1.line.getY2());
-                });
+    //---------------//
+    // ordinateKeyOf //
+    //---------------//
+    /**
+     * Report the ordinate key used to sort the provided item along yDir.
+     *
+     * @param item the item to evaluate
+     * @return the item sorting ordinate
+     */
+    private double ordinateKeyOf (StemItem item)
+    {
+        // A half linker item is located on its refPt ordinate
+        if (item instanceof HalfLinkerItem hl) {
+            return hl.linker.getReferencePoint().getY();
+        }
+
+        // Others are located on their line starting ordinate (line is oriented top down)
+        return (yDir > 0) ? item.line.getY1() : item.line.getY2();
     }
 
     //----------//
