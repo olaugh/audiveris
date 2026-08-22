@@ -10185,3 +10185,26 @@ Boundary 214 remains the strict predecessor. Warmup plus two fresh JVM runs are
 byte-identical. Focused 1/1 and sibling 29/29 (149.20s) pass; formatting,
 strict workspace Clippy, replay, and diff checks are green. `425d58e82` remains
 the exact green remote CI baseline. Continue at queue189 x164/SIG51.
+
+## Boundary 216: two-head existing-stem reconciliation
+
+Bach system-2 queue189 x164/SIG51/Inter3707 has grade bits
+`3fc824ed2e835f84`. LEFT is already linked and RIGHT closed at Java profiles
+0-3. Its existing stem structurally joins x164/SIG51 and x167/SIG40 on LEFT.
+Java returns true, closes x167 LEFT then RIGHT, changes two cells, and preserves
+394 vertices, 596 edges, 77 stems, and the allocator. Native's generic
+continuation reproduces the transaction and advances to queue190 x65/SIG196.
+
+The queue-189 probe is a checked identity-free transform of the frozen
+queue-183 source with Boundary 215 as strict predecessor. Fixture/runner/
+transform/transformed-probe/init/body SHA-256 values are
+`a3568828c467de8b7390fb8ee005f8115d8bc79ef9914d20031a8ce3596c5428`,
+`4c0fc7f45e4954ae46930f4e6101fa3402603b2c6d7bdef100f7a2b53dfc02ca`,
+`20102738ce60feb053653420bc0334a196852d73b785473adfbe54abad7901cd`,
+`273f19d5bacdc88f58b84e9944692d8bc65532dd5c0d2e63e31738689fd90e1f`,
+`f538824fe7ad158cb9d7b2e2832f67a601c5757c68aa89e807450bab0c15ee9d`,
+and `e1e8bd18f83b5e14d08c0794f3f46c0605c38748869f5ee5c887d28ac495ff88`.
+Warmup plus two fresh JVM runs are byte-identical. The focused gate passes 1/1;
+the sibling suite passes 29/29 (158.00s); formatting, strict workspace Clippy,
+replay, and diff checks are green. No production source changed. `425d58e82` remains the exact green
+remote CI baseline. Continue at queue190 x65/SIG196.
