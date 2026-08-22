@@ -8980,5 +8980,43 @@ formatting, strict all-features workspace Clippy, and diff checks pass.
 Boundary 179 commit `5fd12958bf65fca9aa78896924ace95b05ec7def` remains the exact fully green
 remote baseline (Build & Test 32536290867; Rust port 32536290886, 12/12
 shards). Boundary 180 `9dcdb0c179d0af044a79fb4419119f770f5f6ef9` is pushed; its Build & Test
-32542247629 is green while Rust port 32542247645 is still nonterminal. Resume
-at the final retry index 4, x113/SIG75.
+32542247629 is green while Rust port 32542247645 was superseded and cancelled.
+Boundary 181 `4c06c26bf17875c0c16a1f63174b02822dfda0cb` is pushed; Build & Test
+32542733505 is green while Rust port 32542733478 remains queued. Resume at the
+final retry index 4, x113/SIG75.
+
+## Boundary 182: Allegretto system-3 final phase-2 x113 append
+
+`advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113`
+authenticates retry index 4 at x113/SIG75/Java Inter 1826. LEFT is `Neither`
+and RIGHT is `TopOnly`; the selected RIGHT/TOP C-link reuses native glyph 187
+(Java glyph 397) and the checked stem created at queue 29, native identity 47 /
+vertex 264 / Java Stem 3165. The transaction preserves crossed x108/SIG67 edge
+310 and adds only x113 HeadStem edge 329. Native edges therefore advance 319
+to 320 while vertices 267, system stems 52, allocator 3170, and glyph identity
+remain unchanged.
+
+The relation grade/dx/extension/consistency bits are
+`3fea63f9c75cf906`, `3fb0115caff3c30c`,
+`40a12ea2d934ddfe:409dfc0000000000`, and `3ffd1d9afe422d47`.
+Shared-stem closure visits x114, x112, x117, x107, x116, and x108 LEFT then
+RIGHT in that exact order; all twelve writes are idempotent. The phase-two
+cursor advances from four to five and exactly exhausts the corrected five-head
+retry queue.
+
+The dedicated 6-line / 3,807-byte minimized Java oracle is byte-identical
+across warmup plus two fresh runs. Fixture, runner, transform, init, and
+emitted-body/semantic SHA-256 values are
+`83e4c5671e6e1d489c84d30ff0bd5e01c3b095c68b8562d2f09c42908b49f1af`,
+`4f589fb9512f2b7d6467b98c9174b81ec91783a002455ee4c7ae908c1e4aa854`,
+`f143d4f4d49d4fc67cb4ebd883768dfc7a7a11fd9cc918d784cc50a41c8ee00f`,
+`302235acd663a6ebfeda7bceeaab336e77a990baa152012740aa41925af8b09f`,
+and `c1b20ce77aa8cbb727e45dd2a078ef663bd1e59f82b871b26acd26cd417db385`.
+The runner directly pins Boundary 180's x13 runner/fixture at
+`1bdfd26b350170a8f4d17290ea6f336f544b6ee8ee9dc1566bcf00654cd59ac2` /
+`4ebbaa69132cdee430d38b9b27622ae1e64e0d12554ead8e6a782ab8dcdbde3f`.
+
+Focused 1/1 (3.68s), full sibling 20/20 (148.18s), formatting, strict
+all-features workspace Clippy, and diff checks pass. Boundary 179 remains the
+exact fully green remote baseline. Resume at Allegretto system 3's generic
+`finalizeStems` terminal.

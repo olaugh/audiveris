@@ -119,6 +119,7 @@ use audiveris_omr::{
         advance_native_stems_head_open_frontier_order75,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14,
+        advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113,
         advance_native_stems_head_phase_two_append_retry,
         advance_native_stems_head_right_side_reuse_c_link_order93,
         advance_native_stems_head_single_head_reuse_c_link_order72,
@@ -242,6 +243,14 @@ const ALLEGRETTO_PHASE_TWO_X13_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-x13.transform.awk");
 const ALLEGRETTO_PHASE_TWO_X13_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-x13.init.gradle");
+const ALLEGRETTO_PHASE_TWO_X113_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-allegretto-system3-x113.txt");
+const ALLEGRETTO_PHASE_TWO_X113_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-allegretto-system3-x113.sh");
+const ALLEGRETTO_PHASE_TWO_X113_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-x113.transform.awk");
+const ALLEGRETTO_PHASE_TWO_X113_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-x113.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -10752,6 +10761,119 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(phase_two_3.state_after.unlinked_heads[4].x_ordinal, 113);
     assert_eq!(phase_two_3.state_after.unlinked_heads[4].sig_ordinal, 75);
 
+    // Boundary 182: append mode makes x113's RIGHT/TOP corner linkable and
+    // reuses the stem created at queue 29. Only x113's missing HeadStem edge
+    // is appended; the crossed x108 relation remains present.
+    let phase_two_4 = advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113(
+        &phase_two_3.state_after,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Allegretto system-3 final phase-2 reused-stem append");
+    let phase_two_4_after = &phase_two_4.continuation.state_after;
+    assert_eq!(phase_two_4.continuation.processed_head.x_ordinal, 113);
+    assert_eq!(phase_two_4.continuation.processed_head.sig_ordinal, 75);
+    assert_eq!(phase_two_4.continuation.returned_linked, Some(true));
+    assert_eq!(phase_two_4.continuation.closed_value_changes, 0);
+    assert_eq!(
+        phase_two_4
+            .continuation
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (114, 76, NativeStemHeadSide::Left),
+            (114, 76, NativeStemHeadSide::Right),
+            (112, 68, NativeStemHeadSide::Left),
+            (112, 68, NativeStemHeadSide::Right),
+            (117, 72, NativeStemHeadSide::Left),
+            (117, 72, NativeStemHeadSide::Right),
+            (107, 80, NativeStemHeadSide::Left),
+            (107, 80, NativeStemHeadSide::Right),
+            (116, 71, NativeStemHeadSide::Left),
+            (116, 71, NativeStemHeadSide::Right),
+            (108, 67, NativeStemHeadSide::Left),
+            (108, 67, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(phase_two_4_after.phase_two_index, 5);
+    assert_eq!(phase_two_4_after.unlinked_heads.len(), 5);
+    assert_eq!(
+        phase_two_4_after.beam_state.sig.vertices.len(),
+        phase_two_3.state_after.beam_state.sig.vertices.len()
+    );
+    assert_eq!(
+        phase_two_4_after.beam_state.sig.edges.len(),
+        phase_two_3.state_after.beam_state.sig.edges.len() + 1
+    );
+    assert_eq!(phase_two_4.c_link.corner.x_ordinal, 113);
+    assert_eq!(phase_two_4.c_link.corner.sig_ordinal, 75);
+    assert_eq!(
+        phase_two_4.c_link.corner.horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        phase_two_4.c_link.corner.vertical,
+        NativeStemVerticalSide::Top
+    );
+    assert_eq!(
+        (phase_two_4.c_link.last_index, phase_two_4.c_link.max_index),
+        (1, 1)
+    );
+    assert_eq!(phase_two_4.c_link.selected_glyph_id, 187);
+    assert_eq!(
+        phase_two_4.c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 47 }
+    );
+    assert_eq!(phase_two_4.c_link.stem_vertex.0, 264);
+    assert_eq!(phase_two_4.c_link.head_stem_edge.0, 329);
+    assert_eq!(
+        phase_two_4.c_link.relation.grade.to_bits(),
+        0x3fea_63f9_c75c_f906
+    );
+    assert_eq!(
+        phase_two_4.c_link.relation.dx.to_bits(),
+        0x3fb0_115c_aff3_c30c
+    );
+    assert_eq!(phase_two_4.c_link.additional_head_relations.len(), 1);
+    assert_eq!(
+        phase_two_4.c_link.additional_head_relations[0]
+            .corner
+            .x_ordinal,
+        108
+    );
+    assert_eq!(
+        phase_two_4.c_link.additional_head_relations[0]
+            .head_stem_edge
+            .0,
+        310
+    );
+    assert!(!phase_two_4.c_link.additional_head_relations[0].appended);
+    let x113_appended = &phase_two_4_after.beam_state.sig.edges[329];
+    assert_eq!(x113_appended.kind, NativeSigRelationKind::HeadStem);
+    assert_eq!(x113_appended.target, 264);
+    let x113_payload = x113_appended
+        .head_stem
+        .as_ref()
+        .expect("x113 HeadStem payload");
+    assert_eq!(x113_payload.head_side, NativeStemHeadSide::Right);
+    assert_eq!(x113_payload.dx.to_bits(), 0x3fb0_115c_aff3_c30c);
+    assert_eq!(x113_payload.consistency.to_bits(), 0x3ffd_1d9a_fe42_2d47);
+    assert_eq!(
+        x113_payload.extension_point.x.to_bits(),
+        0x40a1_2ea2_d934_ddfe
+    );
+    assert_eq!(
+        x113_payload.extension_point.y.to_bits(),
+        0x409d_fc00_0000_0000
+    );
+
     assert_eq!(
         sha256_hex(ALLEGRETTO_PHASE_TWO_X14_FIXTURE.as_bytes()),
         "f8a18f4ac17d036e0f3481983474d3569668437c6d53670b7f454f707baad1ba"
@@ -11012,6 +11134,137 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(
         x13_field("javaEvidence"),
         "ReturnedBeforeSystem3RetryIndex3"
+    );
+
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_FIXTURE.as_bytes()),
+        "83e4c5671e6e1d489c84d30ff0bd5e01c3b095c68b8562d2f09c42908b49f1af"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_RUNNER),
+        "4f589fb9512f2b7d6467b98c9174b81ec91783a002455ee4c7ae908c1e4aa854"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_TRANSFORM),
+        "f143d4f4d49d4fc67cb4ebd883768dfc7a7a11fd9cc918d784cc50a41c8ee00f"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_INIT),
+        "302235acd663a6ebfeda7bceeaab336e77a990baa152012740aa41925af8b09f"
+    );
+    let x113_rows = ALLEGRETTO_PHASE_TWO_X113_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(x113_rows.len(), 4);
+    let x113_frontier = x113_rows[0];
+    assert!(x113_frontier.starts_with(
+        "stemsheadphase2x113frontier headInterId 1826 corner TR hSide RIGHT vSide TOP"
+    ));
+    for exact in [
+        "refPt 40a12c0000000000:409dc00000000000 yDir -1 minTail 37 bestTail 52",
+        "lastIndex 1 maxIndex 1 relations 2",
+        "head#1826-Clnk-TR:grade3fea63f9c75cf906:dx3fb0115caff3c30c",
+        "head#1810-Clnk-TR:grade3fe5effba81a32fd:dx3fbbac32ace4e186",
+        "glyphs 1 selected [id397:2198:1806:4:107:weight264]",
+        "candidate id397:2198:1806:4:107:weight264 candidateIdBefore 397",
+        "existingStem id3165:glyphid397:2198:1806:4:107:weight264:grade3fe928913bf9fd5e",
+        "verticesBefore 267 edgesBefore 319 allocatorBefore 3170",
+    ] {
+        assert!(
+            x113_frontier.contains(exact),
+            "missing x113 frontier field: {exact}"
+        );
+    }
+    let x113_result = x113_rows[1];
+    assert!(x113_result.starts_with("stemsheadphase2x113result headInterId 1826"));
+    for exact in [
+        "reusedExisting true",
+        "applied grade3fea63f9c75cf906:dx3fb0115caff3c30c:dy0:extension40a12ea2d934ddfe:409dfc0000000000:headSideRIGHT:consistency3ffd1d9afe422d47",
+        "head#1810-Clnk-TR:grade3fe5effba81a32fd:dx3fbbac32ace4e186",
+        "verticesBefore 267 verticesAfter 267 edgesBefore 319 edgesAfter 320",
+        "allocatorBefore 3170 allocatorAfter 3170",
+    ] {
+        assert!(
+            x113_result.contains(exact),
+            "missing x113 result field: {exact}"
+        );
+    }
+    assert_eq!(
+        x113_rows[2],
+        "stemsheadphase2retry page allegretto.png#1 system 3 queueIndex 4 headX 113 headSig 75 headInterId 1826 grade 3fc4d668a2745dbd append true sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=true:bottom=false:branch=TopOnly] returned true sidesAfter [LEFT:false:true,RIGHT:true:true] undefs [] sideChanges [x113:sig75:RIGHT:false:true->true:true] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 319 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170"
+    );
+    let x113_summary = x113_rows[3].split_ascii_whitespace().collect::<Vec<_>>();
+    let x113_field = |name: &str| {
+        x113_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| x113_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto phase-two x113 summary field")
+    };
+    assert_eq!(
+        x113_field("schema"),
+        "stems-head-phase-two-allegretto-system3-x113-v1"
+    );
+    assert_eq!(x113_field("rows"), "3");
+    assert_eq!(
+        x113_field("inputSha256"),
+        "a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065"
+    );
+    assert_eq!(
+        x113_field("baseProbeSourceSha256"),
+        sha256_hex(BATUQUE_PHASE_TWO_PROBE)
+    );
+    assert_eq!(
+        x113_field("headLinkerSourceSha256"),
+        "f51893627e9e1ddaca77daba9166098cfa6d8cc99ff8d094aa9138c13ad78993"
+    );
+    assert_eq!(
+        x113_field("transformSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_TRANSFORM)
+    );
+    assert_eq!(
+        x113_field("probeSourceSha256"),
+        sha256_hex(BATUQUE_PHASE_TWO_PROBE)
+    );
+    assert_eq!(
+        x113_field("transformedHeadLinkerSourceSha256"),
+        "4302e5a6f9509ea59a88de543d7e1a6552a7bceb0474ddc926df84f848aedcaf"
+    );
+    assert_eq!(
+        x113_field("initSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_INIT)
+    );
+    assert_eq!(
+        x113_field("runnerSourceSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_RUNNER)
+    );
+    assert_eq!(
+        x113_field("baseX13RunnerSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X13_RUNNER)
+    );
+    assert_eq!(
+        x113_field("baseX13FixtureSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X13_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        x113_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", x113_rows[..3].join("\n")).as_bytes())
+    );
+    assert_eq!(
+        x113_field("semanticPassSha256"),
+        "c1b20ce77aa8cbb727e45dd2a078ef663bd1e59f82b871b26acd26cd417db385"
+    );
+    assert_eq!(x113_field("freshRuns"), "2");
+    assert_eq!(x113_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        x113_field("nativeScope"),
+        "BoundedAllegrettoSystem3PhaseTwoX113ReusedStemAppend"
+    );
+    assert_eq!(
+        x113_field("javaEvidence"),
+        "ReturnedAfterSystem3RetryIndex4"
     );
 
     assert_eq!(

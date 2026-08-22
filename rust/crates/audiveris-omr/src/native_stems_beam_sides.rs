@@ -5420,6 +5420,19 @@ struct NativeAllegrettoPhaseTwoReusedStemRetry {
     x_ordinal: usize,
     sig_ordinal: usize,
     grade_bits: u64,
+    can_link: (bool, bool, bool, bool),
+    left_top_returns_minus_one: bool,
+    selected_vertical: crate::stems_step::NativeStemVerticalSide,
+    last_index: usize,
+    max_index: usize,
+    selected_glyph_id: i32,
+    stem_identity: usize,
+    stem_vertex: usize,
+    relation_grade_bits: u64,
+    relation_dx_bits: u64,
+    crossed_x_ordinal: usize,
+    crossed_sig_ordinal: usize,
+    crossed_edge: usize,
 }
 
 /// Execute Allegretto system 3's first real phase-2 append mutation.
@@ -5458,6 +5471,19 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14(
             x_ordinal: 14,
             sig_ordinal: 50,
             grade_bits: 0x3fc5_ec72_4df1_d54a,
+            can_link: (true, false, false, true),
+            left_top_returns_minus_one: true,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 204,
+            stem_identity: 30,
+            stem_vertex: 247,
+            relation_grade_bits: 0x3fed_9899_6cac_8bf2,
+            relation_dx_bits: 0x3f9c_4c54_8b8f_edb7,
+            crossed_x_ordinal: 15,
+            crossed_sig_ordinal: 11,
+            crossed_edge: 256,
         },
     )
 }
@@ -5495,6 +5521,68 @@ pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13(
             x_ordinal: 13,
             sig_ordinal: 0,
             grade_bits: 0x3fc5_aea3_5e22_900d,
+            can_link: (true, false, false, true),
+            left_top_returns_minus_one: true,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 204,
+            stem_identity: 30,
+            stem_vertex: 247,
+            relation_grade_bits: 0x3fed_9899_6cac_8bf2,
+            relation_dx_bits: 0x3f9c_4c54_8b8f_edb7,
+            crossed_x_ordinal: 15,
+            crossed_sig_ordinal: 11,
+            crossed_edge: 256,
+        },
+    )
+}
+
+/// Execute Allegretto system 3's final x113 phase-2 retry.
+///
+/// Append mode reaches the RIGHT/TOP C-link, resolves the active glyph to the
+/// stem created at queue 29, and appends only x113's missing HeadStem edge.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativeAllegrettoPhaseTwoReusedStemRetry {
+            queue_index: 4,
+            x_ordinal: 113,
+            sig_ordinal: 75,
+            grade_bits: 0x3fc4_d668_a274_5dbd,
+            can_link: (false, false, true, false),
+            left_top_returns_minus_one: false,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Top,
+            last_index: 1,
+            max_index: 1,
+            selected_glyph_id: 187,
+            stem_identity: 47,
+            stem_vertex: 264,
+            relation_grade_bits: 0x3fea_63f9_c75c_f906,
+            relation_dx_bits: 0x3fb0_115c_aff3_c30c,
+            crossed_x_ordinal: 108,
+            crossed_sig_ordinal: 67,
+            crossed_edge: 310,
         },
     )
 }
@@ -5599,19 +5687,14 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
         can_link(right_top)?,
         can_link(right_bottom)?,
     );
-    if (left_top_ok, left_bottom_ok, right_top_ok, right_bottom_ok) != (true, false, false, true)
-        || !bounded_phase_two_expand_returns_minus_one(
-            left_top,
-            0,
-            head_builders,
-            head_reachability,
-        )?
-        || bounded_phase_two_expand_returns_minus_one(
-            right_bottom,
-            0,
-            head_builders,
-            head_reachability,
-        )?
+    if (left_top_ok, left_bottom_ok, right_top_ok, right_bottom_ok) != expected.can_link
+        || (expected.left_top_returns_minus_one
+            && !bounded_phase_two_expand_returns_minus_one(
+                left_top,
+                0,
+                head_builders,
+                head_reachability,
+            )?)
     {
         return Err(stage(
             "HEADS-phase2-CLink",
@@ -5623,24 +5706,39 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
             side: crate::stems_step::NativeStemHeadSide::Left,
             linked_before: false,
             closed_before: true,
-            top_can_link: Some(true),
-            bottom_can_link: Some(false),
+            top_can_link: Some(left_top_ok),
+            bottom_can_link: Some(left_bottom_ok),
         },
         NativeStemsHeadPhase1SideDecision {
             side: crate::stems_step::NativeStemHeadSide::Right,
             linked_before: false,
             closed_before: true,
-            top_can_link: Some(false),
-            bottom_can_link: Some(true),
+            top_can_link: Some(right_top_ok),
+            bottom_can_link: Some(right_bottom_ok),
         },
     ];
+    let selected_corner = corner(
+        crate::stems_step::NativeStemHeadSide::Right,
+        expected.selected_vertical,
+    );
+    if bounded_phase_two_expand_returns_minus_one(
+        selected_corner,
+        0,
+        head_builders,
+        head_reachability,
+    )? {
+        return Err(stage(
+            "HEADS-phase2-CLink",
+            "selected retry corner does not reach Java's reuseStem transaction",
+        ));
+    }
     let phase_two_frontier = NativeStemsHeadPhase1Frontier {
         head: head_ref,
         stem_profile: 0,
         link_profile: plans.link_profile,
         append: true,
         side_decisions: side_decisions.clone(),
-        next_corner: right_bottom,
+        next_corner: selected_corner,
     };
     let mut shadow = carrier.clone();
     shadow.current_index = head_position;
@@ -5657,22 +5755,24 @@ fn advance_native_stems_head_phase_two_append_c_link_allegretto_system3_shared_s
         checker,
         bridge,
         head_position,
-        2,
-        2,
+        expected.last_index,
+        expected.max_index,
         &phase_two_frontier,
     )?;
     if c_link.create.disposition
-        != (NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 30 })
-        || c_link.selected_glyph_id != 204
-        || c_link.stem_vertex.0 != 247
-        || c_link.last_index != 2
-        || c_link.max_index != 2
-        || c_link.relation.grade.to_bits() != 0x3fed_9899_6cac_8bf2
-        || c_link.relation.dx.to_bits() != 0x3f9c_4c54_8b8f_edb7
+        != (NativeStemsBeamCreateStemDisposition::Reused {
+            stem_identity: expected.stem_identity,
+        })
+        || c_link.selected_glyph_id != expected.selected_glyph_id
+        || c_link.stem_vertex.0 != expected.stem_vertex
+        || c_link.last_index != expected.last_index
+        || c_link.max_index != expected.max_index
+        || c_link.relation.grade.to_bits() != expected.relation_grade_bits
+        || c_link.relation.dx.to_bits() != expected.relation_dx_bits
         || c_link.additional_head_relations.len() != 1
-        || c_link.additional_head_relations[0].corner.x_ordinal != 15
-        || c_link.additional_head_relations[0].corner.sig_ordinal != 11
-        || c_link.additional_head_relations[0].head_stem_edge.0 != 256
+        || c_link.additional_head_relations[0].corner.x_ordinal != expected.crossed_x_ordinal
+        || c_link.additional_head_relations[0].corner.sig_ordinal != expected.crossed_sig_ordinal
+        || c_link.additional_head_relations[0].head_stem_edge.0 != expected.crossed_edge
         || c_link.additional_head_relations[0].appended
         || c_link.s_linker.head != head_ref
         || c_link.s_linker.horizontal != crate::stems_step::NativeStemHeadSide::Right
