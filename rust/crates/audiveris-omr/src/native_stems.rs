@@ -53,6 +53,7 @@ use crate::{
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order7,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order8,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order10,
+        advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order17,
         advance_native_stems_head_phase_two_append_retry, begin_native_stems_head_linking_phase1,
         continue_native_stems_beam_sides_carrier_into_stumps,
         continue_native_stems_head_linking_phase1,
@@ -1372,6 +1373,33 @@ impl NativeStemsPreparedRecognition {
                     ));
                 }
                 let queued_head = carrier.unlinked_heads[carrier.phase_two_index];
+                if system_id == 1
+                    && carrier.phase_two_index == 17
+                    && queued_head.x_ordinal == 68
+                    && queued_head.sig_ordinal == 76
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order17(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
                 if system_id == 1
                     && carrier.phase_two_index == 10
                     && queued_head.x_ordinal == 42
