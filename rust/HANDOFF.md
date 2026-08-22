@@ -9718,3 +9718,35 @@ all-target/all-feature workspace Clippy (13.32s), deterministic Java replay,
 oracle syntax, and diff checks pass. `425d58e82` remains the documented exact
 green remote CI baseline pending newer terminal evidence. Continue at
 Cucaracha system 2 phase-two queue8 x56/SIG78's real append.
+
+## Boundary 201: Cucaracha system-two phase-two queue 8
+
+Native queue8 x56/SIG78 selects LEFT/BOTTOM after both bottom corners pass,
+resolves glyph92 to existing Stem identity30 / vertex242, preserves
+x67/SIG119 edge261, and appends exactly one current-head relation. The later
+RIGHT/BOTTOM expansion returns `-1`. Native relation grade/dx bits are
+`3feb7adfb837fb8d` / `bfbae2955082830c`, exactly matching Java. No vertex,
+system-stem, glyph-ID, or allocator state changes. The continuation returns
+true and advances system 2's phase-two index8→9. Production next fails closed
+at queue9 x132/SIG84's real `reuseStem` append.
+
+Java queue8 independently measures x56/SIG78/Inter1388 selecting glyphs250
+and 2487, canonical candidate250, and existing Stem2647. It retains
+Inter1471, changes only edges347→348, and keeps vertices255, system stems43,
+and allocator2659 fixed.
+
+The strict eight-row-plus-summary fixture is 11 lines / 6,012 bytes and is
+byte-identical across warmup plus two fresh runs. Runner/transform/fixture/
+body+semantic hashes are
+`e862cb9e24ca33a0f9381b1990b25a3a59c607337b60720930871b93936e5b7d`,
+`3f696415a4450338b60c29d343aaccd7ba88772868abaf2deac3ea1c46272cbf`,
+`5290a3261024d312098f1671c536df2bf2e89721e9b6713574c25d95107a58b5`,
+and `71543efca6a7a47a0d0ba1339273402d0b2495f6f0c6ac88fce86716d2a9bef7`.
+Boundary 200's runner/fixture/transform remain pinned at `3ad18d6e…` /
+`457f8f28…` / `a9daae9d…`.
+
+Focused 1/1 (3.83s), full sibling 26/26 (152.25s), formatting, strict
+all-target/all-feature workspace Clippy (13.52s), deterministic Java replay,
+oracle syntax, and diff checks pass. `425d58e82` remains the documented exact
+green remote CI baseline pending newer terminal evidence. Continue at
+Cucaracha system 2 phase-two queue9 x132/SIG84's real append.
