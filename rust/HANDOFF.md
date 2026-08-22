@@ -9018,5 +9018,33 @@ The runner directly pins Boundary 180's x13 runner/fixture at
 
 Focused 1/1 (3.68s), full sibling 20/20 (148.18s), formatting, strict
 all-features workspace Clippy, and diff checks pass. Boundary 179 remains the
-exact fully green remote baseline. Resume at Allegretto system 3's generic
-`finalizeStems` terminal.
+exact fully green remote baseline.
+
+## Boundary 183: Allegretto system-3 generic `finalizeStems`
+
+The unchanged generic `finalize_native_stems` now consumes the exact exhausted
+Boundary-182 carrier. It checks all 118 heads, observes x107/SIG80 as the sole
+multi-stem head, and observes x56/SIG100 as the sole stemless and abnormal
+head. The carried undefined-side map still contains x112/SIG68 RIGHT. Java and
+native remove no HeadStem relation, change no abnormal flag, and preserve the
+entire carrier exactly: SIG 267/320, system stems 52, allocator 3170, and the
+phase-two cursor at five.
+
+The dedicated full-page Java oracle covers all three Allegretto systems and is
+byte-identical across warmup plus two fresh runs. Its 7-line / 3,349-byte
+fixture and runner SHA-256 values are
+`cfb9e6011ed29aa30e6e90db6eeae931a3a6533d7339d80519a5ddd650c0ff0c` and
+`abafa7d183ae151baa7ed4d8005257c562e0c49fb939fe931a7571994d70d890`;
+probe/init/body hashes are
+`9b5e9dbefbf400887f49feba934c573d851c67e65b3e43bfaabc86d6f2c36714`,
+`e0ff89792bf75286317ef011e079f338696d29cc14918f4a3018307ba4ed9548`, and
+`3add75f32b08d8836817483175425872814f10aa18c0c14bef86e3306dddc8f1`.
+The runner directly pins Boundary 182's x113 runner/fixture at
+`4f589fb9512f2b7d6467b98c9174b81ec91783a002455ee4c7ae908c1e4aa854` /
+`83e4c5671e6e1d489c84d30ff0bd5e01c3b095c68b8562d2f09c42908b49f1af`.
+
+Focused 1/1 (3.86s), full sibling 20/20 (153.23s), formatting, strict
+all-target/all-feature workspace Clippy, oracle shell syntax, and diff checks
+pass. Boundary 179 remains the exact fully green remote baseline; no exact
+Boundary-182 workflows were visible at this check. Resume by widening the
+completed generic STEMS drive and finalizer to the next corpus system/page.

@@ -251,6 +251,10 @@ const ALLEGRETTO_PHASE_TWO_X113_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-x113.transform.awk");
 const ALLEGRETTO_PHASE_TWO_X113_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-x113.init.gradle");
+const ALLEGRETTO_FINALIZE_FIXTURE: &str =
+    include_str!("../../../oracle/stems-finalize-allegretto-v1.txt");
+const ALLEGRETTO_FINALIZE_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-finalize-allegretto.sh");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -10874,6 +10878,35 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
         0x409d_fc00_0000_0000
     );
 
+    // Boundary 183: the exhausted Allegretto system-3 carrier enters the
+    // generic finalizer. Java observes x107 as multi-stem but removes no
+    // relation, and x56 was already the sole abnormal stemless head, so this
+    // exact finalization is mutation-free.
+    let before_finalize = (**phase_two_4_after).clone();
+    let finalized = finalize_native_stems(phase_two_4_after)
+        .expect("Allegretto system-3 generic finalizeStems");
+    assert_eq!(finalized.checked_heads, 118);
+    assert_eq!(
+        finalized
+            .multiple_stem_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        vec![(107, 80)]
+    );
+    assert_eq!(
+        finalized
+            .no_stem_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        vec![(56, 100)]
+    );
+    assert_eq!(finalized.abnormal_heads, finalized.no_stem_heads);
+    assert!(finalized.removed_head_stem_relations.is_empty());
+    assert_eq!(finalized.abnormal_value_changes, 0);
+    assert_eq!(*finalized.state_after, before_finalize);
+
     assert_eq!(
         sha256_hex(ALLEGRETTO_PHASE_TWO_X14_FIXTURE.as_bytes()),
         "f8a18f4ac17d036e0f3481983474d3569668437c6d53670b7f454f707baad1ba"
@@ -11265,6 +11298,84 @@ fn allegretto_system3_order29_and_order61_create_checked_stems() {
     assert_eq!(
         x113_field("javaEvidence"),
         "ReturnedAfterSystem3RetryIndex4"
+    );
+
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_FINALIZE_FIXTURE.as_bytes()),
+        "cfb9e6011ed29aa30e6e90db6eeae931a3a6533d7339d80519a5ddd650c0ff0c"
+    );
+    assert_eq!(
+        sha256_hex(ALLEGRETTO_FINALIZE_RUNNER),
+        "abafa7d183ae151baa7ed4d8005257c562e0c49fb939fe931a7571994d70d890"
+    );
+    let finalize_rows = ALLEGRETTO_FINALIZE_FIXTURE
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(finalize_rows.len(), 5);
+    assert_eq!(
+        finalize_rows[0],
+        "stemsfinalizepage page allegretto.png#1 systems 3 mode ForegroundPageSerial"
+    );
+    assert_eq!(
+        finalize_rows[3],
+        "stemsfinalizesystem page allegretto.png#1 system 3 heads 118 undefs [x112:sig68:id1812:[RIGHT]] multipleBefore [x107:sig80:id1836] noStemBefore [x56:sig100:id1876] abnormalBefore [x56:sig100:id1876] removedHeadStem [] abnormalAfter [x56:sig100:id1876] abnormalChanges [] sigVerticesBefore 267 sigVerticesAfter 267 sigEdgesBefore 320 sigEdgesAfter 320 systemStemsBefore 52 systemStemsAfter 52 allocatorBefore 3170 allocatorAfter 3170"
+    );
+    let finalize_summary = finalize_rows[4]
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>();
+    let finalize_field = |name: &str| {
+        finalize_summary
+            .iter()
+            .position(|token| *token == name)
+            .and_then(|index| finalize_summary.get(index + 1))
+            .copied()
+            .expect("strict Allegretto finalizeStems summary field")
+    };
+    assert_eq!(finalize_field("schema"), "stems-finalize-page-v1");
+    assert_eq!(finalize_field("page"), "allegretto.png#1");
+    assert_eq!(finalize_field("rows"), "4");
+    assert_eq!(
+        finalize_field("inputSha256"),
+        "a9207f26b57415d8c54602881316c003319c5593ed8baf4c3af13715c41b3065"
+    );
+    assert_eq!(
+        finalize_field("stemsRetrieverSourceSha256"),
+        "26e95fa09905b39ea0dcae2b65a85b4e4fcb49b772c57f97f332a00c4dc8b9e7"
+    );
+    assert_eq!(
+        finalize_field("probeSourceSha256"),
+        sha256_hex(BATUQUE_FINALIZE_PROBE)
+    );
+    assert_eq!(
+        finalize_field("initSourceSha256"),
+        sha256_hex(BATUQUE_FINALIZE_INIT)
+    );
+    assert_eq!(
+        finalize_field("runnerSourceSha256"),
+        sha256_hex(ALLEGRETTO_FINALIZE_RUNNER)
+    );
+    assert_eq!(
+        finalize_field("basePhaseTwoRunnerSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_RUNNER)
+    );
+    assert_eq!(
+        finalize_field("basePhaseTwoFixtureSha256"),
+        sha256_hex(ALLEGRETTO_PHASE_TWO_X113_FIXTURE.as_bytes())
+    );
+    assert_eq!(
+        finalize_field("emittedBodySha256"),
+        sha256_hex(format!("{}\n", finalize_rows[..4].join("\n")).as_bytes())
+    );
+    assert_eq!(finalize_field("freshRuns"), "2");
+    assert_eq!(finalize_field("freshRunsByteIdentical"), "true");
+    assert_eq!(
+        finalize_field("nativeScope"),
+        "FullPageAllSystemsGenericFinalizeAfterSystem3PhaseTwo"
+    );
+    assert_eq!(
+        finalize_field("javaEvidence"),
+        "ReturnedAfterFinalPageFinalize"
     );
 
     assert_eq!(
