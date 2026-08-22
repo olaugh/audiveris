@@ -10504,3 +10504,27 @@ Boundary 227 is strictly pinned; warmup plus two fresh JVM runs are
 byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
 Clippy, deterministic replay, and diff checks pass. Continue at queue202
 x64/SIG61.
+
+## Boundary 229: idempotent right-side three-head reconciliation
+
+Bach system-2 queue202 x64/SIG61 has grade bits `3fc63bafd5496ee4`.
+Profiles 0-3 skip its closed LEFT and already-linked RIGHT. Its existing RIGHT
+stem joins x60/SIG68, x61/SIG69, and x64/SIG61. Java returns true without
+graph, stem, glyph-index, allocator, undefined-side, or unlinked-head mutation
+and advances to queue203 x125/SIG25.
+
+The unchanged generic native continuation emits x60 LEFT/RIGHT then x61
+LEFT/RIGHT in incident order. All four cells are already closed, so
+`closedValueChanges=0`. No production source changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`565bc3d90727c2980189bddf657bc8813d69458cf6833a028d152e8694471344`,
+`33701954065dcba38cbaaa6fb65aa178c0b8be256f370f30e200fe32f037aaad`,
+`c47059b123a5dac6769c55ab4c86aff8c296ccbe9fe862a8fd0da2e4ab6f826f`,
+`863ebf6c04841b77e6a00e470593a1360c086ee7a4e4513d894c2d30245af939`,
+`e8f8a41fc2c14a8780d69906199e64dad2ca37e6bd7ad1f808940e0aba504214`,
+and `4d0b5a3381ea5781ea1e8d2c3715305ea59f74fa5c3488ebe1f9b001d557be12`.
+Boundary 228 is strictly pinned; warmup plus two fresh JVM runs are
+byte-identical. Focused 1/1, all 29 sibling tests, formatting, strict workspace
+Clippy, deterministic replay, and diff checks pass. Continue at queue203
+x125/SIG25.
