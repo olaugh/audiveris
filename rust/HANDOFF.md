@@ -8246,8 +8246,9 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 248 at phase-two retry index 7,
-   x152/SIG90. Carry the remaining eight queued heads in their authenticated order, then
+2. Continue Bach system 2 after Boundary 249 at phase-two retry index 8,
+   x123/SIG14. Port its measured RIGHT/BOTTOM graph mutation atomically, carry the
+   remaining seven queued heads in order, then
    run generic `finalizeStems` and the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
@@ -10995,6 +10996,28 @@ Fixture/runner/body SHA-256 values are
 `74649eaef4d2cad4be3a4e7ff9975287ecbdc5c1ee0189b4de33a3a90e127fea`,
 and `7fed672bca672031f9a9bfa6268d1dd5f037bf318190ef75432c9dace0a0c704`.
 The strict Boundary-247 runner/fixture predecessors remain pinned. Warmup plus
+two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, and diff checks pass.
+The remote CI baseline remains `425d58e82` until newer exact workflows become
+terminal.
+
+## Boundary 249: Bach system-2 phase-two no-link retry
+
+Bach system-2 phase-two queue index 7 revisits x152/SIG90/Inter3784 with
+grade bits `3fca79cfd0ad367a`. LEFT and RIGHT both remain `Neither`. Java returns
+false without an undefined side, linker write, graph/stem mutation, or allocator
+change.
+
+The generic native phase-two append retry reproduces the no-link result. Its
+ordered local LEFT/RIGHT closure attempts are idempotent, zero cells change, and
+only `phase_two_index` advances from 7 to 8. The next retry is x123/SIG14, the
+first measured phase-two graph mutation; seven entries remain after it.
+
+Fixture/runner/body SHA-256 values are
+`d6002f389798e08c11ca81eb17cb411fba2df27090cf3a02e36bbe2bd4ab833b`,
+`9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965`,
+and `b4f2b620aa0abb9e793393c81d2e7fd19ad1929553ad99cf3d37c3618ce6814a`.
+The strict Boundary-248 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, and diff checks pass.
 The remote CI baseline remains `425d58e82` until newer exact workflows become
