@@ -762,6 +762,14 @@ const BACH_SYSTEM2_PHASE_TWO_ORDER14_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order14.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER14_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order14.sh");
+const BACH_SYSTEM2_FINALIZE_FIXTURE: &str =
+    include_str!("../../../oracle/stems-finalize-bach-system2.txt");
+const BACH_SYSTEM2_FINALIZE_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-finalize-bach-system2.sh");
+const BACH_SYSTEM2_FINALIZE_PROBE: &[u8] =
+    include_bytes!("../../../oracle/java/StemsHeadFinalizePageProbe.java");
+const BACH_SYSTEM2_FINALIZE_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-finalize-page.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -23588,6 +23596,41 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
             "missing Bach phase-two queue-14 oracle fragment: {exact}"
         );
     }
+
+    // Boundary 258: Java's terminal finalizeStems census for the exhausted
+    // Bach system-2 carrier. The before/after distinction is intentional:
+    // Java cleans the one multiple-stem head and removes one relation before
+    // reporting its terminal graph.
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_FINALIZE_FIXTURE.as_bytes()),
+        "487701a520103fd02baf0ca768bffd583aebdfadec6d38d427cc4fab487832be"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_FINALIZE_RUNNER),
+        "a6403b66c367f66d895d836cacb041c3871aea9cd8dcd46e3e9479c0701d19da"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_FINALIZE_PROBE),
+        "07240ff53e6efeed338378fbec91b90ba2b3645540774fac3871be283805f76c"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_FINALIZE_INIT),
+        "a52be045074829368e68fadcdcabc2a1ee59ff0d427350a26cf7853d1cbd7250"
+    );
+    let finalize_rows = BACH_SYSTEM2_FINALIZE_FIXTURE
+        .lines()
+        .filter(|line| line.starts_with("stems"))
+        .collect::<Vec<_>>();
+    assert_eq!(finalize_rows.len(), 2);
+    assert!(finalize_rows[0].contains(
+        "checked 215 multipleBefore 1 multipleAfter 0 noStem 12 abnormal 12 removed 1 abnormalChanges 0 sigEdges 601 systemStems 77 allocator 6815"
+    ));
+    assert!(finalize_rows[1].contains(
+        "schema stems-finalize-bach-system2-v1 page BachInvention5.jpg#1 system 2 rows 1"
+    ));
+    assert!(finalize_rows[1].contains(
+        "nativeScope BachSystem2FinalizeStemsCensus javaEvidence ReturnedAfterFinalizeStemsBachSystem2"
+    ));
 }
 
 #[test]

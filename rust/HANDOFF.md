@@ -8246,12 +8246,13 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 257 with the phase-two queue exhausted,
+2. Continue Bach system 2 after Boundary 258 with the phase-two queue exhausted,
    x54/SIG59 complete and the native generic `finalizeStems` acceptance gate
-   recorded (215 checked heads, one multiple-stem head, 12 no-stem/abnormal
-   heads, one removed HeadStem relation). Carry the measured terminal no-link
-   result and continue with generic finalizeStems heads in order, then run the
-   transactional page driver. Continue the
+   recorded. Java's terminal finalizer is now instrumented for the same carrier:
+   one multiple-stem head before cleanup, zero after, 12 no-stem/abnormal heads,
+   one removed HeadStem relation, and zero abnormal changes. Carry the measured
+   terminal no-link result and continue with generic finalizeStems heads in
+   order, then run the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
@@ -11200,3 +11201,22 @@ finalizer and then compose the transactional page publication.
 
 The focused Bach boundary test passes, and the existing full sibling, strict
 Clippy, formatting, and diff gates remain the verification authority.
+
+## Boundary 258: Bach system-2 Java finalizeStems census
+
+The dedicated Temurin JDK25 probe invokes Java's private `finalizeStems` after
+the exhausted x54/SIG59 phase-two carrier. Java reports 215 checked heads,
+one multiple-stem head before cleanup and zero after cleanup, 12 no-stem heads,
+12 abnormal heads, one removed HeadStem relation, zero abnormal changes,
+SIG edge count 601, 77 system stems, and allocator 6815. The native result's
+one pre-cleanup multiple-stem candidate and one removed relation now have an
+independent Java census.
+
+Fixture SHA-256 is
+`487701a520103fd02baf0ca768bffd583aebdfadec6d38d427cc4fab487832be`;
+runner, probe, and init SHA-256 values are
+`a6403b66c367f66d895d836cacb041c3871aea9cd8dcd46e3e9479c0701d19da`,
+`07240ff53e6efeed338378fbec91b90ba2b3645540774fac3871be283805f76c`, and
+`a52be045074829368e68fadcdcabc2a1ee59ff0d427350a26cf7853d1cbd7250`.
+Warmup plus two fresh JVM runs are byte-identical; the strict Boundary-256
+runner/fixture predecessors remain pinned.
