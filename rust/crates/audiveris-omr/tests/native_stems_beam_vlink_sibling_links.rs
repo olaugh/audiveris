@@ -120,6 +120,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x13,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x14,
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113,
+        advance_native_stems_head_phase_two_append_c_link_bach_system2_order8,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
@@ -728,6 +729,12 @@ const BACH_SYSTEM2_PHASE_TWO_ORDER7_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order7.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER7_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order7.sh");
+const BACH_SYSTEM2_PHASE_TWO_ORDER8_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system2-order8.txt");
+const BACH_SYSTEM2_PHASE_TWO_ORDER8_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order8.sh");
+const BACH_SYSTEM2_PHASE_TWO_ORDER8_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system2-order8.transform.awk");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -21326,6 +21333,145 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         before_phase_two_seven.unlinked_heads
     );
 
+    // Boundary 250: x123/SIG14 reaches RIGHT/BOTTOM and reuses the stem
+    // already attached to x125/SIG25. Native appends exactly the missing
+    // HeadStem edge while preserving the glyph, stem vertex, and allocator.
+    let before_phase_two_eight = (*phase_two_seven.state_after).clone();
+    let phase_two_eight = advance_native_stems_head_phase_two_append_c_link_bach_system2_order8(
+        &phase_two_seven.state_after,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Bach system-2 phase-two queue 8 reused-stem append");
+    let phase_two_eight_after = &phase_two_eight.continuation.state_after;
+    assert_eq!(
+        (
+            phase_two_eight.continuation.processed_head.x_ordinal,
+            phase_two_eight.continuation.processed_head.sig_ordinal,
+            phase_two_eight.continuation.returned_linked,
+            phase_two_eight.continuation.closed_value_changes,
+        ),
+        (123, 14, Some(true), 0)
+    );
+    assert_eq!(phase_two_eight_after.phase_two_index, 9);
+    assert_eq!(
+        phase_two_eight_after.beam_state.sig.vertices.len(),
+        before_phase_two_eight.beam_state.sig.vertices.len()
+    );
+    assert_eq!(
+        phase_two_eight_after.beam_state.sig.edges.len(),
+        before_phase_two_eight.beam_state.sig.edges.len() + 1
+    );
+    assert_eq!(
+        phase_two_eight_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems,
+        before_phase_two_eight
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+    );
+    assert_eq!(
+        phase_two_eight_after
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids,
+        before_phase_two_eight
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .glyph_index
+            .persistent_ids
+    );
+    assert_eq!(phase_two_eight.c_link.corner.x_ordinal, 123);
+    assert_eq!(phase_two_eight.c_link.corner.sig_ordinal, 14);
+    assert_eq!(
+        phase_two_eight.c_link.corner.horizontal,
+        NativeStemHeadSide::Right
+    );
+    assert_eq!(
+        phase_two_eight.c_link.corner.vertical,
+        NativeStemVerticalSide::Bottom
+    );
+    assert_eq!(
+        (
+            phase_two_eight.c_link.last_index,
+            phase_two_eight.c_link.max_index
+        ),
+        (1, 1)
+    );
+    assert_eq!(phase_two_eight.c_link.selected_glyph_id, 149);
+    assert_eq!(
+        phase_two_eight.c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 11 }
+    );
+    assert_eq!(phase_two_eight.c_link.stem_vertex.0, 328);
+    assert_eq!(phase_two_eight.c_link.head_stem_edge.0, 598);
+    assert_eq!(
+        phase_two_eight.c_link.relation.grade.to_bits(),
+        0x3fe4_52a9_b8a2_31bc
+    );
+    assert_eq!(
+        phase_two_eight.c_link.relation.dx.to_bits(),
+        0xbfce_8c8a_1964_8d2d
+    );
+    let extension = phase_two_eight
+        .c_link
+        .relation
+        .extension_point
+        .expect("Bach queue-8 relation extension");
+    assert_eq!(extension.x.to_bits(), 0x4092_222b_bd08_e8fb);
+    assert_eq!(extension.y.to_bits(), 0x4087_2800_0000_0000);
+    assert!(phase_two_eight.c_link.append_reuse.is_none());
+    assert_eq!(phase_two_eight.c_link.additional_head_relations.len(), 1);
+    let reuse_source = &phase_two_eight.c_link.additional_head_relations[0];
+    assert_eq!(reuse_source.corner.x_ordinal, 125);
+    assert_eq!(reuse_source.corner.sig_ordinal, 25);
+    assert_eq!(reuse_source.corner.horizontal, NativeStemHeadSide::Left);
+    assert_eq!(reuse_source.head_stem_edge.0, 304);
+    assert!(!reuse_source.appended);
+    let appended = &phase_two_eight_after.beam_state.sig.edges[598];
+    assert!(appended.active);
+    assert_eq!(appended.kind, NativeSigRelationKind::HeadStem);
+    assert_eq!(appended.target, 328);
+    assert_eq!(
+        appended
+            .support
+            .as_ref()
+            .expect("Bach queue-8 HeadStem support")
+            .grade
+            .to_bits(),
+        0x3fe4_52a9_b8a2_31bc
+    );
+    let payload = appended
+        .head_stem
+        .as_ref()
+        .expect("Bach queue-8 HeadStem payload");
+    assert_eq!(payload.head_side, NativeStemHeadSide::Right);
+    assert_eq!(payload.dx.to_bits(), 0xbfce_8c8a_1964_8d2d);
+    assert_eq!(payload.dy.to_bits(), 0);
+    assert_eq!(payload.consistency.to_bits(), 0x3ff6_db6d_b6db_6db7);
+    assert_eq!(payload.extension_point.x.to_bits(), 0x4092_222b_bd08_e8fb);
+    assert_eq!(payload.extension_point.y.to_bits(), 0x4087_2800_0000_0000);
+    assert_eq!(
+        phase_two_eight_after.undefined_sides,
+        before_phase_two_eight.undefined_sides
+    );
+    assert_eq!(
+        phase_two_eight_after.unlinked_heads,
+        before_phase_two_eight.unlinked_heads
+    );
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
@@ -22800,6 +22946,47 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         assert!(
             BACH_SYSTEM2_PHASE_TWO_ORDER7_FIXTURE.contains(exact),
             "missing Bach phase-two queue-7 oracle fragment: {exact}"
+        );
+    }
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_FIXTURE.as_bytes()),
+        "863be30c6bdf8a69c982ffdfa68f6e1a00ff279235a81e5519d52711ba3fcb6f"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_RUNNER),
+        "a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER8_TRANSFORM),
+        "bce9262e517c4eeae4d36a6e97da8a055978469ecc59f5868703b799b9d71192"
+    );
+    for exact in [
+        "queueIndex 8 headX 123 headSig 14 headInterId 3633 grade 3fca19447d01fead append true",
+        "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=false:bottom=false:branch=Neither,RIGHT:top=false:bottom=true:branch=BottomOnly] returned true",
+        "sidesAfter [LEFT:false:true,RIGHT:true:true] undefs [] sideChanges [x123:sig14:RIGHT:false:true->true:true]",
+        "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 601 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 1 maxIndex 1 relations 2",
+        "candidate id488:1158:747:5:68:weight251 candidateIdBefore 488 existingStem id6750",
+        "sourceHeadId 3655 sourceCorner BL sourceSide LEFT relationGrade 3fe928ae67544cce stem id6750",
+        "reusedExisting true applied grade3fe452a9b8a231bc:dxbfce8c8a19648d2d:dy0",
+        "verticesBefore 394 verticesAfter 394 edgesBefore 600 edgesAfter 601 allocatorBefore 6815 allocatorAfter 6815 terminal ReturnedHeadCLinkTransaction",
+        "runnerSourceSha256 a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0",
+        "baseBoundary249RunnerSha256 9af18b8ff7680a658d667cec9254f9928e73517c12db8dd3ee1c56e96f909965",
+        "baseBoundary249FixtureSha256 d6002f389798e08c11ca81eb17cb411fba2df27090cf3a02e36bbe2bd4ab833b",
+        "baseTransformSourceSha256 69258e54539f10d7771718a8660b2e012db286c4cfdc7285876831da64f77c92",
+        "retargetTransformSourceSha256 bce9262e517c4eeae4d36a6e97da8a055978469ecc59f5868703b799b9d71192",
+        "transformedHeadLinkerSourceSha256 b50d79b1bcfa813db6722436a5a2dee157f4e61a3f34a1de0c349d5c81c53c87",
+        "initSourceSha256 b7c2b721836f8238295dfe0ec01b5add5b1b181a82876fa3420c255a205213b8",
+        "emittedBodySha256 70aa6a599cfffcf0a5e3c2c05e69e8eeba3b524978dc2360639bc25faa5b379f",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem2PhaseTwoOrder8RightReusedStemAppend",
+        "javaEvidence ReturnedBeforeSystem2RetryIndex9",
+    ] {
+        assert!(
+            BACH_SYSTEM2_PHASE_TWO_ORDER8_FIXTURE.contains(exact),
+            "missing Bach phase-two queue-8 oracle fragment: {exact}"
         );
     }
 }

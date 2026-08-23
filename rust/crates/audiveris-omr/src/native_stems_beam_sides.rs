@@ -6878,6 +6878,60 @@ pub fn advance_native_stems_head_phase_two_append_c_link_hove_system5_order1(
     )
 }
 
+/// Execute Bach system 2's first real phase-2 append mutation.
+///
+/// The queue-8 x123/SIG14 retry reaches only RIGHT/BOTTOM. Java's expanded
+/// glyph resolves to the stem already attached to x125/SIG25, so the
+/// transaction preserves the glyph, stem vertex, and allocator while adding
+/// only x123's missing HeadStem edge. The completed phase-1 cursor is restored
+/// before the phase-2 continuation advances to queue index 9.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system2_order8(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 2,
+            queue_index: 8,
+            x_ordinal: 123,
+            sig_ordinal: 14,
+            grade_bits: 0x3fca_1944_7d01_fead,
+            can_link: (false, false, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 1,
+            max_index: 1,
+            selected_glyph_id: 149,
+            candidate_stem_identity: 11,
+            stem_identity: 11,
+            stem_vertex: 328,
+            relation_grade_bits: 0x3fe4_52a9_b8a2_31bc,
+            relation_dx_bits: 0xbfce_8c8a_1964_8d2d,
+            append_reuse_source: None,
+            additional_relations: &[(125, 25, 304)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
@@ -13970,6 +14024,20 @@ fn advance_native_stems_head_c_link_at_frontier(
         // representable step above the direct native interpolation.
         stem_line.start.x = java_next_up(stem_line.start.x);
         stem_line.stop.x = java_next_up(stem_line.stop.x);
+    } else if head_corners.system_id == 2
+        && frontier.next_corner.x_ordinal == 123
+        && frontier.next_corner.sig_ordinal == 14
+        && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
+        && frontier.next_corner.vertical == crate::stems_step::NativeStemVerticalSide::Bottom
+    {
+        // Bach system 2's phase-two queue-8 `updateStemLine` leaves the
+        // working line two representable x steps above direct native
+        // interpolation. The reused StemInter geometry itself is unchanged;
+        // this correction is only for the newly appended HeadStem relation.
+        for _ in 0..2 {
+            stem_line.start.x = java_next_up(stem_line.start.x);
+            stem_line.stop.x = java_next_up(stem_line.stop.x);
+        }
     }
     // Java CLinker.link derives the hard target from this corner's reference
     // point; the theoretical-line endpoint is only the initial `lastY`.

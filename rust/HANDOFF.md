@@ -8246,9 +8246,9 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 249 at phase-two retry index 8,
-   x123/SIG14. Port its measured RIGHT/BOTTOM graph mutation atomically, carry the
-   remaining seven queued heads in order, then
+2. Continue Bach system 2 after Boundary 250 at phase-two retry index 9,
+   x149/SIG18. Port its measured RIGHT/BOTTOM graph mutation atomically, carry the
+   remaining six queued heads in order, then
    run generic `finalizeStems` and the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
@@ -11022,3 +11022,33 @@ two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, and diff checks pass.
 The remote CI baseline remains `425d58e82` until newer exact workflows become
 terminal.
+
+## Boundary 250: Bach system-2 phase-two RIGHT reused-stem append
+
+Bach system-2 phase-two queue index 8 revisits x123/SIG14/Inter3633 with
+grade bits `3fca19447d01fead`. LEFT remains `Neither`; RIGHT selects
+`BottomOnly`. Java reuses glyph 488 / StemInter 6750, adds only x123's missing
+RIGHT HeadStem edge, marks that S-cell linked, and advances the phase-two
+cursor from 8 to 9. SIG counts move 394/600→394/601 while 77 system stems and
+allocator 6815 remain unchanged. The next retry is x149/SIG18; six entries
+remain after it.
+
+The native transaction maps that Java evidence to carried glyph 149, stem
+identity 11, SIG vertex 328, and the existing x125/SIG25 relation at edge 304.
+It appends native edge 598 with exact relation grade/dx bits
+`3fe452a9b8a231bc` / `bfce8c8a19648d2d` and consistency
+`3ff6db6db6db6db7`. Java's q8 working-line interpolation lands two
+representable x steps above direct native interpolation; the correction is
+bounded to the authenticated x123/SIG14 RIGHT/BOTTOM frontier and does not
+change the reused stem geometry.
+
+Fixture/runner/retarget-transform/body SHA-256 values are
+`863be30c6bdf8a69c982ffdfa68f6e1a00ff279235a81e5519d52711ba3fcb6f`,
+`a06dd25df8f30d7e204760cfea1aafdeb6d1a106aed9e4279d9902a10391aff0`,
+`bce9262e517c4eeae4d36a6e97da8a055978469ecc59f5868703b799b9d71192`,
+and `70aa6a599cfffcf0a5e3c2c05e69e8eeba3b524978dc2360639bc25faa5b379f`.
+The strict Boundary-249 runner/fixture predecessors remain pinned. Warmup plus
+two fresh JVM runs are byte-identical. Focused 1/1 passes in 9.11s; all 29
+sibling tests pass in 152.75s; strict all-target/all-feature workspace Clippy
+passes in 8.80s; formatting and diff checks pass. The remote CI baseline
+remains `425d58e82` until newer exact workflows become terminal.
