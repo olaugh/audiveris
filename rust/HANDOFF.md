@@ -8246,8 +8246,8 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 245 at phase-two retry index 4,
-   x160/SIG169. Carry the remaining 11 queued heads in their authenticated order, then
+2. Continue Bach system 2 after Boundary 246 at phase-two retry index 5,
+   x162/SIG168. Carry the remaining 10 queued heads in their authenticated order, then
    run generic `finalizeStems` and the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
@@ -10926,6 +10926,30 @@ Fixture/runner/body SHA-256 values are
 `38e817048be6022fc704b55e69ec8f84009bf83cb017c784e30ef660a7e71c77`,
 and `2f41f2931e132bd05feff04b10815e3b3e322fcae9019e501399f82818d25667`.
 The strict Boundary-244 runner/fixture predecessors remain pinned. Warmup plus
+two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, and diff checks pass.
+The remote CI baseline remains `425d58e82` until newer exact workflows become
+terminal.
+
+## Boundary 246: second Bach system-2 shared-stump undefined retry
+
+Bach system-2 phase-two queue index 4 revisits x160/SIG169/Inter3949 with
+grade bits `3fd16b9e057b88cd`. LEFT selects `TopOnly`; RIGHT has both corners
+linkable, but they resolve to the same stump. Java returns false immediately,
+preserves RIGHT in the carried undefined-side authority, and performs no local
+closure, linker write, graph/stem mutation, or allocation.
+
+The generic native phase-two append retry reproduces this branch without a
+corpus-specific production wrapper. It emits no closure cells, preserves every
+carried undefined side and all 15 queued identities, and advances only
+`phase_two_index` from 4 to 5. The next retry is x162/SIG168; 10 entries remain
+after it.
+
+Fixture/runner/body SHA-256 values are
+`6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753`,
+`e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823`,
+and `2c6a549a584f6dec0b9a2611877277d4f951870b0be353a78941af49e22da039`.
+The strict Boundary-245 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, and diff checks pass.
 The remote CI baseline remains `425d58e82` until newer exact workflows become
