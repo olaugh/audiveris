@@ -11259,3 +11259,12 @@ bits `3fe4e04a170fd2a1` / `bfcd68cbbb961a5a`. The strict JDK25 runner/fixture
 is byte-identical across two fresh runs. Focused and full sibling tests, strict
 workspace Clippy, formatting, and diff checks pass. The full Bach CLI now
 reaches system-3 queue 7 x28/SIG50.
+
+## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
+
+Bach system 3 queue 7 x28/SIG50/Inter4140 is another measured RIGHT/BOTTOM
+reuse: Java StemInter 7366 maps to native glyph 248, stem identity 27, vertex
+319, and carried x29/SIG66 edge 325. It appends edge 537 (Java 539→540) without
+allocating a stem. Two fresh Java passes are byte-identical; the next frontier is
+queue 8 x166/SIG58. Forecast: remaining generic STEMS work remains days to a
+couple of focused weeks because every new live branch needs this same evidence.

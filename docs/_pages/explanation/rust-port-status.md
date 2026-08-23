@@ -6494,3 +6494,12 @@ and existing x147/SIG73 edge 461; it appends native edge 536 with grade/dx bits
 byte-identical across two fresh runs. The focused regression, full 30-test
 sibling suite, strict workspace Clippy, formatting, and diff checks pass. The
 full Bach CLI now reaches system-3 queue 7 x28/SIG50.
+
+## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
+
+Bach system 3 queue 7 x28/SIG50/Inter4140 is a RIGHT/BOTTOM reused-stem append.
+Java StemInter 7366 maps to native glyph 248, stem identity 27 / vertex 319,
+and carried x29/SIG66 edge 325; the transaction appends edge 537 without a new
+stem. Two fresh JDK25 passes are byte-identical. The next Bach frontier is queue
+8 x166/SIG58; remaining generic STEMS parity is still forecast in days to a
+couple of focused weeks, as live branch measurement remains the pacing work.
