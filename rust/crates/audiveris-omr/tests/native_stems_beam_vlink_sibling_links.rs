@@ -716,6 +716,10 @@ const BACH_SYSTEM2_PHASE_TWO_ORDER4_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order4.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER4_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order4.sh");
+const BACH_SYSTEM2_PHASE_TWO_ORDER5_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system2-order5.txt");
+const BACH_SYSTEM2_PHASE_TWO_ORDER5_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order5.sh");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -21176,6 +21180,52 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         before_phase_two_four.unlinked_heads
     );
 
+    // Boundary 247: x162/SIG168 selects LEFT/TOP but Java rejects the append
+    // expansion before reuseStem. RIGHT remains unavailable, so the retry
+    // returns false and only the phase-two cursor advances.
+    let before_phase_two_five = (*phase_two_four.state_after).clone();
+    let phase_two_five = advance_native_stems_head_phase_two_append_retry(
+        &phase_two_four.state_after,
+        head_corners,
+        head_reachability,
+        head_builders,
+        plans,
+    )
+    .expect("Bach system-2 phase-two queue 5 rejected top append");
+    assert_eq!(
+        (
+            phase_two_five.processed_head.x_ordinal,
+            phase_two_five.processed_head.sig_ordinal,
+            phase_two_five.returned_linked,
+            phase_two_five.closed_value_changes,
+        ),
+        (162, 168, Some(false), 0)
+    );
+    assert_eq!(phase_two_five.state_after.phase_two_index, 6);
+    assert_eq!(
+        phase_two_five
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<Vec<_>>(),
+        [
+            (162, 168, NativeStemHeadSide::Left),
+            (162, 168, NativeStemHeadSide::Right),
+        ]
+    );
+    assert_eq!(
+        phase_two_five.state_after.beam_state,
+        before_phase_two_five.beam_state
+    );
+    assert_eq!(
+        phase_two_five.state_after.undefined_sides,
+        before_phase_two_five.undefined_sides
+    );
+    assert_eq!(
+        phase_two_five.state_after.unlinked_heads,
+        before_phase_two_five.unlinked_heads
+    );
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
@@ -22569,6 +22619,33 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         assert!(
             BACH_SYSTEM2_PHASE_TWO_ORDER4_FIXTURE.contains(exact),
             "missing Bach phase-two queue-4 oracle fragment: {exact}"
+        );
+    }
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER5_FIXTURE.as_bytes()),
+        "9a23db94e8c05f442579a28f223cd1a26cd3e45f4bdffd9ce03159990610a409"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_PHASE_TWO_ORDER5_RUNNER),
+        "d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0"
+    );
+    for exact in [
+        "queueIndex 5 headX 162 headSig 168 headInterId 3947 grade 3fcc27b9ce0db120 append true",
+        "sidesBefore [LEFT:false:true,RIGHT:false:true] decisions [LEFT:top=true:bottom=false:branch=TopOnly,RIGHT:top=false:bottom=false:branch=Neither] returned false",
+        "sidesAfter [LEFT:false:true,RIGHT:false:true] undefs [] sideChanges []",
+        "sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 600 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 6815 allocatorAfter 6815",
+        "runnerSourceSha256 d1b668eb65ad174d3cc80030b3cf76a674fe35692f78011fc21e1d18896ed2a0",
+        "baseBoundary246RunnerSha256 e03f0c788dd21a61d5629fbb4fc1c1afaf7d8439f567949afb26c09890361823",
+        "baseBoundary246FixtureSha256 6ba6a704229a926dd21fbae4e396d4917d48ee2b8149736178aa52aeaa833753",
+        "emittedBodySha256 9456f61c645cb109e3c1bdea7c5f519d6ebad9f01d39f71c6209c39f050c050a",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem2PhaseTwoOrder5RejectedTopAppend",
+        "javaEvidence ReturnedAfterSystem2RetryIndex5",
+    ] {
+        assert!(
+            BACH_SYSTEM2_PHASE_TWO_ORDER5_FIXTURE.contains(exact),
+            "missing Bach phase-two queue-5 oracle fragment: {exact}"
         );
     }
 }
