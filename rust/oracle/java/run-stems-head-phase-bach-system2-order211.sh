@@ -1,0 +1,20 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+set -eu
+if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then echo "JAVA_HOME must name the frozen Temurin JDK 25" >&2; exit 2; fi
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+tmp_dir=$(mktemp -d /private/tmp/stems-head-phase-bach-s2-q211-audit.XXXXXX)
+trap 'rm -rf -- "$tmp_dir"' EXIT
+base_probe="$script_dir/StemsHeadPhaseOneBachSystem2Order183Probe.java"; transform="$script_dir/stems-head-phase-bach-system2-order211.transform.awk"; probe="$tmp_dir/StemsHeadPhaseOneBachSystem2Order211Probe.java"; init="$script_dir/stems-head-phase-bach-system2-order211.init.gradle"; input="$repo_root/data/examples/BachInvention5.jpg"
+base_runner="$script_dir/run-stems-head-phase-bach-system2-order210.sh"; base_fixture="$repo_root/rust/oracle/stems-head-phase-bach-system2-order210.txt"
+base_probe_sha=$(shasum -a 256 "$base_probe"|awk '{print $1}'); base_runner_sha=$(shasum -a 256 "$base_runner"|awk '{print $1}'); base_fixture_sha=$(shasum -a 256 "$base_fixture"|awk '{print $1}')
+if [ "$base_probe_sha" != "05c2ff1c14f4f2284ffb80560c82fce4b66c5d41f8debc21e2f5d91fe910a7bb" ] || [ "$base_runner_sha" != "47a2c3977c64ab36cf8c98af00523134bfa00b2371a4c3561004c40cce4d0164" ] || [ "$base_fixture_sha" != "730c4ff7c291de4495db022e5a6c303dd2b3336f618acdf65390c725e0ac8bbc" ]; then echo "strict queue-210 predecessor pins differ" >&2; exit 1; fi
+awk -f "$transform" "$base_probe" > "$probe"
+run_pass(){ (cd "$repo_root"; env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon -q -Porder211Probe="$probe" -PphaseOneOrder211Page="$input" -I "$init" :app:stemsHeadPhaseBachSystem2Order211Probe) > "$1"; }
+run_pass "$tmp_dir/warmup"; run_pass "$tmp_dir/pass1"; run_pass "$tmp_dir/pass2"
+grep '^stemsheadbachs2q211' "$tmp_dir/pass1" > "$tmp_dir/rows1"; grep '^stemsheadbachs2q211' "$tmp_dir/pass2" > "$tmp_dir/rows2"; cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2" || { echo "fresh q211 passes differ" >&2; exit 1; }; rows="$tmp_dir/rows1"
+if [ "$(grep -c '^stemsheadbachs2q211profile ' "$rows")" -ne 4 ] || [ "$(grep -c '^stemsheadbachs2q211result ' "$rows")" -ne 1 ] || ! grep -q 'stemProfile 0 decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\]' "$rows" || ! grep -q 'stemProfile 3 decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\]' "$rows" || ! grep -q 'returned true undefs \[\] sideChanges \[\] incidents \[existingStem:headSideLEFT:heads\[x211:sig10:sideLEFT,x212:sig3:sideLEFT,x213:sig4:sideLEFT,x214:sig87:sideLEFT\]\]' "$rows" || ! grep -q 'sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 599 sigEdgesAfter 599 systemStemsBefore 77 systemStemsAfter 77 allocatorUnchanged true nextHeadOrder 212 nextHeadX 116 nextHeadSig 202$' "$rows"; then echo "queue-211 contract differs" >&2; cat "$rows" >&2; exit 1; fi
+input_sha=$(shasum -a 256 "$input"|awk '{print $1}'); transform_sha=$(shasum -a 256 "$transform"|awk '{print $1}'); probe_sha=$(shasum -a 256 "$probe"|awk '{print $1}'); init_sha=$(shasum -a 256 "$init"|awk '{print $1}'); runner_sha=$(shasum -a 256 "$0"|awk '{print $1}'); body_sha=$(shasum -a 256 "$rows"|awk '{print $1}'); row_count=$(wc -l < "$rows"|tr -d ' '); out="$repo_root/rust/oracle/stems-head-phase-bach-system2-order211.txt"
+{ echo '# Java Audiveris 5.11 Bach system-2 HEADS queue 211 left-side four-head zero-change reconciliation.'; echo '# schema: stems-head-phase-bach-system2-order211-v1'; cat "$rows"; printf '%s\n' "stemsheadbachs2q211summary schema stems-head-phase-bach-system2-order211-v1 page BachInvention5.jpg#1 system 2 rows $row_count inputSha256 $input_sha baseProbeSourceSha256 $base_probe_sha transformSourceSha256 $transform_sha transformedProbeSha256 $probe_sha initSourceSha256 $init_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha baseOrder210RunnerSha256 $base_runner_sha baseOrder210FixtureSha256 $base_fixture_sha freshRuns 2 freshRunsByteIdentical true nativeScope FullLifecycleBachSystem2PhaseOneLeftSideFourHeadZeroChangeReconciliation javaEvidence ReturnedBeforeHeadOrder212"; } > "$out"
+echo "wrote $out"
