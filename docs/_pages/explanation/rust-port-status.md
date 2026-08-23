@@ -6495,6 +6495,13 @@ byte-identical across two fresh runs. The focused regression, full 30-test
 sibling suite, strict workspace Clippy, formatting, and diff checks pass. The
 full Bach CLI now reaches system-3 queue 7 x28/SIG50.
 
+## Boundary 263: Bach system-4 phase-two reuse-stem appends
+
+The Bach production driver now carries system-4 queue 18 x16/SIG119 and queue
+25 x32/SIG122, both RIGHT/BOTTOM reused-stem appends. Their native mappings are
+glyph 340 / stem 20 / vertex 330 and glyph 341 / stem 21 / vertex 331. The next
+live Bach frontier is system 6 queue 1 x100/SIG78.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 is a RIGHT/BOTTOM reused-stem append.

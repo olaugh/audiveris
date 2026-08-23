@@ -52,6 +52,8 @@ use crate::{
         advance_native_stems_head_phase_two_append_c_link_bach_system3_order3,
         advance_native_stems_head_phase_two_append_c_link_bach_system3_order5,
         advance_native_stems_head_phase_two_append_c_link_bach_system3_order7,
+        advance_native_stems_head_phase_two_append_c_link_bach_system4_order18,
+        advance_native_stems_head_phase_two_append_c_link_bach_system4_order25,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
@@ -1421,6 +1423,60 @@ impl NativeStemsPreparedRecognition {
                 {
                     let transaction =
                         advance_native_stems_head_phase_two_append_c_link_cucaracha_system3_order19(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 4
+                    && carrier.phase_two_index == 18
+                    && queued_head.x_ordinal == 16
+                    && queued_head.sig_ordinal == 119
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_bach_system4_order18(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 4
+                    && carrier.phase_two_index == 25
+                    && queued_head.x_ordinal == 32
+                    && queued_head.sig_ordinal == 122
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_bach_system4_order25(
                             &carrier,
                             head_corners,
                             head_reachability,

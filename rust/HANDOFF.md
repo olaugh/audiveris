@@ -11260,6 +11260,16 @@ is byte-identical across two fresh runs. Focused and full sibling tests, strict
 workspace Clippy, formatting, and diff checks pass. The full Bach CLI now
 reaches system-3 queue 7 x28/SIG50.
 
+## Boundary 263: Bach system-4 phase-two reuse-stem appends
+
+The real Bach page driver now carries two Java-instrumented system-4
+RIGHT/BOTTOM reuse-stem appends: queue 18 x16/SIG119 reuses native glyph 340 /
+stem identity 20 (vertex 330), and queue 25 x32/SIG122 reuses glyph 341 / stem
+identity 21 (vertex 331). Their Java edge transitions are 562→563 and 563→564;
+both preserve allocator 8082 and 71 system stems. The composed-page regression
+advances through both and proves the next unported branch is system 6 queue 1
+x100/SIG78. Generic STEMS remains a days-to-couple-of-weeks forecast.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 is another measured RIGHT/BOTTOM

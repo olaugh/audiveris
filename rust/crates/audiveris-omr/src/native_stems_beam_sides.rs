@@ -7131,6 +7131,100 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system3_order7(
 
 #[expect(
     clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system4_order18(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 4,
+            queue_index: 18,
+            x_ordinal: 16,
+            sig_ordinal: 119,
+            grade_bits: 0x3fca_7e74_b418_0e4d,
+            can_link: (false, false, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 2,
+            max_index: 2,
+            selected_glyph_id: 340,
+            candidate_stem_identity: 20,
+            stem_identity: 20,
+            stem_vertex: 330,
+            relation_grade_bits: 0x3fe3_60dd_97bd_0139,
+            relation_dx_bits: 0xbfd0_3642_e9ce_eb0f,
+            append_reuse_source: None,
+            additional_relations: &[(18, 139, 340)],
+        },
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system4_order25(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 4,
+            queue_index: 25,
+            x_ordinal: 32,
+            sig_ordinal: 122,
+            grade_bits: 0x3fc6_e890_bc72_c900,
+            can_link: (false, false, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 1,
+            max_index: 1,
+            selected_glyph_id: 341,
+            candidate_stem_identity: 21,
+            stem_identity: 21,
+            stem_vertex: 331,
+            relation_grade_bits: 0x3fe4_0f2c_f10f_79b4,
+            relation_dx_bits: 0xbfcf_14cd_cd45_abc4,
+            append_reuse_source: None,
+            additional_relations: &[(33, 142, 344)],
+        },
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
 )]
 fn advance_native_stems_head_phase_two_append_c_link_shared_stem(

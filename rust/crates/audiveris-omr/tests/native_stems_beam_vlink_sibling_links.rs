@@ -2280,6 +2280,28 @@ fn bach_system3_phase_two_reuses_existing_stems_orders3_and5() {
     }
 }
 
+#[test]
+fn bach_page_driver_carries_system4_reuse_stem_appends() {
+    let path = repo_root().join("data/examples/BachInvention5.jpg");
+    let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Bach STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Bach BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Bach LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Bach HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Bach native STEMS preparation");
+    let error = prepared
+        .drive_all_system_head_linking_phase2()
+        .expect_err("Bach still has a later unported phase-two append");
+    let detail = error.to_string();
+    assert!(detail.contains("system 6"), "{detail}");
+    assert!(detail.contains("queue 1 head x100/SIG78"), "{detail}");
+}
+
 fn carry_allegretto_sides_transactions(
     transaction_count: usize,
 ) -> (

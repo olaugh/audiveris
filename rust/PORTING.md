@@ -5871,6 +5871,14 @@ are byte-identical across two fresh runs. The focused regression, full sibling
 suite, strict workspace Clippy, formatting, and diff checks pass. The full Bach
 CLI now reaches system-3 queue 7 x28/SIG50.
 
+## Boundary 263: Bach system-4 phase-two reuse-stem appends
+
+Bach system 4 queue 18 x16/SIG119 and queue 25 x32/SIG122 are authenticated
+RIGHT/BOTTOM reuse-stem appends. Native maps them respectively to glyph 340 /
+stem 20 (vertex 330) and glyph 341 / stem 21 (vertex 331), carrying the real
+page driver to system 6 queue 1 x100/SIG78. Java preserves allocator 8082 and
+71 stems across both transitions while adding one edge each (562→563→564).
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 reuses Java StemInter 7366 on
