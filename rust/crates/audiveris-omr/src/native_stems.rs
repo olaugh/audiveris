@@ -50,6 +50,7 @@ use crate::{
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order8,
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order9,
         advance_native_stems_head_phase_two_append_c_link_bach_system3_order3,
+        advance_native_stems_head_phase_two_append_c_link_bach_system3_order5,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
@@ -1914,6 +1915,42 @@ impl NativeStemsPreparedRecognition {
                 {
                     let transaction =
                         advance_native_stems_head_phase_two_append_c_link_bach_system3_order3(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    let expected_index = carrier.phase_two_index + 1;
+                    if retry.state_after.phase_two_index != expected_index {
+                        return Err(phase(
+                            format!(
+                                "system {system_id} phase-2 C-link did not advance exactly one queue entry"
+                            ),
+                            "HEADS phase-2 page drive",
+                        ));
+                    }
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 3
+                    && carrier.phase_two_index == 5
+                    && queued_head.x_ordinal == 146
+                    && queued_head.sig_ordinal == 56
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_bach_system3_order5(
                             &carrier,
                             head_corners,
                             head_reachability,

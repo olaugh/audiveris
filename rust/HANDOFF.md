@@ -8246,10 +8246,11 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach after Boundary 260. The production page driver now dispatches
-   system-3 queue-3 x96/SIG166's measured RIGHT/BOTTOM reuse-stem append; the
-   full Bach CLI reaches the next uninstrumented system-3 queue-5 reuse-stem
-   branch (x146/SIG56). Instrument that Java branch, add its strict fixture,
+2. Continue Bach after Boundary 261. The production page driver now dispatches
+   system-3 queue-3 x96/SIG166 and queue-5 x146/SIG56 measured RIGHT/BOTTOM
+   reuse-stem appends; the full Bach CLI reaches the next uninstrumented
+   system-3 queue-7 reuse-stem branch (x28/SIG50). Instrument that Java branch,
+   add its strict fixture,
    then continue the transactional page driver. The native generic `finalizeStems` acceptance gate remains
    recorded for the exhausted system-2 carrier, with Java's matching census:
    one multiple-stem head before cleanup, zero after, 12 no-stem/abnormal
@@ -11246,3 +11247,15 @@ The strict JDK25 runner/fixture is byte-identical across two fresh runs. The
 focused regression, full 30-test sibling suite, strict workspace Clippy,
 formatting, and diff checks pass. The full Bach CLI now reaches system-3 queue
 5 x146/SIG56.
+
+## Boundary 261: Bach system-3 phase-two queue-5 reused-stem append
+
+Bach system 3 queue index 5 revisits x146/SIG56/Inter4152. LEFT is Neither;
+RIGHT/BOTTOM reuses Java StemInter 7401 through Inter4186's LEFT relation,
+preserving the allocator and 77 system stems while adding one HeadStem edge
+(538→539). Native maps this to glyph 247, stem identity 62, SIG vertex 354,
+and carried x147/SIG73 edge 461, then appends native edge 536 with grade/dx
+bits `3fe4e04a170fd2a1` / `bfcd68cbbb961a5a`. The strict JDK25 runner/fixture
+is byte-identical across two fresh runs. Focused and full sibling tests, strict
+workspace Clippy, formatting, and diff checks pass. The full Bach CLI now
+reaches system-3 queue 7 x28/SIG50.

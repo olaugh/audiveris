@@ -6482,3 +6482,15 @@ grade/dx bits `3fe613e185913e1e` / `bfcad42f4a207c3c`. The strict JDK25
 runner/fixture is byte-identical across two fresh runs. The focused regression,
 full 30-test sibling suite, strict workspace Clippy, formatting, and diff checks
 pass. The full Bach CLI now reaches system-3 queue 5 x146/SIG56.
+
+## Boundary 261: Bach system-3 phase-two queue-5 reused-stem append
+
+Bach system 3 queue index 5 revisits x146/SIG56/Inter4152. LEFT is Neither;
+RIGHT/BOTTOM reuses Java StemInter 7401 through Inter4186's LEFT relation,
+preserving the allocator and 77 system stems while adding one HeadStem edge
+(538→539). Native maps this to glyph 247, stem identity 62, SIG vertex 354,
+and existing x147/SIG73 edge 461; it appends native edge 536 with grade/dx bits
+`3fe4e04a170fd2a1` / `bfcd68cbbb961a5a`. The strict JDK25 runner/fixture is
+byte-identical across two fresh runs. The focused regression, full 30-test
+sibling suite, strict workspace Clippy, formatting, and diff checks pass. The
+full Bach CLI now reaches system-3 queue 7 x28/SIG50.
