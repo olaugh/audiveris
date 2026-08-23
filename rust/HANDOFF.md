@@ -8246,13 +8246,11 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue after Boundary 134, which completes generic `finalizeStems`, with the rather-good profile escalation and `reuseStem` on a system where an append retry actually links:
-   carry the
-   remaining ordered phase-1 queue and
-   rather-good retry/no-link closure, phase-2 append retries, multi-item/recursive
-   C-linkers, and the remaining head branches. In parallel, widen the bounded
-   STUMPS driver and competing-hook removal beyond their single-system/checkpoint evidence
-   before exposing a real `recognize_native_stems` entry point.
+2. Continue Bach system 2 after Boundary 241 at phase-two retry index 0,
+   x185/SIG213. Carry all 15 queued heads in their authenticated order, then
+   run generic `finalizeStems` and the transactional page driver. Continue the
+   remaining Bach systems and widen bounded STUMPS/competing-hook evidence
+   before claiming full-corpus `recognize_native_stems` coverage.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
    unknown byte and distinguish absent, malformed, and undeclared members explicitly.
 4. Migrate future stage snapshots onto `audiveris-testkit` incrementally; keep the
@@ -10802,3 +10800,37 @@ The strict queue212 runner/fixture predecessors remain pinned. Warmup plus two
 fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, deterministic
 replay, and diff checks pass. Continue at queue214 x90/SIG134.
+
+## Boundary 241: terminal phase-one existing-stem C-link
+
+Bach system-2 queue214 x90/SIG134 has grade bits `3fc49feea1bdc8a4`.
+LEFT is `Neither`; RIGHT selects `BottomOnly`. The RIGHT/BOTTOM builder
+combines candidate glyph `915:902:5:65` with support glyph
+`916:902:4:65`, resolves the compound to the existing stem already joining
+x91/SIG144 and x92/SIG133, and appends one accepted HeadStem relation. Java
+returns true, changes only x90's RIGHT linker flags, preserves 394 SIG
+vertices and 77 system stems, advances SIG edges 599 to 600 without allocating
+an object, and exhausts the 215-head phase-one queue.
+
+The generic native C-link transaction reuses carried stem identity and canonical
+glyph 157, caches active support glyph 2946 without changing union size or any
+persistent ID, matches relation grade bits `3fe4aded193443b9`, and records the
+four idempotent x91/x92 sibling closure writes with zero changed cells. It
+finishes at `current_index=215`, `phase_two_index=0`, with all 15 carried retry
+heads intact. Their prefix is x185/SIG213, x159/SIG164, x194/SIG78, and
+x163/SIG170; their suffix is x190/SIG214, x98/SIG136, x30/SIG95,
+x118/SIG211, and x54/SIG59. No production source changed; the next Bach
+boundary is phase-two retry index 0 at x185/SIG213.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`9f304da04ee55692abb622dd1b902e4ba7279dacb7d39067b7868194d20c6f09`,
+`9ca821af9bd3e002b81b7a8a7d17bebd8b775de156dd83afa63859ebc32826a4`,
+`7a215a66feb17f16570e079f493597ade96bed72e4d23cdd35c3684595f2411b`,
+`ce21c73309c01d67275d5750c8cfe99ece9ded032f66eb389cc2e0f19467e8fc`,
+`0c0c68eda7f0a17fddbaf7c4ffa377dd401855d7376162137ab659e295f5e546`,
+and `6e3559ae0636e4a13a2eed11ef32b73af1e5d73e19360896a6e08c53a561d65d`.
+The strict queue213 runner/fixture predecessors remain pinned. Warmup plus two
+fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, deterministic
+replay, and diff checks pass. The remote CI baseline remains `425d58e82`
+until this boundary's exact workflows become terminal.

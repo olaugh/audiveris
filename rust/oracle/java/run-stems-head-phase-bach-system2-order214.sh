@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Deterministic Bach system-2 terminal HEADS queue-214 existing-stem C-link replay.
+set -eu
+if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then echo "JAVA_HOME must name the frozen Temurin JDK 25" >&2; exit 2; fi
+release_field(){ awk -F= -v name="$1" '$1 == name { value=$2; gsub(/^"|"$/, "", value); print value }' "$JAVA_HOME/release"; }
+if [ "$(release_field IMPLEMENTOR)" != "Eclipse Adoptium" ] || [ "$(release_field IMPLEMENTOR_VERSION)" != "Temurin-25.0.3+9" ] || [ "$(release_field JAVA_RUNTIME_VERSION)" != "25.0.3+9-LTS" ] || [ "$(release_field OS_NAME)" != "Darwin" ] || [ "$(release_field OS_ARCH)" != "aarch64" ] || [ "$(release_field JVM_VARIANT)" != "Hotspot" ]; then echo "JAVA_HOME is not frozen Temurin 25.0.3+9-LTS aarch64 HotSpot" >&2; exit 2; fi
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+tmp_dir=$(mktemp -d /private/tmp/stems-head-phase-bach-s2-q214.XXXXXX)
+trap 'rm -rf -- "$tmp_dir"' EXIT
+base_probe="$script_dir/StemsHeadMultiBeamCLinkPageProbe.java"; transform="$script_dir/stems-head-phase-bach-system2-order214.transform.awk"; probe="$tmp_dir/StemsHeadBachSystem2Order214CLinkProbe.java"; init="$script_dir/stems-head-phase-bach-system2-order214.init.gradle"; input="$repo_root/data/examples/BachInvention5.jpg"
+base_runner="$script_dir/run-stems-head-phase-bach-system2-order213.sh"; base_fixture="$repo_root/rust/oracle/stems-head-phase-bach-system2-order213.txt"
+base_probe_sha=$(shasum -a 256 "$base_probe"|awk '{print $1}'); base_runner_sha=$(shasum -a 256 "$base_runner"|awk '{print $1}'); base_fixture_sha=$(shasum -a 256 "$base_fixture"|awk '{print $1}')
+if [ "$base_probe_sha" != "72e85d0de1838664db221fa890917b83a1140bf6ee5ea99b0a1f6bc1839fec33" ] || [ "$base_runner_sha" != "5fbdf0edf5bf34c098611028ff5710dc914aee8293d38437980894ecd02e3ff9" ] || [ "$base_fixture_sha" != "0f302e5e9d8ff1228f825c6f0253fbd9a54e4d9fea5e73c577272969e0897efb" ]; then echo "strict queue-213 predecessor pins differ" >&2; exit 1; fi
+awk -f "$transform" "$base_probe" > "$probe"
+run_pass(){ (cd "$repo_root"; env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon -q -Porder214Probe="$probe" -Porder214Page="$input" -I "$init" :app:stemsHeadBachSystem2Order214CLinkProbe) > "$1"; }
+run_pass "$tmp_dir/warmup"; run_pass "$tmp_dir/pass1"; run_pass "$tmp_dir/pass2"
+grep '^stemsheadbachs2q214' "$tmp_dir/pass1" > "$tmp_dir/rows1"; grep '^stemsheadbachs2q214' "$tmp_dir/pass2" > "$tmp_dir/rows2"; cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2" || { echo "fresh queue-214 passes differ" >&2; exit 1; }; rows="$tmp_dir/rows1"
+if [ "$(grep -c '^stemsheadbachs2q214frontier ' "$rows")" -ne 1 ] || [ "$(grep -c '^stemsheadbachs2q214result ' "$rows")" -ne 1 ] || ! grep -q 'headOrder 214 headX 90 headSig 134 .*cAlias h:90:RIGHT:BOTTOM ' "$rows" || ! grep -q '^stemsheadbachs2q214result .*returned true undefs \[\] allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 599 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77 addedVertices \[\] addedEdges \[source=headX90:target=existingCandidateStem:HeadStemRelation' "$rows" || ! grep -q 'addedSystemStems \[\].*queueExhausted true terminal ReturnedMultiBeamCLinkTransaction$' "$rows"; then echo "Bach system-2 queue-214 contract differs" >&2; cat "$rows" >&2; exit 1; fi
+input_sha=$(shasum -a 256 "$input"|awk '{print $1}'); transform_sha=$(shasum -a 256 "$transform"|awk '{print $1}'); probe_sha=$(shasum -a 256 "$probe"|awk '{print $1}'); init_sha=$(shasum -a 256 "$init"|awk '{print $1}'); runner_sha=$(shasum -a 256 "$0"|awk '{print $1}'); body_sha=$(shasum -a 256 "$rows"|awk '{print $1}'); row_count=$(wc -l < "$rows"|tr -d ' '); out="$repo_root/rust/oracle/stems-head-phase-bach-system2-order214.txt"
+{ echo '# Java Audiveris 5.11 (Temurin JDK 25.0.3+9 LTS) Bach system-2 terminal HEADS queue 214 existing-stem C-link.'; echo '# schema: stems-head-phase-bach-system2-order214-v1'; cat "$rows"; printf '%s\n' "stemsheadbachs2q214summary schema stems-head-phase-bach-system2-order214-v1 page BachInvention5.jpg#1 system 2 rows $row_count inputSha256 $input_sha baseProbeSourceSha256 $base_probe_sha transformSourceSha256 $transform_sha transformedProbeSha256 $probe_sha initSourceSha256 $init_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha baseOrder213RunnerSha256 $base_runner_sha baseOrder213FixtureSha256 $base_fixture_sha freshRuns 2 freshRunsByteIdentical true nativeScope FullLifecycleBachSystem2PhaseOneTerminalExistingStemCLink javaEvidence ReturnedAfterPhaseOneQueueExhausted"; } > "$out"
+echo "wrote $out"

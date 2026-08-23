@@ -688,6 +688,14 @@ const BACH_SYSTEM2_ORDER213_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order213.transform.awk");
 const BACH_SYSTEM2_ORDER213_INIT: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order213.init.gradle");
+const BACH_SYSTEM2_ORDER214_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-bach-system2-order214.txt");
+const BACH_SYSTEM2_ORDER214_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-bach-system2-order214.sh");
+const BACH_SYSTEM2_ORDER214_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order214.transform.awk");
+const BACH_SYSTEM2_ORDER214_INIT: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-bach-system2-order214.init.gradle");
 const BATUQUE_FINALIZE_FIXTURE: &str =
     include_str!("../../../oracle/stems-finalize-batuque-v1.txt");
 const BATUQUE_FINALIZE_RUNNER: &[u8] =
@@ -20690,6 +20698,232 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
             .system_stems
     );
 
+    // Boundary 241: the terminal phase-one head selects RIGHT/BOTTOM and
+    // reuses the existing x91/x92 stem. The transaction appends only the
+    // HeadStem edge, exhausts the 215-head queue, and leaves phase two ready.
+    let before_order214 = (*order213.state_after).clone();
+    let order214_selection = continue_native_stems_head_linking_phase1(
+        &order213.state_after,
+        head_corners,
+        Some(head_reachability),
+        head_builders,
+        plans,
+    )
+    .expect("Bach continuation selects terminal queue-214 RIGHT/BOTTOM C-link");
+    assert_eq!(
+        (
+            order214_selection.processed_head.x_ordinal,
+            order214_selection.processed_head.sig_ordinal,
+            order214_selection.returned_linked,
+            order214_selection.closed_value_changes,
+        ),
+        (90, 134, None, 0)
+    );
+    let mut order214_state = *order214_selection.state_after;
+    assert!(!order214_state.frontier_consumed);
+    assert_eq!(
+        (
+            order214_state.frontier.head.x_ordinal,
+            order214_state.frontier.head.sig_ordinal,
+            order214_state.frontier.stem_profile,
+            order214_state.frontier.next_corner.horizontal,
+            order214_state.frontier.next_corner.vertical,
+        ),
+        (
+            90,
+            134,
+            0,
+            NativeStemHeadSide::Right,
+            NativeStemVerticalSide::Bottom,
+        )
+    );
+    let order214 = advance_native_stems_head_c_link_or_no_link(
+        &mut order214_state,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        vlinkers,
+        &prepared.stem_checker,
+        &start.registry,
+    )
+    .expect("Bach system-2 terminal queue-214 existing-stem C-link")
+    .expect("Bach system-2 terminal queue-214 returns a C-link transaction");
+    assert_eq!((order214.last_index, order214.max_index), (1, 1));
+    let reused_order214_identity = match order214.create.disposition {
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity } => stem_identity,
+        ref other => panic!("Bach queue-214 did not reuse its existing stem: {other:?}"),
+    };
+    let matching_order214_stem = before_order214
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems
+        .iter()
+        .find(|stem| stem.stem_identity == reused_order214_identity)
+        .expect("Bach queue-214 reused identity existed before the transaction");
+    assert_eq!(order214.selected_glyph_id, matching_order214_stem.glyph_id);
+    assert!(order214.beam_relations.is_empty());
+    assert!(order214.beam_stem_edges.is_empty());
+    assert!(order214.linked_b_linkers.is_empty());
+    assert!(order214.additional_head_relations.is_empty());
+    assert!(order214.relation.accepted);
+    let order214_extension = order214
+        .relation
+        .extension_point
+        .expect("Bach queue-214 relation extension");
+    assert_eq!(
+        (
+            order214.relation.grade.to_bits(),
+            order214.relation.dx.to_bits(),
+            order214_extension.x.to_bits(),
+            order214_extension.y.to_bits(),
+        ),
+        (
+            0x3fe4aded193443b9,
+            0xbfcdd1707ccf0e1e,
+            0x408ca51e454830ce,
+            0x408c080000000000,
+        )
+    );
+    assert_eq!(order214.closed_cell_changes, 0);
+    assert_eq!(
+        order214
+            .closed_s_linkers
+            .iter()
+            .map(|cell| (cell.head.x_ordinal, cell.head.sig_ordinal, cell.horizontal))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            (91, 144, NativeStemHeadSide::Left),
+            (91, 144, NativeStemHeadSide::Right),
+            (92, 133, NativeStemHeadSide::Left),
+            (92, 133, NativeStemHeadSide::Right),
+        ])
+    );
+    assert!(order214_state.frontier_consumed);
+    assert_eq!(order214_state.current_index, order214_state.heads.len());
+    assert_eq!(order214_state.current_index, 215);
+    assert_eq!(order214_state.phase_two_index, 0);
+    assert_eq!(
+        order214_state.beam_state.sig.vertices.len(),
+        before_order214.beam_state.sig.vertices.len()
+    );
+    assert_eq!(
+        order214_state.beam_state.sig.edges.len(),
+        before_order214.beam_state.sig.edges.len() + 1
+    );
+    assert_eq!(
+        order214_state
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems,
+        before_order214
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+    );
+    let order214_glyphs = &order214_state
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index;
+    let before_order214_glyphs = &before_order214
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .glyph_index;
+    assert_eq!(
+        order214.create.registration.action,
+        NativeStemsBeamGlyphRegistrationAction::Reused {
+            reinserted_into_active_index: false,
+        }
+    );
+    assert_eq!(order214.create.registration.glyph_id, 157);
+    assert_eq!(
+        order214_glyphs.persistent_ids,
+        before_order214_glyphs.persistent_ids
+    );
+    assert_eq!(
+        order214_glyphs.alias_order,
+        before_order214_glyphs.alias_order
+    );
+    assert_eq!(
+        order214_glyphs.union_size,
+        before_order214_glyphs.union_size
+    );
+    assert_eq!(
+        order214_glyphs.known_canonical_glyphs.len(),
+        before_order214_glyphs.known_canonical_glyphs.len() + 1
+    );
+    assert!(
+        before_order214_glyphs
+            .known_canonical_glyphs
+            .iter()
+            .all(|known| order214_glyphs.known_canonical_glyphs.contains(known))
+    );
+    let learned_order214_glyph = order214_glyphs
+        .known_canonical_glyphs
+        .iter()
+        .find(|known| {
+            !before_order214_glyphs
+                .known_canonical_glyphs
+                .contains(known)
+        })
+        .expect("Bach queue-214 exhaustive glyph equality result is cached");
+    assert_eq!(
+        (
+            learned_order214_glyph.glyph_id,
+            learned_order214_glyph.active_in_index,
+            learned_order214_glyph.strongly_retained,
+        ),
+        (2946, true, true)
+    );
+    assert_eq!(
+        learned_order214_glyph.content.bounds,
+        audiveris_image::section::Bounds {
+            x: 916,
+            y: 902,
+            width: 4,
+            height: 65,
+        }
+    );
+    assert_eq!(
+        order214_state.undefined_sides,
+        before_order214.undefined_sides
+    );
+    assert_eq!(
+        order214_state.unlinked_heads,
+        before_order214.unlinked_heads
+    );
+    assert_eq!(
+        order214_state
+            .unlinked_heads
+            .iter()
+            .map(|head| (head.x_ordinal, head.sig_ordinal))
+            .collect::<Vec<_>>(),
+        [
+            (185, 213),
+            (159, 164),
+            (194, 78),
+            (163, 170),
+            (160, 169),
+            (162, 168),
+            (158, 88),
+            (152, 90),
+            (123, 14),
+            (149, 18),
+            (190, 214),
+            (98, 136),
+            (30, 95),
+            (118, 211),
+            (54, 59),
+        ]
+    );
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
@@ -21906,6 +22140,49 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         assert!(
             BACH_SYSTEM2_ORDER213_FIXTURE.contains(exact),
             "missing Bach queue-213 oracle fragment: {exact}"
+        );
+    }
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER214_FIXTURE.as_bytes()),
+        "9f304da04ee55692abb622dd1b902e4ba7279dacb7d39067b7868194d20c6f09"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER214_RUNNER),
+        "9ca821af9bd3e002b81b7a8a7d17bebd8b775de156dd83afa63859ebc32826a4"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER214_TRANSFORM),
+        "7a215a66feb17f16570e079f493597ade96bed72e4d23cdd35c3684595f2411b"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM2_ORDER214_INIT),
+        "0c0c68eda7f0a17fddbaf7c4ffa377dd401855d7376162137ab659e295f5e546"
+    );
+    for exact in [
+        "headOrder 214 headX 90 headSig 134 headInterId 3874 grade 0x1.49feea1bdc8a4p-3/3fc49feea1bdc8a4",
+        "stemProfile 0 cAlias h:90:RIGHT:BOTTOM",
+        "lastIndex 1 maxIndex 1",
+        "relations 1 relationRows [head:x90:inter3874:RIGHT:BOTTOM:state=false:false:HeadStemRelation:manual=false:grade=0x1.4aded193443b9p-1/3fe4aded193443b9",
+        "glyphs 2 selected [candidateGlyph:g:915:902:5:65:bcdbd30c3e5455f53497bfd0e2eaac3967f4e16f6d02d434e7efded9962d0aac,supportGlyph:g:916:902:4:65:e18604780502531ae90cec43b1046fc14c98a4ee9511cf5cb70b3944e459e72c]",
+        "candidateIdBefore 0",
+        "existingCandidateStem true existingStem StemInter:grade=0x1.8ac610e2ec048p-1/3fe8ac610e2ec048:bounds=914:902:6:65",
+        "returned true undefs [] allocatorDelta 0 sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 599 sigEdgesAfter 600 systemStemsBefore 77 systemStemsAfter 77",
+        "addedVertices [] addedEdges [source=headX90:target=existingCandidateStem:HeadStemRelation",
+        "addedSystemStems []",
+        "queueExhausted true terminal ReturnedMultiBeamCLinkTransaction",
+        "transformSourceSha256 7a215a66feb17f16570e079f493597ade96bed72e4d23cdd35c3684595f2411b",
+        "transformedProbeSha256 ce21c73309c01d67275d5750c8cfe99ece9ded032f66eb389cc2e0f19467e8fc",
+        "emittedBodySha256 6e3559ae0636e4a13a2eed11ef32b73af1e5d73e19360896a6e08c53a561d65d",
+        "baseOrder213RunnerSha256 5fbdf0edf5bf34c098611028ff5710dc914aee8293d38437980894ecd02e3ff9",
+        "baseOrder213FixtureSha256 0f302e5e9d8ff1228f825c6f0253fbd9a54e4d9fea5e73c577272969e0897efb",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope FullLifecycleBachSystem2PhaseOneTerminalExistingStemCLink",
+        "javaEvidence ReturnedAfterPhaseOneQueueExhausted",
+    ] {
+        assert!(
+            BACH_SYSTEM2_ORDER214_FIXTURE.contains(exact),
+            "missing Bach queue-214 oracle fragment: {exact}"
         );
     }
 }
