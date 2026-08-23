@@ -1,0 +1,20 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+set -eu
+if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then echo "JAVA_HOME must name the frozen Temurin JDK 25" >&2; exit 2; fi
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+tmp_dir=$(mktemp -d /private/tmp/stems-head-phase-bach-s2-q210-audit.XXXXXX)
+trap 'rm -rf -- "$tmp_dir"' EXIT
+base_probe="$script_dir/StemsHeadPhaseOneBachSystem2Order183Probe.java"; transform="$script_dir/stems-head-phase-bach-system2-order210.transform.awk"; probe="$tmp_dir/StemsHeadPhaseOneBachSystem2Order210Probe.java"; init="$script_dir/stems-head-phase-bach-system2-order210.init.gradle"; input="$repo_root/data/examples/BachInvention5.jpg"
+base_runner="$script_dir/run-stems-head-phase-bach-system2-order209.sh"; base_fixture="$repo_root/rust/oracle/stems-head-phase-bach-system2-order209.txt"
+base_probe_sha=$(shasum -a 256 "$base_probe"|awk '{print $1}'); base_runner_sha=$(shasum -a 256 "$base_runner"|awk '{print $1}'); base_fixture_sha=$(shasum -a 256 "$base_fixture"|awk '{print $1}')
+if [ "$base_probe_sha" != "05c2ff1c14f4f2284ffb80560c82fce4b66c5d41f8debc21e2f5d91fe910a7bb" ] || [ "$base_runner_sha" != "5fcaffc155c755823aee5557b09eca4eeb0680e4fca7e0a05b3fc3e036cb96f2" ] || [ "$base_fixture_sha" != "357af1a1ad1649226e18b8ff79c0bb566fb92bc1ca1681f2c1a8f9a6f89cf0dd" ]; then echo "strict queue-209 predecessor pins differ" >&2; exit 1; fi
+awk -f "$transform" "$base_probe" > "$probe"
+run_pass(){ (cd "$repo_root"; env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS JAVA_HOME="$JAVA_HOME" ./gradlew --no-daemon -q -Porder210Probe="$probe" -PphaseOneOrder210Page="$input" -I "$init" :app:stemsHeadPhaseBachSystem2Order210Probe) > "$1"; }
+run_pass "$tmp_dir/warmup"; run_pass "$tmp_dir/pass1"; run_pass "$tmp_dir/pass2"
+grep '^stemsheadbachs2q210' "$tmp_dir/pass1" > "$tmp_dir/rows1"; grep '^stemsheadbachs2q210' "$tmp_dir/pass2" > "$tmp_dir/rows2"; cmp -s "$tmp_dir/rows1" "$tmp_dir/rows2" || { echo "fresh q210 passes differ" >&2; exit 1; }; rows="$tmp_dir/rows1"
+if [ "$(grep -c '^stemsheadbachs2q210profile ' "$rows")" -ne 4 ] || [ "$(grep -c '^stemsheadbachs2q210result ' "$rows")" -ne 1 ] || ! grep -q 'stemProfile 0 decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\]' "$rows" || ! grep -q 'stemProfile 3 decisions \[LEFT:SkipAlreadyLinked,RIGHT:SkipClosed\]' "$rows" || ! grep -q 'returned true undefs \[\] sideChanges \[\] incidents \[existingStem:headSideLEFT:heads\[x42:sig66:sideRIGHT,x45:sig58:sideRIGHT,x47:sig57:sideLEFT,x48:sig38:sideLEFT\]\]' "$rows" || ! grep -q 'sigVerticesBefore 394 sigVerticesAfter 394 sigEdgesBefore 599 sigEdgesAfter 599 systemStemsBefore 77 systemStemsAfter 77 allocatorUnchanged true nextHeadOrder 211 nextHeadX 214 nextHeadSig 87$' "$rows"; then echo "queue-210 contract differs" >&2; cat "$rows" >&2; exit 1; fi
+input_sha=$(shasum -a 256 "$input"|awk '{print $1}'); transform_sha=$(shasum -a 256 "$transform"|awk '{print $1}'); probe_sha=$(shasum -a 256 "$probe"|awk '{print $1}'); init_sha=$(shasum -a 256 "$init"|awk '{print $1}'); runner_sha=$(shasum -a 256 "$0"|awk '{print $1}'); body_sha=$(shasum -a 256 "$rows"|awk '{print $1}'); row_count=$(wc -l < "$rows"|tr -d ' '); out="$repo_root/rust/oracle/stems-head-phase-bach-system2-order210.txt"
+{ echo '# Java Audiveris 5.11 Bach system-2 HEADS queue 210 mixed-side zero-change reconciliation.'; echo '# schema: stems-head-phase-bach-system2-order210-v1'; cat "$rows"; printf '%s\n' "stemsheadbachs2q210summary schema stems-head-phase-bach-system2-order210-v1 page BachInvention5.jpg#1 system 2 rows $row_count inputSha256 $input_sha baseProbeSourceSha256 $base_probe_sha transformSourceSha256 $transform_sha transformedProbeSha256 $probe_sha initSourceSha256 $init_sha runnerSourceSha256 $runner_sha emittedBodySha256 $body_sha baseOrder209RunnerSha256 $base_runner_sha baseOrder209FixtureSha256 $base_fixture_sha freshRuns 2 freshRunsByteIdentical true nativeScope FullLifecycleBachSystem2PhaseOneMixedSideZeroChangeReconciliation javaEvidence ReturnedBeforeHeadOrder211"; } > "$out"
+echo "wrote $out"
