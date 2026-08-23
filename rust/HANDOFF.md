@@ -8246,12 +8246,11 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 259. The production page driver now
-   dispatches the already-graded phase-two reuse-stem appends at queue indexes
-   8 and 9 (x123/SIG14 and x149/SIG18); the full Bach CLI reaches the next
-   uninstrumented system-3 queue-3 reuse-stem branch (x96/SIG166). Instrument
-   that Java branch, add its strict fixture, then continue the transactional
-   page driver. The native generic `finalizeStems` acceptance gate remains
+2. Continue Bach after Boundary 260. The production page driver now dispatches
+   system-3 queue-3 x96/SIG166's measured RIGHT/BOTTOM reuse-stem append; the
+   full Bach CLI reaches the next uninstrumented system-3 queue-5 reuse-stem
+   branch (x146/SIG56). Instrument that Java branch, add its strict fixture,
+   then continue the transactional page driver. The native generic `finalizeStems` acceptance gate remains
    recorded for the exhausted system-2 carrier, with Java's matching census:
    one multiple-stem head before cleanup, zero after, 12 no-stem/abnormal
    heads, one removed HeadStem relation, and zero abnormal changes. Continue the
@@ -11234,3 +11233,16 @@ full 29-test sibling suite, strict workspace Clippy, formatting, and diff checks
 are green. The full Bach `-step STEMS -json` drive advances beyond both
 transactions and now stops at the next uninstrumented system-3 queue-3
 reuse-stem append (x96/SIG166), which is the next Java-instrumentation seam.
+
+## Boundary 260: Bach system-3 phase-two queue-3 reused-stem append
+
+Bach system 3 queue index 3 revisits x96/SIG166/Inter4379. LEFT has no
+linkable corner; RIGHT/BOTTOM reuses Java StemInter 7385 through Inter4399's
+LEFT relation, preserves the allocator and 77 system stems, and adds one
+HeadStem edge (537→538). Native maps the transaction to glyph 249, stem
+identity 46, SIG vertex 338, and existing x97/SIG176 edge 392, then appends
+native edge 535 with grade/dx bits `3fe613e185913e1e` / `bfcad42f4a207c3c`.
+The strict JDK25 runner/fixture is byte-identical across two fresh runs. The
+focused regression, full 30-test sibling suite, strict workspace Clippy,
+formatting, and diff checks pass. The full Bach CLI now reaches system-3 queue
+5 x146/SIG56.

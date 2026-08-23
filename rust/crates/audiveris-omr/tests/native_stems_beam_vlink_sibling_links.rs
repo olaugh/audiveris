@@ -122,6 +122,7 @@ use audiveris_omr::{
         advance_native_stems_head_phase_two_append_c_link_allegretto_system3_x113,
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order8,
         advance_native_stems_head_phase_two_append_c_link_bach_system2_order9,
+        advance_native_stems_head_phase_two_append_c_link_bach_system3_order3,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
@@ -742,6 +743,12 @@ const BACH_SYSTEM2_PHASE_TWO_ORDER9_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system2-order9.sh");
 const BACH_SYSTEM2_PHASE_TWO_ORDER9_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system2-order9.transform.awk");
+const BACH_SYSTEM3_PHASE_TWO_ORDER3_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system3-order3.txt");
+const BACH_SYSTEM3_PHASE_TWO_ORDER3_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system3-order3.sh");
+const BACH_SYSTEM3_PHASE_TWO_ORDER3_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system3-order3.transform.awk");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order10.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_RUNNER: &[u8] =
@@ -1909,6 +1916,150 @@ enum RowKind {
     SyntheticGuard,
     PageSummary,
     CorpusSummary,
+}
+
+#[test]
+fn bach_system3_phase_two_order3_reuses_existing_stem() {
+    let path = repo_root().join("data/examples/BachInvention5.jpg");
+    let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
+    let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
+    let stem_seeds =
+        recognize_native_stem_seeds(&grid, &headers).expect("Bach STEM_SEEDS recognition");
+    let beams = recognize_native_beams_with_stem_seeds(&grid, headers.beam_erases(), &stem_seeds)
+        .expect("Bach BEAMS recognition");
+    let ledgers = recognize_native_ledgers(&grid, &beams).expect("Bach LEDGERS recognition");
+    let heads = recognize_native_heads(&grid, &headers, &stem_seeds, &beams, &ledgers)
+        .expect("Bach HEADS recognition");
+    let prepared = prepare_native_stems(&grid, &headers, &stem_seeds, &beams, &ledgers, &heads, 1)
+        .expect("Bach native STEMS preparation");
+    let phase_one = prepared
+        .drive_all_system_head_linking_phase1()
+        .expect("Bach production phase-one drive");
+    let system = phase_one
+        .systems
+        .into_iter()
+        .find(|system| system.system_id == 3)
+        .expect("Bach system-3 phase-one carrier");
+    let head_corners = &prepared.components.head_corners.systems[2];
+    let head_reachability = &prepared.components.head_reachability.systems[2];
+    let seed_glyphs = &prepared.components.stem_seed_glyphs[2];
+    let head_builders = &prepared.components.head_builders.systems[2];
+    let plans = &prepared.components.plans.systems[2];
+    let mut carrier = system.carrier;
+
+    for expected in [(31, 193), (35, 194), (153, 191)] {
+        let retry = advance_native_stems_head_phase_two_append_retry(
+            &carrier,
+            head_corners,
+            head_reachability,
+            head_builders,
+            plans,
+        )
+        .expect("Bach system-3 generic phase-two retry before queue 3");
+        assert_eq!(
+            (
+                retry.processed_head.x_ordinal,
+                retry.processed_head.sig_ordinal
+            ),
+            expected
+        );
+        carrier = *retry.state_after;
+    }
+
+    let before = carrier.clone();
+    let transaction = advance_native_stems_head_phase_two_append_c_link_bach_system3_order3(
+        &carrier,
+        head_corners,
+        head_reachability,
+        &seed_glyphs.free_glyphs,
+        head_builders,
+        plans,
+        &prepared.stem_checker,
+        &system.registry,
+    )
+    .expect("Bach system-3 phase-two queue-3 reused-stem append");
+    let after = &transaction.continuation.state_after;
+    assert_eq!(
+        (
+            transaction.continuation.processed_head.x_ordinal,
+            transaction.continuation.processed_head.sig_ordinal,
+            transaction.continuation.returned_linked,
+            transaction.continuation.closed_value_changes,
+        ),
+        (96, 166, Some(true), 0)
+    );
+    assert_eq!(after.phase_two_index, 4);
+    assert_eq!(
+        after.beam_state.sig.vertices.len(),
+        before.beam_state.sig.vertices.len()
+    );
+    assert_eq!(
+        after.beam_state.sig.edges.len(),
+        before.beam_state.sig.edges.len() + 1
+    );
+    assert_eq!(transaction.c_link.selected_glyph_id, 249);
+    assert_eq!(transaction.c_link.stem_vertex.0, 338);
+    assert_eq!(transaction.c_link.head_stem_edge.0, 535);
+    assert_eq!(
+        transaction.c_link.create.disposition,
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 46 }
+    );
+    assert_eq!(
+        (transaction.c_link.last_index, transaction.c_link.max_index),
+        (2, 2)
+    );
+    assert_eq!(
+        transaction.c_link.relation.grade.to_bits(),
+        0x3fe6_13e1_8591_3e1e
+    );
+    assert_eq!(
+        transaction.c_link.relation.dx.to_bits(),
+        0xbfca_d42f_4a20_7c3c
+    );
+    assert_eq!(transaction.c_link.additional_head_relations.len(), 1);
+    let existing = &transaction.c_link.additional_head_relations[0];
+    assert_eq!(
+        (
+            existing.corner.x_ordinal,
+            existing.corner.sig_ordinal,
+            existing.corner.horizontal,
+            existing.head_stem_edge.0,
+            existing.appended,
+        ),
+        (97, 176, NativeStemHeadSide::Left, 392, false)
+    );
+    assert_eq!(after.undefined_sides, before.undefined_sides);
+    assert_eq!(after.unlinked_heads, before.unlinked_heads);
+
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM3_PHASE_TWO_ORDER3_FIXTURE.as_bytes()),
+        "2c413d187a6c867394754dc5d959d0b343a6af9452d6ea44ff80bd1a661c6a49"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM3_PHASE_TWO_ORDER3_RUNNER),
+        "ab016340ab45a86f16259d2903904d1f6bca8559f408caffa5826143d67f8521"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM3_PHASE_TWO_ORDER3_TRANSFORM),
+        "4f3a8434301b37f2c2ec04b49c85476a99f53d82f8e48924d94147cf7505637f"
+    );
+    for exact in [
+        "queueIndex 3 headX 96 headSig 166 headInterId 4379 grade 3fd020c49ba5e353 append true",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 2 maxIndex 2 relations 2",
+        "candidate id0:1095:1266:5:64:weight199 candidateIdBefore 0 existingStem id7385",
+        "sourceHeadId 4399 sourceCorner BL sourceSide LEFT relationGrade 3fe79fa21b3bae82 stem id7385",
+        "reusedExisting true applied grade3fe613e185913e1e:dxbfcad42f4a207c3c:dy0",
+        "sigVerticesBefore 369 sigVerticesAfter 369 sigEdgesBefore 537 sigEdgesAfter 538 systemStemsBefore 77 systemStemsAfter 77 allocatorBefore 7416 allocatorAfter 7416",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem3PhaseTwoOrder3RightReusedStemAppend",
+        "javaEvidence ReturnedBeforeSystem3RetryIndex4",
+    ] {
+        assert!(
+            BACH_SYSTEM3_PHASE_TWO_ORDER3_FIXTURE.contains(exact),
+            "missing Bach system-3 phase-two queue-3 oracle fragment: {exact}"
+        );
+    }
 }
 
 fn carry_allegretto_sides_transactions(

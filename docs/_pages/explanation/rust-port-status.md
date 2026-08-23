@@ -6470,3 +6470,15 @@ tests, strict workspace Clippy, formatting, and diff checks are green. The full
 Bach `-step STEMS -json` drive now reaches the next uninstrumented system-3
 queue-3 reuse-stem append (x96/SIG166), which is the next Java-instrumentation
 seam.
+
+## Boundary 260: Bach system-3 phase-two queue-3 reused-stem append
+
+Bach system 3 queue index 3 revisits x96/SIG166/Inter4379. LEFT has no
+linkable corner; RIGHT/BOTTOM reuses Java StemInter 7385 through Inter4399's
+LEFT relation, preserving the allocator and 77 system stems while adding one
+HeadStem edge (537→538). Native maps this to glyph 249, stem identity 46, SIG
+vertex 338, and existing x97/SIG176 edge 392; it adds native edge 535 with
+grade/dx bits `3fe613e185913e1e` / `bfcad42f4a207c3c`. The strict JDK25
+runner/fixture is byte-identical across two fresh runs. The focused regression,
+full 30-test sibling suite, strict workspace Clippy, formatting, and diff checks
+pass. The full Bach CLI now reaches system-3 queue 5 x146/SIG56.
