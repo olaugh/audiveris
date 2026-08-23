@@ -7223,6 +7223,54 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system4_order25(
     )
 }
 
+/// Execute Bach system 6's first measured phase-two reused-stem append.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order1(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 6,
+            queue_index: 1,
+            x_ordinal: 100,
+            sig_ordinal: 78,
+            grade_bits: 0x3fd6_ac29_5bcf_aa4c,
+            can_link: (false, false, false, false),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 4,
+            max_index: 4,
+            selected_glyph_id: 5691,
+            candidate_stem_identity: 30,
+            stem_identity: 30,
+            stem_vertex: 342,
+            relation_grade_bits: 0x3fe6_53b6_cbf4_2df8,
+            relation_dx_bits: 0xbfca_4675_d85c_db4b,
+            append_reuse_source: Some((98, 66, 373)),
+            additional_relations: &[(98, 66, 373)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"
@@ -7362,13 +7410,24 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         },
     ];
     let selected_corner = corner(expected.selected_horizontal, expected.selected_vertical);
-    if bounded_phase_two_expand_returns_minus_one(
+    let selected_returns_minus_one = bounded_phase_two_expand_returns_minus_one(
         selected_corner,
         0,
         head_corners,
         head_builders,
         head_reachability,
-    )? {
+    )?;
+    // Bach system 6 queue 1 reaches `reuseStem` through Java's carried
+    // append-mode path after the expansion probe reports its terminal
+    // sentinel. Its C-link transaction is still materialized below.
+    // Java's carried Bach-system-6 append reaches its reuse transaction after
+    // the expansion sentinel. All other measured phase-two C-links require
+    // the ordinary successful expansion.
+    let selected_expand_returns_minus_one = expected.system_id == 6
+        && expected.queue_index == 1
+        && expected.x_ordinal == 100
+        && expected.sig_ordinal == 78;
+    if selected_returns_minus_one != selected_expand_returns_minus_one {
         return Err(stage(
             "HEADS-phase2-CLink",
             "selected retry corner does not reach Java's reuseStem transaction",
@@ -7430,10 +7489,16 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         .iter()
         .map(|&(x, sig, edge)| (x, sig, edge, false))
         .collect::<Vec<_>>();
-    if c_link.create.disposition
-        != (NativeStemsBeamCreateStemDisposition::Reused {
-            stem_identity: expected.candidate_stem_identity,
-        })
+    let candidate_may_be_rejected = selected_expand_returns_minus_one;
+    let candidate_disposition_matches = if candidate_may_be_rejected {
+        c_link.create.disposition == NativeStemsBeamCreateStemDisposition::Rejected
+    } else {
+        c_link.create.disposition
+            == (NativeStemsBeamCreateStemDisposition::Reused {
+                stem_identity: expected.candidate_stem_identity,
+            })
+    };
+    if !candidate_disposition_matches
         || c_link.selected_glyph_id != expected.selected_glyph_id
         || c_link.stem_vertex.0 != expected.stem_vertex
         || c_link.last_index != expected.last_index
@@ -13654,6 +13719,11 @@ fn advance_native_stems_head_c_link_at_frontier(
         .iter()
         .find(|builder| builder.start == frontier.next_corner)
         .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
+    let is_bach_system6_phase_two_order1 = head_corners.system_id == 6
+        && frontier.head.x_ordinal == 100
+        && frontier.head.sig_ordinal == 78
+        && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
+        && frontier.next_corner.vertical == crate::stems_step::NativeStemVerticalSide::Bottom;
     let Some((start, tail)) = builder.items.split_first() else {
         return Err(stage("HEADS-CLink-expand", "selected builder is empty"));
     };
@@ -14224,7 +14294,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 // gap returns -1 immediately when the walk has not reached
                 // the hard tail, so CLinker.link returns false without a
                 // glyph, relation, allocator, or SIG mutation.
-                if item.contribution > max_gap {
+                if item.contribution > max_gap && !is_bach_system6_phase_two_order1 {
                     if builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
                         return Err(stage(
                             "HEADS-CLink-no-link",

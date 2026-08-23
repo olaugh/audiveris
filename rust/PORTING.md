@@ -5879,6 +5879,17 @@ stem 20 (vertex 330) and glyph 341 / stem 21 (vertex 331), carrying the real
 page driver to system 6 queue 1 x100/SIG78. Java preserves allocator 8082 and
 71 stems across both transitions while adding one edge each (562→563→564).
 
+## Boundary 264: Bach system-6 carried reuseStem append
+
+Bach system 6 queue 1 x100/SIG78/Inter5501 is now carried by the production
+driver. Java reaches `reuseStem` after its expansion sentinel, combines two
+glyph components, and attaches x100 to StemInter9368 via x98/SIG66's RIGHT
+relation (edge 555→556), preserving allocator 9413 and 74 stems. Native
+authenticates the same exceptional route as rejected candidate glyph 5691 plus
+carried stem identity 30 / vertex 342 and advances to queue 4 x160/SIG79. The
+JDK25 oracle is deterministic across two fresh runs: fixture `beffbaa5…`,
+runner `ca44961e…`, transform `f613256b…`.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 reuses Java StemInter 7366 on

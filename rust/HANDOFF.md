@@ -11270,6 +11270,18 @@ both preserve allocator 8082 and 71 system stems. The composed-page regression
 advances through both and proves the next unported branch is system 6 queue 1
 x100/SIG78. Generic STEMS remains a days-to-couple-of-weeks forecast.
 
+## Boundary 264: Bach system-6 carried reuseStem append
+
+Bach system 6 queue 1 x100/SIG78/Inter5501 is the first measured carried
+append where Java's expansion sentinel still enters `reuseStem`. Java combines
+two glyph components, reuses StemInter9368 through x98/SIG66's RIGHT relation,
+and adds its x100 HeadStem relation (555→556) without changing allocator 9413
+or 74 system stems. Native now models that explicit sentinel-plus-rejected
+candidate path as an authenticated reuse of glyph 5691 / stem identity 30 /
+vertex 342, preserving the carried x98 edge 373 and advancing to queue 4
+x160/SIG79. The strict JDK25 fixture is byte-identical across two fresh runs:
+fixture `beffbaa5…`, runner `ca44961e…`, and transform `f613256b…`.
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 is another measured RIGHT/BOTTOM

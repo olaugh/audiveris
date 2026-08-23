@@ -6502,6 +6502,16 @@ The Bach production driver now carries system-4 queue 18 x16/SIG119 and queue
 glyph 340 / stem 20 / vertex 330 and glyph 341 / stem 21 / vertex 331. The next
 live Bach frontier is system 6 queue 1 x100/SIG78.
 
+## Boundary 264: Bach system-6 carried reuseStem append
+
+The production Bach driver now carries system 6 queue 1 x100/SIG78. Java's
+measured transaction enters `reuseStem` after an expansion sentinel, combines
+two glyph components, and appends a HeadStem relation through x98/SIG66 while
+preserving allocator 9413 and 74 stems. Native records the bounded exceptional
+path as glyph 5691 and carried stem identity 30 / vertex 342; the next frontier
+is system 6 queue 4 x160/SIG79. The strict JDK25 fixture is byte-identical
+across two fresh runs (`beffbaa5…`, `ca44961e…`, `f613256b…`).
+
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
 Bach system 3 queue 7 x28/SIG50/Inter4140 is a RIGHT/BOTTOM reused-stem append.
