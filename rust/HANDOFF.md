@@ -8246,10 +8246,12 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 256 with the phase-two queue exhausted,
-   x54/SIG59 complete. Carry the measured terminal no-link result and continue with generic finalizeStems
-   heads in order, then
-   run generic `finalizeStems` and the transactional page driver. Continue the
+2. Continue Bach system 2 after Boundary 257 with the phase-two queue exhausted,
+   x54/SIG59 complete and the native generic `finalizeStems` acceptance gate
+   recorded (215 checked heads, one multiple-stem head, 12 no-stem/abnormal
+   heads, one removed HeadStem relation). Carry the measured terminal no-link
+   result and continue with generic finalizeStems heads in order, then run the
+   transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
@@ -11186,3 +11188,15 @@ two fresh JVM runs are byte-identical. Focused 1/1 passes in 9.45s; all 29
 sibling tests pass in 159.94s; strict all-target/all-feature workspace Clippy
 passes in 10.01s; formatting and diff checks pass. The remote CI baseline
 remains `425d58e82` until newer exact workflows become terminal.
+## Boundary 257: Bach system-2 exhausted carrier enters generic finalizeStems
+
+After Boundary 256 exhausts the phase-two retry queue at x54/SIG59,
+`finalize_native_stems` accepts the completed native carrier. The structural
+native result checks 215 heads, one multiple-stem head, 12 no-stem heads,
+12 abnormal heads, one removed HeadStem relation, and zero abnormal-value
+changes. This is a native finalizer acceptance gate, not yet an independent
+Java `finalizeStems` fixture; the next slice should instrument Java's terminal
+finalizer and then compose the transactional page publication.
+
+The focused Bach boundary test passes, and the existing full sibling, strict
+Clippy, formatting, and diff gates remain the verification authority.

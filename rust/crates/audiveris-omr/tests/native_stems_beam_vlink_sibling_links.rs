@@ -21881,6 +21881,22 @@ fn bach_system2_order182_multibeam_and_following_reconciliations() {
         before_phase_two_fourteen.unlinked_heads
     );
 
+    // Boundary 257: the exhausted phase-two carrier is now accepted by the
+    // generic native finalizeStems terminal. Keep this first gate deliberately
+    // structural until a matching Java finalizeStems fixture is frozen.
+    let bach_finalized = finalize_native_stems(&phase_two_fourteen.state_after)
+        .expect("Bach system-2 exhausted phase-two generic finalizeStems");
+    assert_eq!(
+        bach_finalized.state_after.phase_two_index,
+        phase_two_fourteen.state_after.phase_two_index
+    );
+    assert_eq!(bach_finalized.checked_heads, 215);
+    assert_eq!(bach_finalized.multiple_stem_heads.len(), 1);
+    assert_eq!(bach_finalized.no_stem_heads.len(), 12);
+    assert_eq!(bach_finalized.abnormal_heads.len(), 12);
+    assert_eq!(bach_finalized.removed_head_stem_relations.len(), 1);
+    assert_eq!(bach_finalized.abnormal_value_changes, 0);
+
     assert_eq!(
         sha256_hex(BACH_SYSTEM2_ORDER182_MULTIBEAM_FIXTURE.as_bytes()),
         "7b84be8e57253846336ad1463745b998ecf97e3b55b20ec3dbefbd5ce790f760"
