@@ -6932,6 +6932,59 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system2_order8(
     )
 }
 
+/// Execute Bach system 2's immediately following reused-stem append.
+///
+/// Queue 9 x149/SIG18 reaches RIGHT/BOTTOM, resolves the expanded glyph to
+/// x150/SIG29's existing stem, and adds only x149's missing HeadStem edge.
+/// The glyph registry, stem map, SIG vertices, and sheet allocator remain
+/// unchanged while the phase-2 cursor advances to queue index 10.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the phase-2 C-link boundary authenticates independent native authorities"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system2_order9(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 2,
+            queue_index: 9,
+            x_ordinal: 149,
+            sig_ordinal: 18,
+            grade_bits: 0x3fc9_540d_351f_6384,
+            can_link: (false, false, false, true),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 1,
+            max_index: 1,
+            selected_glyph_id: 158,
+            candidate_stem_identity: 47,
+            stem_identity: 47,
+            stem_vertex: 364,
+            relation_grade_bits: 0x3fe3_c8a4_9152_37cf,
+            relation_dx_bits: 0xbfcf_a150_d80c_0969,
+            append_reuse_source: None,
+            additional_relations: &[(150, 29, 449)],
+        },
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the phase-2 C-link boundary authenticates independent native authorities"

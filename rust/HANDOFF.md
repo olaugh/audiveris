@@ -8246,9 +8246,9 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 250 at phase-two retry index 9,
-   x149/SIG18. Port its measured RIGHT/BOTTOM graph mutation atomically, carry the
-   remaining six queued heads in order, then
+2. Continue Bach system 2 after Boundary 251 at phase-two retry index 10,
+   x190/SIG214. Carry its measured no-link result and the remaining five queued
+   heads in order, then
    run generic `finalizeStems` and the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
@@ -11051,4 +11051,29 @@ The strict Boundary-249 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1 passes in 9.11s; all 29
 sibling tests pass in 152.75s; strict all-target/all-feature workspace Clippy
 passes in 8.80s; formatting and diff checks pass. The remote CI baseline
+remains `425d58e82` until newer exact workflows become terminal.
+
+## Boundary 251: second Bach system-2 phase-two reused-stem append
+
+Bach system-2 phase-two queue index 9 revisits x149/SIG18/Inter3641 with
+grade bits `3fc9540d351f6384`. LEFT remains `Neither`; RIGHT selects
+`BottomOnly`. Java reuses glyph 497 / StemInter 6786 and adds only x149's
+missing RIGHT HeadStem edge. SIG counts move 394/601→394/602 while 77 system
+stems and allocator 6815 remain unchanged; the phase-two cursor advances 9→10.
+
+Native maps the Java objects to glyph 158, stem identity 47, SIG vertex 364,
+and x150/SIG29's existing edge 449, then appends edge 599. The new relation
+matches Java directly, without a rounding shim: grade/dx/consistency bits are
+`3fe3c8a4915237cf` / `bfcfa150d80c0969` / `3ff62f53e62f53e7`.
+The next retry is x190/SIG214; five queue entries remain.
+
+Fixture/runner/retarget-transform/body SHA-256 values are
+`47e858bc78ae05861427772e3709de101bd74fc28237cd764ba1781812ea7400`,
+`d709cf7be61c748cd78cac7255fb6bb9b65f82a345399615e2ed3b8f03b3dc73`,
+`744010081f4982168091e092cf2478dda78a17b40e170250e99af408c107467d`,
+and `42de793ba36a5699f6876859310ee7c89f14784dee2136bdfcf33720287e4a2d`.
+The strict Boundary-250 runner/fixture predecessors remain pinned. Warmup plus
+two fresh JVM runs are byte-identical. Focused 1/1 passes in 9.88s; all 29
+sibling tests pass in 164.96s; strict all-target/all-feature workspace Clippy
+passes in 16.12s; formatting and diff checks pass. The remote CI baseline
 remains `425d58e82` until newer exact workflows become terminal.
