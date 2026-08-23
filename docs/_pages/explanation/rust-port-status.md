@@ -6459,3 +6459,14 @@ runner/probe/init SHA-256 values are
 `a52be045074829368e68fadcdcabc2a1ee59ff0d427350a26cf7853d1cbd7250`.
 Warmup plus two fresh JVM runs are byte-identical; the strict Boundary-256
 runner/fixture predecessors remain pinned.
+
+## Boundary 259: production Bach phase-two reuse-stem dispatches
+
+The production page driver now dispatches the already-graded Bach system-2
+phase-two RIGHT/BOTTOM reuse-stem appends at queue indexes 8 and 9
+(x123/SIG14 and x149/SIG18), preserving the carried allocator and stem
+registry while advancing each cursor exactly once. Focused and full sibling
+tests, strict workspace Clippy, formatting, and diff checks are green. The full
+Bach `-step STEMS -json` drive now reaches the next uninstrumented system-3
+queue-3 reuse-stem append (x96/SIG166), which is the next Java-instrumentation
+seam.

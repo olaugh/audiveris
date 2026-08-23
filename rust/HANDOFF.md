@@ -8246,13 +8246,15 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 258 with the phase-two queue exhausted,
-   x54/SIG59 complete and the native generic `finalizeStems` acceptance gate
-   recorded. Java's terminal finalizer is now instrumented for the same carrier:
-   one multiple-stem head before cleanup, zero after, 12 no-stem/abnormal heads,
-   one removed HeadStem relation, and zero abnormal changes. Carry the measured
-   terminal no-link result and continue with generic finalizeStems heads in
-   order, then run the transactional page driver. Continue the
+2. Continue Bach system 2 after Boundary 259. The production page driver now
+   dispatches the already-graded phase-two reuse-stem appends at queue indexes
+   8 and 9 (x123/SIG14 and x149/SIG18); the full Bach CLI reaches the next
+   uninstrumented system-3 queue-3 reuse-stem branch (x96/SIG166). Instrument
+   that Java branch, add its strict fixture, then continue the transactional
+   page driver. The native generic `finalizeStems` acceptance gate remains
+   recorded for the exhausted system-2 carrier, with Java's matching census:
+   one multiple-stem head before cleanup, zero after, 12 no-stem/abnormal
+   heads, one removed HeadStem relation, and zero abnormal changes. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
    before claiming full-corpus `recognize_native_stems` coverage.
 3. Extend `.omr` typing only through bounded read-only views that preserve every
@@ -11220,3 +11222,15 @@ runner, probe, and init SHA-256 values are
 `a52be045074829368e68fadcdcabc2a1ee59ff0d427350a26cf7853d1cbd7250`.
 Warmup plus two fresh JVM runs are byte-identical; the strict Boundary-256
 runner/fixture predecessors remain pinned.
+
+## Boundary 259: production Bach phase-two reuse-stem dispatches
+
+The production page driver now authenticates and dispatches the already-graded
+Bach system-2 phase-two C-link transactions at queue indexes 8 and 9:
+x123/SIG14 and x149/SIG18, both RIGHT/BOTTOM reuse-stem appends. Each branch
+preserves the carried allocator/stem registry and advances exactly one queue
+entry through the existing transactional helper. The focused Bach boundary,
+full 29-test sibling suite, strict workspace Clippy, formatting, and diff checks
+are green. The full Bach `-step STEMS -json` drive advances beyond both
+transactions and now stops at the next uninstrumented system-3 queue-3
+reuse-stem append (x96/SIG166), which is the next Java-instrumentation seam.

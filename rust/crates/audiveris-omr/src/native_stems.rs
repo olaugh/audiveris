@@ -47,6 +47,8 @@ use crate::{
         advance_native_stems_head_multi_head_reuse_c_link_order70_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_order73_from_glyphs,
         advance_native_stems_head_multi_head_reuse_c_link_system2_order54_from_glyphs,
+        advance_native_stems_head_phase_two_append_c_link_bach_system2_order8,
+        advance_native_stems_head_phase_two_append_c_link_bach_system2_order9,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0,
         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x1,
         advance_native_stems_head_phase_two_append_c_link_cucaracha_system1_order6,
@@ -1492,6 +1494,42 @@ impl NativeStemsPreparedRecognition {
                 }
                 if system_id == 2
                     && carrier.phase_two_index == 9
+                    && queued_head.x_ordinal == 149
+                    && queued_head.sig_ordinal == 18
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_bach_system2_order9(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    let expected_index = carrier.phase_two_index + 1;
+                    if retry.state_after.phase_two_index != expected_index {
+                        return Err(phase(
+                            format!(
+                                "system {system_id} phase-2 C-link did not advance exactly one queue entry"
+                            ),
+                            "HEADS phase-2 page drive",
+                        ));
+                    }
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 2
+                    && carrier.phase_two_index == 9
                     && queued_head.x_ordinal == 132
                     && queued_head.sig_ordinal == 84
                 {
@@ -1803,6 +1841,42 @@ impl NativeStemsPreparedRecognition {
                 {
                     let transaction =
                         advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0(
+                            &carrier,
+                            head_corners,
+                            head_reachability,
+                            &seed_glyphs.free_glyphs,
+                            head_builders,
+                            plans,
+                            &self.stem_checker,
+                            &registry,
+                        )
+                        .map_err(|error| {
+                            phase(
+                                format!("system {system_id}: {error}"),
+                                "HEADS phase-2 page drive",
+                            )
+                        })?;
+                    let retry = transaction.continuation;
+                    let expected_index = carrier.phase_two_index + 1;
+                    if retry.state_after.phase_two_index != expected_index {
+                        return Err(phase(
+                            format!(
+                                "system {system_id} phase-2 C-link did not advance exactly one queue entry"
+                            ),
+                            "HEADS phase-2 page drive",
+                        ));
+                    }
+                    carrier = (*retry.state_after).clone();
+                    retries.push(retry);
+                    continue;
+                }
+                if system_id == 2
+                    && carrier.phase_two_index == 8
+                    && queued_head.x_ordinal == 123
+                    && queued_head.sig_ordinal == 14
+                {
+                    let transaction =
+                        advance_native_stems_head_phase_two_append_c_link_bach_system2_order8(
                             &carrier,
                             head_corners,
                             head_reachability,
