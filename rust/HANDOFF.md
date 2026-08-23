@@ -10653,3 +10653,25 @@ The strict queue206 runner/fixture predecessors remain pinned. Warmup plus two
 fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, deterministic
 replay, and diff checks pass. Continue at queue208 x55/SIG67.
+
+## Boundary 235: right-side two-head reconciliation with two changes
+
+Bach system-2 queue208 x55/SIG67 has grade bits `3fc5a087bc9c0caa`.
+Profiles 0-3 skip its closed LEFT and linked RIGHT. Its existing RIGHT stem
+joins x55/SIG67 and x56/SIG60. Java closes x56 LEFT then RIGHT, reports two
+changed values, preserves SIG 394/599 and 77 system stems, and advances to
+queue209 x54/SIG59. The unchanged generic native continuation matches exactly;
+graph, stem, glyph-index, allocator, undefined-side, and unlinked-head state
+remain unchanged. No production source changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`ae7f4b373b81e57d77c9f5733adf8d6c16616f84a88d3161dbd5abdc378d16a2`,
+`1563fd789415447e97461124a7182c6b45b7213457a8f965038b49a17c9096be`,
+`02906fc2f4581adfcd2a4610797f455e14ebbd4ab043777888f0fea39de877c0`,
+`60a8b0c38f30c9923cd76f661b2975fc1675e4f61c0f954d9e40788ee4129490`,
+`037118a6c499f39267daa3b7120e9a43cf87ccd289f44422cf00e8cc0e0a3b21`,
+and `57663a09e8f6c347c231fcead84ee6c0f26201eb6afc37be100fc7fe0524e8c8`.
+The strict queue207 runner/fixture predecessors remain pinned. Warmup plus two
+fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, deterministic
+replay, and diff checks pass. Continue at queue209 x54/SIG59.
