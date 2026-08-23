@@ -10675,3 +10675,28 @@ The strict queue207 runner/fixture predecessors remain pinned. Warmup plus two
 fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
 formatting, strict all-target/all-feature workspace Clippy, deterministic
 replay, and diff checks pass. Continue at queue209 x54/SIG59.
+
+## Boundary 236: identity-free no-link closure and phase-two enqueue
+
+Bach system-2 queue209 x54/SIG59 has grade bits `3fc57085228ee157`.
+Across profiles 0-3, both LEFT and RIGHT classify as `Neither`. Java returns
+false with no undefined side or incident stem, closes x54 LEFT then RIGHT,
+reports two changed values, preserves SIG 394/599 and 77 system stems, and
+advances to queue210 x48/SIG38.
+
+The unchanged generic native continuation reproduces the two ordered closure
+writes, appends x54/SIG59 to the phase-two unlinked-head queue, and does not
+alter graph, stem, glyph-index, allocator, or undefined-side authority. No
+production source changed.
+
+Fixture/runner/transform/transformed-probe/init/body SHA-256 values are
+`357af1a1ad1649226e18b8ff79c0bb566fb92bc1ca1681f2c1a8f9a6f89cf0dd`,
+`5fcaffc155c755823aee5557b09eca4eeb0680e4fca7e0a05b3fc3e036cb96f2`,
+`ccfd555df5789d7e21faf3d1932fe834f394806e5b8cf49afda2c6ddb50fad01`,
+`67a8e749acfdcd2ee88282841cc8c3132ba5c10d47d5feda99cbadc02fbb0d03`,
+`f541f60d413810bde26575cc7e2be70a3929bba5f29d74736fb67a63bc8fbf87`,
+and `dc5f7b6b123bdb093ffba90247c2f2b1e10d569cd8325ddd7479fe158ec04480`.
+The strict queue208 runner/fixture predecessors remain pinned. Warmup plus two
+fresh JVM runs are byte-identical. Focused 1/1, all 29 sibling tests,
+formatting, strict all-target/all-feature workspace Clippy, deterministic
+replay, and diff checks pass. Continue at queue210 x48/SIG38.
