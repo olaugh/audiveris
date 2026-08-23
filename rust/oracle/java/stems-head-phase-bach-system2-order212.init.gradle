@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.findProject(':app')
+    if (app == null) return
+    def outputDir = app.layout.buildDirectory.dir('rust-head-phase-bach-system2-order212/classes')
+    app.tasks.register('compileStemsHeadPhaseBachSystem2Order212Probe', JavaCompile) {
+        source = file(providers.gradleProperty('order212Probe').get())
+        classpath = app.sourceSets.test.runtimeClasspath
+        destinationDirectory = outputDir
+        options.release.set(25)
+    }
+    app.tasks.register('stemsHeadPhaseBachSystem2Order212Probe', JavaExec) {
+        dependsOn 'compileStemsHeadPhaseBachSystem2Order212Probe'
+        classpath = app.files(outputDir) + app.sourceSets.test.runtimeClasspath
+        mainClass = 'org.audiveris.omr.rustport.StemsHeadPhaseOneBachSystem2Order212Probe'
+        workingDir = app.projectDir
+        maxHeapSize = '16g'
+        jvmArgs '-XX:+UseG1GC'
+        systemProperty 'logback.configurationFile', "${gradle.rootProject.projectDir}/rust/oracle/java/logback-quiet.xml"
+        args = [providers.gradleProperty('phaseOneOrder212Page').get()]
+    }
+}
