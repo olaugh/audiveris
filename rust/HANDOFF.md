@@ -8246,8 +8246,8 @@ Commit each slice separately after the full verification block above.
    exposing no partial stage on any system failure. Then publish the completed
    native STEMS product through the existing schema-1 ordinary and stream JSON
    contracts.
-2. Continue Bach system 2 after Boundary 254 at phase-two retry index 13,
-   x118/SIG211. Carry its measured shared-stump RIGHT/BOTH undefined result and the remaining two queued
+2. Continue Bach system 2 after Boundary 255 at phase-two retry index 14,
+   x54/SIG59. Carry its measured final no-link result and the remaining one queued
    heads in order, then
    run generic `finalizeStems` and the transactional page driver. Continue the
    remaining Bach systems and widen bounded STUMPS/competing-hook evidence
@@ -10929,6 +10929,28 @@ The strict Boundary-253 runner/fixture predecessors remain pinned. Warmup plus
 two fresh JVM runs are byte-identical. Focused 1/1 passes in 11.38s; all 29
 sibling tests pass in 176.05s; strict all-target/all-feature workspace Clippy
 passes in 9.82s; formatting and diff checks pass. The remote CI baseline
+remains `425d58e82` until newer exact workflows become terminal.
+
+## Boundary 255: Bach system-2 phase-two final no-link retry
+
+Bach system-2 phase-two queue index 13 revisits x118/SIG211/Inter4031 with
+grade bits `3fc5dd788e12e5a4`. LEFT remains `Neither`; both RIGHT corners
+select `Both` on a shared stump. Java preserves the carried RIGHT undefined
+side and returns false without mutation; SIG 394/602, 77 system stems, and
+allocator 6815 remain unchanged.
+
+The generic native append retry reproduces the branch without a production
+wrapper. No local closure cell changes, and only `phase_two_index` advances
+13→14. The next retry is x54/SIG59; one queue entry remains.
+
+Fixture/runner/body SHA-256 values are
+`96496f2705872692114655481747336fc3cf93e745cc3233f9bcee05c4ab34c7`,
+`1fcb4e5bea6828394fb3a9c689a21aa01e8a1f86d442f90fd6e5918ed6b19a5a`,
+and `c69861db9153f8408c63f82e28658774f3e0bd7164744f1fcb5c6df3c6b1d2de`.
+The strict Boundary-254 runner/fixture predecessors remain pinned. Warmup plus
+two fresh JVM runs are byte-identical. Focused 1/1 passes in 11.23s; all 29
+sibling tests pass in 177.59s; strict all-target/all-feature workspace Clippy
+passes in 11.82s; formatting and diff checks pass. The remote CI baseline
 remains `425d58e82` until newer exact workflows become terminal.
 
 ## Boundary 244: Bach system-2 phase-two shared-stump undefined retry
