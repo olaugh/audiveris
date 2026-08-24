@@ -3660,6 +3660,7 @@ fn native_relation_class(kind: NativeSigRelationKind) -> &'static str {
         NativeSigRelationKind::BeamHead => "org.audiveris.omr.sig.relation.BeamHeadRelation",
         NativeSigRelationKind::BeamRest => "org.audiveris.omr.sig.relation.BeamRestRelation",
         NativeSigRelationKind::HeadStem => "org.audiveris.omr.sig.relation.HeadStemRelation",
+        NativeSigRelationKind::HeadHead => "org.audiveris.omr.sig.relation.HeadHeadRelation",
         NativeSigRelationKind::ChordStem => "org.audiveris.omr.sig.relation.ChordStemRelation",
     }
 }

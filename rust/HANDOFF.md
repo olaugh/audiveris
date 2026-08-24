@@ -11711,3 +11711,28 @@ strict all-target/all-feature workspace Clippy, and diff checks pass. Next,
 compose overlap discovery with the exact exclusion solver, contextual weak
 purges, and foundation checks in Java epoch order, then finish the remaining
 head, ledger, stem, and beam-group branches.
+
+## Boundary 285: composed foundations prefix through stem-ending purge
+
+The production terminal STEMS carrier now advances through the exact
+contiguous beginning of Java `SigReducer.reduceFoundations()`. The native path
+runs overlap discovery, the foundations no-op frozen check, contextualization,
+`analyzeChords`, the first weak purge, the inherited empty slur check,
+`checkStemEndingHeads`, and its immediately following purge. Its typed result
+stops at the `checkHeads()` frontier; it does not reorder already ported hook,
+beam, or exclusion primitives around that missing check.
+
+`analyze_native_foundation_chords` ports the real prolog over the current SIG
+domain. Good stems are stable-sorted by decreasing intrinsic grade. Exact stem
+medians use OpenJDK rectangle-line clipping plus Java's inclusive 0.02 IOU
+gate to find intersected unlinked heads. Linked heads are grouped in incident
+order by duration and size, beams by size, producing normalized exclusions and
+same-duration `HeadHeadRelation` supports with the exact 0.75 coefficient.
+Missing stem geometry and unsupported head shapes fail closed.
+
+The composed prefix runs for every Batuque system. The focused REDUCTION suite
+passes 25/25, all 10 active frozen-SIG gates pass (five diagnostics ignored),
+and the complete library passes 730 tests with two ignored. Formatting, strict
+all-target/all-feature workspace Clippy, and diff checks pass. Next implement
+`checkHeadSide()` to complete `checkHeads()`; that unlocks the next contiguous
+Java-order segment through hook and beam checks.

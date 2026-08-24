@@ -21,7 +21,7 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        detect_native_stems_reduction_overlaps, native_stems_lossless_overlap_resolver,
+        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_prefix,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8728,9 +8728,10 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         .map(|system| system.system_id)
         .collect::<Vec<_>>();
     for system_id in system_ids {
-        let overlap = detect_native_stems_reduction_overlaps(&mut recognized, system_id)
-            .expect("Batuque exact REDUCTION overlap discovery");
-        assert!(!overlap.scan_order.is_empty());
+        let prefix = reduce_native_stems_foundation_prefix(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION foundations prefix");
+        assert!(!prefix.overlap.scan_order.is_empty());
+        assert!(!prefix.chord_analysis.scanned_stems.is_empty());
     }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;

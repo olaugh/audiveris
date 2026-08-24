@@ -5,8 +5,8 @@
 //! The dependency-light lifecycle in [`crate::reduction_step`] owns sheet and
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
-//! algorithm.  Overlap discovery and the foundation-specific consistency
-//! passes remain later REDUCTION boundaries.
+//! algorithm, lossless overlap discovery, chord prolog, and the contiguous
+//! foundations prefix through the purge after `checkStemEndingHeads()`.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -95,6 +95,107 @@ pub struct NativeReductionStemEndingTransaction {
     pub modified_stems: Vec<NativeReductionStemEndingPrune>,
 }
 
+/// Exact relation mutations made by foundations `analyzeChords()` in good
+/// stem order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionChordAnalysisTransaction {
+    pub system_id: usize,
+    pub scanned_stems: Vec<NativeSigVertexId>,
+    pub intersected_head_exclusions: Vec<NativeSigEdgeId>,
+    pub incompatible_exclusions: Vec<NativeSigEdgeId>,
+    pub head_head_supports: Vec<NativeSigEdgeId>,
+}
+
+/// The exact contiguous prefix of Java foundations reduction currently native:
+/// overlap discovery through the purge after `checkStemEndingHeads()`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionFoundationPrefixTransaction {
+    pub system_id: usize,
+    pub overlap: NativeReductionOverlapTransaction,
+    pub pre_prolog_contextualization: NativeSigContextualization,
+    pub chord_analysis: NativeReductionChordAnalysisTransaction,
+    pub initial_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub stem_ending: NativeReductionStemEndingTransaction,
+    pub post_stem_ending_weak_purge: NativeReductionWeakPurgeTransaction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NativeReductionFoundationPrefixError {
+    Graph(NativeSigError),
+    Overlap(NativeReductionOverlapError),
+    StemEnding(NativeReductionStemEndingError),
+    MissingSystem(usize),
+    MissingStemMedian {
+        system_id: usize,
+        stem: NativeSigVertexId,
+    },
+    UnsupportedHeadShape {
+        system_id: usize,
+        head: NativeSigVertexId,
+    },
+}
+
+impl fmt::Display for NativeReductionFoundationPrefixError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Graph(source) => write!(formatter, "REDUCTION foundation-prefix graph: {source}"),
+            Self::Overlap(source) => {
+                write!(formatter, "REDUCTION foundation-prefix overlap: {source}")
+            }
+            Self::StemEnding(source) => {
+                write!(
+                    formatter,
+                    "REDUCTION foundation-prefix stem ending: {source}"
+                )
+            }
+            Self::MissingSystem(system_id) => {
+                write!(formatter, "missing terminal STEMS system {system_id}")
+            }
+            Self::MissingStemMedian { system_id, stem } => write!(
+                formatter,
+                "REDUCTION system {system_id} chord analysis has no median for stem {}",
+                stem.0
+            ),
+            Self::UnsupportedHeadShape { system_id, head } => write!(
+                formatter,
+                "REDUCTION system {system_id} chord analysis has unsupported head shape at {}",
+                head.0
+            ),
+        }
+    }
+}
+
+impl Error for NativeReductionFoundationPrefixError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Graph(source) => Some(source),
+            Self::Overlap(source) => Some(source),
+            Self::StemEnding(source) => Some(source),
+            Self::MissingSystem(_)
+            | Self::MissingStemMedian { .. }
+            | Self::UnsupportedHeadShape { .. } => None,
+        }
+    }
+}
+
+impl From<NativeSigError> for NativeReductionFoundationPrefixError {
+    fn from(source: NativeSigError) -> Self {
+        Self::Graph(source)
+    }
+}
+
+impl From<NativeReductionOverlapError> for NativeReductionFoundationPrefixError {
+    fn from(source: NativeReductionOverlapError) -> Self {
+        Self::Overlap(source)
+    }
+}
+
+impl From<NativeReductionStemEndingError> for NativeReductionFoundationPrefixError {
+    fn from(source: NativeReductionStemEndingError) -> Self {
+        Self::StemEnding(source)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeReductionStemEndingError {
     Graph(NativeSigError),
@@ -143,8 +244,9 @@ pub const MIN_REDUCTION_OVERLAP_IOU: f64 = 0.05;
 ///
 /// Java's `AbstractInter.overlaps()` dispatches across glyph run tables,
 /// areas, ensembles, staff/pitch-aware heads, and bounds.  The REDUCTION
-/// scheduler owns when these questions are asked; a later adapter can resolve
-/// them from the retained stage products without weakening them to box tests.
+/// scheduler owns when these questions are asked; the production adapter
+/// resolves them from retained stage products without weakening them to box
+/// tests.
 pub trait NativeReductionOverlapGeometry {
     /// Whether `right` belongs to the mirror entity set built for `left`.
     fn is_mirror_entity(
@@ -571,6 +673,393 @@ pub fn detect_native_stems_reduction_overlaps(
         &mut system.transaction.state_after.beam_state.sig,
         &mut resolver,
     )
+}
+
+/// Execute the exact contiguous Java foundations prefix which is currently
+/// native, stopping immediately before `checkHeads()`.
+pub fn reduce_native_stems_foundation_prefix(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
+    let mut resolver = native_stems_lossless_overlap_resolver(stems, system_id)
+        .map_err(NativeReductionOverlapError::from)?;
+    let medians = native_stems_terminal_medians(stems, system_id)?;
+    let system = stems
+        .systems
+        .iter_mut()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    reduce_native_foundation_prefix(
+        &mut system.transaction.state_after.beam_state.sig,
+        &mut resolver,
+        &medians,
+    )
+}
+
+/// Dependency-light foundations prefix used by the production STEMS adapter
+/// and synthetic order/failure tests.
+pub fn reduce_native_foundation_prefix(
+    sig: &mut NativeSigSystem,
+    geometry: &mut impl NativeReductionOverlapGeometry,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
+    let overlap = detect_native_reduction_overlaps(sig, geometry)?;
+    // AdapterForFoundations.checkFrozens() is the inherited no-op.
+    let pre_prolog_contextualization = sig.contextualize();
+    let chord_analysis = analyze_native_foundation_chords(sig, stem_medians)?;
+    let initial_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    // AdapterForFoundations.checkSlurs() is the inherited empty set.
+    let stem_ending = prune_native_foundation_stem_ending_heads(sig, stem_medians)?;
+    let post_stem_ending_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    Ok(NativeReductionFoundationPrefixTransaction {
+        system_id: sig.system_id,
+        overlap,
+        pre_prolog_contextualization,
+        chord_analysis,
+        initial_weak_purge,
+        stem_ending,
+        post_stem_ending_weak_purge,
+    })
+}
+
+fn native_stems_terminal_medians(
+    stems: &NativeStemsRecognition,
+    system_id: usize,
+) -> Result<BTreeMap<NativeSigVertexId, NativeStemLine>, NativeReductionFoundationPrefixError> {
+    let system = stems
+        .systems
+        .iter()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let carrier = &system.transaction.state_after;
+    let bindings = &carrier.beam_state.bindings;
+    let known_stems = &carrier
+        .beam_state
+        .latest_base_apply
+        .transaction_state
+        .system_stems
+        .known_stems;
+    let mut medians = BTreeMap::new();
+    for (&identity, &vertex) in &bindings.stem_vertices {
+        let stem = known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == identity && stem.sig_attached)
+            .ok_or(NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id,
+                stem: vertex,
+            })?;
+        medians.insert(vertex, stem.geometry.median);
+    }
+    Ok(medians)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeHeadDuration {
+    Quarter,
+    Half,
+    Whole,
+    Breve,
+}
+
+/// Port foundations `analyzeChords()` before any weak purge.
+pub fn analyze_native_foundation_chords(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<NativeReductionChordAnalysisTransaction, NativeReductionFoundationPrefixError> {
+    const GOOD_INTER_GRADE: f64 = 0.4;
+    const MIN_STEM_HEAD_IOU: f64 = 0.02;
+
+    sig.validate_integrity()?;
+    let mut stems = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Stem)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    stems.sort_by(|left, right| {
+        sig.vertices[right.0]
+            .grade
+            .total_cmp(&sig.vertices[left.0].grade)
+    });
+    let mut all_heads = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Head)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    all_heads.sort_by_key(|head| sig.vertices[head.0].bounds.x);
+
+    let mut scanned_stems = Vec::new();
+    let mut intersected_head_exclusions = Vec::new();
+    let mut incompatible_exclusions = Vec::new();
+    let mut head_head_supports = Vec::new();
+
+    for stem in stems {
+        if sig.vertices[stem.0].grade < GOOD_INTER_GRADE {
+            break;
+        }
+        scanned_stems.push(stem);
+        let &median = stem_medians.get(&stem).ok_or(
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: sig.system_id,
+                stem,
+            },
+        )?;
+        let mut intersected_heads = all_heads
+            .iter()
+            .copied()
+            .filter(|head| {
+                line_intersects_rectangle(median, sig.vertices[head.0].bounds)
+                    && java_rectangle_iou(sig.vertices[stem.0].bounds, sig.vertices[head.0].bounds)
+                        >= MIN_STEM_HEAD_IOU
+            })
+            .collect::<Vec<_>>();
+        let mut duration_sets = Vec::<(NativeHeadDuration, Vec<NativeSigVertexId>)>::new();
+        let mut standard_heads = Vec::new();
+        let mut small_heads = Vec::new();
+        let mut standard_beams = Vec::new();
+        let mut small_beams = Vec::new();
+
+        let incident = sig
+            .incident_edges(stem.0)?
+            .into_iter()
+            .map(|edge| (edge.kind, edge.source))
+            .collect::<Vec<_>>();
+        for (kind, source) in incident {
+            match kind {
+                NativeSigRelationKind::HeadStem => {
+                    let head = NativeSigVertexId(source);
+                    intersected_heads.retain(|candidate| *candidate != head);
+                    let shape = sig.vertices[head.0].shape.as_deref().ok_or(
+                        NativeReductionFoundationPrefixError::UnsupportedHeadShape {
+                            system_id: sig.system_id,
+                            head,
+                        },
+                    )?;
+                    let duration = native_head_duration(shape).ok_or(
+                        NativeReductionFoundationPrefixError::UnsupportedHeadShape {
+                            system_id: sig.system_id,
+                            head,
+                        },
+                    )?;
+                    let duration_index = duration_sets
+                        .iter()
+                        .position(|(candidate, _)| *candidate == duration)
+                        .unwrap_or_else(|| {
+                            duration_sets.push((duration, Vec::new()));
+                            duration_sets.len() - 1
+                        });
+                    push_unique(&mut duration_sets[duration_index].1, head);
+                    if is_small_head_shape(shape) {
+                        push_unique(&mut small_heads, head);
+                    } else {
+                        push_unique(&mut standard_heads, head);
+                    }
+                }
+                NativeSigRelationKind::BeamStem => {
+                    let beam = NativeSigVertexId(source);
+                    if sig.vertices[beam.0].kind == NativeSigInterKind::SmallBeam {
+                        push_unique(&mut small_beams, beam);
+                    } else {
+                        push_unique(&mut standard_beams, beam);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for head in intersected_heads {
+            if let Some(edge) = insert_native_overlap_exclusion(sig, stem, head)? {
+                push_unique_edge(&mut intersected_head_exclusions, edge);
+            }
+        }
+        exclude_native_sets(
+            sig,
+            &small_heads,
+            &standard_heads,
+            &mut incompatible_exclusions,
+        )?;
+        for index in 0..duration_sets.len() {
+            for other in index + 1..duration_sets.len() {
+                exclude_native_sets(
+                    sig,
+                    &duration_sets[index].1,
+                    &duration_sets[other].1,
+                    &mut incompatible_exclusions,
+                )?;
+            }
+            for left in 0..duration_sets[index].1.len() {
+                for right in left + 1..duration_sets[index].1.len() {
+                    if let Some(edge) = insert_native_head_head_support(
+                        sig,
+                        duration_sets[index].1[left],
+                        duration_sets[index].1[right],
+                    )? {
+                        push_unique_edge(&mut head_head_supports, edge);
+                    }
+                }
+            }
+        }
+        exclude_native_sets(
+            sig,
+            &standard_beams,
+            &small_beams,
+            &mut incompatible_exclusions,
+        )?;
+        // Java's default disallows standard heads on small beams and small
+        // heads on standard beams.
+        exclude_native_sets(
+            sig,
+            &small_beams,
+            &standard_heads,
+            &mut incompatible_exclusions,
+        )?;
+        exclude_native_sets(
+            sig,
+            &standard_beams,
+            &small_heads,
+            &mut incompatible_exclusions,
+        )?;
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionChordAnalysisTransaction {
+        system_id: sig.system_id,
+        scanned_stems,
+        intersected_head_exclusions,
+        incompatible_exclusions,
+        head_head_supports,
+    })
+}
+
+fn native_head_duration(shape: &str) -> Option<NativeHeadDuration> {
+    match shape {
+        "NOTEHEAD_BLACK" | "NOTEHEAD_BLACK_SMALL" => Some(NativeHeadDuration::Quarter),
+        "NOTEHEAD_VOID" | "NOTEHEAD_VOID_SMALL" => Some(NativeHeadDuration::Half),
+        "WHOLE_NOTE" | "WHOLE_NOTE_SMALL" => Some(NativeHeadDuration::Whole),
+        "BREVE" | "BREVE_SMALL" => Some(NativeHeadDuration::Breve),
+        _ => None,
+    }
+}
+
+fn is_small_head_shape(shape: &str) -> bool {
+    matches!(
+        shape,
+        "NOTEHEAD_BLACK_SMALL" | "NOTEHEAD_VOID_SMALL" | "WHOLE_NOTE_SMALL" | "BREVE_SMALL"
+    )
+}
+
+fn exclude_native_sets(
+    sig: &mut NativeSigSystem,
+    one: &[NativeSigVertexId],
+    two: &[NativeSigVertexId],
+    inserted: &mut Vec<NativeSigEdgeId>,
+) -> Result<(), NativeSigError> {
+    for &left in one {
+        for &right in two {
+            if let Some(edge) = insert_native_overlap_exclusion(sig, left, right)? {
+                push_unique_edge(inserted, edge);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn insert_native_head_head_support(
+    sig: &mut NativeSigSystem,
+    one: NativeSigVertexId,
+    two: NativeSigVertexId,
+) -> Result<Option<NativeSigEdgeId>, NativeSigError> {
+    let (source, target) = normalized_vertex_pair(one, two);
+    if active_exclusion_between(sig, source, target).is_some() {
+        return Ok(None);
+    }
+    if sig.edges.iter().any(|edge| {
+        edge.active
+            && edge.source == source.0
+            && edge.target == target.0
+            && edge.kind == NativeSigRelationKind::HeadHead
+    }) {
+        return Ok(None);
+    }
+    let edge = NativeSigEdgeId(sig.edges.len());
+    sig.append_edge(NativeSigEdge {
+        ordinal: edge.0,
+        active: true,
+        source: source.0,
+        target: target.0,
+        kind: NativeSigRelationKind::HeadHead,
+        origin: NativeSigRelationOrigin::BaselineGraph,
+        support: Some(crate::native_sig::NativeSigSupport {
+            grade: 1.0,
+            bar_connection_impacts: None,
+        }),
+        beam_portion: None,
+        stem_extension: None,
+        head_stem: None,
+    })?;
+    Ok(Some(edge))
+}
+
+fn line_intersects_rectangle(
+    line: NativeStemLine,
+    bounds: crate::native_sig::NativeSigBounds,
+) -> bool {
+    let left = f64::from(bounds.x);
+    let top = f64::from(bounds.y);
+    let right = left + f64::from(bounds.width);
+    let bottom = top + f64::from(bounds.height);
+    let mut x1 = line.start.x;
+    let mut y1 = line.start.y;
+    let x2 = line.stop.x;
+    let y2 = line.stop.y;
+    let out2 = rectangle_outcode(x2, y2, left, top, right, bottom);
+    if out2 == 0 {
+        return true;
+    }
+    loop {
+        let out1 = rectangle_outcode(x1, y1, left, top, right, bottom);
+        if out1 == 0 {
+            return true;
+        }
+        if out1 & out2 != 0 {
+            return false;
+        }
+        if out1 & 3 != 0 {
+            let x = if out1 & 2 != 0 { right } else { left };
+            y1 = y1 + ((x - x1) * (y2 - y1) / (x2 - x1));
+            x1 = x;
+        } else {
+            let y = if out1 & 8 != 0 { bottom } else { top };
+            x1 = x1 + ((y - y1) * (x2 - x1) / (y2 - y1));
+            y1 = y;
+        }
+    }
+}
+
+fn rectangle_outcode(x: f64, y: f64, left: f64, top: f64, right: f64, bottom: f64) -> u8 {
+    let horizontal = if right <= left {
+        3
+    } else if x < left {
+        1
+    } else if x > right {
+        2
+    } else {
+        0
+    };
+    let vertical = if bottom <= top {
+        12
+    } else if y < top {
+        4
+    } else if y > bottom {
+        8
+    } else {
+        0
+    };
+    horizontal | vertical
 }
 
 fn vertical_line_area(
@@ -1539,6 +2028,7 @@ fn is_support_relation(kind: NativeSigRelationKind) -> bool {
             | NativeSigRelationKind::BeamHead
             | NativeSigRelationKind::BeamRest
             | NativeSigRelationKind::HeadStem
+            | NativeSigRelationKind::HeadHead
     )
 }
 
@@ -1838,6 +2328,203 @@ mod tests {
             }),
             ..edge(ordinal, head, stem, NativeSigRelationKind::HeadStem)
         }
+    }
+
+    fn shaped_head(ordinal: usize, shape: &str, y: i32) -> NativeSigVertex {
+        let mut head = vertex(ordinal, NativeSigInterKind::Head, 0.8);
+        head.shape = Some(shape.to_owned());
+        head.bounds = NativeSigBounds {
+            x: 8,
+            y,
+            width: 6,
+            height: 6,
+        };
+        head
+    }
+
+    #[test]
+    fn chord_analysis_ports_intersection_duration_support_and_beam_size_order() {
+        let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        stem.bounds = NativeSigBounds {
+            x: 10,
+            y: 0,
+            width: 2,
+            height: 100,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 40,
+            vertices: vec![
+                stem,
+                shaped_head(1, "NOTEHEAD_BLACK", 10),
+                shaped_head(2, "NOTEHEAD_BLACK", 30),
+                shaped_head(3, "NOTEHEAD_VOID", 50),
+                shaped_head(4, "NOTEHEAD_BLACK", 70),
+                vertex(5, NativeSigInterKind::Beam, 0.8),
+                vertex(6, NativeSigInterKind::SmallBeam, 0.8),
+            ],
+            edges: vec![
+                head_stem_edge(0, 1, 0),
+                head_stem_edge(1, 2, 0),
+                head_stem_edge(2, 3, 0),
+                beam_stem_edge(3, 5, 0, NativeBeamPortion::Left),
+                beam_stem_edge(4, 6, 0, NativeBeamPortion::Right),
+            ],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 0.0 },
+                stop: NativeStemPoint { x: 11.0, y: 100.0 },
+            },
+        )]);
+
+        let transaction = analyze_native_foundation_chords(&mut sig, &medians).unwrap();
+
+        assert_eq!(transaction.scanned_stems, vec![NativeSigVertexId(0)]);
+        assert_eq!(
+            transaction.intersected_head_exclusions,
+            vec![NativeSigEdgeId(5)]
+        );
+        assert_eq!(
+            transaction.incompatible_exclusions,
+            [6, 7, 9, 10, 11, 12]
+                .map(NativeSigEdgeId)
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(transaction.head_head_supports, vec![NativeSigEdgeId(8)]);
+        assert_eq!(
+            sig.edges
+                .iter()
+                .skip(5)
+                .map(|edge| (edge.source, edge.target, edge.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, 4, NativeSigRelationKind::Exclusion),
+                (1, 3, NativeSigRelationKind::Exclusion),
+                (2, 3, NativeSigRelationKind::Exclusion),
+                (1, 2, NativeSigRelationKind::HeadHead),
+                (5, 6, NativeSigRelationKind::Exclusion),
+                (1, 6, NativeSigRelationKind::Exclusion),
+                (2, 6, NativeSigRelationKind::Exclusion),
+                (3, 6, NativeSigRelationKind::Exclusion),
+            ]
+        );
+        assert_eq!(sig.edges[8].support.expect("head support").grade, 1.0);
+        assert_eq!(
+            insert_native_overlap_exclusion(&mut sig, NativeSigVertexId(1), NativeSigVertexId(2))
+                .unwrap(),
+            None,
+            "HeadHeadRelation suppresses a later exclusion"
+        );
+        assert_eq!(sig.edges.len(), 13);
+    }
+
+    #[test]
+    fn foundation_prefix_stops_after_stem_ending_purge_in_java_order() {
+        let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        stem.bounds = NativeSigBounds {
+            x: 10,
+            y: 0,
+            width: 2,
+            height: 100,
+        };
+        let mut sig = NativeSigSystem {
+            system_id: 41,
+            vertices: vec![stem, shaped_head(1, "NOTEHEAD_BLACK", 80)],
+            edges: vec![head_stem_edge(0, 1, 0)],
+        };
+        sig.edges[0].head_stem.as_mut().expect("payload").head_side = NativeStemHeadSide::Right;
+        sig.edges[0]
+            .head_stem
+            .as_mut()
+            .expect("payload")
+            .extension_point = NativeStemPoint { x: 11.0, y: 82.0 };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 0.0 },
+                stop: NativeStemPoint { x: 11.0, y: 100.0 },
+            },
+        )]);
+        let mut geometry = ScriptedOverlapGeometry::default();
+
+        let transaction = reduce_native_foundation_prefix(&mut sig, &mut geometry, &medians)
+            .expect("exact foundations prefix");
+
+        assert_eq!(transaction.overlap.system_id, 41);
+        assert_eq!(
+            transaction.chord_analysis.scanned_stems,
+            vec![NativeSigVertexId(0)]
+        );
+        assert!(transaction.initial_weak_purge.removed_vertices.is_empty());
+        assert!(transaction.stem_ending.modified_stems.is_empty());
+        assert!(
+            transaction
+                .post_stem_ending_weak_purge
+                .removed_vertices
+                .is_empty()
+        );
+        assert!(sig.vertex(0).is_some());
+        assert!(sig.vertex(1).is_some());
+    }
+
+    #[test]
+    fn chord_analysis_fails_closed_before_guessing_a_good_stem_median() {
+        let mut sig = NativeSigSystem {
+            system_id: 42,
+            vertices: vec![vertex(0, NativeSigInterKind::Stem, 0.9)],
+            edges: Vec::new(),
+        };
+
+        let error = analyze_native_foundation_chords(&mut sig, &BTreeMap::new()).unwrap_err();
+
+        assert_eq!(
+            error,
+            NativeReductionFoundationPrefixError::MissingStemMedian {
+                system_id: 42,
+                stem: NativeSigVertexId(0),
+            }
+        );
+        assert!(sig.edges.is_empty());
+    }
+
+    #[test]
+    fn stem_median_rectangle_intersection_keeps_java_boundary_and_outcode_rules() {
+        let bounds = NativeSigBounds {
+            x: 10,
+            y: 20,
+            width: 8,
+            height: 6,
+        };
+        assert!(line_intersects_rectangle(
+            NativeStemLine {
+                start: NativeStemPoint { x: 14.0, y: 0.0 },
+                stop: NativeStemPoint { x: 14.0, y: 40.0 },
+            },
+            bounds,
+        ));
+        assert!(line_intersects_rectangle(
+            NativeStemLine {
+                start: NativeStemPoint { x: 0.0, y: 20.0 },
+                stop: NativeStemPoint { x: 30.0, y: 20.0 },
+            },
+            bounds,
+        ));
+        assert!(!line_intersects_rectangle(
+            NativeStemLine {
+                start: NativeStemPoint { x: 0.0, y: 19.0 },
+                stop: NativeStemPoint { x: 30.0, y: 19.0 },
+            },
+            bounds,
+        ));
+        assert!(!line_intersects_rectangle(
+            NativeStemLine {
+                start: NativeStemPoint { x: 14.0, y: 0.0 },
+                stop: NativeStemPoint { x: 14.0, y: 40.0 },
+            },
+            NativeSigBounds { width: 0, ..bounds },
+        ));
     }
 
     #[test]

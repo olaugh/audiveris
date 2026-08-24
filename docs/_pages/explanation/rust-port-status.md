@@ -6813,3 +6813,22 @@ and the full library passes 726 tests with two ignored. Formatting, strict
 Clippy, and diff checks are clean. Remaining REDUCTION work is Java-order
 composition with the already native exclusion/purge/foundation primitives and
 the still-open head, ledger, stem, and beam-group checks.
+
+## Boundary 285: foundations prefix in Java order
+
+Production REDUCTION now runs the exact contiguous foundations prefix:
+lossless overlap discovery, contextualization, `analyzeChords`, the initial
+weak purge, `checkStemEndingHeads`, and its following purge. The foundations
+adapter's frozen and slur hooks are correctly retained as no-ops. The prefix
+stops before the incomplete `checkHeads()` rather than invoking later native
+primitives out of order.
+
+Chord analysis uses stable decreasing stem grade, exact OpenJDK line/rectangle
+intersection, the inclusive 0.02 stem/head IOU gate, duration and size groups,
+normalized exclusions, and same-duration `HeadHeadRelation` support with
+Java's 0.75 contextual coefficient. Missing geometry and unknown head shapes
+are typed failures. Every Batuque system executes this production prefix.
+Focused REDUCTION coverage passes 25/25, the frozen SIG baseline passes all 10
+active gates, and the full library passes 730 tests with two ignored. Strict
+Clippy, formatting, and diff checks are clean. The next frontier is completing
+`checkHeadSide()` inside `checkHeads()`.

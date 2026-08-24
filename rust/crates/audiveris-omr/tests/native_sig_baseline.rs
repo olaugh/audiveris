@@ -914,6 +914,7 @@ fn assembled_sig_rebuilds_javas_structural_hashes() {
                     NativeSigRelationKind::BeamHead => "BeamHeadRelation",
                     NativeSigRelationKind::BeamRest => "BeamRestRelation",
                     NativeSigRelationKind::HeadStem => "HeadStemRelation",
+                    NativeSigRelationKind::HeadHead => "HeadHeadRelation",
                     NativeSigRelationKind::ChordStem => "ChordStemRelation",
                 }
                 .to_owned(),
@@ -1576,6 +1577,7 @@ fn native_edge_token(edge: &NativeSigEdge) -> String {
         NativeSigRelationKind::BeamHead => "BeamHeadRelation",
         NativeSigRelationKind::BeamRest => "BeamRestRelation",
         NativeSigRelationKind::HeadStem => "HeadStemRelation",
+        NativeSigRelationKind::HeadHead => "HeadHeadRelation",
         NativeSigRelationKind::ChordStem => "ChordStemRelation",
     };
     let mut token = format!(

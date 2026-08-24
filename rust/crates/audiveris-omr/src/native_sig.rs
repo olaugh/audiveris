@@ -162,6 +162,7 @@ pub enum NativeSigRelationKind {
     BeamHead,
     BeamRest,
     HeadStem,
+    HeadHead,
     ChordStem,
 }
 
@@ -654,6 +655,7 @@ fn native_support_ratio(edge: &NativeSigEdge, focus_is_source: bool) -> f64 {
             4.0 * edge.head_stem.map_or(1.0, |payload| payload.consistency)
         }
         NativeSigRelationKind::HeadStem => 10.0,
+        NativeSigRelationKind::HeadHead => 0.75,
         NativeSigRelationKind::BeamHead if focus_is_source => 0.0,
         NativeSigRelationKind::BeamHead => 1.0,
         NativeSigRelationKind::NoExclusion
@@ -1128,7 +1130,8 @@ fn push_edge(
         NativeSigRelationKind::NoExclusion
         | NativeSigRelationKind::KeyAlters
         | NativeSigRelationKind::ClefKey
-        | NativeSigRelationKind::BeamBeam => Some(NativeSigSupport {
+        | NativeSigRelationKind::BeamBeam
+        | NativeSigRelationKind::HeadHead => Some(NativeSigSupport {
             grade: 1.0,
             bar_connection_impacts: None,
         }),
