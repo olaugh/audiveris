@@ -1075,6 +1075,10 @@ pub struct NativeStemsBeamVLinkTransaction {
 /// their expansion and graph-link phases remain deliberately separate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsCreateStemCandidateTransaction {
+    /// Whether Java actually invoked `StemBuilder.createStem`.
+    /// Append-mode head linking first tries `reuseStem(lastIndex)` and can
+    /// bypass registration and checking entirely.
+    pub invoked: bool,
     pub system_id: usize,
     pub stem_profile: i32,
     pub candidate: NativeStemsBeamFixedGlyphContent,
@@ -1162,6 +1166,7 @@ pub fn apply_native_stems_create_stem_candidate_transaction(
     }
 
     Ok(NativeStemsCreateStemCandidateTransaction {
+        invoked: true,
         system_id,
         stem_profile,
         candidate,

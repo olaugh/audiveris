@@ -769,6 +769,12 @@ const BACH_SYSTEM6_PHASE_TWO_ORDER1_RUNNER: &[u8] =
     include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order1.sh");
 const BACH_SYSTEM6_PHASE_TWO_ORDER1_TRANSFORM: &[u8] =
     include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order1.transform.awk");
+const BACH_SYSTEM6_PHASE_TWO_ORDER4_FIXTURE: &str =
+    include_str!("../../../oracle/stems-head-phase-two-bach-system6-order4.txt");
+const BACH_SYSTEM6_PHASE_TWO_ORDER4_RUNNER: &[u8] =
+    include_bytes!("../../../oracle/java/run-stems-head-phase-two-bach-system6-order4.sh");
+const BACH_SYSTEM6_PHASE_TWO_ORDER4_TRANSFORM: &[u8] =
+    include_bytes!("../../../oracle/java/stems-head-phase-two-bach-system6-order4.transform.awk");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_FIXTURE: &str =
     include_str!("../../../oracle/stems-head-phase-two-bach-system2-order10.txt");
 const BACH_SYSTEM2_PHASE_TWO_ORDER10_RUNNER: &[u8] =
@@ -2287,7 +2293,7 @@ fn bach_system3_phase_two_reuses_existing_stems_orders3_and5() {
 }
 
 #[test]
-fn bach_page_driver_carries_system6_carried_reuse_stem_append() {
+fn bach_page_driver_carries_system6_carried_reuse_stem_appends() {
     let path = repo_root().join("data/examples/BachInvention5.jpg");
     let grid = recognize_grid_lines(path).expect("Bach GRID recognition");
     let headers = recognize_native_headers(&grid).expect("Bach HEADERS recognition");
@@ -2305,7 +2311,7 @@ fn bach_page_driver_carries_system6_carried_reuse_stem_append() {
         .expect_err("Bach still has a later unported phase-two append");
     let detail = error.to_string();
     assert!(detail.contains("system 6"), "{detail}");
-    assert!(detail.contains("queue 4 head x160/SIG79"), "{detail}");
+    assert!(detail.contains("queue 12 head x11/SIG145"), "{detail}");
 }
 
 #[test]
@@ -2337,6 +2343,39 @@ fn bach_system6_phase_two_order1_oracle_is_strict_and_complete() {
         assert!(
             BACH_SYSTEM6_PHASE_TWO_ORDER1_FIXTURE.contains(exact),
             "missing Bach system-6 phase-two queue-1 oracle fragment: {exact}"
+        );
+    }
+}
+
+#[test]
+fn bach_system6_phase_two_order4_oracle_is_strict_and_complete() {
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER4_FIXTURE.as_bytes()),
+        "0c3f02c4bab1e0280b294dd84887d8ae6667acd3d02bb3795b0ed879c1eb321c"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER4_RUNNER),
+        "d1f88a5d11652974e1c4f3e246a12d0fb8099b37563d258ff46158a01b6b555b"
+    );
+    assert_eq!(
+        sha256_hex(BACH_SYSTEM6_PHASE_TWO_ORDER4_TRANSFORM),
+        "94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8"
+    );
+    for exact in [
+        "queueIndex 4 headX 160 headSig 79 headInterId 5503 grade 3fd417fd8f6f3e74 append true",
+        "corner BR hSide RIGHT vSide BOTTOM",
+        "lastIndex 3 maxIndex 3 relations 2",
+        "candidate id0:1506:2164:8:79:weight205 candidateIdBefore 0 existingStem -",
+        "sourceHeadId 5441 sourceCorner BR sourceSide RIGHT relationGrade 3fee8158e2ce2dca stem id9370",
+        "reusedExisting false applied grade3fdd64d68afcd666:dx3fc60a33b8058d2d:dy0",
+        "sigVerticesBefore 389 sigVerticesAfter 389 sigEdgesBefore 556 sigEdgesAfter 557 systemStemsBefore 74 systemStemsAfter 74 allocatorBefore 9413 allocatorAfter 9413",
+        "freshRuns 2 freshRunsByteIdentical true",
+        "nativeScope BachSystem6PhaseTwoOrder4CarriedReuseStemAppend",
+        "javaEvidence ReturnedBeforeSystem6RetryIndex5",
+    ] {
+        assert!(
+            BACH_SYSTEM6_PHASE_TWO_ORDER4_FIXTURE.contains(exact),
+            "missing Bach system-6 phase-two queue-4 oracle fragment: {exact}"
         );
     }
 }
@@ -14875,10 +14914,11 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
         (0, 3, Some(true), 0, 4)
     );
     assert_eq!((x0_c_link.last_index, x0_c_link.max_index), (1, 2));
-    assert_eq!(x0_c_link.selected_glyph_id, 218);
+    assert_eq!(x0_c_link.selected_glyph_id, 182);
+    assert!(!x0_c_link.create.invoked);
     assert_eq!(
         x0_c_link.create.disposition,
-        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 41 }
+        NativeStemsBeamCreateStemDisposition::Reused { stem_identity: 6 }
     );
     assert_eq!(
         x0_c_link.create.candidate.bounds,
@@ -14890,23 +14930,16 @@ fn carmen_system5_order62_stumpless_crossed_head_still_fails_the_hard_tail() {
         }
     );
     assert_eq!(x0_c_link.create.candidate.weight, 99);
-    assert_eq!(x0_c_link.create.registration.glyph_id, 218);
+    assert_eq!(x0_c_link.create.registration.glyph_id, 182);
+    assert!(x0_c_link.create.mutation_order.is_empty());
     let x0_candidate_stem = x0_c_link
         .create
         .stem
         .as_ref()
-        .expect("Carmen x0 selected short stem");
+        .expect("Carmen x0 early reused stem");
     assert_eq!(
         (x0_candidate_stem.stem_identity, x0_candidate_stem.glyph_id),
-        (41, 218)
-    );
-    assert_eq!(
-        x0_candidate_stem.grade.grade().to_bits(),
-        0x3fe5_9495_bdb6_bfc6
-    );
-    assert_eq!(
-        x0_candidate_stem.geometry.ribbon_bounds,
-        JavaRectangle::new(297, 1_680, 3, 50)
+        (6, 182)
     );
     let x0_append_reuse = x0_c_link
         .append_reuse

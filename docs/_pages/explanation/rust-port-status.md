@@ -6505,12 +6505,24 @@ live Bach frontier is system 6 queue 1 x100/SIG78.
 ## Boundary 264: Bach system-6 carried reuseStem append
 
 The production Bach driver now carries system 6 queue 1 x100/SIG78. Java's
-measured transaction enters `reuseStem` after an expansion sentinel, combines
-two glyph components, and appends a HeadStem relation through x98/SIG66 while
-preserving allocator 9413 and 74 stems. Native records the bounded exceptional
-path as glyph 5691 and carried stem identity 30 / vertex 342; the next frontier
-is system 6 queue 4 x160/SIG79. The strict JDK25 fixture is byte-identical
-across two fresh runs (`beffbaa5…`, `ca44961e…`, `f613256b…`).
+measured transaction enters `reuseStem` after an expansion sentinel and does
+so before `createStem`; the compound candidate is never registered. Native
+records `create.invoked=false`, glyph 508, and carried stem identity 30 /
+vertex 342 with no registry mutation. The strict JDK25 fixture is
+byte-identical across two fresh runs (`beffbaa5…`, `ca44961e…`, `f613256b…`).
+
+## Boundary 265: Bach system-6 queue-4 reuse-before-create append
+
+Bach system 6 queue 4 x160/SIG79 also resolves `reuseStem` before candidate
+registration. Java reuses StemInter9370 / glyph871 through Inter5441's RIGHT
+relation and adds edge 556→557 without changing allocator 9413 or 74 stems.
+Native maps this to glyph 532, stem identity 32 / vertex 344, and carried
+x165/SIG50 edge 379; grade/dx bits are `3fdd64d68afcd666` /
+`3fc60a33b8058d2d`. The generic append engine now preserves Java's chronology.
+Exact fixture/runner/transform hashes are `0c3f02c4bab1e0280b294dd84887d8ae6667acd3d02bb3795b0ed879c1eb321c`,
+`d1f88a5d11652974e1c4f3e246a12d0fb8099b37563d258ff46158a01b6b555b`,
+and `94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8`.
+The next live Bach frontier is system 6 queue 12 x11/SIG145.
 
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 

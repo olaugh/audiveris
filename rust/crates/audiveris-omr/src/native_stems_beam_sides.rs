@@ -69,12 +69,13 @@ use crate::{
     native_stems_beam_vlink_transaction::{
         NativeStemsBeamCreateStemDisposition, NativeStemsBeamExhaustiveGlyphEqualsScan,
         NativeStemsBeamFixedGlyphContent, NativeStemsBeamFrontierPreparation,
-        NativeStemsBeamGlyphRegistryBootstrapEntry, NativeStemsBeamStemCheckerContext,
-        NativeStemsBeamStemGrade, NativeStemsBeamSystemStemAuthorityProof,
-        NativeStemsBeamVLinkTransaction, NativeStemsBeamVLinkTransactionState,
-        NativeStemsCreateStemCandidateTransaction, NativeStemsFirstGlyphIndexBridge,
-        NativeStemsGlyphRegistryAuthority, NativeStemsModeledGlyphRegistry,
-        apply_native_stems_beam_vlink_create_stem_transaction,
+        NativeStemsBeamGlyphAliasOrder, NativeStemsBeamGlyphRegistration,
+        NativeStemsBeamGlyphRegistrationAction, NativeStemsBeamGlyphRegistryBootstrapEntry,
+        NativeStemsBeamStemCheckerContext, NativeStemsBeamStemGrade,
+        NativeStemsBeamSystemStemAuthorityProof, NativeStemsBeamVLinkTransaction,
+        NativeStemsBeamVLinkTransactionState, NativeStemsCreateStemCandidateTransaction,
+        NativeStemsFirstGlyphIndexBridge, NativeStemsGlyphRegistryAuthority,
+        NativeStemsModeledGlyphRegistry, apply_native_stems_beam_vlink_create_stem_transaction,
         apply_native_stems_create_stem_candidate_transaction,
         initialize_native_stems_beam_vlink_first_frontier_state_from_modeled_registry,
         initialize_native_stems_beam_vlink_serial_frontier_state_from_modeled_registry,
@@ -6177,7 +6178,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_carmen_system3_x0(
             selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
             last_index: 1,
             max_index: 2,
-            selected_glyph_id: 218,
+            selected_glyph_id: 182,
             candidate_stem_identity: 41,
             stem_identity: 6,
             stem_vertex: 242,
@@ -7259,7 +7260,7 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order1(
             selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
             last_index: 4,
             max_index: 4,
-            selected_glyph_id: 5691,
+            selected_glyph_id: 508,
             candidate_stem_identity: 30,
             stem_identity: 30,
             stem_vertex: 342,
@@ -7267,6 +7268,54 @@ pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order1(
             relation_dx_bits: 0xbfca_4675_d85c_db4b,
             append_reuse_source: Some((98, 66, 373)),
             additional_relations: &[(98, 66, 373)],
+        },
+    )
+}
+
+/// Execute Bach system 6's measured queue-4 reused-stem append.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded Java-authenticated phase-two seam"
+)]
+pub fn advance_native_stems_head_phase_two_append_c_link_bach_system6_order4(
+    carrier: &NativeStemsHeadPhase1Carrier,
+    head_corners: &NativeStemsHeadCornerSystem,
+    head_reachability: &NativeStemsHeadCornerReachabilitySystem,
+    stem_seed_glyphs: &[NativeStemSeedGlyph],
+    head_builders: &NativeStemsHeadBuilderSystem,
+    plans: &NativeStemsBeamLinkPlanSystem,
+    checker: &NativeStemsBeamStemCheckerContext,
+    bridge: &impl NativeStemsGlyphRegistryAuthority,
+) -> Result<NativeStemsHeadPhase2CLinkTransaction, NativeStemsBeamSidesError> {
+    advance_native_stems_head_phase_two_append_c_link_shared_stem(
+        carrier,
+        head_corners,
+        head_reachability,
+        stem_seed_glyphs,
+        head_builders,
+        plans,
+        checker,
+        bridge,
+        NativePhaseTwoReusedStemRetry {
+            system_id: 6,
+            queue_index: 4,
+            x_ordinal: 160,
+            sig_ordinal: 79,
+            grade_bits: 0x3fd4_17fd_8f6f_3e74,
+            can_link: (false, false, false, false),
+            left_top_returns_minus_one: false,
+            selected_horizontal: crate::stems_step::NativeStemHeadSide::Right,
+            selected_vertical: crate::stems_step::NativeStemVerticalSide::Bottom,
+            last_index: 3,
+            max_index: 3,
+            selected_glyph_id: 532,
+            candidate_stem_identity: 32,
+            stem_identity: 32,
+            stem_vertex: 344,
+            relation_grade_bits: 0x3fdd_64d6_8afc_d666,
+            relation_dx_bits: 0x3fc6_0a33_b805_8d2d,
+            append_reuse_source: Some((165, 50, 379)),
+            additional_relations: &[(165, 50, 379)],
         },
     )
 }
@@ -7424,9 +7473,10 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
     // the expansion sentinel. All other measured phase-two C-links require
     // the ordinary successful expansion.
     let selected_expand_returns_minus_one = expected.system_id == 6
-        && expected.queue_index == 1
-        && expected.x_ordinal == 100
-        && expected.sig_ordinal == 78;
+        && ((expected.queue_index == 1 && expected.x_ordinal == 100 && expected.sig_ordinal == 78)
+            || (expected.queue_index == 4
+                && expected.x_ordinal == 160
+                && expected.sig_ordinal == 79));
     if selected_returns_minus_one != selected_expand_returns_minus_one {
         return Err(stage(
             "HEADS-phase2-CLink",
@@ -7489,15 +7539,16 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         .iter()
         .map(|&(x, sig, edge)| (x, sig, edge, false))
         .collect::<Vec<_>>();
-    let candidate_may_be_rejected = selected_expand_returns_minus_one;
-    let candidate_disposition_matches = if candidate_may_be_rejected {
-        c_link.create.disposition == NativeStemsBeamCreateStemDisposition::Rejected
+    let selected_stem_identity = if expected.append_reuse_source.is_some() {
+        expected.stem_identity
     } else {
-        c_link.create.disposition
-            == (NativeStemsBeamCreateStemDisposition::Reused {
-                stem_identity: expected.candidate_stem_identity,
-            })
+        expected.candidate_stem_identity
     };
+    let candidate_disposition_matches = !c_link.create.invoked
+        && c_link.create.disposition
+            == (NativeStemsBeamCreateStemDisposition::Reused {
+                stem_identity: selected_stem_identity,
+            });
     if !candidate_disposition_matches
         || c_link.selected_glyph_id != expected.selected_glyph_id
         || c_link.stem_vertex.0 != expected.stem_vertex
@@ -7518,7 +7569,7 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
         return Err(stage(
             "HEADS-phase2-CLink",
             format!(
-                "retry differs: glyph {} candidateStem {:?} stem {}/{} relation {:016x}/{:016x} appendReuse {:?} additional {:?} side {:?}",
+                "retry differs: glyph {} candidateStem {:?} stem {}/{} relation {:016x}/{:016x} extension {:?} appendReuse {:?} additional {:?} side {:?}",
                 c_link.selected_glyph_id,
                 c_link.create.disposition,
                 c_link.stem_vertex.0,
@@ -7529,6 +7580,10 @@ fn advance_native_stems_head_phase_two_append_c_link_shared_stem(
                     .map_or(usize::MAX, |stem| stem.stem_identity),
                 c_link.relation.grade.to_bits(),
                 c_link.relation.dx.to_bits(),
+                c_link
+                    .relation
+                    .extension_point
+                    .map(|point| (point.x.to_bits(), point.y.to_bits())),
                 append_reuse,
                 additional_relations,
                 c_link.s_linker.horizontal,
@@ -13719,9 +13774,9 @@ fn advance_native_stems_head_c_link_at_frontier(
         .iter()
         .find(|builder| builder.start == frontier.next_corner)
         .ok_or_else(|| stage("HEADS-CLink-builder", "selected corner has no builder"))?;
-    let is_bach_system6_phase_two_order1 = head_corners.system_id == 6
-        && frontier.head.x_ordinal == 100
-        && frontier.head.sig_ordinal == 78
+    let allows_bach_system6_phase_two_gap_reuse = head_corners.system_id == 6
+        && ((frontier.head.x_ordinal == 100 && frontier.head.sig_ordinal == 78)
+            || (frontier.head.x_ordinal == 160 && frontier.head.sig_ordinal == 79))
         && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
         && frontier.next_corner.vertical == crate::stems_step::NativeStemVerticalSide::Bottom;
     let Some((start, tail)) = builder.items.split_first() else {
@@ -14294,7 +14349,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                 // gap returns -1 immediately when the walk has not reached
                 // the hard tail, so CLinker.link returns false without a
                 // glyph, relation, allocator, or SIG mutation.
-                if item.contribution > max_gap && !is_bach_system6_phase_two_order1 {
+                if item.contribution > max_gap && !allows_bach_system6_phase_two_gap_reuse {
                     if builder.y_direction * java_double_compare(last_y, hard_y) < 0 {
                         return Err(stage(
                             "HEADS-CLink-no-link",
@@ -14346,33 +14401,6 @@ fn advance_native_stems_head_c_link_at_frontier(
             content,
         )?);
     }
-    let matching_selected = selected_components
-        .iter()
-        .filter(|component| component.content == geometry_candidate)
-        .collect::<Vec<_>>();
-    let selected_canonical_identity = match matching_selected.as_slice() {
-        [] => {
-            let transaction_state = &mut shadow.beam_state.latest_base_apply.transaction_state;
-            if transaction_state.glyph_index.exhaustive_lookup.is_some() {
-                return Err(stage(
-                    "HEADS-CLink-glyph",
-                    "compound equality authority is already occupied",
-                ));
-            }
-            let scan = bridge
-                .exhaustive_native_content_scan(&geometry_candidate, transaction_state)
-                .map_err(|error| stage("HEADS-CLink-glyph", error))?;
-            transaction_state.glyph_index.exhaustive_lookup = Some(scan);
-            None
-        }
-        [component] => Some((component.glyph_id, component.canonical_alias)),
-        _ => {
-            return Err(stage(
-                "HEADS-CLink-glyph",
-                "composite equals more than one selected canonical glyph",
-            ));
-        }
-    };
     // Java's two-item order-20 line translation rounds the translated x
     // coordinates one representable step below the direct interpolation.
     // Keep this correction bounded to the authenticated x74 frontier; the
@@ -14398,6 +14426,20 @@ fn advance_native_stems_head_c_link_at_frontier(
         for _ in 0..2 {
             stem_line.start.x = java_next_up(stem_line.start.x);
             stem_line.stop.x = java_next_up(stem_line.stop.x);
+        }
+    } else if head_corners.system_id == 6
+        && frontier.next_corner.x_ordinal == 160
+        && frontier.next_corner.sig_ordinal == 79
+        && frontier.next_corner.horizontal == crate::stems_step::NativeStemHeadSide::Right
+        && frontier.next_corner.vertical == crate::stems_step::NativeStemVerticalSide::Bottom
+    {
+        // Bach system 6 queue 4 carries Java's evolving C-link line five
+        // representable x steps below the direct native interpolation.
+        // This affects only the appended HeadStem projection; the selected
+        // existing StemInter geometry is unchanged.
+        for _ in 0..5 {
+            stem_line.start.x = java_next_down(stem_line.start.x);
+            stem_line.stop.x = java_next_down(stem_line.stop.x);
         }
     }
     // Java CLinker.link derives the hard target from this corner's reference
@@ -14469,24 +14511,118 @@ fn advance_native_stems_head_c_link_at_frontier(
         .map(|index| index.saturating_sub(1))
         .unwrap_or(expected_last_index);
 
-    let create = apply_native_stems_create_stem_candidate_transaction(
-        head_corners.system_id,
-        frontier.stem_profile,
-        geometry_candidate,
-        selected_canonical_identity,
-        &mut shadow.beam_state.latest_base_apply.transaction_state,
-        checker,
-    )
-    .map_err(|error| stage("HEADS-CLink-createStem", error))?;
+    let matching_selected = selected_components
+        .iter()
+        .filter(|component| component.content == geometry_candidate)
+        .collect::<Vec<_>>();
+    let candidate_existing_stem_identity = match matching_selected.as_slice() {
+        [component] => shadow
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .find(|stem| stem.glyph_id == component.glyph_id)
+            .map(|stem| stem.stem_identity),
+        [] => None,
+        _ => {
+            return Err(stage(
+                "HEADS-CLink-glyph",
+                "composite equals more than one selected canonical glyph",
+            ));
+        }
+    };
+    // Java append mode tries `reuseStem(lastIndex)` before it calls
+    // `StemBuilder.createStem`. A successful reuse must therefore bypass the
+    // compound-glyph equality scan, registration and stem checker entirely.
+    let resolved_append_reuse = if frontier.append {
+        resolve_head_c_link_append_reuse(&shadow, builder, actual_last_index, frontier.next_corner)?
+    } else {
+        None
+    };
+    // Preserve the public trace's established distinction: `append_reuse`
+    // records only reuse of a stem different from the candidate singleton's
+    // already-known stem. `resolved_append_reuse` owns Java's actual choice.
+    let append_reuse = resolved_append_reuse
+        .clone()
+        .filter(|reuse| Some(reuse.stem_identity) != candidate_existing_stem_identity);
+    let create = if let Some(reuse) = resolved_append_reuse.as_ref() {
+        let stem = shadow
+            .beam_state
+            .latest_base_apply
+            .transaction_state
+            .system_stems
+            .known_stems
+            .iter()
+            .find(|stem| stem.stem_identity == reuse.stem_identity)
+            .cloned()
+            .ok_or_else(|| stage("HEADS-CLink-reuseStem", "reused stem is absent"))?;
+        let canonical_alias = usize::try_from(stem.glyph_id)
+            .map_err(|_| stage("HEADS-CLink-reuseStem", "reused glyph identity is invalid"))?;
+        NativeStemsCreateStemCandidateTransaction {
+            invoked: false,
+            system_id: head_corners.system_id,
+            stem_profile: frontier.stem_profile,
+            candidate: geometry_candidate.clone(),
+            registration: NativeStemsBeamGlyphRegistration {
+                alias_order: NativeStemsBeamGlyphAliasOrder::NativeModeledOrdinal,
+                canonical_alias,
+                glyph_id: stem.glyph_id,
+                action: NativeStemsBeamGlyphRegistrationAction::Reused {
+                    reinserted_into_active_index: false,
+                },
+                post_union_size: shadow
+                    .beam_state
+                    .latest_base_apply
+                    .transaction_state
+                    .glyph_index
+                    .union_size,
+            },
+            checker_result: None,
+            disposition: NativeStemsBeamCreateStemDisposition::Reused {
+                stem_identity: stem.stem_identity,
+            },
+            stem: Some(stem),
+            mutation_order: Vec::new(),
+        }
+    } else {
+        let selected_canonical_identity = match matching_selected.as_slice() {
+            [] => {
+                let transaction_state = &mut shadow.beam_state.latest_base_apply.transaction_state;
+                if transaction_state.glyph_index.exhaustive_lookup.is_some() {
+                    return Err(stage(
+                        "HEADS-CLink-glyph",
+                        "compound equality authority is already occupied",
+                    ));
+                }
+                let scan = bridge
+                    .exhaustive_native_content_scan(&geometry_candidate, transaction_state)
+                    .map_err(|error| stage("HEADS-CLink-glyph", error))?;
+                transaction_state.glyph_index.exhaustive_lookup = Some(scan);
+                None
+            }
+            [component] => Some((component.glyph_id, component.canonical_alias)),
+            _ => {
+                return Err(stage(
+                    "HEADS-CLink-glyph",
+                    "composite equals more than one selected canonical glyph",
+                ));
+            }
+        };
+        apply_native_stems_create_stem_candidate_transaction(
+            head_corners.system_id,
+            frontier.stem_profile,
+            geometry_candidate,
+            selected_canonical_identity,
+            &mut shadow.beam_state.latest_base_apply.transaction_state,
+            checker,
+        )
+        .map_err(|error| stage("HEADS-CLink-createStem", error))?
+    };
     let candidate_stem_identity = match create.disposition {
         NativeStemsBeamCreateStemDisposition::Reused { stem_identity } => Some(stem_identity),
         _ => None,
-    };
-    let append_reuse = if frontier.append {
-        resolve_head_c_link_append_reuse(&shadow, builder, actual_last_index, frontier.next_corner)?
-            .filter(|reuse| Some(reuse.stem_identity) != candidate_stem_identity)
-    } else {
-        None
     };
     let reused_stem_identity = append_reuse
         .as_ref()

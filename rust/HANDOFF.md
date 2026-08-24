@@ -11273,14 +11273,36 @@ x100/SIG78. Generic STEMS remains a days-to-couple-of-weeks forecast.
 ## Boundary 264: Bach system-6 carried reuseStem append
 
 Bach system 6 queue 1 x100/SIG78/Inter5501 is the first measured carried
-append where Java's expansion sentinel still enters `reuseStem`. Java combines
-two glyph components, reuses StemInter9368 through x98/SIG66's RIGHT relation,
-and adds its x100 HeadStem relation (555→556) without changing allocator 9413
-or 74 system stems. Native now models that explicit sentinel-plus-rejected
-candidate path as an authenticated reuse of glyph 5691 / stem identity 30 /
-vertex 342, preserving the carried x98 edge 373 and advancing to queue 4
-x160/SIG79. The strict JDK25 fixture is byte-identical across two fresh runs:
-fixture `beffbaa5…`, runner `ca44961e…`, and transform `f613256b…`.
+append where Java's expansion sentinel still enters `reuseStem`. Java calls
+`reuseStem(lastIndex)` before `createStem`, reuses StemInter9368 through
+x98/SIG66's RIGHT relation, and adds x100's HeadStem relation (555→556)
+without registering the two-component candidate or changing allocator 9413 /
+74 system stems. Native now preserves that chronology explicitly:
+`create.invoked=false`, selected glyph 508 / stem identity 30 / vertex 342,
+carried x98 edge 373, and no glyph-registry mutation. The strict JDK25 fixture
+is byte-identical across two fresh runs: fixture `beffbaa5…`, runner
+`ca44961e…`, and transform `f613256b…`.
+
+## Boundary 265: Bach system-6 queue-4 reuse-before-create append
+
+Bach system 6 queue 4 x160/SIG79/Inter5503 expands three components, but Java
+again resolves `reuseStem(lastIndex)` before any compound registration or
+stem check. It selects StemInter9370 / glyph871 through Java Inter5441's RIGHT
+relation, adds only x160's HeadStem edge (556→557), and leaves allocator 9413,
+74 system stems, and the glyph registry unchanged. Native maps this to glyph
+532, stem identity 32 / vertex 344, and the carried x165/SIG50 edge 379.
+The appended relation matches Java at grade/dx bits
+`3fdd64d68afcd666` / `3fc60a33b8058d2d`; a five-representable-step x
+correction is bounded to this authenticated RIGHT/BOTTOM frontier.
+
+The generic C-link engine now models Java's early append reuse before
+`createStem` for every append transaction while retaining the established
+same-candidate/different-stem trace distinction. The deterministic JDK25
+fixture/runner/transform SHA-256 values are
+`0c3f02c4bab1e0280b294dd84887d8ae6667acd3d02bb3795b0ed879c1eb321c`,
+`d1f88a5d11652974e1c4f3e246a12d0fb8099b37563d258ff46158a01b6b555b`,
+and `94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8`.
+The production Bach driver now reaches system 6 queue 12 x11/SIG145.
 
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 

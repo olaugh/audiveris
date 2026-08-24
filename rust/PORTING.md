@@ -5882,13 +5882,26 @@ page driver to system 6 queue 1 x100/SIG78. Java preserves allocator 8082 and
 ## Boundary 264: Bach system-6 carried reuseStem append
 
 Bach system 6 queue 1 x100/SIG78/Inter5501 is now carried by the production
-driver. Java reaches `reuseStem` after its expansion sentinel, combines two
-glyph components, and attaches x100 to StemInter9368 via x98/SIG66's RIGHT
-relation (edge 555→556), preserving allocator 9413 and 74 stems. Native
-authenticates the same exceptional route as rejected candidate glyph 5691 plus
-carried stem identity 30 / vertex 342 and advances to queue 4 x160/SIG79. The
-JDK25 oracle is deterministic across two fresh runs: fixture `beffbaa5…`,
-runner `ca44961e…`, transform `f613256b…`.
+driver. Java reaches `reuseStem` after its expansion sentinel and, because
+reuse precedes `createStem`, attaches x100 to StemInter9368 via x98/SIG66's
+RIGHT relation without registering the compound candidate. Native records
+`create.invoked=false`, glyph 508, stem identity 30 / vertex 342, and no
+registry mutation. The JDK25 oracle is deterministic across two fresh runs:
+fixture `beffbaa5…`, runner `ca44961e…`, transform `f613256b…`.
+
+## Boundary 265: Bach system-6 queue-4 reuse-before-create append
+
+Bach system 6 queue 4 x160/SIG79/Inter5503 also resolves `reuseStem` before
+`createStem`. Java selects StemInter9370 / glyph871 through Inter5441's RIGHT
+relation, adds edge 556→557, and preserves allocator 9413, 74 stems, and the
+glyph registry. Native maps this to glyph 532, stem identity 32 / vertex 344,
+and x165/SIG50 edge 379; relation grade/dx bits are
+`3fdd64d68afcd666` / `3fc60a33b8058d2d`. The generic append engine now
+preserves this chronology and exposes `create.invoked=false`. Exact fixture,
+runner, and transform hashes are `0c3f02c4bab1e0280b294dd84887d8ae6667acd3d02bb3795b0ed879c1eb321c`,
+`d1f88a5d11652974e1c4f3e246a12d0fb8099b37563d258ff46158a01b6b555b`,
+and `94a7a3f6c334bcd31b226d38c83fe6a9e8b7b818fca21ed50313f3c65d168ed8`.
+The next live Bach frontier is system 6 queue 12 x11/SIG145.
 
 ## Boundary 262: Bach system-3 phase-two queue-7 reused-stem append
 
