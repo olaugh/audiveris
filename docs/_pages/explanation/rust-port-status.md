@@ -6894,3 +6894,21 @@ the full library is 738 passed plus two ignored. Strict Clippy, formatting,
 and diff checks are clean. The next frontier is repeating foundations to its
 outer fixed point, followed by late consistency and the remaining refinement,
 beam-group, free-stem, and glyph-cleanup epochs.
+
+## Boundary 289: foundations fixed point
+
+Native REDUCTION now repeats the complete foundations consistency pass exactly
+as Java does. One-time overlap discovery, contextualization, chord analysis,
+and initial purge remain outside the loop. The six checks and their six purges
+repeat against the mutated SIG until their summed modification count is zero.
+
+Each pass records its checker and purge transactions. Purge deletions remain
+observable but do not enter Java's loop count, and the final zero pass is
+retained. A focused cascade converges with counts `[1, 1, 0]`: a stem-tail cut
+first, its newly orphaned head second, then the zero terminator.
+
+Thirty-four focused REDUCTION tests pass, every Batuque system converges, all
+ten active frozen-SIG gates remain green, and the full library passes 739 tests
+with two ignored. Strict Clippy, formatting, and diff checks pass. Next are
+remaining-exclusion reduction and foundations late consistency, followed by
+the refinement and grouping epochs.

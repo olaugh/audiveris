@@ -5,8 +5,8 @@
 //! The dependency-light lifecycle in [`crate::reduction_step`] owns sheet and
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
-//! algorithm, lossless overlap discovery, chord prolog, and one complete
-//! foundations consistency pass through `checkStems()` and its weak purge.
+//! algorithm, lossless overlap discovery, chord prolog, and the complete
+//! foundations consistency fixed point through `checkStems()` weak purges.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -206,15 +206,10 @@ pub struct NativeReductionChordAnalysisTransaction {
     pub head_head_supports: Vec<NativeSigEdgeId>,
 }
 
-/// One complete Java foundations consistency pass, from overlap discovery
-/// through `checkStems()` and its following contextual weak purge.
+/// One invocation of Java foundations `checkConsistencies()`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct NativeReductionFoundationPrefixTransaction {
+pub struct NativeReductionFoundationConsistencyPassTransaction {
     pub system_id: usize,
-    pub overlap: NativeReductionOverlapTransaction,
-    pub pre_prolog_contextualization: NativeSigContextualization,
-    pub chord_analysis: NativeReductionChordAnalysisTransaction,
-    pub initial_weak_purge: NativeReductionWeakPurgeTransaction,
     pub stem_ending: NativeReductionStemEndingTransaction,
     pub post_stem_ending_weak_purge: NativeReductionWeakPurgeTransaction,
     pub heads: NativeReductionHeadCheckTransaction,
@@ -227,7 +222,27 @@ pub struct NativeReductionFoundationPrefixTransaction {
     pub post_ledgers_weak_purge: NativeReductionWeakPurgeTransaction,
     pub stems: NativeReductionStemCheckTransaction,
     pub post_stems_weak_purge: NativeReductionWeakPurgeTransaction,
+    /// Exact sum returned by Java's six checks. Purge removals do not count.
+    pub modification_count: usize,
 }
+
+/// Java foundations setup plus the complete inner consistency fixed point.
+///
+/// `consistency_passes` includes the final zero-modification invocation which
+/// makes Java's `while ((modifs = checkConsistencies()) > 0)` terminate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionFoundationFixedPointTransaction {
+    pub system_id: usize,
+    pub overlap: NativeReductionOverlapTransaction,
+    pub pre_prolog_contextualization: NativeSigContextualization,
+    pub chord_analysis: NativeReductionChordAnalysisTransaction,
+    pub initial_weak_purge: NativeReductionWeakPurgeTransaction,
+    pub consistency_passes: Vec<NativeReductionFoundationConsistencyPassTransaction>,
+}
+
+/// Compatibility name retained while callers migrate from Boundary 288.
+pub type NativeReductionFoundationPrefixTransaction =
+    NativeReductionFoundationFixedPointTransaction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativeReductionFoundationPrefixError {
@@ -807,12 +822,12 @@ pub fn detect_native_stems_reduction_overlaps(
     )
 }
 
-/// Execute one complete Java foundations consistency pass against terminal
-/// native STEMS state.
-pub fn reduce_native_stems_foundation_prefix(
+/// Execute Java foundations setup and the complete consistency fixed point
+/// against terminal native STEMS state.
+pub fn reduce_native_stems_foundation_fixed_point(
     stems: &mut NativeStemsRecognition,
     system_id: usize,
-) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
+) -> Result<NativeReductionFoundationFixedPointTransaction, NativeReductionFoundationPrefixError> {
     let mut resolver = native_stems_lossless_overlap_resolver(stems, system_id)
         .map_err(NativeReductionOverlapError::from)?;
     let medians = native_stems_terminal_medians(stems, system_id)?;
@@ -825,7 +840,7 @@ pub fn reduce_native_stems_foundation_prefix(
             system_id,
         ))?;
     let beam_state = &mut system.transaction.state_after.beam_state;
-    reduce_native_foundation_prefix(
+    reduce_native_foundation_fixed_point(
         &mut beam_state.sig,
         &mut beam_state.bindings,
         &mut resolver,
@@ -835,8 +850,57 @@ pub fn reduce_native_stems_foundation_prefix(
     )
 }
 
-/// Dependency-light foundations pass used by the production STEMS adapter and
-/// synthetic order/failure tests.
+/// Boundary-288 compatibility entry point. It now returns the fixed-point
+/// transaction rather than stopping after one consistency invocation.
+pub fn reduce_native_stems_foundation_prefix(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
+    reduce_native_stems_foundation_fixed_point(stems, system_id)
+}
+
+/// Dependency-light foundations setup and fixed point used by production and
+/// synthetic order/cascade tests.
+pub fn reduce_native_foundation_fixed_point(
+    sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+    geometry: &mut impl NativeReductionOverlapGeometry,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
+) -> Result<NativeReductionFoundationFixedPointTransaction, NativeReductionFoundationPrefixError> {
+    let overlap = detect_native_reduction_overlaps(sig, geometry)?;
+    // AdapterForFoundations.checkFrozens() is the inherited no-op.
+    let pre_prolog_contextualization = sig.contextualize();
+    let chord_analysis = analyze_native_foundation_chords(sig, stem_medians)?;
+    let initial_weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    // AdapterForFoundations.checkSlurs() is the inherited empty set.
+    let mut consistency_passes = Vec::new();
+    loop {
+        let pass = run_native_foundation_consistency_pass(
+            sig,
+            bindings,
+            stem_medians,
+            head_identities,
+            merged_staff_pairs,
+        )?;
+        let converged = pass.modification_count == 0;
+        consistency_passes.push(pass);
+        if converged {
+            break;
+        }
+    }
+    Ok(NativeReductionFoundationFixedPointTransaction {
+        system_id: sig.system_id,
+        overlap,
+        pre_prolog_contextualization,
+        chord_analysis,
+        initial_weak_purge,
+        consistency_passes,
+    })
+}
+
+/// Boundary-288 compatibility entry point for dependency-light callers.
 pub fn reduce_native_foundation_prefix(
     sig: &mut NativeSigSystem,
     bindings: &mut NativeSigSystemBindings,
@@ -845,12 +909,24 @@ pub fn reduce_native_foundation_prefix(
     head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
     merged_staff_pairs: &[(usize, usize)],
 ) -> Result<NativeReductionFoundationPrefixTransaction, NativeReductionFoundationPrefixError> {
-    let overlap = detect_native_reduction_overlaps(sig, geometry)?;
-    // AdapterForFoundations.checkFrozens() is the inherited no-op.
-    let pre_prolog_contextualization = sig.contextualize();
-    let chord_analysis = analyze_native_foundation_chords(sig, stem_medians)?;
-    let initial_weak_purge = contextualize_and_purge_native_weaks(sig)?;
-    // AdapterForFoundations.checkSlurs() is the inherited empty set.
+    reduce_native_foundation_fixed_point(
+        sig,
+        bindings,
+        geometry,
+        stem_medians,
+        head_identities,
+        merged_staff_pairs,
+    )
+}
+
+fn run_native_foundation_consistency_pass(
+    sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
+) -> Result<NativeReductionFoundationConsistencyPassTransaction, NativeReductionFoundationPrefixError>
+{
     let stem_ending = prune_native_foundation_stem_ending_heads(sig, stem_medians)?;
     let post_stem_ending_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     let heads =
@@ -864,12 +940,14 @@ pub fn reduce_native_foundation_prefix(
     let post_ledgers_weak_purge = contextualize_and_purge_native_weaks(sig)?;
     let stems = prune_native_foundation_stems(sig, stem_medians)?;
     let post_stems_weak_purge = contextualize_and_purge_native_weaks(sig)?;
-    Ok(NativeReductionFoundationPrefixTransaction {
+    let modification_count = stem_ending.modified_stems.len()
+        + heads.mutations.len()
+        + hooks.removed_beams.len()
+        + beams.removed_beams.len()
+        + ledgers.modification_count
+        + stems.modification_count;
+    Ok(NativeReductionFoundationConsistencyPassTransaction {
         system_id: sig.system_id,
-        overlap,
-        pre_prolog_contextualization,
-        chord_analysis,
-        initial_weak_purge,
         stem_ending,
         post_stem_ending_weak_purge,
         heads,
@@ -882,6 +960,7 @@ pub fn reduce_native_foundation_prefix(
         post_ledgers_weak_purge,
         stems,
         post_stems_weak_purge,
+        modification_count,
     })
 }
 
@@ -3863,32 +3942,117 @@ mod tests {
             vec![NativeSigVertexId(0)]
         );
         assert!(transaction.initial_weak_purge.removed_vertices.is_empty());
-        assert!(transaction.stem_ending.modified_stems.is_empty());
-        assert!(
-            transaction
-                .post_stem_ending_weak_purge
-                .removed_vertices
-                .is_empty()
-        );
-        assert!(
-            transaction.heads.mutations.is_empty(),
-            "{:?}",
-            transaction.heads
-        );
-        assert!(transaction.hooks.removed_beams.is_empty());
-        assert!(transaction.beams.removed_beams.is_empty());
-        assert!(transaction.ledgers.removals.is_empty());
-        assert!(transaction.stems.removed_orphan_stems.is_empty());
-        assert!(transaction.stems.tail_prunes.is_empty());
-        assert_eq!(transaction.stems.modification_count, 0);
-        assert!(
-            transaction
-                .post_stems_weak_purge
-                .removed_vertices
-                .is_empty()
-        );
+        assert_eq!(transaction.consistency_passes.len(), 1);
+        let pass = &transaction.consistency_passes[0];
+        assert_eq!(pass.modification_count, 0);
+        assert!(pass.stem_ending.modified_stems.is_empty());
+        assert!(pass.post_stem_ending_weak_purge.removed_vertices.is_empty());
+        assert!(pass.heads.mutations.is_empty(), "{:?}", pass.heads);
+        assert!(pass.hooks.removed_beams.is_empty());
+        assert!(pass.beams.removed_beams.is_empty());
+        assert!(pass.ledgers.removals.is_empty());
+        assert!(pass.stems.removed_orphan_stems.is_empty());
+        assert!(pass.stems.tail_prunes.is_empty());
+        assert_eq!(pass.stems.modification_count, 0);
+        assert!(pass.post_stems_weak_purge.removed_vertices.is_empty());
         assert!(sig.vertex(0).is_some());
         assert!(sig.vertex(1).is_some());
+    }
+
+    #[test]
+    fn foundation_fixed_point_revisits_a_head_orphaned_by_the_prior_stem_pass() {
+        let mut stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        stem.bounds = NativeSigBounds {
+            x: 10,
+            y: 0,
+            width: 2,
+            height: 100,
+        };
+        let mut top = shaped_head(1, "NOTEHEAD_BLACK", 0);
+        top.grade = 0.95;
+        top.contextual_grade = Some(0.95);
+        let bottom = shaped_head(2, "NOTEHEAD_BLACK", 95);
+        let mut top_link = head_stem_edge(0, 1, 0);
+        top_link.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Left;
+        top_link.head_stem.as_mut().unwrap().extension_point = NativeStemPoint { x: 11.0, y: 2.0 };
+        let mut bottom_link = head_stem_edge(1, 2, 0);
+        bottom_link.head_stem.as_mut().unwrap().head_side = NativeStemHeadSide::Right;
+        bottom_link.head_stem.as_mut().unwrap().extension_point =
+            NativeStemPoint { x: 11.0, y: 98.0 };
+        let mut sig = NativeSigSystem {
+            system_id: 42,
+            vertices: vec![stem, top, bottom],
+            edges: vec![top_link, bottom_link],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 11.0, y: 10.0 },
+                stop: NativeStemPoint { x: 11.0, y: 90.0 },
+            },
+        )]);
+        let identities = BTreeMap::from([
+            (
+                NativeSigVertexId(1),
+                NativeReductionHeadIdentity {
+                    staff_id: 1,
+                    integer_pitch: 0,
+                },
+            ),
+            (
+                NativeSigVertexId(2),
+                NativeReductionHeadIdentity {
+                    staff_id: 1,
+                    integer_pitch: 0,
+                },
+            ),
+        ]);
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 42,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+        let mut geometry = ScriptedOverlapGeometry::default();
+
+        let transaction = reduce_native_foundation_fixed_point(
+            &mut sig,
+            &mut bindings,
+            &mut geometry,
+            &medians,
+            &identities,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            transaction
+                .consistency_passes
+                .iter()
+                .map(|pass| pass.modification_count)
+                .collect::<Vec<_>>(),
+            vec![1, 1, 0]
+        );
+        assert_eq!(
+            transaction.consistency_passes[0].stems.tail_prunes[0].removed_head_stem_edges,
+            vec![NativeSigEdgeId(1)]
+        );
+        assert_eq!(
+            transaction.consistency_passes[1].heads.mutations,
+            vec![NativeReductionHeadMutation::OrphanRemoved {
+                head: NativeSigVertexId(2)
+            }]
+        );
+        assert!(transaction.consistency_passes[2].heads.mutations.is_empty());
+        assert!(sig.vertex(0).is_some());
+        assert!(sig.vertex(1).is_some());
+        assert!(sig.vertex(2).is_none());
     }
 
     #[test]

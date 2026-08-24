@@ -11823,3 +11823,28 @@ five ignored diagnostics; and the full library passes 738 tests with two
 ignored. Strict all-target/all-feature Clippy, formatting, and diff checks are
 green. Next implement the outer foundations consistency fixed point, then the
 late consistency, refinement, beam-group, free-stem, and glyph-cleanup epochs.
+
+## Boundary 289: repeat foundations to Java's consistency fixed point
+
+The production entry point now separates the one-time `SigReducer.reduce()`
+setup from the exact inner `while ((modifs = checkConsistencies()) > 0)` loop.
+Overlap discovery, contextualization, chord analysis, the initial purge, and
+the empty slur check execute once. Complete Boundary-288 foundation passes
+then repeat against the mutated SIG until a pass returns zero.
+
+Every pass retains its six checker transactions, six contextual purges, and
+the exact Java modification sum. That sum counts modified stem-ending stems,
+head mutations, removed hooks and standard beams, ledger changes, and stem
+changes; contextual weak-purge removals remain observable but do not control
+the loop. The terminal zero pass is stored rather than projected away.
+Compatibility functions bearing the older “prefix” name now delegate to this
+same converged production path.
+
+The focused `[1, 1, 0]` cascade demonstrates a tail link removed in pass one,
+the resulting orphan head removed in pass two, and the terminating third
+pass. Focused REDUCTION tests pass 34/34, every Batuque system converges, the
+frozen SIG baseline passes ten active gates with five diagnostics ignored,
+and the full library passes 739 tests with two ignored. Strict workspace
+Clippy, formatting, and diff checks pass. Next implement Java's remaining
+exclusion reduction and foundations late-consistency epoch, then proceed to
+stem refinement, beam grouping, free-stem measurement, and glyph cleanup.

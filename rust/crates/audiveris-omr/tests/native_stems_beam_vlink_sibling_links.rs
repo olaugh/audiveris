@@ -21,7 +21,7 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_prefix,
+        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_fixed_point,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8728,21 +8728,31 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         .map(|system| system.system_id)
         .collect::<Vec<_>>();
     for system_id in system_ids {
-        let prefix = reduce_native_stems_foundation_prefix(&mut recognized, system_id)
-            .expect("Batuque exact REDUCTION foundations prefix");
-        assert!(!prefix.overlap.scan_order.is_empty());
-        assert!(!prefix.chord_analysis.scanned_stems.is_empty());
-        assert_eq!(prefix.heads.system_id, system_id);
-        assert!(!prefix.heads.head_order.is_empty());
-        assert_eq!(prefix.post_heads_weak_purge.system_id, system_id);
-        assert_eq!(prefix.hooks.system_id, system_id);
-        assert_eq!(prefix.post_hooks_weak_purge.system_id, system_id);
-        assert_eq!(prefix.beams.system_id, system_id);
-        assert_eq!(prefix.post_beams_weak_purge.system_id, system_id);
-        assert_eq!(prefix.ledgers.system_id, system_id);
-        assert_eq!(prefix.post_ledgers_weak_purge.system_id, system_id);
-        assert_eq!(prefix.stems.system_id, system_id);
-        assert_eq!(prefix.post_stems_weak_purge.system_id, system_id);
+        let fixed_point = reduce_native_stems_foundation_fixed_point(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION foundations fixed point");
+        assert!(!fixed_point.overlap.scan_order.is_empty());
+        assert!(!fixed_point.chord_analysis.scanned_stems.is_empty());
+        assert!(!fixed_point.consistency_passes.is_empty());
+        assert_eq!(
+            fixed_point
+                .consistency_passes
+                .last()
+                .expect("terminal pass")
+                .modification_count,
+            0
+        );
+        for pass in &fixed_point.consistency_passes {
+            assert_eq!(pass.heads.system_id, system_id);
+            assert_eq!(pass.post_heads_weak_purge.system_id, system_id);
+            assert_eq!(pass.hooks.system_id, system_id);
+            assert_eq!(pass.post_hooks_weak_purge.system_id, system_id);
+            assert_eq!(pass.beams.system_id, system_id);
+            assert_eq!(pass.post_beams_weak_purge.system_id, system_id);
+            assert_eq!(pass.ledgers.system_id, system_id);
+            assert_eq!(pass.post_ledgers_weak_purge.system_id, system_id);
+            assert_eq!(pass.stems.system_id, system_id);
+            assert_eq!(pass.post_stems_weak_purge.system_id, system_id);
+        }
     }
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
