@@ -11412,3 +11412,17 @@ PDF files currently stop earlier in the independent PDF reader on unsupported
 content-stream operators (`G` and `CS`), and the rotated Schubert test image
 stops during SCALE with `NoRegularlySpacedLines`; neither is a STEMS failure.
 The expanded 11-page CLI regression passes in 115.99s.
+
+## Boundary 271: production head linking is generic-only
+
+The page driver no longer imports or dispatches any head transaction by
+authenticated page, system, queue index, x ordinal, or SIG ordinal. Removing
+the seven phase-one shortcuts and thirty-three phase-two shortcuts deletes
+1,102 lines from `native_stems.rs`; all measured wrappers remain in the
+transaction module as executable oracle gates, but production uses only
+`continue_native_stems_head_linking_phase1`,
+`advance_native_stems_head_c_link_or_no_link`, and
+`advance_native_stems_head_phase_two_append_or_no_link`. The complete
+eleven-page ordinary/stream gate passes in 118.27s through this generic-only
+path. The 35/35 measured sibling suite passes in 274.89s, and strict workspace
+Clippy remains clean. No known page-specific head-link dispatch remains.
