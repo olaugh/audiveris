@@ -6087,3 +6087,18 @@ all-target/all-feature workspace Clippy, formatting, and diff checks pass.
 Next is native overlap discovery before this solver, followed by the ordered
 foundation checks for stem-ending heads, heads, hooks, beams, ledgers, stems,
 and chord/exclusion late consistency.
+
+## Boundary 277: foundation hook and beam pruning
+
+Native REDUCTION now ports `checkHooksHaveStem` and
+`checkBeamsHaveBothStems` over `NativeSigSystem`. Hooks require at least one
+non-center BeamStem portion. Standard beams require both LEFT and RIGHT
+portions, while small beams and hooks are excluded from the standard-beam
+scan. Candidate snapshots preserve SIG insertion order, and removal retains
+Java's extensive sole-member BeamGroup cascade and stable tombstones.
+
+The two new regressions bring the focused gate to 5/5. The full library gate
+passes 709/709 with two ignored tests; strict workspace Clippy, formatting,
+and diff checks pass. These primitives are not yet composed as a whole epoch:
+the weak contextual purge Java runs after each check and the earlier geometric
+overlap discovery remain the immediate dependencies.

@@ -11565,3 +11565,28 @@ and chord/exclusion late consistency), refines stem endpoints, checks beam
 groups, measures free stem length, and cleans glyphs. The dependency-light
 lifecycle already owns the outer order; the immediate production target is
 overlap discovery feeding this now-exact solver.
+
+## Boundary 277: hook and beam foundation checks
+
+`native_reduction` now includes exact graph-native ports of the first two
+foundation checks whose required semantics are fully present in the terminal
+STEMS SIG. `prune_native_foundation_hooks` snapshots live `BeamHookInter`s in
+vertex order and retains a hook only if an incident BeamStem relation has a
+LEFT or RIGHT beam portion; CENTER alone is insufficient.
+`prune_native_foundation_beams` separately snapshots standard `BeamInter`s and
+requires both LEFT and RIGHT side stems. It intentionally does not scan
+`BeamHookInter` or `SmallBeamInter` vertices.
+
+Both paths use the same extensive removal primitive as exclusion reduction.
+Removing a sole member tombstones its dying BeamGroup, incident edges become
+inactive, and no ordinal is reused or compacted. Transactions distinguish the
+primary beam/hook removals (Java's modification count) from cascaded groups.
+The focused REDUCTION gate passes 5/5; the complete library suite passes
+709/709 with two ignored; strict all-target/all-feature workspace Clippy,
+formatting, and diff checks pass.
+
+Do not compose these checks back-to-back yet without the intervening
+`contextualizeAndPurge` calls Java performs after each one. The next safe
+boundary is either native weak-inter purge (which needs frozen-inter ownership)
+or the glyph/area-backed overlap confirmation input; rectangle-only overlap
+would not be parity-correct for heads and glyph-backed inters.

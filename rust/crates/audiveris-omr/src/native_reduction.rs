@@ -13,6 +13,7 @@ use crate::native_sig::{
     NativeSigRelationKind, NativeSigSystem, NativeSigVertexId,
 };
 use crate::native_stems::NativeStemsRecognition;
+use crate::stems_step::NativeBeamPortion;
 
 /// One selected exclusion and the branch Java removed from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -49,6 +50,16 @@ pub struct NativeReductionExistingExclusionsRecognition {
     pub stems: NativeStemsRecognition,
     pub initial_contextualizations: Vec<NativeSigContextualization>,
     pub transactions: Vec<NativeReductionExclusionTransaction>,
+}
+
+/// Ordered removals from one foundation consistency check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeReductionBeamPruneTransaction {
+    pub system_id: usize,
+    /// Beam/hook iteration order; this is Java's modification count authority.
+    pub removed_beams: Vec<NativeSigVertexId>,
+    /// Dying sole-member groups removed extensively with those beams.
+    pub removed_groups: Vec<NativeSigVertexId>,
 }
 
 /// Consume terminal native STEMS state and reduce every exclusion which is
@@ -126,10 +137,7 @@ pub fn reduce_native_sig_exclusions(
 
         // AbstractInter.remove(true) marks the weaker first, removes any dying
         // ensemble non-extensively, then removes the weaker from the graph.
-        for &ensemble in &dying_ensembles {
-            sig.remove_vertex(ensemble)?;
-        }
-        sig.remove_vertex(weaker)?;
+        remove_vertex_extensively(sig, weaker, &dying_ensembles)?;
 
         decisions.push(NativeReductionExclusionDecision {
             exclusion,
@@ -154,6 +162,98 @@ pub fn reduce_native_sig_exclusions(
         removed_vertices,
         contextualizations,
     })
+}
+
+/// Java `SigReducer.checkHooksHaveStem()`.
+///
+/// A hook survives only when at least one live `BeamStemRelation` reaches a
+/// non-center beam portion. The check snapshots hook insertion order before
+/// mutation, exactly like `SIGraph.inters(BeamHookInter.class)`.
+pub fn prune_native_foundation_hooks(
+    sig: &mut NativeSigSystem,
+) -> Result<NativeReductionBeamPruneTransaction, NativeSigError> {
+    let hooks = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::BeamHook)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    prune_beams(sig, hooks, |sig, hook| {
+        sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::BeamStem
+                && (edge.source == hook.0 || edge.target == hook.0)
+                && edge.beam_portion != Some(NativeBeamPortion::Center)
+        })
+    })
+}
+
+/// Java `SigReducer.checkBeamsHaveBothStems()`.
+///
+/// Only standard `BeamInter` vertices are checked. Hooks and small beams have
+/// their own Java paths. A standard beam must have a live BeamStem relation on
+/// both horizontal portions; center relations do not satisfy either side.
+pub fn prune_native_foundation_beams(
+    sig: &mut NativeSigSystem,
+) -> Result<NativeReductionBeamPruneTransaction, NativeSigError> {
+    let beams = sig
+        .vertices
+        .iter()
+        .filter(|vertex| vertex.active && vertex.kind == NativeSigInterKind::Beam)
+        .map(|vertex| NativeSigVertexId(vertex.ordinal))
+        .collect::<Vec<_>>();
+    prune_beams(sig, beams, |sig, beam| {
+        let has_left = sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::BeamStem
+                && (edge.source == beam.0 || edge.target == beam.0)
+                && edge.beam_portion == Some(NativeBeamPortion::Left)
+        });
+        let has_right = sig.edges.iter().any(|edge| {
+            edge.active
+                && edge.kind == NativeSigRelationKind::BeamStem
+                && (edge.source == beam.0 || edge.target == beam.0)
+                && edge.beam_portion == Some(NativeBeamPortion::Right)
+        });
+        has_left && has_right
+    })
+}
+
+fn prune_beams(
+    sig: &mut NativeSigSystem,
+    candidates: Vec<NativeSigVertexId>,
+    survives: impl Fn(&NativeSigSystem, NativeSigVertexId) -> bool,
+) -> Result<NativeReductionBeamPruneTransaction, NativeSigError> {
+    sig.validate_integrity()?;
+    let mut removed_beams = Vec::new();
+    let mut removed_groups = Vec::new();
+    for candidate in candidates {
+        if !survives(sig, candidate) {
+            let dying = dying_ensembles(sig, candidate);
+            remove_vertex_extensively(sig, candidate, &dying)?;
+            removed_beams.push(candidate);
+            for group in dying {
+                push_unique(&mut removed_groups, group);
+            }
+        }
+    }
+    sig.validate_integrity()?;
+    Ok(NativeReductionBeamPruneTransaction {
+        system_id: sig.system_id,
+        removed_beams,
+        removed_groups,
+    })
+}
+
+fn remove_vertex_extensively(
+    sig: &mut NativeSigSystem,
+    vertex: NativeSigVertexId,
+    dying_ensembles: &[NativeSigVertexId],
+) -> Result<(), NativeSigError> {
+    for &ensemble in dying_ensembles {
+        sig.remove_vertex(ensemble)?;
+    }
+    sig.remove_vertex(vertex)
 }
 
 fn best_grade_of(sig: &NativeSigSystem, ordinal: usize) -> f64 {
@@ -199,6 +299,7 @@ mod tests {
     use crate::native_sig::{
         NativeSigBounds, NativeSigEdge, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertex,
     };
+    use crate::stems_step::NativeStemPoint;
 
     fn vertex(ordinal: usize, kind: NativeSigInterKind, grade: f64) -> NativeSigVertex {
         NativeSigVertex {
@@ -237,6 +338,23 @@ mod tests {
             beam_portion: None,
             stem_extension: None,
             head_stem: None,
+        }
+    }
+
+    fn beam_stem_edge(
+        ordinal: usize,
+        beam: usize,
+        stem: usize,
+        portion: NativeBeamPortion,
+    ) -> NativeSigEdge {
+        NativeSigEdge {
+            support: Some(NativeSigSupport {
+                grade: 0.8,
+                bar_connection_impacts: None,
+            }),
+            beam_portion: Some(portion),
+            stem_extension: Some(NativeStemPoint { x: 2.0, y: 3.0 }),
+            ..edge(ordinal, beam, stem, NativeSigRelationKind::BeamStem)
         }
     }
 
@@ -333,5 +451,59 @@ mod tests {
         assert_eq!(result.decisions[0].removed, NativeSigVertexId(1));
         assert_eq!(result.decisions[1].removed, NativeSigVertexId(3));
         assert_eq!(result.contextualizations.len(), 2);
+    }
+
+    #[test]
+    fn hook_requires_a_non_center_stem_and_removes_its_dying_group() {
+        let mut sig = NativeSigSystem {
+            system_id: 4,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::BeamGroup, 1.0),
+                vertex(1, NativeSigInterKind::BeamHook, 0.7),
+                vertex(2, NativeSigInterKind::Stem, 0.8),
+                vertex(3, NativeSigInterKind::BeamHook, 0.7),
+                vertex(4, NativeSigInterKind::Stem, 0.8),
+            ],
+            edges: vec![
+                edge(0, 0, 1, NativeSigRelationKind::Containment),
+                beam_stem_edge(1, 1, 2, NativeBeamPortion::Center),
+                beam_stem_edge(2, 3, 4, NativeBeamPortion::Left),
+            ],
+        };
+
+        let result = prune_native_foundation_hooks(&mut sig).unwrap();
+
+        assert_eq!(result.removed_beams, vec![NativeSigVertexId(1)]);
+        assert_eq!(result.removed_groups, vec![NativeSigVertexId(0)]);
+        assert!(sig.vertices[0].removed);
+        assert!(sig.vertices[1].removed);
+        assert!(sig.vertices[3].active);
+    }
+
+    #[test]
+    fn standard_beam_requires_both_side_stems_but_small_beam_is_not_scanned() {
+        let mut sig = NativeSigSystem {
+            system_id: 5,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Beam, 0.8),
+                vertex(1, NativeSigInterKind::Stem, 0.8),
+                vertex(2, NativeSigInterKind::Stem, 0.8),
+                vertex(3, NativeSigInterKind::Beam, 0.8),
+                vertex(4, NativeSigInterKind::Stem, 0.8),
+                vertex(5, NativeSigInterKind::SmallBeam, 0.8),
+            ],
+            edges: vec![
+                beam_stem_edge(0, 0, 1, NativeBeamPortion::Left),
+                beam_stem_edge(1, 0, 2, NativeBeamPortion::Right),
+                beam_stem_edge(2, 3, 4, NativeBeamPortion::Center),
+            ],
+        };
+
+        let result = prune_native_foundation_beams(&mut sig).unwrap();
+
+        assert_eq!(result.removed_beams, vec![NativeSigVertexId(3)]);
+        assert!(sig.vertices[0].active);
+        assert!(sig.vertices[3].removed);
+        assert!(sig.vertices[5].active);
     }
 }
