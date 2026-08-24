@@ -1766,10 +1766,12 @@ pub struct NativeStemsBeamCompletedVLinkEvidence {
     pub sibling_linked_b_linkers: Vec<NativeStemsBeamBLinkerRef>,
 }
 
-/// Writes visible when one direct `linkStumps` V-link call returns true.
+/// Writes visible when one direct `linkStumps` V-link call returns.
 ///
 /// STUMPS has no caller-side B18 assignment: B15 wrote the current B cell and
-/// B16 may have written sibling B cells before the loop resumes.
+/// B16 may have written sibling B cells before the loop resumes. When the
+/// call returns false, both collections remain unchanged and
+/// `b15_linked_after` is false; Java still advances to the next stump attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeStemsBeamCompletedStumpVLinkEvidence {
     pub plan: NativeStemsBeamPlanRef,
@@ -2940,7 +2942,6 @@ pub fn resume_native_stems_beam_scheduler_after_stumps_transaction(
         || awaiting.b_linker != completed.b_linker
         || awaiting.v_linker != completed.v_linker
         || completed.v_linker.b_linker != completed.b_linker
-        || !completed.b15_linked_after
         || awaiting.vertical_side != awaiting.v_linker.side
     {
         return Err(NativeStemsBeamSchedulerError::InvalidTerminal {

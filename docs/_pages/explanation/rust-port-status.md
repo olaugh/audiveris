@@ -6630,3 +6630,14 @@ All eleven pages, both ordinary/stream CLI modes, all 35 exact sibling cases,
 strict workspace Clippy, formatting, and diff checks pass. Remaining STEMS work
 is a reachability audit and broader real-scan census rather than a known failing
 branch.
+
+## Boundary 274: generic dense-seed and rejected-stump handling
+
+The audit removed two remaining valid-input guards. Head seed validation now
+uses the complete JDK25 TimSort for 32-plus candidates, with a 64-entry stable
+merge regression. A false beam-stump V-link now follows Java: preserve line
+chronology, skip reuse graph reads, mutate no SIG or linker state, and continue
+the stump worklist. The forced-rejection carrier regression, 35/35 sibling
+suite, eleven-page census, strict workspace Clippy, formatting, and diff checks
+all pass. No reproduced STEMS failure remains; the remaining work is
+reachability classification of legacy measured APIs and wider scan coverage.

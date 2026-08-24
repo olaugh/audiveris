@@ -34,11 +34,11 @@ use crate::{
     },
     native_stems_beam_sides::{
         NativeStemsBeamHookRemovalTransaction, NativeStemsBeamRejectedSidesTransaction,
-        NativeStemsBeamSidesAdvance, NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext,
-        NativeStemsBeamSidesTransaction, NativeStemsBeamStumpsTransaction,
-        NativeStemsFinalizeTransaction, NativeStemsHeadCLinkLineState,
-        NativeStemsHeadCLinkTransaction, NativeStemsHeadPhase1Carrier,
-        NativeStemsHeadPhase1Continuation,
+        NativeStemsBeamRejectedStumpsTransaction, NativeStemsBeamSidesAdvance,
+        NativeStemsBeamSidesCarrier, NativeStemsBeamSidesContext, NativeStemsBeamSidesTransaction,
+        NativeStemsBeamStumpsTransaction, NativeStemsFinalizeTransaction,
+        NativeStemsHeadCLinkLineState, NativeStemsHeadCLinkTransaction,
+        NativeStemsHeadPhase1Carrier, NativeStemsHeadPhase1Continuation,
         advance_native_stems_beam_sides_advance_from_modeled_registry,
         advance_native_stems_head_c_link_or_no_link,
         advance_native_stems_head_c_link_or_no_link_with_line_state,
@@ -161,6 +161,7 @@ pub struct NativeStemsSystemStumpsDrive {
     pub hook_removals: Vec<NativeStemsBeamHookRemovalTransaction>,
     pub continuation: NativeStemsBeamSchedulerStumpsContinuation,
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
+    pub rejected_transactions: Vec<NativeStemsBeamRejectedStumpsTransaction>,
 }
 
 /// Atomic SIDES+STUMPS completion for every consecutive system on one page.
@@ -608,9 +609,8 @@ impl NativeStemsPreparedRecognition {
         self.initialize_next_system_sides(&first)
     }
 
-    /// Drive Batuque's second system from its serial first frontier to a true
-    /// SIDES terminal. Any competing-hook checkpoint remains fail-closed until
-    /// its removal transaction is carried by production state.
+    /// Drive the second system from its serial first frontier to a true SIDES
+    /// terminal, including any atomic competing-hook removal checkpoints.
     pub fn drive_second_system_sides(
         &self,
     ) -> Result<NativeStemsSystemSidesDrive, NativeStemsPreparationError> {
@@ -720,6 +720,7 @@ impl NativeStemsPreparedRecognition {
             hook_removals,
             continuation,
             transactions: drive.transactions,
+            rejected_transactions: drive.rejected_transactions,
         })
     }
 

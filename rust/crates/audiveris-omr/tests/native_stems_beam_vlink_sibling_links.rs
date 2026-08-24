@@ -25951,6 +25951,51 @@ fn native_carrier_drives_full_sides_pass_before_oracle_read() {
     );
     assert_eq!(bridge, bridge_before);
 
+    // Java ignores a false VLinker.link result during linkStumps and resumes
+    // the worklist. Force this otherwise rare branch above every possible
+    // checked grade and prove that it carries no graph/linker mutation.
+    let mut rejecting_checker = context.checker.clone();
+    rejecting_checker.minimum_stem_grade = 1.1;
+    let rejecting_context = NativeStemsBeamSidesContext {
+        checker: &rejecting_checker,
+        ..context
+    };
+    let mut rejected_stump_carrier = carrier.clone();
+    let rejected_stump_before = rejected_stump_carrier.clone();
+    let rejected_stump = drive_native_stems_beam_stumps_from_modeled_registry(
+        &mut rejected_stump_carrier,
+        rejecting_context,
+        &bridge,
+        1,
+    )
+    .expect("rejected STUMPS V-link resumes atomically");
+    assert!(rejected_stump.transactions.is_empty());
+    assert_eq!(rejected_stump.rejected_transactions.len(), 1);
+    assert!(matches!(
+        rejected_stump.rejected_transactions[0].create.disposition,
+        NativeStemsBeamCreateStemDisposition::Rejected
+    ));
+    assert_eq!(rejected_stump_carrier.sig, rejected_stump_before.sig);
+    assert_eq!(
+        rejected_stump_carrier.bindings,
+        rejected_stump_before.bindings
+    );
+    assert_eq!(
+        rejected_stump_carrier.b_cells,
+        rejected_stump_before.b_cells
+    );
+    assert_eq!(
+        rejected_stump_carrier.s_cells,
+        rejected_stump_before.s_cells
+    );
+    let NativeStemsBeamSchedulerStumpsStatus::AwaitingVLinkTransaction(rejected_next) =
+        &rejected_stump.status
+    else {
+        panic!("rejected STUMPS V-link must resume at the next frontier");
+    };
+    assert_eq!(rejected_next.plan.plan_ordinal, 28);
+    assert_eq!(rejected_next.snapshot.current_index, 4);
+
     let mut zero_limit_carrier = carrier.clone();
     let zero_limit_before = zero_limit_carrier.clone();
     drive_native_stems_beam_stumps_from_modeled_registry(

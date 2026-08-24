@@ -6017,3 +6017,17 @@ evidence. The eleven-page ordinary/stream suite passes 2/2, all 35 sibling
 transactions pass, and strict workspace Clippy, formatting, and diff checks
 are clean. Remaining work is a repository-wide reachability audit plus broader
 real-scan coverage, not a currently observed STEMS failure.
+
+## Boundary 274: remove two valid-input fail-closed branches
+
+`retrieveSeeds` validation now delegates every list length to the exact JDK25
+TimSort port instead of refusing the merge path at 32 entries; a 64-entry
+stable descending-order regression covers ties across merges. STUMPS now also
+matches Java's ignored `VLinker.link` boolean: a rejected create/reuse attempt
+retains B12 line state, skips B13 live graph reads, performs zero SIG/binding/
+linker mutation, and resumes at the next stump frontier. A forced rejection
+advances plan 508 to plan 28 with graph and cells unchanged. The focused gate,
+35/35 sibling suite, eleven-page census, strict workspace Clippy, formatting,
+and diff checks pass. Remaining work is classification/cleanup of legacy
+public measured wrappers and additional real-score scanning when new rasters
+are available; there is no currently reproduced STEMS-stage failure.

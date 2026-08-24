@@ -476,10 +476,9 @@ pub enum NativeStemsBeamBuilderError {
     UnsupportedBaselineCollision {
         system_id: usize,
     },
-    /// The frozen corpus never enters JDK TimSort's merge path. Refuse a
-    /// larger list rather than silently substitute Rust's sort while the full
-    /// object-TimSort port remains outside this boundary.
-    UnsupportedJdkTimSortLength {
+    /// Java throws when TimSort detects a comparator-contract violation.
+    /// Preserve that terminal instead of publishing a partially sorted builder.
+    JdkTimSortContractViolation {
         system_id: usize,
         length: usize,
     },
@@ -1998,7 +1997,7 @@ fn stable_sort_items(
     // flow is part of the visible result.
     crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
         .then_some(())
-        .ok_or(NativeStemsBeamBuilderError::UnsupportedJdkTimSortLength {
+        .ok_or(NativeStemsBeamBuilderError::JdkTimSortContractViolation {
             system_id,
             length: items.len(),
         })

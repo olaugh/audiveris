@@ -425,7 +425,7 @@ pub enum NativeStemsHeadBuilderError {
         corner: Option<NativeStemsHeadCornerRef>,
         phase: &'static str,
     },
-    UnsupportedJdkTimSortLength {
+    JdkTimSortContractViolation {
         system_id: usize,
         phase: &'static str,
         length: usize,
@@ -498,13 +498,13 @@ impl fmt::Display for NativeStemsHeadBuilderError {
                     "STEMS head-builder system {system_id} reachability invariant differs during {phase}"
                 ),
             },
-            Self::UnsupportedJdkTimSortLength {
+            Self::JdkTimSortContractViolation {
                 system_id,
                 phase,
                 length,
             } => write!(
                 formatter,
-                "STEMS head-builder system {system_id} {phase} sort length {length} reaches the unported JDK TimSort merge path"
+                "STEMS head-builder system {system_id} {phase} sort length {length} triggers Java's comparator-contract exception"
             ),
             Self::Geometry { system_id } => write!(
                 formatter,
@@ -989,17 +989,6 @@ fn validate_system(context: &SystemContext<'_>) -> Result<(), NativeStemsHeadBui
                     phase: "corner order",
                 });
             }
-            let preliminary = corner.seed_scans.iter().filter(|scan| {
-                matches!(scan.action,
-                    crate::native_stems_head_corner_reachability::NativeStemsHeadSeedScanAction::Preliminary)
-            }).count();
-            if preliminary >= 32 {
-                return Err(NativeStemsHeadBuilderError::UnsupportedJdkTimSortLength {
-                    system_id,
-                    phase: "retrieveSeeds",
-                    length: preliminary,
-                });
-            }
             validate_seed_retrieval(system_id, corner)?;
             let mut seen_beam = false;
             let mut head_targets = Vec::new();
@@ -1083,7 +1072,13 @@ fn validate_seed_retrieval(
     // The retrieveSeeds comparator is contribution-only and stable. Replay
     // the complete pre-sort occurrence sequence before trusting assignments.
     let mut sorted = preliminary.clone();
-    jdk25_sort_seed_preliminary(&mut sorted);
+    if !jdk25_sort_seed_preliminary(&mut sorted) {
+        return Err(NativeStemsHeadBuilderError::JdkTimSortContractViolation {
+            system_id,
+            phase: "retrieveSeeds",
+            length: preliminary.len(),
+        });
+    }
     if sorted
         .iter()
         .enumerate()
@@ -1169,49 +1164,13 @@ fn validate_seed_retrieval(
 
 type SeedValidationRow = (usize, usize, Option<i32>, Option<usize>);
 
-fn jdk25_sort_seed_preliminary(values: &mut [SeedValidationRow]) {
-    if values.len() < 2 {
-        return;
-    }
-    let compare = |left: &SeedValidationRow, right: &SeedValidationRow| {
+fn jdk25_sort_seed_preliminary(values: &mut [SeedValidationRow]) -> bool {
+    crate::jdk25_timsort::sort_by(values, |left, right| {
         right
             .2
             .expect("validated contribution")
             .cmp(&left.2.expect("validated contribution"))
-    };
-    let mut run_hi = 1_usize;
-    if compare(&values[run_hi], &values[0]) == Ordering::Less {
-        run_hi += 1;
-        while run_hi < values.len()
-            && compare(&values[run_hi], &values[run_hi - 1]) == Ordering::Less
-        {
-            run_hi += 1;
-        }
-        values[..run_hi].reverse();
-    } else {
-        run_hi += 1;
-        while run_hi < values.len()
-            && compare(&values[run_hi], &values[run_hi - 1]) != Ordering::Less
-        {
-            run_hi += 1;
-        }
-    }
-    // Exact OpenJDK 25 TimSort binary-insertion path for `length < 32`.
-    for start in run_hi..values.len() {
-        let pivot = values[start];
-        let mut left = 0_usize;
-        let mut right = start;
-        while left < right {
-            let middle = left + (right - left) / 2;
-            if compare(&pivot, &values[middle]) == Ordering::Less {
-                right = middle;
-            } else {
-                left = middle + 1;
-            }
-        }
-        values.copy_within(left..start, left + 1);
-        values[left] = pivot;
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2414,7 +2373,7 @@ fn stable_sort_items(
 ) -> Result<(), NativeStemsHeadBuilderError> {
     crate::jdk25_timsort::sort_by(items, |left, right| item_cmp(left, right, y_direction))
         .then_some(())
-        .ok_or(NativeStemsHeadBuilderError::UnsupportedJdkTimSortLength {
+        .ok_or(NativeStemsHeadBuilderError::JdkTimSortContractViolation {
             system_id,
             phase,
             length: items.len(),
@@ -3069,11 +3028,41 @@ mod tests {
             (2, 12, Some(3), None),
             (3, 13, Some(2), None),
         ];
-        jdk25_sort_seed_preliminary(&mut rows);
+        assert!(jdk25_sort_seed_preliminary(&mut rows));
         assert_eq!(
             rows.iter().map(|row| row.1).collect::<Vec<_>>(),
             vec![11, 12, 13, 10]
         );
+    }
+
+    #[test]
+    fn retrieve_seed_jdk_sort_carries_the_merge_path() {
+        let mut rows = (0..64)
+            .map(|ordinal| {
+                let contribution = ((ordinal * 17) % 11) as i32;
+                (ordinal, ordinal + 100, Some(contribution), None)
+            })
+            .collect::<Vec<_>>();
+        let before = rows.clone();
+
+        assert!(jdk25_sort_seed_preliminary(&mut rows));
+        assert!(rows.windows(2).all(|pair| pair[0].2 >= pair[1].2));
+        for contribution in 0..=10 {
+            let expected = before
+                .iter()
+                .filter(|row| row.2 == Some(contribution))
+                .map(|row| row.1)
+                .collect::<Vec<_>>();
+            let actual = rows
+                .iter()
+                .filter(|row| row.2 == Some(contribution))
+                .map(|row| row.1)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, expected,
+                "contribution tie {contribution} stays stable"
+            );
+        }
     }
 
     #[test]

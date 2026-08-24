@@ -11463,3 +11463,29 @@ pass. The remaining forecast is now an audit problem rather than a known live
 branch: inspect SIDES/STUMPS and public wrapper reachability for any other
 production identity conditions, then broaden the out-of-corpus scan if usable
 sheet rasters are available.
+
+## Boundary 274: dense seed sorts and rejected STUMPS are generic
+
+The production-reachability audit found and removed two valid-input limits.
+Head `retrieveSeeds` validation no longer rejects 32 or more preliminary
+seeds: it now uses the shared exact OpenJDK 25 TimSort through merge/gallop
+paths, with a 64-row descending/stable tie regression. The error terminal now
+means Java's comparator-contract exception rather than an unported sort
+length.
+
+Java's `BeamLinker.linkStumps` also deliberately ignores a false
+`VLinker.link` result. Rust now carries that outcome atomically: B12 line
+chronology persists, B13 performs no lazy SIG/S-linker reads after a null
+`createStem`, no graph/binding/B-cell/S-cell mutation occurs, and the STUMPS
+scheduler consumes the rejected V-link before resuming the remaining worklist.
+A forced-grade regression proves plan 508 rejects and advances to plan 28 with
+all mutable graph/linker authorities unchanged.
+
+The 64-seed units pass 2/2, the focused full carrier passes, the exact sibling
+suite passes 35/35 in 245.56s, and the eleven-page Rust-only completion census
+passes in 126.30s. Strict all-target/all-feature workspace Clippy, formatting,
+and diff checks are clean. No observed STEMS failure remains. The completion
+forecast is now scope-based: finish the remaining legacy-public-wrapper and
+invalid-state reachability classification, then run any additional usable
+score rasters found; this should require only audit/cleanup slices unless a new
+scan exposes another Java branch.

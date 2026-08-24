@@ -60,8 +60,9 @@ use crate::{
     native_stems_beam_vlink_reuse_check::{
         NativeStemsBeamRelationCheck, NativeStemsBeamRelationParameters,
         NativeStemsBeamVLinkReuseCheck, NativeStemsBeamVLinkReuseCheckOutcome,
-        NativeStemsBeamVLinkReuseLiveState, evaluate_native_stems_beam_vlink_reuse_check,
-        evaluate_relation_geometry, project_native_stems_beam_vlink_reuse_live_state,
+        NativeStemsBeamVLinkReuseLiveEvaluation, NativeStemsBeamVLinkReuseLiveState,
+        evaluate_native_stems_beam_vlink_reuse_check, evaluate_relation_geometry,
+        project_native_stems_beam_vlink_reuse_live_state,
     },
     native_stems_beam_vlink_sibling_links::{
         NativeStemsBeamNativeBLinkerCell, NativeStemsBeamNativeSiblingTransaction,
@@ -192,6 +193,20 @@ pub struct NativeStemsBeamStumpsTransaction {
     pub resume: NativeStemsBeamSchedulerStumpsContinuation,
 }
 
+/// One direct `linkStumps` V-link that returned false before B14.
+///
+/// Java ignores this boolean and continues the stump worklist. The carried
+/// transaction preserves B12 theoretical-line chronology but makes no SIG,
+/// registry, or linker-cell mutation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeStemsBeamRejectedStumpsTransaction {
+    pub preparation: NativeStemsBeamFrontierPreparation,
+    pub create: NativeStemsBeamVLinkTransaction,
+    pub reuse_live_state: NativeStemsBeamVLinkReuseLiveState,
+    pub reuse: NativeStemsBeamVLinkReuseCheck,
+    pub resume: NativeStemsBeamSchedulerStumpsContinuation,
+}
+
 /// Atomic result of driving up to a bounded number of STUMPS V frontiers.
 ///
 /// `status` is the carrier's exact scheduler status after the returned
@@ -200,6 +215,7 @@ pub struct NativeStemsBeamStumpsTransaction {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeStemsBeamStumpsDrive {
     pub transactions: Vec<NativeStemsBeamStumpsTransaction>,
+    pub rejected_transactions: Vec<NativeStemsBeamRejectedStumpsTransaction>,
     pub status: NativeStemsBeamSchedulerStumpsStatus,
 }
 
@@ -943,16 +959,18 @@ fn drive_native_stems_beam_stumps_with_authority(
 
     let mut shadow = carrier.clone();
     let mut transactions = Vec::new();
+    let mut rejected_transactions = Vec::new();
     loop {
         let status = current_stumps_status(&shadow.scheduler)?;
         if matches!(
             status,
             NativeStemsBeamSchedulerStumpsStatus::Completed { .. }
-        ) || transactions.len() == transaction_limit
+        ) || transactions.len() + rejected_transactions.len() == transaction_limit
         {
             *carrier = shadow;
             return Ok(NativeStemsBeamStumpsDrive {
                 transactions,
+                rejected_transactions,
                 status,
             });
         }
@@ -963,11 +981,23 @@ fn drive_native_stems_beam_stumps_with_authority(
             glyphs,
             CarrierPass::Stumps,
         ) {
-            Ok(transaction) => transactions.push(transaction.into_stumps()?),
+            Ok(NativeStemsBeamCarrierAdvance::Linked(transaction)) => {
+                transactions.push((*transaction).into_stumps()?)
+            }
+            Ok(NativeStemsBeamCarrierAdvance::RejectedStumps(transaction)) => {
+                rejected_transactions.push(*transaction)
+            }
+            Ok(NativeStemsBeamCarrierAdvance::RejectedSides(_)) => {
+                return Err(stage(
+                    "carrier-pass",
+                    "SIDES rejection returned through the STUMPS drive",
+                ));
+            }
             Err(mut error) => {
                 error.detail = format!(
-                    "after {} successful shadow transactions: {}",
+                    "after {} linked and {} rejected shadow transactions: {}",
                     transactions.len(),
+                    rejected_transactions.len(),
                     error.detail
                 );
                 return Err(error);
@@ -15169,10 +15199,7 @@ fn advance_native_stems_head_c_link_at_frontier(
                     break;
                 }
                 // Java's soft-tail shortcut can additionally inspect and
-                // include the immediately following GlyphItem. That branch
-                // is not yet authenticated by a deterministic transaction,
-                // so retain the fail-closed boundary instead of approximating
-                // its candidate selection.
+                // include the immediately following GlyphItem.
                 if beam_targets.is_empty()
                     && builder.y_direction * java_double_compare(last_y, soft_y) >= 0
                 {
@@ -17601,14 +17628,15 @@ struct NativeStemsBeamCarrierTransaction {
 
 enum NativeStemsBeamCarrierAdvance {
     Linked(Box<NativeStemsBeamCarrierTransaction>),
-    Rejected(Box<NativeStemsBeamRejectedSidesTransaction>),
+    RejectedSides(Box<NativeStemsBeamRejectedSidesTransaction>),
+    RejectedStumps(Box<NativeStemsBeamRejectedStumpsTransaction>),
 }
 
 impl NativeStemsBeamCarrierAdvance {
     fn into_sides(self) -> Result<NativeStemsBeamSidesTransaction, NativeStemsBeamSidesError> {
         match self {
             Self::Linked(transaction) => (*transaction).into_sides(),
-            Self::Rejected(_) => Err(stage(
+            Self::RejectedSides(_) | Self::RejectedStumps(_) => Err(stage(
                 "carrier-rejected",
                 "awaited SIDES transaction returned false before B14",
             )),
@@ -17621,16 +17649,22 @@ impl NativeStemsBeamCarrierAdvance {
                 .into_sides()
                 .map(Box::new)
                 .map(NativeStemsBeamSidesAdvance::Linked),
-            Self::Rejected(transaction) => Ok(NativeStemsBeamSidesAdvance::Rejected(transaction)),
+            Self::RejectedSides(transaction) => {
+                Ok(NativeStemsBeamSidesAdvance::Rejected(transaction))
+            }
+            Self::RejectedStumps(_) => Err(stage(
+                "carrier-pass",
+                "STUMPS rejection returned through the SIDES boundary",
+            )),
         }
     }
 
     fn into_stumps(self) -> Result<NativeStemsBeamStumpsTransaction, NativeStemsBeamSidesError> {
         match self {
             Self::Linked(transaction) => (*transaction).into_stumps(),
-            Self::Rejected(_) => Err(stage(
+            Self::RejectedSides(_) | Self::RejectedStumps(_) => Err(stage(
                 "carrier-rejected",
-                "rejected STUMPS transaction is not yet carried",
+                "awaited STUMPS transaction returned false before B14",
             )),
         }
     }
@@ -17792,15 +17826,28 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         context.checker,
     )
     .map_err(|error| stage("B12", error))?;
-    let reuse_live_state = project_native_stems_beam_vlink_reuse_live_state(
-        &shadow.sig,
-        &shadow.bindings,
-        &shadow.scheduler,
-        context.plans,
-        &shadow.s_cells,
-        &transaction_state.system_stems,
-    )
-    .map_err(|error| stage("B13-live-state", error))?;
+    let reuse_live_state = if matches!(
+        create.disposition,
+        NativeStemsBeamCreateStemDisposition::Rejected
+    ) {
+        // Java returns from VLinker.link immediately when createStem returns
+        // null; no S-linker or SIG relation is read by reuseStem.
+        NativeStemsBeamVLinkReuseLiveState {
+            system_id: shadow.scheduler.system_id,
+            live_sig_stems: Vec::new(),
+            evaluation: NativeStemsBeamVLinkReuseLiveEvaluation::NotReadCreateStemRejected,
+        }
+    } else {
+        project_native_stems_beam_vlink_reuse_live_state(
+            &shadow.sig,
+            &shadow.bindings,
+            &shadow.scheduler,
+            context.plans,
+            &shadow.s_cells,
+            &transaction_state.system_stems,
+        )
+        .map_err(|error| stage("B13-live-state", error))?
+    };
     let reuse = evaluate_native_stems_beam_vlink_reuse_check(
         &shadow.scheduler,
         context.plans,
@@ -17816,12 +17863,6 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
         reuse.outcome,
         NativeStemsBeamVLinkReuseCheckOutcome::ReadyBeforeSigMutation { .. }
     ) {
-        if pass != CarrierPass::Sides {
-            return Err(stage(
-                "B13-rejected",
-                "rejected createStem/BeamStem outcome is only valid during SIDES",
-            ));
-        }
         let frontier = match &shadow.scheduler.status {
             NativeStemsBeamSchedulerStatus::AwaitingVLinkTransaction(frontier) => frontier,
             _ => {
@@ -17831,27 +17872,73 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
                 ));
             }
         };
-        let completed = NativeStemsBeamCompletedVLinkEvidence {
-            plan: frontier.plan,
-            b_linker: frontier.b_linker,
-            v_linker: frontier.v_linker,
-            outer_b_linked_after: false,
-            sibling_linked_b_linkers: Vec::new(),
-        };
-        let resume = resume_native_stems_beam_scheduler_after_transaction(
-            &shadow.scheduler,
-            context.vlinkers,
-            context.builders,
-            context.plans,
-            &completed,
-        )
-        .map_err(|error| stage("B19-rejected", error))?;
-
         // B12 may commit theoretical line chronology before createStem or the
         // BeamStem relation is rejected. Java keeps that transaction state,
         // but does not mutate the SIG, bindings, registry, or linker cells.
         shadow.latest_base_apply.transaction_state = transaction_state;
-        shadow.scheduler = (*resume.advanced_system).clone();
+        let advance = match pass {
+            CarrierPass::Sides => {
+                let completed = NativeStemsBeamCompletedVLinkEvidence {
+                    plan: frontier.plan,
+                    b_linker: frontier.b_linker,
+                    v_linker: frontier.v_linker,
+                    outer_b_linked_after: false,
+                    sibling_linked_b_linkers: Vec::new(),
+                };
+                let resume = resume_native_stems_beam_scheduler_after_transaction(
+                    &shadow.scheduler,
+                    context.vlinkers,
+                    context.builders,
+                    context.plans,
+                    &completed,
+                )
+                .map_err(|error| stage("B19-rejected", error))?;
+                shadow.scheduler = (*resume.advanced_system).clone();
+                NativeStemsBeamCarrierAdvance::RejectedSides(Box::new(
+                    NativeStemsBeamRejectedSidesTransaction {
+                        preparation,
+                        create,
+                        reuse_live_state,
+                        reuse,
+                        resume,
+                    },
+                ))
+            }
+            CarrierPass::Stumps => {
+                let completed = NativeStemsBeamCompletedStumpVLinkEvidence {
+                    plan: frontier.plan,
+                    b_linker: frontier.b_linker,
+                    v_linker: frontier.v_linker,
+                    b15_linked_after: false,
+                    sibling_linked_b_linkers: Vec::new(),
+                };
+                let resume = resume_native_stems_beam_scheduler_after_stumps_transaction(
+                    &shadow.scheduler,
+                    context.stumps,
+                    context.vlinkers,
+                    context.builders,
+                    context.plans,
+                    &completed,
+                )
+                .map_err(|error| stage("B19-STUMPS-rejected", error))?;
+                shadow.scheduler = (*resume.advanced_system).clone();
+                if !linked_b_cells_match(&shadow.scheduler.linked_b_linkers, &shadow.b_cells) {
+                    return Err(stage(
+                        "STUMPS-linked-B-rejected",
+                        "rejected stump resume changed the scheduler B-linker set",
+                    ));
+                }
+                NativeStemsBeamCarrierAdvance::RejectedStumps(Box::new(
+                    NativeStemsBeamRejectedStumpsTransaction {
+                        preparation,
+                        create,
+                        reuse_live_state,
+                        reuse,
+                        resume,
+                    },
+                ))
+            }
+        };
         shadow
             .sig
             .validate_integrity()
@@ -17861,17 +17948,8 @@ fn advance_native_stems_beam_sides_transaction_with_authority(
             .validate_against(&shadow.sig)
             .map_err(|error| stage("post-rejected-bindings", error))?;
 
-        let transaction = NativeStemsBeamRejectedSidesTransaction {
-            preparation,
-            create,
-            reuse_live_state,
-            reuse,
-            resume,
-        };
         *carrier = shadow;
-        return Ok(NativeStemsBeamCarrierAdvance::Rejected(Box::new(
-            transaction,
-        )));
+        return Ok(advance);
     }
     let mut base_state = roll_native_stems_beam_vlink_base_apply_state(
         &shadow.latest_base_apply,
