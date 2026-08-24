@@ -21,7 +21,7 @@ use audiveris_omr::{
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
     native_reduction::{
-        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_fixed_point,
+        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_epoch,
     },
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
@@ -8727,9 +8727,11 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         .iter()
         .map(|system| system.system_id)
         .collect::<Vec<_>>();
+    let mut foundation_outer_repeats = 0;
     for system_id in system_ids {
-        let fixed_point = reduce_native_stems_foundation_fixed_point(&mut recognized, system_id)
-            .expect("Batuque exact REDUCTION foundations fixed point");
+        let epoch = reduce_native_stems_foundation_epoch(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION first foundations epoch");
+        let fixed_point = &epoch.fixed_point;
         assert!(!fixed_point.overlap.scan_order.is_empty());
         assert!(!fixed_point.chord_analysis.scanned_stems.is_empty());
         assert!(!fixed_point.consistency_passes.is_empty());
@@ -8753,7 +8755,18 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
             assert_eq!(pass.stems.system_id, system_id);
             assert_eq!(pass.post_stems_weak_purge.system_id, system_id);
         }
+        assert_eq!(epoch.remaining_exclusions.system_id, system_id);
+        assert_eq!(epoch.late_consistency.system_id, system_id);
+        assert_eq!(epoch.late_consistency.modification_count, 0);
+        assert!(epoch.late_consistency.exclusions.decisions.is_empty());
+        if epoch.requires_outer_repeat {
+            foundation_outer_repeats += 1;
+        }
     }
+    assert!(
+        foundation_outer_repeats > 0,
+        "Batuque must exercise the next outer-epoch frontier"
+    );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
     assert!(

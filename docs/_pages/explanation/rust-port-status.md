@@ -6912,3 +6912,21 @@ ten active frozen-SIG gates remain green, and the full library passes 739 tests
 with two ignored. Strict Clippy, formatting, and diff checks pass. Next are
 remaining-exclusion reduction and foundations late consistency, followed by
 the refinement and grouping epochs.
+
+## Boundary 290: finish the first foundations epoch
+
+Native REDUCTION now reduces exclusions remaining after the foundations fixed
+point and performs Java's one foundations late-consistency call: chord
+analysis, reduction of any new exclusions, contextualization, and weak purge.
+The late checker returns zero because stem-length validation is commented out.
+
+Java has separate outer-local and adapter-owned `reduced`/`deleted` sets. Only
+the opening weak purge and pre-late remaining-exclusion reduction populate the
+outer locals which control epoch repetition; late mutations do not. The native
+transaction preserves that distinction and exposes the exact repeat flag.
+
+Thirty-six focused REDUCTION tests pass. Every Batuque system completes this
+epoch, and at least one raises the real next-epoch signal. All ten active
+frozen-SIG gates remain green, the full library passes 741 tests with two
+ignored, and strict Clippy, formatting, and diff checks pass. Next is outer
+epoch repetition through Java's terminal empty-local-sets condition.

@@ -11848,3 +11848,31 @@ and the full library passes 739 tests with two ignored. Strict workspace
 Clippy, formatting, and diff checks pass. Next implement Java's remaining
 exclusion reduction and foundations late-consistency epoch, then proceed to
 stem refinement, beam grouping, free-stem measurement, and glyph cleanup.
+
+## Boundary 290: finish the first foundations outer epoch
+
+After Boundary 289's consistency fixed point, production now calls
+`SIGraph.reduceExclusions()` on every remaining exclusion, then executes the
+single foundations late-consistency invocation: `analyzeChords()`, another
+exclusion reduction, and contextual weak purge. Java's commented-out stem
+length branch leaves the late modification count at zero, so the late loop
+terminates after that one complete call.
+
+The transaction explicitly models Java's same-named but distinct sets. The
+outer `reduce()` locals receive only the epoch-opening weak purge and the
+pre-late remaining-exclusion removals. The adapter's inherited sets receive
+purges from consistency/late checks and late exclusion removals. Consequently
+only the outer-local sets determine `do/while` repetition. This is preserved
+as `outer_deleted_vertices`, `outer_reduced_vertices`, and
+`requires_outer_repeat`; late graph mutations are not incorrectly promoted
+into the outer condition.
+
+Focused REDUCTION tests pass 36/36. One test resolves a remaining header
+exclusion and raises the outer-repeat flag; another creates a fresh late
+standard/small-beam exclusion, removes the weaker beam, purges, and still
+returns zero. Every Batuque system crosses the epoch, at least one requests a
+real second outer epoch, and late exclusions are empty on that page. The
+frozen SIG baseline is ten active passes plus five ignored diagnostics; the
+full library is 741 passed plus two ignored; strict Clippy, formatting, and
+diff checks pass. Next implement repeated outer foundations epochs through
+the terminal empty-local-sets condition.

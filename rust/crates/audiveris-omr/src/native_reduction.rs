@@ -6,7 +6,8 @@
 //! system ordering.  This module starts the production bridge from terminal
 //! native STEMS SIGs with Java's deterministic `SIGraph.reduceExclusions()`
 //! algorithm, lossless overlap discovery, chord prolog, and the complete
-//! foundations consistency fixed point through `checkStems()` weak purges.
+//! foundations consistency fixed point, remaining-exclusion reduction, and
+//! the first foundations late-consistency invocation.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -238,6 +239,36 @@ pub struct NativeReductionFoundationFixedPointTransaction {
     pub chord_analysis: NativeReductionChordAnalysisTransaction,
     pub initial_weak_purge: NativeReductionWeakPurgeTransaction,
     pub consistency_passes: Vec<NativeReductionFoundationConsistencyPassTransaction>,
+}
+
+/// The single foundations `checkLateConsistencies()` invocation.
+///
+/// Java currently performs chord analysis, reduces the exclusions it creates,
+/// contextualizes/purges, and returns zero because stem-length validation is
+/// commented out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionFoundationLateConsistencyTransaction {
+    pub system_id: usize,
+    pub chord_analysis: NativeReductionChordAnalysisTransaction,
+    pub exclusions: NativeReductionExclusionTransaction,
+    pub weak_purge: NativeReductionWeakPurgeTransaction,
+    pub modification_count: usize,
+}
+
+/// Java's first foundations reduction epoch through late consistency.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeReductionFoundationEpochTransaction {
+    pub system_id: usize,
+    pub fixed_point: NativeReductionFoundationFixedPointTransaction,
+    /// The outer reducer's local `reduced` set before late consistency.
+    pub remaining_exclusions: NativeReductionExclusionTransaction,
+    pub late_consistency: NativeReductionFoundationLateConsistencyTransaction,
+    /// Java's local `deleted` set contains only the epoch-opening purge here;
+    /// adapter-owned purge sets are deliberately distinct.
+    pub outer_deleted_vertices: Vec<NativeSigVertexId>,
+    /// Java's local `reduced` set contains this pre-late exclusion result.
+    pub outer_reduced_vertices: Vec<NativeSigVertexId>,
+    pub requires_outer_repeat: bool,
 }
 
 /// Compatibility name retained while callers migrate from Boundary 288.
@@ -850,6 +881,34 @@ pub fn reduce_native_stems_foundation_fixed_point(
     )
 }
 
+/// Execute the first Java foundations epoch through remaining exclusions and
+/// its single zero-returning late-consistency invocation.
+pub fn reduce_native_stems_foundation_epoch(
+    stems: &mut NativeStemsRecognition,
+    system_id: usize,
+) -> Result<NativeReductionFoundationEpochTransaction, NativeReductionFoundationPrefixError> {
+    let mut resolver = native_stems_lossless_overlap_resolver(stems, system_id)
+        .map_err(NativeReductionOverlapError::from)?;
+    let medians = native_stems_terminal_medians(stems, system_id)?;
+    let (head_identities, merged_staff_pairs) = native_stems_head_identities(stems, system_id)?;
+    let system = stems
+        .systems
+        .iter_mut()
+        .find(|system| system.system_id == system_id)
+        .ok_or(NativeReductionFoundationPrefixError::MissingSystem(
+            system_id,
+        ))?;
+    let beam_state = &mut system.transaction.state_after.beam_state;
+    reduce_native_foundation_epoch(
+        &mut beam_state.sig,
+        &mut beam_state.bindings,
+        &mut resolver,
+        &medians,
+        &head_identities,
+        &merged_staff_pairs,
+    )
+}
+
 /// Boundary-288 compatibility entry point. It now returns the fixed-point
 /// transaction rather than stopping after one consistency invocation.
 pub fn reduce_native_stems_foundation_prefix(
@@ -917,6 +976,58 @@ pub fn reduce_native_foundation_prefix(
         head_identities,
         merged_staff_pairs,
     )
+}
+
+/// Dependency-light first Java foundations epoch.
+pub fn reduce_native_foundation_epoch(
+    sig: &mut NativeSigSystem,
+    bindings: &mut NativeSigSystemBindings,
+    geometry: &mut impl NativeReductionOverlapGeometry,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+    head_identities: &BTreeMap<NativeSigVertexId, NativeReductionHeadIdentity>,
+    merged_staff_pairs: &[(usize, usize)],
+) -> Result<NativeReductionFoundationEpochTransaction, NativeReductionFoundationPrefixError> {
+    let fixed_point = reduce_native_foundation_fixed_point(
+        sig,
+        bindings,
+        geometry,
+        stem_medians,
+        head_identities,
+        merged_staff_pairs,
+    )?;
+    let remaining_exclusions = reduce_native_sig_exclusions(sig)?;
+    let late_consistency = reduce_native_foundation_late_consistency(sig, stem_medians)?;
+    let outer_deleted_vertices = fixed_point.initial_weak_purge.removed_vertices.clone();
+    let outer_reduced_vertices = remaining_exclusions.removed_vertices.clone();
+    let requires_outer_repeat =
+        !outer_deleted_vertices.is_empty() || !outer_reduced_vertices.is_empty();
+    Ok(NativeReductionFoundationEpochTransaction {
+        system_id: sig.system_id,
+        fixed_point,
+        remaining_exclusions,
+        late_consistency,
+        outer_deleted_vertices,
+        outer_reduced_vertices,
+        requires_outer_repeat,
+    })
+}
+
+/// Port foundations `AdapterForFoundations.checkLateConsistencies()`.
+pub fn reduce_native_foundation_late_consistency(
+    sig: &mut NativeSigSystem,
+    stem_medians: &BTreeMap<NativeSigVertexId, NativeStemLine>,
+) -> Result<NativeReductionFoundationLateConsistencyTransaction, NativeReductionFoundationPrefixError>
+{
+    let chord_analysis = analyze_native_foundation_chords(sig, stem_medians)?;
+    let exclusions = reduce_native_sig_exclusions(sig)?;
+    let weak_purge = contextualize_and_purge_native_weaks(sig)?;
+    Ok(NativeReductionFoundationLateConsistencyTransaction {
+        system_id: sig.system_id,
+        chord_analysis,
+        exclusions,
+        weak_purge,
+        modification_count: 0,
+    })
 }
 
 fn run_native_foundation_consistency_pass(
@@ -4051,6 +4162,99 @@ mod tests {
         );
         assert!(transaction.consistency_passes[2].heads.mutations.is_empty());
         assert!(sig.vertex(0).is_some());
+        assert!(sig.vertex(1).is_some());
+        assert!(sig.vertex(2).is_none());
+    }
+
+    #[test]
+    fn foundation_epoch_reduces_remaining_exclusions_and_sets_outer_repeat() {
+        let mut sig = NativeSigSystem {
+            system_id: 43,
+            vertices: vec![
+                vertex(0, NativeSigInterKind::Clef, 0.9),
+                vertex(1, NativeSigInterKind::Key, 0.8),
+            ],
+            edges: vec![edge(0, 0, 1, NativeSigRelationKind::Exclusion)],
+        };
+        let mut bindings = NativeSigSystemBindings {
+            system_id: 43,
+            beam_vertices: BTreeMap::new(),
+            beam_group_vertices: BTreeMap::new(),
+            stem_vertices: BTreeMap::new(),
+            head_vertices: BTreeMap::new(),
+            ledger_vertices: BTreeMap::new(),
+            reduction_interline: 10,
+            reduction_staffs: Vec::new(),
+            merged_staff_pairs: Vec::new(),
+            overlap_geometry: BTreeMap::new(),
+        };
+        let mut geometry = ScriptedOverlapGeometry::default();
+
+        let transaction = reduce_native_foundation_epoch(
+            &mut sig,
+            &mut bindings,
+            &mut geometry,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(transaction.fixed_point.consistency_passes.len(), 1);
+        assert_eq!(
+            transaction.remaining_exclusions.removed_vertices,
+            vec![NativeSigVertexId(1)]
+        );
+        assert!(transaction.outer_deleted_vertices.is_empty());
+        assert_eq!(
+            transaction.outer_reduced_vertices,
+            vec![NativeSigVertexId(1)]
+        );
+        assert!(transaction.requires_outer_repeat);
+        assert_eq!(transaction.late_consistency.modification_count, 0);
+        assert!(transaction.late_consistency.exclusions.decisions.is_empty());
+    }
+
+    #[test]
+    fn foundation_late_consistency_analyzes_then_reduces_fresh_exclusion() {
+        let stem = vertex(0, NativeSigInterKind::Stem, 0.9);
+        let standard = vertex(1, NativeSigInterKind::Beam, 0.95);
+        let small = vertex(2, NativeSigInterKind::SmallBeam, 0.8);
+        let mut sig = NativeSigSystem {
+            system_id: 44,
+            vertices: vec![stem, standard, small],
+            edges: vec![
+                beam_stem_edge(0, 1, 0, NativeBeamPortion::Left),
+                beam_stem_edge(1, 2, 0, NativeBeamPortion::Left),
+            ],
+        };
+        let medians = BTreeMap::from([(
+            NativeSigVertexId(0),
+            NativeStemLine {
+                start: NativeStemPoint { x: 2.0, y: 0.0 },
+                stop: NativeStemPoint { x: 2.0, y: 100.0 },
+            },
+        )]);
+
+        let transaction = reduce_native_foundation_late_consistency(&mut sig, &medians).unwrap();
+
+        assert_eq!(
+            transaction.chord_analysis.incompatible_exclusions,
+            vec![NativeSigEdgeId(2)]
+        );
+        assert_eq!(
+            transaction.exclusions.decisions,
+            vec![NativeReductionExclusionDecision {
+                exclusion: NativeSigEdgeId(2),
+                source: NativeSigVertexId(1),
+                source_best_grade: 0.95,
+                target: NativeSigVertexId(2),
+                target_best_grade: 0.8,
+                removed: NativeSigVertexId(2),
+            }]
+        );
+        assert!(transaction.weak_purge.removed_vertices.is_empty());
+        assert_eq!(transaction.modification_count, 0);
         assert!(sig.vertex(1).is_some());
         assert!(sig.vertex(2).is_none());
     }
