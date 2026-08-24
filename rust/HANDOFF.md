@@ -11876,3 +11876,30 @@ frozen SIG baseline is ten active passes plus five ignored diagnostics; the
 full library is 741 passed plus two ignored; strict Clippy, formatting, and
 diff checks pass. Next implement repeated outer foundations epochs through
 the terminal empty-local-sets condition.
+
+## Boundary 291: complete foundations outer fixed point
+
+Production REDUCTION now owns Java's complete `reduceFoundations()` call.
+The one-time overlap discovery, contextualization, chord prolog, and first
+opening purge remain outside continuation epochs. While either outer-local
+set is nonempty, each continuation performs its opening contextual purge, an
+empty slur check, the full six-check inner fixed point including its terminal
+zero pass, remaining-exclusion reduction, and one zero-returning late pass.
+The final continuation with empty outer-local `deleted` and `reduced` sets is
+retained explicitly.
+
+The transaction preserves Java's same-name field/local shadowing rather than
+using a graph-diff shortcut. Consistency and late-consistency mutations belong
+only to adapter-owned sets; they mutate the SIG but neither request another
+outer epoch nor enter `allRemoved`. The latter is retained in Java insertion
+order from each epoch's opening purge followed by its pre-late exclusion
+result. Focused tests independently exercise both repeat causes and the exact
+ordered ledger.
+
+Focused REDUCTION coverage passes 38/38. Every Batuque system reaches the
+terminal outer epoch and at least one real system executes a continuation.
+The frozen SIG baseline remains ten active passes plus five ignored
+diagnostics; the full library passes 743 tests with two ignored. Strict
+all-target/all-feature Clippy, formatting, and diff checks pass. Java's next
+system action is `ReductionStep` stem head-end refinement; tail refinement is
+disabled by default and follows separately.

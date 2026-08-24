@@ -20,9 +20,7 @@ use audiveris_omr::{
     native_headers::recognize_native_headers,
     native_heads::recognize_native_heads,
     native_ledgers::recognize_native_ledgers,
-    native_reduction::{
-        native_stems_lossless_overlap_resolver, reduce_native_stems_foundation_epoch,
-    },
+    native_reduction::{native_stems_lossless_overlap_resolver, reduce_native_stems_foundations},
     native_sig::{
         NativeSigRelationKind, NativeSigRelationOrigin, NativeSigSupport, NativeSigVertexId,
         assemble_native_sig,
@@ -8729,8 +8727,9 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         .collect::<Vec<_>>();
     let mut foundation_outer_repeats = 0;
     for system_id in system_ids {
-        let epoch = reduce_native_stems_foundation_epoch(&mut recognized, system_id)
-            .expect("Batuque exact REDUCTION first foundations epoch");
+        let transaction = reduce_native_stems_foundations(&mut recognized, system_id)
+            .expect("Batuque exact REDUCTION foundations fixed point");
+        let epoch = &transaction.first_epoch;
         let fixed_point = &epoch.fixed_point;
         assert!(!fixed_point.overlap.scan_order.is_empty());
         assert!(!fixed_point.chord_analysis.scanned_stems.is_empty());
@@ -8762,10 +8761,25 @@ fn batuque_system_one_drives_sides_from_production_prepared_state() {
         if epoch.requires_outer_repeat {
             foundation_outer_repeats += 1;
         }
+        if let Some(terminal) = transaction.continuation_epochs.last() {
+            assert!(!terminal.requires_outer_repeat);
+            assert!(terminal.outer_deleted_vertices.is_empty());
+            assert!(terminal.outer_reduced_vertices.is_empty());
+            assert_eq!(
+                terminal
+                    .consistency_passes
+                    .last()
+                    .expect("terminal continuation consistency pass")
+                    .modification_count,
+                0
+            );
+        } else {
+            assert!(!epoch.requires_outer_repeat);
+        }
     }
     assert!(
         foundation_outer_repeats > 0,
-        "Batuque must exercise the next outer-epoch frontier"
+        "Batuque must exercise a continuation foundations epoch"
     );
 
     let completed_registry_state = &drive.carrier.latest_base_apply.transaction_state;
